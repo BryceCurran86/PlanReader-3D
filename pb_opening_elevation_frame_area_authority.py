@@ -984,6 +984,7 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
     bboxlog = page.get_bboxlog()
     native = extract_native_page(page)
     painted = set()
+    inked: dict = {}
     strokes_by_seq = {d.get("seqno"): d for d in drawings}
     text_by_seq = {}
     for trace in page.get_texttrace():
@@ -992,6 +993,8 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
         path_index = segment.get("path_index")
         if type(path_index) is not int or not 0 <= path_index < len(drawings):
             continue
+        if _segment_coordinates(segment) is None:
+            continue                            # a number that cannot resolve the identity tolerance proves nothing
         drawing = drawings[path_index]
         seqno = drawing.get("seqno")
         width = segment.get("width")
@@ -1043,9 +1046,189 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
             clear = False
             break
         if clear:
-            edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
-            painted.add(f"vec_p{page_id}_{path_index}_{segment['item_index']}{edge}")
+            painted.add(_native_segment_geometry_id(page_id, segment))
+            span = _axis_span(segment)
+            ends = None if span is None else _transverse_endpoints(segment, span[0])
+            if span is not None and ends is not None:
+                inked.setdefault((span[0], _offset_bucket(span[1])), []).append(
+                    (span[1], span[2], span[3], *ends)
+                )
+    # A fill-only boundary (or any extracted edge whose own path is not a proven stroke) is still DRAWN where
+    # source-painted strokes of the same line already ink its whole extent: the visible ink at exactly those
+    # coordinates is what the frame needs, and the stroke itself passed every check above (opaque, solid, visible,
+    # nothing later erases it). Exact coordinate identity only; a shorter stroke, a parallel stroke, a gap or an
+    # unpainted stroke never supports an edge.
+    for segment in native["segments"]:
+        path_index = segment.get("path_index")
+        if type(path_index) is not int or not 0 <= path_index < len(drawings):
+            continue
+        span = _axis_span(segment)
+        ends = None if span is None else _transverse_endpoints(segment, span[0])
+        if span is not None and ends is not None and _collinear_painted_coverage(span, inked, edge_endpoints=ends):
+            painted.add(_native_segment_geometry_id(page_id, segment))
     return frozenset(painted)
+
+
+# Coordinate identity of two extracted edges that were drawn from the same source numbers (sub-micro-point float
+# identity); it is not a measurement tolerance and nothing is fitted to a drawing.
+_COLLINEAR_IDENTITY_TOL = 1e-6
+# A float coordinate can only resolve the identity tolerance below 2**52 tolerance units (about 4.5e9 pt, far beyond any
+# page). A source number beyond that, or too large to be a float at all, is not provably identical to anything: the
+# edge is unsupported (typed abstention), never an OverflowError and never a silently coarse bucket.
+_RESOLVABLE_COORDINATE = 2.0 ** 52 * _COLLINEAR_IDENTITY_TOL
+
+
+def _resolvable_floats(*values) -> bool:
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            number = float(value)
+        except OverflowError:
+            return False
+        if not math.isfinite(number) or abs(number) >= _RESOLVABLE_COORDINATE:
+            return False
+    return True
+
+
+def _segment_coordinates(segment):
+    """The four edge coordinates as floats, or None unless every raw source value is a resolvable number."""
+    try:
+        raw = tuple(segment[k] for k in ("x1", "y1", "x2", "y2"))
+    except (KeyError, TypeError):
+        return None
+    if not _resolvable_floats(*raw):
+        return None
+    return tuple(float(v) for v in raw)
+
+
+def _offset_bucket(offset):
+    """Candidate bucket of a line offset; None when the offset cannot resolve the identity tolerance."""
+    if not _resolvable_floats(offset):
+        return None
+    return round(float(offset) / _COLLINEAR_IDENTITY_TOL)
+
+
+def _native_segment_geometry_id(page_id: str, segment) -> str:
+    edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
+    return f"vec_p{page_id}_{segment['path_index']}_{segment['item_index']}{edge}"
+
+
+def _axis_span(segment):
+    """(axis, offset, lo, hi) of an axis-aligned, finite, non-degenerate edge; None otherwise."""
+    coordinates = _segment_coordinates(segment)
+    if coordinates is None:
+        return None
+    x0, y0, x1, y1 = coordinates
+    if abs(y1 - y0) <= _COLLINEAR_IDENTITY_TOL and abs(x1 - x0) > _COLLINEAR_IDENTITY_TOL:
+        return ("h", (y0 + y1) / 2.0, min(x0, x1), max(x0, x1))
+    if abs(x1 - x0) <= _COLLINEAR_IDENTITY_TOL and abs(y1 - y0) > _COLLINEAR_IDENTITY_TOL:
+        return ("v", (x0 + x1) / 2.0, min(y0, y1), max(y0, y1))
+    return None
+
+
+def _transverse_endpoints(segment, axis):
+    """Actual perpendicular coordinates at the low and high ends of an axis span; None when not resolvable."""
+    coordinates = _segment_coordinates(segment)
+    if coordinates is None:
+        return None
+    x0, y0, x1, y1 = coordinates
+    if axis == "h":
+        return (y0, y1) if x0 <= x1 else (y1, y0)
+    return (x0, x1) if y0 <= y1 else (x1, x0)
+
+
+def _transverse_at(endpoints, lo, hi, position):
+    """Interpolate the actual source line, not its rounded bucket or midpoint."""
+    return endpoints[0] + (endpoints[1] - endpoints[0]) * ((position - lo) / (hi - lo))
+
+
+def _merge_spans(spans):
+    """Union of collinear spans that overlap or touch (exact identity), as sorted disjoint intervals."""
+    merged = []
+    for lo, hi in sorted(spans):
+        # Axial source-ink extents must really touch; transverse identity tolerance is not gap fill.
+        if merged and lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _collinear_painted_coverage(span, inked, *, edge_endpoints=None) -> bool:
+    """Require actual source-ink coordinate identity before joining painted spans.
+
+    Rounded midpoint buckets only locate candidates. Even when midpoints are
+    coincident, near-axis lines can diverge at an endpoint: prove the actual
+    perpendicular coordinate at BOTH ends of each overlap before span union.
+    Legacy constant-offset test tuples remain supported.
+    """
+    axis, offset, lo, hi = span
+    if edge_endpoints is None:
+        edge_endpoints = (offset, offset)
+    bucket = _offset_bucket(offset)
+    if bucket is None or not _resolvable_floats(lo, hi, *edge_endpoints):
+        return False
+    # Ties-to-even can put within-tolerance midpoints two buckets apart.
+    matching = []
+    for neighbour in range(bucket - 2, bucket + 3):
+        for stroke_offset, start, end, *stroke_ends in inked.get((axis, neighbour), ()):
+            if abs(stroke_offset - offset) > _COLLINEAR_IDENTITY_TOL:
+                continue
+            overlap_lo, overlap_hi = max(lo, start), min(hi, end)
+            if overlap_lo > overlap_hi:
+                continue
+            endpoints = tuple(stroke_ends) if stroke_ends else (stroke_offset, stroke_offset)
+            if all(
+                abs(_transverse_at(edge_endpoints, lo, hi, position)
+                    - _transverse_at(endpoints, start, end, position)) <= _COLLINEAR_IDENTITY_TOL
+                for position in (overlap_lo, overlap_hi)
+            ):
+                # Clip to the candidate edge: a point-only contact does not paint
+                # a positive-length interval, and no extrapolated stroke can help.
+                if overlap_lo < overlap_hi:
+                    matching.append((
+                        overlap_lo, overlap_hi,
+                        (_transverse_at(endpoints, start, end, overlap_lo),
+                         _transverse_at(endpoints, start, end, overlap_hi)),
+                    ))
+    if any(start <= lo and hi <= end for start, end, _ends in matching):
+        return True
+    # A union of axial spans alone is insufficient. Two touching strokes can
+    # EACH be within 1e-6 pt of the candidate yet be 1.8e-6 pt apart from
+    # EACH OTHER at the handoff. Only a connected chain of actual source ink
+    # may establish a whole frame edge. Bound pathological same-line fanout.
+    if len(matching) > 1024:
+        return False
+    reached = {i for i, (start, end, _ends) in enumerate(matching)
+               if start <= lo <= end}
+    pending = list(reached)
+    while pending:
+        i = pending.pop()
+        start, end, ends = matching[i]
+        if end >= hi:
+            return True
+        for j, (other_start, other_end, other_ends) in enumerate(matching):
+            if j in reached:
+                continue
+            joint_lo, joint_hi = max(start, other_start), min(end, other_end)
+            if joint_lo > joint_hi:
+                continue
+            delta_lo = (
+                _transverse_at(ends, start, end, joint_lo)
+                - _transverse_at(other_ends, other_start, other_end, joint_lo)
+            )
+            delta_hi = (
+                _transverse_at(ends, start, end, joint_hi)
+                - _transverse_at(other_ends, other_start, other_end, joint_hi)
+            )
+            # Linear strokes may meet at an interior crossing, not only at
+            # interval endpoints; otherwise require actual coordinate identity.
+            if (min(abs(delta_lo), abs(delta_hi)) <= _COLLINEAR_IDENTITY_TOL
+                    or delta_lo * delta_hi < 0):
+                reached.add(j)
+                pending.append(j)
+    return False
 
 
 class OpeningElevationFrameAreaProducer:
@@ -1206,6 +1389,10 @@ class OpeningElevationFrameAreaProducer:
                 continue
 
             records_by_mark: dict[str, list[OpeningElevationFrameAreaRecord]] = {}
+            # Marks with at least one frame candidate whose support is not source-painted. Such a mark publishes
+            # nothing (an unproved rival is never dropped to elect another frame of the SAME mark), but it does not
+            # invalidate the frames of any other mark on the page or the revision.
+            unproved_marks: set[str] = set()
             try:
                 for page_id, claim_words in sorted(
                     claim_words_by_page.items(),
@@ -1232,7 +1419,10 @@ class OpeningElevationFrameAreaProducer:
                         )
                         layout = calibrate_dimension_layout(page)
                     except Exception:
-                        continue
+                        # A failed claimed elevation page may contain a rival of a frame on
+                        # another page. Skipping it could falsely elect that rival as unique.
+                        invalid_revision = True
+                        break
 
                     required_ids = set(title_ids)
                     required_ids.update(
@@ -1334,19 +1524,19 @@ class OpeningElevationFrameAreaProducer:
                             trusted_words=trusted_words,
                         )
                     except Exception:
-                        continue
+                        # Candidate-production failure cannot prove the absence of rivals.
+                        invalid_revision = True
+                        break
                     if records:
                         try:
                             painted_ids = _source_painted_geometry_ids(page, page_id)
                         except (ValueError, TypeError, RuntimeError, KeyError, IndexError):
                             invalid_revision = True
                             break
-                        if any(not set((*record.frame_geometry_ids, *record.dimension_line_ids,
-                                        *record.witness_line_ids)).issubset(painted_ids)
-                               for record in records):
-                            # Do not drop an unproved rival and elect another frame.
-                            invalid_revision = True
-                            break
+                        for record in records:
+                            if not set((*record.frame_geometry_ids, *record.dimension_line_ids,
+                                        *record.witness_line_ids)).issubset(painted_ids):
+                                unproved_marks.add(record.type_mark)
                     for record in records:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
             finally:
@@ -1355,6 +1545,8 @@ class OpeningElevationFrameAreaProducer:
             if invalid_revision:
                 continue
 
+            for mark in sorted(unproved_marks):
+                records_by_mark.pop(mark, None)
             for mark, records in sorted(records_by_mark.items()):
                 key = (
                     published.revision.document_id,
