@@ -65,69 +65,90 @@ def test_modified_machine_material_provenance_not_authenticated_by_original_seal
         verify_sealed_customer_output(run, forged)
 
 
-def test_signed_source_code_display_matches_customer_provenance(monkeypatch):
-    import pb_live_floor_finish_customer_projection as projection
-
-    monkeypatch.setattr(
-        projection, "_source_finish_system",
-        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
-    )
-    run, rows = _real_floor_finish_receipt()
-    assert rows[0]["finish_system"] == "FT1 (tile)"
-    assert verify_sealed_customer_output(run, rows).verified_quantity_ids == (
-        "floor-finish-q1",
-    )
-    stored = deepcopy(rows)
-    stored[0].pop("commercial_projection_provenance")
-    assert verify_sealed_customer_output(run, stored).verified_quantity_ids == (
-        "floor-finish-q1",
+def _source_coded_element_receipt():
+    # Reproduce the GPT1 source-coded customer element using the existing
+    # sealed source/adapter provenance contracts, with no change to quantity.
+    from pb_migration_contracts import QuantityEvidence
+    from pb_quantity_takeoff_adapter import (
+        CommercialTakeoffSourceTrace,
+        CommercialMeasurementAuthority,
+        compute_commercial_projection_fingerprint,
     )
 
-
-@pytest.mark.parametrize("wrong_display", ["FT2 (tile)", "FT3 (tile)", "tile", "FT1 (vinyl)"])
-def test_source_code_label_tamper_is_rejected(monkeypatch, wrong_display):
-    import pb_live_floor_finish_customer_projection as projection
-
-    monkeypatch.setattr(
-        projection, "_source_finish_system",
-        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
+    signed, rows = _real_floor_finish_receipt()
+    source = deepcopy(rows[0])
+    provenance = deepcopy(source["commercial_projection_provenance"])
+    source_element = "Floor finish area (FT1)"
+    source["element"] = source_element
+    provenance["quantity"]["metadata"]["element"] = source_element
+    source["commercial_projection_provenance"] = provenance
+    source["notes"] = json.dumps(provenance)
+    source["commercial_projection_fingerprint"] = (
+        compute_commercial_projection_fingerprint(
+            QuantityEvidence(**dict(provenance["quantity"])),
+            trace=CommercialTakeoffSourceTrace(**dict(provenance["source_trace"])),
+            authority=CommercialMeasurementAuthority(
+                **dict(provenance["measurement_authority"])
+            ),
+        )
     )
-    run, rows = _real_floor_finish_receipt()
-    forged = [deepcopy(rows[0])]
-    forged[0]["finish_system"] = wrong_display
-    with pytest.raises(CustomerOutputVerificationError, match="finish_system differs"):
-        verify_sealed_customer_output(run, forged)
+    return signed, [source]
 
 
-def test_original_semantic_display_cannot_be_relabelled_as_coded():
-    run, rows = _real_floor_finish_receipt()
+def test_original_floor_code_element_passes_without_changing_signed_quantity():
+    signed, rows = _source_coded_element_receipt()
+    original_seal = signed.to_dict()
+    assert rows[0]["element"] == "Floor finish area (FT1)"
     assert rows[0]["finish_system"] == "tile"
-    forged = [deepcopy(rows[0])]
-    forged[0]["finish_system"] = "FT1 (tile)"
-    with pytest.raises(CustomerOutputVerificationError, match="finish_system differs"):
-        verify_sealed_customer_output(run, forged)
+    assert verify_sealed_customer_output(signed, rows).verified_quantity_ids == (
+        "floor-finish-q1",
+    )
+    persisted = deepcopy(rows)
+    persisted[0].pop("commercial_projection_provenance")
+    assert verify_sealed_customer_output(signed, persisted).verified_quantity_ids == (
+        "floor-finish-q1",
+    )
+    assert signed.to_dict() == original_seal
+
+
+@pytest.mark.parametrize("wrong_element", [
+    "Floor finish area (FT3)", "Floor finish area (FT9)",
+    "Floor finish area (FT2)", "Floor finish area (FT1) ",
+    "Floor finish area", "", None, True,
+])
+def test_customer_floor_code_element_tamper_rejected(wrong_element):
+    signed, rows = _source_coded_element_receipt()
+    forged = deepcopy(rows)
+    forged[0]["element"] = wrong_element
+    with pytest.raises(CustomerOutputVerificationError, match="element differs"):
+        verify_sealed_customer_output(signed, forged)
 
 
 @pytest.mark.parametrize("notes_only", [False, True])
-def test_signed_source_code_cannot_be_replaced_in_provenance(monkeypatch, notes_only):
-    import pb_live_floor_finish_customer_projection as projection
-
-    monkeypatch.setattr(
-        projection, "_source_finish_system",
-        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
-    )
-    run, rows = _real_floor_finish_receipt()
-    forged = [deepcopy(rows[0])]
-    forged[0]["finish_system"] = "FT3 (tile)"
-    receipt = deepcopy(forged[0]["commercial_projection_provenance"])
-    receipt["quantity"]["metadata"]["finish_system"] = "FT3 (tile)"
-    forged[0]["notes"] = json.dumps(receipt)
+def test_provenance_and_display_cannot_conspire_to_relabel_signed_finish_code(
+    notes_only,
+):
+    signed, rows = _source_coded_element_receipt()
+    forged = deepcopy(rows)
+    forged[0]["element"] = "Floor finish area (FT3)"
+    provenance = deepcopy(forged[0]["commercial_projection_provenance"])
+    provenance["quantity"]["metadata"]["element"] = "Floor finish area (FT3)"
+    forged[0]["notes"] = json.dumps(provenance)
     if notes_only:
         forged[0].pop("commercial_projection_provenance")
     else:
-        forged[0]["commercial_projection_provenance"] = receipt
-    with pytest.raises(CustomerOutputVerificationError):
-        verify_sealed_customer_output(run, forged)
+        forged[0]["commercial_projection_provenance"] = provenance
+    with pytest.raises(CustomerOutputVerificationError, match="element differs"):
+        verify_sealed_customer_output(signed, forged)
+
+
+def test_legacy_original_floor_label_cannot_be_relabelled_as_source_coded():
+    signed, rows = _real_floor_finish_receipt()
+    assert rows[0]["element"] == "Floor finish area"
+    forged = deepcopy(rows)
+    forged[0]["element"] = "Floor finish area (FT1)"
+    with pytest.raises(CustomerOutputVerificationError, match="element differs"):
+        verify_sealed_customer_output(signed, forged)
 
 
 def test_extra_customer_fields_do_not_affect_unrelated_original_lot16_eight():
