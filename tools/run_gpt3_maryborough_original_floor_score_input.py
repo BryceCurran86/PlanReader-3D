@@ -222,12 +222,29 @@ def run_original_maryborough_floor_handoff(
         project_id=PROJECT,
     )
     verified = verify_sealed_customer_output(sealed, rows)
-    receipt = _validate_sealed_customer_handoff(
-        sealed,
-        rows,
-        verified,
-        source_sha,
-    )
+    try:
+        receipt = _validate_sealed_customer_handoff(
+            sealed,
+            rows,
+            verified,
+            source_sha,
+        )
+    except ValueError:
+        # Preserve the existing producer's first failing gates privately even
+        # when no signed/customer success artifact can be published.
+        source_stage = inspect_room_measurement_gates(claim)
+        if (
+            source_stage.get("benchmark_accuracy") is not None
+            or source_stage.get("commercial_estimator_approved") is not False
+        ):
+            raise ValueError(
+                "source-stage diagnostic unexpectedly grants benchmark/commercial authority"
+            )
+        _publish_new(
+            output_dir / "source_stage_diagnostic_UNPUBLISHED.json",
+            source_stage,
+        )
+        raise
     source_stage = inspect_room_measurement_gates(claim)
     if (
         source_stage.get("benchmark_accuracy") is not None
