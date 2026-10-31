@@ -24,7 +24,7 @@ WHITE_MASK = b"q\n140 90 m 170 90 l 155 110 l h W n\n1 g 145 92 40 16 re f\nQ\n"
 
 
 def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=None, hidden_line=False,
-                mask=None, knockout=None) -> bytes:
+                mask=None, knockout=None, label_mask=None) -> bytes:
     """A three-panel window along x, 100..304, with two internal posts, heavy end jambs and continuing wall faces."""
     doc = fitz.open()
     page = doc.new_page(width=420, height=300)
@@ -69,6 +69,10 @@ def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=
             doc.update_stream(xref, b"")
     if knockout == "after":
         knock_out()
+    if label_mask == "beside":        # a late white label background 0.96 pt inside the opening: it touches no ink
+        page.draw_rect(fitz.Rect(100.96, 196.0, 112.0, 199.0), color=None, fill=(1, 1, 1))
+    elif label_mask == "over":        # the same rectangle moved so that it covers the low jamb stroke
+        page.draw_rect(fitz.Rect(99.5, 196.0, 112.0, 199.0), color=None, fill=(1, 1, 1))
     payload = doc.tobytes()
     doc.close()
     return payload
@@ -371,3 +375,88 @@ def test_a_malformed_coordinate_quantum_is_refused_before_the_source_is_read(cle
         with pytest.raises(ValueError):
             shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True).audit(
                 revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nom], coordinate_quantum_pt=quantum)
+
+
+# ---- terminal-adjacent fills (opt-in, coverage inference) ----------------------------------------------------------------
+def _audit_options(source, published, nomination, **options):
+    return shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True, **options).audit(
+        revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nomination], coordinate_quantum_pt=Q)
+
+
+def test_a_late_label_background_beside_a_jamb_makes_the_authority_abstain_by_default_and_with_backdrop_withholding():
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    nom = _nomination(source, published)
+    for options in ({}, {"withhold_backdrop_fills": True}):
+        out = _audit_options(source, published, nom, **options)
+        c = out.correspondences[0]
+        assert c.status is ABST and shadow.EQUAL_EXTENT_STRUCTURE_NOT_PROVEN in c.reason_codes
+        assert "terminal_adjacent_fill_edge_withheld" not in dict(out.stroke_counts)    # it touches no stroke: not a backdrop
+
+
+def test_that_label_background_is_withheld_when_asked_because_it_covers_nothing_the_reading_rests_on():
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    nom = _nomination(source, published)
+    for options in ({"withhold_terminal_adjacent_fills": True},
+                    {"withhold_backdrop_fills": True, "withhold_terminal_adjacent_fills": True}):
+        out = _audit_options(source, published, nom, **options)
+        c = out.correspondences[0]
+        assert c.status is CAND, (c.reason_codes, [(r.relation, r.span_along) for r in c.relations])
+        assert dict(out.stroke_counts)["terminal_adjacent_fill_edge_withheld"] == 4
+        assert shadow.TERMINAL_ADJACENT_FILL_EDGES_WITHHELD in out.page_reason_codes
+        assert out.input_provenance == shadow._PROVENANCE_BY_OPTIONS[
+            (options.get("withhold_backdrop_fills", False), True)]
+
+
+def test_the_same_late_rectangle_over_a_jamb_stroke_is_never_withheld_because_it_covers_it():
+    source, published = _publish(_window_pdf(label_mask="over"))
+    out = _audit_options(source, published, _nomination(source, published), withhold_terminal_adjacent_fills=True)
+    c = out.correspondences[0]
+    assert c.status is ABST and "terminal_adjacent_fill_edge_withheld" not in dict(out.stroke_counts)
+    assert shadow.TERMINAL_ADJACENT_FILL_EDGES_WITHHELD not in out.page_reason_codes
+
+
+def test_terminal_adjacent_withholding_changes_nothing_on_a_page_without_fill():
+    source, published = _publish(_window_pdf())
+    nom = _nomination(source, published)
+    faithful = _audit_options(source, published, nom)
+    adjacent = _audit_options(source, published, nom, withhold_terminal_adjacent_fills=True)
+    assert adjacent.correspondences == faithful.correspondences and adjacent.page_reason_codes == faithful.page_reason_codes
+
+
+def test_the_terminal_adjacent_option_must_be_an_explicit_bool():
+    for flag in (1, "yes", None):
+        with pytest.raises(TypeError):
+            shadow.StripWholeApertureCorrespondenceShadow(object(), enabled=True, withhold_terminal_adjacent_fills=flag)
+
+
+def test_the_per_strip_rerun_budget_leaves_the_faithful_decision_in_place(monkeypatch):
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    monkeypatch.setattr(shadow, "_MAX_RERUNS", 0)
+    out = _audit_options(source, published, _nomination(source, published), withhold_terminal_adjacent_fills=True)
+    assert out.correspondences[0].status is ABST
+    assert shadow.APERTURE_BUDGET_EXCEEDED_CODE in out.page_reason_codes
+    assert "terminal_adjacent_fill_edge_withheld" not in dict(out.stroke_counts)
+
+
+def test_a_second_run_whose_readings_could_be_covered_by_the_withheld_fill_is_refused(monkeypatch):
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    monkeypatch.setattr(shadow, "withheld_fills_may_cover", lambda *args, **kwargs: True)
+    out = _audit_options(source, published, _nomination(source, published), withhold_terminal_adjacent_fills=True)
+    assert out.correspondences[0].status is ABST
+    assert shadow.WITHHELD_FILL_MAY_COVER_READING_INPUT in out.page_reason_codes
+    assert "terminal_adjacent_fill_edge_withheld" not in dict(out.stroke_counts)
+
+
+def test_the_rerun_is_reported_and_leaves_other_strips_decisions_untouched():
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    nom = _nomination(source, published)
+    other = shadow.StripNomination("strip-2", "H", (500.0, 506.0), (500.0, 600.0), True, ("not-ink",), None,
+                                   (shadow.CalloutClaim("W2", "tag-2", "corr-2"),))
+    out = shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True, withhold_terminal_adjacent_fills=True).audit(
+        revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nom, other], coordinate_quantum_pt=Q)
+    first, second = out.correspondences
+    assert first.status is CAND and second.status is ABST and shadow.STRIP_INK_NOT_IN_STROKE_INVENTORY in second.reason_codes
+    assert dict(out.stroke_counts)["terminal_adjacent_rerun_strips"] == 1
+    faithful = shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True).audit(
+        revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nom, other], coordinate_quantum_pt=Q)
+    assert second == faithful.correspondences[1]

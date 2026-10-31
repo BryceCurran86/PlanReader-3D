@@ -51,6 +51,16 @@ New files only: `pb_callout_strip_whole_aperture_correspondence_shadow.py`, test
   position counts as before; a fill with no readable position is never withheld). A fill painted after a stroke it
   touches can cover that stroke, so it stays as a mask. The rule uses only extents and content-stream positions.
   Withheld edges are counted in the receipt and stay in the inventory; nothing else is changed.
+- Opt-in `withhold_terminal_adjacent_fills` (default off, strict bool; independent of the first, and a second run of
+  the authority only for the strips it can change): the authority pools every stroke within its 2.5 pt snap distance
+  of a terminal station, so an unstroked fill edge that merely lies near a jamb is counted as an uncertain jamb
+  stroke. For each nominated strip, a fill path whose edge sits in the terminal set of a reading related to that
+  strip is withheld only when, for EVERY such reading, no stroke of that reading's terminal, host-face or glazing ink
+  is both touched by the fill's extent and painted before it (or at an unreadable position), the fill's extent and
+  position are proven, and every id the readings rest on is known to the inventory. The strip is then judged on a
+  second run of the unchanged authority, and the second run's readings (which can include readings that only exist
+  because of the withholding) are checked the same way; a failed check keeps the faithful decision. The scope is the
+  strip's own readings, so a fill that does cover another wall's jamb elsewhere on the page does not block it.
 - Relations: `equal_extent`, `nested_inside_strip_extent`, `contains_strip_extent`, `partly_overlaps_strip_extent`,
   each with the record's own status and reasons, shared ink by observation id, and `end_offsets` (diagnostic only).
 - Decision: CANDIDATE only when exactly one equal-extent reading is structurally proven (jamb and wall continuity
@@ -98,18 +108,27 @@ With `withhold_backdrop_fills=True` (same tree and drawing; 1,196 fill-edge segm
 910 discriminated posts): **W01 is CANDIDATE** — exactly one equal-extent reading (843.6..1047.6, glass band
 1955.4..1956.12) that the authority itself marks CANDIDATE with `structural_terminal_jamb_proven` and
 `host_wall_continuity_proven`, no rival of any kind, linkage by span equality only (no record names a strip ink id).
-**W02 stays ABSTAINED**: its whole-width reading (starts 0.96 pt inside the strip) is still
+**W02 stays ABSTAINED under this option alone**: its whole-width reading (starts 0.96 pt inside the strip) is still
 `original_terminal_paint_structural_role_unproven`, and exactly one uncertain stroke remains in its low terminal set:
 the edge of a white rectangle (13.9 x 13.2 pt, the background of a printed label) painted after three strokes it
-touches, among them the long wall-face line it covers. That is a real mask over a real stroke, so the rule keeps it
-and the correspondence abstains; no tolerance or threshold was changed to hide it.
+touches, among them a long vertical line it partly covers.
 
-First remaining gates, in order (default, unchanged input): (1) the aperture authority cannot distinguish a fill edge that precedes the ink from
-one that follows it; (2) the extractor does not recognise a clip written as a closed line polygon equal to its scissor
-as rectangular, which keeps those fills out of the visible inventory; (3) the extent conventions of the strip (outer
-face of the frame) and the aperture (jamb station) differ by a stroke width at W02, and neither authority declares a
-tolerance; (4) nested pane readings are set aside only where the authority discriminated the posts at both ends.
-None of these is changed here.
+With both options (`withhold_terminal_adjacent_fills=True` as well; one extra run; 4 more fill-edge segments
+withheld, all of that one rectangle): **W02 is CANDIDATE** — exactly one equal-extent reading (1557.44..1789.76, glass
+band 1119.84..1120.56) that the authority marks CANDIDATE with the same two proofs, no rival, linkage by span equality
+only. The label background lies 0.96 pt beyond W02's low terminal station and touches none of the ink that reading
+rests on (its jambs, host faces, glazing); the strokes it does cover belong to a different wall's readings, which is
+why a page-wide version of the rule keeps it and the per-strip scope releases it. The 0.96 pt "extent gap" seen
+earlier was this pooled edge pulling the authority's low terminal to 1558.4; no extent tolerance exists or was added.
+
+First remaining gates, in order (default, faithful input): (1) the aperture authority counts a fill-only edge near a
+terminal as an uncertain jamb stroke although a fill edge is not ink; the two opt-in rules above are this module's
+evidence-based way to separate a mask that can cover a reading's ink from one that cannot, and would be redundant if
+the authority adopted a coverage rule itself; (2) the extractor does not recognise a clip written as a closed line
+polygon equal to its scissor as rectangular, which keeps those fills out of the visible inventory (cleared here only
+by paint order); (3) nested pane readings are set aside only where the authority discriminated the posts at both
+ends. Beyond the whole aperture: physical opening existence, host wall and the `type_mark` for the opening, then
+the issuer, which needs the separate authority-promotion review. None of these is changed here.
 
 ## 5. Benchmark observations that must not influence implementation
 

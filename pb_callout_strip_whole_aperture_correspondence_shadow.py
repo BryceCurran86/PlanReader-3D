@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -44,6 +44,15 @@ PRODUCER_INPUT_PROVENANCE = "producer_owned_source_visibility_authenticated_stro
 PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD = (
     "producer_owned_source_visibility_authenticated_strokes_backdrop_fills_withheld_by_paint_order")
 BACKDROP_FILL_EDGES_WITHHELD = "backdrop_fill_edges_withheld_by_paint_order"
+TERMINAL_ADJACENT_FILL_EDGES_WITHHELD = "terminal_adjacent_fill_edges_withheld_by_coverage"
+WITHHELD_FILL_MAY_COVER_READING_INPUT = "withheld_fill_may_cover_a_reading_input"
+_PROVENANCE_BY_OPTIONS = {
+    (False, False): PRODUCER_INPUT_PROVENANCE,
+    (True, False): PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD,
+    (False, True): "producer_owned_source_visibility_authenticated_strokes_terminal_adjacent_fills_withheld_by_coverage",
+    (True, True): ("producer_owned_source_visibility_authenticated_strokes_backdrop_and_"
+                   "terminal_adjacent_fills_withheld"),
+}
 
 # relations of an aperture record to a strip's whole frame extent
 RELATION_EQUAL = "equal_extent"
@@ -92,12 +101,13 @@ STANDING_LIMITS = (
     "aperture_authority_does_not_decide_whole_versus_nested_apertures",
     "aperture_authority_jamb_threshold_between_observed_stroke_widths_cannot_prove_a_jamb_alone",
     "opening_kind_host_wall_binding_and_quantity_not_established",
-    "withholding_backdrop_fills_is_a_paint_order_inference_the_aperture_authority_did_not_make",
+    "withholding_fills_is_a_paint_order_and_coverage_inference_the_aperture_authority_did_not_make",
 )
 
 _MAX_STRIPS = 512
 _MAX_RECORDS = 200_000
 _MAX_UNADMITTED = 400_000
+_MAX_RERUNS = 64            # one extra run of the aperture authority per strip whose decision a withheld fill can change
 _EQ_FRACTION = 4.0          # the callout shadow's equality tolerance: a quarter of the coordinate quantum
 
 _GRANT_FLAGS = (
@@ -642,6 +652,64 @@ def backdrop_fill_paths(fills: Sequence[FillPath], strokes: Sequence[InkItem], e
     return frozenset(result)
 
 
+def terminal_adjacent_fill_paths(readings, ink_by_id, fill_path_by_id, fills_by_path, eq: float) -> frozenset:
+    """Fill paths whose edge sits in a reading's terminal set although the fill covers nothing that reading rests on.
+
+    The aperture authority pools every stroke within its snap distance of a terminal station, so an unstroked fill
+    edge that merely lies near a jamb is counted as an uncertain jamb stroke. That doubt is real only if the fill
+    can hide something the reading rests on: its terminal jambs, its host faces or its glazing. A fill is
+    terminal-adjacent only when, for EVERY reading whose terminal set holds one of its edges, no stroke of that
+    reading's terminal / host / glazing ink is both touched by the fill's extent and painted before it (or at an
+    unreadable position). A fill with an unproven extent or position, or one that touches ink the inventory does
+    not know, is never terminal-adjacent. Uses only extents, content-stream positions and the readings' own ids."""
+    candidates: set[int] = set()
+    harmful: set[int] = set()
+    for reading in readings:
+        terminals = tuple(reading.terminal_jamb_lo_ids) + tuple(reading.terminal_jamb_hi_ids)
+        here = {fill_path_by_id[i] for i in terminals if i in fill_path_by_id}
+        if not here:
+            continue
+        rest_ids = set(terminals) | set(reading.host_face_ids) | set(reading.glazing_strip_ids)
+        unknown = any(i not in ink_by_id for i in rest_ids)
+        rest = [ink_by_id[i] for i in rest_ids if i in ink_by_id and ink_by_id[i].stroked]
+        for path_index in here:
+            candidates.add(path_index)
+            fill = fills_by_path.get(path_index)
+            if fill is None or type(fill.sequence) is not int or unknown:
+                harmful.add(path_index)
+                continue
+            for member in rest:
+                if _touches(member.box, fill.box, eq) and (
+                        type(member.sequence) is not int or member.sequence <= fill.sequence):
+                    harmful.add(path_index)
+                    break
+    return frozenset(candidates - harmful)
+
+
+def withheld_fills_may_cover(readings, paths, ink_by_id, fills_by_path, eq: float) -> bool:
+    """True when a withheld fill could hide ink that one of these readings rests on (so the withholding is refused).
+
+    Applied to the readings of the SECOND run, which can contain readings the first run did not: a reading that only
+    exists because a fill was withheld must not rest on ink that the fill covers."""
+    for reading in readings:
+        rest_ids = (set(reading.terminal_jamb_lo_ids) | set(reading.terminal_jamb_hi_ids)
+                    | set(reading.host_face_ids) | set(reading.glazing_strip_ids))
+        for i in rest_ids:
+            member = ink_by_id.get(i)
+            if member is None:
+                return True               # ink the inventory does not know cannot be shown to be uncovered
+            if not member.stroked:
+                continue
+            for path_index in paths:
+                fill = fills_by_path.get(path_index)
+                if fill is None or type(fill.sequence) is not int:
+                    return True
+                if _touches(member.box, fill.box, eq) and (
+                        type(member.sequence) is not int or member.sequence <= fill.sequence):
+                    return True
+    return False
+
+
 def _sequence(segment) -> Optional[int]:
     value = segment.get("sequence_number")
     return value if type(value) is int and not isinstance(value, bool) else None
@@ -650,21 +718,24 @@ def _sequence(segment) -> Optional[int]:
 class StripWholeApertureCorrespondenceShadow:
     """Opt-in census. `enabled` must be an explicit bool; the default is off and off touches nothing."""
 
-    def __init__(self, source, *, enabled: bool = False, withhold_backdrop_fills: bool = False):
-        if type(enabled) is not bool or type(withhold_backdrop_fills) is not bool:
-            raise TypeError("enabled and withhold_backdrop_fills must be explicit bools")
+    def __init__(self, source, *, enabled: bool = False, withhold_backdrop_fills: bool = False,
+                 withhold_terminal_adjacent_fills: bool = False):
+        if (type(enabled) is not bool or type(withhold_backdrop_fills) is not bool
+                or type(withhold_terminal_adjacent_fills) is not bool):
+            raise TypeError("enabled, withhold_backdrop_fills and withhold_terminal_adjacent_fills must be explicit bools")
         self._source = source
         self._enabled = enabled
         self._withhold = withhold_backdrop_fills
+        self._withhold_adjacent = withhold_terminal_adjacent_fills
 
     @staticmethod
-    def _backdrop_paths(segments, fill_edge_paths, admitted_segments, admitted_ink, eq: float) -> frozenset:
+    def _fill_paths(segments, fill_edge_paths, admitted_segments) -> dict:
         by_path: dict[int, list] = {}
         for segment_id, segment in segments.items():
             path_index = segment.get("path_index")
             if type(path_index) is int:
                 by_path.setdefault(path_index, []).append((str(segment_id), segment))
-        fills = []
+        fills: dict[int, FillPath] = {}
         for path_index in sorted({p for p in fill_edge_paths if p is not None}):
             edges = by_path.get(path_index, [])
             boxes = [_finite_box([segment.get(k) for k in ("x1", "y1", "x2", "y2")]) for _, segment in edges]
@@ -673,10 +744,10 @@ class StripWholeApertureCorrespondenceShadow:
                     or any(segment_id not in admitted_segments for segment_id, _ in edges)
                     or any(segment.get("stroke_present") for _, segment in edges)):
                 continue                  # a fill with an edge the producer did not admit has an unproven extent
-            fills.append(FillPath(path_index, next(iter(positions)), (
+            fills[path_index] = FillPath(path_index, next(iter(positions)), (
                 min(min(b[0], b[2]) for b in boxes), min(min(b[1], b[3]) for b in boxes),
-                max(max(b[0], b[2]) for b in boxes), max(max(b[1], b[3]) for b in boxes))))
-        return backdrop_fill_paths(fills, admitted_ink, eq)
+                max(max(b[0], b[2]) for b in boxes), max(max(b[1], b[3]) for b in boxes)))
+        return fills
 
     def _abstain(self, ownership, nominations, code) -> WholeApertureCorrespondenceShadow:
         empty = StrokeInventory(False, frozenset(), (), (), ())
@@ -823,21 +894,65 @@ class StripWholeApertureCorrespondenceShadow:
         if seed is None or not strokes:
             return self._abstain(ownership, nominations, VISIBLE_SOURCE_AUTHORITY_REQUIRED)
         page_reasons: list[str] = []
-        if self._withhold:
-            backdrop = self._backdrop_paths(segments, fill_edge_paths, admitted_segments, admitted_ink,
-                                            coordinate_quantum_pt / _EQ_FRACTION)
-            kept = [stroke for stroke, path in zip(strokes, fill_edge_paths) if path is None or path not in backdrop]
-            if len(kept) != len(strokes):
-                counts["backdrop_fill_edge_withheld"] = len(strokes) - len(kept)
-                page_reasons.append(BACKDROP_FILL_EDGES_WITHHELD)
-            strokes = kept
+        eq = coordinate_quantum_pt / _EQ_FRACTION
+        fills_by_path = self._fill_paths(segments, fill_edge_paths, admitted_segments)
+        backdrop = (backdrop_fill_paths(list(fills_by_path.values()), admitted_ink, eq)
+                    if self._withhold else frozenset())
+        aligned = tuple(zip(strokes, fill_edge_paths, admitted_ink))
+
+        def analyse(excluded):
+            kept = [stroke for stroke, path, _ in aligned if path is None or path not in excluded]
+            producer = StructuralWholeOpeningApertureProducer.create()
+            return kept, producer.analyze_page(seed, kept), producer.authority()   # every reading, not the id-keyed dict
+
+        kept, discovered, authority = analyse(backdrop)
+        if backdrop and len(kept) != len(strokes):
+            counts["backdrop_fill_edge_withheld"] = len(strokes) - len(kept)
+            page_reasons.append(BACKDROP_FILL_EDGES_WITHHELD)
+        provenance = _PROVENANCE_BY_OPTIONS[(self._withhold, self._withhold_adjacent)]
         inventory = StrokeInventory(
-            complete, frozenset(s.observation_id for s in strokes), tuple(admitted_ink), tuple(unadmitted),
+            complete, frozenset(stroke.observation_id for stroke in kept), tuple(admitted_ink), tuple(unadmitted),
             tuple(sorted(counts.items())), tuple(reasons))
-        producer = StructuralWholeOpeningApertureProducer.create()
-        discovered = producer.analyze_page(seed, strokes)         # every reading, not the id-keyed dictionary
-        authority = producer.authority()
-        return evaluate_whole_aperture_correspondence(
+        receipt = evaluate_whole_aperture_correspondence(
             ownership, nominations, discovered, authority.all_discriminated_subdivisions(), inventory,
-            coordinate_quantum_pt=coordinate_quantum_pt, page_reason_codes=page_reasons,
-            input_provenance=PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD if self._withhold else PRODUCER_INPUT_PROVENANCE)
+            coordinate_quantum_pt=coordinate_quantum_pt, page_reason_codes=page_reasons, input_provenance=provenance)
+        if not self._withhold_adjacent:
+            return receipt
+
+        # A fill edge pooled into a terminal set by the authority's snap distance is withheld for a strip only when it
+        # covers nothing that any reading related to THAT strip rests on, and the second run is checked the same way.
+        ink_by_id = {stroke.observation_id: item for stroke, _, item in aligned}
+        fill_path_by_id = {stroke.observation_id: path for stroke, path, _ in aligned if path is not None}
+        correspondences = list(receipt.correspondences)
+        out_reasons = set(receipt.page_reason_codes)
+        withheld: set[int] = set()
+        reruns = 0
+        for index, nomination in enumerate(nominations):
+            if not _valid_nomination(nomination):
+                continue
+            related = [reading for reading in discovered if _classify(reading, nomination, eq) is not None]
+            adjacent = terminal_adjacent_fill_paths(related, ink_by_id, fill_path_by_id, fills_by_path, eq) - backdrop
+            if not adjacent:
+                continue
+            if reruns >= _MAX_RERUNS:
+                out_reasons.add(APERTURE_BUDGET_EXCEEDED_CODE)
+                continue
+            reruns += 1
+            kept2, discovered2, authority2 = analyse(backdrop | adjacent)
+            related2 = [reading for reading in discovered2 if _classify(reading, nomination, eq) is not None]
+            if withheld_fills_may_cover(related2, adjacent, ink_by_id, fills_by_path, eq):
+                out_reasons.add(WITHHELD_FILL_MAY_COVER_READING_INPUT)
+                continue
+            second = evaluate_whole_aperture_correspondence(
+                ownership, [nomination], discovered2, authority2.all_discriminated_subdivisions(),
+                replace(inventory, admitted_observation_ids=frozenset(stroke.observation_id for stroke in kept2)),
+                coordinate_quantum_pt=coordinate_quantum_pt, input_provenance=provenance)
+            correspondences[index] = second.correspondences[0]
+            out_reasons.update(second.page_reason_codes)
+            withheld |= adjacent
+        if withheld:
+            counts["terminal_adjacent_fill_edge_withheld"] = sum(1 for _, path, _ in aligned if path in withheld)
+            counts["terminal_adjacent_rerun_strips"] = reruns
+            out_reasons.add(TERMINAL_ADJACENT_FILL_EDGES_WITHHELD)
+        return replace(receipt, correspondences=tuple(correspondences), page_reason_codes=tuple(sorted(out_reasons)),
+                       stroke_counts=tuple(sorted(counts.items())))
