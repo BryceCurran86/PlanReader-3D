@@ -149,3 +149,31 @@ abstains, which is why both original strips abstain. (iii) Layer stacks are exer
    seeded record for merged layers and a page-level record for one of its layer pairs have overlapping
    `source_observation_ids` and different `record_id`s, so they would compare as DISTINCT today. Left to the authority
    owner to avoid overlapping edits.
+
+## 10. `compare_identity`: shared source members are not distinctness (owner handoffs 6543274611, 6543894483, 6544665680)
+
+**This is the one behaviour-changing patch in the PR** (every other change here is an addition; the sections above
+describe an unwired method). It tightens an existing live method in the fail-closed direction only and therefore needs the
+authority-promotion review before any merge.
+
+- **Observed.** `compare_identity` returned CORROBORATED DISTINCT for any two same-scope existence records with unequal
+  `record_id`, without reading their `source_observation_ids`. Layer records of one gap (and a seeded record versus a page
+  record for one of its layers) share a face and an extent, so they were counted as two openings. MAX's #4148 separately
+  vetoes only EQUAL rosters, so a proper partial overlap passed both.
+- **Rule (`_source_member_partition`).** Records that share no observation stay DISTINCT. Records that share wall support
+  but whose gaps do not overlap along the shared face axis (adjacent windows in one wall; every shared line is a face
+  piece outside both gaps) stay DISTINCT. Records that share lines and overlap in extent are a CONFLICT
+  (`physical_opening_identity_shared_members_overlapping_extent`). A shared jamb or cap, a shared line that enters a gap,
+  a structure with no readable frame or a different face direction is ABSTAINED
+  (`physical_opening_identity_shared_members_partition_unproven`). Raster records are partitioned by their own
+  source-measured `aperture_bbox_pt`: boxes that overlap in area are a CONFLICT, boxes that do not are DISTINCT, a box on
+  one side only is ABSTAINED. A record compared with itself is still SAME.
+- **Tests, failing first** (`tests/test_physical_opening_identity_partition_v1.py`, 5 failing then passing; 20 tests):
+  adjacent windows sharing support stay DISTINCT in five poses, in both authority modes and both argument orders; layer
+  records of one gap are CONFLICT in five poses and both orders; a seeded record for merged layers overlaps the page record
+  for one layer; disjoint and same-identity are unchanged; shared jamb, unreadable structure, fewer than six lines and the
+  raster box rule at the unit level. The existing raster aperture identity test (separated apertures stay DISTINCT) caught
+  a first version of the rule that ignored the raster box, which is why the box rule exists.
+- **Not proven:** that no live consumer relies on DISTINCT for records that share lines in a way this rule now refuses
+  (the consumer suites listed in the PR pass; no private source run exercises a shared-member pair), and the downstream
+  #4148 behaviour, which is MAX-owned.
