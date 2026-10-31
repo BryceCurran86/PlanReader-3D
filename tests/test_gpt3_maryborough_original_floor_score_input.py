@@ -215,6 +215,55 @@ def test_score_input_publication_is_create_only(tmp_path):
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize("invalid_grant", [False, True])
+def test_original_runner_retains_only_unpublished_source_first_gate_on_rejected_seal(
+    tmp_path, monkeypatch, invalid_grant,
+):
+    claim = object()
+    stage = {
+        "benchmark_accuracy": 1 if invalid_grant else None,
+        "commercial_estimator_approved": False,
+        "first_unproved_stage_counts": {"physical_floor_area_unproven": 1},
+    }
+    sealed = SimpleNamespace(
+        project_id=module.PROJECT,
+        source_sha256s=(),
+        quantities=(),
+    )
+    monkeypatch.setattr(module, "_verify_original_source", lambda *args: SHA)
+    monkeypatch.setattr(module, "collect_live_physical_net_wall_claim", lambda *args, **kwargs: claim)
+    monkeypatch.setattr(module, "seal_live_floor_area_run", lambda *args, **kwargs: sealed)
+    monkeypatch.setattr(module, "project_live_floor_area_customer_rows", lambda *args, **kwargs: ())
+    monkeypatch.setattr(
+        module, "verify_sealed_customer_output",
+        lambda *args, **kwargs: SimpleNamespace(verified_quantity_ids=()),
+    )
+    monkeypatch.setattr(
+        module, "inspect_room_measurement_gates",
+        lambda actual: stage if actual is claim else pytest.fail("wrong claim"),
+    )
+
+    output = tmp_path / "fresh-private-run"
+    message = (
+        "source-stage diagnostic unexpectedly grants benchmark/commercial authority"
+        if invalid_grant else "empty Maryborough floor-area source seal"
+    )
+    with pytest.raises(ValueError, match=message):
+        module.run_original_maryborough_floor_handoff(tmp_path / "unused.pdf", output)
+
+    private_failure = output / "source_stage_diagnostic_UNPUBLISHED.json"
+    assert private_failure.exists() is (not invalid_grant)
+    if not invalid_grant:
+        assert json.loads(private_failure.read_text(encoding="utf-8")) == stage
+    for name in (
+        "source_sealed_run.json",
+        "verified_customer_rows.json",
+        "source_stage_diagnostic.json",
+        "source_score_readiness_UNPUBLISHED.json",
+    ):
+        assert not (output / name).exists()
+
+
 def test_source_runner_contains_no_reference_quantity_or_frozen_object_matching():
     source = inspect.getsource(module)
     for forbidden in (
