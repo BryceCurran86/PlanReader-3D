@@ -46,6 +46,13 @@ PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD = (
 BACKDROP_FILL_EDGES_WITHHELD = "backdrop_fill_edges_withheld_by_paint_order"
 TERMINAL_ADJACENT_FILL_EDGES_WITHHELD = "terminal_adjacent_fill_edges_withheld_by_coverage"
 WITHHELD_FILL_MAY_COVER_READING_INPUT = "withheld_fill_may_cover_a_reading_input"
+# what the existing six-line structural rule says about the members of a whole-extent reading (it decides nothing)
+VIEW_DESCRIBED = "existing_pattern_describes_the_reading"
+VIEW_LAYERED = "existing_pattern_finds_layered_structures_of_the_same_gap"
+VIEW_AMBIGUOUS = "existing_pattern_finds_distinct_structures_of_the_same_gap"
+VIEW_NOT_DESCRIBED = "existing_pattern_does_not_describe_the_reading"
+VIEW_UNAVAILABLE = "existing_pattern_view_unavailable"
+UNACCOUNTED_INK_INSIDE_GAP = "unaccounted_ink_inside_the_gap_not_examined"
 _PROVENANCE_BY_OPTIONS = {
     (False, False): PRODUCER_INPUT_PROVENANCE,
     (True, False): PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD,
@@ -103,6 +110,7 @@ STANDING_LIMITS = (
     "aperture_authority_jamb_threshold_between_observed_stroke_widths_cannot_prove_a_jamb_alone",
     "opening_kind_host_wall_binding_and_quantity_not_established",
     "withholding_fills_is_a_paint_order_and_coverage_inference_the_aperture_authority_did_not_make",
+    "existing_pattern_view_decides_nothing_and_does_not_examine_evidence_left_out_of_the_named_members",
 )
 
 _MAX_STRIPS = 512
@@ -197,6 +205,22 @@ class ApertureRelation:
 
 
 @dataclass(frozen=True)
+class ExistingPatternView:
+    """What `PhysicalOpeningAuthority`'s own six-line rule makes of the members of a whole-extent reading.
+
+    Evidence for whoever promotes existence, not existence: the accessor behind it never returns CORROBORATED, and
+    the evidence left out of the named members is NOT examined by that rule, so the ink inside the gap that nothing
+    accounts for is listed here."""
+
+    verdict: str
+    structure_count: int
+    matching_structure_ids: tuple[str, ...]
+    shared_member_ids: tuple[str, ...]
+    unaccounted_ink_ids: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StripApertureCorrespondence:
     strip_id: str
     claims: tuple[CalloutClaim, ...]
@@ -208,6 +232,7 @@ class StripApertureCorrespondence:
     relations: tuple[ApertureRelation, ...]
     linkage_basis: Optional[str]
     record_id: str
+    existing_pattern: Optional[ExistingPatternView] = None
 
     def __post_init__(self) -> None:
         if self.status is CAND and (
@@ -747,6 +772,74 @@ def withheld_fills_may_cover(readings, paths, ink_by_id, fills_by_path, eq: floa
     return False
 
 
+def _stations(boxes, axis: str, eq: float):
+    """Distinct stations of the members that run perpendicular to the strip axis, or None when unreadable."""
+    stations: list[float] = []
+    for x0, y0, x1, y1 in boxes:
+        along_lo, along_hi, across_lo, across_hi = (x0, x1, y0, y1) if axis == "H" else (y0, y1, x0, x1)
+        if along_hi - along_lo <= eq < across_hi - across_lo:
+            stations.append((along_lo + along_hi) / 2.0)
+    stations.sort()
+    clusters: list[float] = []
+    for station in stations:
+        if not clusters or station - clusters[-1] > eq:
+            clusters.append(station)
+    return clusters
+
+
+def view_existing_pattern(reading, structures, ink_by_id, support_ids, subdivisions_by_id, eq: float,
+                          axis: str) -> ExistingPatternView:
+    """Pure: classify the structures the existing enumerator found among a reading's members.
+
+    A structure matches when its two jambs (its members that run perpendicular to the axis) sit at the reading's
+    two ends. Two or more matching structures that share a member line are layers of one gap; two or more that
+    share nothing are distinct and ambiguous. Ink inside the gap that is neither a member, the strip's ink nor a
+    discriminated post's member is listed: the existing rule never saw it."""
+    matching = []
+    for structure in structures:
+        members = [ink_by_id.get(i) for i in structure.source_observation_ids]
+        if any(m is None for m in members):
+            continue
+        clusters = _stations([m.box for m in members], axis, eq)
+        if (len(clusters) == 2 and abs(clusters[0] - reading.aperture_span_along[0]) <= eq
+                and abs(clusters[1] - reading.aperture_span_along[1]) <= eq):
+            matching.append(structure)
+    if not matching:
+        return ExistingPatternView(VIEW_NOT_DESCRIBED, len(structures), (), (), (), (VIEW_NOT_DESCRIBED,))
+    counts: dict[str, int] = {}
+    for structure in matching:
+        for i in set(structure.source_observation_ids):
+            counts[i] = counts.get(i, 0) + 1
+    shared = tuple(sorted(i for i, n in counts.items() if n > 1))
+    verdict = VIEW_DESCRIBED if len(matching) == 1 else (VIEW_LAYERED if shared else VIEW_AMBIGUOUS)
+    accounted = (set(counts) | set(reading.terminal_jamb_lo_ids) | set(reading.terminal_jamb_hi_ids)
+                 | set(reading.host_face_ids) | set(reading.glazing_strip_ids) | set(support_ids))
+    for subdivision_id in reading.discriminated_subdivision_ids:
+        subdivision = (subdivisions_by_id or {}).get(subdivision_id)
+        if subdivision is not None:
+            accounted |= set(subdivision.member_observation_ids)
+    boxes = [ink_by_id[i].box for structure in matching for i in structure.source_observation_ids]
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    along, across = ((x0, x1), (y0, y1)) if axis == "H" else ((y0, y1), (x0, x1))
+    gap = (reading.aperture_span_along[0], reading.aperture_span_along[1])
+    unaccounted = []
+    for i, item in ink_by_id.items():
+        if i in accounted or not item.stroked:
+            continue
+        ix0, iy0, ix1, iy1 = item.box
+        item_along, item_across = ((ix0, ix1), (iy0, iy1)) if axis == "H" else ((iy0, iy1), (ix0, ix1))
+        # strictly inside the gap and between the faces (a zero-thickness line has no overlap length, and ink that
+        # only touches a jamb or lies on a face is not inside)
+        if (item_along[1] > gap[0] + eq and item_along[0] < gap[1] - eq
+                and item_across[1] > across[0] + eq and item_across[0] < across[1] - eq):
+            unaccounted.append(i)
+    reasons = (verdict,) + ((UNACCOUNTED_INK_INSIDE_GAP,) if unaccounted else ())
+    return ExistingPatternView(
+        verdict, len(structures), tuple(sorted(s.candidate_id for s in matching)), shared,
+        tuple(sorted(unaccounted)), reasons)
+
+
 def _subdivisions_by_id(subdivisions) -> dict:
     """Subdivisions by id; an id that names two different subdivisions resolves to neither."""
     found: dict = {}
@@ -766,14 +859,17 @@ class StripWholeApertureCorrespondenceShadow:
     """Opt-in census. `enabled` must be an explicit bool; the default is off and off touches nothing."""
 
     def __init__(self, source, *, enabled: bool = False, withhold_backdrop_fills: bool = False,
-                 withhold_terminal_adjacent_fills: bool = False):
+                 withhold_terminal_adjacent_fills: bool = False, existing_pattern_view: bool = False):
         if (type(enabled) is not bool or type(withhold_backdrop_fills) is not bool
-                or type(withhold_terminal_adjacent_fills) is not bool):
-            raise TypeError("enabled, withhold_backdrop_fills and withhold_terminal_adjacent_fills must be explicit bools")
+                or type(withhold_terminal_adjacent_fills) is not bool or type(existing_pattern_view) is not bool):
+            raise TypeError(
+                "enabled, withhold_backdrop_fills, withhold_terminal_adjacent_fills and existing_pattern_view "
+                "must be explicit bools")
         self._source = source
         self._enabled = enabled
         self._withhold = withhold_backdrop_fills
         self._withhold_adjacent = withhold_terminal_adjacent_fills
+        self._view = existing_pattern_view
 
     @staticmethod
     def _fill_paths(segments, fill_edge_paths, admitted_segments) -> dict:
@@ -964,8 +1060,9 @@ class StripWholeApertureCorrespondenceShadow:
         receipt = evaluate_whole_aperture_correspondence(
             ownership, nominations, discovered, authority.all_discriminated_subdivisions(), inventory,
             coordinate_quantum_pt=coordinate_quantum_pt, page_reason_codes=page_reasons, input_provenance=provenance)
+        strip_readings = {i: (discovered, authority.all_discriminated_subdivisions()) for i in range(len(nominations))}
         if not self._withhold_adjacent:
-            return receipt
+            return self._attach_views(receipt, nominations, strip_readings, ink_by_id, eq)
 
         # A fill edge pooled into a terminal set by the authority's snap distance is withheld for a strip only when it
         # covers nothing that any reading related to THAT strip rests on, and the second run is checked the same way.
@@ -999,11 +1096,47 @@ class StripWholeApertureCorrespondenceShadow:
                 replace(inventory, admitted_observation_ids=frozenset(stroke.observation_id for stroke in kept2)),
                 coordinate_quantum_pt=coordinate_quantum_pt, input_provenance=provenance)
             correspondences[index] = second.correspondences[0]
+            strip_readings[index] = (discovered2, authority2.all_discriminated_subdivisions())
             out_reasons.update(second.page_reason_codes)
             withheld |= adjacent
         if withheld:
             counts["terminal_adjacent_fill_edge_withheld"] = sum(1 for _, path, _ in aligned if path in withheld)
             counts["terminal_adjacent_rerun_strips"] = reruns
             out_reasons.add(TERMINAL_ADJACENT_FILL_EDGES_WITHHELD)
-        return replace(receipt, correspondences=tuple(correspondences), page_reason_codes=tuple(sorted(out_reasons)),
-                       stroke_counts=tuple(sorted(counts.items())))
+        return self._attach_views(
+            replace(receipt, correspondences=tuple(correspondences), page_reason_codes=tuple(sorted(out_reasons)),
+                    stroke_counts=tuple(sorted(counts.items()))),
+            nominations, strip_readings, ink_by_id, eq)
+
+    def _attach_views(self, receipt, nominations, strip_readings, ink_by_id, eq):
+        """Opt-in: ask the existing opening authority's own six-line rule about each strip's equal-extent reading."""
+        if not self._view:
+            return receipt
+        from pb_physical_opening_authority import PhysicalOpeningAuthority
+        from pb_source_observation_authority import ObservationSelector
+
+        authority = PhysicalOpeningAuthority(self._source.authority())      # private instance; no producer cache is touched
+        ownership = receipt.ownership
+        correspondences = list(receipt.correspondences)
+        for index, nomination in enumerate(nominations):
+            correspondence = correspondences[index]
+            if len(correspondence.equal_record_ids) != 1 or not _valid_nomination(nomination):
+                continue
+            readings, subdivisions = strip_readings[index]
+            reading = next((r for r in readings if _record_key(r) == correspondence.equal_record_ids[0]), None)
+            if reading is None:
+                continue
+            members = sorted(set(reading.terminal_jamb_lo_ids) | set(reading.terminal_jamb_hi_ids)
+                             | set(reading.host_face_ids))
+            if not members:
+                continue
+            structures = authority.seeded_candidate_structures(
+                ObservationSelector(ownership.document_id, ownership.revision_id, ownership.source_sha256,
+                                    ownership.snapshot_id, members[0]), members)
+            if structures.status is not EvidenceResolutionStatus.CANDIDATE:
+                view = ExistingPatternView(VIEW_UNAVAILABLE, 0, (), (), (), (VIEW_UNAVAILABLE,) + tuple(structures.reason_codes))
+            else:
+                view = view_existing_pattern(reading, structures.candidates, ink_by_id, set(nomination.ink_ids),
+                                             _subdivisions_by_id(subdivisions), eq, nomination.axis)
+            correspondences[index] = replace(correspondence, existing_pattern=view)
+        return replace(receipt, correspondences=tuple(correspondences))

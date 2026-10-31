@@ -36,8 +36,8 @@ def _parameters():
     return params, data
 
 
-@pytest.fixture(scope="module", params=[(False, False), (True, False), (True, True)],
-                ids=["faithful", "backdrop-withheld", "backdrop-and-terminal-adjacent-withheld"])
+@pytest.fixture(scope="module", params=[(False, False, False), (True, False, False), (True, True, False), (True, True, True)],
+                ids=["faithful", "backdrop-withheld", "backdrop-and-terminal-adjacent-withheld", "all-with-pattern-view"])
 def original(request):
     params, data = _parameters()
     source = SourceVisibilityProducer(
@@ -56,7 +56,7 @@ def original(request):
         pytest.skip("NOT VERIFIED: the nominator corresponded no strip on this tree, so there is nothing to relate")
     out = shadow.StripWholeApertureCorrespondenceShadow(
         source, enabled=True, withhold_backdrop_fills=request.param[0],
-        withhold_terminal_adjacent_fills=request.param[1]).audit(
+        withhold_terminal_adjacent_fills=request.param[1], existing_pattern_view=request.param[2]).audit(
         revision_id=published.revision.revision_id, plan_page_id=params["plan_page"], nominations=nominations,
         coordinate_quantum_pt=params["coordinate_quantum_pt"])
     return params, source, published, nominations, out, request.param
@@ -69,7 +69,7 @@ def test_ownership_and_grants_belong_to_the_producer(original):
     assert out.shadow_only is True and all(getattr(out, name) is False for name in shadow._GRANT_FLAGS)
     assert out.standing_limits == shadow.STANDING_LIMITS
     assert out.input_provenance == (
-        shadow._PROVENANCE_BY_OPTIONS[options])
+        shadow._PROVENANCE_BY_OPTIONS[options[:2]])
 
 
 def test_every_nominated_strip_is_answered_once_with_the_nominators_claims(original):
@@ -100,7 +100,8 @@ def test_a_candidate_never_carries_an_unvetoed_rival_or_a_missing_linkage(origin
 def test_replay_gives_the_identical_result(original):
     params, source, published, nominations, out, options = original
     again = shadow.StripWholeApertureCorrespondenceShadow(
-        source, enabled=True, withhold_backdrop_fills=options[0], withhold_terminal_adjacent_fills=options[1]).audit(
+        source, enabled=True, withhold_backdrop_fills=options[0], withhold_terminal_adjacent_fills=options[1],
+        existing_pattern_view=options[2]).audit(
         revision_id=published.revision.revision_id, plan_page_id=params["plan_page"], nominations=nominations,
         coordinate_quantum_pt=params["coordinate_quantum_pt"])
     assert again == out
@@ -121,4 +122,27 @@ def test_withheld_backdrop_fills_are_only_ever_fill_edges_the_producer_saw_and_a
         assert (shadow.BACKDROP_FILL_EDGES_WITHHELD in out.page_reason_codes) is (withheld > 0)
     for n, c in zip(nominations, out.correspondences):
         if c.status is EvidenceResolutionStatus.CANDIDATE:
-            assert any(options) or not (withheld or adjacent)     # a CANDIDATE never rests on withheld input unless asked
+            assert any(options[:2]) or not (withheld or adjacent)    # a CANDIDATE never rests on withheld input unless asked
+
+
+def test_the_existing_pattern_view_is_present_only_when_asked_and_decides_nothing(original):
+    params, source, published, nominations, out, options = original
+    views = [c.existing_pattern for c in out.correspondences]
+    if not options[2]:
+        assert all(v is None for v in views)
+        return
+    for c in out.correspondences:
+        if len(c.equal_record_ids) == 1:
+            assert c.existing_pattern is not None
+            assert c.existing_pattern.verdict in {
+                shadow.VIEW_DESCRIBED, shadow.VIEW_LAYERED, shadow.VIEW_AMBIGUOUS, shadow.VIEW_NOT_DESCRIBED,
+                shadow.VIEW_UNAVAILABLE}
+            assert c.existing_pattern.reason_codes and c.existing_pattern.reason_codes[0] == c.existing_pattern.verdict
+        else:
+            assert c.existing_pattern is None
+    without = shadow.StripWholeApertureCorrespondenceShadow(
+        source, enabled=True, withhold_backdrop_fills=options[0], withhold_terminal_adjacent_fills=options[1]).audit(
+        revision_id=published.revision.revision_id, plan_page_id=params["plan_page"], nominations=nominations,
+        coordinate_quantum_pt=params["coordinate_quantum_pt"])
+    from dataclasses import replace
+    assert [replace(c, existing_pattern=None) for c in out.correspondences] == list(without.correspondences)

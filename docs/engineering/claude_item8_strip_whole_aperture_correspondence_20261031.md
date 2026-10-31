@@ -70,6 +70,19 @@ New files only: `pb_callout_strip_whole_aperture_correspondence_shadow.py`, test
   relative to) a stroke of the strip's own ink that its extent touches stops the correspondence
   (`strip_ink_possibly_covered_by_a_later_fill`): such a fill can hide the glazing even when none of its edges is near
   a terminal. A backdrop painted before the ink never blocks.
+- Opt-in `existing_pattern_view` (default off, strict bool): the handoff into the existing opening path. For each
+  strip with exactly one equal-extent reading, `PhysicalOpeningAuthority.seeded_candidate_structures` (a new
+  read-only accessor in `pb_physical_opening_authority.py`, pure addition, CANDIDATE or ABSTAINED only, no existence
+  record, none of the per-page memos used or written, callers pinned by a test) runs the EXISTING six-line
+  enumerator on a universe restricted to that reading's members (terminal jambs and host faces). The module then
+  reports what that rule made of them: `existing_pattern_describes_the_reading` (one structure whose two jambs sit at
+  the reading's ends), `..._finds_layered_structures_of_the_same_gap` (several, sharing a face line),
+  `..._finds_distinct_structures_of_the_same_gap`, or `..._does_not_describe_the_reading`; plus the stroked ink
+  strictly inside the gap that neither the members, the strip's ink nor the posts' members account for, because the
+  rule never saw it. It decides nothing and changes no status. Why an accessor and not `prove_existence`: that method
+  derives its candidates from its own page universe and has no point at which a proposed structure can be injected;
+  injecting one would issue a CORROBORATED existence record from evidence the authority did not enumerate, which is
+  an authority-promotion decision.
 - Relations: `equal_extent`, `nested_inside_strip_extent`, `contains_strip_extent`, `partly_overlaps_strip_extent`,
   each with the record's own status and reasons, shared ink by observation id, and `end_offsets` (diagnostic only).
 - Decision: CANDIDATE only when exactly one equal-extent reading is structurally proven (jamb and wall continuity
@@ -139,7 +152,20 @@ by paint order); (3) nested pane readings are set aside only where the authority
 ends. Beyond the whole aperture: physical opening existence, host wall and the `type_mark` for the opening, then
 the issuer, which needs the separate authority-promotion review. None of these is changed here.
 
-## 5. Handoff into the existing opening path (what the existing stack does with these two strips)
+## 5. Handoff into the existing opening path
+
+Measured with `existing_pattern_view=True` on the original (same tree, both fill options): **W01** - the existing
+rule, restricted to the reading's members, finds **two structures whose two jambs sit exactly at the reading's ends**
+(843.6 and 1047.6), which share two face lines: two layers of one wall (faces at y 1946.48 / 1951.52 and
+1951.52 / 1959.92) for one gap; no stroked ink is left unaccounted inside the gap. **W02** - the same rule finds **no
+structure**: its terminals are stepped returns across three layers, not one jamb line joining two faces, so the
+existing pattern does not describe them. Two things follow: the existing path cannot issue one existence for W01
+until a rule says that layered structures of an identical gap are one opening (today two candidates containing the
+same observation are `ambiguous_physical_opening_candidates`), and it cannot describe W02 at all until a stepped-return
+terminal pattern exists. Both are changes to the existing authority and to commercial output, so they need the
+authority-promotion review; this module changes neither.
+
+Before that, what the existing stack does with the strips on the unrestricted page (what the assessment shadow said, faithful input):
 
 Read from the structural assessment shadow on merged main with the producer's faithful inventory (no withholding;
 that shadow re-derives from the producer and cannot take a filtered inventory): for both nominated strips the

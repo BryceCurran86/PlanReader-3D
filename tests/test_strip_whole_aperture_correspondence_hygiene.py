@@ -54,7 +54,7 @@ def test_the_only_authority_modules_it_reaches_are_the_aperture_authority_and_th
     reached = {m for m in _imports(SOURCE) if m.startswith("pb_")}
     assert reached == {
         "pb_migration_contracts", "pb_structural_whole_opening_aperture_authority", "pb_source_observation_authority",
-        "pb_source_visibility_authority", "pb_vector_geometry_v130"}
+        "pb_source_visibility_authority", "pb_vector_geometry_v130", "pb_physical_opening_authority"}
 
 
 def test_importing_the_correspondence_loads_no_consumer_module():
