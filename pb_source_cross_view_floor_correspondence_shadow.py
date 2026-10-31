@@ -817,6 +817,17 @@ class SourceCrossViewFloorCorrespondenceRecord:
             EvidenceResolutionStatus.ABSTAINED,
         ):
             raise ValueError("source_cross_view_floor_shadow_status_invalid")
+        # A diagnostic CANDIDATE must carry the complete immutable set of
+        # standing physical-owner blockers. A direct constructor or
+        # dataclasses.replace must not silently remove one and present an
+        # apparently unblocked source handoff. Non-candidates grant no
+        # candidate authority and must not advertise standing blockers.
+        expected_blockers = (
+            STANDING_AUTHORITY_BLOCKERS
+            if self.status is EvidenceResolutionStatus.CANDIDATE else ()
+        )
+        if type(self.authority_blockers) is not tuple or self.authority_blockers != expected_blockers:
+            raise ValueError("source_cross_view_floor_shadow_blockers_invalid")
 
 
 @dataclass(frozen=True)
