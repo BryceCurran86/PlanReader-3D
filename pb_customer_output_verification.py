@@ -273,6 +273,23 @@ def _verify_row_lineage(
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} finish_system differs from signed original finish material"
             )
+        # Historical source projection uses the generic floor-finish title.
+        # New source projection includes the separately signed FT code in the
+        # customer element. The display must match the source-owned code AND
+        # its persisted original producer field, never a mutable row caption.
+        producer_element = producer_metadata.get("element")
+        if (
+            type(producer_element) is not str
+            or producer_element not in (
+                "Floor finish area",
+                f"Floor finish area ({parts[2]})",
+            )
+            or type(row.get("element")) is not str
+            or row["element"] != producer_element
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} element differs from signed original finish code"
+            )
 
     # A signed source-closed quantity also authenticates its evidence status,
     # authority and confidence. A row that changes these claims while keeping
