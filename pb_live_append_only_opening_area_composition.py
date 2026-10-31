@@ -125,9 +125,10 @@ def _append_reproved_areas(baseline, openings, quantities):
         raise SourceClosedRunConflictError("complete opening replay source scope missing or conflicting")
     fresh_measured_ids = {q.input_entity_ids[0] for q in fresh.values()}
     # An unsupported-only sibling is negative evidence, never quietly omitted
-    # from a new FIRM area. These exact-source aliases are unequivocal
-    # conflicts; less obvious rivals remain visible in the replay inventory
-    # for a downstream source-owned identity decision.
+    # from a new area. Shared exact observation members require a source-owned
+    # physical partition; neither a different record ID nor a partial roster
+    # intersection proves distinct apertures. Other rivals stay in the replay
+    # inventory for downstream source-owned identity decisions.
     fresh_unmeasured = tuple(
         o for oid, o in fresh_objects.items()
         if oid not in fresh_measured_ids and oid not in old_objects
@@ -141,7 +142,10 @@ def _append_reproved_areas(baseline, openings, quantities):
             if (sibling.physical_opening_id == opening.physical_opening_id
                     or (
                         sibling.source_observation_ids
-                        and sibling.source_observation_ids == opening.source_observation_ids
+                        and opening.source_observation_ids
+                        and not set(sibling.source_observation_ids).isdisjoint(
+                            opening.source_observation_ids
+                        )
                     )
                     or (
                         sibling.source_geometries

@@ -119,8 +119,13 @@ def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
 
-@pytest.mark.parametrize("collision", ("same_source_observations", "same_physical_geometry"))
-def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(original_claim, collision):
+@pytest.mark.parametrize("collision", (
+    "same_source_observations", "partial_source_observation_overlap", "same_physical_geometry",
+))
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(
+    original_claim, collision, reverse_inventory,
+):
     _, full = original_claim
     baseline = subset(full)
     published_old = {q.quantity_id for q in baseline.opening_quantity_evidence}
@@ -133,6 +138,8 @@ def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(origi
         area_m2=None, area_basis=None, figured_area_record_id=None,
         source_observation_ids=(
             added.source_observation_ids if collision == "same_source_observations"
+            else added.source_observation_ids + ("fresh-only-independent-observation",)
+            if collision == "partial_source_observation_overlap"
             else ("distinct-original-observation",)
         ),
         source_geometries=(
@@ -140,10 +147,12 @@ def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(origi
             else ((500.0, 500.0, 550.0, 500.0),)
         ),
     )
+    assert added.source_observation_ids
+    roster = full.canonical_openings + (sibling,)
+    if reverse_inventory:
+        roster = tuple(reversed(roster))
     with pytest.raises(SourceClosedRunConflictError, match="unmeasured opening rival"):
-        _append_reproved_areas(
-            baseline, full.canonical_openings + (sibling,), full.opening_quantity_evidence
-        )
+        _append_reproved_areas(baseline, roster, full.opening_quantity_evidence)
 
 
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
