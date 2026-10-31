@@ -949,29 +949,29 @@ class GPT2OriginalSourceGeometryBridge:
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }
-        # The selected path IDs themselves are caller-provided. Reissuing
-        # only that subset is NOT original-source scope completeness: a caller
-        # can hide the disagreeing left-hand wall stub and produce a false
-        # positive open-room ancestry. Reinspect both full original source
-        # pages for same-ink strokes actually occupying the alleged door gap.
-        if not (
-            _original_doorway_gap_native_ink_inventory_complete(
-                original_source_bytes,
-                page_1_based=original_floor_page_1_based,
-                original_room_graph=reissued["floor_source_graph"],
-            )
-            and _original_doorway_gap_native_ink_inventory_complete(
-                original_source_bytes,
-                page_1_based=finish_page,
-                original_room_graph=reissued["second_plan_source_graph"],
-            )
-        ):
-            return {
-                "status":"source_original_doorway_ancestry_conflict",
-                "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
-                "floor_finish_quantity_granted":False,
-                "new_firm_quantities":0,
-            }
+            # The selected path IDs themselves are caller-provided. Reissuing
+            # only that subset is NOT original-source scope completeness: a caller
+            # can hide the disagreeing left-hand wall stub and produce a false
+            # positive open-room ancestry. Reinspect both full original source
+            # pages for same-ink strokes actually occupying the alleged door gap.
+            if not (
+                _original_doorway_gap_native_ink_inventory_complete(
+                    original_source_bytes,
+                    page_1_based=original_floor_page_1_based,
+                    original_room_graph=reissued["floor_source_graph"],
+                )
+                and _original_doorway_gap_native_ink_inventory_complete(
+                    original_source_bytes,
+                    page_1_based=finish_page,
+                    original_room_graph=reissued["second_plan_source_graph"],
+                )
+            ):
+                return {
+                    "status":"source_original_doorway_ancestry_conflict",
+                    "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
+                    "floor_finish_quantity_granted":False,
+                    "new_firm_quantities":0,
+                }
         # Independently resolve through the exact producer-owned source
         # material authority. A copied dict that merely says "authenticated"
         # is not an FT2/FT3 mark or material-definition issuer.

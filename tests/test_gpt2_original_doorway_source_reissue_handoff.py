@@ -271,6 +271,27 @@ def test_immutable_maryborough_office_d15_mismatch_cannot_spoof_matching_ancestr
 
 
 
+@pytest.mark.parametrize("mode", [False, None, "missing"])
+def test_non_virtual_doorway_handoff_preserves_existing_material_w4_path(
+    monkeypatch, mode,
+):
+    """The native gap census only applies to explicitly virtual closures."""
+    cross = _cross_sheet()
+    if mode == "missing":
+        cross.pop("source_real_door_ink_gap_virtual_closure_only")
+    else:
+        cross["source_real_door_ink_gap_virtual_closure_only"] = mode
+    result, calls = _call(
+        monkeypatch, cross=cross, inventory_complete=False,
+    )
+    assert [x[0] for x in calls] == [
+        "source", "material", "w4", "gpt1_shadow",
+    ]
+    assert result["status"] == "source_W4_FT_handoff_shadow_only"
+    assert result["floor_finish_quantity_granted"] is False
+    assert result["new_firm_quantities"] == 0
+
+
 def test_original_source_gap_inventory_prevents_selected_stroke_omission(
     monkeypatch,
 ):
