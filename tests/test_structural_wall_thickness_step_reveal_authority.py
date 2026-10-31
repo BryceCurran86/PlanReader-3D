@@ -767,3 +767,87 @@ def test_frozen_reveal_existing_threshold_boundaries_preserved(
     assert replace(result) == result
     assert result == authority.evaluate_stepped_wall_aperture(**kw)
     assert_shadow(result)
+
+
+@pytest.mark.parametrize("field,delta", [
+    ("clear_span_pt", 5e-10),
+    ("reveal_depth_pt", 5e-10),
+    ("centerline_step_offset_pt", 5e-10),
+    ("clear_span_m", 5e-13),
+    ("left_wall_thickness_mm", 5e-13),
+    ("right_wall_thickness_mm", 5e-13),
+    ("reveal_depth_mm", 5e-13),
+])
+def test_frozen_reveal_rejects_sub_tolerance_derived_receipt_mutation(
+    authority, field, delta,
+):
+    """A different derived value cannot reuse the original source-neutral ID."""
+    from dataclasses import replace
+
+    original_inputs = inputs()
+    candidate = authority.evaluate_stepped_wall_aperture(**original_inputs)
+    before = candidate.to_dict()
+    assert candidate.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    assert getattr(candidate, field) + delta != getattr(candidate, field)
+    with pytest.raises(ValueError, match="reveal numeric evidence conflicts"):
+        replace(candidate, **{field: getattr(candidate, field) + delta})
+    assert candidate.to_dict() == before
+    assert candidate == authority.evaluate_stepped_wall_aperture(**original_inputs)
+    assert original_inputs == inputs()
+    assert_shadow(candidate)
+
+
+@pytest.mark.parametrize("missing", [
+    {"scale_ratio": None},
+    {"datum_offset_pt": None},
+    {"datum_alignment": None},
+])
+def test_frozen_abstained_reveal_also_rejects_sub_tolerance_geometry(
+    authority, missing,
+):
+    from dataclasses import replace
+
+    record = authority.evaluate_stepped_wall_aperture(**inputs(**missing))
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert_null_metrics(record)
+    for field in ("clear_span_pt", "reveal_depth_pt", "centerline_step_offset_pt"):
+        with pytest.raises(ValueError, match="reveal numeric evidence conflicts"):
+            replace(record, **{field: getattr(record, field) + 5e-10})
+    assert_shadow(record)
+    assert record == authority.evaluate_stepped_wall_aperture(**inputs(**missing))
+
+
+def test_frozen_zero_reveal_metric_cannot_be_forged_positive(authority):
+    from dataclasses import replace
+
+    kw = inputs(left_thickness_pt=5.0, right_thickness_pt=5.0)
+    record = authority.evaluate_stepped_wall_aperture(**kw)
+    assert record.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    assert record.reveal_depth_pt == 0
+    assert record.reveal_depth_mm == 0
+    with pytest.raises(ValueError, match="metric axes"):
+        replace(record, reveal_depth_mm=5e-13)
+    assert_shadow(record)
+    assert record == authority.evaluate_stepped_wall_aperture(**kw)
+
+
+@pytest.mark.parametrize("jamb_a,jamb_b", [
+    ((100.0, 200.0), (200.0, 200.0)),
+    ((200.0, 200.0), (100.0, 200.0)),
+    ((100.0, 200.0), (100.0, 300.0)),
+    ((100.0, 300.0), (100.0, 200.0)),
+])
+def test_exact_reveal_receipts_preserve_rotated_reversed_replay(
+    authority, jamb_a, jamb_b,
+):
+    from dataclasses import replace
+
+    kw = inputs(jamb_datum_a=jamb_a, jamb_datum_b=jamb_b)
+    before = dict(kw)
+    record = authority.evaluate_stepped_wall_aperture(**kw)
+    assert record.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    assert replace(record) == record
+    assert record == authority.evaluate_stepped_wall_aperture(**kw)
+    assert record.to_dict()["clear_span_m"] == record.clear_span_m
+    assert_shadow(record)
+    assert kw == before

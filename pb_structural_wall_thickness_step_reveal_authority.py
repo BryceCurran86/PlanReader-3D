@@ -134,6 +134,9 @@ class SteppedWallApertureRecord:
                     (not _finite_real(field) or field < 0
                      or (not allow_zero and field == 0))):
                 raise ValueError("reveal numeric evidence must be finite and physical")
+        # These fields are deterministic producer-derived receipts, not fuzzy
+        # geometric matches. An isclose tolerance permits re-keyed frozen
+        # evidence to retain its stable ID after a sub-tolerance mutation.
         expected_span = math.hypot(
             self.jamb_right_datum[0] - self.jamb_left_datum[0],
             self.jamb_right_datum[1] - self.jamb_left_datum[1],
@@ -141,13 +144,9 @@ class SteppedWallApertureRecord:
         expected_reveal = abs(self.left_wall_thickness_pt - self.right_wall_thickness_pt)
         if (not math.isfinite(expected_span)
                 or not math.isfinite(expected_reveal)
-                or not math.isclose(self.clear_span_pt, expected_span,
-                                    rel_tol=1e-12, abs_tol=1e-9)
-                or not math.isclose(self.reveal_depth_pt, expected_reveal,
-                                    rel_tol=1e-12, abs_tol=1e-9)
-                or not math.isclose(self.centerline_step_offset_pt,
-                                    expected_reveal / 2.0,
-                                    rel_tol=1e-12, abs_tol=1e-9)):
+                or self.clear_span_pt != expected_span
+                or self.reveal_depth_pt != expected_reveal
+                or self.centerline_step_offset_pt != expected_reveal / 2.0):
             raise ValueError("reveal numeric evidence conflicts with wall geometry")
         # Re-evaluate the producer's FIRST failing gate from the frozen
         # inputs. A caller can otherwise forge a geometric candidate or
@@ -193,6 +192,8 @@ class SteppedWallApertureRecord:
                 self.clear_span_m, self.left_wall_thickness_mm,
                 self.right_wall_thickness_mm, self.reveal_depth_mm,
             )
+            # Exact arithmetic mirrors the producer's evaluation order; a
+            # changed hypothetical metric cannot retain its old evidence ID.
             if (any(not math.isfinite(value) for value in expected_metrics)
                     or any(expected == 0 and source > 0
                            for expected, source in zip(
@@ -200,8 +201,7 @@ class SteppedWallApertureRecord:
                                    self.clear_span_pt, self.left_wall_thickness_pt,
                                    self.right_wall_thickness_pt, self.reveal_depth_pt,
                                )))
-                    or any(not math.isclose(actual, expected,
-                                            rel_tol=1e-12, abs_tol=1e-12)
+                    or any(actual != expected
                            for actual, expected in zip(actual_metrics, expected_metrics))):
                 raise ValueError("reveal numeric evidence conflicts with metric axes")
 
