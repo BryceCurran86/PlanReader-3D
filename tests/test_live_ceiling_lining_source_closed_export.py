@@ -6,7 +6,10 @@ from dataclasses import replace
 import pytest
 
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
-from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_customer_projection import (
+    _figured_authority,
+    project_live_ceiling_customer_rows,
+)
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
     seal_live_ceiling_lining_run,
@@ -401,6 +404,54 @@ def test_scaled_quantity_is_not_admitted_to_documented_rcp_export() -> None:
             workspace_id=1,
             project_id="project-1",
         )
+
+
+@pytest.mark.parametrize("figured_ids", (
+    ("dim-h", "dim-v", "dim-h"),
+    ("dim-h", "dim-h"),
+    ("dim-h", " dim-v"),
+    ("dim-h", "dim-v "),
+    ("dim-h", ""),
+    ("dim-h", True),
+    ("dim-h", 2),
+    ("dim-h", None),
+    ("dim-h", ("dim-v",)),
+    "dim-h,dim-v",
+    None,
+    {"dim-h": 1, "dim-v": 2},
+))
+def test_live_ceiling_customer_cannot_repair_original_figured_axes(figured_ids) -> None:
+    # The source sealer already fails closed. The customer boundary must not
+    # independently cast/trim/deduplicate an invalid source into two axes.
+    quantity = _quantity()
+    malformed = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), "figured_dimension_ids": figured_ids},
+    )
+    assert _figured_authority(malformed) is None
+
+
+def test_live_ceiling_customer_retains_exact_original_figured_axes() -> None:
+    quantity = _quantity()
+    assert _figured_authority(quantity).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+    reversed_source = replace(
+        quantity,
+        metadata={
+            **dict(quantity.metadata),
+            "figured_dimension_ids": ("dim-v", "dim-h"),
+        },
+    )
+    assert _figured_authority(reversed_source).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+
+
+def test_live_ceiling_customer_cannot_retype_scaled_source_as_figured() -> None:
+    quantity = _quantity()
+    changed = replace(quantity, authority="pdf_scaled")
+    assert _figured_authority(changed) is None
 
 
 def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
