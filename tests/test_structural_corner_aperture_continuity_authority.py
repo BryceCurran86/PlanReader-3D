@@ -1036,3 +1036,81 @@ def test_frozen_corner_candidate_cannot_be_relabelled_as_abstained(authority):
     assert record.shadow_only and not record.takeoff_eligible
     assert not record.commercial_projection_allowed
     assert authority.evaluate_corner_aperture(**kwargs) == record
+
+
+@pytest.mark.parametrize("field", (
+    "leg_span_pt", "axis_vector_x", "axis_vector_y",
+    "corner_angle_deg", "total_girth_pt", "diagonal_chord_pt",
+    "leg_a_metric", "leg_b_metric", "total_girth_m",
+))
+def test_frozen_corner_exact_arithmetic_rejects_one_ulp_alias(authority, field):
+    """A frozen shadow ID cannot serialize a changed derived receipt."""
+    import math
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+        context_label="EXACT_CORNER_ARITHMETIC",
+    )
+    original = authority.evaluate_corner_aperture(**kw)
+    assert original.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE
+    assert replace(original) == original
+    before = original.to_dict()
+    leg = original.leg_a
+    if field == "leg_span_pt":
+        with pytest.raises(ValueError, match="geometry"):
+            replace(leg, leg_span_pt=math.nextafter(leg.leg_span_pt, math.inf))
+    elif field.startswith("axis_vector_"):
+        index = 0 if field.endswith("_x") else 1
+        axis = list(leg.axis_vector)
+        axis[index] = math.nextafter(axis[index], math.inf)
+        with pytest.raises(ValueError, match="axis"):
+            replace(leg, axis_vector=tuple(axis))
+    elif field in ("leg_a_metric", "leg_b_metric"):
+        name = "leg_a" if field == "leg_a_metric" else "leg_b"
+        original_leg = getattr(original, name)
+        mutated = replace(
+            original_leg,
+            leg_span_m=math.nextafter(original_leg.leg_span_m, math.inf),
+        )
+        with pytest.raises(ValueError, match="hypothetical metric"):
+            replace(original, **{name: mutated})
+    else:
+        value = getattr(original, field)
+        with pytest.raises(ValueError, match="numeric evidence|hypothetical metric"):
+            replace(original, **{field: math.nextafter(value, math.inf)})
+    assert original.to_dict() == before
+    assert authority.evaluate_corner_aperture(**kw) == original
+    assert original.shadow_only and not original.takeoff_eligible
+    assert not original.commercial_projection_allowed
+
+
+def test_exact_corner_arithmetic_preserves_abstention_and_leg_order(authority):
+    """Producer negatives and reversed source ordering still replay exactly."""
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=(200.0, 300.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    abstained = authority.evaluate_corner_aperture(**kw)
+    assert abstained.classification is CornerApertureClassification.ABSTAINED_DEGENERATE_LEG
+    assert replace(abstained) == abstained
+    assert abstained.total_girth_m is None
+    kw["jamb_a"] = (200.0, 380.0)
+    positive = authority.evaluate_corner_aperture(**kw)
+    swapped = authority.evaluate_corner_aperture(**(
+        kw | {
+            "jamb_a": kw["jamb_b"], "jamb_b": kw["jamb_a"],
+            "host_wall_a_id": kw["host_wall_b_id"],
+            "host_wall_b_id": kw["host_wall_a_id"],
+        }
+    ))
+    assert positive == swapped
+    assert replace(positive) == positive
+    assert positive.shadow_only and not positive.commercial_projection_allowed

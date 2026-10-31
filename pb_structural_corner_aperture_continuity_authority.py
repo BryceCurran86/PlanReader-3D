@@ -76,6 +76,8 @@ class CornerOpeningLegRecord:
                 or (self.leg_span_m is not None and
                     (not _finite_real(self.leg_span_m) or self.leg_span_m <= 0))):
             raise ValueError("corner leg numeric evidence must be finite and physical")
+        # Frozen receipts require exact producer arithmetic, not tolerance-based
+        # near-equality that aliases distinct derived values under one ID.
         # Direct dataclass replacement cannot substitute an unrelated wall
         # direction or span. A genuinely degenerate source leg has zero axis
         # and stays a typed abstention at the parent record, never a host.
@@ -83,18 +85,12 @@ class CornerOpeningLegRecord:
         dy = self.terminal_jamb[1] - self.corner_vertex[1]
         span = math.hypot(dx, dy)
         if (not math.isfinite(span)
-                or not math.isclose(self.leg_span_pt, span,
-                                    rel_tol=1e-12, abs_tol=1e-9)):
+                or self.leg_span_pt != span):
             raise ValueError("corner leg numeric evidence conflicts with geometry")
         if span == 0.0:
             if self.axis_vector != (0.0, 0.0):
                 raise ValueError("corner leg axis conflicts with degenerate geometry")
-        elif (not math.isclose(math.hypot(*self.axis_vector), 1.0,
-                               rel_tol=0.0, abs_tol=1e-12)
-              or not math.isclose(self.axis_vector[0], dx / span,
-                                  rel_tol=0.0, abs_tol=1e-12)
-              or not math.isclose(self.axis_vector[1], dy / span,
-                                  rel_tol=0.0, abs_tol=1e-12)):
+        elif (self.axis_vector != (dx / span, dy / span)):
             raise ValueError("corner leg axis conflicts with geometry")
 
     def to_dict(self) -> Mapping[str, Any]:
@@ -199,8 +195,7 @@ class StructuralCornerApertureRecord:
             self.leg_a.axis_vector[0] * self.leg_b.axis_vector[0]
             + self.leg_a.axis_vector[1] * self.leg_b.axis_vector[1]))
         expected_angle = math.degrees(math.acos(dot))
-        if not math.isclose(self.corner_angle_deg, expected_angle,
-                            rel_tol=1e-12, abs_tol=1e-9):
+        if self.corner_angle_deg != expected_angle:
             raise ValueError("corner record numeric evidence conflicts with leg angle")
         expected_girth = self.leg_a.leg_span_pt + self.leg_b.leg_span_pt
         expected_chord = math.hypot(
@@ -209,10 +204,8 @@ class StructuralCornerApertureRecord:
         )
         if (not math.isfinite(expected_girth)
                 or not math.isfinite(expected_chord)
-                or not math.isclose(self.total_girth_pt, expected_girth,
-                                    rel_tol=1e-12, abs_tol=1e-9)
-                or not math.isclose(self.diagonal_chord_pt, expected_chord,
-                                    rel_tol=1e-12, abs_tol=1e-9)):
+                or self.total_girth_pt != expected_girth
+                or self.diagonal_chord_pt != expected_chord):
             raise ValueError("corner record numeric evidence conflicts with leg geometry")
         # Producer identity is a receipt, not an arbitrary caller label.
         # Reconstruct it from exact native points, ordered hosts, context,
@@ -260,8 +253,7 @@ class StructuralCornerApertureRecord:
             )
             if any(not math.isfinite(expected) or expected <= 0
                    or recorded is None
-                   or not math.isclose(recorded, expected,
-                                       rel_tol=1e-12, abs_tol=0.0)
+                   or recorded != expected
                    for recorded, expected in zip(recorded_metric, expected_metric)):
                 raise ValueError("corner hypothetical metric evidence conflicts with scale")
 
