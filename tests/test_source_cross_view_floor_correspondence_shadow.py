@@ -1008,6 +1008,60 @@ def _source_lineage_record(*, selector=None, face_id="face-office", target_shift
     return rec
 
 
+@pytest.mark.parametrize("field_name, invalid_value", [
+    ("commercial_projection_allowed", True),
+    ("commercial_projection_allowed", 1),
+    ("commercial_projection_allowed", None),
+    ("commercial_projection_allowed", "false"),
+    ("takeoff_eligible", True),
+    ("takeoff_eligible", 1),
+    ("takeoff_eligible", None),
+    ("takeoff_eligible", "false"),
+])
+def test_source_shadow_record_rejects_forged_commercial_authority(
+    field_name, invalid_value,
+):
+    original = _source_lineage_record()
+    original_id = original.record_id
+    with pytest.raises(
+        ValueError,
+        match="source_cross_view_floor_shadow_commercial_authority_forbidden",
+    ):
+        replace(original, **{field_name: invalid_value})
+    assert original.record_id == original_id
+    assert original.takeoff_eligible is False
+    assert original.commercial_projection_allowed is False
+
+
+@pytest.mark.parametrize("invalid_status", [
+    EvidenceResolutionStatus.RAW,
+    EvidenceResolutionStatus.CORROBORATED,
+    "candidate",
+    None,
+])
+def test_source_shadow_record_rejects_forged_source_authority(invalid_status):
+    original = _source_lineage_record()
+    with pytest.raises(
+        ValueError, match="source_cross_view_floor_shadow_status_invalid"
+    ):
+        replace(original, status=invalid_status)
+    assert original.status in (
+        EvidenceResolutionStatus.CANDIDATE,
+        EvidenceResolutionStatus.ABSTAINED,
+        EvidenceResolutionStatus.CONFLICT,
+    )
+
+
+def test_source_shadow_record_constructor_keeps_valid_replay_and_no_promotion():
+    original = _source_lineage_record()
+    replay = replace(original)
+    assert replay == original
+    assert replay.record_id == original.record_id
+    assert replay.status is original.status
+    assert replay.takeoff_eligible is False
+    assert replay.commercial_projection_allowed is False
+
+
 def test_shadow_record_id_separates_source_sha_snapshot_and_face_identity():
     selector = sample_selector()
     base = _source_lineage_record(selector=selector)
