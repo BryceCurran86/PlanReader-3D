@@ -199,6 +199,38 @@ def test_floor_finish_export_rejects_semantic_drift_from_canonical_floor() -> No
         )
 
 
+def test_floor_finish_customer_distinguishes_source_codes_with_same_material_family() -> None:
+    """FT1 and FT2 may both be tile but are different scheduled finishes."""
+    original = _quantity()
+    alternate = replace(
+        original,
+        quantity_id="floor-finish-ft2-q1",
+        semantic_key="floor_finish_area:floor-1:FT2:tile",
+        metadata={**dict(original.metadata), "finish_code": "FT2"},
+    )
+    for source_quantity, expected_system in (
+        (original, "FT1 (tile)"),
+        (alternate, "FT2 (tile)"),
+    ):
+        claim = replace(
+            _claim(),
+            floor_finish_quantity_evidence=(source_quantity,),
+        )
+        sealed = seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+        rows = project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+        assert len(rows) == len(sealed.quantities) == 1
+        assert rows[0]["quantity_family"] == "floor_finish_area"
+        assert rows[0]["quantity"] == 8.64
+        assert rows[0]["finish_system"] == expected_system
+        assert verify_sealed_customer_output(
+            sealed, rows
+        ).verified_quantity_ids == (source_quantity.quantity_id,)
+
+
 def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     claim = _claim()
     run = seal_live_floor_finish_area_run(
@@ -219,7 +251,7 @@ def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     assert row["quantity_status"] == "To review"
     assert row["origin"] == "AI"
     assert row["row_role"] == "floor_area"
-    assert row["finish_system"] == "tile"
+    assert row["finish_system"] == "FT1 (tile)"
 
     report = verify_sealed_customer_output(run, rows)
     assert report.valid_quantity_count == 1
@@ -532,7 +564,7 @@ def test_floor_finish_customer_projection_uses_canonical_not_physical_floor_join
     assert len(rows) == 1
     assert rows[0]["quantity_id"] == corrected.quantity_id
     assert rows[0]["location"] == floor.room_entity_id
-    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["finish_system"] == "FT1 (tile)"
     assert verify_sealed_customer_output(sealed, rows).verified_quantity_ids == (
         corrected.quantity_id,
     )
