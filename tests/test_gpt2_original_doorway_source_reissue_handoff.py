@@ -762,3 +762,106 @@ def test_original_gap_boundary_touching_curve_does_not_veto(vertical):
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=1,original_room_graph=graph,
     )
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("shape_kind", ["rect", "quad", "bezier"])
+@pytest.mark.parametrize("placement", ["inside", "outside", "enclosing"])
+def test_original_door_gap_rejects_visible_fill_only_path_occupancy(
+    vertical, selected, shape_kind, placement,
+):
+    """Fill-only original ink must veto a door gap even without a stroked edge."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    x0,x1={
+        "inside":(35,45),
+        "outside":(145,155),
+        # Fill completely covers the gap: no rectangle boundary crosses
+        # the gap, so checking edges alone is insufficient.
+        "enclosing":(10,100),
+    }[placement]
+    if shape_kind=="rect":
+        a,b=turn((x0,18)),turn((x1,22))
+        page.draw_rect(fitz.Rect(*a,*b),color=None,fill=(0,0,0))
+    elif shape_kind=="quad":
+        page.draw_quad(fitz.Quad(*(
+            fitz.Point(*turn(p)) for p in (
+                (x0,18),(x1,18),(x0,22),(x1,22)
+            )
+        )),color=None,fill=(0,0,0))
+    else:
+        page.draw_bezier(*(
+            turn(p) for p in (
+                (x0,18),(x0+2,17),(x1-2,23),(x1,22)
+            )
+        ),color=None,fill=(0,0,0))
+    assert page.get_drawings()[-1]["type"]=="f"
+    assert page.get_drawings()[-1]["color"] is None
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(
+            f"d{i}i0" for i in range(6 if selected else 5)
+        ),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    ) is (placement=="outside")
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+def test_transparent_fill_only_native_path_does_not_veto_door_gap(vertical):
+    """A genuinely zero-opacity fill is not painted competing source ink."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    a,b=turn((35,18)),turn((45,22))
+    page.draw_rect(
+        fitz.Rect(*a,*b),color=None,fill=(0,0,0),fill_opacity=0,
+    )
+    assert page.get_drawings()[-1]["type"]=="f"
+    assert page.get_drawings()[-1]["fill_opacity"]==0
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    )

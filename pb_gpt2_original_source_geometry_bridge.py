@@ -102,27 +102,58 @@ def _original_doorway_gap_native_ink_inventory_complete(
     if len(drawings)>120000:
         return False
 
-    def paint(row):
-        # A competing real wall/door stroke need not share the selected
-        # stroke's colour, width, dash pattern, opacity, or fill. The source
-        # has not independently classified other on-axis ink as irrelevant.
-        # Count all visibly stroked native lines; never pick the closest
-        # matching paint style and silently discard the competing strokes.
+    def stroke_paint(row):
+        # Stroked original paths are rival ink regardless of colour, width,
+        # dash, or selected-source membership. A fill-only path is NOT a
+        # selected wall boundary, even when it has a native rectangle edge.
         color=row.get("color")
         width=row.get("width")
         opacity=row.get("stroke_opacity")
-        if ("s" not in str(row.get("type",""))
-                or type(width) not in (int,float)
-                or not math.isfinite(width) or width<=0
-                or type(opacity) not in (int,float)
-                or not math.isfinite(opacity) or opacity<=0
-                or type(color) not in (tuple,list) or len(color)!=3
-                or any(type(c) not in (int,float) or not math.isfinite(c)
-                       for c in color)):
+        return (
+            "s" in str(row.get("type",""))
+            and type(width) in (int,float)
+            and math.isfinite(width) and width>0
+            and type(opacity) in (int,float)
+            and math.isfinite(opacity) and opacity>0
+            and type(color) in (tuple,list) and len(color)==3
+            and all(type(c) in (int,float) and math.isfinite(c)
+                    for c in color)
+        )
+
+    def fill_paint(row):
+        # PDF fill-only ('f') and fill+stroke ('fs') paths can occupy the
+        # doorway without ANY stroked edge crossing its axis. Missing or
+        # malformed fill-opacity evidence cannot certify invisibility.
+        if "f" not in str(row.get("type","")):
             return False
-        # Even a white stroke can be visible on an inked background; a
-        # separate visibility owner, not an assumed white page, must rule it out.
-        return True
+        opacity=row.get("fill_opacity")
+        if type(opacity) not in (int,float) or not math.isfinite(opacity):
+            return True
+        return opacity>0
+
+    def filled_gap(row):
+        if not fill_paint(row):
+            return False
+        # Native get_drawings() rect bounds the complete painted fill,
+        # including closed paths and Beziers. An intersecting bound is only
+        # a conservative veto: it never asserts that the ink is a wall.
+        # We cannot elect a physical role from a fill's shape or colour.
+        rect=row.get("rect")
+        try:
+            x0,y0,x1,y1=(
+                float(rect.x0),float(rect.y0),
+                float(rect.x1),float(rect.y1),
+            )
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return True
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>x1 or y0>y1):
+            return True
+        if horizontal:
+            return (x0<high-tolerance and x1>low+tolerance
+                    and y0<=fixed+tolerance and y1>=fixed-tolerance)
+        return (y0<high-tolerance and y1>low+tolerance
+                and x0<=fixed+tolerance and x1>=fixed-tolerance)
 
     def same_runs(item):
         # Native PyMuPDF path items are not all 'l': 're' and 'qu' encode
@@ -256,12 +287,12 @@ def _original_doorway_gap_native_ink_inventory_complete(
             return False
         row=drawings[ix]
         selected_spans=(
-            same_runs(row["items"][j]) if paint(row) else ()
+            same_runs(row["items"][j]) if stroke_paint(row) else ()
         )
         # The caller's selected source IDs are NOT a physical-role
         # whitelist. Original ink inside an allegedly empty doorway gap
         # conflicts even if the caller included its ID in the wall roster.
-        if paint(row) and crosses_gap(row["items"][j]):
+        if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j])):
             return False
         if any(
                 abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance
@@ -271,12 +302,12 @@ def _original_doorway_gap_native_ink_inventory_complete(
     if not has_selected_ink_at_gap:
         return False
     for ix,row in enumerate(drawings):
-        if not paint(row):
+        if not (stroke_paint(row) or fill_paint(row)):
             continue
         for j,item in enumerate(row.get("items",())):
             if f"d{ix}i{j}" in selected:
                 continue
-            if crosses_gap(item):
+            if filled_gap(row) or (stroke_paint(row) and crosses_gap(item)):
                 return False
     return True
 
