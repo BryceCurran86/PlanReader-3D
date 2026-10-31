@@ -244,11 +244,9 @@ def test_original_runner_retains_only_unpublished_source_first_gate_on_rejected_
     )
 
     output = tmp_path / "fresh-private-run"
-    message = (
-        "source-stage diagnostic unexpectedly grants benchmark/commercial authority"
-        if invalid_grant else "empty Maryborough floor-area source seal"
-    )
-    with pytest.raises(ValueError, match=message):
+    # An invalid private diagnostic is discarded; it must not replace the
+    # original sealed-source failure with a secondary diagnostic error.
+    with pytest.raises(ValueError, match="empty Maryborough floor-area source seal"):
         module.run_original_maryborough_floor_handoff(tmp_path / "unused.pdf", output)
 
     private_failure = output / "source_stage_diagnostic_UNPUBLISHED.json"
@@ -273,14 +271,16 @@ def test_original_runner_retains_only_unpublished_source_first_gate_on_rejected_
         ("customer_verification", module.CustomerOutputVerificationError),
     ),
 )
-@pytest.mark.parametrize("diagnostic_fails", (False, True))
+@pytest.mark.parametrize(
+    "diagnostic_failure", ("none", "inspect", "invalid", "write")
+)
 def test_original_runner_preserves_first_failure_before_receipt_validator(
-    tmp_path, monkeypatch, first_gate, failure_type, diagnostic_fails,
+    tmp_path, monkeypatch, first_gate, failure_type, diagnostic_failure,
 ):
     claim = object()
     sealed = SimpleNamespace(project_id=module.PROJECT, quantities=())
     stage = {
-        "benchmark_accuracy": None,
+        "benchmark_accuracy": 1 if diagnostic_failure == "invalid" else None,
         "commercial_estimator_approved": False,
         "first_unproved_stage_counts": {"physical_floor_area_unproven": 1},
     }
@@ -294,7 +294,7 @@ def test_original_runner_preserves_first_failure_before_receipt_validator(
     def inspect(actual):
         assert actual is claim
         inspected.append(actual)
-        if diagnostic_fails:
+        if diagnostic_failure == "inspect":
             raise RuntimeError("private source diagnostic unavailable")
         return stage
 
@@ -318,6 +318,12 @@ def test_original_runner_preserves_first_failure_before_receipt_validator(
         ),
     )
     monkeypatch.setattr(module, "inspect_room_measurement_gates", inspect)
+    if diagnostic_failure == "write":
+        def fail_private_diagnostic_write(path, data):
+            assert path.name == "source_stage_diagnostic_UNPUBLISHED.json"
+            assert data == stage
+            raise OSError("private diagnostic write refused")
+        monkeypatch.setattr(module, "_publish_new", fail_private_diagnostic_write)
 
     output = tmp_path / "first-failure-private-run"
     with pytest.raises(failure_type, match="first production " + first_gate + " rejection"):
@@ -325,8 +331,8 @@ def test_original_runner_preserves_first_failure_before_receipt_validator(
 
     assert inspected == [claim]
     diagnostic = output / "source_stage_diagnostic_UNPUBLISHED.json"
-    assert diagnostic.exists() is (not diagnostic_fails)
-    if not diagnostic_fails:
+    assert diagnostic.exists() is (diagnostic_failure == "none")
+    if diagnostic_failure == "none":
         assert json.loads(diagnostic.read_text(encoding="utf-8")) == stage
     for name in (
         "source_sealed_run.json",

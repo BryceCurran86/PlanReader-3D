@@ -248,19 +248,22 @@ def run_original_maryborough_floor_handoff(
         # source/seal/customer rejection.
         try:
             source_stage = inspect_room_measurement_gates(claim)
-        except Exception:
-            raise failure from None
-        if (
-            source_stage.get("benchmark_accuracy") is not None
-            or source_stage.get("commercial_estimator_approved") is not False
-        ):
-            raise ValueError(
-                "source-stage diagnostic unexpectedly grants benchmark/commercial authority"
+            if (
+                source_stage.get("benchmark_accuracy") is not None
+                or source_stage.get("commercial_estimator_approved") is not False
+            ):
+                raise ValueError(
+                    "source-stage diagnostic unexpectedly grants benchmark/commercial authority"
+                )
+            _publish_new(
+                output_dir / "source_stage_diagnostic_UNPUBLISHED.json",
+                source_stage,
             )
-        _publish_new(
-            output_dir / "source_stage_diagnostic_UNPUBLISHED.json",
-            source_stage,
-        )
+        except Exception:
+            # Even a malformed/over-authoritative diagnostic or a failed
+            # create-only private write must never mask the FIRST real
+            # source/seal/customer rejection.
+            raise failure from None
         raise
     source_stage = inspect_room_measurement_gates(claim)
     if (
