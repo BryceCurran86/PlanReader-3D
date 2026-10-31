@@ -109,6 +109,8 @@ def test_no_private_diagnostic_in_public_logs_artifacts_or_working_tree():
     assert 'rm -rf documents/sources "$RUNNER_TEMP/gpt1-original-lot16-first-failure"' in original
     assert "original.json" not in neutral
     assert "stage_summary.json" not in neutral
+    assert "raise SystemExit(1)" in original
+    assert "raise SystemExit(0)" not in original
 
 
 def test_source_first_status_does_not_mint_new_measurement_authority():
