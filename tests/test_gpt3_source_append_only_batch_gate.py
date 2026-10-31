@@ -8,8 +8,14 @@ from pathlib import Path
 import pytest
 
 from pb_customer_output_verification import CustomerOutputVerificationError
-from pb_quantity_takeoff_adapter import quantities_to_takeoff_output_rows
+from pb_quantity_takeoff_adapter import (
+    CommercialTakeoffConflictError,
+    MissingCommercialAuthorityError,
+    quantities_to_takeoff_output_rows,
+)
 from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
+    SourceClosedRunExportError,
     seal_source_closed_run, sealed_source_closed_run_from_dict,
 )
 from test_customer_output_verification import quantity, trace, authority
@@ -93,6 +99,85 @@ def _check(batch):
     )
 
 
+@pytest.mark.parametrize("signed_status", ["firm", "corroborated"])
+def test_source_closed_firm_and_corroborated_area_admit_only_to_identity_review(
+    signed_status,
+):
+    # The real room and floor-finish sources issue firm; opening-area
+    # sources may issue corroborated. Neither state authenticates the
+    # producer or independently binds frozen identities in this consumer.
+    original = quantity("original", "physical-room-1")
+    independent = replace(
+        quantity("new", "physical-room-2", value=7.5),
+        status=signed_status,
+    )
+    report = _check((
+        _sealed(original),
+        _sealed(original, independent),
+        _customers(original),
+        _customers(original, independent),
+    ))
+    assert report["admission_status"] == "READY_FOR_INDEPENDENT_IDENTITY_REVIEW"
+    assert report["added_quantity_ids"] == ["new"]
+    assert report["retained_quantity_ids"] == ["original"]
+    assert report["candidate_customer_verified_count"] == 2
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["source_authenticated"] is False
+    assert report["customer_approval_granted"] is False
+    assert report["independent_benchmark_identity_verified"] is False
+    assert report["official_v2_accuracy"] is None
+
+
+@pytest.mark.parametrize("unproven_status", [
+    "candidate", "blocked", "conflict", "abstained",
+    "review_required", "unverified", "", "FIRMED",
+])
+def test_append_only_never_treats_unproven_status_as_new_firm(unproven_status):
+    # This is the same live commercial publishing status vocabulary; it
+    # is intentionally narrower than 'non-abstained' or 'not a conflict'.
+    assert gate.quantity_status_not_publishable(unproven_status)
+
+
+
+@pytest.mark.parametrize("unproven_status", [
+    "candidate", "blocked", "conflict", "abstained",
+    "review_required", "unverified", "", "FIRMED",
+])
+def test_unpublishable_status_cannot_reach_signed_batch_review(unproven_status):
+    original = quantity("original", "physical-room-1")
+    # Empty status is invalid at the QuantityEvidence constructor: it
+    # must never be misrepresented as a signed commercial candidate.
+    if unproven_status == "":
+        with pytest.raises(ValueError, match="status must be a non-empty string"):
+            replace(quantity("new", "physical-room-2", value=7.5), status="")
+        return
+    suspect = replace(
+        quantity("new", "physical-room-2", value=7.5),
+        status=unproven_status,
+    )
+    # Both real producer paths are legitimate fail-closed stages: either
+    # the source signer/customer projector refuses the status outright,
+    # or a verified batch reaches the admission gate and must be BLOCKED.
+    try:
+        old = _sealed(original)
+        candidate = _sealed(original, suspect)
+        old_customers = _customers(original)
+        new_customers = _customers(original, suspect)
+        report = gate.assess_append_only_signed_batch(
+            old, candidate, baseline_customers=old_customers,
+            candidate_customers=new_customers,
+        )
+    except (
+        SourceClosedRunExportError, MissingCommercialAuthorityError,
+        CommercialTakeoffConflictError, CustomerOutputVerificationError,
+        ValueError,
+    ):
+        return
+    assert report["admission_status"] == "BLOCKED"
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["official_v2_accuracy"] is None
+
+
 def test_new_genuine_signed_customer_batch_only_allows_independent_review():
     result = _check(_fixture())
     assert result["admission_status"] == "READY_FOR_INDEPENDENT_IDENTITY_REVIEW"
@@ -136,8 +221,12 @@ def test_deleted_predecessor_cannot_be_replaced_by_same_quantity_value():
 
 
 def test_same_family_claiming_same_opening_twice_cannot_append():
-    report = _check(_fixture(duplicate_area=True))
-    assert report["first_failing_gate"] == "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY"
+    # An even earlier protection now refuses to issue a V1 signed run for
+    # competing door/window products on one original physical opening.
+    # No forged double-seal may reach the downstream append-only gate.
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="conflicting signed opening identity"):
+        _fixture(duplicate_area=True)
 
 
 def test_abstention_is_not_a_new_firm_customer_approved_quantity():
