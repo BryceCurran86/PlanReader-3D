@@ -110,11 +110,46 @@ def _append_reproved_areas(baseline, openings, quantities):
     roots = {(o.document_id, o.revision_id, o.source_sha256) for o in old_objects.values()}
     if len(roots) != 1:
         raise SourceClosedRunConflictError("original opening source root unavailable or ambiguous")
+    # This source replay includes measured and unmeasured physical rivals. A
+    # complete, independently re-proved roster must belong to ONE real source
+    # snapshot; never turn mixed or copied snapshots into an append receipt.
+    replay_scopes = {
+        (o.document_id, o.revision_id, o.source_sha256, o.snapshot_id)
+        for o in fresh_objects.values()
+    }
+    if (len(replay_scopes) != 1
+            or any(type(value) is not str or not value or value != value.strip()
+                   for scope in replay_scopes for value in scope)
+            or next(iter(replay_scopes))[:3] not in roots
+            or len({o.physical_opening_id for o in fresh_objects.values()}) != len(fresh_objects)):
+        raise SourceClosedRunConflictError("complete opening replay source scope missing or conflicting")
+    fresh_measured_ids = {q.input_entity_ids[0] for q in fresh.values()}
+    # An unsupported-only sibling is negative evidence, never quietly omitted
+    # from a new FIRM area. These exact-source aliases are unequivocal
+    # conflicts; less obvious rivals remain visible in the replay inventory
+    # for a downstream source-owned identity decision.
+    fresh_unmeasured = tuple(
+        o for oid, o in fresh_objects.items()
+        if oid not in fresh_measured_ids and oid not in old_objects
+    )
     for quantity in additions:
         oid = quantity.input_entity_ids[0]
         if oid in physical_claims:
             raise SourceClosedRunConflictError("new quantity aliases an already measured physical opening")
         opening = fresh_objects[oid]
+        for sibling in fresh_unmeasured:
+            if (sibling.physical_opening_id == opening.physical_opening_id
+                    or (
+                        sibling.source_observation_ids
+                        and sibling.source_observation_ids == opening.source_observation_ids
+                    )
+                    or (
+                        sibling.source_geometries
+                        and sibling.source_geometries == opening.source_geometries
+                    )):
+                raise SourceClosedRunConflictError(
+                    "fresh-only unmeasured opening rival aliases a new area"
+                )
         if (opening.document_id, opening.revision_id, opening.source_sha256) not in roots:
             raise SourceClosedRunConflictError("new opening belongs to a foreign source root")
         if oid in old_objects and _physical_core(old_objects[oid]) != _physical_core(opening):
@@ -131,6 +166,12 @@ def _append_reproved_areas(baseline, openings, quantities):
         baseline,
         canonical_openings=retained + tuple(replacements[key] for key in sorted(replacements)),
         opening_quantity_evidence=baseline.opening_quantity_evidence + additions,
+        # Keep every exact fresh canonical sibling (including still-abstained
+        # rivals), not only objects granted a new area. The customer seal
+        # continues to consume canonical_openings/quantity_evidence only.
+        opening_area_replay_source_inventory=tuple(
+            fresh_objects[key] for key in sorted(fresh_objects)
+        ),
     )
 
 
