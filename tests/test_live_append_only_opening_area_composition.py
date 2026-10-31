@@ -216,6 +216,73 @@ def test_archived_unmeasured_rival_is_checked_against_new_area(
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
 
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+@pytest.mark.parametrize("overlap", (False, True))
+def test_measured_opening_rival_requires_independent_source_partition(
+    original_claim, overlap, reverse_inventory,
+):
+    """No second measured aperture may borrow an original source member.
+
+    A new physical ID and a genuine issuer-shaped QuantityEvidence do not
+    authenticate independent physical identity. Separate source observations
+    still preserve the old signed area and reach the real customer projector.
+    """
+    _, full = original_claim
+    baseline = subset(full)
+    old = next(o for o in baseline.canonical_openings
+               if o.canonical_opening_id == baseline.opening_quantity_evidence[0].input_entity_ids[0])
+    assert old.source_observation_ids
+    previous_ids = {q.quantity_id for q in baseline.opening_quantity_evidence}
+    new_q = next(q for q in full.opening_quantity_evidence
+                 if q.quantity_id not in previous_ids)
+    new = next(o for o in full.canonical_openings
+               if o.canonical_opening_id == new_q.input_entity_ids[0])
+    assert not set(old.source_observation_ids) & set(new.source_observation_ids)
+
+    if overlap:
+        # Retain original source geometry, host and figure; forge only a
+        # borrowed original member and rederive the real issuer-shaped
+        # quantity. Both the old signed body and different IDs stay intact.
+        new = replace(
+            new,
+            source_observation_ids=tuple(dict.fromkeys(
+                old.source_observation_ids[:1] + new.source_observation_ids
+            )),
+        )
+        rebuilt = _opening_quantity(new)
+        assert rebuilt is not None
+        quantities = tuple(
+            rebuilt if q.quantity_id == new_q.quantity_id else q
+            for q in full.opening_quantity_evidence
+        )
+    else:
+        quantities = full.opening_quantity_evidence
+    roster = tuple(new if o.canonical_opening_id == new.canonical_opening_id else o
+                   for o in full.canonical_openings)
+    if reverse_inventory:
+        roster = tuple(reversed(roster))
+        quantities = tuple(reversed(quantities))
+    if overlap:
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="measured opening rival requires source-owned physical partition",
+        ):
+            _append_reproved_areas(baseline, roster, quantities)
+        assert baseline.opening_quantity_evidence[0] is full.opening_quantity_evidence[0]
+        return
+
+    result = _append_reproved_areas(baseline, roster, quantities)
+    assert result.opening_quantity_evidence[0] is baseline.opening_quantity_evidence[0]
+    assert result.canonical_openings[0] is baseline.canonical_openings[0]
+    sealed = seal_live_opening_area_claim_run(
+        result, workspace_id=1, project_id="source-project",
+    )
+    rows = project_live_opening_customer_rows(
+        result, workspace_id=1, project_id="source-project",
+    )
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)

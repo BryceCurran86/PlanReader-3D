@@ -136,11 +136,41 @@ def _append_reproved_areas(baseline, openings, quantities):
         o for oid, o in fresh_objects.items()
         if oid not in fresh_measured_ids
     )
+    # A complete producer roster may have two *measured* source identities
+    # that share an exact original observation. Different physical IDs or
+    # quantities do not establish two openings. The composition step cannot
+    # authenticate shared wall-face support versus a second reading of one
+    # gap, so keep this source-partition-dependent case unissued. A future
+    # positive exception must arrive through source-owned identity authority,
+    # not a caller-supplied ID or an omitted rival.
+    measured_openings = tuple(
+        fresh_objects[q.input_entity_ids[0]] for q in fresh.values()
+    )
     for quantity in additions:
         oid = quantity.input_entity_ids[0]
         if oid in physical_claims:
             raise SourceClosedRunConflictError("new quantity aliases an already measured physical opening")
         opening = fresh_objects[oid]
+        for other in measured_openings:
+            if other.canonical_opening_id == oid:
+                continue
+            if (
+                other.physical_opening_id == opening.physical_opening_id
+                or (
+                    other.source_observation_ids
+                    and opening.source_observation_ids
+                    and not set(other.source_observation_ids).isdisjoint(
+                        opening.source_observation_ids
+                    )
+                )
+                or (
+                    other.source_geometries
+                    and other.source_geometries == opening.source_geometries
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    "measured opening rival requires source-owned physical partition"
+                )
         for sibling in unmeasured_rivals:
             if (sibling.physical_opening_id == opening.physical_opening_id
                     or (
