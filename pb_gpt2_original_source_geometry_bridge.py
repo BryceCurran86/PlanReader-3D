@@ -181,9 +181,20 @@ def _original_doorway_gap_native_ink_inventory_complete(
         if ix>=len(drawings) or j>=len(drawings[ix].get("items",())):
             return False
         row=drawings[ix]
-        if paint(row) and any(
+        selected_spans=(
+            same_runs(row["items"][j]) if paint(row) else ()
+        )
+        # The caller's selected source IDs are NOT a physical-role
+        # whitelist. Original ink inside an allegedly empty doorway gap
+        # conflicts even if the caller included its ID in the wall roster.
+        if any(
+                min(span[1],high)-max(span[0],low)>tolerance
+                for span in selected_spans
+        ):
+            return False
+        if any(
                 abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance
-                for span in same_runs(row["items"][j])
+                for span in selected_spans
         ):
             has_selected_ink_at_gap=True
     if not has_selected_ink_at_gap:

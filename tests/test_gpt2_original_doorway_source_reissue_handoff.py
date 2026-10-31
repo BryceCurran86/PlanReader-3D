@@ -619,3 +619,46 @@ def test_private_original_complete_entrance_retains_differently_weighted_jamb_ri
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=7,original_room_graph=graph,
     ) is False
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("extra_position", ["inside", "outside"])
+def test_selected_original_source_ids_cannot_whitelist_painted_door_gap_ink(
+    vertical, extra_position,
+):
+    """Even a caller-selected native source item must not paint the gap."""
+    import fitz
+
+    def turn(point):
+        return (point[1], point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)), ((120,20),(120,140)),
+        ((20,140),(120,140)), ((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    x0,x1=(35,45) if extra_position=="inside" else (145,155)
+    page.draw_line(
+        turn((x0,20)),turn((x1,20)),
+        color=(1,0,0),width=0.50,
+    )
+    # The added painted rival is deliberately in the selected roster.
+    # An unselected-rival-only veto would wrongly accept the inside case.
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(6)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    ) is (extra_position=="outside")
