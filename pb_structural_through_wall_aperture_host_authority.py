@@ -432,15 +432,71 @@ class ThroughWallHostedOpeningRecord:
             max(0.0, raw_stations[0]),
             min(self.whole_wall_length_pt, raw_stations[1]),
         )
-        # Geometry-rejected records retain raw projected stations. A later
-        # physical-identity/observation conflict may instead carry the
-        # previously clipped candidate stations while status is ABSTAINED.
-        permitted = (
-            (raw_stations, clipped_stations)
-            if self.status is EvidenceResolutionStatus.ABSTAINED
-            else (clipped_stations,)
+        # A producer input is always a physical, finite aperture span, even
+        # when its host geometry subsequently ABSTAINS. Directly reconstructed
+        # frozen records must not bypass that input gate.
+        opening_dx = self.opening_end_pt[0] - self.opening_start_pt[0]
+        opening_dy = self.opening_end_pt[1] - self.opening_start_pt[1]
+        opening_length = math.hypot(opening_dx, opening_dy)
+        if not math.isfinite(opening_length) or opening_length <= _COORD_TOL:
+            raise ValueError("host frozen jamb span must be finite and physical")
+        alignment = abs((opening_dx * ax + opening_dy * ay) / opening_length)
+        if not math.isfinite(alignment):
+            raise ValueError("host frozen jamb alignment must remain finite")
+
+        # Reproduce the producer's FIRST geometric failure, not merely the
+        # plausibility of a supplied status. A re-keyed ABSTAINED record must
+        # not conceal an earlier axis/band/extent/overlap failure behind a
+        # later obstruction or complete-universe identity-conflict label.
+        geometry_gate = None
+        if alignment < _ALIGNMENT_COS_TOL:
+            geometry_gate = "aperture_wall_axis_misaligned"
+        elif max(abs(offset) for offset in projected_normals) > (
+            self.wall_thickness_pt / 2.0 + self.snap_tolerance_pt
+        ):
+            geometry_gate = "aperture_outside_host_wall_band"
+        elif (raw_stations[0] < -self.snap_tolerance_pt
+              or raw_stations[1] > self.whole_wall_length_pt + self.snap_tolerance_pt):
+            geometry_gate = "aperture_extends_beyond_wall_extent"
+        elif clipped_stations[1] - clipped_stations[0] <= _COORD_TOL:
+            geometry_gate = "aperture_no_host_wall_overlap"
+
+        # Obstruction and rival-identity vetoes require a complete external
+        # candidate/obstruction universe, which this frozen record does not
+        # contain. Keep those typed ABSTAINED gates but never self-certify them
+        # as source-positive, and reject invented or out-of-order gate labels.
+        universe_gates = (
+            "host_through_wall_obstructed",
+            "aperture_physical_interval_conflict",
+            "aperture_terminal_jamb_observation_conflict",
         )
-        if (self.u0_pt, self.u1_pt) not in permitted:
+        geometry_gates = (
+            "aperture_wall_axis_misaligned",
+            "aperture_outside_host_wall_band",
+            "aperture_extends_beyond_wall_extent",
+            "aperture_no_host_wall_overlap",
+        )
+        if self.status is EvidenceResolutionStatus.ABSTAINED:
+            if self.first_remaining_gate not in geometry_gates + universe_gates:
+                raise ValueError("host abstention gate is not producer-issued")
+            if (geometry_gate is not None
+                    and self.first_remaining_gate != geometry_gate):
+                raise ValueError("host frozen first-failing geometric gate conflict")
+            if (geometry_gate is None
+                    and self.first_remaining_gate not in universe_gates):
+                raise ValueError("host frozen first-failing geometric gate conflict")
+            # The producer retains raw stations for geometric/obstruction
+            # abstentions; only post-geometry identity conflicts are clipped.
+            expected_stations = (
+                clipped_stations
+                if self.first_remaining_gate in universe_gates[1:]
+                else raw_stations
+            )
+        else:
+            if geometry_gate is not None:
+                raise ValueError("candidate host geometry conflicts with first failing gate")
+            expected_stations = clipped_stations
+        if (self.u0_pt, self.u1_pt) != expected_stations:
             raise ValueError("host numeric evidence conflicts with owned jamb stations")
         if self.status is EvidenceResolutionStatus.CANDIDATE:
             # Recheck the producer's actual geometry gate at the public frozen

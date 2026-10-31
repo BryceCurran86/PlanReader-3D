@@ -1,7 +1,7 @@
 """Tests for Milestone 3: Source-authenticated structural through-wall aperture host authority."""
 
 import math
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 
@@ -10,6 +10,7 @@ from pb_structural_through_wall_aperture_host_authority import (
     ApertureHostCandidateInput,
     ContinuousThroughWallCandidate,
     InterAperturePierRecord,
+    ThroughWallHostedOpeningRecord,
     StructuralThroughWallApertureHostAuthority,
     StructuralThroughWallApertureHostProducer,
 )
@@ -555,3 +556,190 @@ def test_frozen_pier_rejects_cross_opening_shared_jamb_observations(
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(left, right),
     ) == (records, piers)
+
+
+def _construct_host_with_reissued_identity(
+    original: ThroughWallHostedOpeningRecord, **changes,
+) -> ThroughWallHostedOpeningRecord:
+    """Re-key a direct frozen record so gate validation, not stale ID, is tested."""
+    values = {field.name: getattr(original, field.name) for field in fields(original)}
+    values.update(changes)
+    payload = {
+        "document_id": values["document_id"],
+        "revision_id": values["revision_id"],
+        "source_sha256": values["source_sha256"],
+        "physical_opening_id": values["physical_opening_id"],
+        "host_wall_id": values["host_wall_id"],
+        "opening_start_pt": tuple(float(v).hex() for v in values["opening_start_pt"]),
+        "opening_end_pt": tuple(float(v).hex() for v in values["opening_end_pt"]),
+        "terminal_jamb_observation_ids": values["terminal_jamb_observation_ids"],
+        "host_start_pt": tuple(float(v).hex() for v in values["host_start_pt"]),
+        "host_end_pt": tuple(float(v).hex() for v in values["host_end_pt"]),
+        "host_thickness_pt": float(values["wall_thickness_pt"]).hex(),
+        "snap_tolerance_pt": float(values["snap_tolerance_pt"]).hex(),
+        "u0_pt": float(values["u0_pt"]).hex(),
+        "u1_pt": float(values["u1_pt"]).hex(),
+        "status": values["status"].value,
+        "first_remaining_gate": values["first_remaining_gate"],
+        "adjacent_pier_ids": tuple(sorted(values["adjacent_pier_ids"])),
+    }
+    values["hosting_record_id"] = stable_contract_id(
+        "through_wall_hosted_opening", payload, digest_chars=32,
+    )
+    return ThroughWallHostedOpeningRecord(**values)
+
+
+def test_frozen_host_reproves_first_failing_geometry_gate(
+    authority: StructuralThroughWallApertureHostAuthority,
+) -> None:
+    """Re-keyed abstentions cannot invent or conceal an earlier geometry gate."""
+    wall = ContinuousThroughWallCandidate(
+        "frozen_gate_wall", (0.0, 0.0), (200.0, 0.0), 10.0,
+    )
+    cases = (
+        (
+            ApertureHostCandidateInput("axis", (20.0, 0.0), (20.0, 20.0)),
+            (),
+            "aperture_wall_axis_misaligned",
+        ),
+        (
+            ApertureHostCandidateInput("band", (20.0, 30.0), (40.0, 30.0)),
+            (),
+            "aperture_outside_host_wall_band",
+        ),
+        (
+            ApertureHostCandidateInput("extent", (-10.0, 0.0), (40.0, 0.0)),
+            (),
+            "aperture_extends_beyond_wall_extent",
+        ),
+        (
+            ApertureHostCandidateInput("overlap", (-2.0, 0.0), (-1.0, 0.0)),
+            (),
+            "aperture_no_host_wall_overlap",
+        ),
+        (
+            ApertureHostCandidateInput("obstructed", (20.0, 0.0), (40.0, 0.0)),
+            (((30.0, -30.0), (30.0, 30.0)),),
+            "host_through_wall_obstructed",
+        ),
+    )
+    for opening, obstructions, expected_gate in cases:
+        inputs = dict(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=obstructions,
+        )
+        records, piers = authority.bind_openings_to_through_wall(**inputs)
+        assert piers == ()
+        assert len(records) == 1
+        original = records[0]
+        assert original.status is EvidenceResolutionStatus.ABSTAINED
+        assert original.first_remaining_gate == expected_gate
+        assert replace(original) == original
+        assert authority.bind_openings_to_through_wall(**inputs) == (records, piers)
+        assert original.shadow_only and not original.takeoff_eligible
+        assert not original.commercial_projection_allowed
+        with pytest.raises(ValueError, match="host abstention gate"):
+            _construct_host_with_reissued_identity(
+                original, first_remaining_gate="fabricated_source_failure",
+            )
+        wrong_gate = (
+            "aperture_wall_axis_misaligned"
+            if expected_gate == "host_through_wall_obstructed"
+            else "host_through_wall_obstructed"
+        )
+        with pytest.raises(ValueError, match="first-failing geometric gate"):
+            _construct_host_with_reissued_identity(
+                original, first_remaining_gate=wrong_gate,
+            )
+
+    extent = authority.bind_openings_to_through_wall(
+        through_wall=wall,
+        openings=(ApertureHostCandidateInput(
+            "extent_again", (-10.0, 0.0), (40.0, 0.0),
+        ),),
+    )[0][0]
+    # Geometric abstentions preserve raw stations, not the clipped interval.
+    with pytest.raises(ValueError, match="owned jamb stations"):
+        _construct_host_with_reissued_identity(extent, u0_pt=0.0)
+
+    valid = authority.bind_openings_to_through_wall(
+        through_wall=wall,
+        openings=(ApertureHostCandidateInput(
+            "candidate", (20.0, 0.0), (40.0, 0.0),
+        ),),
+    )[0][0]
+    assert valid.status is EvidenceResolutionStatus.CANDIDATE
+    with pytest.raises(ValueError, match="host abstention gate"):
+        _construct_host_with_reissued_identity(
+            valid, status=EvidenceResolutionStatus.ABSTAINED,
+            first_remaining_gate="original_source_host_unverified",
+        )
+    with pytest.raises(ValueError, match="frozen jamb span"):
+        _construct_host_with_reissued_identity(
+            valid, opening_end_pt=valid.opening_start_pt,
+            u1_pt=valid.u0_pt,
+        )
+
+    # Rotation and input-order invariance retain the producer's real gate.
+    rotated = ContinuousThroughWallCandidate(
+        "frozen_gate_wall_rot", (100.0, 0.0), (100.0, 200.0), 10.0,
+    )
+    vertical_opening = ApertureHostCandidateInput(
+        "rotated_axis", (100.0, 20.0), (120.0, 20.0),
+    )
+    for opening in (
+        vertical_opening,
+        replace(vertical_opening, start_pt=vertical_opening.end_pt,
+                end_pt=vertical_opening.start_pt),
+    ):
+        record = authority.bind_openings_to_through_wall(
+            through_wall=rotated, openings=(opening,),
+        )[0][0]
+        assert record.status is EvidenceResolutionStatus.ABSTAINED
+        assert record.first_remaining_gate == "aperture_wall_axis_misaligned"
+        assert not record.takeoff_eligible
+
+
+def test_frozen_host_retains_complete_universe_conflict_gates(
+    authority: StructuralThroughWallApertureHostAuthority,
+) -> None:
+    """Real overlap/observation conflicts remain typed, never source-positive."""
+    wall = ContinuousThroughWallCandidate(
+        "frozen_conflict_wall", (0.0, 0.0), (200.0, 0.0), 10.0,
+    )
+    overlap = (
+        ApertureHostCandidateInput("left", (20.0, 0.0), (50.0, 0.0)),
+        ApertureHostCandidateInput("right", (40.0, 0.0), (70.0, 0.0)),
+    )
+    reused = (
+        ApertureHostCandidateInput(
+            "one", (20.0, 0.0), (40.0, 0.0),
+            terminal_jamb_observation_ids=("same_jamb",),
+        ),
+        ApertureHostCandidateInput(
+            "two", (50.0, 0.0), (70.0, 0.0),
+            terminal_jamb_observation_ids=("same_jamb",),
+        ),
+    )
+    for inputs, expected_gate in (
+        (overlap, "aperture_physical_interval_conflict"),
+        (reused, "aperture_terminal_jamb_observation_conflict"),
+    ):
+        for order in (inputs, tuple(reversed(inputs))):
+            records, piers = authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=order,
+            )
+            assert piers == ()
+            assert len(records) == 2
+            assert all(rec.status is EvidenceResolutionStatus.ABSTAINED
+                       and rec.first_remaining_gate == expected_gate
+                       and rec.shadow_only and not rec.takeoff_eligible
+                       and not rec.commercial_projection_allowed
+                       for rec in records)
+            assert all(replace(rec) == rec for rec in records)
+            assert all(
+                rec.first_remaining_gate == expected_gate
+                for rec in authority.bind_openings_to_through_wall(
+                    through_wall=wall, openings=order,
+                )[0]
+            )
