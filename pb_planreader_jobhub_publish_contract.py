@@ -245,9 +245,31 @@ class PlanReaderJobHubPayload:
             PlanReaderJobHubQuantityRow.from_dict(q)
             for q in (data.get("quantities") or [])
         ]
+        project_identity = dict(data.get("project_identity") or {})
+        drawing_revision = dict(data.get("drawing_revision") or {})
+        # A serialized customer-ready flag is a claim, not a certificate.
+        # Recheck the same commercial consumer that issues fresh payloads:
+        # otherwise a draft, blocked or empty payload can be rehydrated as
+        # commercially approved without any source-owned quantity.
+        if raw_commercial_ready:
+            if (
+                type(data.get("publish_mode")) is not str
+                or data["publish_mode"] != PublishMode.COMMERCIAL_PUBLISH.value
+            ):
+                raise ValueError("Commercial-ready legacy payload requires commercial publish mode")
+            if not quantities:
+                raise ValueError("Commercial-ready legacy payload requires source-owned quantities")
+            preflight = run_jobhub_publish_preflight(
+                quantities,
+                project_identity=project_identity,
+                drawing_revision=drawing_revision,
+                mode=PublishMode.COMMERCIAL_PUBLISH,
+            )
+            if not preflight.is_valid or preflight.publishable_row_count != len(quantities):
+                raise ValueError("Commercial-ready legacy payload failed source authority preflight")
         return cls(
-            project_identity=dict(data.get("project_identity") or {}),
-            drawing_revision=dict(data.get("drawing_revision") or {}),
+            project_identity=project_identity,
+            drawing_revision=drawing_revision,
             authority_summary=dict(data.get("authority_summary") or {}),
             quantities=quantities,
             excluded_items=list(data.get("excluded_items") or []),
