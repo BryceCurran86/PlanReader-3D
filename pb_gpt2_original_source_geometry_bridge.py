@@ -168,6 +168,80 @@ def _original_doorway_gap_native_ink_inventory_complete(
         except (AttributeError,TypeError,ValueError,OverflowError):
             return ()
 
+
+    def crosses_gap(item):
+        """Conservatively veto any painted native path crossing the open gap.
+
+        A perpendicular, diagonal or curved source stroke can invalidate a
+        claimed empty doorway just as a collinear wall run can. The native
+        stroke inventory is a negative gate, not a physical-role classifier.
+        """
+        if type(item) is not tuple or not item:
+            return False
+
+        def axis_point(point):
+            x,y=round(float(point.x),3),round(float(point.y),3)
+            if not (math.isfinite(x) and math.isfinite(y)):
+                raise ValueError("nonfinite_original_point")
+            return (x,y) if horizontal else (y,x)
+
+        def edge_crosses(p,q):
+            a0,o0=axis_point(p)
+            a1,o1=axis_point(q)
+            if abs(o0-fixed)<=tolerance and abs(o1-fixed)<=tolerance:
+                return (min(a0,a1)<high-tolerance
+                        and max(a0,a1)>low+tolerance)
+            if abs(o1-o0)<=tolerance:
+                return False
+            t=(fixed-o0)/(o1-o0)
+            if not 0<=t<=1:
+                return False
+            hit=a0+t*(a1-a0)
+            return low+tolerance<hit<high-tolerance
+
+        def curve_crosses(points,depth=0):
+            # Bezier curves stay within the convex hull of their controls.
+            # Subdivide that hull until excluded, or conservatively veto
+            # unresolved source ink rather than claim an empty doorway.
+            axes=[p[0] for p in points]
+            orth=[p[1] for p in points]
+            if (max(axes)<=low+tolerance or min(axes)>=high-tolerance
+                    or min(orth)>fixed+tolerance
+                    or max(orth)<fixed-tolerance):
+                return False
+            if depth==16:
+                return True
+            a,b,c,d=points
+            ab=tuple((u+v)/2 for u,v in zip(a,b))
+            bc=tuple((u+v)/2 for u,v in zip(b,c))
+            cd=tuple((u+v)/2 for u,v in zip(c,d))
+            abc=tuple((u+v)/2 for u,v in zip(ab,bc))
+            bcd=tuple((u+v)/2 for u,v in zip(bc,cd))
+            mid=tuple((u+v)/2 for u,v in zip(abc,bcd))
+            return (curve_crosses((a,ab,abc,mid),depth+1)
+                    or curve_crosses((mid,bcd,cd,d),depth+1))
+
+        try:
+            kind=item[0]
+            if kind=="l" and len(item)==3:
+                edges=((item[1],item[2]),)
+            elif kind=="re" and len(item)==3:
+                rect=item[1]
+                corners=(rect.tl,rect.tr,rect.br,rect.bl)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="qu" and len(item)==2:
+                quad=item[1]
+                corners=(quad.ul,quad.ur,quad.lr,quad.ll)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="c" and len(item)==5:
+                return curve_crosses(tuple(axis_point(p) for p in item[1:]))
+            else:
+                return False
+            return any(edge_crosses(p,q) for p,q in edges)
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            # Invalid source geometry cannot certify a complete gap.
+            return True
+
     # Independently confirm that selected strokes actually border the
     # claimed door gap. These prove the bounds, NOT a style whitelist for
     # other original ink, which may carry a competing physical source role.
@@ -187,10 +261,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # The caller's selected source IDs are NOT a physical-role
         # whitelist. Original ink inside an allegedly empty doorway gap
         # conflicts even if the caller included its ID in the wall roster.
-        if any(
-                min(span[1],high)-max(span[0],low)>tolerance
-                for span in selected_spans
-        ):
+        if paint(row) and crosses_gap(row["items"][j]):
             return False
         if any(
                 abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance
@@ -205,10 +276,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
         for j,item in enumerate(row.get("items",())):
             if f"d{ix}i{j}" in selected:
                 continue
-            if any(
-                    min(span[1],high)-max(span[0],low)>tolerance
-                    for span in same_runs(item)
-            ):
+            if crosses_gap(item):
                 return False
     return True
 
