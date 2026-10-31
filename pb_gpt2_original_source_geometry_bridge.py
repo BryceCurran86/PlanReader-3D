@@ -103,18 +103,24 @@ def _original_doorway_gap_native_ink_inventory_complete(
         return False
 
     def paint(row):
+        # A competing real wall/door stroke need not share the selected
+        # stroke's colour, width, dash pattern, opacity, or fill. The source
+        # has not independently classified other on-axis ink as irrelevant.
+        # Count all visibly stroked native lines; never pick the closest
+        # matching paint style and silently discard the competing strokes.
         color=row.get("color")
         width=row.get("width")
-        if (row.get("stroke_opacity")!=1.0
-                or row.get("dashes")!="[] 0"
-                or row.get("fill") is not None
+        opacity=row.get("stroke_opacity")
+        if ("s" not in str(row.get("type",""))
                 or type(width) not in (int,float)
                 or not math.isfinite(width) or width<=0
+                or type(opacity) not in (int,float)
+                or not math.isfinite(opacity) or opacity<=0
                 or type(color) not in (tuple,list) or len(color)!=3
                 or any(type(c) not in (int,float) or not math.isfinite(c)
                        for c in color)):
-            return None
-        return round(float(width),4),tuple(round(float(c),4) for c in color)
+            return False
+        return any(float(c)<1.0 for c in color)
 
     def same_run(item):
         if type(item) is not tuple or len(item)!=3 or item[0]!="l":
@@ -128,9 +134,10 @@ def _original_doorway_gap_native_ink_inventory_complete(
             return tuple(sorted((y0,y1)))
         return None
 
-    # Derive ink appearance from the actual selected doorway-side strokes,
-    # not a global black-line assumption or a project-specific style.
-    styles=set()
+    # Independently confirm that selected strokes actually border the
+    # claimed door gap. These prove the bounds, NOT a style whitelist for
+    # other original ink, which may carry a competing physical source role.
+    has_selected_ink_at_gap=False
     selected=set(ids)
     for name in selected:
         match=re.fullmatch(r"d(\d+)i(\d+)",name)
@@ -141,14 +148,13 @@ def _original_doorway_gap_native_ink_inventory_complete(
             return False
         row=drawings[ix]
         span=same_run(row["items"][j])
-        signature=paint(row)
-        if signature is not None and span is not None and (
+        if paint(row) and span is not None and (
                 abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance):
-            styles.add(signature)
-    if not styles:
+            has_selected_ink_at_gap=True
+    if not has_selected_ink_at_gap:
         return False
     for ix,row in enumerate(drawings):
-        if paint(row) not in styles:
+        if not paint(row):
             continue
         for j,item in enumerate(row.get("items",())):
             if f"d{ix}i{j}" in selected:
