@@ -67,6 +67,12 @@ PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
 PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
 PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
 PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
+PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT = (
+    "physical_opening_identity_shared_members_overlapping_extent"
+)
+PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_PARTITION_UNPROVEN = (
+    "physical_opening_identity_shared_members_partition_unproven"
+)
 PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT = "opening_support"
 PHYSICAL_OPENING_DISPOSITION_CANDIDATE = "candidate_unresolved"
 PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE = "no_candidate_in_covered_path"
@@ -884,6 +890,43 @@ def _seeded_ink_checks(
         if max(offsets) > inner_low and min(offsets) < inner_high and observation_id not in accounted_ids:
             unaccounted.append(observation_id)
     return tuple(sorted(stubs)), tuple(sorted(unaccounted)), tuple(sorted(continuing))
+
+
+def _source_member_partition(
+    left_ids: Sequence[str],
+    right_ids: Sequence[str],
+    records_by_id: Mapping[str, SourceObservationRecord],
+) -> str:
+    """Whether two openings that rest on some of the same source lines are physically apart.
+
+    ``disjoint``: they share no observation. ``partitioned``: they share some, but each is a jamb-bounded structure,
+    their gaps along the shared face axis do not overlap, and every shared line is a wall face piece lying outside both
+    gaps (support between two windows in one wall). ``overlapping_extent``: their gaps overlap, so they describe the
+    same stretch of wall and are neither the same nor distinct. ``unproven``: anything else (a shared jamb or cap, a
+    shared line that enters a gap, a structure with no readable frame, a different face direction). Different record
+    ids alone prove neither identity nor distinctness."""
+    shared = set(map(str, left_ids)) & set(map(str, right_ids))
+    if not shared:
+        return "disjoint"
+    first = _structure_frame(tuple(map(str, left_ids)), records_by_id)
+    second = _structure_frame(tuple(map(str, right_ids)), records_by_id)
+    if first is None or second is None:
+        return "unproven"
+    aligned = _in_axes_of(first, second)
+    if aligned is None:
+        return "unproven"
+    gaps = ((first.gap_start, first.gap_end), aligned[0])
+    if min(gaps[0][1], gaps[1][1]) - max(gaps[0][0], gaps[1][0]) > _FRAME_TOL:
+        return "overlapping_extent"
+    for member in sorted(shared):
+        record = records_by_id.get(member)
+        line = _line_geometry(record) if record is not None else None
+        if line is None or abs(_cross(first.direction, _unit_direction(line))) > _COORD_EQ_ABS_TOL:
+            return "unproven"
+        span = sorted((_projection((line[0], line[1]), first.direction), _projection((line[2], line[3]), first.direction)))
+        if any(min(span[1], high) - max(span[0], low) > _FRAME_TOL for low, high in gaps):
+            return "unproven"
+    return "partitioned"
 
 
 def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
@@ -4928,7 +4971,12 @@ class PhysicalOpeningAuthority:
         left_selector: ObservationSelector,
         right_selector: ObservationSelector,
     ) -> PhysicalOpeningIdentityResult:
-        """Compare two selectors using independently re-proven G17 existence only."""
+        """Compare two selectors using independently re-proven G17 existence only.
+
+        Two records with different ids are DISTINCT only when they share no source observation, or when the source
+        proves a physical partition between them (``_source_member_partition``). Records that share lines and
+        overlap in extent are a CONFLICT, and records whose shared lines are not provably wall support between
+        separate gaps are ABSTAINED: different record ids alone are not distinctness."""
         if not isinstance(left_selector, ObservationSelector):
             raise TypeError("left_selector must be ObservationSelector")
         if not isinstance(right_selector, ObservationSelector):
@@ -4994,6 +5042,29 @@ class PhysicalOpeningAuthority:
                 right_source_observation=right_source,
             )
 
+        # Different record ids are not distinct openings when the two records rest on some of the same source lines:
+        # adjacent openings share the wall support between them, layers of one gap share a face and an extent. Only a
+        # physical partition proven from the source separates them.
+        records, failures = self._visible_snapshot_records(left_source)
+        partition = (
+            "unproven" if failures else _source_member_partition(
+                left_record.source_observation_ids, right_record.source_observation_ids,
+                {str(record.observation_id): record for record in records}))
+        if partition in {"overlapping_extent", "unproven"}:
+            overlapping = partition == "overlapping_extent"
+            return PhysicalOpeningIdentityResult(
+                status=EvidenceResolutionStatus.CONFLICT if overlapping else EvidenceResolutionStatus.ABSTAINED,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
+                proven_same=False,
+                reason_codes=(
+                    PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT if overlapping
+                    else PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_PARTITION_UNPROVEN,),
+                left_source_observation=left_source,
+                right_source_observation=right_source,
+                missing_upstream_capability=(
+                    "source-owned physical partition of openings that share exact source members"),
+            )
+
         return PhysicalOpeningIdentityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
@@ -5026,6 +5097,8 @@ __all__ = [
     "PHYSICAL_OPENING_IDENTITIES_DISTINCT",
     "PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED",
     "PHYSICAL_OPENING_IDENTITY_RESOLVED",
+    "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT",
+    "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_PARTITION_UNPROVEN",
     "PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH",
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
     "PhysicalOpeningAuthority",
