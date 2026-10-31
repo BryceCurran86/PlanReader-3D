@@ -3962,6 +3962,80 @@ class PhysicalOpeningAuthority:
             reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
         )
 
+    def seeded_candidate_structures(
+        self,
+        selector: ObservationSelector,
+        member_observation_ids: Sequence[str],
+    ) -> PhysicalOpeningCandidateStructureResult:
+        """The structures the existing six-line enumerator finds among ONLY the named observations.
+
+        Read-only diagnostic accessor for a structure proposed by another authority (the observations it says make
+        up one whole opening). It runs the same exact predicates as page discovery on a universe restricted to
+        those observations, so whether they form a jamb-bounded two-face interruption is decided by this
+        authority's own rules and not by the proposer. It is deliberately weaker than ``prove_existence``: it never
+        returns CORROBORATED, issues no existence record, uses and writes none of the per-page candidate memos, and
+        does not look at the evidence it was told to leave out, so the caller must account for that evidence
+        itself. Every named observation must be a visible observation of the selector's authenticated snapshot
+        and page, and the selector's own observation must be one of them; anything else abstains.
+        """
+
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if isinstance(member_observation_ids, (str, bytes)):
+            raise TypeError("member_observation_ids must be a sequence of observation ids")
+        if self._source_visibility_authority is None:
+            return PhysicalOpeningCandidateStructureResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                page_id=None,
+                candidates=(),
+                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),
+            )
+        source_result = self._resolve_visible_cached(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+        ):
+            return PhysicalOpeningCandidateStructureResult(
+                status=_source_failure_status(source_result),
+                page_id=None,
+                candidates=(),
+                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+            )
+        records, failures = self._visible_snapshot_records(source_result)
+        page_id = str(source_result.observation.page_id)
+        if failures:
+            return PhysicalOpeningCandidateStructureResult(
+                status=_source_failure_status(*failures),
+                page_id=page_id,
+                candidates=(),
+                reason_codes=_dedupe_reason_codes(
+                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                    *tuple(result.reason_codes for result in failures),
+                ),
+            )
+        wanted = {str(value) for value in member_observation_ids}
+        by_id = {str(record.observation_id): record for record in records}
+        if (
+            not wanted
+            or str(source_result.observation.observation_id) not in wanted
+            or any(value not in by_id for value in wanted)
+        ):
+            return PhysicalOpeningCandidateStructureResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                page_id=page_id,
+                candidates=(),
+                reason_codes=(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+            )
+        restricted = tuple(by_id[value] for value in sorted(wanted))
+        return PhysicalOpeningCandidateStructureResult(
+            status=EvidenceResolutionStatus.CANDIDATE,
+            page_id=page_id,
+            candidates=self._visible_structural_candidates(
+                source_result.observation, restricted
+            ),
+            reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
+        )
+
     def classify_disposition(
         self,
         selector: ObservationSelector,
