@@ -48,6 +48,15 @@ def test_original_replay_requires_exact_owner_main_manual_and_rerun_ownership():
     _, neutral, original = _jobs()
     first_line = original.splitlines()[0].strip()
     assert first_line.startswith("if: ${{ ") and first_line.endswith(" }}")
+    # Must equal the dynamic repository-wide private-source allowlist, without
+    # weakening that census or accepting arbitrary reordered expressions.
+    assert first_line == (
+        "if: ${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.repository == 'BryceCurran86/PlanReader-3D' && "
+        "github.triggering_actor == 'BryceCurran86' }}"
+    )
     for trusted_scope in (
         "github.event_name == 'workflow_dispatch'",
         "github.ref == 'refs/heads/main'",
