@@ -993,6 +993,8 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
         path_index = segment.get("path_index")
         if type(path_index) is not int or not 0 <= path_index < len(drawings):
             continue
+        if _segment_coordinates(segment) is None:
+            continue                            # a number that cannot resolve the identity tolerance proves nothing
         drawing = drawings[path_index]
         seqno = drawing.get("seqno")
         width = segment.get("width")
@@ -1046,9 +1048,10 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
         if clear:
             painted.add(_native_segment_geometry_id(page_id, segment))
             span = _axis_span(segment)
-            if span is not None:
-                inked.setdefault((span[0], round(span[1] / _COLLINEAR_IDENTITY_TOL)), []).append(
-                    (span[1], span[2], span[3], *_transverse_endpoints(segment, span[0]))
+            ends = None if span is None else _transverse_endpoints(segment, span[0])
+            if span is not None and ends is not None:
+                inked.setdefault((span[0], _offset_bucket(span[1])), []).append(
+                    (span[1], span[2], span[3], *ends)
                 )
     # A fill-only boundary (or any extracted edge whose own path is not a proven stroke) is still DRAWN where
     # source-painted strokes of the same line already ink its whole extent: the visible ink at exactly those
@@ -1060,9 +1063,8 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
         if type(path_index) is not int or not 0 <= path_index < len(drawings):
             continue
         span = _axis_span(segment)
-        if span is not None and _collinear_painted_coverage(
-            span, inked, edge_endpoints=_transverse_endpoints(segment, span[0])
-        ):
+        ends = None if span is None else _transverse_endpoints(segment, span[0])
+        if span is not None and ends is not None and _collinear_painted_coverage(span, inked, edge_endpoints=ends):
             painted.add(_native_segment_geometry_id(page_id, segment))
     return frozenset(painted)
 
@@ -1070,6 +1072,41 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
 # Coordinate identity of two extracted edges that were drawn from the same source numbers (sub-micro-point float
 # identity); it is not a measurement tolerance and nothing is fitted to a drawing.
 _COLLINEAR_IDENTITY_TOL = 1e-6
+# A float coordinate can only resolve the identity tolerance below 2**52 tolerance units (about 4.5e9 pt, far beyond any
+# page). A source number beyond that, or too large to be a float at all, is not provably identical to anything: the
+# edge is unsupported (typed abstention), never an OverflowError and never a silently coarse bucket.
+_RESOLVABLE_COORDINATE = 2.0 ** 52 * _COLLINEAR_IDENTITY_TOL
+
+
+def _resolvable_floats(*values) -> bool:
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            number = float(value)
+        except OverflowError:
+            return False
+        if not math.isfinite(number) or abs(number) >= _RESOLVABLE_COORDINATE:
+            return False
+    return True
+
+
+def _segment_coordinates(segment):
+    """The four edge coordinates as floats, or None unless every raw source value is a resolvable number."""
+    try:
+        raw = tuple(segment[k] for k in ("x1", "y1", "x2", "y2"))
+    except (KeyError, TypeError):
+        return None
+    if not _resolvable_floats(*raw):
+        return None
+    return tuple(float(v) for v in raw)
+
+
+def _offset_bucket(offset):
+    """Candidate bucket of a line offset; None when the offset cannot resolve the identity tolerance."""
+    if not _resolvable_floats(offset):
+        return None
+    return round(float(offset) / _COLLINEAR_IDENTITY_TOL)
 
 
 def _native_segment_geometry_id(page_id: str, segment) -> str:
@@ -1079,12 +1116,10 @@ def _native_segment_geometry_id(page_id: str, segment) -> str:
 
 def _axis_span(segment):
     """(axis, offset, lo, hi) of an axis-aligned, finite, non-degenerate edge; None otherwise."""
-    try:
-        x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
-    except (KeyError, TypeError, ValueError):
+    coordinates = _segment_coordinates(segment)
+    if coordinates is None:
         return None
-    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
-        return None
+    x0, y0, x1, y1 = coordinates
     if abs(y1 - y0) <= _COLLINEAR_IDENTITY_TOL and abs(x1 - x0) > _COLLINEAR_IDENTITY_TOL:
         return ("h", (y0 + y1) / 2.0, min(x0, x1), max(x0, x1))
     if abs(x1 - x0) <= _COLLINEAR_IDENTITY_TOL and abs(y1 - y0) > _COLLINEAR_IDENTITY_TOL:
@@ -1093,8 +1128,11 @@ def _axis_span(segment):
 
 
 def _transverse_endpoints(segment, axis):
-    """Actual perpendicular coordinates at the low and high ends of an axis span."""
-    x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
+    """Actual perpendicular coordinates at the low and high ends of an axis span; None when not resolvable."""
+    coordinates = _segment_coordinates(segment)
+    if coordinates is None:
+        return None
+    x0, y0, x1, y1 = coordinates
     if axis == "h":
         return (y0, y1) if x0 <= x1 else (y1, y0)
     return (x0, x1) if y0 <= y1 else (x1, x0)
@@ -1128,7 +1166,9 @@ def _collinear_painted_coverage(span, inked, *, edge_endpoints=None) -> bool:
     axis, offset, lo, hi = span
     if edge_endpoints is None:
         edge_endpoints = (offset, offset)
-    bucket = round(offset / _COLLINEAR_IDENTITY_TOL)
+    bucket = _offset_bucket(offset)
+    if bucket is None or not _resolvable_floats(lo, hi, *edge_endpoints):
+        return False
     # Ties-to-even can put within-tolerance midpoints two buckets apart.
     matching = []
     for neighbour in range(bucket - 2, bucket + 3):
