@@ -78,6 +78,9 @@ def test_actual_producer_area_appends_through_sealer_and_customer_without_old_dr
     assert verify_sealed_customer_output(after, rows).valid_quantity_count == 2
     assert baseline.canonical_openings == original_objects
     assert result.opening_quantity_evidence[0] is baseline.opening_quantity_evidence[0]
+    assert result.opening_area_replay_source_inventory == tuple(sorted(
+        full.canonical_openings, key=lambda o: o.canonical_opening_id
+    ))
     assert all(getattr(result, field) == getattr(baseline, field) for field in (
         "canonical_walls", "canonical_rooms", "canonical_floors", "canonical_ceilings",
         "opening_count_quantity_evidence", "room_area_quantity_evidence",
@@ -280,6 +283,7 @@ def test_default_false_retains_the_existing_source_output(original_claim):
     path, full = original_claim
     repeated = collect_live_physical_net_wall_claim(path, pages=(0,), recover_additional_opening_areas=False)
     assert repeated == full
+    assert repeated.opening_area_replay_source_inventory == ()
 
 
 def test_real_source_recovery_without_new_measurements_keeps_original_claim(original_claim):
