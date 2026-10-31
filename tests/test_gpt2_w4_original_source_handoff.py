@@ -49,10 +49,20 @@ def _composition(room):
 
 
 def _receipt(*,polygon=BOX,sha=SHA):
+    # Mirror the native source diagnostic's independently retained receipts,
+    # not an invented room/finish proof or a signed quantity.
     return {
         "status":"original_source_ink_ring_translation_candidate",
         "original_source_sha256":sha,
         "original_floor_page":7,
+        "original_finish_page":11,
+        "original_floor_source_ids":("floor-edge-a","floor-edge-b",
+                                     "floor-edge-c","floor-edge-d"),
+        "original_finish_source_ids":("finish-edge-a","finish-edge-b",
+                                      "finish-edge-c","finish-edge-d"),
+        "source_cross_sheet_translation_pdf_pts":(10.0,0.0),
+        "source_finishes_perimeter_polygon_pdf_pts":
+            tuple((round(x+10.0,3),round(y,3)) for x,y in polygon),
         "geometric_ink_correspondence_only":True,
         "source_floor_perimeter_polygon_pdf_pts":polygon,
     }
@@ -379,3 +389,102 @@ def test_unowned_door_gap_cannot_be_smuggled_without_original_source_flag():
         _w4_source_positive_candidate(),forged)
     assert result["first_failure"]=="source_original_door_gap_receipt_invalid"
     assert result["source_finish_area_quantity_issued"] is False
+
+
+def _source_receipt_abstention(**mutation):
+    source={**_receipt(), **mutation}
+    return audit_gpt2_w4_bound_original_floor(
+        source,canonical_rooms=_composition(_room()),physical_room_id="room-one")
+
+
+def test_w4_intake_accepts_only_literal_true_source_ink_flag():
+    for forged in ("true", "false", 1, 0, 2, [], [True], {"verified":True}, None, False):
+        result=_source_receipt_abstention(geometric_ink_correspondence_only=forged)
+        assert result["first_failure"]=="original_pdf_room_root_or_page_mismatch"
+        assert not result["w4_room_face_source_identity_proven"]
+        assert result["new_firm_quantities"]==0
+    assert _source_receipt_abstention()["first_failure"]=="sealed_W4_room_face_issuer_missing"
+
+
+def test_w4_intake_rejects_cross_sheet_page_type_alias_and_same_page():
+    cases=(
+        {"original_floor_page":True},
+        {"original_floor_page":7.0},
+        {"original_floor_page":"7"},
+        {"original_floor_page":0},
+        {"original_finish_page":True},
+        {"original_finish_page":11.0},
+        {"original_finish_page":"11"},
+        {"original_finish_page":7},
+        {"original_finish_page":0},
+        {"original_finish_page":None},
+    )
+    for mutation in cases:
+        result=_source_receipt_abstention(**mutation)
+        assert result["first_failure"]=="original_pdf_room_root_or_page_mismatch"
+        assert result["new_firm_quantities"]==0
+
+
+def test_w4_intake_rejects_missing_duplicate_or_aliased_original_edge_receipts():
+    cases=(
+        {"original_floor_source_ids":None},
+        {"original_floor_source_ids":()},
+        {"original_finish_source_ids":()},
+        {"original_floor_source_ids":"floor-edge-a"},
+        {"original_finish_source_ids":{"finish-edge-a"}},
+        {"original_floor_source_ids":("floor-edge-a","floor-edge-a")},
+        {"original_finish_source_ids":("finish-edge-a","finish-edge-a")},
+        {"original_floor_source_ids":(" floor-edge-a ",)},
+        {"original_finish_source_ids":("",)},
+        {"original_floor_source_ids":(True,)},
+        {"original_finish_source_ids":("finish-edge-a",None)},
+        {"original_finish_source_ids":("finish-edge-a",[])},
+    )
+    for mutation in cases:
+        result=_source_receipt_abstention(**mutation)
+        assert result["first_failure"]=="original_cross_sheet_source_edge_receipt_invalid"
+        assert result["new_firm_quantities"]==0
+        assert not result["w4_room_face_source_identity_proven"]
+
+
+def test_w4_intake_rejects_missing_nonfinite_or_misaligned_finish_ring():
+    cases=(
+        ({"source_cross_sheet_translation_pdf_pts":None},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_cross_sheet_translation_pdf_pts":(10.0,)},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_cross_sheet_translation_pdf_pts":(10.0,"0")},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_cross_sheet_translation_pdf_pts":(10.0,False)},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_cross_sheet_translation_pdf_pts":(float("nan"),0.0)},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_cross_sheet_translation_pdf_pts":(float("inf"),0.0)},
+         "original_cross_sheet_translation_receipt_invalid"),
+        ({"source_finishes_perimeter_polygon_pdf_pts":None},
+         "original_cross_sheet_source_ring_invalid"),
+        ({"source_finishes_perimeter_polygon_pdf_pts":()},
+         "original_cross_sheet_source_ring_invalid"),
+        ({"source_finishes_perimeter_polygon_pdf_pts":
+              ((31.,20.),(131.,20.),(131.,100.),(31.,100.))},
+         "original_cross_sheet_source_ring_mismatch"),
+        ({"source_cross_sheet_translation_pdf_pts":(11.0,0.0)},
+         "original_cross_sheet_source_ring_mismatch"),
+    )
+    for mutation,reason in cases:
+        result=_source_receipt_abstention(**mutation)
+        assert result["first_failure"]==reason
+        assert result["new_firm_quantities"]==0
+
+
+def test_w4_intake_does_not_mutate_valid_native_receipt_or_grant_W4_from_it():
+    from copy import deepcopy
+    source=_receipt()
+    unchanged=deepcopy(source)
+    result=_source_receipt_abstention(**source)
+    assert source==unchanged
+    assert result["first_failure"]=="sealed_W4_room_face_issuer_missing"
+    assert result["status"]=="original_source_w4_room_binding_abstained"
+    assert result["floor_finish_quantity_issued"] is False
+    assert result["source_room_metric_area_issued"] is False
+    assert result["new_firm_quantities"]==0
