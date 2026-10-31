@@ -2168,14 +2168,23 @@ class SourceMaterialSemanticProducer:
                         revision_id=revision_id,
                         page_id=str(page_number),
                         physical_plan_view_shadow=True,
+                        # Match the ordinary material F.07 path's native-cell
+                        # schedule guard; never infer a physical room or finish.
+                        source_connected_table_cell_shadow=True,
                     )
                     if str(page_number) in self._physical_plan_page_ids
                     else segment_page_viewports(
                         page,page_number=page_number,
+                        # The material producer must not treat repeated
+                        # disconnected fixture rectangles as an external
+                        # schedule. This existing source-cell veto does not
+                        # change the generic F.07 default or elect a plan
+                        # viewport; line-built CAD schedule fallback remains.
                         **({
                             "source_connected_table_cell_shadow":True,
                             "source_native_multipath_semantic_frame_shadow":True,
-                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                        } if str(page_number) in self._source_native_schedule_page_ids
+                          else {"source_connected_table_cell_shadow":True}),
                     )
                 )
                 if (
