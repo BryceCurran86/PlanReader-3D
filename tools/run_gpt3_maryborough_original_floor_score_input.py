@@ -16,7 +16,12 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from pb_customer_output_verification import verify_sealed_customer_output
+from pb_customer_output_verification import (
+    CustomerOutputVerificationError,
+    verify_sealed_customer_output,
+)
+from pb_quantity_takeoff_adapter import CommercialTakeoffProjectionError
+from pb_source_closed_run_export import SourceClosedRunExportError
 from pb_live_floor_area_customer_projection import (
     project_live_floor_area_customer_rows,
 )
@@ -211,28 +216,40 @@ def run_original_maryborough_floor_handoff(
         topology_pages=(6,),
         room_area_support_pages=(10,),
     )
-    sealed = seal_live_floor_area_run(
-        claim,
-        workspace_id=1,
-        project_id=PROJECT,
-    )
-    rows = project_live_floor_area_customer_rows(
-        claim,
-        workspace_id=1,
-        project_id=PROJECT,
-    )
-    verified = verify_sealed_customer_output(sealed, rows)
     try:
+        # Each boundary can reject source/issuer authority before the final
+        # sealed/customer receipt validator runs. Preserve the SAME claim's
+        # first ABSTAIN evidence regardless of which fail-closed gate rejects.
+        sealed = seal_live_floor_area_run(
+            claim,
+            workspace_id=1,
+            project_id=PROJECT,
+        )
+        rows = project_live_floor_area_customer_rows(
+            claim,
+            workspace_id=1,
+            project_id=PROJECT,
+        )
+        verified = verify_sealed_customer_output(sealed, rows)
         receipt = _validate_sealed_customer_handoff(
             sealed,
             rows,
             verified,
             source_sha,
         )
-    except ValueError:
-        # Preserve the existing producer's first failing gates privately even
-        # when no signed/customer success artifact can be published.
-        source_stage = inspect_room_measurement_gates(claim)
+    except (
+        SourceClosedRunExportError,
+        CommercialTakeoffProjectionError,
+        CustomerOutputVerificationError,
+        ValueError,
+    ) as failure:
+        # Diagnostic is private, create-only, UNPUBLISHED and never a customer
+        # or frozen score input. A failed diagnostic must not hide the original
+        # source/seal/customer rejection.
+        try:
+            source_stage = inspect_room_measurement_gates(claim)
+        except Exception:
+            raise failure from None
         if (
             source_stage.get("benchmark_accuracy") is not None
             or source_stage.get("commercial_estimator_approved") is not False
