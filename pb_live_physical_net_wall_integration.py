@@ -127,6 +127,10 @@ class LivePhysicalNetWallClaim:
     canonical_space_status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    # The complete independently re-proved canonical source inventory (including
+    # unsupported/ABSTAINED siblings). Shadow witness for downstream preflight;
+    # it is NOT a published opening, measured quantity, or count.
+    opening_area_replay_source_inventory: tuple[LiveCanonicalOpeningObject, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_dimension_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
