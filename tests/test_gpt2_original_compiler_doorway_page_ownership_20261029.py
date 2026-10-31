@@ -968,3 +968,74 @@ def test_floor_finish_ink_handoff_distinct_original_pages_remain_shadow_only(
     assert result["new_firm_quantities"] == 0
     assert result["physical_floor_or_ceiling_issued"] is False
     assert result["source_verified_not_customer_verified"] is True
+
+
+def test_private_original_native_doorway_compiler_gate_if_explicitly_provisioned():
+    """Real original issuer/bridge replay, separate from synthetic acceptance.
+
+    Selectors below already appear in the existing original OFFICE ancestry
+    and jamb tests. No expected benchmark quantity enters the producer.
+    """
+    import copy
+    import hashlib
+    import os
+    from pathlib import Path
+
+    import fitz
+
+    from pb_source_doorway_jamb_authority import (
+        audit_native_source_doorway_jamb_chain,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from tools.diag_gpt2_original_doorway_room_closure_shadow import (
+        audit_original_doorway_ring_candidate,
+    )
+
+    configured = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not configured:
+        pytest.skip("private original acceptance NOT VERIFIED: no explicit source path")
+    original = Path(configured)
+    assert original.is_file(), "explicit original source path is unavailable"
+    raw = original.read_bytes()
+    sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert hashlib.sha256(raw).hexdigest() == sha
+    source = SourceVisibilityProducer(
+        producer_method="gpt2-original-doorway-regression", producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="private-original-architectural", source_bytes=raw,
+        source_locator="memory://private-original-architectural.pdf", page_ids=("7",),
+    )
+    bridge = GPT2OriginalSourceGeometryBridge.from_source_visibility_producer(source)
+    graph = bridge.original_room_ink_graph(
+        revision_id=published.revision.revision_id, page_1_based=7,
+        original_source_edge_ids=(
+            "d52239i0", "d66216i0", "d53725i0", "d52622i0", "d52625i0",
+        ),
+    )
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        witness = audit_native_source_doorway_jamb_chain(
+            doc[6], left_wall_id="d52622i0", right_wall_id="d52625i0",
+            left_jamb_id="d69419i0", right_jamb_id="d69421i0",
+        )
+    ring = audit_original_doorway_ring_candidate(
+        raw, expected_sha256=sha, original_page_1_based=7,
+        source_room_graph=graph, original_jamb_source_receipt=witness,
+    )
+    assert ring["status"] == "source_jamb_bound_open_door_perimeter_candidate_only"
+    before = copy.deepcopy((ring, graph))
+    matches = compiler._original_doorway_ring_matches_reissued_native_graph
+    assert matches(ring, graph)
+    for field, value in (
+        ("original_page_1_based", 11),
+        ("source_only_native_polygon_area_pdf_pt2_not_m2",
+         ring["source_only_native_polygon_area_pdf_pt2_not_m2"] * 2),
+    ):
+        forged = copy.deepcopy(ring)
+        forged[field] = value
+        assert not matches(forged, graph)
+    assert (ring, graph) == before
+    assert ring["new_firm_quantities"] == graph["new_firm_quantities"] == 0
+    assert ring["source_finished_floor_area_issued"] is False
+    assert graph["source_physical_room_identity_issued"] is False
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == sha
