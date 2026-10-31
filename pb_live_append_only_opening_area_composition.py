@@ -123,6 +123,16 @@ def _append_reproved_areas(baseline, openings, quantities):
             or next(iter(replay_scopes))[:3] not in roots
             or len({o.physical_opening_id for o in fresh_objects.values()}) != len(fresh_objects)):
         raise SourceClosedRunConflictError("complete opening replay source scope missing or conflicting")
+    # The first producer's unsupported historical candidates are negative
+    # evidence too. A second producer cannot assert its source replay is
+    # complete while silently dropping one; an old measurement is not the
+    # only kind of source rival that must survive. Independent source-owned
+    # identity retirement is a different authority and must be explicit.
+    missing_historical = set(old_objects) - set(fresh_objects)
+    if missing_historical:
+        raise SourceClosedRunConflictError(
+            "historical opening competitor missing from complete source replay"
+        )
     fresh_measured_ids = {q.input_entity_ids[0] for q in fresh.values()}
     # An unsupported-only sibling is negative evidence, never quietly omitted
     # from a new area. Shared exact observation members require a source-owned

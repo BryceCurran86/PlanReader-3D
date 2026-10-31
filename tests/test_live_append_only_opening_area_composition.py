@@ -283,6 +283,52 @@ def test_measured_opening_rival_requires_independent_source_partition(
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
 
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+def test_replay_cannot_erase_archived_unmeasured_competitor(
+    original_claim, reverse_inventory,
+):
+    """A fresh roster is not complete if an old unsupported rival vanished.
+
+    The archived source object is not a measured quantity, but its existence
+    remains independent negative evidence against a newly issued area.
+    """
+    _, full = original_claim
+    baseline = subset(full)
+    old_qty = baseline.opening_quantity_evidence[0]
+    new_qty = next(q for q in full.opening_quantity_evidence
+                   if q.quantity_id != old_qty.quantity_id)
+    new_opening = next(o for o in full.canonical_openings
+                       if o.canonical_opening_id == new_qty.input_entity_ids[0])
+    historical = replace(
+        new_opening,
+        canonical_opening_id="archived-unsupported-not-in-fresh-replay",
+        physical_opening_id="archived-unsupported-not-in-fresh-replay",
+        representative_observation_id="historic-source-only-observation",
+        source_observation_ids=("historic-source-only-observation",),
+        source_lineage_root_ids=("historic-source-only-lineage",),
+        source_geometries=((520.0, 405.0, 550.0, 405.0),),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    baseline = replace(
+        baseline, canonical_openings=baseline.canonical_openings + (historical,)
+    )
+    assert historical.canonical_opening_id not in {
+        o.canonical_opening_id for o in full.canonical_openings
+    }
+    fresh = full.canonical_openings
+    quantities = full.opening_quantity_evidence
+    if reverse_inventory:
+        fresh = tuple(reversed(fresh))
+        quantities = tuple(reversed(quantities))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="historical opening competitor missing from complete source replay",
+    ):
+        _append_reproved_areas(baseline, fresh, quantities)
+    assert baseline.canonical_openings[-1] is historical
+    assert baseline.opening_quantity_evidence[0] is old_qty
+
+
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)
