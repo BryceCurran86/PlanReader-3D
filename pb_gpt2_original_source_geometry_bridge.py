@@ -783,7 +783,9 @@ class GPT2OriginalSourceGeometryBridge:
                 "source_cross_sheet_translation_pdf_pts")
             finish_page=source_cross_sheet_receipt.get("original_finish_page")
             valid_scope=(
-                type(finish_page) is int and finish_page!=original_floor_page_1_based
+                type(source_cross_sheet_receipt.get("original_floor_page")) is int
+                and source_cross_sheet_receipt["original_floor_page"]==original_floor_page_1_based
+                and type(finish_page) is int and finish_page!=original_floor_page_1_based
                 and type(floor_ids) is tuple and type(finish_ids) is tuple
                 and all(2<=len(ids)<=120000 and len(set(ids))==len(ids)
                         and all(type(item) is str and item for item in ids)
