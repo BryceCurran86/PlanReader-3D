@@ -82,7 +82,7 @@ def test_producer_shaped_exact_room_face_keeps_signed_and_customer_output():
     assert first.to_json() == second.to_json()
     assert first.fingerprint == second.fingerprint
     assert first.quantities[0].value == 8.64
-    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["finish_system"] == "FT1 (tile)"
     assert verify_sealed_customer_output(first, rows).verified_quantity_ids == (
         original_source[0].quantity_id,
     )
