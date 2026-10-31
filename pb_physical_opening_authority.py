@@ -84,6 +84,12 @@ MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY = (
 )
 
 JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
+# Seeded whole-opening evidence (see PhysicalOpeningAuthority.seeded_candidate_structures / prove_seeded_existence)
+LAYERED_FACES_OF_ONE_GAP = "layered_faces_of_one_gap"
+SEEDED_OPENING_INK_UNACCOUNTED = "unaccounted_source_ink_inside_seeded_opening"
+SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP = "wall_face_continues_inside_seeded_opening_gap"
+SEEDED_COMPETING_LAYER_UNRESOLVED = "seeded_competing_layer_with_wall_face_stub_unresolved"
+SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER = "seeded_opening_ink_role_asserted_only_by_caller"
 RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
 RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION = (
     "raster_door_swing_wall_band_interruption"
@@ -610,6 +616,274 @@ def _physical_opening_geometry_identity(
     ):
         return ()
     return geometry
+
+
+_FRAME_TOL = 1e-5
+
+
+@dataclass(frozen=True)
+class _StructureFrame:
+    """A jamb-bounded two-face structure in its own axes: along the faces, across them."""
+
+    direction: tuple[float, float]
+    normal: tuple[float, float]
+    gap_start: float
+    gap_end: float
+    face_offsets: tuple[float, ...]
+    face_line_ids: tuple[tuple[str, ...], ...]      # the face lines on each offset, same order as face_offsets
+
+
+def _unit_direction(line: tuple[float, float, float, float]) -> tuple[float, float]:
+    dx, dy = line[2] - line[0], line[3] - line[1]
+    length = math.hypot(dx, dy)
+    return (dx / length, dy / length)
+
+
+def _clusters(values: Sequence[float], tolerance: float) -> list[float]:
+    found: list[float] = []
+    for value in sorted(values):
+        if not found or value - found[-1] > tolerance:
+            found.append(value)
+    return found
+
+
+def _structure_frame(
+    observation_ids: Sequence[str],
+    records_by_id: Mapping[str, SourceObservationRecord],
+) -> Optional[_StructureFrame]:
+    """Axes, gap and face offsets of the lines of one or more jamb-bounded two-face structures.
+
+    The larger orientation class is the faces and the other the jambs; the jambs must be perpendicular to the faces
+    and sit at exactly two stations, which are the gap. Anything else has no frame."""
+    lines: list[tuple[str, tuple[float, float, float, float]]] = []
+    for observation_id in observation_ids:
+        record = records_by_id.get(str(observation_id))
+        line = _line_geometry(record) if record is not None else None
+        if line is None:
+            return None
+        lines.append((str(observation_id), line))
+    if len(lines) < 6:
+        return None
+    base = _unit_direction(lines[0][1])
+    parallel = [i for i, line in lines if abs(_cross(base, _unit_direction(line))) <= _COORD_EQ_ABS_TOL]
+    other = [i for i, _ in lines if i not in set(parallel)]
+    if len(parallel) == len(other):
+        return None
+    face_ids, jamb_ids = (parallel, other) if len(parallel) > len(other) else (other, parallel)
+    by_line = dict(lines)
+    d = _unit_direction(by_line[face_ids[0]])
+    if d[0] < 0 or (d[0] == 0 and d[1] < 0):
+        d = (-d[0], -d[1])
+    n = (-d[1], d[0])
+    if any(abs(_cross(d, _unit_direction(by_line[i]))) <= _COORD_EQ_ABS_TOL or
+           abs(d[0] * _unit_direction(by_line[i])[0] + d[1] * _unit_direction(by_line[i])[1]) > _COORD_EQ_ABS_TOL
+           for i in jamb_ids):
+        return None
+    if any(abs(_cross(d, _unit_direction(by_line[i]))) > _COORD_EQ_ABS_TOL for i in face_ids):
+        return None
+    stations = _clusters(
+        [_projection(((by_line[i][0] + by_line[i][2]) / 2.0, (by_line[i][1] + by_line[i][3]) / 2.0), d) for i in jamb_ids],
+        _FRAME_TOL)
+    face_offset_of = {
+        i: _projection(((by_line[i][0] + by_line[i][2]) / 2.0, (by_line[i][1] + by_line[i][3]) / 2.0), n) for i in face_ids}
+    offsets = _clusters(list(face_offset_of.values()), _FRAME_TOL)
+    if len(stations) != 2 or len(offsets) < 2:
+        return None
+    on_offset = tuple(
+        tuple(sorted(i for i, value in face_offset_of.items() if abs(value - offset) <= _FRAME_TOL)) for offset in offsets)
+    return _StructureFrame(d, n, stations[0], stations[1], tuple(offsets), on_offset)
+
+
+def _in_axes_of(
+    frame: _StructureFrame,
+    other: _StructureFrame,
+) -> Optional[tuple[tuple[float, float], tuple[tuple[float, tuple[str, ...]], ...]]]:
+    """``other``'s gap stations and (face offset, face lines) along ``frame``'s axes, or None when not parallel."""
+    if abs(_cross(frame.direction, other.direction)) > _COORD_EQ_ABS_TOL:
+        return None
+    sign = 1.0 if frame.direction[0] * other.direction[0] + frame.direction[1] * other.direction[1] > 0.0 else -1.0
+    stations = tuple(sorted(sign * value for value in (other.gap_start, other.gap_end)))
+    faces = tuple(sorted(
+        (sign * offset, ids) for offset, ids in zip(other.face_offsets, other.face_line_ids)))
+    return (stations[0], stations[1]), faces
+
+
+def _shared_host_face(first: _StructureFrame, second: _StructureFrame) -> Optional[float]:
+    """The offset of the ONE wall face two jamb-bounded structures verifiably share, or None.
+
+    A shared jamb, a shared cap or any overlap of observation ids is not enough. Both structures must have the same
+    two jamb stations and two face offsets each; exactly one offset is common to both, the face lines on it are the
+    very same lines in both, and the two structures lie on opposite sides of it (so they are stacked layers of one wall
+    and not two readings of the depth of the same wall)."""
+    aligned = _in_axes_of(first, second)
+    if aligned is None:
+        return None
+    stations, faces = aligned
+    if (abs(first.gap_start - stations[0]) > _FRAME_TOL or abs(first.gap_end - stations[1]) > _FRAME_TOL
+            or len(first.face_offsets) != 2 or len(faces) != 2):
+        return None
+    common = [(i, j) for i, offset in enumerate(first.face_offsets) for j, (other, _) in enumerate(faces)
+              if abs(offset - other) <= _FRAME_TOL]
+    if len(common) != 1:
+        return None
+    i, j = common[0]
+    if not first.face_line_ids[i] or first.face_line_ids[i] != faces[j][1]:
+        return None
+    if (first.face_offsets[1 - i] - first.face_offsets[i]) * (faces[1 - j][0] - faces[j][0]) >= 0.0:
+        return None
+    return first.face_offsets[i]
+
+
+def _is_stack_of_layers(group: Sequence[CandidateSemanticOpening], frames: Mapping[str, _StructureFrame]) -> bool:
+    """True when the structures, ordered across the wall, each rest on the face the next one starts from."""
+    ordered = sorted(group, key=lambda c: c.candidate_id)
+    reference = frames[ordered[0].candidate_id]
+    spans = []
+    for candidate in ordered:
+        aligned = _in_axes_of(reference, frames[candidate.candidate_id])
+        if aligned is None or len(aligned[1]) != 2:
+            return False
+        spans.append((aligned[1][0][0], aligned[1][1][0], candidate))
+    spans.sort(key=lambda span: (span[0], span[1], span[2].candidate_id))
+    for (_, high, lower), (low, _, upper) in zip(spans, spans[1:]):
+        if (abs(high - low) > _FRAME_TOL
+                or _shared_host_face(frames[lower.candidate_id], frames[upper.candidate_id]) is None):
+            return False
+    return True
+
+
+def _same_source(first: CandidateSemanticOpening, second: CandidateSemanticOpening) -> bool:
+    return all(getattr(first, name) == getattr(second, name) for name in (
+        "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "viewport_id", "structural_pattern"))
+
+
+def _merge_layered_structures(
+    candidates: Sequence[CandidateSemanticOpening],
+    records_by_id: Mapping[str, SourceObservationRecord],
+) -> tuple[CandidateSemanticOpening, ...]:
+    """One opening per stack of jamb-bounded structures that verifiably share a wall face across one gap.
+
+    A wall drawn in layers (masonry, lining, return) gives one six-line structure per pair of adjacent layers, all
+    with the same two jambs' stations. Two such structures are layers of ONE opening only when they come from the same
+    document, revision, snapshot, page and viewport, have the same gap and share one host face (the same face lines at
+    the same offset) with the structures on opposite sides of it (``_shared_host_face``). Sharing a jamb, a cap or any
+    other observation does not merge anything. The structures connected this way must also form a clean stack across
+    the wall (each starts where the previous one ends); a connected set that is not one, such as two readings of
+    the depth on the same side of a shared face bridged by a third, is NOT merged, so its structures stay as rivals
+    for the caller to see as a conflict. Structures that share nothing, and structures whose frame cannot be read,
+    are left apart."""
+    frames = {c.candidate_id: _structure_frame(c.source_observation_ids, records_by_id) for c in candidates}
+    parent = {c.candidate_id: c.candidate_id for c in candidates}
+
+    def root(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    ordered = sorted(candidates, key=lambda c: c.candidate_id)
+    for index, first in enumerate(ordered):
+        a = frames[first.candidate_id]
+        if a is None:
+            continue
+        for second in ordered[index + 1:]:
+            b = frames[second.candidate_id]
+            if b is None or not _same_source(first, second) or _shared_host_face(a, b) is None:
+                continue
+            parent[root(first.candidate_id)] = root(second.candidate_id)
+    groups: dict[str, list[CandidateSemanticOpening]] = {}
+    for candidate in ordered:
+        groups.setdefault(root(candidate.candidate_id), []).append(candidate)
+    merged: list[CandidateSemanticOpening] = []
+    for group in groups.values():
+        if len(group) == 1 or not _is_stack_of_layers(group, frames):
+            merged.extend(group)
+            continue
+        ids = tuple(sorted({i for c in group for i in c.source_observation_ids}))
+        roots = tuple(sorted({i for c in group for i in c.source_lineage_root_ids}))
+        merged.append(replace(
+            group[0],
+            candidate_id=stable_contract_id("layered_physical_opening_candidate", {"members": ids}, digest_chars=32),
+            source_observation_ids=ids,
+            source_lineage_root_ids=roots,
+            reason_codes=_dedupe_reason_codes(
+                tuple(code for c in group for code in c.reason_codes), (LAYERED_FACES_OF_ONE_GAP,)),
+        ))
+    return tuple(sorted(merged, key=lambda c: c.candidate_id))
+
+
+def _seeded_rival_layer_atoms(
+    observation: SourceObservationRecord,
+    rivals: Sequence[tuple[CandidateSemanticOpening, Sequence[str]]],
+) -> tuple[EvidenceAtom, ...]:
+    """One typed opposing atom per structure the seeded proof set aside because of a wall-face stub.
+
+    A set-aside structure is a competing reading of the same opening, not a disproved one: no producer authenticates
+    whether the stub is wall or window-frame linework, so the atom says the role is unresolved. It carries the
+    structure's lines and the stub lines, and is a CANDIDATE that only opposes; it closes nothing."""
+    from pb_wall_room_topology_typed_negative_evidence import KIND_UNKNOWN, POLARITY_OPPOSING
+
+    atoms = []
+    for structure, stub_ids in sorted(rivals, key=lambda row: row[0].candidate_id):
+        metadata = dict(
+            revision_id=observation.revision_id, source_sha256=observation.source_sha256,
+            snapshot_id=observation.snapshot_id, polarity=POLARITY_OPPOSING,
+            rival_candidate_id=structure.candidate_id,
+            source_observation_ids=tuple(sorted(structure.source_observation_ids)),
+            opposing_observation_ids=tuple(sorted(str(i) for i in stub_ids)),
+            role_status="unresolved_no_producer_authenticated_role")
+        atoms.append(EvidenceAtom(
+            evidence_id=stable_contract_id("seeded_competing_layer_stub", metadata, digest_chars=32),
+            document_id=observation.document_id, page_id=str(observation.page_id), kind=KIND_UNKNOWN,
+            method="seeded_existence_interior_stub_rule", status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=(SEEDED_COMPETING_LAYER_UNRESOLVED,), metadata=metadata))
+    return tuple(atoms)
+
+
+def _seeded_ink_checks(
+    frame: _StructureFrame,
+    member_ids: frozenset,
+    accounted_ids: frozenset,
+    records: Sequence[SourceObservationRecord],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Visible lines the restricted universe never saw: (face stubs inside the gap, unaccounted interior ink, face
+    ink that continues into the gap).
+
+    A stub is the six-line enumerator's own negative evidence, applied with its own definition: a line collinear with
+    one of the structure's faces that lies strictly INSIDE the gap (both ends clear of the two jamb stations) proves the
+    two face pieces are not adjacent boundaries. Face ink that is not a stub but still overlaps the gap (anchored at a
+    jamb, running jamb to jamb, or several segments that together do) is wall face continuing across the opening: the
+    enumerator keeps such a line as a possible cap for the annotation checks, but an existence proof for a named
+    opening cannot, so it is its own negative and, unlike interior ink, no naming by the caller excuses it. Any other
+    visible line that overlaps the gap and lies strictly between the outermost faces must be named by the caller."""
+    low, high = frame.gap_start + _FRAME_TOL, frame.gap_end - _FRAME_TOL
+    inner_low, inner_high = min(frame.face_offsets) + _FRAME_TOL, max(frame.face_offsets) - _FRAME_TOL
+    stubs: list[str] = []
+    unaccounted: list[str] = []
+    continuing: list[str] = []
+    for record in records:
+        observation_id = str(record.observation_id)
+        if observation_id in member_ids or record.observation_kind not in {
+                NATIVE_PDF_VISIBLE_SEGMENT, RASTER_PDF_VISIBLE_SEGMENT}:
+            continue
+        line = _line_geometry(record)
+        if line is None:
+            continue
+        a = sorted((_projection((line[0], line[1]), frame.direction), _projection((line[2], line[3]), frame.direction)))
+        if not (a[1] > low and a[0] < high and min(a[1], high) - max(a[0], low) > _FRAME_TOL):
+            continue
+        offsets = (_projection((line[0], line[1]), frame.normal), _projection((line[2], line[3]), frame.normal))
+        if (abs(_cross(frame.direction, _unit_direction(line))) <= _COORD_EQ_ABS_TOL
+                and abs(offsets[0] - offsets[1]) <= _FRAME_TOL
+                and any(abs(offsets[0] - face) <= _FRAME_TOL for face in frame.face_offsets)):
+            if a[0] > frame.gap_start + _COORD_EQ_ABS_TOL and a[1] < frame.gap_end - _COORD_EQ_ABS_TOL:
+                stubs.append(observation_id)
+            else:
+                continuing.append(observation_id)
+            continue
+        if max(offsets) > inner_low and min(offsets) < inner_high and observation_id not in accounted_ids:
+            unaccounted.append(observation_id)
+    return tuple(sorted(stubs)), tuple(sorted(unaccounted)), tuple(sorted(continuing))
 
 
 def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
@@ -3962,6 +4236,57 @@ class PhysicalOpeningAuthority:
             reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
         )
 
+    def _seeded_universe(self, selector: ObservationSelector, member_observation_ids: Sequence[str]):
+        """(failure result or None, source result, page records, records by id, restricted records)."""
+
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if isinstance(member_observation_ids, (str, bytes)):
+            raise TypeError("member_observation_ids must be a sequence of observation ids")
+        if self._source_visibility_authority is None:
+            return (
+                PhysicalOpeningCandidateStructureResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, page_id=None, candidates=(),
+                    reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,)),
+                None, (), {}, (),
+            )
+        source_result = self._resolve_visible_cached(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+        ):
+            return (
+                PhysicalOpeningCandidateStructureResult(
+                    status=_source_failure_status(source_result), page_id=None, candidates=(),
+                    reason_codes=_dedupe_reason_codes(source_result.reason_codes)),
+                source_result, (), {}, (),
+            )
+        records, failures = self._visible_snapshot_records(source_result)
+        page_id = str(source_result.observation.page_id)
+        if failures:
+            return (
+                PhysicalOpeningCandidateStructureResult(
+                    status=_source_failure_status(*failures), page_id=page_id, candidates=(),
+                    reason_codes=_dedupe_reason_codes(
+                        (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                        *tuple(result.reason_codes for result in failures))),
+                source_result, (), {}, (),
+            )
+        wanted = {str(value) for value in member_observation_ids}
+        by_id = {str(record.observation_id): record for record in records}
+        if (
+            not wanted
+            or str(source_result.observation.observation_id) not in wanted
+            or any(value not in by_id for value in wanted)
+        ):
+            return (
+                PhysicalOpeningCandidateStructureResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, page_id=page_id, candidates=(),
+                    reason_codes=(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)),
+                source_result, records, by_id, (),
+            )
+        return None, source_result, records, by_id, tuple(by_id[value] for value in sorted(wanted))
+
     def seeded_candidate_structures(
         self,
         selector: ObservationSelector,
@@ -3972,69 +4297,181 @@ class PhysicalOpeningAuthority:
         Read-only diagnostic accessor for a structure proposed by another authority (the observations it says make
         up one whole opening). It runs the same exact predicates as page discovery on a universe restricted to
         those observations, so whether they form a jamb-bounded two-face interruption is decided by this
-        authority's own rules and not by the proposer. It is deliberately weaker than ``prove_existence``: it never
-        returns CORROBORATED, issues no existence record, uses and writes none of the per-page candidate memos, and
-        does not look at the evidence it was told to leave out, so the caller must account for that evidence
-        itself. Every named observation must be a visible observation of the selector's authenticated snapshot
-        and page, and the selector's own observation must be one of them; anything else abstains.
+        authority's own rules and not by the proposer; structures that are layers of one gap (same source, the same
+        jamb stations, and one verified shared host face with the structures on its opposite sides) are returned as
+        ONE candidate carrying ``layered_faces_of_one_gap``, and any connected set that is not a clean stack is left
+        as rivals. It is deliberately weaker than ``prove_existence``: it never returns
+        CORROBORATED, issues no existence record, uses and writes none of the per-page candidate memos, and does not
+        look at the evidence it was told to leave out, so the caller must account for that evidence itself (or use
+        ``prove_seeded_existence``, which does). Every named observation must be a visible observation of the
+        selector's authenticated snapshot and page, and the selector's own observation must be one of them;
+        anything else abstains.
         """
 
-        if not isinstance(selector, ObservationSelector):
-            raise TypeError("selector must be ObservationSelector")
-        if isinstance(member_observation_ids, (str, bytes)):
-            raise TypeError("member_observation_ids must be a sequence of observation ids")
-        if self._source_visibility_authority is None:
-            return PhysicalOpeningCandidateStructureResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                page_id=None,
-                candidates=(),
-                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),
-            )
-        source_result = self._resolve_visible_cached(selector)
-        if (
-            source_result.status is not EvidenceResolutionStatus.CORROBORATED
-            or source_result.observation is None
-        ):
-            return PhysicalOpeningCandidateStructureResult(
-                status=_source_failure_status(source_result),
-                page_id=None,
-                candidates=(),
-                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
-            )
-        records, failures = self._visible_snapshot_records(source_result)
-        page_id = str(source_result.observation.page_id)
-        if failures:
-            return PhysicalOpeningCandidateStructureResult(
-                status=_source_failure_status(*failures),
-                page_id=page_id,
-                candidates=(),
-                reason_codes=_dedupe_reason_codes(
-                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
-                    *tuple(result.reason_codes for result in failures),
-                ),
-            )
-        wanted = {str(value) for value in member_observation_ids}
-        by_id = {str(record.observation_id): record for record in records}
-        if (
-            not wanted
-            or str(source_result.observation.observation_id) not in wanted
-            or any(value not in by_id for value in wanted)
-        ):
-            return PhysicalOpeningCandidateStructureResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                page_id=page_id,
-                candidates=(),
-                reason_codes=(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
-            )
-        restricted = tuple(by_id[value] for value in sorted(wanted))
+        failure, source_result, _records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
+        if failure is not None:
+            return failure
+        found = self._visible_structural_candidates(source_result.observation, restricted)
         return PhysicalOpeningCandidateStructureResult(
             status=EvidenceResolutionStatus.CANDIDATE,
-            page_id=page_id,
-            candidates=self._visible_structural_candidates(
-                source_result.observation, restricted
-            ),
+            page_id=str(source_result.observation.page_id),
+            candidates=_merge_layered_structures(found, by_id),
             reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
         )
+
+    def prove_seeded_existence(
+        self,
+        selector: ObservationSelector,
+        member_observation_ids: Sequence[str],
+        accounted_observation_ids: Sequence[str] = (),
+    ) -> PhysicalOpeningExistenceResult:
+        """PROPOSAL, UNWIRED: existence of ONE opening whose members another authority named.
+
+        Applies this authority's own rules to the named members (``seeded_candidate_structures``: the six-line
+        predicates, layered faces of one gap merged) and then to everything the restricted universe left out:
+        a structure with a face stub strictly inside its gap is dropped before layers are merged (the six-line
+        enumerator's own negative evidence, with its own definition of a stub), and any other visible line inside
+        the gap and between the outermost faces makes the proof abstain: unnamed, it is unaccounted ink, and named in
+        ``accounted_observation_ids`` it is still only a caller's assertion about its role, which cannot grant it
+        (``seeded_opening_ink_role_asserted_only_by_caller``); a producer-authenticated role is required and does not
+        exist yet. Wall-face ink that continues into the gap (anchored at a jamb, jamb to jamb, or in several segments)
+        is refused on any face of the opening, outer or shared. A structure set aside because of a face stub is a
+        competing reading, not a disproved one: it is returned as a typed opposing atom
+        (``opposing_evidence_atoms``, role unresolved) and the proof cannot certify a unique opening beside it.
+        Viewport scope, annotation opposition and geometry identity are the ones ``prove_existence`` applies; a plain
+        opening yields the identical existence record unless it has such ink, which this proof alone refuses. No memo is read or written. Nothing in the repository calls this method: wiring it to a
+        consumer, and whether a caller may name members at all (the producer-owned authority is designed so that
+        callers cannot inject candidate sets), is the separate authority-promotion decision."""
+
+        if (self._source_visibility_producer is not None and (
+                self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+                or self._raster_double_face_negative_shadow != getattr(
+                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
+            raise RuntimeError("original raster source policy changed after authority creation")
+        if isinstance(accounted_observation_ids, (str, bytes)):
+            raise TypeError("accounted_observation_ids must be a sequence of observation ids")
+
+        def unresolved(source, reasons, **extra):
+            return PhysicalOpeningExistenceResult(
+                status=extra.pop("status", EvidenceResolutionStatus.ABSTAINED), proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(tuple(reasons)), source_observation=source,
+                missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY, **extra)
+
+        failure, source_result, records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
+        if failure is not None:
+            return unresolved(source_result, failure.reason_codes, status=failure.status)
+        accounted = frozenset(str(value) for value in accounted_observation_ids)
+        if any(value not in by_id for value in accounted):
+            return unresolved(source_result, (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,))
+        observation = source_result.observation
+        found = self._visible_structural_candidates(observation, restricted)
+        survivors = []
+        rivals = []
+        for structure in found:
+            own_frame = _structure_frame(structure.source_observation_ids, by_id)
+            own_stubs = (_seeded_ink_checks(own_frame, frozenset(structure.source_observation_ids), frozenset(), records)[0]
+                         if own_frame is not None else ())
+            if own_frame is not None and not own_stubs:
+                survivors.append(structure)
+            else:
+                rivals.append((structure, own_stubs))
+        rival_atoms = _seeded_rival_layer_atoms(observation, rivals)
+
+        def refuse(reasons, **extra):
+            # a set-aside structure is a plausible competing reading of the same opening: it stays in the answer
+            codes = tuple(reasons) + ((SEEDED_COMPETING_LAYER_UNRESOLVED,) if rivals and survivors else ())
+            return unresolved(source_result, codes, opposing_evidence_atoms=rival_atoms, **extra)
+
+        if found and not survivors:
+            return refuse((SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,))
+        structures = _merge_layered_structures(tuple(survivors), by_id)
+        if len(structures) > 1:
+            return refuse((AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,), status=EvidenceResolutionStatus.CONFLICT)
+        containing = [c for c in structures if observation.observation_id in c.source_observation_ids]
+        if len(containing) != 1:
+            return refuse((VISIBLE_WALL_CONTINUATION_REQUIRED,))
+        candidate = containing[0]
+        frame = _structure_frame(candidate.source_observation_ids, by_id)
+        if frame is None:
+            return refuse((INVALID_STRUCTURAL_GEOMETRY,), candidate=candidate)
+        stubs, interior, continuing = _seeded_ink_checks(
+            frame, frozenset(candidate.source_observation_ids), frozenset(), records)
+        if stubs or continuing:
+            return refuse((SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,), candidate=candidate)
+        if any(i not in accounted for i in interior):
+            return refuse((SEEDED_OPENING_INK_UNACCOUNTED,), candidate=candidate)
+        if interior:
+            # the caller's naming only says which lines it knows about; it cannot make them glazing
+            return refuse((SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,), candidate=candidate)
+        if rivals:
+            return refuse((), candidate=candidate)
+        if self._source_visibility_producer is not None:
+            from pb_physical_opening_viewport_scope_authority import (
+                classify_opening_candidate_viewport_scopes,
+            )
+
+            scope = classify_opening_candidate_viewport_scopes(
+                source_visibility_producer=self._source_visibility_producer, revision_id=observation.revision_id,
+                page_id=observation.page_id, snapshot_id=observation.snapshot_id, candidates=(candidate,),
+                records=records)
+            decisions = dict(scope.decisions)
+            if scope.status is not EvidenceResolutionStatus.CORROBORATED:
+                return unresolved(source_result, tuple(scope.reason_codes), candidate=candidate)
+            if tuple(scope.authenticated_viewports):
+                decision = decisions.get(candidate.candidate_id)
+                viewport_id = str(getattr(decision, "viewport_id", "") or "").strip()
+                if (decision is None or not bool(getattr(decision, "promotable", False)) or not viewport_id
+                        or (candidate.viewport_id is not None and str(candidate.viewport_id) != viewport_id)):
+                    return unresolved(source_result, tuple(scope.reason_codes), candidate=candidate)
+                candidate = replace(candidate, viewport_id=viewport_id)
+        if (self._source_visibility_producer is not None
+                and candidate.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION):
+            opposition_reason = "native_dimension_annotation_opposes_opening"
+            try:
+                opposing = self._source_visibility_producer.native_dimension_cap_evidence(
+                    selector, opening_support_ids=candidate.source_observation_ids)
+                if not opposing:
+                    opposing = self._source_visibility_producer.native_unstroked_fill_evidence(
+                        selector, support_observation_ids=candidate.source_observation_ids)
+                    opposition_reason = "native_unstroked_fill_boundary_opposes_opening"
+            except RuntimeError:
+                return unresolved(source_result, ("opening_annotation_source_integrity_unproven",), candidate=candidate)
+            if opposing:
+                return unresolved(source_result, (opposition_reason,), candidate=candidate,
+                                  opposing_evidence_atoms=opposing)
+        physical_geometry = _physical_opening_geometry_identity(
+            candidate, records, self._visible_records_by_observation_id(source_result, records))
+        if not physical_geometry:
+            return PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PHYSICAL_OPENING_IDENTITY_UNRESOLVED,), source_observation=source_result,
+                candidate=candidate, missing_upstream_capability=AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE)
+        record_payload = {
+            "document_id": candidate.document_id, "revision_id": candidate.revision_id,
+            "source_sha256": candidate.source_sha256, "page_id": candidate.page_id,
+            "semantic_class": "opening", "source_geometry": physical_geometry,
+        }
+        structural_codes = (STRUCTURAL_OPENING_EXISTENCE_RESOLVED,) + (
+            (LAYERED_FACES_OF_ONE_GAP,) if LAYERED_FACES_OF_ONE_GAP in candidate.reason_codes else ())
+        existence = PhysicalOpeningExistenceRecord(
+            record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
+            source_observation_ids=candidate.source_observation_ids,
+            source_lineage_root_ids=candidate.source_lineage_root_ids,
+            document_id=candidate.document_id, revision_id=candidate.revision_id, source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id, page_id=candidate.page_id, viewport_id=candidate.viewport_id,
+            semantic_class="opening", status=EvidenceResolutionStatus.CORROBORATED, proposition=PHYSICAL_OPENING_EXISTS,
+            structural_pattern=candidate.structural_pattern, diagnostic_confidence=1.0, blocking_reasons=(),
+            structural_reason_codes=structural_codes, producer_method=source_result.snapshot.producer_method,
+            producer_version=source_result.snapshot.producer_version,
+            producer_generation=source_result.snapshot.producer_generation,
+        )
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED, proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence=PHYSICAL_OPENING_EXISTS, reason_codes=structural_codes,
+            source_observation=source_result, candidate=candidate, existence_record=existence)
 
     def classify_disposition(
         self,
@@ -4575,6 +5012,11 @@ __all__ = [
     "INSUFFICIENT_INDEPENDENT_SOURCE_LINEAGE",
     "INVALID_STRUCTURAL_GEOMETRY",
     "JAMB_BOUNDED_TWO_FACE_INTERRUPTION",
+    "LAYERED_FACES_OF_ONE_GAP",
+    "SEEDED_OPENING_INK_UNACCOUNTED",
+    "SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP",
+    "SEEDED_COMPETING_LAYER_UNRESOLVED",
+    "SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER",
     "MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY",
     "OPENING_JAMB_BOUNDARY_KIND",
     "PHYSICAL_OPENING_EXISTS",
