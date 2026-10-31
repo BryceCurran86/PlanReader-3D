@@ -19,7 +19,12 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
+# A positive one-digit D1/D3 can be a genuine printed table code. Whether a
+# glyph is a TABLE row or a foreign DETAIL comes from source-owned geometry,
+# never digit padding. D0/D00 remain invalid.
 _DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
+# Wider D-digit tokens are negative SOURCE evidence only, never schedule codes.
+_DOOR_LIKE_TOKEN = re.compile(r"^D[0-9]+$")
 _NUMERIC = re.compile(r"^[1-9][0-9]*$")
 _MAX_ORIGINAL_WORDS = 25000
 
@@ -75,6 +80,10 @@ class SourceDoorScheduleResult:
     # Source-visible Dxx code rows that failed parsing remain explicit
     # blockers instead of disappearing from the claimed schedule universe.
     unparsed_original_door_codes: tuple[str, ...] = ()
+    # Complete native source observations remain owned by SourceVisibilityProducer.
+    # These receipts identify foreign D-code DETAILS, never installed doors.
+    original_detail_code_observation_ids: tuple[str, ...] = ()
+    original_table_row_scope_authenticated: bool = False
     new_opening_counts: int = 0
     new_opening_areas_m2: int = 0
 
@@ -343,9 +352,15 @@ def _original_door_schedule_column_proof(
             "width" in matched and "height" in matched
             and matched["width"].observation_id!=matched["height"].observation_id
         )
+        source_code_conflict=(
+            row.status in {
+                "source_schedule_row_duplicate_code_conflict",
+                "source_schedule_row_competing_native_code_conflict",
+            }
+        )
         accepted_row=(
             table_trusted and row.complete_native_row_text_trusted
-            and row.status!="source_schedule_row_duplicate_code_conflict"
+            and not source_code_conflict
         )
         # Column authority is narrower than whole descriptive row trust.
         # Only the native Dxx cell and independently sourced numeric cells,
@@ -356,7 +371,7 @@ def _original_door_schedule_column_proof(
         code_words=[w for w in members if w.literal==row.code]
         numeric_fields_trusted=(
             table_trusted
-            and row.status!="source_schedule_row_duplicate_code_conflict"
+            and not source_code_conflict
             and len(code_words)==1 and code_words[0].trusted
             and geometry_verified
             and matched["width"].trusted and matched["height"].trusted
@@ -397,13 +412,12 @@ def _original_door_schedule_column_proof(
                 numeric_fields_trusted
             ),
             status=(
+                row.status if source_code_conflict else
                 "source_schedule_row_text_authenticated" if accepted_row
                 else "source_schedule_row_text_unverified"
-            ) if row.status!="source_schedule_row_duplicate_code_conflict"
-            else row.status,
+            ),
             first_unclosed_gate=(
-                row.first_unclosed_gate if row.status==
-                "source_schedule_row_duplicate_code_conflict"
+                row.first_unclosed_gate if source_code_conflict
                 else first_gate
             ),
         ))
@@ -426,10 +440,38 @@ def inspect_published_door_schedule(
     if int(page_id) not in {int(x) for x in published.coverage.decoded_pages}:
         raise ValueError("source_door_page_not_in_published_source_coverage")
     words=_producer_owned_native_words(producer,published,page_id)
-    candidate_rows=_original_source_row_candidates(words)
-    # Count all native code-bearing blocks before lexical row filtering.
-    # A Dxx header with unrecognised hardware/description is negative
-    # evidence, not permission to claim a complete schedule census.
+    # This is NOT a competing source publisher. The existing GPT2 source-only
+    # scope census uses the FULL publisher-owned native word universe to
+    # classify same-code DETAIL drawings as negative schedule evidence.
+    # It cannot grant a physical door, kind, size, metric unit or count.
+    # Import at consumption time: the shadow imports the existing row parser.
+    from pb_gpt2_original_a600_table_row_scope_shadow import (
+        classify_original_door_table_row_scope_shadow,
+    )
+    scope=classify_original_door_table_row_scope_shadow(
+        words,
+        source_sha256=published.revision.source_sha256,
+        revision_id=published.revision.revision_id,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id=page_id,
+    )
+    # Retain ALL source words for native title/header/column proof and for
+    # complete original D-code enumeration. Only an independently established
+    # printed table may exclude typed foreign DETAIL blocks from a ROW parser.
+    # A failed/ambiguous table scope stays on the old fail-closed path.
+    table_member_blocks={
+        block for decision in scope.decisions
+        for block in decision.original_table_native_blocks
+    }
+    foreign_detail_blocks={
+        block for decision in scope.decisions
+        for block in decision.original_other_native_blocks
+    } if scope.source_table_geometry_candidate_only else set()
+    row_parse_words=(
+        tuple(w for w in words if w.block_no not in foreign_detail_blocks)
+        if scope.source_table_geometry_candidate_only else words
+    )
+    candidate_rows=_original_source_row_candidates(row_parse_words)
     source_blocks=defaultdict(list)
     for word in words:
         source_blocks[word.block_no].append(word)
@@ -437,33 +479,100 @@ def inspect_published_door_schedule(
     for block, members in source_blocks.items():
         if members and _DOOR_CODE.fullmatch(members[0].literal):
             code_blocks[members[0].literal].append(block)
+    # A native source D-code drawing/detail remains in the source universe and
+    # its exact observation ID stays audit-visible. Only authenticated TABLE
+    # membership may count towards uniqueness or an incomplete table census.
+    scoped_code_blocks=defaultdict(list)
+    for code, blocks in code_blocks.items():
+        scoped_code_blocks[code]=[
+            block for block in blocks if block in table_member_blocks
+        ] if scope.source_table_geometry_candidate_only else list(blocks)
     candidates_by_block={row.native_block_no:row for row in candidate_rows}
+    # Source schedule ROWS must not hide a second D-code word in their own
+    # native block. A first-word-only code census would falsely authenticate
+    # the original first code while silently losing the second source glyph.
+    # The real A600 contains 'D18 TO D27' in FOREIGN drawing detail block
+    # 53; it is deliberately NOT classified as a table-row competitor.
+    secondary_table_codes=defaultdict(set)
+    for block, members in source_blocks.items():
+        if block not in table_member_blocks:
+            continue
+        for member in members[1:]:
+            if _DOOR_LIKE_TOKEN.fullmatch(member.literal):
+                secondary_table_codes[block].add(member.literal)
+    # A malformed D-digit glyph (e.g. D0/D00) INSIDE a genuine table
+    # cannot disappear from the printed-table completeness proof. Genuine
+    # single-digit TABLE codes are valid; foreign DETAIL D3 remains a receipt.
+    noncanonical_table_codes={
+        word.literal for block,members in source_blocks.items()
+        if block in table_member_blocks for word in members
+        if _DOOR_LIKE_TOKEN.fullmatch(word.literal)
+        and not _DOOR_CODE.fullmatch(word.literal)
+    }
     unparsed_codes=tuple(sorted(
-        code for code, blocks in code_blocks.items()
-        if any(block not in candidates_by_block for block in blocks)
+        noncanonical_table_codes | {
+            code for code, blocks in scoped_code_blocks.items()
+            if any(block not in candidates_by_block for block in blocks)
+        } | {
+            code for competing in secondary_table_codes.values()
+            for code in competing
+        }
     ))
-    # A second D-code source block with unparseable description must not
-    # leave the first parsed block masquerading as a unique scheduled door.
     rows_with_conflicts=tuple(
         replace(row,
             status="source_schedule_row_duplicate_code_conflict",
             first_unclosed_gate="duplicate_original_source_door_rows")
-        if len(code_blocks[row.code])>1 else row
+        if len(scoped_code_blocks[row.code])>1 else
+        replace(row,
+            status="source_schedule_row_competing_native_code_conflict",
+            first_unclosed_gate="competing_native_door_code_inside_schedule_row")
+        if secondary_table_codes.get(row.native_block_no) else row
         for row in candidate_rows
     )
     rows,title_ok=_original_door_schedule_column_proof(
         words,rows_with_conflicts,
     )
+    foreign_observations=tuple(sorted(
+        word.observation_id for word in words
+        if word.block_no in foreign_detail_blocks
+        and _DOOR_CODE.fullmatch(word.literal)
+    ))
     return SourceDoorScheduleResult(
         source_sha256=published.revision.source_sha256,
         revision_id=published.revision.revision_id,
         snapshot_id=published.snapshot.snapshot_id,
         page_id=page_id,
         rows=rows,
-        all_original_source_codes=tuple(sorted(code_blocks)),
+        # The census is of ALL native SOURCE D-code words, not just
+        # first-word candidates for independently parsed schedule rows.
+        # A hidden D99 second code and separate D18-TO-D27 detail text
+        # remain visible as negative evidence to every downstream reader.
+        all_original_source_codes=tuple(sorted({
+            word.literal for word in words
+            if _DOOR_CODE.fullmatch(word.literal)
+        })),
         title_source_trusted=title_ok,
-        # The input universe may be complete but schedule row recognition
-        # must also be complete for an authoritative door *table* census.
-        complete_source_word_universe=bool(words) and not unparsed_codes,
+        # The original text observation census can be complete while some
+        # unrelated Dxx drawing DETAILS share the printed schedule's codes.
+        # A Dxx INSIDE the table without a parseable row remains unparsed.
+        complete_source_word_universe=(
+            bool(words) and scope.source_table_geometry_candidate_only
+            and title_ok and not unparsed_codes
+            # Every printed original TABLE row must be unique, not just
+            # parseable. Two source-native same-code rows are conflicting
+            # physical schedule identities even if both yield valid text.
+            # Other DETAIL Dxx words remain independently preserved above.
+            and not any(
+                row.status in (
+                    "source_schedule_row_duplicate_code_conflict",
+                    "source_schedule_row_competing_native_code_conflict",
+                )
+                for row in rows
+            )
+        ),
         unparsed_original_door_codes=unparsed_codes,
+        original_detail_code_observation_ids=foreign_observations,
+        original_table_row_scope_authenticated=(
+            scope.source_table_geometry_candidate_only and title_ok
+        ),
     )
