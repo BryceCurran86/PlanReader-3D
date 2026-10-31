@@ -142,6 +142,8 @@ def test_forged_copied_status_or_changed_original_geometry_never_reaches_issuer(
 @pytest.mark.parametrize("change", [
     {"original_floor_source_ids": ("d1i0", "d1i0", "d2i0")},
     {"original_finish_source_ids": ("d11i0", "d12i0", "d99i0")},
+    {"original_floor_page": 8},
+    {"original_floor_page": "7"},
     {"original_finish_page": True},
     {"original_finish_page": 7},
     {"source_cross_sheet_translation_pdf_pts": [78.24, 0.0]},
