@@ -28,6 +28,25 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _source_finish_element(metadata: Mapping[str, Any]) -> str:
+    """Show the exact plan code without altering the signed material family.
+
+    The signed semantic key authenticates code + family. Keep finish_system
+    equal to that family's source semantic for the GPT3 material verifier,
+    while making distinct scheduled FT codes visible in the customer element.
+    """
+    code = metadata.get("finish_code")
+    family = metadata.get("semantic_finish")
+    if any(
+        type(value) is not str or not value or value != value.strip()
+        for value in (code, family)
+    ):
+        raise MissingCommercialAuthorityError(
+            "floor-finish customer element requires an exact source finish code"
+        )
+    return f"Floor finish area ({code})"
+
+
 def _measurement_authority(quantity: QuantityEvidence) -> CommercialMeasurementAuthority:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     # A source-authenticated figured floor area requires two distinct native
@@ -179,13 +198,10 @@ def project_live_floor_finish_customer_rows(
         metadata.update(
             {
                 "section": "Internal",
-                "element": "Floor finish area",
+                "element": _source_finish_element(metadata),
                 "location": _clean(floor.room_entity_id),
                 "substrate": "Floor",
-                "finish_system": _clean(
-                    metadata.get("semantic_finish")
-                    or floor.finish_descriptor
-                ),
+                "finish_system": _clean(metadata.get("semantic_finish")),
                 "inclusion_status": "INCLUSION",
                 "row_role": "floor_area",
                 "commercial_projection_allowed": True,
