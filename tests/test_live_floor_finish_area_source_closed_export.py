@@ -208,9 +208,9 @@ def test_floor_finish_customer_distinguishes_source_codes_with_same_material_fam
         semantic_key="floor_finish_area:floor-1:FT2:tile",
         metadata={**dict(original.metadata), "finish_code": "FT2"},
     )
-    for source_quantity, expected_system in (
-        (original, "FT1 (tile)"),
-        (alternate, "FT2 (tile)"),
+    for source_quantity, expected_element in (
+        (original, "Floor finish area (FT1)"),
+        (alternate, "Floor finish area (FT2)"),
     ):
         claim = replace(
             _claim(),
@@ -225,7 +225,8 @@ def test_floor_finish_customer_distinguishes_source_codes_with_same_material_fam
         assert len(rows) == len(sealed.quantities) == 1
         assert rows[0]["quantity_family"] == "floor_finish_area"
         assert rows[0]["quantity"] == 8.64
-        assert rows[0]["finish_system"] == expected_system
+        assert rows[0]["finish_system"] == "tile"
+        assert rows[0]["element"] == expected_element
         assert verify_sealed_customer_output(
             sealed, rows
         ).verified_quantity_ids == (source_quantity.quantity_id,)
@@ -251,7 +252,8 @@ def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     assert row["quantity_status"] == "To review"
     assert row["origin"] == "AI"
     assert row["row_role"] == "floor_area"
-    assert row["finish_system"] == "FT1 (tile)"
+    assert row["finish_system"] == "tile"
+    assert row["element"] == "Floor finish area (FT1)"
 
     report = verify_sealed_customer_output(run, rows)
     assert report.valid_quantity_count == 1
@@ -564,7 +566,8 @@ def test_floor_finish_customer_projection_uses_canonical_not_physical_floor_join
     assert len(rows) == 1
     assert rows[0]["quantity_id"] == corrected.quantity_id
     assert rows[0]["location"] == floor.room_entity_id
-    assert rows[0]["finish_system"] == "FT1 (tile)"
+    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
     assert verify_sealed_customer_output(sealed, rows).verified_quantity_ids == (
         corrected.quantity_id,
     )
