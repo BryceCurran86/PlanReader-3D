@@ -83,8 +83,11 @@ jobs:
               test_path=tests/test_gpt2_native_grid_row_membership_shadow.py
               ;;
             rcp_ink)
-              approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de
-              approved_head=bd9aff98dd1bc644b14de916e8f88e8f7159cadc
+              # Current exact-head RCP shadow branch incorporates the #4136
+              # replay merge; compare to that trusted main tree, not the
+              # obsolete pre-merge base (which would include workflow paths).
+              approved_base=837befe133e89db7d5cb5878bff141e1e6d08923
+              approved_head=20c0b7e9978683ddb1e6f6490bfbfd8c2db259f6
               expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
               original_test=test_real_original_page9_native_source_rivals_if_available
               test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
