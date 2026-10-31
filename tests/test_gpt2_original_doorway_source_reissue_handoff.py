@@ -662,3 +662,103 @@ def test_selected_original_source_ids_cannot_whitelist_painted_door_gap_ink(
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=1,original_room_graph=graph,
     ) is (extra_position=="outside")
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("shape_kind", [
+    "perpendicular", "diagonal", "rectangle", "quad", "curve",
+])
+@pytest.mark.parametrize("inside_gap", [False, True])
+def test_original_gap_vetoes_crossing_ink_regardless_of_selected_ids(
+    vertical, selected, shape_kind, inside_gap,
+):
+    """A crossing native path cannot certify a physically empty door gap."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    x=35 if inside_gap else 145
+    if shape_kind=="perpendicular":
+        page.draw_line(turn((x,10)),turn((x,30)),color=(1,0,0))
+    elif shape_kind=="diagonal":
+        page.draw_line(turn((x-10,10)),turn((x+10,30)),color=(1,0,0))
+    elif shape_kind=="rectangle":
+        a,b=turn((x-2,10)),turn((x+2,30))
+        page.draw_rect(fitz.Rect(*a,*b),color=(1,0,0))
+    elif shape_kind=="quad":
+        page.draw_quad(fitz.Quad(*(
+            fitz.Point(*turn(p)) for p in (
+                (x-2,10),(x+2,10),(x-2,30),(x+2,30)
+            )
+        )),color=(1,0,0))
+    else:
+        page.draw_bezier(*(
+            turn(p) for p in (
+                (x-10,10),(x-5,15),(x+5,25),(x+10,30)
+            )
+        ),color=(1,0,0))
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(
+            f"d{i}i0" for i in range(6 if selected else 5)
+        ),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    ) is (not inside_gap)
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+def test_original_gap_boundary_touching_curve_does_not_veto(vertical):
+    """A curve leaving a doorway endpoint outward is not an interior rival."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    page.draw_bezier(*(
+        turn(p) for p in (
+            (24,20),(25,10),(30,10),(35,10)
+        )
+    ),color=(1,0,0))
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    )
