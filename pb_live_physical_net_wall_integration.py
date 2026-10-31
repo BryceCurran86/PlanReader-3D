@@ -149,18 +149,20 @@ def _selected_page_indices(
 ) -> tuple[int, ...]:
     if pages is None:
         return tuple(range(page_count))
-    selected = tuple(
-        sorted(
-            {
-                int(page)
-                for page in pages
-                if isinstance(page, int) and 0 <= int(page) < page_count
-            }
-        )
-    )
-    if not selected:
-        raise ValueError("pages must select at least one valid PDF page")
-    return selected
+    # This is the complete requested ORIGINAL source-page universe. Silently
+    # filtering an invalid member can hide a competing source sheet while
+    # retaining a plausible physical/metric quantity from the remaining ones.
+    # Reject one-shot iterables and bool (which Python treats as int), rather
+    # than coercing, truncating or choosing the valid subset.
+    if type(pages) not in (tuple, list) or not pages:
+        raise ValueError("pages must be a nonempty native PDF page sequence")
+    if any(
+        type(page) is not int or page < 0 or page >= page_count
+        for page in pages
+    ):
+        raise ValueError("pages must contain only in-range native PDF indices")
+    # Duplicate exact page IDs are idempotent, not independent evidence.
+    return tuple(sorted(set(pages)))
 
 
 def _unique_authenticated_containing_floor_plan_viewport(
