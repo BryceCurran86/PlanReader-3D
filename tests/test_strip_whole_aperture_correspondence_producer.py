@@ -73,6 +73,10 @@ def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=
         page.draw_rect(fitz.Rect(100.96, 196.0, 112.0, 199.0), color=None, fill=(1, 1, 1))
     elif label_mask == "over":        # the same rectangle moved so that it covers the low jamb stroke
         page.draw_rect(fitz.Rect(99.5, 196.0, 112.0, 199.0), color=None, fill=(1, 1, 1))
+    elif label_mask == "glass":       # beside the jamb as well, but tall enough to cover the glass lines of the strip
+        page.draw_rect(fitz.Rect(100.96, 199.5, 112.0, 201.2), color=None, fill=(1, 1, 1))
+    elif label_mask == "post":        # over an internal post of the glazing (its ticks and the glass-line ends)
+        page.draw_rect(fitz.Rect(158.5, 199.5, 163.5, 201.2), color=None, fill=(1, 1, 1))
     payload = doc.tobytes()
     doc.close()
     return payload
@@ -460,3 +464,35 @@ def test_the_rerun_is_reported_and_leaves_other_strips_decisions_untouched():
     faithful = shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True).audit(
         revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nom, other], coordinate_quantum_pt=Q)
     assert second == faithful.correspondences[1]
+
+
+# ---- a mask over the glazing is a real mask (the authority leaves glazing_strip_ids empty) -------------------------------
+@pytest.mark.parametrize("mask", ["glass", "post"])
+def test_a_late_white_rectangle_over_the_strips_glazing_is_never_withheld_whatever_the_options(mask):
+    source, published = _publish(_window_pdf(label_mask=mask))
+    nom = _nomination(source, published)
+    for options in ({}, {"withhold_backdrop_fills": True}, {"withhold_terminal_adjacent_fills": True},
+                    {"withhold_backdrop_fills": True, "withhold_terminal_adjacent_fills": True}):
+        out = _audit_options(source, published, nom, **options)
+        c = out.correspondences[0]
+        assert c.status is not CAND, (mask, options, c.reason_codes)
+        assert "terminal_adjacent_fill_edge_withheld" not in dict(out.stroke_counts)
+        assert shadow.TERMINAL_ADJACENT_FILL_EDGES_WITHHELD not in out.page_reason_codes
+
+
+def test_the_same_rectangle_clear_of_the_glazing_is_still_released_so_valid_glazing_survives():
+    source, published = _publish(_window_pdf(label_mask="beside"))
+    out = _audit_options(source, published, _nomination(source, published), withhold_terminal_adjacent_fills=True)
+    assert out.correspondences[0].status is CAND
+
+
+def test_the_rule_reads_the_glazing_from_the_nomination_not_from_a_record_field_the_authority_never_fills():
+    source, published = _publish(_window_pdf(label_mask="glass"))
+    nom = _nomination(source, published)
+    stripped = shadow.StripNomination(nom.strip_id, nom.axis, nom.band, nom.frame_along, nom.extent_complete,
+                                      nom.ink_ids[:1], nom.viewport if hasattr(nom, "viewport") else nom.plan_viewport_id,
+                                      nom.claims)
+    # with only one glass line nominated the other is no longer the strip's glazing: the rule cannot protect ink
+    # the nominator did not name, which is exactly why the nominated ink must be the complete strip ink
+    out = _audit_options(source, published, stripped, withhold_terminal_adjacent_fills=True)
+    assert out.correspondences[0].status is ABST

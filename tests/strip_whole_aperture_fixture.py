@@ -53,12 +53,14 @@ def nomination(frame=(100.0, 304.0), band=(197.0, 203.0), *, axis="H", ink=INK, 
                                   tuple(claims))
 
 
-def inventory(ink=INK, *, extra=(), complete=True, boxes=(), unadmitted=(), admitted_ink=(), reasons=()):
+def inventory(ink=INK, *, extra=(), complete=True, boxes=(), unadmitted=(), admitted_ink=(), reasons=(), fills=(),
+              ink_by_id=None):
     """`boxes` are stroked unadmitted ink of unreadable paint order (they always block); `unadmitted` and
     `admitted_ink` are InkItem records with a paint order."""
     items = tuple(shadow.InkItem(tuple(b), None, True) for b in boxes) + tuple(unadmitted)
     return shadow.StrokeInventory(complete, frozenset(tuple(ink) + tuple(extra)), tuple(admitted_ink), items,
-                                  (("stroked", len(tuple(ink)) + len(tuple(extra))),), tuple(reasons))
+                                  (("stroked", len(tuple(ink)) + len(tuple(extra))),), tuple(reasons), tuple(fills),
+                                  dict(ink_by_id or {}))
 
 
 def evaluate(nominations, records, subs=(), inv=None, *, own=OWN, quantum=Q, **kw):
@@ -113,5 +115,7 @@ def transform(scenario, *, scale=1.0, along=0.0, across=0.0, swap_axes=False):
     new_subs = [replace(s, axis=axis(s.axis), subdivision_span_along=_map_pair(s.subdivision_span_along, scale, along))
                 for s in subs]
     new_inv = replace(inv, unadmitted_ink=tuple(replace(i, box=box(i.box)) for i in inv.unadmitted_ink),
-                      admitted_ink=tuple(replace(i, box=box(i.box)) for i in inv.admitted_ink))
+                      admitted_ink=tuple(replace(i, box=box(i.box)) for i in inv.admitted_ink),
+                      fills=tuple(replace(f, box=box(f.box)) for f in inv.fills),
+                      ink_by_id={k: replace(v, box=box(v.box)) for k, v in inv.ink_by_id.items()})
     return new_noms, new_records, new_subs, new_inv

@@ -61,6 +61,15 @@ New files only: `pb_callout_strip_whole_aperture_correspondence_shadow.py`, test
   second run of the unchanged authority, and the second run's readings (which can include readings that only exist
   because of the withholding) are checked the same way; a failed check keeps the faithful decision. The scope is the
   strip's own readings, so a fill that does cover another wall's jamb elsewhere on the page does not block it.
+  What a reading rests on is its terminal jambs, its host faces, **the nominated strip's own ink** (the authority
+  leaves `glazing_strip_ids` empty, so the glazing is the nominator's ink ids) and the members of the posts it
+  discriminated; a post that cannot be resolved is unknown ink. Both coverage checks (before and after the second
+  run) use that one definition. Reproduced defect, fixed: a late white rectangle that covers the strip's glass lines
+  and sits beside a jamb used to be withheld and the strip became CANDIDATE.
+- Independently of both options, an admitted unstroked fill that is painted at or after (or at an unreadable position
+  relative to) a stroke of the strip's own ink that its extent touches stops the correspondence
+  (`strip_ink_possibly_covered_by_a_later_fill`): such a fill can hide the glazing even when none of its edges is near
+  a terminal. A backdrop painted before the ink never blocks.
 - Relations: `equal_extent`, `nested_inside_strip_extent`, `contains_strip_extent`, `partly_overlaps_strip_extent`,
   each with the record's own status and reasons, shared ink by observation id, and `end_offsets` (diagnostic only).
 - Decision: CANDIDATE only when exactly one equal-extent reading is structurally proven (jamb and wall continuity
@@ -130,7 +139,24 @@ by paint order); (3) nested pane readings are set aside only where the authority
 ends. Beyond the whole aperture: physical opening existence, host wall and the `type_mark` for the opening, then
 the issuer, which needs the separate authority-promotion review. None of these is changed here.
 
-## 5. Benchmark observations that must not influence implementation
+## 5. Handoff into the existing opening path (what the existing stack does with these two strips)
+
+Read from the structural assessment shadow on merged main with the producer's faithful inventory (no withholding;
+that shadow re-derives from the producer and cannot take a filtered inventory): for both nominated strips the
+existing `PhysicalOpeningAuthority` returns only **fragments**: many `jamb_bounded_two_face_interruption` candidates,
+some `corroborated` and many `contested`, none spanning the strip's whole extent, with
+`ambiguous_physical_opening_candidates`, `strip_fragments_only_no_whole_extent_candidate` and
+`original_terminal_paint_structural_role_unproven`. So the first failing gate of the existing path for a multi-panel
+window is that its candidate enumeration never forms the whole-extent candidate, not that a measurement is missing.
+The whole-extent reading this module relates to a strip comes from `StructuralWholeOpeningApertureProducer`, whose own
+`filter_opening_candidates` only removes post-only candidates and is not wired anywhere. Removing this gate needs: a
+whole-extent candidate (terminal jambs, host faces, the strip's ink) presented to the existing
+`PhysicalOpeningAuthority.prove_existence` so its own rules decide existence, then the existing host binding, and a
+`type_mark` for the opening that `pb_live_physical_opening_void_composition` can read (it takes it from schedule /
+plan-tag binding, which cannot see a tag drawn outside the strip). Each of those is an existing authority's seam and a
+change to commercial output, so it needs the separate authority-promotion review; this module adds none of it.
+
+## 6. Benchmark observations that must not influence implementation
 
 None were used. No tag, project, file, page number, expected quantity or tolerance derived from a benchmark appears
 in the module or the unit tests; the original-source test takes every parameter from the environment and asserts

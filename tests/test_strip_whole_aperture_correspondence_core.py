@@ -545,3 +545,42 @@ def test_each_relation_reports_how_far_its_ends_are_from_the_strip_without_using
     offsets = {r.record_id: r.end_offsets for r in c.relations}
     assert offsets["near-miss"] == (0.96, 0.0) and offsets[whole.record_id] == (0.0, 0.0)
     assert c.status is CONF and shadow.NESTED_APERTURES_NOT_VETOED in c.reason_codes
+
+
+# ---- a later fill over the strip's own ink --------------------------------------------------------------------------------
+def _strip_ink_inventory(fill, *, ink_sequence=10, ink_boxes=None):
+    boxes = ink_boxes or {"g1": (120.0, 200.0, 160.0, 200.0), "g2": (120.0, 200.72, 160.0, 200.72), "t1": (160.0, 200.0, 160.0, 200.72)}
+    items = {i: shadow.InkItem(b, ink_sequence, True) for i, b in boxes.items()}
+    return inventory(fills=[fill] if fill is not None else [], ink_by_id=items)
+
+
+def test_an_admitted_fill_painted_after_the_strip_glazing_it_touches_stops_the_correspondence():
+    fill = shadow.FillPath(3, 50, (130.0, 199.5, 140.0, 201.0))
+    c = one(nomination(), [record((100.0, 304.0))], inv=_strip_ink_inventory(fill))
+    assert c.status is ABST and shadow.STRIP_INK_POSSIBLY_COVERED_BY_FILL in c.reason_codes
+
+
+@pytest.mark.parametrize("fill, ink_sequence, blocks", [
+    (shadow.FillPath(3, 5, (130.0, 199.5, 140.0, 201.0)), 10, False),      # a backdrop: painted before the glazing
+    (shadow.FillPath(3, 10, (130.0, 199.5, 140.0, 201.0)), 10, True),      # same position: it may cover it
+    (shadow.FillPath(3, None, (130.0, 199.5, 140.0, 201.0)), 10, True),    # unreadable position of the fill
+    (shadow.FillPath(3, 50, (130.0, 199.5, 140.0, 201.0)), None, True),    # unreadable position of the ink
+    (shadow.FillPath(3, 50, (130.0, 190.0, 140.0, 196.0)), 10, False),     # nowhere near the strip ink
+    (shadow.FillPath(3, 50, (130.0, 201.0, 140.0, 204.0)), 10, False),     # 0.28 pt clear of the lower glass line
+])
+def test_only_a_fill_that_is_after_and_touches_the_strip_ink_blocks(fill, ink_sequence, blocks):
+    c = one(nomination(), [record((100.0, 304.0))], inv=_strip_ink_inventory(fill, ink_sequence=ink_sequence))
+    assert (c.status is ABST) is blocks
+    assert (shadow.STRIP_INK_POSSIBLY_COVERED_BY_FILL in c.reason_codes) is blocks
+
+
+def test_without_fill_information_there_is_nothing_to_check():
+    assert one(nomination(), [record((100.0, 304.0))], inv=inventory()).status is CAND
+
+
+def test_the_covered_ink_decision_is_invariant_under_translation_turn_and_scale():
+    fill = shadow.FillPath(3, 50, (130.0, 199.5, 140.0, 201.0))
+    base = ([nomination()], [record((100.0, 304.0))], [], _strip_ink_inventory(fill))
+    for kwargs in ({"along": 500.0}, {"across": -20.0}, {"scale": 2.0}, {"swap_axes": True}):
+        moved = transform(base, **kwargs)
+        assert signature(evaluate(*moved, quantum=Q * kwargs.get("scale", 1.0))) == signature(evaluate(*base))

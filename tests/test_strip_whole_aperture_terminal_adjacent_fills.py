@@ -178,3 +178,66 @@ def test_without_readings_or_withheld_paths_nothing_can_be_covered():
     readings, ink_by_id, _, fills = scenario()
     assert may_cover([], {7}, ink_by_id, fills) is False
     assert may_cover(readings, set(), ink_by_id, fills) is False
+
+
+# ---- the strip's own glazing and the discriminated posts are part of what a reading rests on --------------------------------
+from strip_whole_aperture_fixture import sub  # noqa: E402
+
+
+def test_the_nominated_strip_ink_is_protected_even_though_the_reading_names_no_glazing():
+    readings, ink_by_id, paths, fills = scenario()
+    readings = [replace(readings[0], glazing_strip_ids=())]
+    ink_by_id["strip-line"] = ink((100.5, 199.0, 160.0, 199.0), 23)
+    fills[7] = shadow.FillPath(7, 90, (100.96, 198.5, 112.0, 199.5))          # covers the strip line, painted after it
+    assert adjacent(readings, ink_by_id, paths, fills) == {7}                  # without the support ids it is released
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, support_ids={"strip-line"}) == frozenset()
+
+
+def test_strip_ink_painted_after_the_fill_is_on_top_of_it():
+    readings, ink_by_id, paths, fills = scenario()
+    ink_by_id["strip-line"] = ink((100.5, 199.0, 160.0, 199.0), 95)
+    fills[7] = shadow.FillPath(7, 90, (100.96, 198.5, 112.0, 199.5))
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, support_ids={"strip-line"}) == {7}
+
+
+def test_strip_ink_the_inventory_does_not_know_is_never_assumed_uncovered():
+    readings, ink_by_id, paths, fills = scenario()
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, support_ids={"never-seen"}) == frozenset()
+
+
+def test_the_members_of_a_discriminated_post_are_protected():
+    readings, ink_by_id, paths, fills = scenario()
+    readings = [replace(readings[0], discriminated_subdivision_ids=("post-1",))]
+    post = replace(sub((160.0, 162.0), sid="post-1"), member_observation_ids=("post-tick",))
+    ink_by_id["post-tick"] = ink((160.0, 200.0, 160.0, 200.72), 30)
+    covered = (155.0, 199.0, 163.0, 201.0)
+    fills[7] = shadow.FillPath(7, 90, covered)
+    kwargs = {"subdivisions_by_id": {"post-1": post}}
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, **kwargs) == frozenset()
+    fills[7] = shadow.FillPath(7, 90, FILL_BOX)
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, **kwargs) == {7}
+
+
+def test_a_discriminated_post_the_caller_cannot_resolve_keeps_the_fill():
+    readings, ink_by_id, paths, fills = scenario()
+    readings = [replace(readings[0], discriminated_subdivision_ids=("post-unknown",))]
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ) == frozenset()
+    assert shadow.terminal_adjacent_fill_paths(readings, ink_by_id, paths, fills, EQ, subdivisions_by_id={}) == frozenset()
+
+
+def test_the_second_run_check_uses_the_same_notion_of_what_a_reading_rests_on():
+    readings, ink_by_id, _, fills = scenario()
+    readings = [replace(readings[0], glazing_strip_ids=())]
+    ink_by_id["strip-line"] = ink((100.5, 199.0, 160.0, 199.0), 23)
+    fills[7] = shadow.FillPath(7, 90, (100.96, 198.5, 112.0, 199.5))
+    assert shadow.withheld_fills_may_cover(readings, {7}, ink_by_id, fills, EQ) is False
+    assert shadow.withheld_fills_may_cover(readings, {7}, ink_by_id, fills, EQ, support_ids={"strip-line"}) is True
+    unresolved = [replace(readings[0], discriminated_subdivision_ids=("post-unknown",))]
+    assert shadow.withheld_fills_may_cover(unresolved, {7}, ink_by_id, fills, EQ) is True
+
+
+def test_subdivisions_that_share_an_id_resolve_to_neither():
+    a, b = sub((160.0, 162.0), sid="dup"), sub((200.0, 202.0), sid="dup")
+    c = sub((230.0, 232.0), sid="solo")
+    assert set(shadow._subdivisions_by_id([a, b, c])) == {"solo"}
+    assert shadow._subdivisions_by_id([a, a]) == {"dup": a}

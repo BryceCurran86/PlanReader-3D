@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -78,6 +78,7 @@ STRIP_NOMINATION_INVALID = "strip_nomination_invalid"
 STRIP_EXTENT_INCOMPLETE = "strip_extent_incomplete"
 STRIP_CLAIMED_BY_MULTIPLE_CALLOUTS = "strip_claimed_by_multiple_callouts"
 STRIP_INK_NOT_IN_STROKE_INVENTORY = "strip_ink_not_in_stroke_inventory"
+STRIP_INK_POSSIBLY_COVERED_BY_FILL = "strip_ink_possibly_covered_by_a_later_fill"
 UNADMITTED_INK_IN_STRIP_REGION = "unadmitted_source_ink_in_strip_region"
 PAGE_STROKE_INVENTORY_INCOMPLETE = "page_stroke_inventory_incomplete"
 APERTURE_RECORD_OWNERSHIP_MISMATCH = "aperture_record_ownership_mismatch"
@@ -173,6 +174,8 @@ class StrokeInventory:
     unadmitted_ink: tuple[InkItem, ...]
     counts: tuple[tuple[str, int], ...]
     reason_codes: tuple[str, ...] = ()
+    fills: tuple = ()                                   # FillPath of every unstroked path the producer fully admitted
+    ink_by_id: dict = field(default_factory=dict)       # InkItem of every admitted observation, by observation id
 
 
 # --------------------------------------------------------------------------------------
@@ -395,6 +398,20 @@ def _vetoing_subdivisions(record, equal, subdivisions_by_id, ownership, eq: floa
     return tuple(sorted(set(used)))
 
 
+def _strip_ink_possibly_covered(nom: StripNomination, inventory: StrokeInventory, eq: float) -> bool:
+    """True when an admitted unstroked fill is painted at or after (or at an unreadable position) a stroke of the
+    strip's own ink that its extent touches: that fill can hide the glazing the correspondence is about, whether or
+    not its edges sit near a terminal. Fills painted before the strip ink (a backdrop) never block."""
+    ink = [inventory.ink_by_id[i] for i in nom.ink_ids if i in inventory.ink_by_id]
+    for fill in inventory.fills:
+        for member in ink:
+            if member.stroked and _touches(member.box, fill.box, eq) and (
+                    type(fill.sequence) is not int or type(member.sequence) is not int
+                    or member.sequence <= fill.sequence):
+                return True
+    return False
+
+
 def _in_region(item: InkItem, axis: str, along, across, eq: float) -> bool:
     x0, y0, x1, y1 = item.box
     box_along, box_across = ((x0, x1), (y0, y1)) if axis == "H" else ((y0, y1), (x0, x1))
@@ -457,6 +474,8 @@ def correspond_strip(
         blockers.append((ABST, PAGE_STROKE_INVENTORY_INCOMPLETE))
     if not set(nom.ink_ids) <= inventory.admitted_observation_ids:
         blockers.append((ABST, STRIP_INK_NOT_IN_STROKE_INVENTORY))
+    elif _strip_ink_possibly_covered(nom, inventory, eq):
+        blockers.append((ABST, STRIP_INK_POSSIBLY_COVERED_BY_FILL))
 
     related = []
     for record in records:
@@ -652,16 +671,50 @@ def backdrop_fill_paths(fills: Sequence[FillPath], strokes: Sequence[InkItem], e
     return frozenset(result)
 
 
-def terminal_adjacent_fill_paths(readings, ink_by_id, fill_path_by_id, fills_by_path, eq: float) -> frozenset:
+def _reading_rest_ids(reading, support_ids, subdivisions_by_id):
+    """Every observation a reading rests on, and whether a reference to ink could not be resolved.
+
+    The aperture authority leaves `glazing_strip_ids` empty, so the glazing a reading is about is the nominated
+    strip's own ink (`support_ids`); the posts it discriminated are the members of its discriminated subdivisions.
+    A discriminated subdivision the caller cannot resolve is unknown ink."""
+    rest = (set(reading.terminal_jamb_lo_ids) | set(reading.terminal_jamb_hi_ids) | set(reading.host_face_ids)
+            | set(reading.glazing_strip_ids) | set(support_ids))
+    unresolved = False
+    for subdivision_id in reading.discriminated_subdivision_ids:
+        subdivision = (subdivisions_by_id or {}).get(subdivision_id)
+        if subdivision is None:
+            unresolved = True
+        else:
+            rest |= set(subdivision.member_observation_ids)
+    return rest, unresolved
+
+
+def _fill_may_cover(fill, rest_ids, ink_by_id, eq: float) -> bool:
+    """True when the fill is unproven or could hide any stroke of `rest_ids` (touched by it, painted before it)."""
+    if fill is None or type(fill.sequence) is not int:
+        return True
+    for i in rest_ids:
+        member = ink_by_id.get(i)
+        if member is None:
+            return True                   # ink the inventory does not know cannot be shown to be uncovered
+        if member.stroked and _touches(member.box, fill.box, eq) and (
+                type(member.sequence) is not int or member.sequence <= fill.sequence):
+            return True
+    return False
+
+
+def terminal_adjacent_fill_paths(readings, ink_by_id, fill_path_by_id, fills_by_path, eq: float, *,
+                                 support_ids=(), subdivisions_by_id=None) -> frozenset:
     """Fill paths whose edge sits in a reading's terminal set although the fill covers nothing that reading rests on.
 
     The aperture authority pools every stroke within its snap distance of a terminal station, so an unstroked fill
     edge that merely lies near a jamb is counted as an uncertain jamb stroke. That doubt is real only if the fill
-    can hide something the reading rests on: its terminal jambs, its host faces or its glazing. A fill is
-    terminal-adjacent only when, for EVERY reading whose terminal set holds one of its edges, no stroke of that
-    reading's terminal / host / glazing ink is both touched by the fill's extent and painted before it (or at an
-    unreadable position). A fill with an unproven extent or position, or one that touches ink the inventory does
-    not know, is never terminal-adjacent. Uses only extents, content-stream positions and the readings' own ids."""
+    can hide something the reading rests on: its terminal jambs, its host faces, the glazing it is about (the
+    nominated strip's ink, `support_ids`) or the posts it discriminated. A fill is terminal-adjacent only when, for
+    EVERY reading whose terminal set holds one of its edges, no stroke of that ink is both touched by the fill's
+    extent and painted before it (or at an unreadable position). A fill with an unproven extent or position, or
+    one next to ink the inventory or the subdivision list does not know, is never terminal-adjacent. Uses only
+    extents, content-stream positions and the readings' own ids."""
     candidates: set[int] = set()
     harmful: set[int] = set()
     for reading in readings:
@@ -669,45 +722,39 @@ def terminal_adjacent_fill_paths(readings, ink_by_id, fill_path_by_id, fills_by_
         here = {fill_path_by_id[i] for i in terminals if i in fill_path_by_id}
         if not here:
             continue
-        rest_ids = set(terminals) | set(reading.host_face_ids) | set(reading.glazing_strip_ids)
-        unknown = any(i not in ink_by_id for i in rest_ids)
-        rest = [ink_by_id[i] for i in rest_ids if i in ink_by_id and ink_by_id[i].stroked]
+        rest_ids, unresolved = _reading_rest_ids(reading, support_ids, subdivisions_by_id)
         for path_index in here:
             candidates.add(path_index)
-            fill = fills_by_path.get(path_index)
-            if fill is None or type(fill.sequence) is not int or unknown:
+            if unresolved or _fill_may_cover(fills_by_path.get(path_index), rest_ids, ink_by_id, eq):
                 harmful.add(path_index)
-                continue
-            for member in rest:
-                if _touches(member.box, fill.box, eq) and (
-                        type(member.sequence) is not int or member.sequence <= fill.sequence):
-                    harmful.add(path_index)
-                    break
     return frozenset(candidates - harmful)
 
 
-def withheld_fills_may_cover(readings, paths, ink_by_id, fills_by_path, eq: float) -> bool:
+def withheld_fills_may_cover(readings, paths, ink_by_id, fills_by_path, eq: float, *,
+                             support_ids=(), subdivisions_by_id=None) -> bool:
     """True when a withheld fill could hide ink that one of these readings rests on (so the withholding is refused).
 
     Applied to the readings of the SECOND run, which can contain readings the first run did not: a reading that only
-    exists because a fill was withheld must not rest on ink that the fill covers."""
+    exists because a fill was withheld must not rest on ink that the fill covers. It uses the same notion of what a
+    reading rests on as `terminal_adjacent_fill_paths`, including the strip's glazing and the posts' members."""
     for reading in readings:
-        rest_ids = (set(reading.terminal_jamb_lo_ids) | set(reading.terminal_jamb_hi_ids)
-                    | set(reading.host_face_ids) | set(reading.glazing_strip_ids))
-        for i in rest_ids:
-            member = ink_by_id.get(i)
-            if member is None:
-                return True               # ink the inventory does not know cannot be shown to be uncovered
-            if not member.stroked:
-                continue
-            for path_index in paths:
-                fill = fills_by_path.get(path_index)
-                if fill is None or type(fill.sequence) is not int:
-                    return True
-                if _touches(member.box, fill.box, eq) and (
-                        type(member.sequence) is not int or member.sequence <= fill.sequence):
-                    return True
+        rest_ids, unresolved = _reading_rest_ids(reading, support_ids, subdivisions_by_id)
+        if unresolved:
+            return True
+        for path_index in paths:
+            if _fill_may_cover(fills_by_path.get(path_index), rest_ids, ink_by_id, eq):
+                return True
     return False
+
+
+def _subdivisions_by_id(subdivisions) -> dict:
+    """Subdivisions by id; an id that names two different subdivisions resolves to neither."""
+    found: dict = {}
+    clashing: set = set()
+    for subdivision in subdivisions:
+        if found.setdefault(subdivision.record_id, subdivision) != subdivision:
+            clashing.add(subdivision.record_id)
+    return {k: v for k, v in found.items() if k not in clashing}
 
 
 def _sequence(segment) -> Optional[int]:
@@ -910,9 +957,10 @@ class StripWholeApertureCorrespondenceShadow:
             counts["backdrop_fill_edge_withheld"] = len(strokes) - len(kept)
             page_reasons.append(BACKDROP_FILL_EDGES_WITHHELD)
         provenance = _PROVENANCE_BY_OPTIONS[(self._withhold, self._withhold_adjacent)]
+        ink_by_id = {stroke.observation_id: item for stroke, _, item in aligned}
         inventory = StrokeInventory(
             complete, frozenset(stroke.observation_id for stroke in kept), tuple(admitted_ink), tuple(unadmitted),
-            tuple(sorted(counts.items())), tuple(reasons))
+            tuple(sorted(counts.items())), tuple(reasons), tuple(fills_by_path.values()), ink_by_id)
         receipt = evaluate_whole_aperture_correspondence(
             ownership, nominations, discovered, authority.all_discriminated_subdivisions(), inventory,
             coordinate_quantum_pt=coordinate_quantum_pt, page_reason_codes=page_reasons, input_provenance=provenance)
@@ -921,7 +969,6 @@ class StripWholeApertureCorrespondenceShadow:
 
         # A fill edge pooled into a terminal set by the authority's snap distance is withheld for a strip only when it
         # covers nothing that any reading related to THAT strip rests on, and the second run is checked the same way.
-        ink_by_id = {stroke.observation_id: item for stroke, _, item in aligned}
         fill_path_by_id = {stroke.observation_id: path for stroke, path, _ in aligned if path is not None}
         correspondences = list(receipt.correspondences)
         out_reasons = set(receipt.page_reason_codes)
@@ -931,7 +978,10 @@ class StripWholeApertureCorrespondenceShadow:
             if not _valid_nomination(nomination):
                 continue
             related = [reading for reading in discovered if _classify(reading, nomination, eq) is not None]
-            adjacent = terminal_adjacent_fill_paths(related, ink_by_id, fill_path_by_id, fills_by_path, eq) - backdrop
+            support = set(nomination.ink_ids)
+            adjacent = terminal_adjacent_fill_paths(
+                related, ink_by_id, fill_path_by_id, fills_by_path, eq, support_ids=support,
+                subdivisions_by_id=_subdivisions_by_id(authority.all_discriminated_subdivisions())) - backdrop
             if not adjacent:
                 continue
             if reruns >= _MAX_RERUNS:
@@ -940,7 +990,8 @@ class StripWholeApertureCorrespondenceShadow:
             reruns += 1
             kept2, discovered2, authority2 = analyse(backdrop | adjacent)
             related2 = [reading for reading in discovered2 if _classify(reading, nomination, eq) is not None]
-            if withheld_fills_may_cover(related2, adjacent, ink_by_id, fills_by_path, eq):
+            if withheld_fills_may_cover(related2, adjacent, ink_by_id, fills_by_path, eq, support_ids=support,
+                                        subdivisions_by_id=_subdivisions_by_id(authority2.all_discriminated_subdivisions())):
                 out_reasons.add(WITHHELD_FILL_MAY_COVER_READING_INPUT)
                 continue
             second = evaluate_whole_aperture_correspondence(
