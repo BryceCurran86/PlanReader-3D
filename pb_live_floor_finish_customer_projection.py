@@ -28,12 +28,12 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
-def _source_finish_system(metadata: Mapping[str, Any]) -> str:
-    """Keep the original finish code visible in the customer material field.
+def _source_finish_element(metadata: Mapping[str, Any]) -> str:
+    """Show the exact plan code without altering the signed material family.
 
-    'tile' alone loses the distinction between FT2, FT3, etc. The source
-    sealer has already authenticated both tokens; this output formatter must
-    never invent a code or normalize an imported alias.
+    The signed semantic key authenticates code + family. Keep finish_system
+    equal to that family's source semantic for the GPT3 material verifier,
+    while making distinct scheduled FT codes visible in the customer element.
     """
     code = metadata.get("finish_code")
     family = metadata.get("semantic_finish")
@@ -42,9 +42,9 @@ def _source_finish_system(metadata: Mapping[str, Any]) -> str:
         for value in (code, family)
     ):
         raise MissingCommercialAuthorityError(
-            "floor-finish customer material requires an exact source finish code"
+            "floor-finish customer element requires an exact source finish code"
         )
-    return f"{code} ({family})"
+    return f"Floor finish area ({code})"
 
 
 def _measurement_authority(quantity: QuantityEvidence) -> CommercialMeasurementAuthority:
@@ -198,10 +198,10 @@ def project_live_floor_finish_customer_rows(
         metadata.update(
             {
                 "section": "Internal",
-                "element": "Floor finish area",
+                "element": _source_finish_element(metadata),
                 "location": _clean(floor.room_entity_id),
                 "substrate": "Floor",
-                "finish_system": _source_finish_system(metadata),
+                "finish_system": _clean(metadata.get("semantic_finish")),
                 "inclusion_status": "INCLUSION",
                 "row_role": "floor_area",
                 "commercial_projection_allowed": True,
