@@ -88,6 +88,8 @@ JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
 LAYERED_FACES_OF_ONE_GAP = "layered_faces_of_one_gap"
 SEEDED_OPENING_INK_UNACCOUNTED = "unaccounted_source_ink_inside_seeded_opening"
 SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP = "wall_face_continues_inside_seeded_opening_gap"
+SEEDED_COMPETING_LAYER_UNRESOLVED = "seeded_competing_layer_with_wall_face_stub_unresolved"
+SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER = "seeded_opening_ink_role_asserted_only_by_caller"
 RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
 RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION = (
     "raster_door_swing_wall_band_interruption"
@@ -808,6 +810,34 @@ def _merge_layered_structures(
                 tuple(code for c in group for code in c.reason_codes), (LAYERED_FACES_OF_ONE_GAP,)),
         ))
     return tuple(sorted(merged, key=lambda c: c.candidate_id))
+
+
+def _seeded_rival_layer_atoms(
+    observation: SourceObservationRecord,
+    rivals: Sequence[tuple[CandidateSemanticOpening, Sequence[str]]],
+) -> tuple[EvidenceAtom, ...]:
+    """One typed opposing atom per structure the seeded proof set aside because of a wall-face stub.
+
+    A set-aside structure is a competing reading of the same opening, not a disproved one: no producer authenticates
+    whether the stub is wall or window-frame linework, so the atom says the role is unresolved. It carries the
+    structure's lines and the stub lines, and is a CANDIDATE that only opposes; it closes nothing."""
+    from pb_wall_room_topology_typed_negative_evidence import KIND_UNKNOWN, POLARITY_OPPOSING
+
+    atoms = []
+    for structure, stub_ids in sorted(rivals, key=lambda row: row[0].candidate_id):
+        metadata = dict(
+            revision_id=observation.revision_id, source_sha256=observation.source_sha256,
+            snapshot_id=observation.snapshot_id, polarity=POLARITY_OPPOSING,
+            rival_candidate_id=structure.candidate_id,
+            source_observation_ids=tuple(sorted(structure.source_observation_ids)),
+            opposing_observation_ids=tuple(sorted(str(i) for i in stub_ids)),
+            role_status="unresolved_no_producer_authenticated_role")
+        atoms.append(EvidenceAtom(
+            evidence_id=stable_contract_id("seeded_competing_layer_stub", metadata, digest_chars=32),
+            document_id=observation.document_id, page_id=str(observation.page_id), kind=KIND_UNKNOWN,
+            method="seeded_existence_interior_stub_rule", status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=(SEEDED_COMPETING_LAYER_UNRESOLVED,), metadata=metadata))
+    return tuple(atoms)
 
 
 def _seeded_ink_checks(
@@ -4301,10 +4331,13 @@ class PhysicalOpeningAuthority:
         predicates, layered faces of one gap merged) and then to everything the restricted universe left out:
         a structure with a face stub strictly inside its gap is dropped before layers are merged (the six-line
         enumerator's own negative evidence, with its own definition of a stub), and any other visible line inside
-        the gap and between the outermost faces must be named in ``accounted_observation_ids`` or the proof abstains. Wall-face
-        ink that continues into the gap (anchored at a jamb, jamb to jamb, or in several segments) is refused on any face
-        of the opening, outer or shared, and naming it does not excuse it: only ink that is not on a wall face (glazing,
-        mullions) can be accounted for, and only by an observation the producer authenticated on this snapshot and page.
+        the gap and between the outermost faces makes the proof abstain: unnamed, it is unaccounted ink, and named in
+        ``accounted_observation_ids`` it is still only a caller's assertion about its role, which cannot grant it
+        (``seeded_opening_ink_role_asserted_only_by_caller``); a producer-authenticated role is required and does not
+        exist yet. Wall-face ink that continues into the gap (anchored at a jamb, jamb to jamb, or in several segments)
+        is refused on any face of the opening, outer or shared. A structure set aside because of a face stub is a
+        competing reading, not a disproved one: it is returned as a typed opposing atom
+        (``opposing_evidence_atoms``, role unresolved) and the proof cannot certify a unique opening beside it.
         Viewport scope, annotation opposition and geometry identity are the ones ``prove_existence`` applies; a plain
         opening yields the identical existence record unless it has such ink, which this proof alone refuses. No memo is read or written. Nothing in the repository calls this method: wiring it to a
         consumer, and whether a caller may name members at all (the producer-owned authority is designed so that
@@ -4335,31 +4368,45 @@ class PhysicalOpeningAuthority:
         observation = source_result.observation
         found = self._visible_structural_candidates(observation, restricted)
         survivors = []
+        rivals = []
         for structure in found:
             own_frame = _structure_frame(structure.source_observation_ids, by_id)
             own_stubs = (_seeded_ink_checks(own_frame, frozenset(structure.source_observation_ids), frozenset(), records)[0]
-                         if own_frame is not None else ("unreadable",))
-            if not own_stubs:
+                         if own_frame is not None else ())
+            if own_frame is not None and not own_stubs:
                 survivors.append(structure)
+            else:
+                rivals.append((structure, own_stubs))
+        rival_atoms = _seeded_rival_layer_atoms(observation, rivals)
+
+        def refuse(reasons, **extra):
+            # a set-aside structure is a plausible competing reading of the same opening: it stays in the answer
+            codes = tuple(reasons) + ((SEEDED_COMPETING_LAYER_UNRESOLVED,) if rivals and survivors else ())
+            return unresolved(source_result, codes, opposing_evidence_atoms=rival_atoms, **extra)
+
         if found and not survivors:
-            return unresolved(source_result, (SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,))
+            return refuse((SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,))
         structures = _merge_layered_structures(tuple(survivors), by_id)
         if len(structures) > 1:
-            return unresolved(source_result, (AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
-                              status=EvidenceResolutionStatus.CONFLICT)
+            return refuse((AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,), status=EvidenceResolutionStatus.CONFLICT)
         containing = [c for c in structures if observation.observation_id in c.source_observation_ids]
         if len(containing) != 1:
-            return unresolved(source_result, (VISIBLE_WALL_CONTINUATION_REQUIRED,))
+            return refuse((VISIBLE_WALL_CONTINUATION_REQUIRED,))
         candidate = containing[0]
         frame = _structure_frame(candidate.source_observation_ids, by_id)
         if frame is None:
-            return unresolved(source_result, (INVALID_STRUCTURAL_GEOMETRY,), candidate=candidate)
-        stubs, unaccounted, continuing = _seeded_ink_checks(
-            frame, frozenset(candidate.source_observation_ids), accounted, records)
+            return refuse((INVALID_STRUCTURAL_GEOMETRY,), candidate=candidate)
+        stubs, interior, continuing = _seeded_ink_checks(
+            frame, frozenset(candidate.source_observation_ids), frozenset(), records)
         if stubs or continuing:
-            return unresolved(source_result, (SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,), candidate=candidate)
-        if unaccounted:
-            return unresolved(source_result, (SEEDED_OPENING_INK_UNACCOUNTED,), candidate=candidate)
+            return refuse((SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,), candidate=candidate)
+        if any(i not in accounted for i in interior):
+            return refuse((SEEDED_OPENING_INK_UNACCOUNTED,), candidate=candidate)
+        if interior:
+            # the caller's naming only says which lines it knows about; it cannot make them glazing
+            return refuse((SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,), candidate=candidate)
+        if rivals:
+            return refuse((), candidate=candidate)
         if self._source_visibility_producer is not None:
             from pb_physical_opening_viewport_scope_authority import (
                 classify_opening_candidate_viewport_scopes,
@@ -4968,6 +5015,8 @@ __all__ = [
     "LAYERED_FACES_OF_ONE_GAP",
     "SEEDED_OPENING_INK_UNACCOUNTED",
     "SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP",
+    "SEEDED_COMPETING_LAYER_UNRESOLVED",
+    "SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER",
     "MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY",
     "OPENING_JAMB_BOUNDARY_KIND",
     "PHYSICAL_OPENING_EXISTS",

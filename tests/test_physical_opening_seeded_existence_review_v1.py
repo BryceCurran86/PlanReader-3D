@@ -12,6 +12,7 @@ import pytest
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
     LAYERED_FACES_OF_ONE_GAP,
+    SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,
     SEEDED_OPENING_INK_UNACCOUNTED,
     SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,
     _merge_layered_structures,
@@ -186,15 +187,18 @@ def test_a_plain_opening_with_solid_face_ink_across_its_gap_is_refused_even_when
 
 
 @pytest.mark.parametrize("kw", POSES)
-def test_glazing_that_is_not_on_a_face_survives_when_named_in_every_pose(kw):
+def test_ink_just_off_a_face_is_interior_ink_not_wall_face_continuity_in_every_pose(kw):
     near_face = (((104.0, 100.4), (136.0, 100.4)), ((104.0, 109.6), (136.0, 109.6)), ((120.0, 102.0), (120.0, 108.0)))
     physical, published, ids, kw = _fixture(LAYERED + GLAZING + near_face, **kw)
     members = _ids(ids, LAYERED, kw)
     glass = _ids(ids, GLAZING + near_face, kw)
     selector = _selector(published, members[6])
     assert physical.prove_seeded_existence(selector, members).reason_codes == (SEEDED_OPENING_INK_UNACCOUNTED,)
+    # off the face by 0.4 it is not face continuity (that would be refused whatever is named); it is interior ink whose
+    # role only a producer could grant, so naming it ends in the caller-asserted-role abstention, never a record
     named = physical.prove_seeded_existence(selector, members, glass)
-    assert named.status is CORR and LAYERED_FACES_OF_ONE_GAP in named.existence_record.structural_reason_codes
+    assert named.status is ABST and named.existence_record is None
+    assert named.reason_codes == (SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,)
 
 
 def _rect_fixture(*, stroke, fill):
@@ -273,4 +277,5 @@ def test_an_omitted_stroke_inside_the_gap_is_opposition_the_caller_must_name():
     glass = _ids(ids, GLAZING, kw)
     selector = _selector(published, members[4])
     assert physical.prove_seeded_existence(selector, members).reason_codes == (SEEDED_OPENING_INK_UNACCOUNTED,)
-    assert physical.prove_seeded_existence(selector, members, glass).status is CORR
+    assert physical.prove_seeded_existence(selector, members, glass).reason_codes == (
+        SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,)

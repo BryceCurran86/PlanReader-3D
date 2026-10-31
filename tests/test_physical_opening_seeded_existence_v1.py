@@ -14,6 +14,8 @@ from pb_physical_opening_authority import (
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
     LAYERED_FACES_OF_ONE_GAP,
     PHYSICAL_OPENING_EXISTS,
+    SEEDED_COMPETING_LAYER_UNRESOLVED,
+    SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,
     SEEDED_OPENING_INK_UNACCOUNTED,
     SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,
     STRUCTURAL_OPENING_EXISTENCE_RESOLVED,
@@ -183,7 +185,7 @@ def test_the_record_is_geometry_identity_so_it_does_not_depend_on_the_order_of_t
 
 
 # ---- what the restricted universe left out ----------------------------------------------------------------------------------
-def test_glazing_between_the_faces_must_be_accounted_for_by_name():
+def test_glazing_between_the_faces_is_ink_the_caller_cannot_grant_a_role_by_naming():
     physical, published, ids, kw = _fixture(LAYERED + GLAZING)
     members = _ids(ids, LAYERED, kw)
     glass = _ids(ids, GLAZING, kw)
@@ -192,9 +194,11 @@ def test_glazing_between_the_faces_must_be_accounted_for_by_name():
     assert refused.status is ABST and refused.reason_codes == (SEEDED_OPENING_INK_UNACCOUNTED,)
     assert refused.existence_record is None and refused.candidate is not None
     partly = physical.prove_seeded_existence(selector, members, glass[:1])
-    assert partly.status is ABST
+    assert partly.status is ABST and partly.reason_codes == (SEEDED_OPENING_INK_UNACCOUNTED,)
+    # naming every line only tells the proof which lines the caller knows about: a role needs a producer, not a caller
     named = physical.prove_seeded_existence(selector, members, glass)
-    assert named.status is CORR and named.existence_record.source_observation_ids == tuple(sorted(members))
+    assert named.status is ABST and named.existence_record is None and named.candidate is not None
+    assert named.reason_codes == (SEEDED_INK_ROLE_ASSERTED_ONLY_BY_CALLER,)
 
 
 SHARED_STUB = (((112.0, 105.0), (128.0, 105.0)),)           # collinear with the face both layers share
@@ -214,14 +218,17 @@ def test_a_stub_on_the_face_both_layers_share_is_refused_even_when_named(account
     assert physical.prove_seeded_existence(_selector(published, members[6]), members + stub).existence_record is None
 
 
-def test_a_stub_on_one_outer_face_drops_only_the_layer_that_face_belongs_to():
+def test_a_stub_on_one_outer_face_sets_aside_only_that_layer_but_it_stays_a_rival():
     physical, published, ids, kw = _fixture(LAYERED + SILL_STUB)
     members = _ids(ids, LAYERED, kw)
-    dropped = physical.prove_seeded_existence(_selector(published, members[6]), members)      # a jamb of the dropped layer
-    assert dropped.status is ABST and dropped.reason_codes == (VISIBLE_WALL_CONTINUATION_REQUIRED,)
-    kept = physical.prove_seeded_existence(_selector(published, members[8]), members)          # a jamb of the kept layer
-    assert kept.status is CORR and LAYERED_FACES_OF_ONE_GAP not in kept.existence_record.structural_reason_codes
-    assert not set(kept.existence_record.source_observation_ids) & {members[6], members[7]}
+    dropped = physical.prove_seeded_existence(_selector(published, members[6]), members)      # a jamb of the set-aside layer
+    assert dropped.status is ABST and dropped.reason_codes == (
+        VISIBLE_WALL_CONTINUATION_REQUIRED, SEEDED_COMPETING_LAYER_UNRESOLVED)
+    kept = physical.prove_seeded_existence(_selector(published, members[8]), members)          # a jamb of the clean layer
+    assert kept.status is ABST and kept.existence_record is None
+    assert kept.reason_codes == (SEEDED_COMPETING_LAYER_UNRESOLVED,) and len(kept.opposing_evidence_atoms) == 1
+    assert LAYERED_FACES_OF_ONE_GAP not in kept.candidate.reason_codes
+    assert not set(kept.candidate.source_observation_ids) & {members[6], members[7]}
 
 
 def test_a_wall_face_that_runs_from_jamb_to_jamb_is_not_an_opening_whatever_the_caller_names():
