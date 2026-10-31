@@ -42,8 +42,10 @@ class PlanReaderJobHubQuantityRow:
     value: float
     unit: str
     trade: str = "general"
-    source_type: str = TakeoffSourceType.DOCUMENTED_DIMENSION.value
-    authority_status: str = AuthorityStatus.FIRM.value
+    # Direct legacy construction is not evidence of a measured source.
+    # Only explicit issuer-supplied receipts may reach commercial preflight.
+    source_type: str = TakeoffSourceType.BLOCKED.value
+    authority_status: str = AuthorityStatus.BLOCKED.value
     confidence: float = 1.0
     source_page: Optional[Union[int, str]] = None
     source_sheet: Optional[str] = None
