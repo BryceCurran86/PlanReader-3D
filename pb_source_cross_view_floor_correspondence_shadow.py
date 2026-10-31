@@ -802,6 +802,22 @@ class SourceCrossViewFloorCorrespondenceRecord:
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
 
+    def __post_init__(self) -> None:
+        # A source-only diagnostic record must never become an issuer or
+        # commercial authority through direct construction or dataclasses.replace.
+        # Keep the producer's existing candidate/conflict/abstain states.
+        if (
+            self.commercial_projection_allowed is not False
+            or self.takeoff_eligible is not False
+        ):
+            raise ValueError("source_cross_view_floor_shadow_commercial_authority_forbidden")
+        if type(self.status) is not EvidenceResolutionStatus or self.status not in (
+            EvidenceResolutionStatus.CANDIDATE,
+            EvidenceResolutionStatus.CONFLICT,
+            EvidenceResolutionStatus.ABSTAINED,
+        ):
+            raise ValueError("source_cross_view_floor_shadow_status_invalid")
+
 
 @dataclass(frozen=True)
 class SourceCrossViewFloorCorrespondenceResult:
