@@ -292,7 +292,8 @@ def _original_doorway_gap_native_ink_inventory_complete(
     # Independently confirm that selected strokes actually border the
     # claimed door gap. These prove the bounds, NOT a style whitelist for
     # other original ink, which may carry a competing physical source role.
-    has_selected_ink_at_gap=False
+    has_selected_left_ink_at_gap=False
+    has_selected_right_ink_at_gap=False
     selected=set(ids)
     for name in selected:
         match=re.fullmatch(r"d(\d+)i(\d+)",name)
@@ -310,12 +311,15 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # conflicts even if the caller included its ID in the wall roster.
         if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j])):
             return False
-        if any(
-                abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance
-                for span in selected_spans
-        ):
-            has_selected_ink_at_gap=True
-    if not has_selected_ink_at_gap:
+        if any(abs(span[1]-low)<=tolerance for span in selected_spans):
+            has_selected_left_ink_at_gap=True
+        if any(abs(span[0]-high)<=tolerance for span in selected_spans):
+            has_selected_right_ink_at_gap=True
+    # Both source-ink wall fragments are necessary to establish a bounded
+    # native doorway gap. One side plus a caller-nominated endpoint on the
+    # other side cannot prove the missing physical wall fragment. This
+    # is source completeness only, not an independently authenticated W4.
+    if not (has_selected_left_ink_at_gap and has_selected_right_ink_at_gap):
         return False
     for ix,row in enumerate(drawings):
         if not (stroke_paint(row) or fill_paint(row)):
