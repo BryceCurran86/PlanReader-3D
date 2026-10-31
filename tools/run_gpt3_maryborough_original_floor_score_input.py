@@ -210,12 +210,35 @@ def run_original_maryborough_floor_handoff(
         raise FileExistsError("Maryborough sealed score-input directory must be fresh")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    claim = collect_live_physical_net_wall_claim(
-        pdf,
-        pages=(6,),
-        topology_pages=(6,),
-        room_area_support_pages=(10,),
-    )
+    try:
+        claim = collect_live_physical_net_wall_claim(
+            pdf,
+            pages=(6,),
+            topology_pages=(6,),
+            room_area_support_pages=(10,),
+        )
+    except Exception as failure:
+        # The original source collector runs before a measurement claim exists,
+        # so inspect_room_measurement_gates cannot inspect this first rejection.
+        # Record only a private, create-only, explicitly UNPUBLISHED failure.
+        # Neither a diagnostic failure nor its write may replace the first
+        # source exception or create sealed/customer/scoring authority.
+        try:
+            _publish_new(
+                output_dir / "source_stage_diagnostic_UNPUBLISHED.json",
+                {
+                    "publication_status": "SOURCE_COLLECTION_FAILURE_UNPUBLISHED",
+                    "failure_stage": "collect_live_physical_net_wall_claim",
+                    "failure_type": type(failure).__name__,
+                    "failure_message": str(failure),
+                    "source_sha256": source_sha,
+                    "benchmark_accuracy": None,
+                    "commercial_estimator_approved": False,
+                },
+            )
+        except Exception:
+            pass
+        raise
     try:
         # Each boundary can reject source/issuer authority before the final
         # sealed/customer receipt validator runs. Preserve the SAME claim's
