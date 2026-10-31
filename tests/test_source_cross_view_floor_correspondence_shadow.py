@@ -3112,3 +3112,88 @@ def test_registration_retains_refined_distinct_translation_rivals(
     assert target == target_before
     assert "takeoff_eligible" not in row
     assert "commercial_projection_allowed" not in row
+
+
+
+# A direct frozen-record constructor is not an independent source publisher.
+# A caller must not replace an abstention with CANDIDATE while retaining
+# contradictory source-wall or finish-mark evidence.
+@pytest.mark.parametrize(("field_name", "forged_value"), [
+    ("wall_bounded_on_both_sheets", False),
+    ("wall_bounded_on_both_sheets", 1),
+    ("wall_evidence_identical_on_both_sheets", False),
+    ("wall_evidence_identical_on_both_sheets", "true"),
+    ("finish_codes_in_box", {}),
+    ("finish_codes_in_box", {"FT3": 0}),
+    ("finish_codes_in_box", {"FT3": True}),
+    ("finish_codes_in_box", {"FT3": 2}),
+    ("finish_codes_in_box", {"FT2": 1}),
+    ("finish_codes_in_box", {"FT3": 1, "FT2": 1}),
+    ("material_code", "FT2"),
+    ("reason_codes", ()),
+    ("reason_codes", ("unsupported_positive",)),
+    ("reason_codes", (
+        "floor_geometrically_owned_equivalence_not_authenticated",
+        "extra_unresolved",
+    )),
+])
+def test_source_shadow_candidate_rejects_forged_wall_mark_or_reason_receipt(
+    field_name, forged_value,
+):
+    from dataclasses import replace
+
+    original = _source_lineage_record()
+    assert original.status is EvidenceResolutionStatus.CANDIDATE
+    before = (
+        original.wall_bounded_on_both_sheets,
+        original.wall_evidence_identical_on_both_sheets,
+        dict(original.finish_codes_in_box),
+        original.material_code,
+        original.reason_codes,
+        original.authority_blockers,
+    )
+    with pytest.raises(
+        ValueError, match="source_cross_view_floor_shadow_candidate_evidence_invalid"
+    ):
+        replace(original, **{field_name: forged_value})
+    assert (
+        original.wall_bounded_on_both_sheets,
+        original.wall_evidence_identical_on_both_sheets,
+        dict(original.finish_codes_in_box),
+        original.material_code,
+        original.reason_codes,
+        original.authority_blockers,
+    ) == before
+    assert original.commercial_projection_allowed is False
+    assert original.takeoff_eligible is False
+
+
+def test_source_shadow_candidate_constructor_preserves_legitimate_positive_and_negative():
+    from dataclasses import replace
+
+    original = _source_lineage_record()
+    replay = replace(original)
+    assert replay == original
+    assert replay.status is EvidenceResolutionStatus.CANDIDATE
+    assert replay.authority_blockers == STANDING_AUTHORITY_BLOCKERS
+    negative = replace(
+        original,
+        status=EvidenceResolutionStatus.ABSTAINED,
+        authority_blockers=(),
+        reason_codes=("source_mark_not_authenticated",),
+        finish_codes_in_box={},
+        wall_bounded_on_both_sheets=False,
+        wall_evidence_identical_on_both_sheets=False,
+    )
+    assert negative.status is EvidenceResolutionStatus.ABSTAINED
+    assert negative.authority_blockers == ()
+    with pytest.raises(
+        ValueError, match="source_cross_view_floor_shadow_candidate_evidence_invalid"
+    ):
+        replace(
+            negative,
+            status=EvidenceResolutionStatus.CANDIDATE,
+            authority_blockers=STANDING_AUTHORITY_BLOCKERS,
+        )
+    assert negative.takeoff_eligible is False
+    assert negative.commercial_projection_allowed is False

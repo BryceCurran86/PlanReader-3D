@@ -829,6 +829,32 @@ class SourceCrossViewFloorCorrespondenceRecord:
         if type(self.authority_blockers) is not tuple or self.authority_blockers != expected_blockers:
             raise ValueError("source_cross_view_floor_shadow_blockers_invalid")
 
+        # Standing blockers alone are not a positive source receipt. A caller
+        # cannot promote an ABSTAINED/conflicting floor by changing only its
+        # status and blockers while leaving contradictory wall/mark evidence.
+        # This checks producer-invariant facts; it does NOT authenticate W4,
+        # doorway ownership, FIRM quantities or customer eligibility.
+        if self.status is EvidenceResolutionStatus.CANDIDATE:
+            one_owned_mark = (
+                isinstance(self.finish_codes_in_box, Mapping)
+                and type(self.material_code) is str
+                and len(self.finish_codes_in_box) == 1
+                and type(self.finish_codes_in_box.get(self.material_code)) is int
+                and self.finish_codes_in_box[self.material_code] == 1
+            )
+            if (
+                self.wall_bounded_on_both_sheets is not True
+                or self.wall_evidence_identical_on_both_sheets is not True
+                or not one_owned_mark
+                or type(self.reason_codes) is not tuple
+                or self.reason_codes != (
+                    FLOOR_GEOMETRICALLY_OWNED_EQUIVALENCE_NOT_AUTHENTICATED,
+                )
+            ):
+                raise ValueError(
+                    "source_cross_view_floor_shadow_candidate_evidence_invalid"
+                )
+
 
 @dataclass(frozen=True)
 class SourceCrossViewFloorCorrespondenceResult:
