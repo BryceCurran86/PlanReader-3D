@@ -12,7 +12,7 @@ publication remain separate downstream authorities.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import math
 from typing import Mapping, Optional, Sequence
 
@@ -67,6 +67,7 @@ PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
 PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
 PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
 PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
+_PARTITION_RECEIPT_SEAL = object()
 PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT = (
     "physical_opening_identity_shared_members_overlapping_extent"
 )
@@ -268,6 +269,54 @@ class PhysicalOpeningIdentityResult:
     left_source_observation: Optional[SourceObservationAuthorityResult] = None
     right_source_observation: Optional[SourceObservationAuthorityResult] = None
     missing_upstream_capability: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PhysicalOpeningPartitionReceipt:
+    """What the authority proved about two openings that may rest on the same source lines.
+
+    Issued ONLY by ``PhysicalOpeningAuthority.partition_receipt``, which re-proves both existence records from the
+    source (a caller cannot build one: the seal is checked). A consumer must not accept a receipt from a caller; it
+    asks the authority for the receipt of the two openings it holds selectors for, or has the authority verify one by
+    recomputation (``verify_partition_receipt``). The two sides are ordered by existence record id, so the receipt
+    does not depend on the order of the selectors. It grants no quantity, count or firm authority."""
+
+    receipt_id: str
+    status: EvidenceResolutionStatus
+    partition: str            # disjoint | partitioned | same_record | overlapping_extent | unproven | not_applicable
+    basis: str                # no_shared_source_members | native_gap_intervals | raster_aperture_box | same_existence_record | ""
+    reason_codes: tuple[str, ...]
+    left_record_id: str
+    right_record_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    left_viewport_id: Optional[str]
+    right_viewport_id: Optional[str]
+    left_source_observation_ids: tuple[str, ...]
+    right_source_observation_ids: tuple[str, ...]
+    shared_source_observation_ids: tuple[str, ...]
+    left_extent: tuple[float, ...]
+    right_extent: tuple[float, ...]
+    producer_method: str
+    producer_version: str
+    producer_generation: int
+    grants_quantity: bool = False
+    grants_firm_authority: bool = False
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._seal is not _PARTITION_RECEIPT_SEAL:
+            raise TypeError("only the physical opening authority issues partition receipts")
+        if self.grants_quantity or self.grants_firm_authority:
+            raise ValueError("a partition receipt grants no quantity or firm authority")
+
+    @property
+    def is_physically_distinct(self) -> bool:
+        """True only for two different openings the source proves apart (no shared members, or a proven partition)."""
+        return self.status is EvidenceResolutionStatus.CORROBORATED and self.partition in {"disjoint", "partitioned"}
 
 
 @dataclass(frozen=True)
@@ -892,6 +941,57 @@ def _seeded_ink_checks(
     return tuple(sorted(stubs)), tuple(sorted(unaccounted)), tuple(sorted(continuing))
 
 
+def _source_member_partition_detail(
+    left_ids: Sequence[str],
+    right_ids: Sequence[str],
+    records_by_id: Mapping[str, SourceObservationRecord],
+    *,
+    left_box: Optional[Sequence[float]] = None,
+    right_box: Optional[Sequence[float]] = None,
+) -> tuple[str, str, tuple[float, ...], tuple[float, ...]]:
+    """(verdict, basis, left extent, right extent) behind ``_source_member_partition``.
+
+    The verdict is ``disjoint`` (they share no observation), ``partitioned`` (they share some, but each is a
+    jamb-bounded structure, their gaps along the shared face axis do not overlap and every shared line is a wall face
+    piece outside both gaps: support between two windows in one wall), ``overlapping_extent`` (the gaps overlap, so they
+    describe the same stretch of wall and are neither the same nor distinct) or ``unproven`` (a shared jamb or cap, a
+    shared line that enters a gap, a structure with no readable frame, a different face direction). A record that
+    carries its own source-measured aperture box (the raster framed path) is partitioned by that box instead. The basis
+    names which evidence decided it and the extents are the gap intervals (in the left structure's face axis, left
+    first) or the boxes that were compared. Different record ids alone prove neither identity nor distinctness."""
+    shared = set(map(str, left_ids)) & set(map(str, right_ids))
+    if not shared:
+        return "disjoint", "no_shared_source_members", (), ()
+    if left_box is not None or right_box is not None:
+        if left_box is None or right_box is None or len(left_box) != 4 or len(right_box) != 4:
+            return "unproven", "raster_aperture_box", (), ()
+        extents = (tuple(float(v) for v in left_box), tuple(float(v) for v in right_box))
+        overlap_x = min(left_box[2], right_box[2]) - max(left_box[0], right_box[0])
+        overlap_y = min(left_box[3], right_box[3]) - max(left_box[1], right_box[1])
+        verdict = "overlapping_extent" if overlap_x > _FRAME_TOL and overlap_y > _FRAME_TOL else "partitioned"
+        return verdict, "raster_aperture_box", extents[0], extents[1]
+    first = _structure_frame(tuple(map(str, left_ids)), records_by_id)
+    second = _structure_frame(tuple(map(str, right_ids)), records_by_id)
+    if first is None or second is None:
+        return "unproven", "native_gap_intervals", (), ()
+    aligned = _in_axes_of(first, second)
+    if aligned is None:
+        return "unproven", "native_gap_intervals", (), ()
+    gaps = ((first.gap_start, first.gap_end), aligned[0])
+    extents = (tuple(gaps[0]), tuple(gaps[1]))
+    if min(gaps[0][1], gaps[1][1]) - max(gaps[0][0], gaps[1][0]) > _FRAME_TOL:
+        return "overlapping_extent", "native_gap_intervals", extents[0], extents[1]
+    for member in sorted(shared):
+        record = records_by_id.get(member)
+        line = _line_geometry(record) if record is not None else None
+        if line is None or abs(_cross(first.direction, _unit_direction(line))) > _COORD_EQ_ABS_TOL:
+            return "unproven", "native_gap_intervals", extents[0], extents[1]
+        span = sorted((_projection((line[0], line[1]), first.direction), _projection((line[2], line[3]), first.direction)))
+        if any(min(span[1], high) - max(span[0], low) > _FRAME_TOL for low, high in gaps):
+            return "unproven", "native_gap_intervals", extents[0], extents[1]
+    return "partitioned", "native_gap_intervals", extents[0], extents[1]
+
+
 def _source_member_partition(
     left_ids: Sequence[str],
     right_ids: Sequence[str],
@@ -900,46 +1000,9 @@ def _source_member_partition(
     left_box: Optional[Sequence[float]] = None,
     right_box: Optional[Sequence[float]] = None,
 ) -> str:
-    """Whether two openings that rest on some of the same source lines are physically apart.
-
-    ``disjoint``: they share no observation. ``partitioned``: they share some, but each is a jamb-bounded structure,
-    their gaps along the shared face axis do not overlap, and every shared line is a wall face piece lying outside both
-    gaps (support between two windows in one wall). ``overlapping_extent``: their gaps overlap, so they describe the
-    same stretch of wall and are neither the same nor distinct. ``unproven``: anything else (a shared jamb or cap, a
-    shared line that enters a gap, a structure with no readable frame, a different face direction). Different record
-    ids alone prove neither identity nor distinctness.
-
-    A record that carries its own source-measured aperture box (the raster framed path) is partitioned by that box
-    instead: boxes that overlap in area are ``overlapping_extent``, boxes that do not are ``partitioned``, and a box
-    on only one side is ``unproven``."""
-    shared = set(map(str, left_ids)) & set(map(str, right_ids))
-    if not shared:
-        return "disjoint"
-    if left_box is not None or right_box is not None:
-        if left_box is None or right_box is None or len(left_box) != 4 or len(right_box) != 4:
-            return "unproven"
-        overlap_x = min(left_box[2], right_box[2]) - max(left_box[0], right_box[0])
-        overlap_y = min(left_box[3], right_box[3]) - max(left_box[1], right_box[1])
-        return "overlapping_extent" if overlap_x > _FRAME_TOL and overlap_y > _FRAME_TOL else "partitioned"
-    first = _structure_frame(tuple(map(str, left_ids)), records_by_id)
-    second = _structure_frame(tuple(map(str, right_ids)), records_by_id)
-    if first is None or second is None:
-        return "unproven"
-    aligned = _in_axes_of(first, second)
-    if aligned is None:
-        return "unproven"
-    gaps = ((first.gap_start, first.gap_end), aligned[0])
-    if min(gaps[0][1], gaps[1][1]) - max(gaps[0][0], gaps[1][0]) > _FRAME_TOL:
-        return "overlapping_extent"
-    for member in sorted(shared):
-        record = records_by_id.get(member)
-        line = _line_geometry(record) if record is not None else None
-        if line is None or abs(_cross(first.direction, _unit_direction(line))) > _COORD_EQ_ABS_TOL:
-            return "unproven"
-        span = sorted((_projection((line[0], line[1]), first.direction), _projection((line[2], line[3]), first.direction)))
-        if any(min(span[1], high) - max(span[0], low) > _FRAME_TOL for low, high in gaps):
-            return "unproven"
-    return "partitioned"
+    """Whether two openings that rest on some of the same source lines are physically apart (see the detail function)."""
+    return _source_member_partition_detail(
+        left_ids, right_ids, records_by_id, left_box=left_box, right_box=right_box)[0]
 
 
 def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
@@ -4990,6 +5053,64 @@ class PhysicalOpeningAuthority:
         proves a physical partition between them (``_source_member_partition``). Records that share lines and
         overlap in extent are a CONFLICT, and records whose shared lines are not provably wall support between
         separate gaps are ABSTAINED: different record ids alone are not distinctness."""
+        return self._pairwise_identity(left_selector, right_selector)[0]
+
+    def partition_receipt(
+        self,
+        left_selector: ObservationSelector,
+        right_selector: ObservationSelector,
+    ) -> PhysicalOpeningPartitionReceipt:
+        """The producer-owned, re-proven pairwise partition receipt for two selectors (see its class docstring).
+
+        Re-proves both existence records through this authority, so a caller's ids certify nothing. The result is
+        canonical in the order of the selectors. Where existence or scope is not proven the receipt says
+        ``not_applicable`` and carries no record or member ids."""
+        result, details = self._pairwise_identity(left_selector, right_selector)
+        if details is None:
+            payload = dict(
+                status=result.status, partition="not_applicable", basis="", reason_codes=tuple(result.reason_codes),
+                left_record_id="", right_record_id="", document_id="", revision_id="", source_sha256="",
+                snapshot_id="", page_id="", left_viewport_id=None, right_viewport_id=None,
+                left_source_observation_ids=(), right_source_observation_ids=(), shared_source_observation_ids=(),
+                left_extent=(), right_extent=(), producer_method="", producer_version="", producer_generation=0)
+        else:
+            left, right = details["left_record"], details["right_record"]
+            payload = dict(
+                status=result.status, partition=details["partition"], basis=details["basis"],
+                reason_codes=tuple(result.reason_codes),
+                left_record_id=left.record_id, right_record_id=right.record_id, document_id=left.document_id,
+                revision_id=left.revision_id, source_sha256=left.source_sha256, snapshot_id=left.snapshot_id,
+                page_id=left.page_id, left_viewport_id=left.viewport_id, right_viewport_id=right.viewport_id,
+                left_source_observation_ids=tuple(sorted(left.source_observation_ids)),
+                right_source_observation_ids=tuple(sorted(right.source_observation_ids)),
+                shared_source_observation_ids=tuple(sorted(
+                    set(left.source_observation_ids) & set(right.source_observation_ids))),
+                left_extent=tuple(details["left_extent"]), right_extent=tuple(details["right_extent"]),
+                producer_method=left.producer_method, producer_version=left.producer_version,
+                producer_generation=left.producer_generation)
+        identity = {key: (value.value if isinstance(value, EvidenceResolutionStatus) else value)
+                    for key, value in payload.items()}
+        return PhysicalOpeningPartitionReceipt(
+            receipt_id=stable_contract_id("physical_opening_partition_receipt", identity, digest_chars=32),
+            _seal=_PARTITION_RECEIPT_SEAL, **payload)
+
+    def verify_partition_receipt(
+        self,
+        receipt: object,
+        left_selector: ObservationSelector,
+        right_selector: ObservationSelector,
+    ) -> bool:
+        """True only if this authority, re-proving the two openings now, issues exactly this receipt."""
+        return (isinstance(receipt, PhysicalOpeningPartitionReceipt)
+                and receipt == self.partition_receipt(left_selector, right_selector))
+
+    def _pairwise_identity(
+        self,
+        left_selector: ObservationSelector,
+        right_selector: ObservationSelector,
+    ) -> tuple[PhysicalOpeningIdentityResult, Optional[dict]]:
+        """The identity verdict for two selectors and, when both existence records are proven in one scope, the facts
+        it rests on (the two records in record-id order, the partition verdict, its basis and the compared extents)."""
         if not isinstance(left_selector, ObservationSelector):
             raise TypeError("left_selector must be ObservationSelector")
         if not isinstance(right_selector, ObservationSelector):
@@ -5028,7 +5149,7 @@ class PhysicalOpeningAuthority:
                 left_source_observation=left_source,
                 right_source_observation=right_source,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
-            )
+            ), None
 
         left_record = left_existence.existence_record
         right_record = right_existence.existence_record
@@ -5043,8 +5164,9 @@ class PhysicalOpeningAuthority:
                 missing_upstream_capability=(
                     "independent cross-scope physical opening equivalence authority"
                 ),
-            )
+            ), None
 
+        first, second = sorted((left_record, right_record), key=lambda record: record.record_id)
         if left_record.record_id == right_record.record_id:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
@@ -5053,21 +5175,24 @@ class PhysicalOpeningAuthority:
                 reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
                 left_source_observation=left_source,
                 right_source_observation=right_source,
-            )
+            ), dict(partition="same_record", basis="same_existence_record", left_record=first, right_record=second,
+                    left_extent=(), right_extent=())
 
         # Different record ids are not distinct openings when the two records rest on some of the same source lines:
         # adjacent openings share the wall support between them, layers of one gap share a face and an extent. Only a
         # physical partition proven from the source separates them.
-        boxes = (left_record.aperture_bbox_pt, right_record.aperture_bbox_pt)
+        boxes = (first.aperture_bbox_pt, second.aperture_bbox_pt)
         by_id: dict[str, SourceObservationRecord] = {}
-        if (set(left_record.source_observation_ids) & set(right_record.source_observation_ids)
+        if (set(first.source_observation_ids) & set(second.source_observation_ids)
                 and all(box is None for box in boxes)):
             records, failures = self._visible_snapshot_records(left_source)
             if not failures:
                 by_id = {str(record.observation_id): record for record in records}
-        partition = _source_member_partition(
-            left_record.source_observation_ids, right_record.source_observation_ids, by_id,
+        partition, basis, left_extent, right_extent = _source_member_partition_detail(
+            first.source_observation_ids, second.source_observation_ids, by_id,
             left_box=boxes[0], right_box=boxes[1])
+        details = dict(partition=partition, basis=basis, left_record=first, right_record=second,
+                       left_extent=left_extent, right_extent=right_extent)
         if partition in {"overlapping_extent", "unproven"}:
             overlapping = partition == "overlapping_extent"
             return PhysicalOpeningIdentityResult(
@@ -5081,7 +5206,7 @@ class PhysicalOpeningAuthority:
                 right_source_observation=right_source,
                 missing_upstream_capability=(
                     "source-owned physical partition of openings that share exact source members"),
-            )
+            ), details
 
         return PhysicalOpeningIdentityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
@@ -5090,7 +5215,7 @@ class PhysicalOpeningAuthority:
             reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
             left_source_observation=left_source,
             right_source_observation=right_source,
-        )
+        ), details
 
 
 __all__ = [
@@ -5117,6 +5242,7 @@ __all__ = [
     "PHYSICAL_OPENING_IDENTITY_RESOLVED",
     "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT",
     "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_PARTITION_UNPROVEN",
+    "PhysicalOpeningPartitionReceipt",
     "PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH",
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
     "PhysicalOpeningAuthority",
