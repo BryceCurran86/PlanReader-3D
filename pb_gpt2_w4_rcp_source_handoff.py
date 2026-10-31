@@ -153,7 +153,8 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
         return {**blocked,"first_failure":"A120_ceiling_area_cannot_borrow_floor_perimeter"}
     translation=independently_registered_rcp.get(
         "source_cross_sheet_translation_pdf_pts")
-    if type(translation) not in (list,tuple) or len(translation)!=2:
+    if (type(translation) not in (list,tuple) or len(translation)!=2
+            or any(type(v) not in (int,float) for v in translation)):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
     try:
         dx,dy=(float(v) for v in translation)
@@ -161,8 +162,15 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
         return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
     if not math.isfinite(dx) or not math.isfinite(dy):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
-    from shapely.affinity import translate
-    if not translate(registered_floor,xoff=dx,yoff=dy).equals(rcp):
+    # The upstream original PDF ink-ring registration compares round(x+dx,3)
+    # native points. Raw binary float translation can create a false negative
+    # even for the same printed source vertices (20.12+0.1 vs 20.22).
+    # Reuse the original precision, not a new geometric or area tolerance.
+    translated_native=Polygon(tuple(
+        (round(float(x)+dx,3),round(float(y)+dy,3))
+        for x,y in registered_floor.exterior.coords[:-1]
+    ))
+    if not translated_native.is_valid or not translated_native.equals(rcp):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_conflict"}
     return {
         **blocked,
