@@ -69,6 +69,9 @@ LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH = (
 LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE = (
     "live_ceiling_lining_source_quantity_confidence_failure"
 )
+LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE = (
+    "live_ceiling_lining_source_quantity_id_failure"
+)
 LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS = (
     "live_ceiling_lining_upstream_area_scope_alias"
 )
@@ -1032,8 +1035,25 @@ def collect_live_ceiling_lining_claims(
                             )
                     quantity_id = quantity.quantity_id
                     if not _exact_source_ceiling_quantity_id(quantity_id):
-                        # Reject invalid producer IDs before replay tracking;
-                        # never trim/repair an original ceiling identity.
+                        # An unidentifiable positive source ceiling is not an
+                        # unrelated diagnostic.  Skipping it would publish a
+                        # valid sibling from a partial original quantity
+                        # universe. Revoke the entire selected source run.
+                        if (
+                            quantity.family == "ceiling_lining"
+                            and quantity.abstained is False
+                            and _source_positive_area_m2(quantity.value) is not None
+                        ):
+                            return LiveCeilingLiningResult(
+                                status=EvidenceResolutionStatus.ABSTAINED,
+                                reason_codes=(
+                                    LIVE_CEILING_LINING_UNAVAILABLE,
+                                    LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE,
+                                ),
+                                claims=(),
+                            )
+                        # Existing abstained/nonpositive diagnostic treatment
+                        # remains unchanged; no source ID is manufactured.
                         continue
                     source_scope = (page_no, viewport_id)
                     prior = seen_ceiling_quantity_ids.get(quantity_id)
@@ -1303,6 +1323,7 @@ __all__ = [
     "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
     "LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH",
     "LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE",
+    "LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE",
     "LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
