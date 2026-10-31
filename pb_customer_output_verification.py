@@ -273,17 +273,16 @@ def _verify_row_lineage(
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} finish_system differs from signed original finish material"
             )
-        # Historical source projection uses the generic floor-finish title.
-        # New source projection includes the separately signed FT code in the
-        # customer element. The display must match the source-owned code AND
-        # its persisted original producer field, never a mutable row caption.
+        # The sealed source semantic key authenticates the FT code but does
+        # NOT sign a display-mode/version witness. A customer can rewrite both
+        # mutable metadata.element and its recomputable projection fingerprint.
+        # Therefore a generic caption cannot be accepted as a legacy positive:
+        # it is indistinguishable from a coded-to-generic downgrade. Require
+        # the exact signed FT code in both provenance and customer display.
         producer_element = producer_metadata.get("element")
         if (
             type(producer_element) is not str
-            or producer_element not in (
-                "Floor finish area",
-                f"Floor finish area ({parts[2]})",
-            )
+            or producer_element != f"Floor finish area ({parts[2]})"
             or type(row.get("element")) is not str
             or row["element"] != producer_element
         ):

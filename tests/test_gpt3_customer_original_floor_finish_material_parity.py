@@ -73,11 +73,12 @@ def _source_coded_element_receipt():
     return signed, rows
 
 
-def _legacy_element_receipt():
-    """Reconstruct an authentic old-format row with a matching source receipt.
+def _forged_generic_element_receipt():
+    """Recompute a fully self-consistent but UNSIGNED generic caption downgrade.
 
-    Only this regression constructs the historical customer display. The
-    coded-format positives above must go through the actual GPT1 projector.
+    The sealed source key contains FT1, but neither mutable metadata.element
+    nor its customer projection fingerprint is an immutable display witness.
+    Positive rows must still pass through the real GPT1 projector.
     """
     from pb_migration_contracts import QuantityEvidence
     from pb_quantity_takeoff_adapter import (
@@ -187,16 +188,18 @@ def test_recomputed_customer_fingerprint_cannot_resign_a_foreign_finish_code(
         verify_sealed_customer_output(signed, forged)
 
 
-def test_legacy_original_floor_label_cannot_be_relabelled_as_source_coded():
-    signed, rows = _legacy_element_receipt()
+@pytest.mark.parametrize("notes_only", [False, True])
+def test_recomputed_generic_caption_downgrade_cannot_pass_signed_ft_code(
+    notes_only,
+):
+    signed, rows = _forged_generic_element_receipt()
+    assert signed.quantities[0].semantic_key == "floor_finish_area:floor-1:FT1:tile"
     assert rows[0]["element"] == "Floor finish area"
-    assert verify_sealed_customer_output(signed, rows).verified_quantity_ids == (
-        "floor-finish-q1",
-    )
-    forged = deepcopy(rows)
-    forged[0]["element"] = "Floor finish area (FT1)"
+    assert rows[0]["commercial_projection_provenance"]["quantity"]["metadata"]["element"] == "Floor finish area"
+    if notes_only:
+        rows[0].pop("commercial_projection_provenance")
     with pytest.raises(CustomerOutputVerificationError, match="element differs"):
-        verify_sealed_customer_output(signed, forged)
+        verify_sealed_customer_output(signed, rows)
 
 
 def test_extra_customer_fields_do_not_affect_unrelated_original_lot16_eight():
