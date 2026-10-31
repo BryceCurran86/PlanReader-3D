@@ -353,6 +353,7 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
     )
 
     assert seen["pages"] == (0, 1, 2)
+    assert seen["recover_supported_opening_areas"] is True
     assert seen["topology_pages"] is None
     assert seen["room_area_support_pages"] is None
     assert summary["status"] == "no_sealable_quantities"

@@ -1169,18 +1169,26 @@ def collect_live_physical_net_wall_claim(
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
     recover_additional_opening_areas: bool = False,
+    recover_supported_opening_areas: bool = False,
     source_native_finish_text_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
     Recovery is explicit and single-topology-page only. Existing measured
     objects and their quantity/customer receipts are never reissued.
+    Application recovery additionally leaves multi-page topology and already
+    published count/net-wall scopes unchanged: their reproof is separate.
     """
     if type(recover_additional_opening_areas) is not bool:
         raise ValueError("opening area recovery must be an explicit boolean")
+    if type(recover_supported_opening_areas) is not bool:
+        raise ValueError("supported opening area recovery must be an explicit boolean")
+    if recover_additional_opening_areas and recover_supported_opening_areas:
+        raise ValueError("choose one opening area recovery policy")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
-    if recover_additional_opening_areas:
+    recovery_page_id = None
+    if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
             for scope in (pages, topology_pages):
                 if scope is not None and (
@@ -1194,7 +1202,10 @@ def collect_live_physical_net_wall_claim(
             topology = (_selected_page_indices(doc.page_count, topology_pages)
                         if topology_pages is not None else selected)
         if len(topology) != 1 or not set(topology) <= set(selected):
-            raise ValueError("opening area recovery requires one selected topology page")
+            if recover_additional_opening_areas:
+                raise ValueError("opening area recovery requires one selected topology page")
+        else:
+            recovery_page_id = str(topology[0] + 1)
     claim = _collect_live_physical_net_wall_claim(
         pdf_path, pages=pages, topology_pages=topology_pages,
         room_area_support_pages=room_area_support_pages,
@@ -1202,11 +1213,29 @@ def collect_live_physical_net_wall_claim(
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
     )
-    if not recover_additional_opening_areas:
+    if recovery_page_id is None:
         return claim
+    if recover_supported_opening_areas and (
+        claim.opening_count_quantity_evidence or claim.quantity_m2 is not None
+    ):
+        # The area replayer cannot retain independent count/net-wall totals
+        # while enriching their opening universe. Do not attempt that replay
+        # in the application or discard its already authenticated baseline.
+        return claim
+    if recover_supported_opening_areas:
+        from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
+
+        # Caller page selection is not a source-owned floor-plan role. Reuse
+        # the existing original-source classifier before enabling recovery.
+        try:
+            scope = source_floor_plan_topology_scope(pdf_path, topology)
+        except Exception:
+            return claim
+        if tuple(getattr(scope, "floor_plan_page_indices", ())) != tuple(topology):
+            return claim
     from pb_live_append_only_opening_area_composition import recover_source_opening_areas
     return recover_source_opening_areas(
-        claim, Path(pdf_path).read_bytes(), page_id=str(topology[0] + 1),
+        claim, Path(pdf_path).read_bytes(), page_id=recovery_page_id,
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
     )
 
