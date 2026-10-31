@@ -137,3 +137,82 @@ def test_complete_synthetic_source_receipt_retains_real_legacy_consumer_path():
     assert payload.quantities[0].authority_status == "firm"
     assert PlanReaderJobHubQuantityRow.from_dict(hydrated.to_dict()).to_dict() == hydrated.to_dict()
     assert complete == before
+
+
+@pytest.mark.parametrize("explicit_receipts", [
+    {},
+    {"source_type": "documented_dimension"},
+    {"authority_status": "firm"},
+])
+def test_direct_typed_legacy_construction_without_both_receipts_cannot_be_sold(explicit_receipts):
+    # The dataclass constructor is a separate entry seam from from_dict.
+    # A source page and dimension text alone do not prove FIRM authority.
+    row = PlanReaderJobHubQuantityRow(
+        quantity_id="synthetic-direct-without-authority",
+        description="Unverified direct legacy wall",
+        value=12.75,
+        unit="m2",
+        trade="painting",
+        source_page=3,
+        dimension_text_id="synthetic-dimension",
+        revision_hash=REVISION["revision_hash"],
+        is_publishable=True,
+        **explicit_receipts,
+    )
+    before = deepcopy(row.to_dict())
+    assert row.source_type == explicit_receipts.get("source_type", "blocked")
+    assert row.authority_status == explicit_receipts.get("authority_status", "blocked")
+    for candidate in (row, row.to_dict(), PlanReaderJobHubQuantityRow.from_dict(row.to_dict())):
+        result = _preflight([candidate])
+        assert result.is_valid is False
+        assert result.publishable_row_count == 0
+        assert result.blocked_row_count == 1
+        with pytest.raises(ValueError, match="Cannot build commercial payload"):
+            build_jobhub_payload(
+                [candidate], PROJECT, REVISION,
+                publish_mode=PublishMode.COMMERCIAL_PUBLISH,
+            )
+    assert row.to_dict() == before
+
+
+def test_direct_typed_legacy_explicit_source_and_firm_receipts_keep_customer_path():
+    row = PlanReaderJobHubQuantityRow(
+        quantity_id="synthetic-direct-fully-owned",
+        description="Synthetic documented wall",
+        value=12.75,
+        unit="m2",
+        trade="painting",
+        source_type="documented_dimension",
+        authority_status="firm",
+        source_page=3,
+        dimension_text_id="synthetic-dimension",
+        revision_hash=REVISION["revision_hash"],
+        is_publishable=True,
+    )
+    before = deepcopy(row.to_dict())
+    assert _preflight([row]).is_valid is True
+    payload = build_jobhub_payload(
+        [row], PROJECT, REVISION,
+        publish_mode=PublishMode.COMMERCIAL_PUBLISH,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert payload.is_commercial_ready is True
+    assert payload.quantities[0].to_dict() == before
+    assert row.to_dict() == before
+
+
+def test_unclaimed_direct_legacy_row_remains_draft_only():
+    row = PlanReaderJobHubQuantityRow(
+        quantity_id="synthetic-direct-draft",
+        description="No original measurement",
+        value=4.0,
+        unit="m2",
+    )
+    assert (row.source_type, row.authority_status) == ("blocked", "blocked")
+    assert row.is_publishable is False
+    draft = build_jobhub_payload(
+        [row], PROJECT, REVISION, publish_mode=PublishMode.DRAFT_PUBLISH,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert draft.is_commercial_ready is False
+    assert draft.quantities[0].authority_status == "blocked"
