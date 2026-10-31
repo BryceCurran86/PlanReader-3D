@@ -177,3 +177,40 @@ authority-promotion review before any merge.
 - **Not proven:** that no live consumer relies on DISTINCT for records that share lines in a way this rule now refuses
   (the consumer suites listed in the PR pass; no private source run exercises a shared-member pair), and the downstream
   #4148 behaviour, which is MAX-owned.
+
+## 11. Producer-owned pairwise partition receipt for the composer (owner decision 6549912542, review 5725190625)
+
+**Question from the composer's owner:** which producer output fields and record ownership are needed so that adjacent
+openings that legitimately share wall-face support can be recovered, without silently discarding the overlap, turning
+differing ids into DISTINCT, or passing a caller allowlist.
+
+**Answer, as built (additive; unwired; `compare_identity` is now derived from the same derivation).**
+
+- **Ownership.** `PhysicalOpeningAuthority.partition_receipt(left_selector, right_selector)` re-proves both existence
+  records through the authority's own `prove_existence` and returns a `PhysicalOpeningPartitionReceipt`. The type is
+  sealed: a caller cannot construct one (the seal is checked with `is`; a missing or wrong seal raises `TypeError`).
+  `verify_partition_receipt(receipt, left, right)` is true only if the authority, re-proving the pair now, issues exactly
+  that receipt, so a forged, stale, tampered or foreign-snapshot receipt does not verify. The composer should hold the
+  two selectors it already has for the historical and the new opening and ask the authority; it should never accept a
+  receipt, an id list or an allowlist from a caller.
+- **Fields.** `receipt_id` (stable id of every other field); `status`; `partition` (`disjoint`, `partitioned`,
+  `same_record`, `overlapping_extent`, `unproven`, `not_applicable`); `basis` (`no_shared_source_members`,
+  `native_gap_intervals`, `raster_aperture_box`, `same_existence_record`); `reason_codes`; the two existence record ids;
+  document, revision, source hash, snapshot and page; each side's viewport; each side's source observation ids and the
+  shared ones; the compared extents (gap intervals along the shared face axis, or aperture boxes); and the producer
+  method, version and generation of the left record. `grants_quantity` and `grants_firm_authority` are always False.
+  `is_physically_distinct` is true only for CORROBORATED `disjoint` or `partitioned`.
+- **Determinism.** The two sides are ordered by existence record id, so the receipt and its id are identical for either
+  selector order and on replay. Where existence or scope is not proven the receipt is `not_applicable` and carries no ids.
+- **What the composer may do with it (MAX-owned, not done here).** For a pair of siblings whose source members
+  intersect, accept the pair as distinct only when `verify_partition_receipt` holds and `is_physically_distinct`; any
+  other `partition` keeps the existing abstention. Shared members are never discarded: the receipt names them.
+- **Tests, failing first** (`tests/test_physical_opening_partition_receipt_v1.py`, 20 tests; the first run failed at
+  collection because the type did not exist): partitioned receipt for adjacent windows in five poses and both authority
+  modes; order independence and replay; layers of one gap CONFLICT; disjoint and same-record cases; no partition for a
+  pair without proven existence or in another snapshot; construction without the seal and with a wrong seal refused,
+  forged and foreign receipts do not verify; no other result changes; the detail behind the verdict (basis and extents,
+  raster box, shared jamb unproven).
+- **Not proven.** No private source run exercises a shared-member pair, so the actual Lot16 a68/993 partition is not
+  established; the composer integration and the downstream equal-roster veto are MAX-owned; the receipt covers pairs, not
+  a roster-wide census.
