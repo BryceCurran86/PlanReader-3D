@@ -216,3 +216,85 @@ def test_unclaimed_direct_legacy_row_remains_draft_only():
     )
     assert draft.is_commercial_ready is False
     assert draft.quantities[0].authority_status == "blocked"
+
+
+def _valid_synthetic_customer_wire():
+    row = PlanReaderJobHubQuantityRow.from_dict(_source_row())
+    return build_jobhub_payload(
+        [row], PROJECT, REVISION, publish_mode=PublishMode.COMMERCIAL_PUBLISH,
+        created_at="2026-01-01T00:00:00+00:00",
+    ).to_dict()
+
+
+def test_source_owned_synthetic_commercial_customer_roundtrip_is_lossless():
+    wire = _valid_synthetic_customer_wire()
+    before = deepcopy(wire)
+    hydrated = PlanReaderJobHubPayload.from_dict(wire)
+    assert hydrated.is_commercial_ready is True
+    assert hydrated.publish_mode == PublishMode.COMMERCIAL_PUBLISH.value
+    assert hydrated.to_dict() == wire
+    assert PlanReaderJobHubPayload.from_dict(hydrated.to_dict()).to_dict() == wire
+    assert wire == before
+
+
+def test_draft_payload_cannot_be_promoted_by_serialized_ready_flag():
+    row = PlanReaderJobHubQuantityRow(
+        quantity_id="synthetic-blocked", description="No source", value=4.0, unit="m2",
+    )
+    wire = build_jobhub_payload(
+        [row], PROJECT, REVISION, publish_mode=PublishMode.DRAFT_PUBLISH,
+        created_at="2026-01-01T00:00:00+00:00",
+    ).to_dict()
+    before = deepcopy(wire)
+    draft = PlanReaderJobHubPayload.from_dict(wire)
+    assert draft.is_commercial_ready is False
+    assert draft.to_dict() == before
+    wire["is_commercial_ready"] = True
+    tampered = deepcopy(wire)
+    with pytest.raises(ValueError, match="requires commercial publish mode"):
+        PlanReaderJobHubPayload.from_dict(wire)
+    assert wire == tampered
+
+
+def test_empty_commercial_customer_universe_cannot_be_ready():
+    wire = _valid_synthetic_customer_wire()
+    wire["quantities"] = []
+    before = deepcopy(wire)
+    with pytest.raises(ValueError, match="requires source-owned quantities"):
+        PlanReaderJobHubPayload.from_dict(wire)
+    assert wire == before
+
+
+@pytest.mark.parametrize("tamper", [
+    "blocked_row",
+    "stale_revision",
+    "duplicate_physical_id",
+    "unconfirmed_project",
+])
+def test_hydrated_customer_ready_claim_rechecks_actual_commercial_preflight(tamper):
+    wire = _valid_synthetic_customer_wire()
+    if tamper == "blocked_row":
+        wire["quantities"][0]["authority_status"] = "blocked"
+        wire["quantities"][0]["is_publishable"] = False
+    elif tamper == "stale_revision":
+        wire["quantities"][0]["revision_hash"] = "synthetic-other-revision"
+    elif tamper == "duplicate_physical_id":
+        wire["quantities"].append(deepcopy(wire["quantities"][0]))
+    else:
+        wire["project_identity"]["identity_confirmed"] = False
+    before = deepcopy(wire)
+    with pytest.raises(ValueError, match="failed source authority preflight"):
+        PlanReaderJobHubPayload.from_dict(wire)
+    assert wire == before
+
+
+def test_unapproved_commercial_wire_remains_hydratable_but_not_ready():
+    wire = _valid_synthetic_customer_wire()
+    wire["is_commercial_ready"] = False
+    wire["quantities"][0]["authority_status"] = "blocked"
+    wire["quantities"][0]["is_publishable"] = False
+    before = deepcopy(wire)
+    hydrated = PlanReaderJobHubPayload.from_dict(wire)
+    assert hydrated.is_commercial_ready is False
+    assert hydrated.quantities[0].authority_status == "blocked"
+    assert wire == before
