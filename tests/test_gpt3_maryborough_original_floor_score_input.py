@@ -343,6 +343,63 @@ def test_original_runner_preserves_first_failure_before_receipt_validator(
         assert not (output / name).exists()
 
 
+@pytest.mark.parametrize("failure_type", (ValueError, RuntimeError))
+@pytest.mark.parametrize("diagnostic_write_fails", (False, True))
+def test_original_runner_preserves_first_source_collection_failure(
+    tmp_path, monkeypatch, failure_type, diagnostic_write_fails,
+):
+    first_failure = failure_type("first original source-scope rejection")
+    monkeypatch.setattr(module, "_verify_original_source", lambda *args: SHA)
+
+    def reject_source(*args, **kwargs):
+        raise first_failure
+
+    def forbidden_downstream(*args, **kwargs):
+        pytest.fail("source failure must not enter the issuer or customer path")
+
+    monkeypatch.setattr(
+        module, "collect_live_physical_net_wall_claim", reject_source,
+    )
+    monkeypatch.setattr(module, "seal_live_floor_area_run", forbidden_downstream)
+    monkeypatch.setattr(
+        module, "inspect_room_measurement_gates", forbidden_downstream,
+    )
+    if diagnostic_write_fails:
+        def reject_private_write(path, data):
+            assert path.name == "source_stage_diagnostic_UNPUBLISHED.json"
+            raise OSError("private diagnostic write refused")
+
+        monkeypatch.setattr(module, "_publish_new", reject_private_write)
+
+    output = tmp_path / "source-collection-first-failure"
+    with pytest.raises(failure_type) as caught:
+        module.run_original_maryborough_floor_handoff(
+            tmp_path / "unused.pdf", output,
+        )
+    assert caught.value is first_failure
+
+    diagnostic = output / "source_stage_diagnostic_UNPUBLISHED.json"
+    assert diagnostic.exists() is (not diagnostic_write_fails)
+    if not diagnostic_write_fails:
+        stage = json.loads(diagnostic.read_text(encoding="utf-8"))
+        assert stage == {
+            "publication_status": "SOURCE_COLLECTION_FAILURE_UNPUBLISHED",
+            "failure_stage": "collect_live_physical_net_wall_claim",
+            "failure_type": failure_type.__name__,
+            "failure_message": "first original source-scope rejection",
+            "source_sha256": SHA,
+            "benchmark_accuracy": None,
+            "commercial_estimator_approved": False,
+        }
+    for name in (
+        "source_sealed_run.json",
+        "verified_customer_rows.json",
+        "source_stage_diagnostic.json",
+        "source_score_readiness_UNPUBLISHED.json",
+    ):
+        assert not (output / name).exists()
+
+
 def test_source_runner_contains_no_reference_quantity_or_frozen_object_matching():
     source = inspect.getsource(module)
     for forbidden in (
