@@ -756,11 +756,18 @@ class SourceCrossViewFloorCorrespondenceSelector:
             val = getattr(self, field_name)
             if type(val) is not str or not val.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
+            # Cross-view PDF page IDs denote literal numbered source pages,
+            # not opaque drawing labels. Accept only canonical ASCII decimal
+            # spelling so "07"/"7", Unicode digits, signed or dotted values
+            # cannot disguise self-registration as cross-sheet corroboration.
+            # Page 0 remains valid for zero-indexed producer-owned page IDs.
             if field_name in ("support_page_id", "target_page_id") and (
-                val != val.strip() or not val.isprintable()
+                not val.isascii()
+                or not val.isdecimal()
+                or (len(val) > 1 and val.startswith("0"))
             ):
                 raise ValueError(
-                    f"{field_name} must be a canonical printable source page identity"
+                    f"{field_name} must be a canonical ASCII decimal source page identity"
                 )
         # A cross-view source-owner candidate requires TWO independent page
         # identities. Self-registration of one sheet is not corroboration.
