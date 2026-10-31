@@ -266,20 +266,29 @@ def _verify_row_lineage(
                 raise CustomerOutputVerificationError(
                     f"customer row {quantity_id!r} source finish {field} contradicts signed source"
                 )
-        # Legacy source projection shows only the semantic material (tile).
-        # New source projection shows the signed source code as well
-        # (FT1 (tile)). The original producer's persisted customer display,
-        # never the mutable row field, chooses which representation applies.
-        # Both parts must still agree with the sealed source semantic key.
-        source_display = producer_metadata.get("finish_system", parts[3])
         if (
-            type(source_display) is not str
-            or source_display not in (parts[3], f"{parts[2]} ({parts[3]})")
-            or type(row.get("finish_system")) is not str
-            or row["finish_system"] != source_display
+            type(row.get("finish_system")) is not str
+            or row["finish_system"] != parts[3]
         ):
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} finish_system differs from signed original finish material"
+            )
+        # Historical source projection uses the generic floor-finish title.
+        # New source projection includes the separately signed FT code in the
+        # customer element. The display must match the source-owned code AND
+        # its persisted original producer field, never a mutable row caption.
+        producer_element = producer_metadata.get("element")
+        if (
+            type(producer_element) is not str
+            or producer_element not in (
+                "Floor finish area",
+                f"Floor finish area ({parts[2]})",
+            )
+            or type(row.get("element")) is not str
+            or row["element"] != producer_element
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} element differs from signed original finish code"
             )
 
     # A signed source-closed quantity also authenticates its evidence status,
