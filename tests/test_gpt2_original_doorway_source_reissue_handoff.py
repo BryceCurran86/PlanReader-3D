@@ -119,6 +119,60 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
     return result, calls
 
 
+def test_negative_original_doorway_receipt_replays_and_preserves_producer_first_gate(
+    monkeypatch,
+):
+    negative=_original_ancestry()
+    negative["status"]="original_doorway_source_endpoint_rival_conflict"
+    negative["first_unclosed_gate"]="original_short_wall_stub_disagrees_across_sheets"
+    result,calls=_call(monkeypatch,ancestry=negative,actual=negative)
+    assert [entry[0] for entry in calls]==["source","source_reissue"]
+    assert result["status"]=="source_original_doorway_ancestry_conflict"
+    assert result["first_failure"]==negative["first_unclosed_gate"]
+    assert result["original_doorway_reissue_attempted"] is True
+    assert result["original_doorway_reissued_status"]==negative["status"]
+    assert result["new_firm_quantities"]==0
+    assert result["floor_finish_quantity_granted"] is False
+
+
+def test_forged_positive_preserves_actual_reissued_negative_gate(monkeypatch):
+    actual=_original_ancestry()
+    actual["status"]="original_doorway_source_endpoint_rival_conflict"
+    actual["first_unclosed_gate"]="original_short_wall_stub_disagrees_across_sheets"
+    result,calls=_call(monkeypatch,actual=actual)
+    assert [entry[0] for entry in calls]==["source","source_reissue"]
+    assert result["first_failure"]=="original_doorway_caller_receipt_mismatch"
+    assert result["original_doorway_reissued_status"]==actual["status"]
+    assert result["original_doorway_reissued_first_unclosed_gate"]==(
+        actual["first_unclosed_gate"]
+    )
+    assert result["new_firm_quantities"]==0
+
+
+def test_invalid_caller_scope_does_not_masquerade_as_real_source_failure(
+    monkeypatch,
+):
+    altered=_cross_sheet()
+    altered["original_floor_page"]=8
+    result,calls=_call(monkeypatch,cross=altered)
+    assert [entry[0] for entry in calls]==["source"]
+    assert result["first_failure"]=="original_doorway_caller_scope_invalid"
+    assert result["original_doorway_reissue_attempted"] is False
+    assert result["original_doorway_reissued_status"] is None
+    assert result["new_firm_quantities"]==0
+
+
+def test_negative_caller_status_cannot_bypass_positive_original_replay(
+    monkeypatch,
+):
+    forged=_original_ancestry()
+    forged["status"]="original_doorway_source_endpoint_rival_conflict"
+    result,calls=_call(monkeypatch,ancestry=forged)
+    assert [entry[0] for entry in calls]==["source","source_reissue"]
+    assert result["first_failure"]=="original_doorway_caller_receipt_mismatch"
+    assert result["new_firm_quantities"]==0
+
+
 def test_replayed_original_doorway_reaches_existing_source_only_w4_handoff(monkeypatch):
     result, calls = _call(monkeypatch)
     assert [x[0] for x in calls] == [

@@ -1081,8 +1081,6 @@ class GPT2OriginalSourceGeometryBridge:
                         and v==v and v not in (float("inf"),float("-inf"))
                         for v in translation)
                 and type(rival) is dict
-                and rival.get("status")==
-                    "original_doorway_all_printed_wall_strokes_match_candidate"
                 and rival.get("original_source_sha256")==
                     published.revision.source_sha256
                 and rival.get("source_document_id")==published.revision.document_id
@@ -1099,7 +1097,10 @@ class GPT2OriginalSourceGeometryBridge:
                 and rival.get("original_translation_pdf_pts")==list(translation)
             )
             reissued=None
+            reissue_attempted=False
+            reissue_failed=False
             if valid_scope:
+                reissue_attempted=True
                 try:
                     reissued=self.original_room_doorway_source_ancestry(
                         revision_id=revision_id,
@@ -1111,14 +1112,35 @@ class GPT2OriginalSourceGeometryBridge:
                     )
                 except (ValueError,TypeError,KeyError,IndexError,
                         OverflowError,AttributeError,RuntimeError):
-                    pass
-            if (reissued is None or reissued!=rival
-                    or reissued.get("status")!=
-                        "original_doorway_all_printed_wall_strokes_match_candidate"):
+                    reissue_failed=True
+            # A negative caller receipt is still replayable; only the
+            # independently reissued original may establish the first source
+            # gate. None of these paths authorizes material, W4 or quantity.
+            if not valid_scope:
+                first_failure="original_doorway_caller_scope_invalid"
+            elif reissue_failed or type(reissued) is not dict:
+                first_failure="original_doorway_original_reissue_failed"
+            elif reissued!=rival:
+                first_failure="original_doorway_caller_receipt_mismatch"
+            elif reissued.get("status")!=(
+                    "original_doorway_all_printed_wall_strokes_match_candidate"):
+                producer_gate=reissued.get("first_unclosed_gate")
+                first_failure=(producer_gate
+                               if type(producer_gate) is str and producer_gate
+                               else "original_doorway_reissued_source_conflict")
+            else:
+                first_failure=None
+            if first_failure is not None:
                 return {
                     "status":"source_original_doorway_ancestry_conflict",
-                    "first_failure":"real_original_doorway_stub_disagrees_across_sheets",
+                    "first_failure":first_failure,
                     "original_doorway_source_ancestry":rival,
+                    "original_doorway_reissue_attempted":reissue_attempted,
+                    "original_doorway_reissued_status":(
+                        reissued.get("status") if type(reissued) is dict else None),
+                    "original_doorway_reissued_first_unclosed_gate":(
+                        reissued.get("first_unclosed_gate")
+                        if type(reissued) is dict else None),
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }
