@@ -148,6 +148,47 @@ _VISIBILITY_PAGE_CACHE_MAX_PAGES = 24
 
 
 @dataclass(frozen=True)
+class NativePaintFact:
+    """What the source itself says about how one native visible segment is painted.
+
+    Authenticated against the source bytes and the visibility receipts (see
+    ``SourceVisibilityProducer.native_paint_facts``). It is provenance, not a role: nothing here says whether a line is
+    wall, glazing, a frame, an annotation or decoration, and ``asserts_role`` can only be False. ``sequence_number`` is
+    the PDF's own paint order for the page; ``path_index`` is the drawing path the segment belongs to (the four edges
+    of one rectangle share one)."""
+
+    observation_id: str
+    source_primitive_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    geometry: tuple[float, float, float, float]
+    kind: str
+    paint_type: Optional[str]
+    stroke_color: Optional[tuple[float, ...]]
+    stroke_width: Optional[float]
+    dashes: str
+    layer: str
+    fill: Optional[tuple[float, ...]]
+    fill_opacity: Optional[float]
+    path_index: int
+    item_index: int
+    edge_index: Optional[int]
+    sequence_number: int
+    clip_bbox: Optional[tuple[float, ...]]
+    clip_known: bool
+    clip_shape_known: bool
+    clip_exact_rect: Optional[tuple[float, ...]]
+    asserts_role: bool = False
+
+    def __post_init__(self) -> None:
+        if self.asserts_role is not False:
+            raise ValueError("a native paint fact asserts no role")
+
+
+@dataclass(frozen=True)
 class _CachedVisibilityWord:
     raw_text: str
     geometry: tuple[float, ...]
@@ -969,6 +1010,7 @@ class SourceVisibilityProducer:
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
         self._native_paint_page_cache: OrderedDict = OrderedDict()
+        self._native_paint_facts_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_word_cache: OrderedDict = OrderedDict()
@@ -1233,6 +1275,95 @@ class SourceVisibilityProducer:
             reason_codes=(('native_unstroked_white_fill_boundary' if all_white
                            else 'native_unstroked_pale_neutral_fill_boundary'),),
             metadata=metadata),)
+
+    def native_paint_facts(
+        self, selector: ObservationSelector, *, observation_ids: Sequence[str]
+    ) -> tuple[NativePaintFact, ...]:
+        """Authenticated paint provenance for the named native visible observations. Asserts no role.
+
+        Re-proves the source exactly as ``native_unstroked_fill_evidence`` does (published snapshot, source bytes hash,
+        a CORROBORATED visibility receipt for every observation, and the observation's geometry equal to the painted
+        segment's), then reports the facts the PDF itself holds about each segment: kind, paint type, stroke colour
+        and width, dashes, layer, fill and opacity, drawing path, paint order and clip. Missing or damaged evidence
+        raises the existing integrity error; consumers must not mistake a failed authentication for no facts.
+        Non-native observations, or observations on more than one page, yield ``()``. The result is ordered by
+        observation id and does not depend on the order or repetition of the request. Read-only: it writes only its own
+        immutable page cache, and the paint cache the fill-evidence sibling reads is untouched.
+        """
+        from pb_vector_geometry_v130 import extract_native_page
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        selected = frozenset(str(i) for i in observation_ids)
+        if not selected or selector.observation_id not in selected:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        records = {}
+        visibility = self.authority()
+        for observation_id in sorted(selected):
+            result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            records[observation_id] = result.observation
+        if any(r.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT for r in records.values()):
+            return ()
+        page_ids = {r.page_id for r in records.values()}
+        if len(page_ids) != 1:
+            return ()
+        page_id = next(iter(page_ids))
+        cache_key = (selector.source_sha256, page_id)
+        page_facts = self._native_paint_facts_page_cache.get(cache_key)
+        if page_facts is None:
+            try:
+                with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                    page = pdf[int(page_id) - 1]
+                    drawings = page.get_drawings()
+                    page_facts = {}
+                    for segment in extract_native_page(page)['segments']:
+                        drawing = drawings[segment['path_index']]
+                        color = drawing.get('color')
+                        fill = drawing.get('fill')
+                        clip = segment.get('clip')
+                        exact = segment.get('clip_exact_rect')
+                        page_facts[segment['id']] = dict(
+                            geometry=tuple(float(segment[k]) for k in ('x1', 'y1', 'x2', 'y2')),
+                            kind=str(segment['kind']), paint_type=drawing.get('type'),
+                            stroke_color=None if color is None else tuple(float(v) for v in color),
+                            stroke_width=(float(drawing['width']) if color is not None and drawing.get('width') is not None
+                                          else None),
+                            dashes=str(segment.get('dashes') or ''), layer=str(segment.get('layer') or ''),
+                            fill=None if fill is None else tuple(float(v) for v in fill),
+                            fill_opacity=(None if drawing.get('fill_opacity') is None
+                                          else float(drawing['fill_opacity'])),
+                            path_index=int(segment['path_index']), item_index=int(segment['item_index']),
+                            edge_index=(None if segment.get('edge_index') is None else int(segment['edge_index'])),
+                            sequence_number=int(segment['sequence_number']),
+                            clip_bbox=None if clip is None else tuple(float(v) for v in clip),
+                            clip_known=bool(segment.get('clip_known')),
+                            clip_shape_known=bool(segment.get('clip_shape_known')),
+                            clip_exact_rect=None if exact is None else tuple(float(v) for v in exact))
+            except (ValueError, IndexError, KeyError, TypeError, RuntimeError):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            self._native_paint_facts_page_cache[cache_key] = page_facts
+            while len(self._native_paint_facts_page_cache) > 2:
+                self._native_paint_facts_page_cache.popitem(last=False)
+        self._native_paint_facts_page_cache.move_to_end(cache_key)
+        facts = []
+        for observation_id, record in sorted(records.items()):
+            primitive = record.source_primitive_ref.removeprefix('visible:segment:')
+            held = page_facts.get(primitive)
+            if held is None or tuple(record.geometry) != held['geometry']:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            facts.append(NativePaintFact(
+                observation_id=observation_id, source_primitive_id=primitive, document_id=selector.document_id,
+                revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id, page_id=str(page_id), **held))
+        return tuple(facts)
 
     @contextmanager
     def _native_dimension_source_proof_batch(self, published, *, page_id: str):
@@ -4043,6 +4174,7 @@ __all__ = [
     "VISIBILITY_PROVEN_RECTANGULAR_CLIP",
     "VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT",
     "VISIBILITY_RECEIPT_UNAVAILABLE",
+    "NativePaintFact",
     "NativeSegmentVisibilityDecision",
     "RasterSegmentVisibilityReceipt",
     "PublishedVisibleSourceSnapshot",
