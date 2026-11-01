@@ -329,6 +329,111 @@ def test_replay_cannot_erase_archived_unmeasured_competitor(
     assert baseline.opening_quantity_evidence[0] is old_qty
 
 
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+@pytest.mark.parametrize("damage", (
+    "source_geometries", "source_observation_ids", "source_lineage_root_ids",
+    "representative_observation_id", "semantic_class", "physical_opening_id",
+))
+def test_archived_unmeasured_rival_source_identity_is_immutable(
+    original_claim, damage, reverse_inventory,
+):
+    """Reissuing the same historic unsupported ID cannot erase its old ink."""
+    _, full = original_claim
+    baseline = subset(full)
+    old_qty = baseline.opening_quantity_evidence[0]
+    new_q = next(q for q in full.opening_quantity_evidence
+                 if q.quantity_id != old_qty.quantity_id)
+    new = next(o for o in full.canonical_openings
+               if o.canonical_opening_id == new_q.input_entity_ids[0])
+    historical = replace(
+        new,
+        canonical_opening_id="historic-unsupported-rival",
+        physical_opening_id="historic-unsupported-rival",
+        representative_observation_id="historic-observation",
+        source_observation_ids=("historic-observation",),
+        source_lineage_root_ids=("historic-original-lineage",),
+        source_geometries=((530.0, 410.0, 561.0, 410.0),),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    baseline = replace(
+        baseline, canonical_openings=baseline.canonical_openings + (historical,),
+    )
+    mutated = replace(historical, **{
+        "source_geometries": {"source_geometries": ((650.0, 420.0, 699.0, 420.0),)},
+        "source_observation_ids": {"source_observation_ids": ("different-original-ink",)},
+        "source_lineage_root_ids": {"source_lineage_root_ids": ("different-original-lineage",)},
+        "representative_observation_id": {"representative_observation_id": "different-original-representative"},
+        "semantic_class": {"semantic_class": "another-opening-kind"},
+        "physical_opening_id": {"physical_opening_id": "different-physical-instance"},
+    }[damage])
+    fresh = full.canonical_openings + (mutated,)
+    quantities = full.opening_quantity_evidence
+    if reverse_inventory:
+        fresh = tuple(reversed(fresh))
+        quantities = tuple(reversed(quantities))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="historical opening source identity changed during replay",
+    ):
+        _append_reproved_areas(baseline, fresh, quantities)
+    assert baseline.canonical_openings[-1] is historical
+    assert baseline.opening_quantity_evidence[0] is old_qty
+
+
+def test_historical_unmeasured_rival_allows_new_snapshot_and_host_receipt_reissue(
+    original_claim,
+):
+    """Only receipt freshness may change; original physical source remains."""
+    _, full = original_claim
+    baseline = subset(full)
+    previous = baseline.opening_quantity_evidence[0]
+    new_q = next(q for q in full.opening_quantity_evidence
+                 if q.quantity_id != previous.quantity_id)
+    new = next(o for o in full.canonical_openings
+               if o.canonical_opening_id == new_q.input_entity_ids[0])
+    historical = replace(
+        new,
+        canonical_opening_id="historic-unsupported-rival",
+        physical_opening_id="historic-unsupported-rival",
+        representative_observation_id="historic-ink",
+        source_observation_ids=("historic-ink",),
+        source_lineage_root_ids=("historic-root",),
+        source_geometries=((530.0, 410.0, 561.0, 410.0),),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    baseline = replace(
+        baseline, canonical_openings=baseline.canonical_openings + (historical,),
+    )
+    reissued = tuple(
+        replace(
+            o, snapshot_id="fresh-original-producer-snapshot",
+            **({"host_binding_record_id": "fresh-host-receipt"}
+               if o.canonical_opening_id == historical.canonical_opening_id
+               else {}),
+        )
+        for o in full.canonical_openings + (historical,)
+    )
+    quantities = tuple(
+        q for o in reissued
+        if (q := _opening_quantity(o)) is not None
+    )
+    result = _append_reproved_areas(baseline, reissued, quantities)
+    assert result.canonical_openings[:2] == baseline.canonical_openings
+    assert result.canonical_openings[1] is historical
+    assert result.opening_quantity_evidence[0] is previous
+    assert len(result.opening_quantity_evidence) == 2
+    assert result.opening_area_replay_source_inventory == tuple(
+        sorted(reissued, key=lambda opening: opening.canonical_opening_id)
+    )
+    sealed = seal_live_opening_area_claim_run(
+        result, workspace_id=1, project_id="source-project",
+    )
+    rows = project_live_opening_customer_rows(
+        result, workspace_id=1, project_id="source-project",
+    )
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)

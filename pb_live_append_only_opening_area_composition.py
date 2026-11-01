@@ -133,6 +133,24 @@ def _append_reproved_areas(baseline, openings, quantities):
         raise SourceClosedRunConflictError(
             "historical opening competitor missing from complete source replay"
         )
+    # Preserve every previously observed physical hypothesis, not just those
+    # that already minted an area. A fresh replay may legitimately reissue
+    # host or snapshot receipts; it may not quietly rewrite an old rival's
+    # physical instance, representative, original ink, or source lineage to
+    # conceal a conflict. A source-owned retirement would need its own
+    # explicit, authenticated authority; no such authority is assumed here.
+    for oid, previous in old_objects.items():
+        current = fresh_objects[oid]
+        if (
+            _physical_core(previous) != _physical_core(current)
+            or previous.representative_observation_id
+            != current.representative_observation_id
+            or previous.source_observation_ids != current.source_observation_ids
+            or previous.source_lineage_root_ids != current.source_lineage_root_ids
+        ):
+            raise SourceClosedRunConflictError(
+                "historical opening source identity changed during replay"
+            )
     fresh_measured_ids = {q.input_entity_ids[0] for q in fresh.values()}
     # An unsupported-only sibling is negative evidence, never quietly omitted
     # from a new area. Shared exact observation members require a source-owned
