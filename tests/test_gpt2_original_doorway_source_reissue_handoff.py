@@ -325,11 +325,11 @@ def test_immutable_maryborough_office_d15_mismatch_cannot_spoof_matching_ancestr
 
 
 
-@pytest.mark.parametrize("mode", [False, None, "missing"])
-def test_non_virtual_doorway_handoff_preserves_existing_material_w4_path(
+@pytest.mark.parametrize("mode", [False, None, "missing", "True", 0, 1])
+def test_unverified_doorway_scope_never_bypasses_original_replay(
     monkeypatch, mode,
 ):
-    """The native gap census only applies to explicitly virtual closures."""
+    """Caller flags cannot turn an OPEN doorway into a closed-room authority."""
     cross = _cross_sheet()
     if mode == "missing":
         cross.pop("source_real_door_ink_gap_virtual_closure_only")
@@ -338,10 +338,10 @@ def test_non_virtual_doorway_handoff_preserves_existing_material_w4_path(
     result, calls = _call(
         monkeypatch, cross=cross, inventory_complete=False,
     )
-    assert [x[0] for x in calls] == [
-        "source", "material", "w4", "gpt1_shadow",
-    ]
-    assert result["status"] == "source_W4_FT_handoff_shadow_only"
+    assert [x[0] for x in calls] == ["source"]
+    assert result["status"] == "source_original_doorway_ancestry_conflict"
+    assert result["first_failure"] == "original_doorway_open_gap_scope_unverified"
+    assert result["original_doorway_reissue_attempted"] is False
     assert result["floor_finish_quantity_granted"] is False
     assert result["new_firm_quantities"] == 0
 
