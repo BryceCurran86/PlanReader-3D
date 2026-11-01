@@ -1055,6 +1055,20 @@ class GPT2OriginalSourceGeometryBridge:
                 source_cross_sheet_receipt.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_cross_sheet_root_does_not_match_active_revision")
+        # This entry point is only for an explicitly source-replayed OPEN
+        # doorway. A caller-controlled False, None or absent field must not
+        # bypass the original ancestry and full-page painted-ink census.
+        # Genuine closed rings use original_floor_finish_ink_handoff with a
+        # separately reissued original closed source graph, not this flag.
+        if source_cross_sheet_receipt.get(
+                "source_real_door_ink_gap_virtual_closure_only") is not True:
+            return {
+                "status":"source_original_doorway_ancestry_conflict",
+                "first_failure":"original_doorway_open_gap_scope_unverified",
+                "original_doorway_reissue_attempted":False,
+                "floor_finish_quantity_granted":False,
+                "new_firm_quantities":0,
+            }
         if source_cross_sheet_receipt.get(
                 "source_real_door_ink_gap_virtual_closure_only") is True:
             rival=original_doorway_source_ancestry
