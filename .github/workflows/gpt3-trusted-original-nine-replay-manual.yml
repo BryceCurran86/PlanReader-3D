@@ -150,6 +150,10 @@ jobs:
           # Private original never reaches candidate Python on the networked
           # runner. Only trusted main resolved the token-bearing local action.
           # Candidate code and the original are independent read-only mounts.
+          # The trusted provisioner already SHA-verified the private PDF.
+          # Reprove the nested bind and exact pinned PDF runtime INSIDE the
+          # same no-network, read-only container before running real issuers.
+          # Nothing from these private checks may reach workflow logs.
           if ! docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 256 \
               --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
@@ -159,10 +163,37 @@ jobs:
               -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
               -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
               "gpt3-offline:${{ matrix.python-version }}" \
-              python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings \
+              python -c 'import hashlib,json,fitz;from pathlib import Path;p=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf");m=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json").read_text());e=[d for d in m["source_documents"] if d.get("role")=="architectural_drawings"];assert len(e)==1;d=e[0];assert p.is_file() and p.name==d["name"] and p.stat().st_size==d["size_bytes"];assert hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"];assert fitz.VersionBind=="1.28.0"' > "$output" 2>&1; then
+            echo "::error::Original Docker source mount or pinned PyMuPDF preflight FAILED (private details withheld)"
+            exit 1
+          fi
+          if ! docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 \
+              --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+              --mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
+              "gpt3-offline:${{ matrix.python-version }}" \
+              python -m pytest -q -p no:cacheprovider --tb=short --disable-warnings \
               tests/test_gpt3_lot16_original_nine_whole_retention.py \
               > "$output" 2>&1; then
-            echo "::error::Isolated GPT3 Lot16 8+9 replay FAILED (private details withheld)"
+            # The complete pytest traceback remains in the ephemeral private
+            # log; output only one pre-reviewed static call-site category.
+            # No exception value, source geometry, customer row or raw log
+            # content is ever echoed, uploaded, or persisted.
+            if grep -Fq 'old_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+              echo "::error::Original default-eight producer/seal/customer FAILED (private details withheld)"
+            elif grep -Fq 'new_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+              echo "::error::Original explicit-nine producer/seal/customer FAILED (private details withheld)"
+            elif grep -Eq 'old_signed, old_customer = _verified_production|new_signed, new_customer = _verified_production' "$output"; then
+              echo "::error::Original sealed/customer receipt verification FAILED (private details withheld)"
+            elif grep -Eq 'baseline_signed|baseline_customer|additional_ids|old_scopes|new_scope' "$output"; then
+              echo "::error::Original signed-eight retention or new physical identity FAILED (private details withheld)"
+            else
+              echo "::error::Original replay failed at an unclassified private test stage (private details withheld)"
+            fi
             exit 1
           fi
           if ! grep -Eq '(^|[ ,])1 passed([, ]|$)' "$output" || grep -Eq '(^|[ ,])[1-9][0-9]* skipped([, ]|$)' "$output"; then
