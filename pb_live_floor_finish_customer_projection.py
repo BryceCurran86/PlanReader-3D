@@ -79,7 +79,7 @@ def _measurement_authority(quantity: QuantityEvidence) -> CommercialMeasurementA
     if quantity.authority == MeasurementAuthorityType.PDF_SCALED.value:
         scale_id = metadata.get("resolved_scale_id")
         scale_status = metadata.get("scale_status")
-        raw_conflicts = metadata.get("scale_conflicts", ())
+        raw_conflicts = metadata.get("scale_conflicts")
         if (
             type(scale_id) is not str or not scale_id
             or scale_id != scale_id.strip()
