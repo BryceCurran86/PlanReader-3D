@@ -346,7 +346,7 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert 'python -c \'import hashlib,json,fitz;' in execute
         assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
         assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
-        assert ' > "$output" 2>&1; then' in execute
+        assert execute.count(' > "$output" 2>&1; then') == 2
         assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" in execute
         assert "Original default-eight producer/seal/customer FAILED" in execute
         assert "Original explicit-nine producer/seal/customer FAILED" in execute
@@ -359,6 +359,7 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert "github.event.inputs" not in raw
         assert 'rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"' in steps[-1]["run"]
         assert 'echo "$output"' not in execute
+        assert '$(<' not in execute
         return True
     except (AssertionError, KeyError, TypeError, yaml.YAMLError):
         return False
