@@ -328,3 +328,60 @@ def test_owner_only_replay_requires_original_and_rerun_actor(
         repository == "BryceCurran86/PlanReader-3D",
         rerunner == "BryceCurran86",
     )) is permitted
+
+def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
+    """No unreviewed private source, exception or traceback may reach Actions."""
+    try:
+        doc = _parse(raw)
+        steps = doc["jobs"]["original"]["steps"]
+        assert len(steps) == 6
+        assert _isolated_private_source_contract(raw)
+        execute = steps[4]["run"]
+        assert execute.count(
+            "docker run --rm --network none --read-only --cap-drop ALL"
+        ) == 2
+        assert execute.count("dst=/workspace/documents/sources,readonly") == 2
+        assert "fitz.VersionBind==\"1.28.0\"" in execute
+        assert 'hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]' in execute
+        assert 'python -c \'import hashlib,json,fitz;' in execute
+        assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+        assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
+        assert ' > "$output" 2>&1; then' in execute
+        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" in execute
+        assert "Original default-eight producer/seal/customer FAILED" in execute
+        assert "Original explicit-nine producer/seal/customer FAILED" in execute
+        assert "Original sealed/customer receipt verification FAILED" in execute
+        assert "Original signed-eight retention or new physical identity FAILED" in execute
+        assert "unclassified private test stage" in execute
+        assert 'cat "$output"' not in execute
+        assert 'tee "$output"' not in execute
+        assert "actions/upload-artifact" not in raw
+        assert "github.event.inputs" not in raw
+        assert 'rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"' in steps[-1]["run"]
+        assert 'echo "$output"' not in execute
+        return True
+    except (AssertionError, KeyError, TypeError, yaml.YAMLError):
+        return False
+
+
+def test_original_private_first_failure_classifier_is_source_safe():
+    assert _private_phase_diagnostic_is_source_safe(WORKFLOW.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("old", "bad"), [
+    ("--tb=short", "--tb=no"),
+    ("--network none", "--network host"),
+    ('fitz.VersionBind=="1.28.0"', 'fitz.VersionBind=="1.26.7"'),
+    ('hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]', "True"),
+    (' > "$output" 2>&1; then', " 2>&1; then"),
+    ('grep -Fq', 'cat "$output"; grep -Fq'),
+    ('echo "::error::Original default-eight producer/seal/customer FAILED',
+     'echo "$(<$output)"; echo "::error::Original default-eight producer/seal/customer FAILED'),
+    ('rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"',
+     'echo "$(<$RUNNER_TEMP/gpt3-owner-original-positive.log)"'),
+])
+def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    assert old in raw
+    assert _private_phase_diagnostic_is_source_safe(raw)
+    assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
