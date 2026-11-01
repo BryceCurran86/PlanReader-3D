@@ -37,7 +37,7 @@ def test_adjacent_openings_sharing_wall_support_get_a_partitioned_receipt_in_eve
     physical, published, members, left, right = _two_windows(kw, producer_owned)
     first, second = physical.prove_existence(left).existence_record, physical.prove_existence(right).existence_record
     receipt = physical.partition_receipt(left, right)
-    assert receipt.status is CORR and receipt.partition == "partitioned" and receipt.basis == "native_gap_intervals"
+    assert receipt.status is CORR and receipt.partition == "partitioned" and receipt.basis == "native_aperture_extents"
     assert receipt.is_physically_distinct and not receipt.grants_quantity and not receipt.grants_firm_authority
     assert {receipt.left_record_id, receipt.right_record_id} == {first.record_id, second.record_id}
     assert set(receipt.shared_source_observation_ids) == set(first.source_observation_ids) & set(second.source_observation_ids)
@@ -46,7 +46,7 @@ def test_adjacent_openings_sharing_wall_support_get_a_partitioned_receipt_in_eve
         first.document_id, first.revision_id, first.source_sha256, first.snapshot_id, first.page_id)
     assert (receipt.producer_method, receipt.producer_version, receipt.producer_generation) == (
         first.producer_method, first.producer_version, first.producer_generation)
-    assert len(receipt.left_extent) == len(receipt.right_extent) == 2
+    assert len(receipt.left_extent) == len(receipt.right_extent) == 4          # along start, along end, depth low, depth high
     assert min(receipt.left_extent[1], receipt.right_extent[1]) <= max(receipt.left_extent[0], receipt.right_extent[0]) + 1e-5
     # the receipt agrees with the identity verdict it is derived with
     assert physical.compare_identity(left, right).physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
@@ -76,7 +76,7 @@ def test_openings_sharing_nothing_are_disjoint_and_one_opening_compared_with_its
     plain, other = _ids(ids, PLAIN, kw), _ids(ids, OTHER_WALL, kw)
     disjoint = physical.partition_receipt(_selector(published, plain[4]), _selector(published, other[4]))
     assert disjoint.status is CORR and disjoint.partition == "disjoint" and disjoint.is_physically_distinct
-    assert disjoint.basis == "no_shared_source_members" and disjoint.shared_source_observation_ids == ()
+    assert disjoint.basis == "native_aperture_extents" and disjoint.shared_source_observation_ids == ()
     same = physical.partition_receipt(_selector(published, plain[4]), _selector(published, plain[5]))
     assert same.status is CORR and same.partition == "same_record" and not same.is_physically_distinct
     assert same.left_record_id == same.right_record_id
@@ -131,12 +131,12 @@ def test_the_detail_behind_the_verdict_names_the_basis_and_the_extents():
     first = tuple(sorted({members[0], members[1], members[3], members[4], members[6], members[7]}))
     second = tuple(sorted({members[1], members[2], members[4], members[5], members[8], members[9]}))
     verdict, basis, left_extent, right_extent = _source_member_partition_detail(first, second, by_id)
-    assert (verdict, basis) == ("partitioned", "native_gap_intervals")
+    assert (verdict, basis) == ("partitioned", "native_aperture_extents")
     assert _source_member_partition(first, second, by_id) == verdict
     assert left_extent[1] <= right_extent[0] + 1e-5 or right_extent[1] <= left_extent[0] + 1e-5
     boxed = _source_member_partition_detail(("a", "b"), ("a", "c"), {}, left_box=(0, 0, 10, 10), right_box=(20, 0, 30, 10))
     assert boxed == ("partitioned", "raster_aperture_box", (0, 0, 10, 10), (20, 0, 30, 10))
-    assert _source_member_partition_detail(("a",), ("b",), {})[:2] == ("disjoint", "no_shared_source_members")
+    assert _source_member_partition_detail(("a",), ("b",), {})[:2] == ("unproven", "native_aperture_extents")
 
 
 def test_a_shared_jamb_is_unproven_not_partitioned():
@@ -147,4 +147,4 @@ def test_a_shared_jamb_is_unproven_not_partitioned():
     first = tuple(sorted(members[:6]))
     second = tuple(sorted(members[6:11] + [members[5]]))
     verdict, basis, _l, _r2 = _source_member_partition_detail(first, second, by_id)
-    assert verdict == "unproven" and basis == "native_gap_intervals"
+    assert verdict == "unproven" and basis == "native_aperture_extents"

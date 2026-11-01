@@ -284,7 +284,7 @@ class PhysicalOpeningPartitionReceipt:
     receipt_id: str
     status: EvidenceResolutionStatus
     partition: str            # disjoint | partitioned | same_record | overlapping_extent | unproven | not_applicable
-    basis: str                # no_shared_source_members | native_gap_intervals | raster_aperture_box | same_existence_record | ""
+    basis: str                # native_aperture_extents | raster_aperture_box | same_existence_record | ""
     reason_codes: tuple[str, ...]
     left_record_id: str
     right_record_id: str
@@ -941,6 +941,33 @@ def _seeded_ink_checks(
     return tuple(sorted(stubs)), tuple(sorted(unaccounted)), tuple(sorted(continuing))
 
 
+def _aperture_corners(frame: _StructureFrame) -> list[tuple[float, float]]:
+    d, n = frame.direction, frame.normal
+    low, high = min(frame.face_offsets), max(frame.face_offsets)
+    return [(a * d[0] + b * n[0], a * d[1] + b * n[1]) for a in (frame.gap_start, frame.gap_end) for b in (low, high)]
+
+
+def _apertures_overlap(first: _StructureFrame, second: _StructureFrame) -> bool:
+    """Whether two jamb-bounded apertures describe the same stretch of wall.
+
+    In the same wall direction they overlap when their gaps overlap along the wall AND their depth bands overlap or
+    abut (layers of one gap abut): two gaps at different depths, or consecutive gaps along one wall, do not. In
+    different directions they overlap when the oriented rectangles overlap in area."""
+    aligned = _in_axes_of(first, second)
+    if aligned is not None:
+        (start, end), faces = aligned
+        along = min(first.gap_end, end) - max(first.gap_start, start)
+        depth = min(max(first.face_offsets), faces[-1][0]) - max(min(first.face_offsets), faces[0][0])
+        return along > _FRAME_TOL and depth >= -_FRAME_TOL
+    first_corners, second_corners = _aperture_corners(first), _aperture_corners(second)
+    for axis in (first.direction, first.normal, second.direction, second.normal):
+        a = [_projection(point, axis) for point in first_corners]
+        b = [_projection(point, axis) for point in second_corners]
+        if min(max(a), max(b)) - max(min(a), min(b)) <= _FRAME_TOL:
+            return False
+    return True
+
+
 def _source_member_partition_detail(
     left_ids: Sequence[str],
     right_ids: Sequence[str],
@@ -951,45 +978,53 @@ def _source_member_partition_detail(
 ) -> tuple[str, str, tuple[float, ...], tuple[float, ...]]:
     """(verdict, basis, left extent, right extent) behind ``_source_member_partition``.
 
-    The verdict is ``disjoint`` (they share no observation), ``partitioned`` (they share some, but each is a
-    jamb-bounded structure, their gaps along the shared face axis do not overlap and every shared line is a wall face
-    piece outside both gaps: support between two windows in one wall), ``overlapping_extent`` (the gaps overlap, so they
-    describe the same stretch of wall and are neither the same nor distinct) or ``unproven`` (a shared jamb or cap, a
-    shared line that enters a gap, a structure with no readable frame, a different face direction). A record that
-    carries its own source-measured aperture box (the raster framed path) is partitioned by that box instead. The basis
-    names which evidence decided it and the extents are the gap intervals (in the left structure's face axis, left
-    first) or the boxes that were compared. Different record ids alone prove neither identity nor distinctness."""
+    The physical extents of the two apertures decide; shared observations only refine. Two apertures that overlap
+    describe the same stretch of wall whether or not they share a single source line (the same wall read twice from
+    different lines), so they are ``overlapping_extent``, neither the same nor distinct. Extents that cannot be read
+    from the source (a record with neither a source-measured aperture box nor a readable jamb-bounded frame, or a box
+    on one side only) are ``unproven``. Apertures that are apart are ``disjoint`` when they share no observation, and
+    ``partitioned`` when they share wall support: every shared line must be a wall face piece outside both gaps
+    (support between two windows in one wall); a shared jamb or cap, or a shared line that enters a gap, is
+    ``unproven``. A record that carries its own source-measured aperture box (the raster framed path) is compared by
+    that box. The extents returned are (along start, along end, depth low, depth high) in the left structure's axes,
+    left first, or the boxes; they are empty for oriented rectangles in different directions. Different record ids
+    alone prove neither identity nor distinctness."""
     shared = set(map(str, left_ids)) & set(map(str, right_ids))
-    if not shared:
-        return "disjoint", "no_shared_source_members", (), ()
     if left_box is not None or right_box is not None:
         if left_box is None or right_box is None or len(left_box) != 4 or len(right_box) != 4:
             return "unproven", "raster_aperture_box", (), ()
         extents = (tuple(float(v) for v in left_box), tuple(float(v) for v in right_box))
         overlap_x = min(left_box[2], right_box[2]) - max(left_box[0], right_box[0])
         overlap_y = min(left_box[3], right_box[3]) - max(left_box[1], right_box[1])
-        verdict = "overlapping_extent" if overlap_x > _FRAME_TOL and overlap_y > _FRAME_TOL else "partitioned"
-        return verdict, "raster_aperture_box", extents[0], extents[1]
+        if overlap_x > _FRAME_TOL and overlap_y > _FRAME_TOL:
+            return "overlapping_extent", "raster_aperture_box", extents[0], extents[1]
+        return ("partitioned" if shared else "disjoint"), "raster_aperture_box", extents[0], extents[1]
     first = _structure_frame(tuple(map(str, left_ids)), records_by_id)
     second = _structure_frame(tuple(map(str, right_ids)), records_by_id)
     if first is None or second is None:
-        return "unproven", "native_gap_intervals", (), ()
+        return "unproven", "native_aperture_extents", (), ()
     aligned = _in_axes_of(first, second)
+    extents: tuple[tuple[float, ...], tuple[float, ...]] = ((), ())
+    if aligned is not None:
+        extents = (
+            (first.gap_start, first.gap_end, min(first.face_offsets), max(first.face_offsets)),
+            (aligned[0][0], aligned[0][1], aligned[1][0][0], aligned[1][-1][0]))
+    if _apertures_overlap(first, second):
+        return "overlapping_extent", "native_aperture_extents", extents[0], extents[1]
+    if not shared:
+        return "disjoint", "native_aperture_extents", extents[0], extents[1]
     if aligned is None:
-        return "unproven", "native_gap_intervals", (), ()
+        return "unproven", "native_aperture_extents", extents[0], extents[1]
     gaps = ((first.gap_start, first.gap_end), aligned[0])
-    extents = (tuple(gaps[0]), tuple(gaps[1]))
-    if min(gaps[0][1], gaps[1][1]) - max(gaps[0][0], gaps[1][0]) > _FRAME_TOL:
-        return "overlapping_extent", "native_gap_intervals", extents[0], extents[1]
     for member in sorted(shared):
         record = records_by_id.get(member)
         line = _line_geometry(record) if record is not None else None
         if line is None or abs(_cross(first.direction, _unit_direction(line))) > _COORD_EQ_ABS_TOL:
-            return "unproven", "native_gap_intervals", extents[0], extents[1]
+            return "unproven", "native_aperture_extents", extents[0], extents[1]
         span = sorted((_projection((line[0], line[1]), first.direction), _projection((line[2], line[3]), first.direction)))
         if any(min(span[1], high) - max(span[0], low) > _FRAME_TOL for low, high in gaps):
-            return "unproven", "native_gap_intervals", extents[0], extents[1]
-    return "partitioned", "native_gap_intervals", extents[0], extents[1]
+            return "unproven", "native_aperture_extents", extents[0], extents[1]
+    return "partitioned", "native_aperture_extents", extents[0], extents[1]
 
 
 def _source_member_partition(
@@ -5049,10 +5084,11 @@ class PhysicalOpeningAuthority:
     ) -> PhysicalOpeningIdentityResult:
         """Compare two selectors using independently re-proven G17 existence only.
 
-        Two records with different ids are DISTINCT only when they share no source observation, or when the source
-        proves a physical partition between them (``_source_member_partition``). Records that share lines and
-        overlap in extent are a CONFLICT, and records whose shared lines are not provably wall support between
-        separate gaps are ABSTAINED: different record ids alone are not distinctness."""
+        Two records with different ids are DISTINCT only when the source proves their apertures apart
+        (``_source_member_partition``): separate extents, and, if they share lines, wall support outside both gaps.
+        Apertures that overlap are a CONFLICT whether or not the records share a single observation, and extents
+        that cannot be read, or shared lines that are not provably wall support between separate gaps, are
+        ABSTAINED: different record ids or different source observations alone are not distinctness."""
         return self._pairwise_identity(left_selector, right_selector)[0]
 
     def partition_receipt(
@@ -5178,13 +5214,13 @@ class PhysicalOpeningAuthority:
             ), dict(partition="same_record", basis="same_existence_record", left_record=first, right_record=second,
                     left_extent=(), right_extent=())
 
-        # Different record ids are not distinct openings when the two records rest on some of the same source lines:
-        # adjacent openings share the wall support between them, layers of one gap share a face and an extent. Only a
-        # physical partition proven from the source separates them.
+        # Different record ids (or different source observations) do not make two openings distinct: the same wall can
+        # be read twice from different lines, adjacent openings share the wall support between them, and layers of
+        # one gap share a face and an extent. Only the physical extents and a partition proven from the source
+        # separate them.
         boxes = (first.aperture_bbox_pt, second.aperture_bbox_pt)
         by_id: dict[str, SourceObservationRecord] = {}
-        if (set(first.source_observation_ids) & set(second.source_observation_ids)
-                and all(box is None for box in boxes)):
+        if all(box is None for box in boxes):
             records, failures = self._visible_snapshot_records(left_source)
             if not failures:
                 by_id = {str(record.observation_id): record for record in records}

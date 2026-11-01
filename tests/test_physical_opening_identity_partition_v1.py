@@ -101,8 +101,9 @@ def test_the_partition_rule_on_sources_with_nothing_in_common_or_nothing_readabl
     selector = _selector(published, members[6])
     failure, _source, _records, by_id, _restricted = physical._seeded_universe(selector, members)
     assert failure is None
-    left, right = members[:2] + members[3:5] + members[6:8], members[2:3] + members[5:6] + members[8:10]
-    assert _source_member_partition(left, right, by_id) == "disjoint"
+    left = members[:2] + members[3:5] + members[6:8]
+    # no shared line and no readable extent for the other side: the partition is unproven, not "disjoint"
+    assert _source_member_partition(left, members[2:3] + members[5:6] + members[8:10], by_id) == "unproven"
     assert _source_member_partition(tuple(members[:5]), tuple(members[3:8]), by_id) == "unproven"   # < 6 lines: no frame
     assert _source_member_partition(tuple(left), tuple(left), by_id) == "overlapping_extent"
     # the two windows' real six-line supports share the two middle pieces and have separate gaps
@@ -122,7 +123,10 @@ def test_a_record_that_carries_its_own_source_measured_box_is_partitioned_by_tha
     one_sided = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=None)
     assert (apart, touching, overlapping, contained, one_sided) == (
         "partitioned", "partitioned", "overlapping_extent", "overlapping_extent", "unproven")
-    assert _source_member_partition(("a", "b"), ("c", "d"), {}, left_box=(0, 0, 10, 10), right_box=(5, 5, 15, 15)) == "disjoint"
+    # the boxes decide even when no observation is shared
+    assert _source_member_partition(("a", "b"), ("c", "d"), {}, left_box=(0, 0, 10, 10), right_box=(5, 5, 15, 15)) == (
+        "overlapping_extent")
+    assert _source_member_partition(("a", "b"), ("c", "d"), {}, left_box=(0, 0, 10, 10), right_box=(20, 0, 30, 10)) == "disjoint"
     assert shared
 
 
