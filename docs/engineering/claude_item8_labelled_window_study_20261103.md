@@ -37,10 +37,13 @@ Definitions R-A, R-B and R-C are those of S3 section A3, computed by the same co
 - **R-C:** a face-collinear line has the same style as at least one of the structure's own face lines.
 
 ### A4. Decision rules
-1. A document is **qualifying** for a relation only if it has at least 20 labelled windows contributing at least one applicable
-   item (R-A/R-B: structure with interior ink; R-C: structure with face ink). If fewer than two documents qualify, the study is
-   **inconclusive as a rule** for that relation. A single-document figure is reported as a document-local observation: it cannot
-   become a rule, and the question stays ABSTAIN. (A paint convention in one drawing is not evidence about the next.)
+1. A document is **qualifying** for a relation only if it has at least 20 items for that relation, exactly as S3 counted them
+   (R-A: structures with interior ink; R-B and R-C: face lines), AND those items come from at least 5 distinct labelled
+   structures, so that many lines from one or two windows are never taken for a population. If fewer than two documents
+   qualify, the study is **inconclusive as a rule** for that relation. A single-document figure is reported as a
+   document-local observation: it cannot become a rule, and the question stays ABSTAIN. (A paint convention in one drawing is
+   not evidence about the next.) The 5-structure floor is a study criterion fixed here before any label exists; it is
+   not a production threshold.
 2. A relation is a **clean separator for labelled windows** only if, in EVERY qualifying document, at least 90% of its items take
    the SAME value (R-A: true) or are decisively assigned (R-B), AND the dominant direction is the same in every qualifying
    document, AND the per-document figures differ by no more than 15 percentage points.
@@ -65,13 +68,32 @@ Definitions R-A, R-B and R-C are those of S3 section A3, computed by the same co
   coordinates, ids, file names beyond the document label, or drawing content.
 
 ### A7. Honest scope and cost
-- Owner effort: one click per window on two plan pages, then one choice per window. If only one document is labelled, rule A4.1
-  makes the result inconclusive by construction; the owner should decide before labelling whether a second document is worth it.
+- Owner effort: one click per window on two plan pages, then one choice per window. The sample is small by nature: the
+  Maryborough plan carries six window callouts (counted by the callout census) and the Lot16 plan a similarly small number. R-A counts one item per structure,
+  so with so few windows R-A cannot reach the 20-item bar in either document; R-B and R-C count face lines and can. That is
+  recorded here, not engineered around.
+- Even a clean separator from this few windows per document is a lead for a larger, separately pre-registered study (more
+  documents, more windows), never a rule and never a production input. Only the opposite result is conclusive: if paint
+  does not separate the blocks even among the few owner-identified windows, the question is closed ABSTAIN.
+- If only one document is labelled, rule A4.1 makes the result inconclusive by construction; the owner should decide before
+  labelling whether a second document is worth it.
 - The study can only close the question, or show a consistent signature worth a separate proposal. It cannot move any item on its
   own.
+
+### A8. Procedure (so the run is repeatable)
+1. `python tools/item8_b/b_enumerate.py <label> <pdf> <page> <out_dir>` builds the local viewer and the structure file.
+2. The owner opens the viewer in a browser, marks every framed window on the page, and downloads the label file.
+3. `python tools/item8_b/b_analyse.py <label> <pdf> <page> <labels> <structures> <out>` checks the labels against a fresh
+   enumeration (refuses on any difference) and writes counts and id-free per-structure rows.
+4. `python tools/item8_b/b_aggregate.py <out> [<out> ...]` applies A4 and prints the verdicts.
 
 ---
 
 ## Part B. RESULTS
 
 Not yet run. Part A is committed first; results follow only after the owner supplies labels.
+
+Enumeration counts (no labels involved): Maryborough plan page 7 has 1,345 six-line structures; Lot16 plan page 3 has 181. The
+viewer reproduced both from the SHA-verified originals, and the structure extents were checked against the page render by eye
+on both pages (including the rotated Maryborough page). Most of these structures are furniture, fittings, dimension chains and
+text boxes, not openings; that is why the study asks the owner to point at windows instead of sampling structures.
