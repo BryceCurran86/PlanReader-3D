@@ -37,8 +37,22 @@ def _pdf(*, dx=0.0, dy=0.0, rotation=0, before=False, after=False, scale=1.0):
     return data
 
 
-def _source(**kwargs):
-    data = _pdf(**kwargs)
+def _opacity_pdf():
+    pdf = fitz.open()
+    page = pdf.new_page(width=300, height=300)
+    page.draw_line((20, 20), (120, 20), color=BLACK, width=0.48)                                   # opaque (the default)
+    page.draw_line((20, 30), (120, 30), color=BLACK, width=0.48, stroke_opacity=0.5)               # partially transparent
+    page.draw_line((20, 40), (120, 40), color=BLACK, width=0.48, stroke_opacity=0.0)               # fully transparent
+    page.draw_rect(fitz.Rect(20, 60, 60, 80), color=RED, width=0.48, fill=(0, 1, 0), fill_opacity=0.25,
+                   stroke_opacity=0.75)
+    page.draw_rect(fitz.Rect(80, 60, 120, 80), color=None, fill=(1, 1, 1))                         # fill only
+    data = pdf.tobytes()
+    pdf.close()
+    return data
+
+
+def _source(pdf_data=None, **kwargs):
+    data = pdf_data if pdf_data is not None else _pdf(**kwargs)
     producer = SourceVisibilityProducer(producer_method="paint-facts-test", producer_version="1")
     published = producer.ingest_native_pdf_bytes(
         document_id="paint-facts-test", source_bytes=data, source_locator="memory://paint-facts-test.pdf")
@@ -192,3 +206,35 @@ def test_an_empty_unknown_or_selector_less_request_is_refused(requested):
         producer.native_paint_facts(selector, observation_ids=requested)
     with pytest.raises(RuntimeError):
         producer.native_paint_facts(selector, observation_ids=ids[1:])             # the selector's own id is missing
+
+
+def test_stroke_opacity_is_reported_so_transparent_ink_is_never_mistaken_for_opaque_ink():
+    producer, published, selector, ids, data = _source(_opacity_pdf())
+    facts = producer.native_paint_facts(selector, observation_ids=ids)
+    assert len(facts) == len(ids) == 11
+    drawings = _oracle(data)
+    for fact in facts:
+        drawing = drawings[fact.path_index]
+        assert fact.stroke_opacity == drawing["stroke_opacity"]
+        assert fact.fill_opacity == drawing["fill_opacity"]
+    lines = sorted((f for f in facts if f.kind == "line"), key=lambda f: f.sequence_number)
+    assert [f.stroke_opacity for f in lines] == [1.0, 0.5, 0.0]
+    assert [f.stroke_is_partially_transparent for f in lines] == [False, True, False]
+    assert [f.stroke_is_transparent for f in lines] == [False, False, True]
+    stroked_fill = [f for f in facts if f.kind == "rect_edge" and f.stroke_color == RED]
+    assert len(stroked_fill) == 4
+    assert {(f.stroke_opacity, f.fill_opacity) for f in stroked_fill} == {(0.75, 0.25)}
+    assert all(f.stroke_is_partially_transparent and not f.stroke_is_transparent for f in stroked_fill)
+    fill_only = [f for f in facts if f.kind == "rect_edge" and f.stroke_color is None]
+    assert len(fill_only) == 4 and {f.stroke_opacity for f in fill_only} == {None}
+    assert not any(f.stroke_is_transparent or f.stroke_is_partially_transparent for f in fill_only)   # no stroke at all
+    assert not any(f.asserts_role for f in facts)
+
+
+def test_opacity_does_not_change_which_observations_exist_or_their_order_and_the_sibling_still_requires_opaque_fill():
+    producer, published, selector, ids, data = _source(_opacity_pdf())
+    again = producer.native_paint_facts(selector, observation_ids=tuple(reversed(ids)))
+    assert again == producer.native_paint_facts(selector, observation_ids=ids)
+    fill_only = tuple(f.observation_id for f in again if f.stroke_color is None)
+    assert producer.native_unstroked_fill_evidence(
+        replace(selector, observation_id=fill_only[0]), support_observation_ids=fill_only)

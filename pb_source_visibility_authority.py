@@ -153,7 +153,10 @@ class NativePaintFact:
 
     Authenticated against the source bytes and the visibility receipts (see
     ``SourceVisibilityProducer.native_paint_facts``). It is provenance, not a role: nothing here says whether a line is
-    wall, glazing, a frame, an annotation or decoration, and ``asserts_role`` can only be False. ``sequence_number`` is
+    wall, glazing, a frame, an annotation or decoration, and ``asserts_role`` can only be False. Stroke and fill
+    opacity are reported as the PDF holds them, so a consumer can tell opaque ink from partially transparent or fully
+    transparent paint before it treats any observation as visible structural ink; the opacity of a fill-only path's
+    stroke is None because it has no stroke. ``sequence_number`` is
     the PDF's own paint order for the page; ``path_index`` is the drawing path the segment belongs to (the four edges
     of one rectangle share one)."""
 
@@ -169,6 +172,7 @@ class NativePaintFact:
     paint_type: Optional[str]
     stroke_color: Optional[tuple[float, ...]]
     stroke_width: Optional[float]
+    stroke_opacity: Optional[float]
     dashes: str
     layer: str
     fill: Optional[tuple[float, ...]]
@@ -186,6 +190,17 @@ class NativePaintFact:
     def __post_init__(self) -> None:
         if self.asserts_role is not False:
             raise ValueError("a native paint fact asserts no role")
+
+    @property
+    def stroke_is_transparent(self) -> bool:
+        """The segment is stroked but its stroke is fully transparent (opacity 0): paint that leaves no visible ink."""
+        return self.stroke_color is not None and self.stroke_opacity is not None and self.stroke_opacity <= 0.0
+
+    @property
+    def stroke_is_partially_transparent(self) -> bool:
+        """The segment is stroked with an opacity strictly between 0 and 1: ink that does not fully cover what is under it."""
+        return (self.stroke_color is not None and self.stroke_opacity is not None
+                and 0.0 < self.stroke_opacity < 1.0)
 
 
 @dataclass(frozen=True)
@@ -1336,6 +1351,8 @@ class SourceVisibilityProducer:
                             stroke_color=None if color is None else tuple(float(v) for v in color),
                             stroke_width=(float(drawing['width']) if color is not None and drawing.get('width') is not None
                                           else None),
+                            stroke_opacity=(None if drawing.get('stroke_opacity') is None
+                                            else float(drawing['stroke_opacity'])),
                             dashes=str(segment.get('dashes') or ''), layer=str(segment.get('layer') or ''),
                             fill=None if fill is None else tuple(float(v) for v in fill),
                             fill_opacity=(None if drawing.get('fill_opacity') is None
