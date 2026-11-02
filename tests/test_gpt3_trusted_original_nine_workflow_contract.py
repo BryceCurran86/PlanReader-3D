@@ -192,9 +192,11 @@ def _isolated_private_source_contract(raw: str) -> bool:
             "--workdir /workspace",
             '"gpt3-offline:${{ matrix.python-version }}"',
             "python -c '",
-            "tests/test_gpt3_lot16_original_nine_whole_retention.py",
         ):
             assert run.count(required) == 1
+        # Pinned test occurs in source read, traceback scope and pytest invocation.
+        assert run.count("tests/test_gpt3_lot16_original_nine_whole_retention.py") == 3
+        assert '"tests/test_gpt3_lot16_original_nine_whole_retention.py"])' in run
         assert "python -c 'import hashlib,json,fitz;" not in script
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
