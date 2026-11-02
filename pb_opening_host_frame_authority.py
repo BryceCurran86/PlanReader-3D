@@ -1198,9 +1198,14 @@ class OpeningHostFrameProducer:
                 # every local aligned segment in the sealed solid band, even
                 # if the rest of a bent/curved candidate averages far away.
                 allowance = host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+                # The source offset is measured from the aperture centerline.
+                # Rival W4 centerlines anywhere inside the physical wall band
+                # still require producer-owned DISTINCT proof, not just those
+                # within the much narrower raster render tolerance.
+                physical_band_limit = wall_thickness / 2.0 + allowance
                 points = record.wall_candidate.centerline_pts
                 excluded = not any(
-                    data is not None and abs(data[2]) <= allowance
+                    data is not None and abs(data[2]) <= physical_band_limit
                     for data in (
                         host_geometry._source_line_axis_data((*start, *end), geometry)
                         for start, end in zip(points, points[1:])
