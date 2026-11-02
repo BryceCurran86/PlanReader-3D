@@ -1266,3 +1266,125 @@ def test_floor_finish_cannot_borrow_foreign_unpublished_original_room_area(
         project_live_floor_finish_customer_rows(
             claim, workspace_id=1, project_id="project-1",
         )
+
+
+def _original_labeled_room(
+    *,
+    label="OFFICE",
+    binding_id="source-label-binding-1",
+    receipts=("ev-room",),
+):
+    from pb_live_canonical_room_composition import LiveCanonicalRoomObject
+
+    floor = _floor()
+    return LiveCanonicalRoomObject(
+        canonical_room_id=floor.room_entity_id,
+        physical_room_id=floor.room_entity_id,
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        viewport_id=floor.viewport_id,
+        decision_scope_id="room-face-source:vp-1",
+        polygon_pdf_pts=floor.polygon_pdf_pts,
+        bounding_wall_ids=floor.bounding_wall_ids,
+        canonical_bounding_wall_ids=floor.canonical_bounding_wall_ids,
+        wall_relationships_complete=False,
+        area_page_pts2=floor.area_page_pts2,
+        source_room_face_record_id=floor.source_room_face_record_id,
+        evidence_ids=floor.evidence_ids,
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label=label,
+        room_label_binding_record_id=binding_id,
+        room_label_evidence_ids=receipts,
+        room_label_reason_codes=("source_room_label_resolved",),
+    )
+
+
+def test_source_labeled_floor_finish_displays_actual_room_name_in_customer_output():
+    room = _original_labeled_room()
+    original = _quantity()
+    quantity = replace(
+        original,
+        metadata={**original.metadata, "room_label": "OFFICE"},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(room,),
+        floor_finish_quantity_evidence=(quantity,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (quantity.quantity_id,)
+
+
+@pytest.mark.parametrize("mutation", (
+    "missing_label",
+    "missing_label_binding",
+    "missing_label_evidence",
+    "duplicate_room_label",
+))
+def test_unproven_or_duplicate_original_room_label_retains_canonical_customer_id(
+    mutation,
+):
+    room = _original_labeled_room()
+    additional = ()
+    if mutation == "missing_label":
+        room = replace(room, room_label=None)
+    elif mutation == "missing_label_binding":
+        room = replace(room, room_label_binding_record_id=None)
+    elif mutation == "missing_label_evidence":
+        room = replace(room, room_label_evidence_ids=())
+    else:
+        additional = (
+            replace(
+                room,
+                canonical_room_id="room-2",
+                physical_room_id="room-2",
+                source_room_face_record_id="face-2",
+                room_label_binding_record_id="binding-other",
+                room_label="office",
+            ),
+        )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(room, *additional),
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "room-1"
+    assert rows[0]["quantity"] == 8.64
+
+
+def test_original_finish_room_label_mismatch_rejected_without_changing_quantity():
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(
+            replace(
+                _quantity(),
+                metadata={**_quantity().metadata, "room_label": "FREEZER"},
+            ),
+        ),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError, match="room label contradicts",
+    ):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
