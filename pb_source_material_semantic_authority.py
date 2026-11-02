@@ -1837,6 +1837,7 @@ class SourceMaterialSemanticProducer:
         _physical_plan_page_ids: tuple[str, ...] = (),
         _source_native_multirow_material_shadow: bool = False,
         _source_native_schedule_page_ids: tuple[str, ...] = (),
+        _source_connected_rcp_plan_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
@@ -1851,6 +1852,9 @@ class SourceMaterialSemanticProducer:
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
+        self._source_connected_rcp_plan_page_ids = frozenset(
+            _source_connected_rcp_plan_page_ids
+        )
         self._plan_raster = (
             RasterTextCorroborationProducer.for_physical_plan_view_shadow(
                 source_visibility_producer
@@ -1922,6 +1926,33 @@ class SourceMaterialSemanticProducer:
             _source_native_schedule_page_ids=tuple(
                 sorted(set(page_ids),key=int)
             ),
+        )
+
+    @classmethod
+    def for_source_connected_original_rcp_plan_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Explicit original RCP plan + schedule scope, no quantities.
+
+        The opt-in F07 parent may be an original unstroked CAD underlay,
+        NOT a physical wall. Independent source-reissued ceiling ink, W4
+        wall face and unique finish marks remain separate gates.
+        """
+        if (not isinstance(page_ids, Sequence)
+                or isinstance(page_ids, (str, bytes)) or not page_ids):
+            raise ValueError("explicit_original_rcp_source_page_ids_required")
+        if any(type(p) is not str or not p.isdecimal()
+               or str(int(p))!=p or int(p)<1 for p in page_ids):
+            raise ValueError("canonical_original_rcp_page_ids_required")
+        selected=tuple(sorted(set(page_ids),key=int))
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_schedule_page_ids=selected,
+            _source_connected_rcp_plan_page_ids=selected,
         )
 
     @classmethod
@@ -2175,7 +2206,13 @@ class SourceMaterialSemanticProducer:
                         **({
                             "source_connected_table_cell_shadow":True,
                             "source_native_multipath_semantic_frame_shadow":True,
-                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                            "source_connected_text_cell_plan_frame_shadow":True,
+                        } if str(page_number) in self._source_connected_rcp_plan_page_ids
+                           else {
+                            "source_connected_table_cell_shadow":True,
+                            "source_native_multipath_semantic_frame_shadow":True,
+                        } if str(page_number) in self._source_native_schedule_page_ids
+                           else {}),
                     )
                 )
                 if (
