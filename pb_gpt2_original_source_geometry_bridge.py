@@ -920,6 +920,90 @@ class GPT2OriginalSourceGeometryBridge:
         ):
             return blocked_ink
 
+        # The RCP ink is reissued above, but a caller-supplied floor→RCP
+        # correspondence remains untrusted until its FLOOR ink is also
+        # independently reissued from the same sealed original PDF. Without
+        # this, a forged floor polygon/translation could bind a genuine GRID
+        # source polygon to an unrelated W4 room.
+        blocked_registration = {
+            "status": "source_floor_RCP_registration_issuer_not_replayable",
+            "first_failure": "original_floor_to_A120_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        correspondence = source_floor_rcp_correspondence
+        if (
+            correspondence.get("status") !=
+                "original_source_ink_ring_translation_candidate"
+            or correspondence.get("geometric_ink_correspondence_only") is not True
+            or type(correspondence.get("original_floor_page")) is not int
+            or correspondence["original_floor_page"] != original_floor_page_1_based
+            or type(correspondence.get("original_finish_page")) is not int
+            or correspondence["original_finish_page"] != ink_page
+            or correspondence.get("original_source_sha256") !=
+                published.revision.source_sha256
+        ):
+            return blocked_registration
+        floor_ids = correspondence.get("original_floor_source_ids")
+        rcp_ids = correspondence.get("original_finish_source_ids")
+        shift = correspondence.get("source_cross_sheet_translation_pdf_pts")
+        if (
+            type(floor_ids) is not tuple or not 3 <= len(floor_ids) <= 20000
+            or type(rcp_ids) is not tuple or rcp_ids != borders
+            or len(set(floor_ids)) != len(floor_ids)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in floor_ids)
+            or type(shift) not in (list, tuple) or len(shift) != 2
+            or any(type(x) not in (int, float) for x in shift)
+        ):
+            return blocked_registration
+        import math
+        from shapely.geometry import Polygon
+        try:
+            dx, dy = (float(x) for x in shift)
+            if not (math.isfinite(dx) and math.isfinite(dy)):
+                return blocked_registration
+            floor_source = self.original_room_ink_graph(
+                revision_id=revision_id,
+                page_1_based=original_floor_page_1_based,
+                original_source_edge_ids=floor_ids,
+            )
+            components = floor_source.get("native_components")
+            if (
+                floor_source.get("source_sha256") !=
+                    published.revision.source_sha256
+                or floor_source.get("page_1_based") != original_floor_page_1_based
+                or floor_source.get("native_candidate_ring_count") != 1
+                or floor_source.get("interior_stroke_intersections_and_overlaps")
+                or type(components) not in (tuple, list)
+                or len(components) != 1
+            ):
+                return blocked_registration
+            source_ring = components[0].get("source_simple_ring_candidate")
+            if type(source_ring) is not dict:
+                return blocked_registration
+            floor = Polygon(source_ring["vertices_pdf_pts"])
+            claimed_floor = Polygon(
+                correspondence["source_floor_perimeter_polygon_pdf_pts"])
+            claimed_rcp = Polygon(
+                correspondence["source_finishes_perimeter_polygon_pdf_pts"])
+            ceiling = Polygon(
+                actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if (not all(p.is_valid and p.area > 0 for p in (
+                        floor, claimed_floor, claimed_rcp, ceiling))
+                    or not floor.equals(claimed_floor)
+                    or not claimed_rcp.equals(ceiling)):
+                return blocked_registration
+            shifted_floor = Polygon([
+                (round(float(x) + dx, 3), round(float(y) + dy, 3))
+                for x, y in floor.exterior.coords[:-1]
+            ])
+            if not shifted_floor.is_valid or not shifted_floor.equals(ceiling):
+                return blocked_registration
+        except (KeyError, ValueError, TypeError, IndexError,
+                OverflowError, RuntimeError):
+            return blocked_registration
+
         # Source issue is independently repeated from the original,
         # producer-sealed A120 RCP mark and material definition. A copied
         # dict cannot supply source-verified ceiling material ownership.
