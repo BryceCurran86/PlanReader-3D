@@ -470,3 +470,42 @@ def test_source_closed_cross_block_office_label_is_candidate_only(monkeypatch):
     )
     assert result["new_firm_quantities"] == 0
     assert result["source_ceiling_area_m2"] is None
+
+
+
+def test_original_office_service_note_is_not_second_room_label(monkeypatch):
+    # On the actual A120 original, the real OFFICE block and
+    # "REVIEW IN OFFICE AREA" block are both within the ink region.
+    # A word-token match would incorrectly count two OFFICE labels.
+    def line(block, text, oid):
+        return SimpleNamespace(
+            page_id="9", source_partition_id="original-rcp-page9",
+            block_no=block, line_no=0, text=text,
+            bbox=(26., 45., 46., 57.),
+            observation_ids=(oid,), receipt_ids=(oid+"-receipt",),
+        )
+    result, events=_call(
+        monkeypatch, native_room_lines=(
+            line(9,"OFFICE","original-office-label"),
+            line(212,"REVIEW IN OFFICE AREA","mechanical-review-note"),
+        ),
+    )
+    assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
+    assert result["original_rcp_room_label_native_block_no"] == 9
+    assert result["original_rcp_room_label_observation_ids"] == (
+        "original-office-label",
+    )
+    assert "trusted_room_labels" in [e[0] for e in events]
+    assert result["new_firm_quantities"] == 0
+
+
+def test_source_review_note_alone_does_not_mint_office_identity(monkeypatch):
+    note=SimpleNamespace(
+        page_id="9",source_partition_id="original-rcp-page9",
+        block_no=212,line_no=0,text="REVIEW IN OFFICE AREA",
+        bbox=(26.,45.,46.,57.),
+        observation_ids=("note-text",),receipt_ids=("note-receipt",),
+    )
+    result,_=_call(monkeypatch,native_room_lines=(note,))
+    assert result["status"] == "source_RCP_room_label_region_not_authenticated"
+    assert result["new_firm_quantities"] == 0
