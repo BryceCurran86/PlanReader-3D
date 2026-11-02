@@ -417,7 +417,9 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert 'echo "$output"' not in execute
         assert '$(<' not in execute
         return True
-    except (AssertionError, KeyError, TypeError, yaml.YAMLError):
+    except (AssertionError, KeyError, TypeError, ValueError, SyntaxError, yaml.YAMLError):
+        # A nonliteral or malformed pytest argument list cannot establish a
+        # pinned, source-safe private test selection.
         return False
 
 
