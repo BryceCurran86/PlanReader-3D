@@ -1,6 +1,6 @@
 # Candidate 3 trace: tag, leader and schedule ownership for openings (2026-11-02)
 
-**Status.** Architecture report for review, per `AGENTS.md` ("First deliverable on a new change"). No code, test, workflow, threshold or truth change. It grants no authority and is not an input to any producer. This is the trace that candidate 3 of `claude_accuracy_gate_census_report_20261102.md` said it needed before any code. Only counts and public module names appear; no expected quantity, item id or private drawing content was used.
+**Status.** Decided 2026-11-02: candidate 3 closed as no-code (section 8). Architecture report, per `AGENTS.md` ("First deliverable on a new change"). No code, test, workflow, threshold or truth change. It grants no authority and is not an input to any producer. This is the trace that candidate 3 of `claude_accuracy_gate_census_report_20261102.md` said it needed before any code. Only counts and public module names appear; no expected quantity, item id or private drawing content was used.
 
 **Result in one line.** The proposed "joint tag, leader and schedule ownership graph" already exists twice (one legacy shadow, one production authority). Building a third would break the "no second canonical graph" rule, and on the two originals I can measure it is not the first failing gate. Recommendation: close candidate 3 as no-code and move to the gate that is measured in my lane (section 5).
 
@@ -65,6 +65,6 @@ None were read. The Lot16 counts come from producer receipts, read after the pro
 
 Every `.py` file, test, workflow, benchmark and truth file, and all committed signed outputs. Local-only untracked outputs (the census JSON, which contains observation ids) are not committed.
 
-## 8. Stop for review
+## 8. Owner decision (2026-11-02)
 
-Ask: close candidate 3 as no-code, and open the Maryborough aperture trace as the next primary task?
+The owner answered "Yes, both": candidate 3 is **closed as no-code**, and the Maryborough strip-to-whole-aperture trace is the next primary task in this lane. That trace is a separate report; this PR carries no further work.
