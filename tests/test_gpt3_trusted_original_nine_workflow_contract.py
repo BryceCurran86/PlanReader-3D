@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import re
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -190,7 +191,7 @@ def _isolated_private_source_contract(raw: str) -> bool:
             '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
             "--workdir /workspace",
             '"gpt3-offline:${{ matrix.python-version }}"',
-            "python -m pytest -q -p no:cacheprovider --tb=short",
+            "python -c '",
             "tests/test_gpt3_lot16_original_nine_whole_retention.py",
         ):
             assert run.count(required) == 1
@@ -360,14 +361,14 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert execute.count("dst=/workspace/documents/sources,readonly") == 1
         assert "python -c 'import hashlib,json,fitz;" not in execute
         assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
-        assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+        assert "python -c '" in execute and "status = pytest.main([" in execute
         assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
         assert execute.count(' > "$output" 2>&1; then') == 1
         assert "Original default-eight producer/seal/customer FAILED" in execute
         assert "Original explicit-nine producer/seal/customer FAILED" in execute
         assert "Original sealed/customer receipt verification FAILED" in execute
         assert "Original signed-eight retention or new physical identity FAILED" in execute
-        assert "unclassified private test stage" in execute
+        assert "Original container/test stopped before trusted phase reporting" in execute
         assert 'cat "$output"' not in execute
         assert 'tee "$output"' not in execute
         assert "actions/upload-artifact" not in raw
@@ -387,7 +388,7 @@ def test_original_private_first_failure_classifier_is_source_safe():
 @pytest.mark.parametrize(("old", "bad"), [
     ("--tb=short", "--tb=no"),
     ("--network none", "--network host"),
-    ("python -m pytest -q -p no:cacheprovider --tb=short", "python -m pytest -q -p no:cacheprovider --tb=no"),
+    ("status = pytest.main([", "status = pytest.main([]"),
     ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
     (' > "$output" 2>&1; then', " 2>&1; then"),
     ('grep -Fq', 'cat "$output"; grep -Fq'),
@@ -415,6 +416,6 @@ def test_offline_original_replay_runs_immutable_approved_test_not_main_checkout(
     assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in steps[2]["run"]
     assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in execute
     assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in execute
-    assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+    assert "python -c '" in execute and "status = pytest.main([" in execute
     assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in execute
     assert _isolated_private_source_contract(WORKFLOW.read_text(encoding="utf-8"))
