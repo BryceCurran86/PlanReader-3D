@@ -174,10 +174,31 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
         script = execute["run"]
-        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
-        assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in script
-        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
-        assert "python -m pytest" in script
+        # The preflight and real-source pytest are separate Docker invocations.
+        # Each must independently satisfy the owner-only offline/mount policy.
+        # Checking for one safe substring anywhere in this step can hide an
+        # unsafe second container and incorrectly accept an adversarial edit.
+        runs = re.findall(
+            r'if ! (docker run --rm\\b.*?) > "\\$output" 2>&1; then',
+            script, flags=re.DOTALL,
+        )
+        assert len(runs) == 2
+        assert script.count("docker run --rm") == 2
+        for run in runs:
+            assert run.startswith(
+                "docker run --rm --network none --read-only --cap-drop ALL"
+            )
+            for required in (
+                "--security-opt no-new-privileges",
+                "--pids-limit 256",
+                '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
+                '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
+                "--workdir /workspace",
+                '"gpt3-offline:${{ matrix.python-version }}"',
+            ):
+                assert run.count(required) == 1
+        assert "python -c 'import hashlib,json,fitz;" in runs[0]
+        assert "python -m pytest" in runs[1]
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
