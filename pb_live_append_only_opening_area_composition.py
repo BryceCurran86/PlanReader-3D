@@ -233,6 +233,107 @@ def _source_partition_proves_distinct(authority, left, right):
         return False
 
 
+
+# In-process authority capability, NOT a portable signed record. Ordinary
+# callers cannot confer original-source authority with a boolean, record ID,
+# mutable typed inventory or a deserialized customer/source JSON document.
+_ORIGINAL_REPLAY_ISSUER = object()
+
+
+class _OriginalOpeningReplayProof:
+    __slots__ = (
+        "_issuer", "_source", "_published", "_authority", "_host_authority",
+        "_binding_selectors", "_baseline", "_reproved",
+    )
+
+    def __init__(
+        self, *, issuer, source, published, authority, host_authority,
+        binding_selectors, baseline, reproved,
+    ):
+        if issuer is not _ORIGINAL_REPLAY_ISSUER:
+            raise TypeError("original opening replay proof must come from source producer")
+        self._issuer = issuer
+        self._source = source
+        self._published = published
+        self._authority = authority
+        self._host_authority = host_authority
+        self._binding_selectors = dict(binding_selectors)
+        self._baseline = baseline
+        self._reproved = reproved
+
+    def verify(self, claim) -> bool:
+        """Reconsult the live producer; no claimant-provided receipt is trusted."""
+        try:
+            if (
+                self._issuer is not _ORIGINAL_REPLAY_ISSUER
+                or claim.opening_area_replay_source_proof is not self
+                or self._source.published_snapshot_for_revision(
+                    self._published.revision.revision_id
+                ) != self._published
+                or claim.canonical_openings != self._reproved.canonical_openings
+                or claim.opening_quantity_evidence != self._reproved.opening_quantity_evidence
+                or claim.opening_area_replay_source_inventory
+                != self._reproved.opening_area_replay_source_inventory
+                or claim.opening_count_quantity_evidence
+                != self._baseline.opening_count_quantity_evidence
+                or claim.quantity_m2 != self._baseline.quantity_m2
+            ):
+                return False
+            old_ids = {q.quantity_id for q in self._baseline.opening_quantity_evidence}
+            fresh = {
+                o.canonical_opening_id: o
+                for o in self._reproved.opening_area_replay_source_inventory
+            }
+            if len(fresh) != len(self._reproved.opening_area_replay_source_inventory):
+                return False
+            # Re-prove the *entire* source candidate roster including
+            # unmeasured physical rivals, not only objects with signed areas.
+            for opening in fresh.values():
+                if _canonical_source_proof(self._authority, opening) is None:
+                    return False
+            for quantity in self._reproved.opening_quantity_evidence:
+                if quantity.quantity_id in old_ids:
+                    continue
+                if len(quantity.input_entity_ids) != 1:
+                    return False
+                new = fresh.get(quantity.input_entity_ids[0])
+                if new is None or _opening_quantity(new) != quantity:
+                    return False
+                binding_selector = self._binding_selectors.get(new.physical_opening_id)
+                binding = (
+                    self._host_authority.resolve(binding_selector)
+                    if binding_selector is not None else None
+                )
+                if (
+                    binding is None
+                    or binding.status is not EvidenceResolutionStatus.CORROBORATED
+                    or binding.record is None
+                    or binding.record.record_id != new.host_binding_record_id
+                    or binding.record.host_wall_id != new.host_wall_id
+                ):
+                    return False
+                # The fresh physical authority reissues a distinctness proof
+                # against every retained rival, including old source ink
+                # reissued into the fresh snapshot. No first/nearest selector.
+                for rival in fresh.values():
+                    if (
+                        rival.canonical_opening_id != new.canonical_opening_id
+                        and not _source_partition_proves_distinct(
+                            self._authority, new, rival,
+                        )
+                    ):
+                        return False
+            return True
+        except Exception:
+            # Source authority unavailable, conflicting, or revoked: abstain.
+            return False
+
+
+def _verify_original_opening_area_replay_proof(claim) -> bool:
+    proof = getattr(claim, "opening_area_replay_source_proof", None)
+    return type(proof) is _OriginalOpeningReplayProof and proof.verify(claim)
+
+
 def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_authority=None):
     """Composition only; caller owns original-source/host reauthentication."""
     from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
@@ -494,4 +595,21 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
     )
     if source.published_snapshot_for_revision(published.revision.revision_id) != published:
         raise SourceClosedRunConflictError("opening source snapshot changed during reproof")
+    if result is baseline:
+        return baseline
+    # Mint a non-serializable in-process capability only after the trusted
+    # original-PDF reissue, full physical roster and source/host/partition
+    # checks have completed. The customer sealer revalidates it on use.
+    proof = _OriginalOpeningReplayProof(
+        issuer=_ORIGINAL_REPLAY_ISSUER, source=source, published=published,
+        authority=composition.physical_opening_authority,
+        host_authority=composition.opening_host_binding_authority,
+        binding_selectors=composition.binding_selectors,
+        baseline=baseline, reproved=result,
+    )
+    result = replace(result, opening_area_replay_source_proof=proof)
+    if not proof.verify(result):
+        raise SourceClosedRunConflictError(
+            "original opening replay source/host/partition proof failed"
+        )
     return result
