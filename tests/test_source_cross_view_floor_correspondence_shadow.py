@@ -436,3 +436,116 @@ def test_selector_validation():
             target_page_id="7",
             material_code="",
         )
+
+
+# Fresh-main GPT2 source-mark integrity: no source evidence is manufactured.
+def _source_complete_correspondence():
+    return {
+        "wall_bounded_on_both_sheets": True,
+        "wall_evidence_identical_on_both_sheets": True,
+    }
+
+
+def _source_complete_mark():
+    return {"code": "FT3", "margin_pt": 8.0, "registered_region": True}
+
+
+def test_one_explicit_source_registered_ft3_remains_candidate_only():
+    result = classify_floor(
+        _source_complete_correspondence(),
+        registration_unique=True, marks_inside=[_source_complete_mark()],
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert result["status"] is EvidenceResolutionStatus.CANDIDATE
+    assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+@pytest.mark.parametrize("marks", [
+    [_source_complete_mark(), _source_complete_mark()],
+    [{**_source_complete_mark(), "registered_region": None}],
+    [{k: v for k, v in _source_complete_mark().items()
+      if k != "registered_region"}],
+    [{**_source_complete_mark(), "registered_region": "True"}],
+    [{**_source_complete_mark(), "margin_pt": float("nan")}],
+    [{**_source_complete_mark(), "margin_pt": float("inf")}],
+    [{**_source_complete_mark(), "margin_pt": None}],
+    [{**_source_complete_mark(), "margin_pt": True}],
+    [{**_source_complete_mark(), "code": " FT3 "}],
+    [{"code": "FT3", "margin_pt": 8., "registered_region": True},
+     {"code": "FT2", "margin_pt": 8., "registered_region": True}],
+])
+def test_ambiguous_duplicate_or_unregistered_source_ft_mark_cannot_be_candidate(marks):
+    result = classify_floor(
+        _source_complete_correspondence(),
+        registration_unique=True, marks_inside=marks,
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert result["status"] in (
+        EvidenceResolutionStatus.ABSTAINED, EvidenceResolutionStatus.CONFLICT,
+    )
+    assert result["authority_blockers"] == ()
+    assert not result["authenticated_physical_wall_face_equivalence"]
+
+
+@pytest.mark.parametrize(("kwargs", "reason"), [
+    ({"identity_ambiguous": True}, "duplicate_physical_floor_identity"),
+    ({"identity_missing": True}, "missing_physical_floor_identity"),
+    ({"registration_unique": 1}, REGISTRATION_NOT_UNIQUE),
+    ({"min_margin_pt": float("nan")}, MARK_TOO_CLOSE_TO_BOX_SIDE),
+    ({"min_margin_pt": -1.0}, MARK_TOO_CLOSE_TO_BOX_SIDE),
+])
+def test_original_finish_source_identity_and_threshold_inputs_fail_closed(kwargs, reason):
+    args = {
+        "registration_unique": True,
+        "marks_inside": [_source_complete_mark()],
+        "other_labelled_boxes_overlapping": 0,
+        "material_code": "FT3",
+    }
+    args.update(kwargs)
+    result = classify_floor(_source_complete_correspondence(), **args)
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert reason in result["reason_codes"]
+
+
+def test_duplicated_ft3_marks_abstain_through_real_source_shadow_producer():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3",
+         "registered_region": True},
+        {"x": 350.0, "y": 1450.0, "code": "FT3",
+         "registered_region": True},
+    ]
+    result = prod.evaluate_synthetic(
+        selector=selector, support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=marks,
+    )
+    assert result.records
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert "multiple_same_code_finish_marks_in_box" in result.records[0].reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert not any(rec.takeoff_eligible for rec in result.records)
+
+
+def test_missing_registered_region_propagates_abstain_to_source_shadow_collection():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(), target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3"}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
