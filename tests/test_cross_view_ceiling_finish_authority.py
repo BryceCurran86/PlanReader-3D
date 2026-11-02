@@ -734,3 +734,241 @@ def test_ceiling_contested_pair_does_not_poison_unrelated_room(monkeypatch) -> N
     )
     assert accepted == (third,)
     assert rejected == ("room-1", "room-2")
+
+
+def _source_closed_cross_block_case(monkeypatch, *, altered=None, rooms_override=None):
+    """Mock an independently reissued upstream producer, never a PDF test."""
+    from types import SimpleNamespace
+    from pb_source_material_semantic_authority import (
+        SourceMaterialDefinitionSelector, SourceMaterialOccurrenceSelector,
+    )
+    from pb_gpt2_original_source_geometry_bridge import (
+        GPT2OriginalSourceGeometryBridge,
+    )
+
+    source, published = _source()
+    room = _room(published)
+    rooms = rooms_override(published, room) if rooms_override else _rooms(published, room)
+    definition = _definition(published)
+    occurrence = replace(
+        _occurrence(published), source_text_observation_ids=("native-grid-word",),
+    )
+    root = dict(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+    definition_selector = SourceMaterialDefinitionSelector(**root, code="GRID")
+    occurrence_selector = SourceMaterialOccurrenceSelector(
+        **root, page_id="2", viewport_id="rcp-vp",
+    )
+    class _MaterialAuthority:
+        def resolve_definition(self, selector):
+            assert selector == definition_selector
+            return SourceMaterialDefinitionResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source-closed",), record=definition,
+            )
+        def resolve_occurrences(self, selector):
+            assert selector == occurrence_selector
+            return SourceMaterialOccurrenceScopeResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source-closed",), scope_complete=True,
+                records=(occurrence,), source_viewport_ownership_id="f07-original-owner",
+            )
+    auth = _MaterialAuthority()
+    bound = dict(
+        status="original_A120_RCP_material_on_W4_room_candidate_for_GPT1",
+        ceiling_quantity_m2_issued=False, new_firm_quantities=0,
+        original_physical_room_id=room.physical_room_id,
+        original_source_room_face_record_id=room.source_room_face_record_id,
+        original_source_sha256=room.source_sha256,
+        original_rcp_code="GRID", original_rcp_page=2,
+        original_rcp_viewport_id="rcp-vp",
+        original_ceiling_material_definition_record_id=definition.record_id,
+        original_ceiling_source_mark_ids=(occurrence.record_id,),
+        original_rcp_source_polygon_pdf_pts=room.polygon_pdf_pts,
+    )
+    proof = dict(
+        status="source_W4_original_A120_ceiling_compilation_shadow_only",
+        new_firm_quantities=0, source_ceiling_area_m2=None,
+        source_original_revision_id=room.revision_id,
+        source_original_snapshot_id=room.snapshot_id,
+        source_w4_room_face_claim={
+            "status":"source_original_floor_W4_face_candidate_only",
+            "w4_room_face_source_identity_proven":True,
+            "source_w4_wall_ownership_authenticated":True,
+            "original_physical_room_id":room.physical_room_id,
+        },
+        source_original_rcp_ceiling_input_for_gpt1=bound,
+        original_rcp_room_label_text="OFFICE",
+        original_rcp_room_label_source_partition_id="partition-2",
+        original_rcp_room_label_native_block_no=9,
+        original_rcp_room_label_native_line_no=0,
+        original_rcp_room_label_observation_ids=("office-native-observation",),
+        original_rcp_room_label_receipt_ids=("office-native-receipt",),
+    )
+    if altered:
+        altered(proof, bound)
+    called = []
+    class _Bridge:
+        def original_rcp_ceiling_source_handoff_for_gpt1(self, **kwargs):
+            called.append(kwargs)
+            assert kwargs["canonical_rooms"] is rooms
+            assert kwargs["physical_room_id"] == room.physical_room_id
+            return proof
+    monkeypatch.setattr(
+        GPT2OriginalSourceGeometryBridge,
+        "from_source_visibility_producer",
+        classmethod(lambda cls, source_arg: (
+            _Bridge() if source_arg is source else (_ for _ in ()).throw(
+                AssertionError("source producer not retained")
+            )
+        )),
+    )
+    monkeypatch.setattr(
+        ceiling, "_occurrence_line",
+        lambda *a, **k: _line(
+            text="GRID", block_no=10, line_no=0,
+            bbox=occurrence.bbox_pdf_pts,
+        ),
+    )
+    producer = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source,rooms=rooms,
+    )
+    result = producer.publish_original_rcp_source_closed(
+        revision_id=room.revision_id,
+        original_floor_page_1_based=1,
+        source_floor_rcp_correspondence={"untrusted_candidate":True},
+        original_rcp_ink={"untrusted_candidate":True},
+        original_rcp_material={"original_rcp_scope_ownership_id":"f07-original-owner"},
+        material_authority=auth,
+        definition_selector=definition_selector,
+        occurrence_selector=occurrence_selector,
+        original_ceiling_finish_code="GRID",
+        physical_room_id=room.physical_room_id,
+    )
+    return result, called
+
+
+def test_source_reissued_cross_native_block_rcp_finish_is_candidate_not_quantity(
+    monkeypatch,
+):
+    result, called = _source_closed_cross_block_case(monkeypatch)
+    assert len(called) == 1
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.room_label == "OFFICE"
+    assert record.support_block_no == 10
+    assert record.room_label_observation_ids == ("office-native-observation",)
+    assert record.finish_code == "GRID"
+    assert record.occurrence_record_id == "occ-grid"
+    assert record.support_snapshot_id
+    assert record.commercial_projection_allowed is False
+    assert result.unresolved_physical_room_ids == ()
+    assert not hasattr(record, "area_m2")
+
+
+def test_default_same_block_ceiling_publisher_is_not_weakened(monkeypatch):
+    source, published = _source()
+    rooms = _rooms(published, _room(published))
+    _patch_material(monkeypatch, published, occurrence_block=10)
+    monkeypatch.setattr(
+        ceiling, "_trusted_room_labels_for_pages",
+        lambda *a, **k: {
+            "2": (_line(
+                text="OFFICE",block_no=9,line_no=0,
+                bbox=(50.,50.,90.,62.),
+            ),),
+        },
+    )
+    result = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_positive_never_accepts_unverified_w4(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof[
+            "source_w4_room_face_claim"
+        ].update(w4_room_face_source_identity_proven=False),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_positive_never_issues_nested_customer_quantity(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: bound.update(
+            ceiling_quantity_m2_issued=True,
+        ),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_source_label_native_observation_must_be_unique(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_observation_ids=("same","same"),
+        ),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_source_label_receipt_cannot_change_room(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_text="LAUNDRY",
+        ),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_wrong_source_material_id_cannot_be_minted(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: bound.update(
+            original_ceiling_source_mark_ids=("forged-grid",),
+        ),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_cross_block_duplicate_physical_room_label_fails_closed(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, rooms_override=lambda published, room: _rooms(
+            published, room, _room(
+                published,room_id="room-2",canonical_id="canonical-2",
+            ),
+        ),
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+
+def test_cross_block_foreign_text_partition_cannot_borrow_grid_source(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_source_partition_id="other-source-partition",
+        ),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+
+
+def test_cross_block_forged_source_line_index_abstains(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_native_line_no=True,
+        ),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()

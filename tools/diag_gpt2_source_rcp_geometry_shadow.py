@@ -195,20 +195,93 @@ def audit_original_rcp_source_finish_occurrence(
             or not scope.scope_complete or not scope.source_viewport_ownership_id
             or scope.unresolved_source_text_observation_ids):
         return {**base,"first_failure":"original_rcp_occurrence_scope_incomplete"}
-    polygon=Polygon(rcp_candidate["source_ceiling_ink_polygon_pdf_pts"])
+    # An eligible RCP viewport is a COMPLETE source occurrence census, not
+    # a code-filtered list. A GRID mark cannot own a ceiling whose same
+    # physical ink zone also carries IPF1 or any other printed finish code.
+    try:
+        polygon=Polygon(rcp_candidate["source_ceiling_ink_polygon_pdf_pts"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {**base,"first_failure":"original_rcp_ink_polygon_invalid"}
+    if not polygon.is_valid or polygon.area<=0:
+        return {**base,"first_failure":"original_rcp_ink_polygon_invalid"}
+    competing=[]
+    for other in scope.records:
+        if other.code.upper()==original_finish_code.upper():
+            continue
+        if (other.document_id!=occurrence_selector.document_id
+                or other.revision_id!=occurrence_selector.revision_id
+                or other.snapshot_id!=occurrence_selector.snapshot_id
+                or other.source_sha256!=root
+                or other.page_id!=occurrence_selector.page_id
+                or other.viewport_id!=occurrence_selector.viewport_id
+                or not other.source_text_observation_ids):
+            return {**base,"first_failure":"other_rcp_finish_mark_source_lineage_unresolved"}
+        raw_bbox=other.bbox_pdf_pts
+        if (type(raw_bbox) is not tuple or len(raw_bbox)!=4
+                or any(type(v) not in (int,float) for v in raw_bbox)):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
+        try:
+            x0,y0,x1,y1=(float(v) for v in raw_bbox)
+        except (TypeError,ValueError,OverflowError):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>=x1 or y0>=y1):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
+        if polygon.intersects(box(x0,y0,x1,y1)):
+            competing.append(other)
+    if competing:
+        return {
+            **base,
+            "first_failure":"competing_rcp_material_codes_in_one_ceiling_zone",
+            "competing_original_rcp_mark_record_ids":tuple(
+                sorted({row.record_id for row in competing})
+            ),
+        }
     inside=[]
     for occ in scope.records:
         if occ.code.upper()!=original_finish_code.upper():
             continue
+        # The requested mark must be no less source-authenticated than
+        # OTHER finish codes. Its document and native text/box ancestry are
+        # separate from matching a raw code or the original PDF SHA.
+        native_ids=occ.source_text_observation_ids
         if (occ.definition_record_id!=definition.record.record_id
+                or occ.document_id!=occurrence_selector.document_id
                 or occ.revision_id!=occurrence_selector.revision_id
                 or occ.snapshot_id!=occurrence_selector.snapshot_id
                 or occ.source_sha256!=root
                 or occ.page_id!=occurrence_selector.page_id
                 or occ.viewport_id!=occurrence_selector.viewport_id
-                or not occ.source_text_observation_ids):
+                or type(occ.record_id) is not str
+                or not occ.record_id or occ.record_id!=occ.record_id.strip()
+                or type(native_ids) is not tuple or not native_ids
+                or len(set(native_ids))!=len(native_ids)
+                or any(type(v) is not str or not v or v!=v.strip()
+                       for v in native_ids)):
             return {**base,"first_failure":"source_rcp_mark_ancestry_conflict"}
-        if polygon.contains(box(*occ.bbox_pdf_pts)):
+        raw_bbox=occ.bbox_pdf_pts
+        if (type(raw_bbox) is not tuple or len(raw_bbox)!=4
+                or any(type(v) not in (int,float) for v in raw_bbox)):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
+        try:
+            x0,y0,x1,y1=(float(v) for v in raw_bbox)
+        except (TypeError,ValueError,OverflowError):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>=x1 or y0>=y1):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
+        mark_box=box(x0,y0,x1,y1)
+        # GEOS contains() is TRUE when a contained material bbox touches
+        # the outer zone's ink boundary. That is not unique source ownership
+        # of GRID vs the adjacent ceiling (even without an explicit rival).
+        # Boundary ink is an original separation, not a free tolerance.
+        if polygon.boundary.intersects(mark_box):
+            return {
+                **base,
+                "first_failure":"original_rcp_finish_mark_touches_zone_boundary",
+                "boundary_touch_original_rcp_mark_record_ids":(occ.record_id,),
+            }
+        if polygon.contains(mark_box):
             inside.append(occ)
     if len(inside)!=1:
         return {**base,"first_failure":"original_rcp_finish_mark_missing_or_competing"}
