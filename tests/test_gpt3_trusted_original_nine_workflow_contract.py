@@ -408,7 +408,7 @@ def test_original_private_first_failure_classifier_is_source_safe():
 @pytest.mark.parametrize(("old", "bad"), [
     ("--tb=short", "--tb=no"),
     ("--network none", "--network host"),
-    ("status = pytest.main([", "status = pytest.main([]"),
+    ("status = pytest.main([", "status = pytest.NOTmain(["),
     ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
     (' > "$output" 2>&1; then', " 2>&1; then"),
     ('grep -Fxq', 'cat "$output"; grep -Fxq'),
