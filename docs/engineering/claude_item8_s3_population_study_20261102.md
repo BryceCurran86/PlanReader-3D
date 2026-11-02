@@ -58,7 +58,8 @@ the drawings, no file names beyond the document's project label. Every document 
 ## Part B. RESULTS (the Part A rules were applied unchanged)
 
 Pre-registration commit: `f2ab6fe2d`, pushed to #4160 before any result below existed. The census ran afterwards on the
-code at `f97bc3515`'s content (S1, S2a, S2b), read-only, on the four local originals. No coordinates or drawing content
+S1, S2a and S2b code of this PR (S2b is `f97bc3515`), read-only, on the four local originals; its scripts are in
+`tools/item8_s3/` and take the private sources directory as an argument. No coordinates or drawing content
 appear here.
 
 ### B1. What was processed
@@ -95,8 +96,8 @@ All four documents qualify (at least 20 items) for every relation.
 | Q5446 | 786 / 293 | 538 / 274 | 542 / 20 |
 
 Opening-local face ink is mostly in the wall's own style in every document (73% to 100%), so style does not mark it as
-something other than wall. Shared wall-face ink (past both jambs) is in another style in a large share of 3Laurel (66%) and a
-small share elsewhere. The classification of locality (S2a) is robust and source-owned; what the lines ARE is not told by
+something other than wall. Shared wall-face ink (past both jambs) is in another style in 66% of 3Laurel's and in smaller shares elsewhere
+(4% to 21%). The classification of locality (S2a) is robust and source-owned; what the lines ARE is not told by
 paint.
 
 ### B5. What this does and does not show
