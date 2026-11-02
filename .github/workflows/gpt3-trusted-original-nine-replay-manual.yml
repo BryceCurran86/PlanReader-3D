@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           approved_base=782b4e3ef4028e9463f39a4a64feb5c50b9332f6
-          approved_head=2937084701e614bf929fab4d08544820b488b21b
+          approved_head=1d454a115cc049ccd16400ab36f847fe49541424
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -67,6 +67,7 @@ jobs:
           tests/test_gpt3_guarded_pending_owned_rollback.py
           tests/test_gpt3_guarded_pending_reconciliation.py
           tests/test_gpt3_lot16_original_nine_whole_retention.py
+          tests/test_gpt3_lot16_original_sealed_score_input.py
           tests/test_gpt3_new_seal_snapshot_conflicts.py
           tests/test_gpt3_opening_cross_semantic_source_seal.py
           tests/test_gpt3_opening_kind_complete_semantics.py
