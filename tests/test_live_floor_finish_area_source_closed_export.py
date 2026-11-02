@@ -1171,6 +1171,10 @@ def _independent_source_room_area() -> QuantityEvidence:
             "viewport_id": "vp-1",
             "source_room_face_record_id": "face-1",
             "room_snapshot_id": "snap-1",
+            # The original figured room-area producer, not the material
+            # code, owns these two independently issued source axes. The
+            # commercial floor-area projection must see the same exact IDs.
+            "figured_dimension_ids": ("dim-h-source", "dim-v-source"),
         },
     )
 
