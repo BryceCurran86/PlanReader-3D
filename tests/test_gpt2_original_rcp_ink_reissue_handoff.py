@@ -550,7 +550,8 @@ def _open_floor_graph():
         "native_candidate_ring_count":0,
         "interior_stroke_intersections_and_overlaps":(),
         "original_native_edges":tuple(
-            {"source_id":ident,"endpoints_pdf_pts":coords}
+            {"source_id":ident,"endpoints_pdf_pts":coords,
+             "source_ink_length_pdf_pt":__import__("math").dist(*coords)}
             for ident,coords in strokes
         ),
         "native_components":({
