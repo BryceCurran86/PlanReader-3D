@@ -270,7 +270,18 @@ def audit_original_rcp_source_finish_occurrence(
         if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
                 or x0>=x1 or y0>=y1):
             return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
-        if polygon.contains(box(x0,y0,x1,y1)):
+        mark_box=box(x0,y0,x1,y1)
+        # GEOS contains() is TRUE when a contained material bbox touches
+        # the outer zone's ink boundary. That is not unique source ownership
+        # of GRID vs the adjacent ceiling (even without an explicit rival).
+        # Boundary ink is an original separation, not a free tolerance.
+        if polygon.boundary.intersects(mark_box):
+            return {
+                **base,
+                "first_failure":"original_rcp_finish_mark_touches_zone_boundary",
+                "boundary_touch_original_rcp_mark_record_ids":(occ.record_id,),
+            }
+        if polygon.contains(mark_box):
             inside.append(occ)
     if len(inside)!=1:
         return {**base,"first_failure":"original_rcp_finish_mark_missing_or_competing"}
