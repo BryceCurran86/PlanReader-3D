@@ -810,6 +810,7 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
         claim, workspace_id=1, project_id="customer-workspace:1",
     )
     assert len(projected) == 1, "source-closed ceiling projector rejected test claim"
+    assert projected[0]["element"] == "Ceiling lining area (GRID)"
     source = tmp_path / "synthetic-ceiling-source.pdf"
     source.write_bytes(b"source-neutral-ceiling-not-an-original-PDF")
     app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
@@ -843,7 +844,9 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
     )
     customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
     original = claim.ceiling_lining_quantity_evidence[0]
-    assert customer["element"] == "Ceiling lining area"
+    # Verify that the real workspace takeoff conversion never strips the
+    # original RCP code from the independently sealed ceiling customer row.
+    assert customer["element"] == projected[0]["element"] == "Ceiling lining area (GRID)"
     assert customer["finish_system"] == "ceiling_grid"
     assert customer["quantity"] == original.value == 9.05352
     assert customer["unit"] == "m²"
