@@ -326,3 +326,28 @@ def test_original_rcp_native_source_rounding_preserves_true_fractional_registrat
         },ink=ink,material=material)
     assert rival["first_failure"]=="original_floor_to_A120_registration_conflict"
     assert rival["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("original_area", [
+    None, "", "10000", True, False, float("nan"), float("inf"),
+    0.0, -1.0, 10000.00001, 9999.99999, 8.94630827,
+])
+def test_original_rcp_ink_polygon_area_receipt_cannot_be_replaced_by_metric_or_alias(
+    monkeypatch, original_area,
+):
+    source = _rcp()
+    source["source_ceiling_polygon_area_pdf_pt2_not_m2"] = original_area
+    result = _authenticated_upstream_result(monkeypatch, ink=source)
+    assert result["first_failure"] == "A120_original_ink_area_receipt_mismatch"
+    assert result["ceiling_quantity_m2_issued"] is False
+    assert result["new_firm_quantities"] == 0
+
+
+def test_exact_original_native_rcp_ink_area_reaches_candidate_not_firm(monkeypatch):
+    source = _rcp()
+    source["source_ceiling_polygon_area_pdf_pt2_not_m2"] = 10000.0
+    result = _authenticated_upstream_result(monkeypatch, ink=source)
+    assert result["status"] == "original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+    assert result["source_original_rcp_polygon_pdf_pt2_not_m2"] == 10000.
+    assert result["ceiling_quantity_m2_issued"] is False
+    assert result["new_firm_quantities"] == 0
