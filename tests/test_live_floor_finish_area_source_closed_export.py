@@ -1388,3 +1388,61 @@ def test_original_finish_room_label_mismatch_rejected_without_changing_quantity(
             claim, workspace_id=1, project_id="project-1",
         )
     assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+@pytest.mark.parametrize("not_permitted", (
+    False, 0, 1, "false", "True", "", None,
+))
+@pytest.mark.parametrize("handoff_only", (False, True))
+def test_original_material_only_ft_cannot_be_promoted_to_customer_floor_area(
+    not_permitted, handoff_only,
+):
+    """A material code without its source-owned finished floor is not m²."""
+    original = _quantity()
+    unmeasured = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": not_permitted,
+            "quantity_handoff_only": handoff_only,
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(unmeasured,),
+    )
+    for adapter in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="material-only receipt forbids",
+        ):
+            adapter(claim, workspace_id=1, project_id="project-1")
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+def test_explicit_original_ft_customer_permission_retains_signed_area_and_code():
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": True,
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(permitted,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
