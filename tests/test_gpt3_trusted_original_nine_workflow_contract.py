@@ -174,33 +174,27 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
         script = execute["run"]
-        # The preflight and real-source pytest are separate Docker invocations.
-        # Each must independently satisfy the owner-only offline/mount policy.
-        # Checking for one safe substring anywhere in this step can hide an
-        # unsafe second container and incorrectly accept an adversarial edit.
-        pieces = script.split("if ! docker run --rm ")
-        assert len(pieces) == 3
-        assert script.count("docker run --rm") == 2
-        runs = []
-        for piece in pieces[1:]:
-            run, separator, _remaining = piece.partition(' > "$output" 2>&1; then')
-            assert separator
-            runs.append("docker run --rm " + run)
-        for run in runs:
-            assert run.startswith(
-                "docker run --rm --network none --read-only --cap-drop ALL"
-            )
-            for required in (
-                "--security-opt no-new-privileges",
-                "--pids-limit 256",
-                '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
-                '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
-                "--workdir /workspace",
-                '"gpt3-offline:${{ matrix.python-version }}"',
-            ):
-                assert run.count(required) == 1
-        assert "python -c 'import hashlib,json,fitz;" in runs[0]
-        assert "python -m pytest" in runs[1]
+        # The SAME immutable original pytest first reauthenticates the SHA/size
+        # inside the source-mounted offline container, then runs both issuers.
+        # The temporary duplicate preflight introduced a runtime regression.
+        # This must stay ONE isolated read-only invocation, never a host run.
+        assert script.count("docker run --rm") == 1
+        prefix = "if ! docker run --rm "
+        assert script.count(prefix) == 1
+        run = script.split(prefix, 1)[1].split(' > "$output" 2>&1; then', 1)[0]
+        assert run.startswith("--network none --read-only --cap-drop ALL")
+        for required in (
+            "--security-opt no-new-privileges",
+            "--pids-limit 256",
+            '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
+            '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
+            "--workdir /workspace",
+            '"gpt3-offline:${{ matrix.python-version }}"',
+            "python -m pytest -q -p no:cacheprovider --tb=short",
+            "tests/test_gpt3_lot16_original_nine_whole_retention.py",
+        ):
+            assert run.count(required) == 1
+        assert "python -c 'import hashlib,json,fitz;" not in script
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
@@ -362,14 +356,13 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         execute = steps[4]["run"]
         assert execute.count(
             "docker run --rm --network none --read-only --cap-drop ALL"
-        ) == 2
-        assert execute.count("dst=/workspace/documents/sources,readonly") == 2
-        assert "fitz.VersionBind==\"1.28.0\"" in execute
-        assert 'hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]' in execute
-        assert 'python -c \'import hashlib,json,fitz;' in execute
+        ) == 1
+        assert execute.count("dst=/workspace/documents/sources,readonly") == 1
+        assert "python -c 'import hashlib,json,fitz;" not in execute
+        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
         assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
         assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
-        assert execute.count(' > "$output" 2>&1; then') == 2
+        assert execute.count(' > "$output" 2>&1; then') == 1
         assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" in execute
         assert "Original default-eight producer/seal/customer FAILED" in execute
         assert "Original explicit-nine producer/seal/customer FAILED" in execute
@@ -395,8 +388,8 @@ def test_original_private_first_failure_classifier_is_source_safe():
 @pytest.mark.parametrize(("old", "bad"), [
     ("--tb=short", "--tb=no"),
     ("--network none", "--network host"),
-    ('fitz.VersionBind=="1.28.0"', 'fitz.VersionBind=="1.26.7"'),
-    ('hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]', "True"),
+    ("python -m pytest -q -p no:cacheprovider --tb=short", "python -m pytest -q -p no:cacheprovider --tb=no"),
+    ("tests/test_gpt3_lot16_original_nine_whole_retention.py", "tests/test_gpt3_lot16_original_nine_whole_retention_DISABLED.py"),
     (' > "$output" 2>&1; then', " 2>&1; then"),
     ('grep -Fq', 'cat "$output"; grep -Fq'),
     ('echo "::error::Original default-eight producer/seal/customer FAILED',
@@ -409,3 +402,19 @@ def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
     assert old in raw
     assert _private_phase_diagnostic_is_source_safe(raw)
     assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
+
+
+
+def test_original_producer_reverifies_source_sha_inside_offline_pytest():
+    """No standalone preflight may replace the original test's source attestation."""
+    root = WORKFLOW.parents[2]
+    acceptance = (root / "tests/test_gpt3_lot16_original_nine_whole_retention.py").read_text(encoding="utf-8")
+    runner = (root / "tools/run_gpt3_lot16_original_sealed_score_input.py").read_text(encoding="utf-8")
+    requirements = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "original_sha = _verify_original_source(SOURCE, MANIFEST)" in acceptance
+    assert "old_receipt = run_original_lot16_sealed_handoff(SOURCE, old_dir)" in acceptance
+    assert "new_receipt = run_original_lot16_sealed_handoff(" in acceptance
+    assert 'sha = _verify_original_source(pdf, manifest_path)' in runner
+    assert 'digest = hashlib.sha256(pdf.read_bytes()).hexdigest()' in runner
+    assert 'if digest != original["sha256"]:' in runner
+    assert "PyMuPDF==1.28.0" in requirements.splitlines()
