@@ -1,14 +1,14 @@
 """Autonomous structural opening accuracy recovery — Milestone 3.
 
-Source-authenticated continuous through-wall aperture hosting and host frame authority.
+Source-neutral through-wall aperture hosting hypotheses; not original-source authority.
 Reconciles whole-opening apertures (e.g. Maryborough W05, W03/W01, W02) with continuous
 loadbearing through-walls and narrow inter-aperture structural dividing piers.
 
 Enforces:
 1. Through-wall continuity: Openings are hosted in continuous structural walls without
    destroying through-wall continuity or fragmenting the parent wall into severed stubs.
-2. Narrow inter-aperture pier reconciliation: Solid structural piers (e.g. 7.44 pt pier
-   between Maryborough W03 and W02) are authenticated as structural wall elements.
+2. Narrow inter-aperture pier hypotheses: a geometric gap cannot authenticate a solid
+   structural pier without independent original-source wall evidence.
 3. Strict fail-closed geometric validation: Fails closed on transverse wall crossings,
    angular misalignment (> 1°), or transverse displacements exceeding wall half-thickness.
 4. Strict shadow isolation: commercial_projection_allowed=False, takeoff_eligible=False.
@@ -17,6 +17,7 @@ Enforces:
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -27,26 +28,51 @@ from pb_migration_contracts import (
 )
 
 DEFAULT_SNAP_TOLERANCE_PT = 2.5
+# The repository's 20k geometry-primitive cap applies even with no
+# transverse obstructions (where the pairwise work product would be zero).
+_MAX_GEOMETRIC_PRIMITIVES = 20_000
+# Bounded shadow-only candidate work: 20k primitives must not imply 400m
+# opening/obstruction intersection tests. This is NOT a geometry threshold.
+_MAX_TRANSVERSE_INTERSECTION_CHECKS = 250_000
 _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
+
+
+def _native_source_identity(value: object) -> bool:
+    """Preserve literal source identities; never trim, coerce or alias observations."""
+    return (
+        type(value) is str
+        and bool(value)
+        and value == value.strip()
+        and value.isprintable()
+    )
 
 
 def _finite_real(value: object) -> bool:
     """Reject non-numeric, Boolean, nonfinite and unrepresentably large coordinates."""
     if type(value) not in (int, float):
         return False
+    if type(value) is int and abs(value) > 2**53:
+        return False  # distinct source integers would alias on float conversion
     try:
-        return math.isfinite(value)
-    except OverflowError:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
         return False
 
 
+def _finite_source_coordinate(value: object) -> bool:
+    """Refuse source-point magnitudes beyond binary64's integer identity limit."""
+    # The same identity bound applies to native float and int coordinates.
+    # Scalar thickness and snap values use _finite_real independently.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
 def _finite_point(point: object) -> bool:
-    """A source-coordinate pair must contain two real, finite, non-Boolean values."""
+    """A source-coordinate pair must preserve finite native coordinate identity."""
     return (
         type(point) in (tuple, list)
         and len(point) == 2
-        and all(_finite_real(value) for value in point)
+        and all(_finite_source_coordinate(value) for value in point)
     )
 
 
@@ -60,7 +86,7 @@ class ContinuousThroughWallCandidate:
     thickness_pt: float
 
     def __post_init__(self) -> None:
-        if not self.wall_id.strip():
+        if not _native_source_identity(self.wall_id):
             raise ValueError("wall_id required")
         if (not _finite_real(self.thickness_pt) or self.thickness_pt <= 0.0):
             raise ValueError("thickness_pt must be positive and finite")
@@ -71,6 +97,9 @@ class ContinuousThroughWallCandidate:
         distance = math.hypot(dx, dy)
         if not math.isfinite(distance) or distance <= _COORD_TOL:
             raise ValueError("Through-wall start and end points must be distinct and finite")
+        # A frozen record cannot retain mutable caller-owned endpoint lists.
+        object.__setattr__(self, "start_pt", tuple(float(v) for v in self.start_pt))
+        object.__setattr__(self, "end_pt", tuple(float(v) for v in self.end_pt))
 
     @property
     def length_pt(self) -> float:
@@ -105,7 +134,164 @@ class InterAperturePierRecord:
     pier_width_pt: float
     left_opening_id: str
     right_opening_id: str
-    is_structural_masonry_pier: bool = True
+    # Immutable source-neutral receipt for the exact pier identity.
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    host_wall_id: str
+    host_start_pt: tuple[float, float]
+    host_end_pt: tuple[float, float]
+    host_thickness_pt: float
+    snap_tolerance_pt: float
+    left_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
+    right_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
+    left_jamb_observations: tuple[str, ...]
+    right_jamb_observations: tuple[str, ...]
+    is_structural_masonry_pier: bool | None = None
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    first_remaining_gate: str = "original_source_structural_pier_unverified"
+
+    def __post_init__(self) -> None:
+        # This public record is source-neutral even when directly constructed
+        # or recreated with dataclasses.replace, not only via this producer.
+        if (self.is_structural_masonry_pier is not None
+                or self.status is not EvidenceResolutionStatus.CANDIDATE
+                or self.first_remaining_gate != "original_source_structural_pier_unverified"):
+            raise ValueError("source-neutral pier cannot assert structural source authority")
+        if (any(not _native_source_identity(v) for v in (
+                self.pier_id, self.left_opening_id, self.right_opening_id))
+                or self.left_opening_id == self.right_opening_id
+                or any(not _finite_real(v) for v in (
+                    self.pier_start_station, self.pier_end_station,
+                    self.pier_width_pt,
+                ))
+                or self.pier_end_station <= self.pier_start_station
+                or self.pier_width_pt <= 0):
+            raise ValueError("pier numeric evidence must be finite and physical")
+        gap = self.pier_end_station - self.pier_start_station
+        if (not math.isfinite(gap)
+                or not math.isclose(self.pier_width_pt, gap,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("pier numeric evidence conflicts with stations")
+        # Frozen records may be directly constructed or dataclasses.replace'd.
+        # Reconstruct the producer's complete source/host/jamb identity before
+        # accepting a geometric pier. This does not grant original-source proof.
+        if not 0.5 <= gap <= 60.0:
+            raise ValueError("pier numeric evidence outside candidate gap range")
+        if any(not _native_source_identity(value) for value in (
+                self.document_id, self.revision_id, self.source_sha256,
+                self.host_wall_id)):
+            raise ValueError("pier source identity receipt must be exact")
+        if (not _finite_point(self.host_start_pt)
+                or not _finite_point(self.host_end_pt)
+                or not _finite_real(self.host_thickness_pt)
+                or self.host_thickness_pt <= 0
+                or not _finite_real(self.snap_tolerance_pt)
+                or not 0.0 <= self.snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
+            raise ValueError("pier host geometry receipt must be finite and physical")
+        wall_dx = self.host_end_pt[0] - self.host_start_pt[0]
+        wall_dy = self.host_end_pt[1] - self.host_start_pt[1]
+        wall_length = math.hypot(wall_dx, wall_dy)
+        if not math.isfinite(wall_length) or wall_length <= _COORD_TOL:
+            raise ValueError("pier host geometry receipt requires a distinct wall")
+        ax, ay = wall_dx / wall_length, wall_dy / wall_length
+        for endpoints, observations in (
+            (self.left_jamb_endpoints, self.left_jamb_observations),
+            (self.right_jamb_endpoints, self.right_jamb_observations),
+        ):
+            if (type(endpoints) is not tuple or len(endpoints) != 2
+                    or any(type(point) is not tuple or not _finite_point(point)
+                           for point in endpoints)
+                    or endpoints[0] == endpoints[1]):
+                raise ValueError("pier jamb geometry receipt must contain two native points")
+            if (type(observations) is not tuple
+                    or len(observations) > _MAX_GEOMETRIC_PRIMITIVES
+                    or any(not _native_source_identity(v) for v in observations)
+                    or len(set(observations)) != len(observations)
+                    or observations != tuple(sorted(observations))):
+                raise ValueError("pier jamb observation receipt must be exact and bounded")
+        # Two distinct physical openings cannot derive their independent
+        # jamb support from the same original observation. The producer
+        # rejects this across the complete opening universe; the public
+        # frozen pier must retain that veto even after a re-keyed replace.
+        if set(self.left_jamb_observations).intersection(self.right_jamb_observations):
+            raise ValueError("pier jamb observations cannot support two openings")
+        def station(point: tuple[float, float]) -> float:
+            dx = point[0] - self.host_start_pt[0]
+            dy = point[1] - self.host_start_pt[1]
+            projected = dx * ax + dy * ay
+            if not math.isfinite(projected):
+                raise ValueError("pier jamb station receipt must remain finite")
+            return projected
+        # A pier is emitted only between TWO producer-valid hosted openings.
+        # Recompute those host-band and axis predicates at the public frozen
+        # record seam. Matching projected stations and a freshly recomputed
+        # stable ID alone cannot authenticate transversely displaced or
+        # oblique jambs. Use the exact producer-owned snap receipt, never
+        # silently widen a stricter per-run tolerance to the 2.5pt maximum.
+        for endpoints in (self.left_jamb_endpoints, self.right_jamb_endpoints):
+            p0, p1 = endpoints
+            opening_dx = p1[0] - p0[0]
+            opening_dy = p1[1] - p0[1]
+            opening_length = math.hypot(opening_dx, opening_dy)
+            if not math.isfinite(opening_length) or opening_length <= _COORD_TOL:
+                raise ValueError("pier jamb geometry requires a physical opening span")
+            alignment = abs((opening_dx * ax + opening_dy * ay) / opening_length)
+            if not math.isfinite(alignment) or alignment < _ALIGNMENT_COS_TOL:
+                raise ValueError("pier jamb geometry conflicts with host wall axis")
+            jamb_stations = []
+            for point in endpoints:
+                along = station(point)
+                rel_x = point[0] - self.host_start_pt[0]
+                rel_y = point[1] - self.host_start_pt[1]
+                normal = -rel_x * ay + rel_y * ax
+                if (not math.isfinite(normal)
+                        or along < -self.snap_tolerance_pt
+                        or along > wall_length + self.snap_tolerance_pt
+                        or abs(normal) > self.host_thickness_pt / 2.0
+                        + self.snap_tolerance_pt):
+                    raise ValueError("pier jamb geometry conflicts with host wall band or extent")
+                jamb_stations.append(along)
+            if (min(wall_length, max(jamb_stations))
+                    - max(0.0, min(jamb_stations)) <= _COORD_TOL):
+                raise ValueError("pier jamb geometry has no physical host wall overlap")
+        left_station = min(
+            wall_length, max(0.0, max(station(p) for p in self.left_jamb_endpoints))
+        )
+        right_station = max(
+            0.0, min(wall_length, min(station(p) for p in self.right_jamb_endpoints))
+        )
+        if (self.pier_start_station != left_station
+                or self.pier_end_station != right_station):
+            raise ValueError("pier numeric evidence conflicts with owned jamb stations")
+        pier_payload = {
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "host_wall_id": self.host_wall_id,
+            "host_start_pt": tuple(float(v).hex() for v in self.host_start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in self.host_end_pt),
+            "host_thickness_pt": float(self.host_thickness_pt).hex(),
+            "snap_tolerance_pt": float(self.snap_tolerance_pt).hex(),
+            "left_opening_id": self.left_opening_id,
+            "right_opening_id": self.right_opening_id,
+            "left_jamb_endpoints": tuple(sorted(
+                tuple(float(v).hex() for v in point)
+                for point in self.left_jamb_endpoints
+            )),
+            "right_jamb_endpoints": tuple(sorted(
+                tuple(float(v).hex() for v in point)
+                for point in self.right_jamb_endpoints
+            )),
+            "left_jamb_observations": self.left_jamb_observations,
+            "right_jamb_observations": self.right_jamb_observations,
+            "start_station": float(self.pier_start_station).hex(),
+            "end_station": float(self.pier_end_station).hex(),
+            "width_pt": float(self.pier_width_pt).hex(),
+        }
+        if self.pier_id != stable_contract_id(
+                "inter_aperture_pier", pier_payload, digest_chars=32):
+            raise ValueError("pier stable identity conflicts with source or geometry receipt")
 
 
 @dataclass(frozen=True)
@@ -118,7 +304,7 @@ class ApertureHostCandidateInput:
     terminal_jamb_observation_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.physical_opening_id.strip():
+        if not _native_source_identity(self.physical_opening_id):
             raise ValueError("physical_opening_id required")
         if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
             raise ValueError("Aperture endpoints must have finite coordinates")
@@ -127,6 +313,15 @@ class ApertureHostCandidateInput:
         distance = math.hypot(dx, dy)
         if not math.isfinite(distance) or distance <= _COORD_TOL:
             raise ValueError("Aperture start and end points must be distinct and finite")
+        observations = self.terminal_jamb_observation_ids
+        if (type(observations) not in (tuple, list)
+                or len(observations) > _MAX_GEOMETRIC_PRIMITIVES
+                or any(not _native_source_identity(v) for v in observations)
+                or len(set(observations)) != len(observations)):
+            raise ValueError("terminal_jamb_observation_ids must be distinct nonblank strings")
+        object.__setattr__(self, "start_pt", tuple(float(v) for v in self.start_pt))
+        object.__setattr__(self, "end_pt", tuple(float(v) for v in self.end_pt))
+        object.__setattr__(self, "terminal_jamb_observation_ids", tuple(sorted(observations)))
 
 
 @dataclass(frozen=True)
@@ -143,22 +338,245 @@ class ThroughWallHostedOpeningRecord:
     axis_unit: tuple[float, float]
     normal_unit: tuple[float, float]
     origin_pt: tuple[float, float]
+    opening_start_pt: tuple[float, float]
+    opening_end_pt: tuple[float, float]
+    terminal_jamb_observation_ids: tuple[str, ...]
     status: EvidenceResolutionStatus
     first_remaining_gate: str
+    snap_tolerance_pt: float
+    # Complete source and wall-geometry identity receipt. These fields are
+    # immutable evidence, not original-source authority or a scale assertion.
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    host_start_pt: tuple[float, float]
+    host_end_pt: tuple[float, float]
     adjacent_pier_ids: tuple[str, ...] = ()
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
     shadow_only: bool = True
+
+    def __post_init__(self) -> None:
+        # Frozen dataclasses can still be directly instantiated or replaced.
+        # The source-neutral record contract must fail closed at that seam.
+        if (type(self.status) is not EvidenceResolutionStatus
+                or self.status not in (
+                    EvidenceResolutionStatus.CANDIDATE,
+                    EvidenceResolutionStatus.ABSTAINED,
+                )
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral host cannot grant commercial or source authority")
+        if (not _native_source_identity(self.first_remaining_gate)
+                or self.first_remaining_gate == "none"
+                or (self.status is EvidenceResolutionStatus.CANDIDATE
+                    and self.first_remaining_gate != "original_source_host_unverified")):
+            raise ValueError("source-neutral host requires unresolved source authority gate")
+        if (any(not _native_source_identity(v) for v in (
+                self.hosting_record_id, self.physical_opening_id, self.host_wall_id))
+                or any(not _finite_real(v) for v in (
+                    self.u0_pt, self.u1_pt, self.whole_wall_length_pt,
+                    self.wall_thickness_pt, self.snap_tolerance_pt,
+                ))
+                or not 0.0 <= self.snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT
+                or self.u0_pt > self.u1_pt
+                or self.whole_wall_length_pt <= 0
+                or self.wall_thickness_pt <= 0):
+            raise ValueError("host numeric evidence must be finite and physical")
+        for point in (
+            self.axis_unit, self.normal_unit, self.origin_pt,
+            self.opening_start_pt, self.opening_end_pt,
+        ):
+            if (type(point) is not tuple or len(point) != 2
+                    or not _finite_point(point)):
+                raise ValueError("host numeric evidence must be finite and physical")
+        if any(abs(v) > 1.0 for v in (*self.axis_unit, *self.normal_unit)):
+            raise ValueError("host numeric evidence must be finite and physical")
+        # This public frozen record is also constructible through dataclasses.replace.
+        # Validate the *frame*, not just its individual finite components:
+        # normal_unit is the +90-degree (counter-clockwise) axis rotation.
+        # This is a numerical identity tolerance, never a geometric snap.
+        ax, ay = self.axis_unit
+        nx, ny = self.normal_unit
+        if (not math.isclose(math.hypot(ax, ay), 1.0, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(math.hypot(nx, ny), 1.0, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(nx, -ay, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(ny, ax, rel_tol=0.0, abs_tol=1e-12)):
+            raise ValueError("host numeric evidence must have an orthonormal oriented frame")
+        # A frozen host record can also be forged with finite but displaced
+        # wall stations. Recompute the native projection from the record's
+        # owned endpoints and oriented frame; a caller cannot substitute a
+        # different candidate interval via direct construction or replace().
+        # This is station identity, not a snap or measurement-authority gate.
+        projected_stations = []
+        projected_normals = []
+        for point in (self.opening_start_pt, self.opening_end_pt):
+            dx = point[0] - self.origin_pt[0]
+            dy = point[1] - self.origin_pt[1]
+            if not math.isfinite(dx) or not math.isfinite(dy):
+                raise ValueError("host station projection must remain finite")
+            station = dx * ax + dy * ay
+            if not math.isfinite(station):
+                raise ValueError("host station projection must remain finite")
+            projected_stations.append(station)
+            normal_offset = dx * nx + dy * ny
+            if not math.isfinite(normal_offset):
+                raise ValueError("host normal projection must remain finite")
+            projected_normals.append(normal_offset)
+        raw_stations = (min(projected_stations), max(projected_stations))
+        clipped_stations = (
+            max(0.0, raw_stations[0]),
+            min(self.whole_wall_length_pt, raw_stations[1]),
+        )
+        # A producer input is always a physical, finite aperture span, even
+        # when its host geometry subsequently ABSTAINS. Directly reconstructed
+        # frozen records must not bypass that input gate.
+        opening_dx = self.opening_end_pt[0] - self.opening_start_pt[0]
+        opening_dy = self.opening_end_pt[1] - self.opening_start_pt[1]
+        opening_length = math.hypot(opening_dx, opening_dy)
+        if not math.isfinite(opening_length) or opening_length <= _COORD_TOL:
+            raise ValueError("host frozen jamb span must be finite and physical")
+        alignment = abs((opening_dx * ax + opening_dy * ay) / opening_length)
+        if not math.isfinite(alignment):
+            raise ValueError("host frozen jamb alignment must remain finite")
+
+        # Reproduce the producer's FIRST geometric failure, not merely the
+        # plausibility of a supplied status. A re-keyed ABSTAINED record must
+        # not conceal an earlier axis/band/extent/overlap failure behind a
+        # later obstruction or complete-universe identity-conflict label.
+        geometry_gate = None
+        if alignment < _ALIGNMENT_COS_TOL:
+            geometry_gate = "aperture_wall_axis_misaligned"
+        elif max(abs(offset) for offset in projected_normals) > (
+            self.wall_thickness_pt / 2.0 + self.snap_tolerance_pt
+        ):
+            geometry_gate = "aperture_outside_host_wall_band"
+        elif (raw_stations[0] < -self.snap_tolerance_pt
+              or raw_stations[1] > self.whole_wall_length_pt + self.snap_tolerance_pt):
+            geometry_gate = "aperture_extends_beyond_wall_extent"
+        elif clipped_stations[1] - clipped_stations[0] <= _COORD_TOL:
+            geometry_gate = "aperture_no_host_wall_overlap"
+
+        # Obstruction and rival-identity vetoes require a complete external
+        # candidate/obstruction universe, which this frozen record does not
+        # contain. Keep those typed ABSTAINED gates but never self-certify them
+        # as source-positive, and reject invented or out-of-order gate labels.
+        universe_gates = (
+            "host_through_wall_obstructed",
+            "aperture_physical_interval_conflict",
+            "aperture_terminal_jamb_observation_conflict",
+        )
+        geometry_gates = (
+            "aperture_wall_axis_misaligned",
+            "aperture_outside_host_wall_band",
+            "aperture_extends_beyond_wall_extent",
+            "aperture_no_host_wall_overlap",
+        )
+        if self.status is EvidenceResolutionStatus.ABSTAINED:
+            if self.first_remaining_gate not in geometry_gates + universe_gates:
+                raise ValueError("host abstention gate is not producer-issued")
+            if (geometry_gate is not None
+                    and self.first_remaining_gate != geometry_gate):
+                raise ValueError("host frozen first-failing geometric gate conflict")
+            if (geometry_gate is None
+                    and self.first_remaining_gate not in universe_gates):
+                raise ValueError("host frozen first-failing geometric gate conflict")
+            # The producer retains raw stations for geometric/obstruction
+            # abstentions; only post-geometry identity conflicts are clipped.
+            expected_stations = (
+                clipped_stations
+                if self.first_remaining_gate in universe_gates[1:]
+                else raw_stations
+            )
+        else:
+            if geometry_gate is not None:
+                raise ValueError("candidate host geometry conflicts with first failing gate")
+            expected_stations = clipped_stations
+        if (self.u0_pt, self.u1_pt) != expected_stations:
+            raise ValueError("host numeric evidence conflicts with owned jamb stations")
+        if self.status is EvidenceResolutionStatus.CANDIDATE:
+            # Recheck the producer's actual geometry gate at the public frozen
+            # record seam. Along-axis stations alone cannot prove a wall host:
+            # moving either jamb or the origin normally preserves u0/u1.
+            if (raw_stations[0] < -self.snap_tolerance_pt
+                    or raw_stations[1] > self.whole_wall_length_pt + self.snap_tolerance_pt
+                    or clipped_stations[1] - clipped_stations[0] <= _COORD_TOL
+                    or max(abs(offset) for offset in projected_normals)
+                       > self.wall_thickness_pt / 2.0 + self.snap_tolerance_pt):
+                raise ValueError("candidate host geometry conflicts with wall band or extent")
+            dx = self.opening_end_pt[0] - self.opening_start_pt[0]
+            dy = self.opening_end_pt[1] - self.opening_start_pt[1]
+            aperture_length = math.hypot(dx, dy)
+            if not math.isfinite(aperture_length) or aperture_length <= _COORD_TOL:
+                raise ValueError("candidate host geometry has invalid jamb span")
+            alignment = abs((dx * ax + dy * ay) / aperture_length)
+            if not math.isfinite(alignment) or alignment < _ALIGNMENT_COS_TOL:
+                raise ValueError("candidate host geometry conflicts with wall axis alignment")
+        for ids in (self.terminal_jamb_observation_ids, self.adjacent_pier_ids):
+            if (type(ids) is not tuple
+                    or len(ids) > _MAX_GEOMETRIC_PRIMITIVES
+                    or any(not _native_source_identity(v) for v in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError("host evidence references must be bounded and distinct")
+        if any(not _native_source_identity(value) for value in (
+                self.document_id, self.revision_id, self.source_sha256)):
+            raise ValueError("host source identity receipt must be exact")
+        if not _finite_point(self.host_start_pt) or not _finite_point(self.host_end_pt):
+            raise ValueError("host numeric evidence requires exact wall endpoints")
+        # The producer's source-bound ID includes the ORIGINAL wall endpoints,
+        # not merely a projected opening interval. Reconstruct their frame
+        # independently before checking that exact ID, including snap and
+        # the complete adjacent-pier universe. A jointly changed valid snap
+        # and moved jamb may still be a geometric candidate, but it must not
+        # reuse the original immutable identity.
+        wall_dx = self.host_end_pt[0] - self.host_start_pt[0]
+        wall_dy = self.host_end_pt[1] - self.host_start_pt[1]
+        wall_length = math.hypot(wall_dx, wall_dy)
+        if (not math.isfinite(wall_length) or wall_length <= _COORD_TOL
+                or self.host_start_pt != self.origin_pt
+                or wall_length != self.whole_wall_length_pt
+                or self.axis_unit != (wall_dx / wall_length, wall_dy / wall_length)):
+            raise ValueError("host numeric evidence conflicts with owned wall frame")
+        identity_payload = {
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "physical_opening_id": self.physical_opening_id,
+            "host_wall_id": self.host_wall_id,
+            "opening_start_pt": tuple(float(v).hex() for v in self.opening_start_pt),
+            "opening_end_pt": tuple(float(v).hex() for v in self.opening_end_pt),
+            "terminal_jamb_observation_ids": self.terminal_jamb_observation_ids,
+            "host_start_pt": tuple(float(v).hex() for v in self.host_start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in self.host_end_pt),
+            "host_thickness_pt": float(self.wall_thickness_pt).hex(),
+            "snap_tolerance_pt": float(self.snap_tolerance_pt).hex(),
+            "u0_pt": float(self.u0_pt).hex(),
+            "u1_pt": float(self.u1_pt).hex(),
+            "status": self.status.value,
+            "first_remaining_gate": self.first_remaining_gate,
+            "adjacent_pier_ids": tuple(sorted(self.adjacent_pier_ids)),
+        }
+        if self.hosting_record_id != stable_contract_id(
+                "through_wall_hosted_opening", identity_payload, digest_chars=32):
+            raise ValueError("host stable identity conflicts with source or geometry receipt")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "hosting_record_id": self.hosting_record_id,
             "physical_opening_id": self.physical_opening_id,
             "host_wall_id": self.host_wall_id,
+            "opening_start_pt": list(self.opening_start_pt),
+            "opening_end_pt": list(self.opening_end_pt),
+            "terminal_jamb_observation_ids": list(self.terminal_jamb_observation_ids),
             "u0_pt": self.u0_pt,
             "u1_pt": self.u1_pt,
             "whole_wall_length_pt": self.whole_wall_length_pt,
             "wall_thickness_pt": self.wall_thickness_pt,
+            "snap_tolerance_pt": self.snap_tolerance_pt,
             "axis_unit": list(self.axis_unit),
             "normal_unit": list(self.normal_unit),
             "origin_pt": list(self.origin_pt),
@@ -181,11 +599,11 @@ class StructuralThroughWallApertureHostProducer:
         revision_id: str,
         source_sha256: str,
     ) -> None:
-        if not document_id.strip():
+        if not _native_source_identity(document_id):
             raise ValueError("document_id required")
-        if not revision_id.strip():
+        if not _native_source_identity(revision_id):
             raise ValueError("revision_id required")
-        if not source_sha256.strip():
+        if not _native_source_identity(source_sha256):
             raise ValueError("source_sha256 required")
         self._document_id = document_id
         self._revision_id = revision_id
@@ -226,9 +644,37 @@ class StructuralThroughWallApertureHostAuthority:
         if (not _finite_real(snap_tolerance_pt)
                 or not 0.0 <= snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
             raise ValueError("snap_tolerance_pt must be finite and within the 2.5pt cap")
+        # These universes are read repeatedly (geometry, ownership, obstruction).
+        # A one-shot iterator is exhausted by validation and can silently hide
+        # a real crossing or a competing opening. Accept only complete,
+        # replayable built-in containers and freeze their membership now.
+        if type(openings) not in (list, tuple):
+            raise ValueError("openings must be a complete list/tuple candidate universe")
+        if type(transverse_wall_segments) not in (list, tuple):
+            raise ValueError(
+                "transverse_wall_segments must be a complete list/tuple obstruction universe"
+            )
+        # Count the continuous host itself and BOTH complete candidate
+        # universes. A product-only work budget misses 20k+ openings when
+        # transverse evidence is empty, and misses transverse-only inputs
+        # when no openings were detected. Never truncate either universe.
+        if (1 + len(openings) + len(transverse_wall_segments)
+                > _MAX_GEOMETRIC_PRIMITIVES):
+            raise ValueError("through_wall_primitive_limit_exceeded")
+        openings = tuple(openings)
+        if any(type(opening) is not ApertureHostCandidateInput for opening in openings):
+            raise ValueError("openings must contain ApertureHostCandidateInput records")
+        # Bound the COMPLETE auxiliary jamb-reference universe separately from
+        # geometric primitive counts. One geometric aperture may otherwise
+        # carry unbounded source references through conflict indexing and
+        # stable-ID serialization. Never truncate or select a subset.
+        if (sum(len(op.terminal_jamb_observation_ids) for op in openings)
+                > _MAX_GEOMETRIC_PRIMITIVES):
+            raise ValueError("terminal_jamb_observation_reference_limit_exceeded")
         # Every supplied transverse obstruction belongs to the candidate universe.
         # A malformed/NaN crossing cannot be silently treated as "no obstruction".
         # Validate even when there are no openings, so bad evidence never disappears.
+        frozen_transverse_segments = []
         for segment in transverse_wall_segments:
             if (type(segment) not in (tuple, list) or len(segment) != 2
                     or not _finite_point(segment[0]) or not _finite_point(segment[1])):
@@ -238,9 +684,18 @@ class StructuralThroughWallApertureHostAuthority:
             distance = math.hypot(dx, dy)
             if not math.isfinite(distance) or distance <= _COORD_TOL:
                 raise ValueError("transverse_wall_segments require distinct finite endpoints")
-        if not openings:
-            return ((), ())
-
+            frozen_transverse_segments.append((
+                tuple(float(value) for value in segment[0]),
+                tuple(float(value) for value in segment[1]),
+            ))
+        transverse_wall_segments = tuple(frozen_transverse_segments)
+        # The naive crossing loop below is O(openings * transverse segments).
+        # Refuse an oversized COMPLETE universe before returning any partial
+        # candidate, pier or commercial-adjacent record. Do not truncate,
+        # sample, choose the first obstruction or silently drop evidence.
+        if (len(openings) * len(transverse_wall_segments)
+                > _MAX_TRANSVERSE_INTERSECTION_CHECKS):
+            raise ValueError("transverse_wall_intersection_budget_exceeded")
         wall_len = through_wall.length_pt
         ax, ay = through_wall.axis_unit
         nx, ny = through_wall.normal_unit
@@ -261,6 +716,28 @@ class StructuralThroughWallApertureHostAuthority:
                 raise ValueError("aperture projection must remain finite")
             return along, perp
 
+        # Project the COMPLETE obstruction universe before testing any opening.
+        # Otherwise an early obstructing segment can hide a later segment whose
+        # finite native endpoints overflow relative to this host's origin.
+        # That would make candidate authority depend on obstruction input order.
+        projected_transverse_segments = tuple(
+            (project_pt(start), project_pt(end))
+            for start, end in transverse_wall_segments
+        )
+        # Finite projected endpoints can still have an infinite difference
+        # (for example, -1e308 to +1e308 across the wall). The clipping
+        # algorithm would divide by infinity and collapse a real crossing to
+        # a zero-width parameter interval, incorrectly accepting its host.
+        # Validate the COMPLETE universe before any early obstruction veto
+        # or empty-opening return; obstruction order must not hide this.
+        for (a0, p0), (a1, p1) in projected_transverse_segments:
+            if not math.isfinite(a1 - a0) or not math.isfinite(p1 - p0):
+                raise ValueError(
+                    "transverse_wall_segments projected delta must be finite"
+                )
+        if not openings:
+            return ((), ())
+
         intermediate_openings: list[dict[str, Any]] = []
 
         for op in openings:
@@ -280,7 +757,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_wall_axis_misaligned"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -296,7 +774,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -308,7 +787,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_extends_beyond_wall_extent"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -322,9 +802,10 @@ class StructuralThroughWallApertureHostAuthority:
             clipped_u_max = min(wall_len, u_max)
             if clipped_u_max - clipped_u_min <= _COORD_TOL:
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max,
+                    op, through_wall, u_min, u_max,
                     EvidenceResolutionStatus.ABSTAINED,
                     "aperture_no_host_wall_overlap",
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -333,9 +814,7 @@ class StructuralThroughWallApertureHostAuthority:
 
             # 4. Check transverse wall crossings obstructing the opening
             obstructed = False
-            for t_start, t_end in transverse_wall_segments:
-                t1_along, t1_perp = project_pt(t_start)
-                t2_along, t2_perp = project_pt(t_end)
+            for (t1_along, t1_perp), (t2_along, t2_perp) in projected_transverse_segments:
                 # Clip the WHOLE finite segment against the open interior of
                 # the opening's wall band. Both obstacle endpoints may lie
                 # outside the opening while the segment crosses its centre.
@@ -377,7 +856,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "host_through_wall_obstructed"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -435,17 +915,148 @@ class StructuralThroughWallApertureHostAuthority:
             if identity_occurrences[item["op"].physical_opening_id] > 1:
                 conflicting_positions.add(index)
 
-        for index in conflicting_positions:
+        # One native terminal jamb observation cannot prove two different
+        # physical apertures, even when their station intervals are disjoint.
+        # Consult the COMPLETE observation universe: an already-rejected
+        # sibling must not disappear and silently validate the other claim.
+        observation_owners: dict[str, set[str]] = {}
+        for opening in openings:
+            for observation_id in opening.terminal_jamb_observation_ids:
+                observation_owners.setdefault(observation_id, set()).add(
+                    opening.physical_opening_id
+                )
+        reused_observations = {
+            observation_id for observation_id, owners in observation_owners.items()
+            if len(owners) > 1
+        }
+        observation_conflicts = {
+            index for index, item in enumerate(valid_items)
+            if reused_observations.intersection(
+                item["op"].terminal_jamb_observation_ids
+            )
+        }
+
+        for index in sorted(conflicting_positions | observation_conflicts):
             item = valid_items[index]
             item["valid"] = False
             item["rec"] = self._make_record(
-                item["op"].physical_opening_id,
+                item["op"],
                 through_wall,
                 item["u_min"],
                 item["u_max"],
                 EvidenceResolutionStatus.ABSTAINED,
-                "aperture_physical_interval_conflict",
+                (
+                    "aperture_terminal_jamb_observation_conflict"
+                    if index in observation_conflicts
+                    else "aperture_physical_interval_conflict"
+                ),
+                    snap_tolerance_pt=snap_tolerance_pt,
             )
+
+        # A rejected geometric opening can still occupy a plausible host-wall
+        # station interval. Excluding it from valid_items must not silently
+        # make its two surviving neighbors consecutive physical apertures.
+        # Clip its WHOLE finite segment to the host band: an oblique rejected
+        # aperture may cross the wall while one/both jambs lie outside it.
+        # Far-off-band observations and boundary-only touches cannot veto a pier.
+        unresolved_wall_band_intervals: list[tuple[float, float]] = []
+        band = half_thick + snap_tolerance_pt
+        for item in intermediate_openings:
+            if item["valid"]:
+                continue
+            rejected = item["rec"]
+            p0_along, p0_perp = project_pt(rejected.opening_start_pt)
+            p1_along, p1_perp = project_pt(rejected.opening_end_pt)
+            # Boundary-only contact does not occupy the open wall band.
+            # A perpendicular rejected observation may nevertheless occupy
+            # one physical station (low == high) inside the band.
+            if min(p0_perp, p1_perp) >= band or max(p0_perp, p1_perp) <= -band:
+                continue
+            low = max(0.0, min(p0_along, p1_along))
+            high = min(wall_len, max(p0_along, p1_along))
+            if high < low:
+                continue
+            if not (-band <= p0_perp <= band and -band <= p1_perp <= band):
+                delta_perp = p1_perp - p0_perp
+                delta_along = p1_along - p0_along
+                if (math.isfinite(delta_perp) and delta_perp != 0.0
+                        and math.isfinite(delta_along)):
+                    t_enter = (-band - p0_perp) / delta_perp
+                    t_leave = (band - p0_perp) / delta_perp
+                    t_low = max(0.0, min(t_enter, t_leave))
+                    t_high = min(1.0, max(t_enter, t_leave))
+                    if t_low >= t_high:
+                        continue  # a boundary point is not a physical interval
+                    clipped_start = p0_along + t_low * delta_along
+                    clipped_end = p0_along + t_high * delta_along
+                    if math.isfinite(clipped_start) and math.isfinite(clipped_end):
+                        low = max(0.0, min(clipped_start, clipped_end))
+                        high = min(wall_len, max(clipped_start, clipped_end))
+                # If finite endpoints overflow in the subtraction/interpolation,
+                # retain the entire projected station interval conservatively.
+            # A zero-station-width transverse candidate still crosses a
+            # positive-length wall-band interior. Keep it as a point
+            # blocker: low < next_start and high > previous_end detect
+            # that station strictly inside a proposed pier gap.
+            if high >= low:
+                unresolved_wall_band_intervals.append((low, high))
+
+        # An in-band rejected aperture blocks a gap iff its low station is
+        # strictly below the next opening start AND its high station is
+        # strictly above the previous opening end.  Prefix maximum highs
+        # over sorted lows answer that exact predicate in logarithmic time,
+        # rather than scanning every rejected interval for every candidate.
+        unresolved_wall_band_intervals.sort()
+        rejected_lows: list[float] = []
+        rejected_prefix_highs: list[float] = []
+        greatest_high = -math.inf
+        for low, high in unresolved_wall_band_intervals:
+            rejected_lows.append(low)
+            greatest_high = max(greatest_high, high)
+            rejected_prefix_highs.append(greatest_high)
+
+        # A transverse structural segment through the proposed BETWEEN-opening
+        # gap leaves an uninterrupted pier unproved, even if neither aperture
+        # itself is obstructed. Clip the complete transverse universe to the
+        # open wall-thickness band once; query its projected station intervals
+        # with a prefix maximum. This preserves the existing pairwise-work cap
+        # rather than adding another O(openings * obstructions) scan.
+        transverse_gap_intervals: list[tuple[float, float]] = []
+        for (a0, p0), (a1, p1) in projected_transverse_segments:
+            if min(p0, p1) >= half_thick or max(p0, p1) <= -half_thick:
+                continue  # wholly outside or tangent to the wall band
+            if (-half_thick < p0 < half_thick
+                    and -half_thick < p1 < half_thick):
+                t_start, t_end = 0.0, 1.0
+            else:
+                delta_perp = p1 - p0  # finite: complete-universe check above
+                if delta_perp == 0.0:
+                    continue
+                enter = (-half_thick - p0) / delta_perp
+                leave = (half_thick - p0) / delta_perp
+                if not math.isfinite(enter) or not math.isfinite(leave):
+                    raise ValueError("transverse pier-band clipping must remain finite")
+                t_start = max(0.0, min(enter, leave))
+                t_end = min(1.0, max(enter, leave))
+                if t_start >= t_end:
+                    continue  # boundary-only contact does not cross the band
+            delta_along = a1 - a0  # finite: complete-universe check above
+            station_start = a0 + t_start * delta_along
+            station_end = a0 + t_end * delta_along
+            if not math.isfinite(station_start) or not math.isfinite(station_end):
+                raise ValueError("transverse pier-band stations must remain finite")
+            transverse_gap_intervals.append((
+                min(station_start, station_end),
+                max(station_start, station_end),
+            ))
+        transverse_gap_intervals.sort()
+        transverse_gap_lows: list[float] = []
+        transverse_gap_prefix_highs: list[float] = []
+        greatest_transverse_high = -math.inf
+        for low, high in transverse_gap_intervals:
+            transverse_gap_lows.append(low)
+            greatest_transverse_high = max(greatest_transverse_high, high)
+            transverse_gap_prefix_highs.append(greatest_transverse_high)
 
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
@@ -457,23 +1068,45 @@ class StructuralThroughWallApertureHostAuthority:
             # structural pier between otherwise disjoint candidates.
             if not curr["valid"] or not nxt["valid"]:
                 continue
+            # An abstained same-band candidate inside the proposed gap leaves
+            # physical consecutiveness unresolved, so no pier is inferred.
+            # bisect_left excludes low == next start; the strict prefix
+            # comparison excludes high == previous end (edge touch only).
+            cutoff = bisect_left(rejected_lows, nxt["u_min"])
+            if cutoff and rejected_prefix_highs[cutoff - 1] > curr["u_max"]:
+                continue
             gap = nxt["u_min"] - curr["u_max"]
-            if (
-                0.5 <= gap <= 60.0
-            ):  # Narrow structural pier (e.g. 7.44 pt in Maryborough)
+            if 0.5 <= gap <= 60.0:
+                # A transverse wall crossing the OPEN gap makes continuous
+                # pier identity ambiguous. Edge-only contact is not a crossing.
+                cutoff = bisect_left(transverse_gap_lows, nxt["u_min"])
+                if (cutoff and transverse_gap_prefix_highs[cutoff - 1]
+                        > curr["u_max"]):
+                    continue
                 pier_payload = {
                     "document_id": self._producer.document_id,
                     "revision_id": self._producer.revision_id,
                     "source_sha256": self._producer.source_sha256,
                     "host_wall_id": through_wall.wall_id,
-                    "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
-                    "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
-                    "host_thickness_pt": round(through_wall.thickness_pt, 4),
+                    "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
+                    "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
+                    "host_thickness_pt": float(through_wall.thickness_pt).hex(),
+                    "snap_tolerance_pt": float(snap_tolerance_pt).hex(),
                     "left_opening_id": curr["op"].physical_opening_id,
                     "right_opening_id": nxt["op"].physical_opening_id,
-                    "start_station": round(curr["u_max"], 2),
-                    "end_station": round(nxt["u_min"], 2),
-                    "width_pt": round(gap, 2),
+                    "left_jamb_endpoints": tuple(sorted(
+                        tuple(float(v).hex() for v in p)
+                        for p in (curr["op"].start_pt, curr["op"].end_pt)
+                    )),
+                    "right_jamb_endpoints": tuple(sorted(
+                        tuple(float(v).hex() for v in p)
+                        for p in (nxt["op"].start_pt, nxt["op"].end_pt)
+                    )),
+                    "left_jamb_observations": curr["op"].terminal_jamb_observation_ids,
+                    "right_jamb_observations": nxt["op"].terminal_jamb_observation_ids,
+                    "start_station": float(curr["u_max"]).hex(),
+                    "end_station": float(nxt["u_min"]).hex(),
+                    "width_pt": float(gap).hex(),
                 }
                 pier_id = stable_contract_id(
                     "inter_aperture_pier", pier_payload, digest_chars=32
@@ -485,7 +1118,23 @@ class StructuralThroughWallApertureHostAuthority:
                     pier_width_pt=gap,
                     left_opening_id=curr["op"].physical_opening_id,
                     right_opening_id=nxt["op"].physical_opening_id,
-                    is_structural_masonry_pier=True,
+                    document_id=self._producer.document_id,
+                    revision_id=self._producer.revision_id,
+                    source_sha256=self._producer.source_sha256,
+                    host_wall_id=through_wall.wall_id,
+                    host_start_pt=through_wall.start_pt,
+                    host_end_pt=through_wall.end_pt,
+                    host_thickness_pt=through_wall.thickness_pt,
+                    snap_tolerance_pt=snap_tolerance_pt,
+                    left_jamb_endpoints=tuple(sorted((
+                        curr["op"].start_pt, curr["op"].end_pt,
+                    ))),
+                    right_jamb_endpoints=tuple(sorted((
+                        nxt["op"].start_pt, nxt["op"].end_pt,
+                    ))),
+                    left_jamb_observations=curr["op"].terminal_jamb_observation_ids,
+                    right_jamb_observations=nxt["op"].terminal_jamb_observation_ids,
+                    is_structural_masonry_pier=None,
                 )
                 piers.append(pier_rec)
                 pier_ids_by_opening.setdefault(
@@ -505,13 +1154,14 @@ class StructuralThroughWallApertureHostAuthority:
                 op_id = op.physical_opening_id
                 adjacent_piers = tuple(pier_ids_by_opening.get(op_id, ()))
                 rec = self._make_record(
-                    op_id,
+                    op,
                     through_wall,
                     item["u_min"],
                     item["u_max"],
-                    EvidenceResolutionStatus.CORROBORATED,
-                    "none",
+                    EvidenceResolutionStatus.CANDIDATE,
+                    "original_source_host_unverified",
                     adjacent_piers=adjacent_piers,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 final_records.append(rec)
 
@@ -519,39 +1169,59 @@ class StructuralThroughWallApertureHostAuthority:
 
     def _make_record(
         self,
-        opening_id: str,
+        opening: ApertureHostCandidateInput,
         through_wall: ContinuousThroughWallCandidate,
         u0: float,
         u1: float,
         status: EvidenceResolutionStatus,
         gate: str,
+        snap_tolerance_pt: float,
         adjacent_piers: tuple[str, ...] = (),
     ) -> ThroughWallHostedOpeningRecord:
+        # Projected stations alone alias transversely shifted or clipped jambs.
+        opening_start, opening_end = sorted((opening.start_pt, opening.end_pt))
         payload = {
             "document_id": self._producer.document_id,
             "revision_id": self._producer.revision_id,
             "source_sha256": self._producer.source_sha256,
-            "physical_opening_id": opening_id,
+            "physical_opening_id": opening.physical_opening_id,
             "host_wall_id": through_wall.wall_id,
-            "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
-            "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
-            "host_thickness_pt": round(through_wall.thickness_pt, 4),
-            "u0_pt": round(u0, 4),
-            "u1_pt": round(u1, 4),
+            "opening_start_pt": tuple(float(v).hex() for v in opening_start),
+            "opening_end_pt": tuple(float(v).hex() for v in opening_end),
+            "terminal_jamb_observation_ids": opening.terminal_jamb_observation_ids,
+            "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
+            "host_thickness_pt": float(through_wall.thickness_pt).hex(),
+            "snap_tolerance_pt": float(snap_tolerance_pt).hex(),
+            "u0_pt": float(u0).hex(),
+            "u1_pt": float(u1).hex(),
             "status": status.value,
             "first_remaining_gate": gate,
+            # The record's lineage includes its geometric neighbor relationships.
+            # Otherwise one isolated host and the same host with a candidate
+            # pier share an ID despite different adjacent_pier_ids in to_dict().
+            "adjacent_pier_ids": tuple(sorted(adjacent_piers)),
         }
         rec_id = stable_contract_id(
             "through_wall_hosted_opening", payload, digest_chars=32
         )
         return ThroughWallHostedOpeningRecord(
             hosting_record_id=rec_id,
-            physical_opening_id=opening_id,
+            physical_opening_id=opening.physical_opening_id,
             host_wall_id=through_wall.wall_id,
-            u0_pt=round(u0, 4),
-            u1_pt=round(u1, 4),
-            whole_wall_length_pt=round(through_wall.length_pt, 4),
-            wall_thickness_pt=round(through_wall.thickness_pt, 4),
+            opening_start_pt=opening_start,
+            opening_end_pt=opening_end,
+            terminal_jamb_observation_ids=opening.terminal_jamb_observation_ids,
+            u0_pt=u0,
+            u1_pt=u1,
+            whole_wall_length_pt=through_wall.length_pt,
+            wall_thickness_pt=through_wall.thickness_pt,
+            snap_tolerance_pt=snap_tolerance_pt,
+            document_id=self._producer.document_id,
+            revision_id=self._producer.revision_id,
+            source_sha256=self._producer.source_sha256,
+            host_start_pt=through_wall.start_pt,
+            host_end_pt=through_wall.end_pt,
             axis_unit=through_wall.axis_unit,
             normal_unit=through_wall.normal_unit,
             origin_pt=through_wall.origin_pt,
