@@ -104,6 +104,11 @@ def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_
         source_lineage_root_ids=("other-original-wall-fragment",),
         source_geometries=((450.0, 450.0, 475.0, 450.0),),
         area_m2=None, area_basis=None, figured_area_record_id=None,
+        # This rival has source ink only, not the measured opening's void.
+        geometry_complete=False, wall_local_frame_id=None,
+        profile_kind=None, coordinate_unit=None,
+        u0=None, u1=None, z0=None, z1=None,
+        width_m=None, height_m=None, opening_void_record_id=None,
     )
     fresh_roster = full.canonical_openings + (sibling,)
     result = _append_reproved_areas(baseline, fresh_roster, full.opening_quantity_evidence)
@@ -186,6 +191,10 @@ def test_archived_unmeasured_rival_is_checked_against_new_area(
         ),
         source_lineage_root_ids=("archived-independent-lineage",),
         source_geometries=((610.0, 510.0, 655.0, 510.0),),
+        geometry_complete=False, wall_local_frame_id=None,
+        profile_kind=None, coordinate_unit=None,
+        u0=None, u1=None, z0=None, z1=None,
+        width_m=None, height_m=None, opening_void_record_id=None,
         area_m2=None,
         area_basis=None,
         figured_area_record_id=None,
@@ -400,6 +409,10 @@ def test_historical_unmeasured_rival_allows_new_snapshot_and_host_receipt_reissu
         source_lineage_root_ids=("historic-root",),
         source_geometries=((530.0, 410.0, 561.0, 410.0),),
         area_m2=None, area_basis=None, figured_area_record_id=None,
+        geometry_complete=False, wall_local_frame_id=None,
+        profile_kind=None, coordinate_unit=None,
+        u0=None, u1=None, z0=None, z1=None,
+        width_m=None, height_m=None, opening_void_record_id=None,
     )
     baseline = replace(
         baseline, canonical_openings=baseline.canonical_openings + (historical,),
