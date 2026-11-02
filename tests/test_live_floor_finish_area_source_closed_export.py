@@ -1152,3 +1152,117 @@ def test_original_floor_finish_requires_present_empty_source_scale_conflict_cens
     assert len(seal_live_floor_finish_area_run(
         original, workspace_id=1, project_id="project-1",
     ).quantities) == 1
+
+
+def _independent_source_room_area() -> QuantityEvidence:
+    """A source-neutral existing FIRM room-area owner, not a new measurement."""
+    original = _quantity()
+    return replace(
+        original,
+        quantity_id="room-area-1",
+        family="room_area",
+        semantic_key="room_area:room-1",
+        input_entity_ids=("room-1",),
+        evidence_ids=("ev-room", "ev-area"),
+        metadata={
+            "source_sha256": "a" * 64,
+            "revision_id": "rev-1",
+            "page_no": "1",
+            "viewport_id": "vp-1",
+            "source_room_face_record_id": "face-1",
+            "room_snapshot_id": "snap-1",
+        },
+    )
+
+
+def test_firm_finish_consumes_exact_independently_published_room_area():
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    claim = replace(
+        _claim(),
+        room_area_quantity_evidence=(_independent_source_room_area(),),
+    )
+    floor_quantities = publish_live_floor_area_quantities(claim)
+    assert len(floor_quantities) == 1
+    assert floor_quantities[0].metadata[
+        "upstream_room_area_quantity_id"
+    ] == "room-area-1"
+    signed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == floor_quantities[0].value == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (signed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("mutation", (
+    "other_source_id",
+    "different_value",
+    "blocked_original",
+    "different_source_sha",
+    "different_room_face",
+    "different_page",
+    "different_room_owner",
+    "different_source_semantic",
+    "different_measurement_authority",
+))
+def test_floor_finish_cannot_borrow_foreign_unpublished_original_room_area(
+    mutation,
+):
+    original = _independent_source_room_area()
+    floor_claim = _claim()
+    if mutation == "other_source_id":
+        original = replace(original, quantity_id="source-room-not-on-floor")
+    elif mutation == "different_value":
+        original = replace(original, value=7.25)
+    elif mutation == "blocked_original":
+        original = replace(
+            original, blocking_reasons=("original_room_boundary_conflicted",),
+        )
+    elif mutation == "different_source_sha":
+        original = replace(
+            original, metadata={**original.metadata, "source_sha256": "b" * 64},
+        )
+    elif mutation == "different_room_face":
+        original = replace(
+            original, metadata={
+                **original.metadata,
+                "source_room_face_record_id": "foreign-room-face",
+            },
+        )
+    elif mutation == "different_page":
+        original = replace(
+            original, metadata={**original.metadata, "page_no": "2"},
+        )
+    elif mutation == "different_room_owner":
+        original = replace(
+            original, input_entity_ids=("other-original-room",),
+        )
+    elif mutation == "different_source_semantic":
+        original = replace(
+            original, semantic_key="room_area:other-original-room",
+        )
+    else:
+        original = replace(original, authority="pdf_scaled")
+    claim = replace(
+        floor_claim, room_area_quantity_evidence=(original,),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="original room-area quantity is not independently published",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
