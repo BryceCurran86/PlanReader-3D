@@ -974,8 +974,13 @@ class GPT2OriginalSourceGeometryBridge:
                 original_source_edge_ids=floor_ids,
             )
             components = floor_source.get("native_components")
+            issued_floor_ids = floor_source.get("original_native_edge_ids")
             if (
-                floor_source.get("source_sha256") !=
+                type(issued_floor_ids) is not tuple
+                or len(issued_floor_ids) != len(floor_ids)
+                or len(set(issued_floor_ids)) != len(issued_floor_ids)
+                or set(issued_floor_ids) != set(floor_ids)
+                or floor_source.get("source_sha256") !=
                     published.revision.source_sha256
                 or floor_source.get("page_1_based") != original_floor_page_1_based
                 or floor_source.get("native_candidate_ring_count") != 1
