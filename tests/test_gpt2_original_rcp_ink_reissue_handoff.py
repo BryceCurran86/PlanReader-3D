@@ -67,7 +67,8 @@ def _ink():
 
 
 def _call(monkeypatch, ink=None, *, issued=None, error=None,
-          cross=None, issued_floor=None, floor_error=None):
+          cross=None, issued_floor=None, floor_error=None,
+          issued_w4=None, issued_ceiling=None):
     events = []
     actual = _ink() if issued is None else issued
 
@@ -120,12 +121,22 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
     )
     monkeypatch.setattr(
         module, "audit_gpt2_w4_bound_original_floor",
-        lambda *a, **k: events.append(("w4",)) or {"status": "W4_test_only"},
+        lambda *a, **k: events.append(("w4",)) or (
+            {
+                "status": "source_original_floor_W4_face_candidate_only",
+                "w4_room_face_source_identity_proven": True,
+                "source_w4_wall_ownership_authenticated": True,
+            } if issued_w4 is None else issued_w4
+        ),
     )
     monkeypatch.setattr(
         module, "audit_gpt2_w4_original_rcp_ceiling_handoff",
-        lambda *a, **k: events.append(("ceiling_handoff",)) or
-            {"new_firm_quantities": 0, "ceiling_quantity_m2_issued": False},
+        lambda *a, **k: events.append(("ceiling_handoff",)) or (
+            {
+                "status": "original_A120_RCP_material_on_W4_room_candidate_for_GPT1",
+                "new_firm_quantities": 0, "ceiling_quantity_m2_issued": False,
+            } if issued_ceiling is None else issued_ceiling
+        ),
     )
 
     result = Bridge().original_rcp_ceiling_source_handoff_for_gpt1(
@@ -300,3 +311,45 @@ def test_failed_private_source_floor_reissue_abstains_before_material(monkeypatc
     assert "reissue_floor" in [event[0] for event in events]
     assert all(x[0] not in ("material","w4","ceiling_handoff") for x in events)
     assert result["source_ceiling_area_m2"] is None
+
+
+
+@pytest.mark.parametrize("negative", [
+    {"status": "original_W4_RCP_ceiling_handoff_abstained",
+     "first_failure": "W4_published_face_polygon_or_ancestry_conflict",
+     "new_firm_quantities": 0, "ceiling_quantity_m2_issued": False},
+    {"status": "original_A120_RCP_material_on_W4_room_candidate_for_GPT1",
+     "new_firm_quantities": 1, "ceiling_quantity_m2_issued": False},
+    {"status": "original_A120_RCP_material_on_W4_room_candidate_for_GPT1",
+     "new_firm_quantities": 0, "ceiling_quantity_m2_issued": True},
+    {},
+])
+def test_nested_source_w4_ceiling_failure_cannot_make_positive_outer_compilation(
+    monkeypatch, negative,
+):
+    result, events = _call(monkeypatch, issued_ceiling=negative)
+    assert result["status"] == "source_W4_original_A120_ceiling_binding_unverified"
+    assert result["new_firm_quantities"] == 0
+    assert result["source_ceiling_area_m2"] is None
+    assert [x[0] for x in events][-2:] == ["w4", "ceiling_handoff"]
+
+
+@pytest.mark.parametrize("negative", [
+    {"status":"original_source_w4_room_binding_abstained",
+     "first_failure":"sealed_W4_room_face_issuer_missing"},
+    {"status":"source_original_floor_W4_face_candidate_only",
+     "w4_room_face_source_identity_proven":False,
+     "source_w4_wall_ownership_authenticated":True},
+    {"status":"source_original_floor_W4_face_candidate_only",
+     "w4_room_face_source_identity_proven":True,
+     "source_w4_wall_ownership_authenticated":False},
+    {},
+])
+def test_missing_sealed_w4_physical_owner_abstains_before_ceiling_adapter(
+    monkeypatch, negative,
+):
+    result, events = _call(monkeypatch, issued_w4=negative)
+    assert result["status"] == "source_W4_original_A120_ceiling_binding_unverified"
+    assert result["new_firm_quantities"] == 0
+    assert result["source_ceiling_area_m2"] is None
+    assert "ceiling_handoff" not in [x[0] for x in events]
