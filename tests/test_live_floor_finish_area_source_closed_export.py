@@ -1530,3 +1530,49 @@ def test_authentic_room_axes_can_arrive_in_opposite_order_to_finish_axes():
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("bad_source", (
+    "duplicate_identical_original",
+    "duplicate_conflicted_original",
+    "duplicate_abstained_original",
+    "foreign_family_original",
+    "invalid_original_id",
+))
+def test_original_room_area_inventory_cannot_hide_disputed_source_before_finish_seal(
+    bad_source,
+):
+    """Complete room FIRM/CANDIDATE universe is checked before filter."""
+    source = _independent_source_room_area()
+    if bad_source == "duplicate_identical_original":
+        inventory = (source, source)
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "duplicate_conflicted_original":
+        inventory = (source, replace(source, value=8.63))
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "duplicate_abstained_original":
+        inventory = (
+            source,
+            replace(source, abstained=True, value=None, status="blocked"),
+        )
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "foreign_family_original":
+        inventory = (source, replace(
+            source, quantity_id="non-room-original", family="floor_area",
+        ))
+        expected = "original room-area inventory contains foreign family"
+    else:
+        inventory = (source, replace(source, quantity_id=" pad "))
+        expected = "duplicate or invalid original room-area quantity ID"
+    claim = replace(
+        _claim(), room_area_quantity_evidence=inventory,
+    )
+    with pytest.raises(SourceClosedRunConflictError, match=expected):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    with pytest.raises(SourceClosedRunConflictError, match=expected):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
