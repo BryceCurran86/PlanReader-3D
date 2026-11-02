@@ -46,7 +46,8 @@ def _original_ancestry():
 
 
 def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
-          inventory_complete=True, reissue_error=None):
+          inventory_complete=True, reissue_error=None,
+          w4_negative=False, gpt1_negative=False):
     calls = []
     class Bridge(module.GPT2OriginalSourceGeometryBridge):
         def __init__(self):
@@ -81,6 +82,12 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
 
     def w4(*args, **kwargs):
         calls.append(("w4",))
+        if w4_negative:
+            return {
+                "status":"original_source_w4_room_binding_abstained",
+                "first_failure":"W4_original_face_owner_missing",
+                "new_firm_quantities":0,
+            }
         return {
             "status": "source_original_floor_W4_face_candidate_only",
             "w4_room_face_source_identity_proven": True,
@@ -90,6 +97,12 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
 
     def to_gpt1(*args, **kwargs):
         calls.append(("gpt1_shadow",))
+        if gpt1_negative:
+            return {
+                "status":"gpt2_source_to_gpt1_handoff_abstained",
+                "first_failure":"source_original_finish_mark_and_W4_physical_floor_mismatch",
+                "new_firm_quantities":0,
+            }
         return {
             "status":"gpt2_W4_source_finished_floor_ready_for_GPT1_measurement",
             "floor_finish_quantity_granted": False,
@@ -1293,4 +1306,23 @@ def test_positive_open_doorway_never_issues_firm_without_metric_measurement(monk
         "gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
     )
     assert result["source_gpt1_floor_finish_input"]["new_firm_quantities"]==0
+    assert result["new_firm_quantities"]==0
+
+
+
+def test_open_doorway_replayed_source_cannot_override_blocked_W4(monkeypatch):
+    result,calls=_call(monkeypatch,w4_negative=True)
+    assert result["status"]=="source_W4_FT_handoff_abstained"
+    assert result["first_failure"]=="W4_original_face_owner_missing"
+    assert [row[0] for row in calls][-1]=="w4"
+    assert result["new_firm_quantities"]==0
+
+
+def test_open_doorway_replayed_source_cannot_override_blocked_GPT1(monkeypatch):
+    result,calls=_call(monkeypatch,gpt1_negative=True)
+    assert result["status"]=="source_W4_FT_handoff_abstained"
+    assert result["first_failure"]==(
+        "source_original_finish_mark_and_W4_physical_floor_mismatch"
+    )
+    assert [row[0] for row in calls][-1]=="gpt1_shadow"
     assert result["new_firm_quantities"]==0
