@@ -13,8 +13,8 @@ import pytest
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/gpt3-trusted-original-nine-replay-manual.yml"
-APPROVED = "296f48e8d89496afd96b4eda5a2e65f18285227b"
-BASE = "a8d0fa5ef2dc0db3e1171ab8e8558bf9448f1e94"
+APPROVED = "d9512499b9c96de60faee8805056aa03a99d7f4f"
+BASE = "86c0193c157cd1333a11470b45d50ab3f5cf44fc"
 OWNER_REPOSITORY_GUARD = (
     "${{ github.event_name == 'workflow_dispatch' && "
     "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && "
