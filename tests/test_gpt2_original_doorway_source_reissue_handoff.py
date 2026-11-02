@@ -1107,3 +1107,85 @@ def test_native_open_doorway_requires_source_ink_on_both_gap_flanks(
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=1,original_room_graph=graph,
     ) is (flank=="both")
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("paint_case", [
+    "early_opaque_white_full",
+    "late_opaque_white_full",
+    "early_opaque_white_partial",
+    "early_opaque_black_full",
+    "early_translucent_white_full",
+    "early_stroked_white_full",
+    "early_white_quad_full",
+    "early_white_full_then_crossing_stroke",
+])
+def test_native_gap_rejects_competing_paint_but_not_earlier_canvas_underlay(
+    vertical, paint_case,
+):
+    """Paint order does not let whiteouts or other original ink evade replay."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+
+    def draw_paint():
+        x0,x1=(40,60) if paint_case=="early_opaque_white_partial" else (10,100)
+        if paint_case=="early_white_quad_full":
+            corners=(
+                (x0,15),(x1,15),(x0,25),(x1,25),
+            )
+            page.draw_quad(
+                fitz.Quad(*(fitz.Point(*turn(point)) for point in corners)),
+                color=None,fill=(1,1,1),
+            )
+            return
+        a,b=turn((x0,15)),turn((x1,25))
+        opts={"color":None,"fill":(1,1,1)}
+        if paint_case=="early_opaque_black_full":
+            opts["fill"]=(0,0,0)
+        if paint_case=="early_translucent_white_full":
+            opts["fill_opacity"]=0.5
+        if paint_case=="early_stroked_white_full":
+            opts["color"]=(1,1,1)
+        page.draw_rect(fitz.Rect(*a,*b),**opts)
+
+    early=paint_case!="late_opaque_white_full"
+    if early:
+        draw_paint()
+    start=1 if early else 0
+    for a,b in (
+        ((20,20),(20,140)),
+        ((120,20),(120,140)),
+        ((20,140),(120,140)),
+        ((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=.48)
+    if not early:
+        draw_paint()
+    if paint_case=="early_white_full_then_crossing_stroke":
+        page.draw_line(
+            turn((50,15)),turn((50,25)),color=(0,0,0),width=.48,
+        )
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(
+            f"d{i}i0" for i in range(start,start+5)
+        ),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    result=module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    )
+    assert result is (paint_case=="early_opaque_white_full")
