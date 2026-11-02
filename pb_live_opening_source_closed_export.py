@@ -221,6 +221,69 @@ def build_live_opening_area_claim_source_traces(
     )
 
 
+
+def _require_complete_append_only_source_replay(
+    claim,
+    *,
+    source_root: tuple[str, str, str],
+    old_objects: Sequence[LiveCanonicalOpeningObject],
+    new_objects: Sequence[LiveCanonicalOpeningObject],
+) -> None:
+    """Verify the source replay roster exists and covers both signed scopes.
+
+    An opt-in boolean or a dataclass-replaced new snapshot is not proof that
+    the collector re-ran the original source. The complete replay inventory is
+    a *necessary* witness, not an independently authenticated source-partition
+    receipt. Original-source acceptance remains a separate mandatory gate.
+    """
+    inventory = claim.opening_area_replay_source_inventory
+    if type(inventory) is not tuple or not inventory:
+        raise SourceClosedRunConflictError(
+            "complete original-source opening replay inventory required"
+        )
+    replay_by_id = _opening_map(inventory)
+    source_scopes = {
+        (opening.document_id, opening.revision_id, opening.source_sha256,
+         opening.snapshot_id)
+        for opening in inventory
+    }
+    expected_fresh_scope = (*source_root, new_objects[0].snapshot_id)
+    if source_scopes != {expected_fresh_scope}:
+        raise SourceClosedRunConflictError(
+            "complete opening replay inventory has mixed or stale source scope"
+        )
+    existing_by_id = _opening_map(claim.canonical_openings)
+    if not set(existing_by_id).issubset(replay_by_id):
+        raise SourceClosedRunConflictError(
+            "complete opening replay inventory drops historical physical rivals"
+        )
+
+    # The old signed objects retain their *original* snapshot/host/quantity
+    # bodies, while the replayed physical ink must still identify the same
+    # document, instance, observation, lineage and geometry. Fresh receipts
+    # cannot silently relocate the old eight to a fabricated snapshot.
+    fields = (
+        "canonical_opening_id", "physical_opening_id", "document_id",
+        "revision_id", "source_sha256", "page_id", "viewport_id",
+        "semantic_class", "structural_pattern", "source_observation_ids",
+        "source_lineage_root_ids", "source_geometries",
+    )
+    for prior in old_objects:
+        reproduced = replay_by_id[prior.canonical_opening_id]
+        if any(getattr(prior, field) != getattr(reproduced, field)
+               for field in fields):
+            raise SourceClosedRunConflictError(
+                "replayed source rewrites original signed physical opening"
+            )
+    # Every newly measured opening must be the exact corresponding fresh
+    # roster object, not an unrelated candidate with a caller-chosen ID.
+    for fresh in new_objects:
+        if replay_by_id.get(fresh.canonical_opening_id) != fresh:
+            raise SourceClosedRunConflictError(
+                "new opening differs from complete source replay inventory"
+            )
+
+
 def _seal_explicit_source_reproved_append_only_openings(
     claim,
     quantities: tuple[QuantityEvidence, ...],
@@ -288,6 +351,21 @@ def _seal_explicit_source_reproved_append_only_openings(
         )
     if not old_objects or not new_objects:
         raise SourceClosedRunConflictError("source-reproved append has no original or new source scope")
+    _require_complete_append_only_source_replay(
+        claim, source_root=source_root,
+        old_objects=old_objects, new_objects=new_objects,
+    )
+    # A matching replay inventory remains entirely caller-controlled.
+    # Accept mixed producer snapshots ONLY when the original-byte collector
+    # minted the live proof after reissuing the complete source/host/physical
+    # partition authorities; the proof independently reconsults those owners.
+    from pb_live_append_only_opening_area_composition import (
+        _verify_original_opening_area_replay_proof,
+    )
+    if not _verify_original_opening_area_replay_proof(claim):
+        raise SourceClosedRunConflictError(
+            "original-source opening replay authority proof required"
+        )
 
     # Reject even a different physical-ID string if a later snapshot copied
     # precisely the same original observation, lineage and geometry receipt.
