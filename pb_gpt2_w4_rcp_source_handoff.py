@@ -147,6 +147,15 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
     rcp=_valid_polygon(original_rcp_ink.get("source_ceiling_ink_polygon_pdf_pts"))
     if not all((registered_floor,registered_rcp,w4_floor,rcp)):
         return {**blocked,"first_failure":"A120_source_perimeter_invalid"}
+    # The original RCP source receipt must describe the actual native ink
+    # polygon in PDF square points, not an independently mutable area value.
+    # This is NOT a metric conversion or a new ceiling-quantity authority.
+    original_area=original_rcp_ink.get("source_ceiling_polygon_area_pdf_pt2_not_m2")
+    if (type(original_area) not in (int,float)
+            or not math.isfinite(original_area)
+            or original_area<=0
+            or not math.isclose(float(original_area),rcp.area,rel_tol=0.0,abs_tol=1e-6)):
+        return {**blocked,"first_failure":"A120_original_ink_area_receipt_mismatch"}
     if (not registered_floor.equals(w4_floor)
             or not registered_rcp.equals(rcp)
             or not material_polygon.equals(rcp)):
