@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           approved_base=782b4e3ef4028e9463f39a4a64feb5c50b9332f6
-          approved_head=1d454a115cc049ccd16400ab36f847fe49541424
+          approved_head=e54a6047b4045c3c2667a5f7b7dd9dd202672c56
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -41,10 +41,13 @@ jobs:
           .github/workflows/test-gpt3-v1-unsigned-scope-wire.yml
           .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
           .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+          docs/engineering/gpt1_source_ceiling_code_customer_element_20261102.md
           docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
           pb_auto_geometry_v1219.py
+          pb_cross_view_floor_finish_authority.py
           pb_customer_output_verification.py
           pb_live_append_only_opening_area_composition.py
+          pb_live_ceiling_customer_projection.py
           pb_live_floor_finish_area_source_closed_export.py
           pb_live_floor_finish_customer_projection.py
           pb_live_opening_customer_projection.py
@@ -52,7 +55,10 @@ jobs:
           pb_live_physical_net_wall_integration.py
           pb_quantity_takeoff_adapter.py
           pb_source_closed_run_export.py
+          tests/test_cross_view_floor_finish_authority_v1.py
           tests/test_gpt1_floor_finish_exact_original_face_seal.py
+          tests/test_gpt1_producer_figured_area_ring_bridge_shadow.py
+          tests/test_gpt1_source_producer_to_workspace_floor_finish.py
           tests/test_gpt3_activation_portability_and_duplicate_keys.py
           tests/test_gpt3_append_only_opening_member_overlap.py
           tests/test_gpt3_atomic_pending_activation_pair.py
@@ -84,6 +90,7 @@ jobs:
           tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py
           tests/test_live_append_only_opening_area_composition.py
           tests/test_live_canonical_family_coverage.py
+          tests/test_live_ceiling_lining_source_closed_export.py
           tests/test_live_floor_finish_area_source_closed_export.py
           tools/diag_lot16_room_face_scope.py
           tools/gpt3_atomic_pending_activation_pair.py
