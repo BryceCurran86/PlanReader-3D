@@ -403,6 +403,39 @@ def test_reversed_but_exact_source_axis_pair_preserves_positive_floor_finish(
     )
 
 
+@pytest.mark.parametrize("changed_room_snapshot", (
+    None, "", "foreign-geometry-snapshot", " padded-snapshot ",
+    True, 42,
+))
+def test_room_area_source_snapshot_cannot_be_rebound_to_other_floor(
+    monkeypatch, changed_room_snapshot,
+) -> None:
+    """Original room-area snapshot and physical-floor snapshot are one owner.
+
+    Separate finish-plan/material snapshots remain independently permitted.
+    """
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    area = room_areas.records[0]
+    modified = dict(area.area_evidence.metadata)
+    if changed_room_snapshot is None:
+        modified.pop("room_snapshot_id")
+    else:
+        modified["room_snapshot_id"] = changed_room_snapshot
+    swapped_area = replace(
+        area, area_evidence=replace(area.area_evidence, metadata=modified),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=replace(room_areas, records=(swapped_area,)),
+        floors=floors,
+    ).publish()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
 def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
     monkeypatch,
 ) -> None:
