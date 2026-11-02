@@ -53,3 +53,56 @@ def test_source_identity_missing_cannot_use_geometry_only():
     record, geometry, lines = _fixture()
     record.physical_identity.source_primitive_ids = ()
     assert not _approved_alternate_projection(record, geometry, lines)
+
+
+def test_actual_frame_producer_cannot_skip_unpartitioned_aligned_motif_rival(monkeypatch):
+    """Real synthetic source-to-frame path: motif hints never substitute for DISTINCT.
+
+    This tests the actual frame publisher, not a copied source-edge predicate.
+    No original plan, source-specific coordinates or benchmark expectations.
+    """
+    import pb_opening_host_frame_authority as frame_module
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture as source_fixture
+    from test_raster_connected_host_frame import _publish, _scope
+
+    _source, _composition, producer, bound = source_fixture()
+    producer._raster_split_frame_shadow = True
+    baseline = _publish(producer, bound)
+    assert all(result.status is Status.CORROBORATED for result in baseline)
+
+    scope = _scope(producer, bound)
+    representative = scope.records[0]
+    center = baseline[0].evidence.origin_pt[1]
+    rival = replace(
+        representative,
+        wall_candidate_id="unpartitioned-aligned-motif-rival",
+        physical_identity=replace(
+            representative.physical_identity, source_primitive_ids=("unowned-source",)
+        ),
+        wall_candidate=replace(
+            representative.wall_candidate,
+            centerline_pts=((10.0, center), (30.0, center)),
+        ),
+    )
+    candidate_scope = replace(scope, records=(*scope.records, rival))
+    original_scope = repr(candidate_scope)
+    monkeypatch.setattr(
+        producer._walls, "resolve_scope", lambda _selector: candidate_scope
+    )
+    # Simulate a drafting-motif classification while source equivalence
+    # deliberately contains no producer-owned DISTINCT relation for this rival.
+    # Old code skipped this unknown pair and erroneously granted a frame.
+    monkeypatch.setattr(
+        frame_module, "repeated_raster_drafting_motif_wall_ids",
+        lambda _records: frozenset((rival.wall_candidate_id,)), raising=False,
+    )
+    for ordered in (bound, tuple(reversed(bound))):
+        results = _publish(producer, ordered)
+        assert all(result.status is Status.ABSTAINED and result.evidence is None
+                   for result in results)
+        assert all(
+            "opening_host_frame_aligned_fragment_distinctness_unproven"
+            in result.reason_codes for result in results
+        )
+    assert repr(candidate_scope) == original_scope
