@@ -328,7 +328,13 @@ def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs()
         assert "--volume /var/run/docker.sock" not in script
         assert "--network host" not in script
         assert "secrets.ORIGINAL_SOURCES_TOKEN" not in script
-    assert steps[focused_index]["run"].count("run_isolated python -m pytest") == 3
+    focused_script = steps[focused_index]["run"]
+    # The owner-selected Antigravity target adds one more *isolated* original
+    # south-wall test, never a shell/host-side private-source test.
+    assert focused_script.count("run_isolated python -m pytest") == 4
+    assert '[[ "$GPTMAX_TARGET" == "antigravity" ]]' in focused_script
+    assert "tests/test_antigravity_lot16_south_wall_frame.py" in focused_script
+    assert "Original Lot16 south wall frame skipped or missing" in focused_script
     assert steps[replay_index]["run"].count("run_isolated python -m pytest") == 1
 
 
