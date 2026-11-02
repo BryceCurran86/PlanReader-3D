@@ -74,7 +74,9 @@ def _ink():
 
 def _call(monkeypatch, ink=None, *, issued=None, error=None,
           cross=None, issued_floor=None, floor_error=None,
-          issued_w4=None, issued_ceiling=None, native_room_lines=None):
+          issued_w4=None, issued_ceiling=None, native_room_lines=None,
+          open_floor=None, issued_open_ancestry=None,
+          painted_gap_inventory_complete=True):
     events = []
     actual = _ink() if issued is None else issued
 
@@ -117,6 +119,18 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
             if floor_error is not None:
                 raise floor_error
             return deepcopy(_floor() if issued_floor is None else issued_floor)
+
+        def original_room_doorway_source_ancestry(self, **kwargs):
+            events.append(("reissue_original_open_doorway",kwargs))
+            return deepcopy(issued_open_ancestry)
+
+    monkeypatch.setattr(
+        module, "_original_doorway_gap_native_ink_inventory_complete",
+        lambda *a, **k: (
+            events.append(("replay_full_gap_ink",k.get("page_1_based")))
+            or painted_gap_inventory_complete
+        ),
+    )
 
     monkeypatch.setattr(
         module, "audit_original_rcp_source_finish_occurrence",
@@ -181,6 +195,7 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
             SimpleNamespace(physical_room_id="OFFICE", room_label="OFFICE"),
         )),
         physical_room_id="OFFICE",
+        original_floor_open_doorway_source=open_floor,
     )
     return result, events
 
