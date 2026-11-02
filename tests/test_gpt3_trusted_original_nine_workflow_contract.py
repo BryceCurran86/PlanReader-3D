@@ -174,10 +174,33 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
         script = execute["run"]
-        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
-        assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in script
-        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
-        assert "python -m pytest" in script
+        # The preflight and real-source pytest are separate Docker invocations.
+        # Each must independently satisfy the owner-only offline/mount policy.
+        # Checking for one safe substring anywhere in this step can hide an
+        # unsafe second container and incorrectly accept an adversarial edit.
+        pieces = script.split("if ! docker run --rm ")
+        assert len(pieces) == 3
+        assert script.count("docker run --rm") == 2
+        runs = []
+        for piece in pieces[1:]:
+            run, separator, _remaining = piece.partition(' > "$output" 2>&1; then')
+            assert separator
+            runs.append("docker run --rm " + run)
+        for run in runs:
+            assert run.startswith(
+                "docker run --rm --network none --read-only --cap-drop ALL"
+            )
+            for required in (
+                "--security-opt no-new-privileges",
+                "--pids-limit 256",
+                '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
+                '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
+                "--workdir /workspace",
+                '"gpt3-offline:${{ matrix.python-version }}"',
+            ):
+                assert run.count(required) == 1
+        assert "python -c 'import hashlib,json,fitz;" in runs[0]
+        assert "python -m pytest" in runs[1]
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
@@ -328,3 +351,61 @@ def test_owner_only_replay_requires_original_and_rerun_actor(
         repository == "BryceCurran86/PlanReader-3D",
         rerunner == "BryceCurran86",
     )) is permitted
+
+def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
+    """No unreviewed private source, exception or traceback may reach Actions."""
+    try:
+        doc = _parse(raw)
+        steps = doc["jobs"]["original"]["steps"]
+        assert len(steps) == 6
+        assert _isolated_private_source_contract(raw)
+        execute = steps[4]["run"]
+        assert execute.count(
+            "docker run --rm --network none --read-only --cap-drop ALL"
+        ) == 2
+        assert execute.count("dst=/workspace/documents/sources,readonly") == 2
+        assert "fitz.VersionBind==\"1.28.0\"" in execute
+        assert 'hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]' in execute
+        assert 'python -c \'import hashlib,json,fitz;' in execute
+        assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+        assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
+        assert execute.count(' > "$output" 2>&1; then') == 2
+        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" in execute
+        assert "Original default-eight producer/seal/customer FAILED" in execute
+        assert "Original explicit-nine producer/seal/customer FAILED" in execute
+        assert "Original sealed/customer receipt verification FAILED" in execute
+        assert "Original signed-eight retention or new physical identity FAILED" in execute
+        assert "unclassified private test stage" in execute
+        assert 'cat "$output"' not in execute
+        assert 'tee "$output"' not in execute
+        assert "actions/upload-artifact" not in raw
+        assert "github.event.inputs" not in raw
+        assert 'rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"' in steps[-1]["run"]
+        assert 'echo "$output"' not in execute
+        assert '$(<' not in execute
+        return True
+    except (AssertionError, KeyError, TypeError, yaml.YAMLError):
+        return False
+
+
+def test_original_private_first_failure_classifier_is_source_safe():
+    assert _private_phase_diagnostic_is_source_safe(WORKFLOW.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("old", "bad"), [
+    ("--tb=short", "--tb=no"),
+    ("--network none", "--network host"),
+    ('fitz.VersionBind=="1.28.0"', 'fitz.VersionBind=="1.26.7"'),
+    ('hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"]', "True"),
+    (' > "$output" 2>&1; then', " 2>&1; then"),
+    ('grep -Fq', 'cat "$output"; grep -Fq'),
+    ('echo "::error::Original default-eight producer/seal/customer FAILED',
+     'echo "$(<$output)"; echo "::error::Original default-eight producer/seal/customer FAILED'),
+    ('rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"',
+     'echo "$(<$RUNNER_TEMP/gpt3-owner-original-positive.log)"'),
+])
+def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    assert old in raw
+    assert _private_phase_diagnostic_is_source_safe(raw)
+    assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
