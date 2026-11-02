@@ -111,7 +111,11 @@ def audit_source_open_floor_native_ink_virtual_gap(
                                   for v in p) for p in pts)):
                 return base
             ls=LineString(tuple(tuple(round(float(x),3) for x in p) for p in pts))
-            if (ls.is_empty or ls.length<=0 or not virtual.boundary.covers(ls)):
+            source_length=row.get("source_ink_length_pdf_pt")
+            if (ls.is_empty or ls.length<=0 or not virtual.boundary.covers(ls)
+                    or type(source_length) not in (float,int)
+                    or not math.isfinite(source_length) or source_length<=0
+                    or abs(source_length-ls.length)>0.001):
                 return base
             strokes.append(ls)
         if names != set(original_source_edge_ids):
