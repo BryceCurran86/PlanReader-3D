@@ -972,3 +972,72 @@ def test_explicit_source_owned_ceiling_customer_permission_preserves_signed_quan
     assert verify_sealed_customer_output(
         seal, rows,
     ).verified_quantity_ids == (original.quantity_id,)
+
+
+def test_original_ceiling_customer_row_uses_unique_source_owned_room_label():
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("failure", (
+    "no_label",
+    "no_label_binding",
+    "no_label_evidence",
+    "competing_same_label",
+))
+def test_ceiling_customer_does_not_guess_ambiguous_or_unbound_original_room_name(
+    failure,
+):
+    room = _room()
+    other = ()
+    if failure == "no_label":
+        room = replace(room, room_label=None)
+    elif failure == "no_label_binding":
+        room = replace(room, room_label_binding_record_id=None)
+    elif failure == "no_label_evidence":
+        room = replace(room, room_label_evidence_ids=())
+    else:
+        other = (replace(
+            room,
+            canonical_room_id="other-canonical-room",
+            physical_room_id="other-physical-room",
+            source_room_face_record_id="other-face-record",
+            room_label="office",
+            room_label_binding_record_id="other-binding",
+        ),)
+    claim = replace(_claim(_quantity()), canonical_rooms=(room, *other))
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "physical-room-1"
+
+
+def test_ceiling_material_cannot_relabel_another_original_room_in_customer_row():
+    original = _quantity()
+    changed = replace(
+        original, metadata={**original.metadata, "room_label": "FREEZER"},
+    )
+    claim = _claim(changed)
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical original room",
+    ):
+        project_live_ceiling_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    ).quantities[0].value == 9.05352
