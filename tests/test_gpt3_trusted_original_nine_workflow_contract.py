@@ -178,12 +178,14 @@ def _isolated_private_source_contract(raw: str) -> bool:
         # Each must independently satisfy the owner-only offline/mount policy.
         # Checking for one safe substring anywhere in this step can hide an
         # unsafe second container and incorrectly accept an adversarial edit.
-        runs = re.findall(
-            r'if ! (docker run --rm\\b.*?) > "\\$output" 2>&1; then',
-            script, flags=re.DOTALL,
-        )
-        assert len(runs) == 2
+        pieces = script.split("if ! docker run --rm ")
+        assert len(pieces) == 3
         assert script.count("docker run --rm") == 2
+        runs = []
+        for piece in pieces[1:]:
+            run, separator, _remaining = piece.partition(' > "$output" 2>&1; then')
+            assert separator
+            runs.append("docker run --rm " + run)
         for run in runs:
             assert run.startswith(
                 "docker run --rm --network none --read-only --cap-drop ALL"
