@@ -15,6 +15,7 @@ HEADS = {
     "cache": "5ae6170f03b81c58df15423b997caacd9e778f87",
     "vertical": "f7e2872a56d920f28043af29474f82dfd5a401b4",
     "horizontal": "98deb79aa5d4f1c45b666d8b7a71a77f82a5c825",
+    "antigravity": "1bb99be3e869d00bc1e9d4b0cf106e8fe688a4f1",
 }
 BASES = {
     "host": BASE,
@@ -23,6 +24,7 @@ BASES = {
     "cache": "86c0193c157cd1333a11470b45d50ab3f5cf44fc",
     "vertical": "5a3649001830efd119c28c9a40db795ce815f4c2",
     "horizontal": "fa7b2bd77adaa8ddf3c5af2e2ff80e755f44c512",
+    "antigravity": "782b4e3ef4028e9463f39a4a64feb5c50b9332f6",
 }
 
 
@@ -55,6 +57,12 @@ PATHS = {
         "docs/engineering/gptmax_horizontal_third_root_ownership_20261029.md",
         "pb_gptmax_horizontal_raster_tile_seam_shadow.py",
         "tests/test_gptmax_horizontal_raster_tile_seam_shadow.py",
+    ),
+    "antigravity": (
+        "pb_live_wall_opening_authority_composition.py",
+        "pb_opening_host_frame_authority.py",
+        "tests/test_antigravity_lot16_north_wall_frame.py",
+        "tests/test_antigravity_lot16_south_wall_frame.py",
     ),
 }
 
@@ -95,7 +103,11 @@ def _load():
 
 def test_manual_only_owner_main_context_never_pr_or_push():
     data = _load()
-    assert data["on"] == {"workflow_dispatch": None}
+    assert data["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "SHA-reviewed original-source target (all runs every gate)",
+        "type": "choice", "required": True, "default": "cache",
+        "options": list(HEADS) + ["all"],
+    }}}}
     assert set(data) == {"name", "on", "permissions", "concurrency", "jobs"}
     assert data["permissions"] == {"contents": "read"}
     assert tuple(data["jobs"]) == ("verify",)
@@ -104,7 +116,12 @@ def test_manual_only_owner_main_context_never_pr_or_push():
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
     assert "github.triggering_actor == 'BryceCurran86'" in job["if"]
-    assert job["strategy"]["matrix"]["target"] == list(HEADS)
+    selector = job["strategy"]["matrix"]["target"]
+    assert selector.startswith("${{ fromJSON(") and selector.endswith(") }}")
+    assert "inputs.target == 'all'" in selector and '["unsupported"]' in selector
+    for name in HEADS:
+        assert f"inputs.target == '{name}'" in selector
+        assert f'["{name}"]' in selector
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     assert job["strategy"]["fail-fast"] is False
     assert "github.event.inputs" not in WORKFLOW.read_text(encoding="utf-8")
@@ -410,3 +427,36 @@ def test_dependency_copy_shell_ignores_moving_main_and_private_sentinel(tmp_path
     for name in ("requirements.txt", "requirements-ci-v1228.txt"):
         assert (context / name).read_text(encoding="utf-8") == "PINNED-" + name
     assert not (context / "private-original.pdf").exists()
+
+
+def test_owner_selective_original_targets_reject_any_unreviewed_source_path():
+    data=_load()
+    target=data["on"]["workflow_dispatch"]["inputs"]["target"]
+    assert target["type"] == "choice" and target["required"] is True
+    assert target["default"] == "cache"
+    assert target["options"] == list(HEADS) + ["all"]
+    selector=data["jobs"]["verify"]["strategy"]["matrix"]["target"]
+    assert "inputs.target == 'all'" in selector
+    assert '["unsupported"]' in selector
+    for name in HEADS:
+        assert f"inputs.target == '{name}'" in selector
+    guard=next(s["run"] for s in data["jobs"]["verify"]["steps"] if s.get("name","").startswith("Authenticate immutable"))
+    assert "case \"$TARGET\" in" in guard
+    assert "ORIGINAL_SOURCES_TOKEN" not in guard
+    assert "github.event.pull_request" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_antigravity_original_both_walls_sha_pinned_before_private_source_provision():
+    steps=_load()["jobs"]["verify"]["steps"]
+    source=next(s["run"] for s in steps if s.get("name","").startswith("Authenticate immutable"))
+    assert "antigravity)" in source
+    assert f"approved_base={BASES['antigravity']}" in source
+    assert f"approved_head={HEADS['antigravity']}" in source
+    assert "focused_test=tests/test_antigravity_lot16_north_wall_frame.py" in source
+    for path in PATHS["antigravity"]:
+        assert path in source
+    execute=next(s["run"] for s in steps if s.get("name","").startswith("Verify original-provisioned"))
+    assert '[[ "$GPTMAX_TARGET" == "antigravity" ]]' in execute
+    assert "tests/test_antigravity_lot16_south_wall_frame.py" in execute
+    assert "Original Lot16 south wall frame skipped or missing" in execute
+    assert "--network none --read-only --cap-drop ALL" in execute

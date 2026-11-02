@@ -1,6 +1,21 @@
 name: GPT MAX trusted original opening replay (manual)
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "SHA-reviewed original-source target (all runs every gate)"
+        type: choice
+        required: true
+        default: cache
+        options:
+          - host
+          - frame
+          - receipt
+          - cache
+          - vertical
+          - horizontal
+          - antigravity
+          - all
 permissions:
   contents: read
 concurrency:
@@ -16,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [host, frame, receipt, cache, vertical, horizontal]
+        target: ${{ fromJSON(inputs.target == 'all' && '["host","frame","receipt","cache","vertical","horizontal","antigravity"]' || inputs.target == 'host' && '["host"]' || inputs.target == 'frame' && '["frame"]' || inputs.target == 'receipt' && '["receipt"]' || inputs.target == 'cache' && '["cache"]' || inputs.target == 'vertical' && '["vertical"]' || inputs.target == 'horizontal' && '["horizontal"]' || inputs.target == 'antigravity' && '["antigravity"]' || '["unsupported"]') }}
     steps:
       - name: Checkout trusted workflow context
         uses: actions/checkout@v4
@@ -70,6 +85,13 @@ jobs:
               approved_head=98deb79aa5d4f1c45b666d8b7a71a77f82a5c825
               expected_paths='docs/engineering/gptmax_horizontal_third_root_ownership_20261029.md|pb_gptmax_horizontal_raster_tile_seam_shadow.py|tests/test_gptmax_horizontal_raster_tile_seam_shadow.py'
               focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py
+              ;;
+            antigravity)
+              # Source-backed and source-negative north/south original replay.
+              approved_base=782b4e3ef4028e9463f39a4a64feb5c50b9332f6
+              approved_head=1bb99be3e869d00bc1e9d4b0cf106e8fe688a4f1
+              expected_paths='pb_live_wall_opening_authority_composition.py|pb_opening_host_frame_authority.py|tests/test_antigravity_lot16_north_wall_frame.py|tests/test_antigravity_lot16_south_wall_frame.py'
+              focused_test=tests/test_antigravity_lot16_north_wall_frame.py
               ;;
             *)
               echo "::error::Unknown source replay target"
@@ -229,6 +251,19 @@ jobs:
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original p5 horizontal rail test skipped or missing"
+              exit 1
+            fi
+          fi
+          if [[ "$GPTMAX_TARGET" == "antigravity" ]]; then
+            # NORTH already required by focused_test, require separate SOUTH positive.
+            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
+              tests/test_antigravity_lot16_south_wall_frame.py \
+              > "$output" 2>&1; then
+              echo "::error::Original Lot16 south wall frame test FAILED"
+              exit 1
+            fi
+            if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
+              echo "::error::Original Lot16 south wall frame skipped or missing"
               exit 1
             fi
           fi
