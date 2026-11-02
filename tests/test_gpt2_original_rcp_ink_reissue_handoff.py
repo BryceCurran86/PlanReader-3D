@@ -38,6 +38,7 @@ def _floor():
     return {
         "source_sha256": SHA,
         "page_1_based": 7,
+        "original_native_edge_ids": FLOOR_EDGES,
         "native_candidate_ring_count": 1,
         "interior_stroke_intersections_and_overlaps": (),
         "native_components": ({
@@ -267,6 +268,9 @@ def test_unsealed_or_forged_floor_rcp_registration_abstains_before_material(
 @pytest.mark.parametrize("mutation", [
     {"source_sha256": "b"*64},
     {"page_1_based": 11},
+    {"original_native_edge_ids": FLOOR_EDGES[:-1]},
+    {"original_native_edge_ids": FLOOR_EDGES + ("f0",)},
+    {"original_native_edge_ids": tuple(reversed(FLOOR_EDGES)) + ("f5",)},
     {"native_candidate_ring_count": 0},
     {"interior_stroke_intersections_and_overlaps": ("false-wall-crossing",)},
     {"native_components": ()},
