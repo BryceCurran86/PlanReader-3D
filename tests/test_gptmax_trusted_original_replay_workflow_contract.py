@@ -12,7 +12,7 @@ HEADS = {
     "host": "b58d435efa65e003ba55754c2bdc152df5c91e8b",
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
-    "cache": "6a937ad7d44da2c63e2fae04492c332a03b3b623",
+    "cache": "5ae6170f03b81c58df15423b997caacd9e778f87",
     "vertical": "f7e2872a56d920f28043af29474f82dfd5a401b4",
     "horizontal": "98deb79aa5d4f1c45b666d8b7a71a77f82a5c825",
 }
@@ -20,7 +20,7 @@ BASES = {
     "host": BASE,
     "frame": BASE,
     "receipt": BASE,
-    "cache": "f480fc84d2e7486319e9b52a3a72790bb7435e69",
+    "cache": "86c0193c157cd1333a11470b45d50ab3f5cf44fc",
     "vertical": "5a3649001830efd119c28c9a40db795ce815f4c2",
     "horizontal": "fa7b2bd77adaa8ddf3c5af2e2ff80e755f44c512",
 }
@@ -43,8 +43,6 @@ PATHS = {
         "tests/test_raster_opening_receipt_registration.py",
     ),
     "cache": (
-        ".github/workflows/gptmax-g17-source-receipt-integrity.yml",
-        "docs/engineering/gptmax_g17_cached_source_integrity_20261020.md",
         "pb_physical_opening_authority.py",
         "tests/test_raster_opening_cached_source_integrity.py",
     ),
@@ -170,8 +168,8 @@ def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
         if step.get("name", "").startswith("Authenticate immutable")
     )
     assert "cache)" in guard
-    assert "approved_base=f480fc84d2e7486319e9b52a3a72790bb7435e69" in guard
-    assert "approved_head=6a937ad7d44da2c63e2fae04492c332a03b3b623" in guard
+    assert f"approved_base={BASES['cache']}" in guard
+    assert f"approved_head={HEADS['cache']}" in guard
     assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
     assert 'git checkout --detach "$approved_head"' not in guard
     assert "github.event.pull_request" not in source
