@@ -549,3 +549,63 @@ def test_missing_registered_region_propagates_abstain_to_source_shadow_collectio
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
     assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
+
+
+
+def test_original_physical_room_identity_collision_abstains_both_floor_boxes():
+    measured = [{
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-office",
+        "source_room_face_record_id": "face-office",
+    }]
+    # Disjoint boxes cannot both claim ONE underlying original physical room.
+    second = dict(measured[0])
+    second["dimension_box_pdf_pts"] = (418.5, 1390., 638.2, 1600.)
+    second["canonical_floor_id"] = "second-canonical-floor"
+    second["source_room_face_record_id"] = "second-face"
+    measured.append(second)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=measured,
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert len(result.records) == 2
+    assert all(r.status is EvidenceResolutionStatus.ABSTAINED for r in result.records)
+    assert all("duplicate_physical_floor_identity" in r.reason_codes for r in result.records)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert all(r.commercial_projection_allowed is False for r in result.records)
+
+
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("canonical_floor_id", None),
+    ("physical_room_id", 1234),
+    ("source_room_face_record_id", ""),
+    ("physical_room_id", " physical-office "),
+    ("source_room_face_record_id", True),
+])
+def test_missing_or_coerced_original_physical_source_identity_abstains(
+    field, invalid,
+):
+    box = {
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-office",
+        "source_room_face_record_id": "face-office",
+    }
+    box[field] = invalid
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=[box],
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert "missing_physical_floor_identity" in result.records[0].reason_codes
