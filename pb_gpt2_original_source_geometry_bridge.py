@@ -1036,6 +1036,20 @@ class GPT2OriginalSourceGeometryBridge:
         w4=audit_gpt2_w4_bound_original_floor(
             source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
+        if (type(w4) is not dict
+                or w4.get("status")!="source_original_floor_W4_face_candidate_only"
+                or w4.get("w4_room_face_source_identity_proven") is not True
+                or w4.get("source_w4_wall_ownership_authenticated") is not True):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    w4.get("first_failure", "source_W4_original_face_unverified")
+                    if type(w4) is dict else "source_W4_original_face_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
         result=audit_gpt2_w4_original_rcp_ceiling_handoff(
             independently_registered_rcp=source_floor_rcp_correspondence,
             original_rcp_ink=original_rcp_ink,
@@ -1043,6 +1057,22 @@ class GPT2OriginalSourceGeometryBridge:
             canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id,
         )
+        if (type(result) is not dict
+                or result.get("status") !=
+                    "original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+                or result.get("ceiling_quantity_m2_issued") is not False
+                or result.get("new_firm_quantities") != 0):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    result.get("first_failure", "A120_W4_ceiling_material_unverified")
+                    if type(result) is dict else "A120_W4_ceiling_material_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_original_rcp_ceiling_input_for_gpt1":result,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
             "source_w4_room_face_claim":w4,
