@@ -27,6 +27,68 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _original_ceiling_room_location(
+    claim: LivePhysicalNetWallClaim,
+    ceiling: Any,
+    metadata: Mapping[str, Any],
+) -> str:
+    """Show one original RCP room label, never a guessed cross-room name.
+
+    The ceiling quantity/source sealer independently checks room geometry
+    and original room-face lineage. This helper only selects a customer
+    presentation label from that same exact corroborated canonical room.
+    """
+    fallback = _clean(
+        metadata.get("physical_room_id")
+        or metadata.get("canonical_room_id")
+        or ceiling.room_entity_id
+    )
+    rooms = [
+        room for room in claim.canonical_rooms
+        if getattr(room, "canonical_room_id", None) == ceiling.room_entity_id
+    ]
+    if len(rooms) != 1:
+        return fallback
+    room = rooms[0]
+    label = getattr(room, "room_label", None)
+    receipt = getattr(room, "room_label_binding_record_id", None)
+    evidence = getattr(room, "room_label_evidence_ids", None)
+    if (
+        type(label) is not str or not label or label != label.strip()
+        or type(receipt) is not str or not receipt
+        or receipt != receipt.strip()
+        or type(evidence) not in (tuple, list) or not evidence
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in evidence)
+        or len(set(evidence)) != len(evidence)
+        or room.document_id != ceiling.document_id
+        or room.revision_id != ceiling.revision_id
+        or room.source_sha256.lower() != ceiling.source_sha256.lower()
+        or room.snapshot_id != ceiling.snapshot_id
+        or room.canonical_room_id != ceiling.room_entity_id
+        or metadata.get("source_room_face_record_id")
+        != room.source_room_face_record_id
+    ):
+        return fallback
+    norm = " ".join(label.casefold().split())
+    if any(
+        other is not room
+        and type(getattr(other, "room_label", None)) is str
+        and " ".join(other.room_label.casefold().split()) == norm
+        for other in claim.canonical_rooms
+    ):
+        return fallback
+    observed_label = metadata.get("room_label")
+    if observed_label is not None and (
+        type(observed_label) is not str
+        or " ".join(observed_label.casefold().split()) != norm
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling source material room label contradicts canonical original room"
+        )
+    return label
+
+
 def _figured_authority(quantity: QuantityEvidence) -> CommercialMeasurementAuthority | None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     # The original producer must supply exactly two distinct native figured
@@ -180,10 +242,8 @@ def project_live_ceiling_customer_rows(
                 "commercial_projection_allowed": True,
                 "section": "Internal",
                 "element": f"Ceiling lining area ({source_finish_code})",
-                "location": _clean(
-                    metadata.get("physical_room_id")
-                    or metadata.get("canonical_room_id")
-                    or ceiling.room_entity_id
+                "location": _original_ceiling_room_location(
+                    claim, ceiling, metadata,
                 ),
                 "substrate": "Other",
                 "finish_system": _clean(
