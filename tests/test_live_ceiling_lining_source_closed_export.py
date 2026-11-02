@@ -6,7 +6,10 @@ from dataclasses import replace
 import pytest
 
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
-from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_customer_projection import (
+    _figured_authority,
+    project_live_ceiling_customer_rows,
+)
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
     seal_live_ceiling_lining_run,
@@ -403,6 +406,54 @@ def test_scaled_quantity_is_not_admitted_to_documented_rcp_export() -> None:
         )
 
 
+@pytest.mark.parametrize("figured_ids", (
+    ("dim-h", "dim-v", "dim-h"),
+    ("dim-h", "dim-h"),
+    ("dim-h", " dim-v"),
+    ("dim-h", "dim-v "),
+    ("dim-h", ""),
+    ("dim-h", True),
+    ("dim-h", 2),
+    ("dim-h", None),
+    ("dim-h", ("dim-v",)),
+    "dim-h,dim-v",
+    None,
+    {"dim-h": 1, "dim-v": 2},
+))
+def test_live_ceiling_customer_cannot_repair_original_figured_axes(figured_ids) -> None:
+    # The source sealer already fails closed. The customer boundary must not
+    # independently cast/trim/deduplicate an invalid source into two axes.
+    quantity = _quantity()
+    malformed = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), "figured_dimension_ids": figured_ids},
+    )
+    assert _figured_authority(malformed) is None
+
+
+def test_live_ceiling_customer_retains_exact_original_figured_axes() -> None:
+    quantity = _quantity()
+    assert _figured_authority(quantity).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+    reversed_source = replace(
+        quantity,
+        metadata={
+            **dict(quantity.metadata),
+            "figured_dimension_ids": ("dim-v", "dim-h"),
+        },
+    )
+    assert _figured_authority(reversed_source).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+
+
+def test_live_ceiling_customer_cannot_retype_scaled_source_as_figured() -> None:
+    quantity = _quantity()
+    changed = replace(quantity, authority="pdf_scaled")
+    assert _figured_authority(changed) is None
+
+
 def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     quantity = _quantity()
     claim = _claim(quantity)
@@ -424,6 +475,7 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert row["quantity_status"] == "To review"
     assert row["origin"] == "AI"
     assert row["row_role"] == "ceiling_area"
+    assert row["element"] == "Ceiling lining area (GRID)"
     assert row["finish_system"] == "ceiling_grid"
 
     report = verify_sealed_customer_output(run, rows)
@@ -452,6 +504,35 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+@pytest.mark.parametrize("unowned_code", (
+    None, "", " GRID", "GRID ", "IPF1", True, 23,
+))
+def test_ceiling_customer_cannot_relabel_original_firm_finish(
+    unowned_code,
+) -> None:
+    """Commercial RCP material code must be the original signed code."""
+    signed = _quantity()
+    metadata = {**dict(signed.metadata), "finish_code": unowned_code}
+    tampered = replace(signed, metadata=metadata)
+    original_claim = _claim(signed)
+    claim = replace(
+        original_claim,
+        ceiling_lining_quantity_evidence=(tampered,),
+    )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_ceiling_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    # An invalid imported source must not alter the valid signed customer
+    # output, even when the source decoder is replayed in the same process.
+    rows = project_live_ceiling_customer_rows(
+        original_claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == signed.value
 
 
 @pytest.mark.parametrize("stolen", (
