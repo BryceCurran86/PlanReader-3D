@@ -39,6 +39,9 @@ from pb_gpt2_w4_original_floor_handoff import (
     audit_gpt2_w4_bound_original_floor,
     audit_gpt2_w4_material_to_gpt1,
 )
+from pb_gpt2_source_open_floor_rcp_geometry import (
+    audit_source_open_floor_native_ink_virtual_gap,
+)
 from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
     audit_gpt2_original_cross_sheet_ring_correspondence,
     audit_gpt2_original_doorway_bound_floor_finish_correspondence,
@@ -1372,6 +1375,7 @@ class GPT2OriginalSourceGeometryBridge:
         original_ceiling_finish_code: str,
         canonical_rooms,
         physical_room_id: str,
+        original_floor_open_doorway_source: dict | None = None,
     ) -> dict:
         """Bind original A120-only ceiling geometry to one sealed W4 room.
 
@@ -1507,12 +1511,9 @@ class GPT2OriginalSourceGeometryBridge:
                 or len(issued_floor_ids) != len(floor_ids)
                 or len(set(issued_floor_ids)) != len(issued_floor_ids)
                 or set(issued_floor_ids) != set(floor_ids)
-                or floor_source.get("status") !=
-                    "original_closed_ink_ring_candidates_only"
                 or floor_source.get("source_sha256") !=
                     published.revision.source_sha256
                 or floor_source.get("page_1_based") != original_floor_page_1_based
-                or floor_source.get("native_candidate_ring_count") != 1
                 or floor_source.get("interior_stroke_intersections_and_overlaps")
                 or type(components) not in (tuple, list)
                 or len(components) != 1
@@ -1526,18 +1527,102 @@ class GPT2OriginalSourceGeometryBridge:
             )
             if (
                 type(source_edges) is not tuple
-                or type(ring_edges) is not tuple
                 or len(source_edges) != len(floor_ids)
-                or len(ring_edges) != len(floor_ids)
                 or set(source_edges) != set(floor_ids)
-                or set(ring_edges) != set(floor_ids)
             ):
                 return blocked_registration
-            if type(source_ring) is not dict:
-                return blocked_registration
-            floor = Polygon(source_ring["vertices_pdf_pts"])
             claimed_floor = Polygon(
                 correspondence["source_floor_perimeter_polygon_pdf_pts"])
+            if original_floor_open_doorway_source is None:
+                # Original CLOSED floor ink is still the only default route.
+                if (floor_source.get("status") !=
+                        "original_closed_ink_ring_candidates_only"
+                        or floor_source.get("native_candidate_ring_count") != 1
+                        or type(source_ring) is not dict
+                        or type(ring_edges) is not tuple
+                        or len(ring_edges) != len(floor_ids)
+                        or set(ring_edges) != set(floor_ids)):
+                    return blocked_registration
+                floor = Polygon(source_ring["vertices_pdf_pts"])
+            else:
+                # Explicit authentic OPEN p7 floor -> closed A120 ceiling.
+                # The missing doorway ink is a VIRTUAL REGISTRATION CHORD,
+                # never structural wall or customer threshold evidence.
+                opt=original_floor_open_doorway_source
+                if type(opt) is not dict or source_ring is not None:
+                    return blocked_registration
+                gap_check=audit_source_open_floor_native_ink_virtual_gap(
+                    floor_source, original_source_edge_ids=floor_ids,
+                    virtual_floor_vertices_pdf_pts=tuple(
+                        correspondence["source_floor_perimeter_polygon_pdf_pts"]
+                    ),
+                )
+                if gap_check.get("status") != (
+                    "source_open_floor_one_original_door_gap_candidate_only"
+                ):
+                    return blocked_registration
+                second=opt.get("original_second_page_1_based")
+                second_ids=opt.get("original_second_source_edge_ids")
+                second_shift=opt.get("source_floor_to_second_translation_pdf_pts")
+                expected=opt.get("claimed_reissued_ancestry")
+                if (type(second) is not int
+                        or second in (original_floor_page_1_based,ink_page)
+                        or second<1
+                        or type(second_ids) is not tuple
+                        or not 3<=len(second_ids)<=20000
+                        or len(set(second_ids))!=len(second_ids)
+                        or any(type(v) is not str or not v or v!=v.strip()
+                               for v in second_ids)
+                        or type(second_shift) not in (tuple,list)
+                        or len(second_shift)!=2
+                        or any(type(v) not in (int,float) or not math.isfinite(v)
+                               for v in second_shift)
+                        or type(expected) is not dict):
+                    return blocked_registration
+                reissued=self.original_room_doorway_source_ancestry(
+                    revision_id=revision_id,
+                    original_floor_page_1_based=original_floor_page_1_based,
+                    original_second_page_1_based=second,
+                    original_floor_source_edge_ids=floor_ids,
+                    original_second_source_edge_ids=second_ids,
+                    original_translation_pdf_pts=tuple(second_shift),
+                )
+                if (reissued!=expected or
+                        reissued.get("status") !=
+                            "original_doorway_all_printed_wall_strokes_match_candidate"
+                        or reissued.get("source_document_id") !=
+                            published.revision.document_id
+                        or reissued.get("source_revision_id") != revision_id
+                        or reissued.get("source_snapshot_id") !=
+                            published.snapshot.snapshot_id
+                        or reissued.get("original_source_sha256") !=
+                            published.revision.source_sha256):
+                    return blocked_registration
+                a=reissued.get("floor_source_graph")
+                b=reissued.get("second_plan_source_graph")
+                if (type(a) is not dict or type(b) is not dict
+                        or a.get("original_native_edge_ids") !=
+                           tuple(sorted(floor_ids))
+                        or b.get("original_native_edge_ids") !=
+                           tuple(sorted(second_ids))):
+                    return blocked_registration
+                _,original_bytes=self._source_revision(
+                    revision_id,page_1_based=original_floor_page_1_based)
+                if not (
+                    _original_doorway_gap_native_ink_inventory_complete(
+                        original_bytes,
+                        page_1_based=original_floor_page_1_based,
+                        original_room_graph=a,
+                    )
+                    and _original_doorway_gap_native_ink_inventory_complete(
+                        original_bytes,
+                        page_1_based=second,
+                        original_room_graph=b,
+                    )
+                ):
+                    return blocked_registration
+                floor=claimed_floor
+            
             claimed_rcp = Polygon(
                 correspondence["source_finishes_perimeter_polygon_pdf_pts"])
             ceiling = Polygon(
