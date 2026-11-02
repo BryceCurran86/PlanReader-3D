@@ -208,6 +208,24 @@ def project_live_floor_finish_customer_rows(
                 f"{source_id}"
             )
 
+    # Genuine source material with an unresolved physical finished-floor
+    # boundary is not yet a takeoff area. Reject explicit source-stage
+    # commercial denial before the projection adapter can set its own True.
+    for original in claim.floor_finish_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        source_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in source_metadata
+            and source_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original material-only receipt forbids "
+                f"customer area projection: {original.quantity_id}"
+            )
+
     quantities = tuple(
         quantity
         for quantity in claim.floor_finish_quantity_evidence
