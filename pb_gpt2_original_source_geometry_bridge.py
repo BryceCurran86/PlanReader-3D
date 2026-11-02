@@ -46,6 +46,219 @@ from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
 )
 
 
+
+def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict) -> bool:
+    """Prove a caller's perimeter vertices/IDs against SHA-page-native strokes.
+
+    This is a negative-only source integrity gate. The jamb receipt and W4
+    physical wall/room authority remain separate, never inferred here.
+    """
+    import math
+    import re
+
+    def point(value):
+        if type(value) not in (tuple, list) or len(value) != 2:
+            return None
+        out = []
+        for coordinate in value:
+            if type(coordinate) not in (int, float):
+                return None
+            # Native PDF endpoints above the binary64 exact integer range
+            # cannot retain distinct physical point identity as floats.
+            if abs(coordinate) > 2**53:
+                return None
+            try:
+                number = float(coordinate)
+            except (ValueError, OverflowError):
+                return None
+            if not math.isfinite(number):
+                return None
+            out.append(number)
+        return tuple(out)
+
+    if type(ring) is not dict or type(graph) is not dict:
+        return False
+    # Equality of two absent roots (None == None), or numeric page aliases
+    # (7.0 == 7, True == 1), is NOT original-source authentication. Require
+    # complete typed source roots on BOTH independently supplied witnesses
+    # before comparing their values or accepting any native edge geometry.
+    ring_sha = ring.get("original_source_sha256")
+    graph_sha = graph.get("source_sha256")
+    ring_page = ring.get("original_page_1_based")
+    graph_page = graph.get("page_1_based")
+    if (any(type(sha) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+            for sha in (ring_sha, graph_sha))
+            or any(type(page) is not int or not 1 <= page <= 2**53
+                   for page in (ring_page, graph_page))):
+        return False
+    if (ring.get("source_jamb_roles_same_sha_rechecked") is not True
+            or ring.get("source_wall_and_jamb_geometry_independently_recomputed") is not True
+            or graph_sha != ring_sha
+            or graph_page != ring_page):
+        return False
+    ids = ring.get("original_source_perimeter_side_ids")
+    if (type(ids) is not tuple or not 2 <= len(ids) <= 120000
+            or any(type(ident) is not str
+                   or re.fullmatch(r"d(0|[1-9][0-9]*)i(0|[1-9][0-9]*)", ident) is None
+                   for ident in ids)
+            or len(set(ids)) != len(ids)
+            or tuple(sorted(ids)) != graph.get("original_native_edge_ids")):
+        return False
+    components = graph.get("native_components")
+    intersections = graph.get("interior_stroke_intersections_and_overlaps")
+    # The native producer explicitly emits a tuple of every intersecting or
+    # overlapping stroke. Missing/None/False is NOT proof of zero conflicts.
+    # Likewise, the component must explicitly report whether it has a closed
+    # simple ring; an omitted field cannot stand in for an open doorway.
+    if (type(components) not in (tuple, list) or len(components) != 1
+            or type(components[0]) is not dict
+            or "source_simple_ring_candidate" not in components[0]
+            or type(intersections) is not tuple or intersections
+            or components[0]["source_simple_ring_candidate"] is not None):
+        return False
+    edges = graph.get("original_native_edges")
+    if type(edges) not in (tuple, list) or len(edges) != len(ids):
+        return False
+    # The sealed source can expose many native strokes. Tuple membership for
+    # each stroke is quadratic and can stall a source replay on large rooms.
+    # This set changes lookup complexity only; it does not elect any edge.
+    id_set = set(ids)
+    native = {}
+    for row in edges:
+        if type(row) is not dict:
+            return False
+        source_id = row.get("source_id")
+        if type(source_id) is not str or source_id not in id_set:
+            return False
+        ends = row.get("endpoints_pdf_pts")
+        if type(ends) not in (tuple, list) or len(ends) != 2:
+            return False
+        a, b = point(ends[0]), point(ends[1])
+        if a is None or b is None or a == b or row["source_id"] in native:
+            return False
+        native[row["source_id"]] = frozenset((a, b))
+    if len(native) != len(ids):
+        return False
+    vertices = ring.get("source_ink_ring_with_explicit_virtual_door_gap_pdf_pts")
+    if type(vertices) not in (tuple, list) or len(vertices) != len(ids) + 1:
+        return False
+    chain = [point(vertex) for vertex in vertices]
+    if any(vertex is None for vertex in chain) or len(set(chain)) != len(chain):
+        return False
+    actual_edges = [frozenset((a, b)) for a, b in zip(chain, chain[1:])]
+    if any(len(edge) != 2 for edge in actual_edges):
+        return False
+    if sorted(actual_edges, key=lambda x: sorted(x)) != sorted(native.values(), key=lambda x: sorted(x)):
+        return False
+    gap = ring.get("source_virtual_door_connector_pdf_pts")
+    if type(gap) not in (tuple, list) or len(gap) != 2:
+        return False
+    if point(gap[0]) != chain[-1] or point(gap[1]) != chain[0]:
+        return False
+    # The connector is VIRTUAL, so the original native-stroke intersection
+    # census cannot prove that it avoids the other room walls. A crossing,
+    # nonadjacent touch, or overlap would close a self-intersecting room ring.
+    # This is only a veto: an unblocked connector still has no W4, jamb,
+    # physical-room, finish or measurement authority.
+    connector_a, connector_b = chain[-1], chain[0]
+
+    def orient(a, b, c):
+        return ((b[0] - a[0]) * (c[1] - a[1])
+                - (b[1] - a[1]) * (c[0] - a[0]))
+
+    def on_segment(a, b, c):
+        return (min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+                and min(a[1], b[1]) <= c[1] <= max(a[1], b[1]))
+
+    def intersects(a, b, c, d):
+        ab_c, ab_d = orient(a, b, c), orient(a, b, d)
+        cd_a, cd_b = orient(c, d, a), orient(c, d, b)
+        return (ab_c == 0 and on_segment(a, b, c)
+                or ab_d == 0 and on_segment(a, b, d)
+                or cd_a == 0 and on_segment(c, d, a)
+                or cd_b == 0 and on_segment(c, d, b)
+                or ab_c * ab_d < 0 and cd_a * cd_b < 0)
+
+    # Independently veto backtracking between adjacent native strokes.
+    # An empty producer intersection census is not enough: two distinct
+    # collinear edges sharing a vertex can overlap along a nonzero ink span.
+    # A legitimate straight-through split has an opposite-ray direction and
+    # remains valid. This O(N) check is source-only, not W4 wall authority.
+    for i in range(1, len(chain) - 1):
+        shared, previous, following = chain[i], chain[i - 1], chain[i + 1]
+        if orient(shared, previous, following) == 0 and (
+            (previous[0] - shared[0]) * (following[0] - shared[0])
+            + (previous[1] - shared[1]) * (following[1] - shared[1])
+        ) > 0:
+            return False
+
+    for index, (a, b) in enumerate(zip(chain, chain[1:])):
+        if index in (0, len(chain) - 2):
+            # The first and last native strokes are permitted to meet the
+            # virtual connector at their own single doorway endpoint only.
+            # Collinear same-ray segments instead share a nonzero span.
+            shared = connector_b if index == 0 else connector_a
+            other_connector = connector_a if index == 0 else connector_b
+            other_native = b if index == 0 else a
+            if orient(shared, other_connector, other_native) == 0 and (
+                (other_connector[0] - shared[0])
+                * (other_native[0] - shared[0])
+                + (other_connector[1] - shared[1])
+                * (other_native[1] - shared[1])
+            ) > 0:
+                return False
+        elif intersects(connector_a, connector_b, a, b):
+            return False
+    # Reissued endpoint degrees are evidence only when they account for
+    # EVERY native vertex and the exact source IDs incident on that vertex.
+    # Two reported open endpoints alone could hide a missing interior node,
+    # a duplicate degree row, or an unrelated source-edge owner.
+    native_incidence = {}
+    for source_id, endpoints in native.items():
+        for vertex in endpoints:
+            native_incidence.setdefault(vertex, set()).add(source_id)
+    degrees = components[0].get("native_endpoint_degrees")
+    if type(degrees) not in (tuple, list):
+        return False
+    reported_incidence = {}
+    for row in degrees:
+        if type(row) is not dict or type(row.get("degree")) is not int:
+            return False
+        coordinate = point(row.get("point_pdf_pt"))
+        owners = row.get("original_source_edge_ids")
+        if (coordinate is None or coordinate in reported_incidence
+                or row["degree"] not in (1, 2)
+                or type(owners) not in (tuple, list)
+                or len(owners) != row["degree"]
+                or any(type(owner) is not str for owner in owners)
+                or len(set(owners)) != len(owners)):
+            return False
+        reported_incidence[coordinate] = set(owners)
+    if reported_incidence != native_incidence:
+        return False
+    open_ends = {vertex for vertex, owners in reported_incidence.items()
+                 if len(owners) == 1}
+    if len(open_ends) != 2 or open_ends != {chain[0], chain[-1]}:
+        return False
+    area = ring.get("source_only_native_polygon_area_pdf_pt2_not_m2")
+    if type(area) not in (int, float):
+        return False
+    try:
+        expected_area = float(area)
+    except (OverflowError, ValueError):
+        return False
+    shoelace = abs(sum(
+        a[0] * b[1] - b[0] * a[1]
+        for a, b in zip(chain, chain[1:] + chain[:1])
+    )) / 2.0
+    return (math.isfinite(expected_area) and expected_area > 0
+            and math.isfinite(shoelace)
+            and math.isclose(expected_area, shoelace, rel_tol=1e-12, abs_tol=1e-8))
+
+
+
+
 class GPT2OriginalSourceGeometryBridge:
     """Read-only source publisher, bound to an existing visibility producer."""
 
@@ -62,15 +275,58 @@ class GPT2OriginalSourceGeometryBridge:
 
     def _source_revision(self, revision_id: str, *, page_1_based: int):
         if type(revision_id) is not str or not revision_id or (
-            type(page_1_based) is not int or page_1_based<1
+            type(page_1_based) is not int or not 1 <= page_1_based <= 2**53
         ):
             raise ValueError("source_revision_and_page_selector_required")
         published=self._source.published_snapshot_for_revision(revision_id)
         raw=_source_bytes(self._source,revision_id)
         if published is None or raw is None:
             raise ValueError("original_source_revision_sha_or_bytes_unavailable")
-        decoded={int(v) for v in published.coverage.decoded_pages}
-        if page_1_based not in decoded:
+        # Coverage, immutable revision and published snapshot must all belong
+        # to the SAME source root. A copied page-coverage receipt cannot
+        # authorize a foreign source snapshot for later original-page joins.
+        snapshot = getattr(published, "snapshot", None)
+        snapshot_id = getattr(snapshot, "snapshot_id", None)
+        if (
+            published.revision.revision_id != revision_id
+            or type(published.revision.document_id) is not str
+            or not published.revision.document_id
+            or getattr(snapshot, "document_id", None) != published.revision.document_id
+            or getattr(snapshot, "revision_id", None) != revision_id
+            or getattr(snapshot, "source_sha256", None) != published.revision.source_sha256
+            or type(snapshot_id) is not str
+            or not snapshot_id
+            or snapshot_id != snapshot_id.strip()
+        ):
+            raise ValueError("original_source_snapshot_lineage_conflict")
+        # Original-page identity is producer-owned. int(v) silently turns
+        # True, 7.0 and "7" into the same page; malformed values may raise.
+        # A page listed as both decoded and failed is never authenticated.
+        coverage = published.coverage
+        total = coverage.total_pages
+        decoded = coverage.decoded_pages
+        failed = coverage.failed_pages
+        if (
+            type(total) is not int or not 1 <= total <= 2**53
+            or type(decoded) is not tuple or type(failed) is not tuple
+            or any(type(v) is not int or not 1 <= v <= total
+                   for v in (*decoded, *failed))
+            or len(set(decoded)) != len(decoded)
+            or len(set(failed)) != len(failed)
+            or not set(decoded).isdisjoint(failed)
+            or coverage.document_id != published.revision.document_id
+            or coverage.revision_id != revision_id
+            or coverage.state not in ("complete", "partial")
+            # A producer's COMPLETE decode receipt must cover the whole
+            # original PDF. A subset marked complete can falsely certify
+            # source-page universe completeness even if the requested page
+            # itself was decoded. PARTIAL retains its separate valid scope.
+            or (coverage.state == "complete" and (
+                bool(failed) or len(decoded) != total
+                or decoded != tuple(range(1, total + 1))
+            ))
+            or page_1_based > total or page_1_based not in decoded
+        ):
             raise ValueError("original_source_page_outside_producer_coverage")
         return published,raw
 
@@ -369,6 +625,12 @@ class GPT2OriginalSourceGeometryBridge:
         source_occurrence_selector,
         source_finish_code: str,
     ) -> dict:
+        # A cross-sheet floor/finish receipt must actually involve two
+        # distinct original pages. Re-reading one native page twice can
+        # never independently authenticate a physical room correspondence.
+        # Keep this fail-closed check before either source graph is issued.
+        if floor_page_1_based == finish_page_1_based:
+            raise ValueError("original_source_floor_finish_distinct_pages_required")
         floor=self.original_room_ink_graph(
             revision_id=revision_id,page_1_based=floor_page_1_based,
             original_source_edge_ids=source_floor_wall_ids)
@@ -416,11 +678,50 @@ class GPT2OriginalSourceGeometryBridge:
         finish,_=self._source_revision(
             revision_id,page_1_based=finish_page_1_based)
         expected_root=floor.revision.source_sha256
+        if floor_page_1_based==finish_page_1_based:
+            raise ValueError("original_source_doorway_distinct_pages_required")
+        # The original jamb-bound ring producer emits a typed native page.
+        # A matching SHA alone cannot authorize a ring from a DIFFERENT
+        # floor/finish sheet in this sealed source-visibility compilation.
+        if any(
+            type(row) is not dict
+            or row.get("status")!="source_jamb_bound_open_door_perimeter_candidate_only"
+            or type(row.get("original_page_1_based")) is not int
+            or row["original_page_1_based"]!=page
+            for row,page in (
+                (original_floor_doorway_ring,floor_page_1_based),
+                (original_finish_doorway_ring,finish_page_1_based),
+            )
+        ):
+            raise ValueError("original_source_doorway_compiler_page_receipt_conflict")
         if (finish.revision.source_sha256!=expected_root or
                 any(row.get("original_source_sha256")!=expected_root
                     for row in (original_floor_doorway_ring,
                                 original_finish_doorway_ring))):
             raise ValueError("original_source_doorway_handoff_revision_root_conflict")
+        # A page number and SHA copied into a caller dictionary are not
+        # proof that its side IDs and polygon are the original printed ink.
+        # Reissue BOTH open perimeters from the sealed original PDF, then
+        # require exact native side/vertex/gap correspondence before joining.
+        for candidate, page in (
+            (original_floor_doorway_ring, floor_page_1_based),
+            (original_finish_doorway_ring, finish_page_1_based),
+        ):
+            ids = candidate.get("original_source_perimeter_side_ids")
+            if (type(ids) is not tuple or len(ids) < 2
+                    or len(ids) > 120000 or any(type(v) is not str for v in ids)):
+                raise ValueError("original_source_doorway_compiler_native_perimeter_receipt_conflict")
+            try:
+                graph = self.original_room_ink_graph(
+                    revision_id=revision_id, page_1_based=page,
+                    original_source_edge_ids=ids,
+                )
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError):
+                raise ValueError(
+                    "original_source_doorway_compiler_native_perimeter_receipt_conflict"
+                ) from None
+            if not _original_doorway_ring_matches_reissued_native_graph(candidate, graph):
+                raise ValueError("original_source_doorway_compiler_native_perimeter_receipt_conflict")
         joining=audit_gpt2_original_doorway_bound_floor_finish_correspondence(
             original_floor_doorway_ring,original_finish_doorway_ring,
             source_registration=independent_cross_sheet_registration,
