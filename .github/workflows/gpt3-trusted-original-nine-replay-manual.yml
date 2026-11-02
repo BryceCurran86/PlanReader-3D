@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=a8d0fa5ef2dc0db3e1171ab8e8558bf9448f1e94
-          approved_head=296f48e8d89496afd96b4eda5a2e65f18285227b
+          approved_base=cc5f58a7ae95801a45b4d348319fa184f91115cc
+          approved_head=a3afced106dd07e083f24723f33f3eac43e0517b
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -42,17 +42,22 @@ jobs:
           .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
           .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
           docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
+          pb_auto_geometry_v1219.py
           pb_customer_output_verification.py
+          pb_live_floor_finish_area_source_closed_export.py
+          pb_live_floor_finish_customer_projection.py
           pb_live_opening_customer_projection.py
           pb_live_opening_source_closed_export.py
           pb_quantity_takeoff_adapter.py
           pb_source_closed_run_export.py
+          tests/test_gpt1_floor_finish_exact_original_face_seal.py
           tests/test_gpt3_activation_portability_and_duplicate_keys.py
           tests/test_gpt3_append_only_opening_member_overlap.py
           tests/test_gpt3_atomic_pending_activation_pair.py
           tests/test_gpt3_cross_semantic_physical_claims_shadow.py
           tests/test_gpt3_customer_original_floor_finish_material_parity.py
           tests/test_gpt3_floor_area_physical_double_issue_veto.py
+          tests/test_gpt3_floor_finish_family_handoff.py
           tests/test_gpt3_floor_surface_activation_signed_material_trade.py
           tests/test_gpt3_four_project_evidence.py
           tests/test_gpt3_guarded_activation_signed_trade_veto.py
@@ -75,6 +80,8 @@ jobs:
           tests/test_gpt3_v2_opening_physical_kind_consistency.py
           tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py
           tests/test_live_append_only_opening_area_composition.py
+          tests/test_live_canonical_family_coverage.py
+          tests/test_live_floor_finish_area_source_closed_export.py
           tools/diag_lot16_room_face_scope.py
           tools/gpt3_atomic_pending_activation_pair.py
           tools/gpt3_signed_v2_family_trade_integrity.py
