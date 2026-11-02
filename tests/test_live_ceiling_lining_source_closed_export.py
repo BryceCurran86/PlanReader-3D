@@ -913,3 +913,62 @@ def test_consistently_forged_second_ceiling_source_root_still_fails_closed(bad_r
             claim, workspace_id=1, project_id="project-1"
         )
 
+
+
+@pytest.mark.parametrize("not_permitted", (
+    False, 0, 1, "true", "False", "", None,
+))
+@pytest.mark.parametrize("handoff_only", (False, True))
+def test_original_rcp_material_only_receipt_cannot_create_firm_ceiling_customer_area(
+    not_permitted, handoff_only,
+):
+    """A source-owned GRID material witness is not a ceiling m² measurement.
+
+    Synthetic 9.05352 m² remains a test fixture; real OFFICE p9 RCP material
+    alone does NOT authenticate or issue an independent ceiling quantity.
+    """
+    original = _quantity()
+    not_area = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": not_permitted,
+            "quantity_handoff_only": handoff_only,
+        },
+    )
+    claim = _claim(not_area)
+    for adapter in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="material-only receipt forbids",
+        ):
+            adapter(claim, workspace_id=1, project_id="project-1")
+    assert claim.ceiling_lining_quantity_evidence[0].value == 9.05352
+
+
+def test_explicit_source_owned_ceiling_customer_permission_preserves_signed_quantity():
+    """Explicit original source-positive permission is not an added gate."""
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": True,
+        },
+    )
+    claim = _claim(permitted)
+    seal = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(seal.quantities) == len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        seal, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
