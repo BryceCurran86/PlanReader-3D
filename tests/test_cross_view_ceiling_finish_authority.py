@@ -866,6 +866,7 @@ def test_source_reissued_cross_native_block_rcp_finish_is_candidate_not_quantity
     assert record.finish_code == "GRID"
     assert record.occurrence_record_id == "occ-grid"
     assert record.support_snapshot_id
+    assert record.commercial_projection_allowed is False
     assert result.unresolved_physical_room_ids == ()
     assert not hasattr(record, "area_m2")
 
