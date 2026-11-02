@@ -41,7 +41,6 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateRecord,
     PhysicalWallCandidateSelector,
-    repeated_raster_drafting_motif_wall_ids,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
@@ -1225,10 +1224,6 @@ class OpeningHostFrameProducer:
 
         pair_lookup = _pair_lookup(wall_scope.equivalence)
         component_set = set(component_ids)
-        motif_ids = frozenset()
-        if self._raster_split_frame_shadow and raster_component:
-            motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
-        skipped_motif_wall_ids: list[str] = []
         unproven_pairs: set[tuple[str, str]] = set()
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
@@ -1263,19 +1258,10 @@ class OpeningHostFrameProducer:
                 classification = pair_lookup.get(tuple(sorted((wall_id, member_id))))
                 if classification is PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
                     continue
-                # Opt-in shadow only. Raster-visible dimension ticks share no
-                # path_index, so they survive W2 as W4 walls. The existing
-                # drafting-motif census positively identifies a repeated
-                # orthogonal family; identity has already refused SAME-wall
-                # candidacy (no stored relation). A unique aligned fragment
-                # still fails closed.
-                if (
-                    wall_id in motif_ids
-                    and member_id not in motif_ids
-                    and classification is None
-                ):
-                    skipped_motif_wall_ids.append(wall_id)
-                    continue
+                # A repeated drafting motif is not a source-owned physical
+                # DISTINCT relation. Preserve every unproved aligned rival,
+                # including ticks and solid piers, until the source wall
+                # equivalence authority explicitly partitions it.
                 if self._source_fragment_roles_shadow:
                     # Keep all unresolved source competitors reviewable. This
                     # is diagnostic addressing, never DISTINCT or exclusion.
@@ -1365,7 +1351,7 @@ class OpeningHostFrameProducer:
             frame_id=frame_id,
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
-            skipped_motif_wall_ids=tuple(sorted(dict.fromkeys(skipped_motif_wall_ids))),
+            skipped_motif_wall_ids=(),
         )
 
     def publish(
