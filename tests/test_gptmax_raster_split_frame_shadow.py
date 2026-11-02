@@ -155,7 +155,7 @@ def test_seven_aligned_raster_ticks_remain_unproven_in_shadow(monkeypatch):
         for r in results)
 
 
-def test_repeated_raster_dimension_ticks_do_not_block_opt_in_shadow_frame(monkeypatch):
+def test_repeated_raster_dimension_ticks_without_distinct_block_opt_in_shadow_frame(monkeypatch):
     source,composition,producer,bound=_fixture()
     expected=_publish(producer,bound)
     assert all(r.status is Status.CORROBORATED for r in expected)
@@ -165,24 +165,20 @@ def test_repeated_raster_dimension_ticks_do_not_block_opt_in_shadow_frame(monkey
     monkeypatch.setattr(producer._walls,"resolve_scope",
         lambda _s: replace(scope,records=(*scope.records, *extra)))
     default_results=_publish(producer,bound)
-    assert all(r.status is Status.ABSTAINED and
+    assert all(r.status is Status.ABSTAINED and r.evidence is None and
         "opening_host_frame_aligned_fragment_distinctness_unproven" in r.reason_codes
         for r in default_results)
     shadow=_shadow(composition)
     monkeypatch.setattr(shadow._walls,"resolve_scope",
         lambda _s: replace(scope,records=(*scope.records, *extra)))
     results=_publish(shadow,bound)
-    assert all(r.status is Status.CORROBORATED for r in results)
-    skipped={f"tick-{index}" for index in range(8)}
-    for result in results:
-        assert "opening_host_frame_aligned_motif_fragments_skipped" in result.reason_codes
-        assert skipped <= {
-            code.split(":", 1)[1]
-            for code in result.reason_codes
-            if code.startswith("opening_host_frame_aligned_motif_fragments_skipped:")
-        }
-    assert {r.evidence.whole_wall_frame_id for r in results}=={
-        r.evidence.whole_wall_frame_id for r in expected}
+    # Repetition/shape is not a producer-owned DISTINCT physical-wall decision.
+    # Shadow must retain each rival instead of silently treating it as drafting ink.
+    assert all(r.status is Status.ABSTAINED and r.evidence is None and
+        "opening_host_frame_aligned_fragment_distinctness_unproven" in r.reason_codes
+        for r in results)
+    assert all("opening_host_frame_aligned_motif_fragments_skipped" not in r.reason_codes
+        for r in results)
     assert _publish(shadow,tuple(reversed(bound)))==tuple(reversed(results))
     from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
     from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
@@ -220,41 +216,31 @@ def test_eight_aligned_wall_fragments_remain_unproven_in_shadow(monkeypatch):
         for r in results)
 
 
-def test_sparse_28pt_pitch130_cannot_grant_production_distinct(monkeypatch):
-    # Occupancy 938 * 0.03 = 28.14 keeps 28 pt pieces as a motif census.
-    # That is a typed unsigned residual. Default production must still
-    # fail closed: repetition plus a missing identity relation is not
-    # PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.
+def test_sparse_28pt_pitch130_without_distinct_blocks_shadow_too(monkeypatch):
+    # Repeated sparse pieces remain physically unpartitioned even if a drafting
+    # motif census labels them; that label is not source-owned DISTINCT proof.
     source,composition,producer,bound=_fixture()
     expected=_publish(producer,bound)
+    assert all(r.status is Status.CORROBORATED for r in expected)
     scope=_scope(producer,bound)
     center=expected[0].evidence.origin_pt[1]
     extra=_aligned_wall_piece_records(scope.records[0], center, 8, 130.0)
     monkeypatch.setattr(producer._walls,"resolve_scope",
         lambda _s: replace(scope,records=(*scope.records, *extra)))
     default_results=_publish(producer,bound)
-    assert all(r.status is Status.ABSTAINED and
+    assert all(r.status is Status.ABSTAINED and r.evidence is None and
         "opening_host_frame_aligned_fragment_distinctness_unproven" in r.reason_codes
-        for r in default_results)
-    assert all("opening_host_frame_aligned_motif_fragments_skipped" not in r.reason_codes
         for r in default_results)
     shadow=_shadow(composition)
     monkeypatch.setattr(shadow._walls,"resolve_scope",
         lambda _s: replace(scope,records=(*scope.records, *extra)))
     results=_publish(shadow,bound)
-    assert all(r.status is Status.CORROBORATED for r in results)
-    skipped={f"piece-{index}" for index in range(8)}
-    for result in results:
-        assert "opening_host_frame_aligned_motif_fragments_skipped" in result.reason_codes
-        assert skipped <= {
-            code.split(":", 1)[1]
-            for code in result.reason_codes
-            if code.startswith("opening_host_frame_aligned_motif_fragments_skipped:")
-        }
-        assert result.evidence.record_id in {row.evidence.record_id for row in expected}
-        assert result.evidence.whole_wall_frame_id in {
-            row.evidence.whole_wall_frame_id for row in expected
-        }
+    assert all(r.status is Status.ABSTAINED and r.evidence is None and
+        "opening_host_frame_aligned_fragment_distinctness_unproven" in r.reason_codes
+        for r in results)
+    assert all("opening_host_frame_aligned_motif_fragments_skipped" not in r.reason_codes
+        for r in results)
+    assert _publish(shadow,tuple(reversed(bound)))==tuple(reversed(results))
     from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
     from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
     voids=compose_live_physical_opening_voids(source_visibility_producer=source,
