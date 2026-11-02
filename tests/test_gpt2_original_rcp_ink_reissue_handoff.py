@@ -445,8 +445,8 @@ def test_source_closed_cross_block_office_label_is_candidate_only(monkeypatch):
     assert result["original_rcp_room_label_native_block_no"] == 9
     assert result["original_rcp_room_label_observation_ids"] == ("office-obs",)
     assert result["original_rcp_room_label_receipt_ids"] == ("office-receipt",)
-    assert result["original_rcp_label_and_material_native_block_join"] == (
-        "source_closed_zone_not_same_block"
+    assert result["original_rcp_label_material_join_authority"] == (
+        "source_closed_zone_independent_text"
     )
     assert result["new_firm_quantities"] == 0
     assert result["source_ceiling_area_m2"] is None
