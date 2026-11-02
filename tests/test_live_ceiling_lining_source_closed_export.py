@@ -239,7 +239,7 @@ def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
             **dict(base.metadata),
             "commercial_projection_allowed": True,
             "section": "Internal",
-            "element": "Ceiling lining area",
+            "element": "Ceiling lining area (GRID)",
             "location": "OFFICE",
             "substrate": "Other",
             "finish_system": "ceiling_grid",
@@ -271,6 +271,7 @@ def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
     assert row is not None
     assert row["quantity_id"] == quantity.quantity_id
     assert row["quantity"] == 9.05352
+    assert row["element"] == "Ceiling lining area (GRID)"
     assert row["source_sha256"] == SOURCE_SHA
     assert row["revision_id"] == "rev-1"
     assert row["canonical_entity_ids"] == list(trace.canonical_entity_ids)
