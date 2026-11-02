@@ -2,6 +2,7 @@
 
 No benchmark, original PDF, secrets or producer authority is used by this test.
 """
+import ast
 from pathlib import Path
 import os
 import re
@@ -364,6 +365,25 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert "python -c 'import hashlib,json,fitz;" not in execute
         assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
         assert "python -c '" in execute and "status = pytest.main([" in execute
+        # The private source mount must execute precisely the approved test.
+        # A textual prefix check also matches pytest.main([]), which would
+        # discover and run unintended tests with the protected PDF mounted.
+        inline = _trusted_phase_probe_code(raw)
+        pytest_calls = [
+            node for node in ast.walk(ast.parse(inline))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "pytest"
+            and node.func.attr == "main"
+        ]
+        assert len(pytest_calls) == 1
+        assert len(pytest_calls[0].args) == 1 and not pytest_calls[0].keywords
+        assert ast.literal_eval(pytest_calls[0].args[0]) == [
+            "-q", "-p", "no:cacheprovider", "--tb=short",
+            "--disable-warnings",
+            "tests/test_gpt3_lot16_original_nine_whole_retention.py",
+        ]
         assert '"--tb=short"' in execute
         assert '"-p", "no:cacheprovider"' in execute
         assert "sys.settrace(trace_call)" in execute
@@ -409,6 +429,10 @@ def test_original_private_first_failure_classifier_is_source_safe():
     ("--tb=short", "--tb=no"),
     ("--network none", "--network host"),
     ("status = pytest.main([", "status = pytest.NOTmain(["),
+    # Real unsafe empty selection is valid Python and used to evade the old
+    # prefix-only check. No other original source/secret access is tested.
+    ('status = pytest.main(["-q", "-p", "no:cacheprovider", "--tb=short",',
+     'status = pytest.main([]) # removed pinned selection '),
     ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
     (' > "$output" 2>&1; then', " 2>&1; then"),
     ('grep -Fxq', 'cat "$output"; grep -Fxq'),
