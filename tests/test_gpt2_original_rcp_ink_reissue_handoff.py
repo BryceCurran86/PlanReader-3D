@@ -441,5 +441,12 @@ def test_source_closed_cross_block_office_label_is_candidate_only(monkeypatch):
     result, events = _call(monkeypatch)
     assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
     assert "trusted_room_labels" in [v[0] for v in events]
+    assert result["original_rcp_room_label_text"] == "OFFICE"
+    assert result["original_rcp_room_label_native_block_no"] == 9
+    assert result["original_rcp_room_label_observation_ids"] == ("office-obs",)
+    assert result["original_rcp_room_label_receipt_ids"] == ("office-receipt",)
+    assert result["original_rcp_label_and_material_native_block_join"] == (
+        "source_closed_zone_not_same_block"
+    )
     assert result["new_firm_quantities"] == 0
     assert result["source_ceiling_area_m2"] is None
