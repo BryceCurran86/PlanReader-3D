@@ -479,6 +479,7 @@ def _generate_project_handoff_locked(
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
             pages=claim_execution_pages,
+            recover_supported_opening_areas=True,
             topology_pages=(topology_pages if topology_restricted else None),
             # Core-family execution never activates cross-view room-area
             # measurement. Surface/all execution retains the source-classified

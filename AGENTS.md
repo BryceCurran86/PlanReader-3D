@@ -2,6 +2,30 @@
 
 This file records the default engineering contract. Explicit current owner instructions supersede conflicting repository workflow instructions.
 
+## Owner focused integration sprint — 2026-10-31
+
+This sprint supersedes all earlier numerical PR/merge quotas and independent implementation queues. Existing work and history are retained; the progress measure is reusable production capability, removed first failing production blockers, verified customer quantities and honestly reconciled evaluator results.
+
+**Shared delivery:** complete one floor-finish case and one installed-opening case through original PDF -> authenticated physical/semantic/metric evidence -> existing real quantity issuer -> sealed/customer output -> unchanged evaluator. Establish a reproducible four-project baseline in parallel, transfer reusable fixes across all four projects, then test unfamiliar plans. A diagnostic candidate alone does not complete a production handoff.
+
+| Owner | Primary task and exit condition |
+|---|---|
+| GPT1, #2017 | Consume authenticated room/finish/ceiling/opening evidence through existing quantity issuers and customer output. Start with measured rooms where finish ownership is actually proven. Measure finishes to internal wall face; never tile under walls. |
+| GPT2, #2843 | Supply the source evidence for GPT1's selected bounded floor-finish case: internal finished faces, FT2/FT3 definitions and occurrences, exact cross-sheet/doorway ownership where needed, then ceiling zones. Finish when the actual issuer consumes the handoff. |
+| GPT3, #2004/#2297 | Own one pinned private execution environment, the first real source-to-seal/runtime failure, all four original projects, signed/customer retention, independent source identity maps and unchanged frozen120 baseline/results. Do not build another scoring framework. |
+| GPT MAX, #2396 | Complete the next recoverable Lot16 opening's physical host/frame/type/axis/instance evidence; address 1215 SGW, 2127 stacker and G17/W2-W4 continuity where they actually block it. Preserve solid piers and old quantities; own shared integration and timely technical review. |
+| Claude | Repair actual glazing/support lineage in both fill-coverage checks of #4140, retain real masking negatives and valid glazing positives, then deliver aperture evidence consumed by MAX/GPT1 through existing contracts. |
+
+Operating rules:
+- One primary task per agent. Claim exact files/functions and record the first failing function, missing evidence, owner and verifiable exit condition. Read live heads/claims; do not overwrite another agent's branch or unexplained changes.
+- Use historical hub #3462 and current coordination issue #4135 (the former reached GitHub's comment limit). Record substantive JOIN/CLAIM/RESULT/BLOCKED/HANDOFF on #4135 and the lane tracker. A comment does not awaken another session.
+- Reuse existing modules, contracts, diagnostics and runners. Add a standalone diagnostic only after establishing that existing diagnostics cannot answer the current production failure. While CI waits, advance necessary dependencies of these same production cases instead of opening an unrelated implementation queue.
+- Original PDFs for Lot16, Maryborough, 3Laurel and Q5446 are available. Resolve the approved private source location and verify each actual run's required immutable SHA; avoid repeated presence-only audits. An offline owner PC or a public checkout excluding private PDFs does not establish that originals are missing.
+- Run focused tests and private source validation before batching a final push. Keep the final head fixed during full CI. Required automated checks, original-source authority, immutable signed/customer retention, frozen separation and existing geometry limits remain mandatory.
+- Report supporting security/integrity work separately from new quantities and accuracy. No score/FIRM/customer claim from candidates, synthetic success, CI or PR counts. A global four-project score requires actual 4/4 execution.
+- Preserve active branches and useful regression coverage. Retire superseded alternatives only after dependency checks; defer bulk cleanup/rewrite until the production paths work. This sprint assigns GPT1, GPT2, GPT3, GPT MAX and Claude; no new Cursor tasks.
+- The source/privacy/measurement/ABSTAIN rules below remain unchanged. Independent reviewer/account/formal APPROVED remains optional under owner policy; actual source-backed authority promotion is still required.
+
 ## Owner policy update — 2026-10-24
 
 The owner has removed mandatory independent-review restrictions. An independent person, a separate GitHub account, a formal `APPROVED` review, cross-agent sign-off, and a pause awaiting architecture review are not prerequisites to implementation or merge. Additional human or AI reviews are optional. This policy supersedes older reviewer requirements in repository documents, PR descriptions, and coordination comments.

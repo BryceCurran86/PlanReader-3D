@@ -3785,6 +3785,7 @@ class GenericPlanReaderExtractor:
             elif physical_net_pages:
                 physical_claim_kwargs: dict[str, object] = {
                     "pages": physical_claim_pages,
+                    "recover_supported_opening_areas": True,
                     # Decode the caller's existing extraction universe for
                     # cross-view room-area evidence, but do not add these pages
                     # to wall topology or opening evidence authority.

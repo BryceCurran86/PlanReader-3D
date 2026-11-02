@@ -30,7 +30,7 @@ def _imports(path: Path):
             yield node.module
 
 
-def test_nothing_in_production_imports_the_assessment():
+def test_only_the_diagnostic_cli_imports_the_assessment():
     importers = []
     for root in ("", "tools", "scripts"):
         for path in sorted((REPO / root).glob("*.py")):
@@ -38,7 +38,23 @@ def test_nothing_in_production_imports_the_assessment():
                 continue
             if re.search(rf"^\s*(?:from|import)\s+{MODULE}\b", path.read_text(encoding="utf-8", errors="replace"), re.M):
                 importers.append(path.relative_to(REPO).as_posix())
-    assert importers == []
+    assert importers == ["tools/diag_plan_callout_strip_census.py"]
+    # The exception is exactly this diagnostic function, never a live issuer.
+    diagnostic = ast.parse((REPO / importers[0]).read_text(encoding="utf-8"))
+    for top in diagnostic.body:
+        assert not (isinstance(top, ast.ImportFrom) and top.module == MODULE)
+        assert not (isinstance(top, ast.Import) and any(a.name == MODULE for a in top.names))
+    functions = [node.name for node in ast.walk(diagnostic) if isinstance(node, ast.FunctionDef)
+                 and MODULE in set(_imports_from_tree(node))]
+    assert functions == ["census"]
+
+
+def _imports_from_tree(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            yield node.module
 
 
 def test_the_assessment_imports_no_issuer_binder_count_host_or_wall_module():
