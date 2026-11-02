@@ -195,6 +195,10 @@ class CrossViewCeilingFinishRecord:
     # the topology snapshot that minted the canonical room. It is admissible
     # only when both snapshots belong to the exact same immutable revision.
     support_snapshot_id: str = ""
+    # Legacy same-block source material retains its existing policy. A new
+    # source-closed cross-native-block region is MATERIAL-ONLY until GPT1
+    # independently authenticates actual RCP metric ceiling geometry.
+    commercial_projection_allowed: bool = True
     schema_version: str = CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION
     _seal: object = None
 
@@ -1139,6 +1143,7 @@ class CrossViewCeilingFinishProducer:
             occurrence_receipt_ids=line.receipt_ids,
             occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
             support_snapshot_id=room.snapshot_id,
+            commercial_projection_allowed=False,
             _seal=_RECORD_SEAL,
         )
         remaining = tuple(sorted(r.physical_room_id for r in rooms
