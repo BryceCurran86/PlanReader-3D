@@ -362,6 +362,21 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert "python -c 'import hashlib,json,fitz;" not in execute
         assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
         assert "python -c '" in execute and "status = pytest.main([" in execute
+        assert '"--tb=short"' in execute
+        assert '"-p", "no:cacheprovider"' in execute
+        assert "sys.settrace(trace_call)" in execute
+        assert "sys.settrace(None)" in execute
+        assert 'print("GPT3_TRUSTED_PHASE=" + phase[0], flush=True)' in execute
+        for phase_label in (
+            "INSTRUMENTATION_ERROR", "COLLECTION_OR_SETUP",
+            "SOURCE_AUTH", "DEFAULT_EIGHT", "EXPLICIT_NINE",
+            "VERIFY_DEFAULT_CUSTOMER", "VERIFY_EXPLICIT_CUSTOMER",
+            "ARCHIVED_EIGHT_RETENTION", "PHYSICAL_UNIQUENESS",
+            "SNAPSHOT_IDENTITY",
+        ):
+            assert "GPT3_TRUSTED_PHASE=" + phase_label in execute or (
+                phase_label in execute and "stages[hits[0]] = safe_label" in execute
+            )
         assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
         assert execute.count(' > "$output" 2>&1; then') == 1
         assert "Original default-eight producer/seal/customer FAILED" in execute
@@ -391,7 +406,7 @@ def test_original_private_first_failure_classifier_is_source_safe():
     ("status = pytest.main([", "status = pytest.main([]"),
     ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
     (' > "$output" 2>&1; then', " 2>&1; then"),
-    ('grep -Fq', 'cat "$output"; grep -Fq'),
+    ('grep -Fxq', 'cat "$output"; grep -Fxq'),
     ('echo "::error::Original default-eight producer/seal/customer FAILED',
      'echo "$(<$output)"; echo "::error::Original default-eight producer/seal/customer FAILED'),
     ('rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"',
@@ -419,3 +434,75 @@ def test_offline_original_replay_runs_immutable_approved_test_not_main_checkout(
     assert "python -c '" in execute and "status = pytest.main([" in execute
     assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in execute
     assert _isolated_private_source_contract(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _trusted_phase_probe_code(raw: str) -> str:
+    """Parse the static trusted source-neutral Python phase tracer."""
+    execute = _parse(raw)["jobs"]["original"]["steps"][4]["run"]
+    prefix = "python -c '\n"
+    suffix = "' > \"$output\" 2>&1; then"
+    assert execute.count(prefix) == 1
+    assert execute.count(suffix) == 1
+    probe = execute.split(prefix, 1)[1].split(suffix, 1)[0].strip("\n")
+    assert "sys.settrace(trace_call)" in probe
+    assert "sys.settrace(None)" in probe
+    assert "status = pytest.main([" in probe
+    assert 'print("GPT3_TRUSTED_PHASE=" + phase[0], flush=True)' in probe
+    compile(probe, "<trusted source-neutral phase probe>", "exec")
+    return probe
+
+
+@pytest.mark.parametrize(("failure_point", "expected"), [
+    ("collection", "COLLECTION_OR_SETUP"),
+    ("source", "SOURCE_AUTH"),
+    ("default", "DEFAULT_EIGHT"),
+])
+def test_trusted_phase_tracer_classifies_synthetic_first_failure(
+    tmp_path, failure_point, expected,
+):
+    """Exercise the actual trusted inline tracer without any private original."""
+    probe = _trusted_phase_probe_code(WORKFLOW.read_text(encoding="utf-8"))
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    auth = (
+        'raise ValueError("synthetic authentication failure")'
+        if failure_point == "source" else 'return "SYNTHETIC"'
+    )
+    synthetic = f'''
+SOURCE = object()
+MANIFEST = object()
+old_dir = object()
+new_dir = object()
+def _verify_original_source(source, manifest):
+    {auth}
+def run_original_lot16_sealed_handoff(source, directory):
+    raise RuntimeError("synthetic default-eight issuer failure")
+def _verified_production(directory, sha):
+    return ({{}}, {{}})
+def test_owner_original_lot16_nine_seals_and_preserves_eight_whole_customer_bodies():
+    original_sha = _verify_original_source(SOURCE, MANIFEST)
+    old_receipt = run_original_lot16_sealed_handoff(SOURCE, old_dir)
+    new_receipt = run_original_lot16_sealed_handoff(
+        SOURCE, new_dir, recover_additional_opening_areas=True,
+    )
+    old_signed, old_customer = _verified_production(old_dir, original_sha)
+    new_signed, new_customer = _verified_production(new_dir, original_sha)
+    digest_lines = (ARCHIVE.parent / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+    additional_ids = set(new_signed) - set(baseline_signed)
+    physical_sources = _object(new_dir / "source_production_openings.json")
+'''
+    if failure_point == "collection":
+        synthetic = 'raise RuntimeError("synthetic collection failure")\n' + synthetic
+    (tests / "test_gpt3_lot16_original_nine_whole_retention.py").write_text(
+        synthetic, encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTHONDONTWRITEBYTECODE="1")
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=30, check=False,
+    )
+    assert result.returncode != 0
+    assert f"GPT3_TRUSTED_PHASE={expected}" in result.stdout
+    assert result.stdout.count("GPT3_TRUSTED_PHASE=") == 1
