@@ -1163,7 +1163,7 @@ class GPT2OriginalSourceGeometryBridge:
             "original_rcp_room_label_native_line_no":inside[0].line_no,
             "original_rcp_room_label_observation_ids":inside[0].observation_ids,
             "original_rcp_room_label_receipt_ids":inside[0].receipt_ids,
-            "original_rcp_label_and_material_native_block_join":"source_closed_zone_not_same_block",
+            "original_rcp_label_material_join_authority":"source_closed_zone_independent_text",
             "source_w4_room_face_claim":w4,
             "source_original_rcp_ceiling_input_for_gpt1":result,
             "source_original_document_id":published.revision.document_id,
