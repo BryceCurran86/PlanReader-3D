@@ -124,6 +124,249 @@ def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
 
+@pytest.fixture(scope="module", params=(False, True))
+def shared_wall_partition_claim(tmp_path_factory, request):
+    """Real source/host/figured issuers, with shared faces between two gaps."""
+    from hashlib import sha256
+
+    from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+    from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    measured_peer = request.param
+    path = tmp_path_factory.mktemp("partition-append") / "shared-wall.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=760, height=650)
+        for a, b in (
+            ((20, 100), (100, 100)), ((140, 100), (200, 100)), ((240, 100), (320, 100)),
+            ((20, 110), (100, 110)), ((140, 110), (200, 110)), ((240, 110), (320, 110)),
+            ((100, 100), (100, 110)), ((140, 100), (140, 110)),
+            ((200, 100), (200, 110)), ((240, 100), (240, 110)),
+        ):
+            page.draw_line(fitz.Point(*a), fitz.Point(*b), width=1)
+        if measured_peer:
+            page.insert_text((102, 108), "1521 SGW", fontsize=6)
+        page.insert_text((202, 108), "0915 SGW", fontsize=6)
+        payload = doc.tobytes(garbage=4, deflate=True)
+    path.write_bytes(payload)
+    full = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(full.canonical_openings) == 2
+    assert len(full.opening_quantity_evidence) == 1 + measured_peer
+    source = SourceVisibilityProducer(
+        producer_method="live-physical-net-wall",
+        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id=f"live-source:{sha256(payload).hexdigest()[:32]}",
+        source_bytes=payload, source_locator="memory://live-physical-net-wall-source.pdf",
+        page_ids=(1,),
+    )
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source, revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    authority = composition.physical_opening_authority
+    new_q = full.opening_quantity_evidence[-1]
+    new = next(o for o in full.canonical_openings if o.canonical_opening_id == new_q.input_entity_ids[0])
+    peer = next(o for o in full.canonical_openings if o is not new)
+    assert len(set(new.source_observation_ids) & set(peer.source_observation_ids)) == 2
+    baseline = replace(
+        full, canonical_openings=(peer,),
+        opening_quantity_evidence=tuple(q for q in full.opening_quantity_evidence if q is not new_q),
+    )
+    return baseline, full, authority, new, peer
+
+
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+def test_verified_shared_wall_partition_reaches_existing_sealer_and_customer(
+    shared_wall_partition_claim, reverse_inventory, monkeypatch,
+):
+    baseline, full, authority, new, peer = shared_wall_partition_claim
+    verified = []
+    verify = authority.verify_partition_receipt
+
+    def reprove(receipt, left, right):
+        verified.append(receipt)
+        return verify(receipt, left, right)
+
+    monkeypatch.setattr(authority, "verify_partition_receipt", reprove)
+    roster = tuple(reversed(full.canonical_openings)) if reverse_inventory else full.canonical_openings
+    quantities = tuple(reversed(full.opening_quantity_evidence)) if reverse_inventory else full.opening_quantity_evidence
+    result = _append_reproved_areas(
+        baseline, roster, quantities, physical_opening_authority=authority,
+    )
+    assert verified and all(r.partition == "partitioned" for r in verified)
+    assert result.canonical_openings[0] is peer
+    assert result.opening_quantity_evidence[:len(baseline.opening_quantity_evidence)] == baseline.opening_quantity_evidence
+    assert new in result.canonical_openings
+    sealed = seal_live_opening_area_claim_run(result, workspace_id=1, project_id="partition-source")
+    rows = project_live_opening_customer_rows(result, workspace_id=1, project_id="partition-source")
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == len(quantities)
+
+
+def test_shared_wall_partition_is_not_an_implicit_caller_allowlist(shared_wall_partition_claim):
+    baseline, full, _authority, _new, _peer = shared_wall_partition_claim
+    with pytest.raises(SourceClosedRunConflictError):
+        _append_reproved_areas(baseline, full.canonical_openings, full.opening_quantity_evidence)
+
+
+@pytest.mark.parametrize("damage", (
+    "source_geometries", "representative_observation_id", "source_observation_ids",
+    "source_lineage_root_ids", "snapshot_id", "physical_opening_id", "viewport_id",
+))
+def test_partition_reproof_binds_exact_canonical_source(shared_wall_partition_claim, damage):
+    from pb_live_append_only_opening_area_composition import _source_partition_proves_distinct
+
+    _baseline, _full, authority, new, peer = shared_wall_partition_claim
+    changes = {
+        "source_geometries": ((10., 10., 15., 10.),),
+        "representative_observation_id": "unowned-observation",
+        "source_observation_ids": new.source_observation_ids + ("unowned-observation",),
+        "source_lineage_root_ids": ("unowned-root",),
+        "snapshot_id": "stale-source-snapshot", "physical_opening_id": "another-opening",
+        "viewport_id": "another-viewport",
+    }
+    assert not _source_partition_proves_distinct(authority, replace(new, **{damage: changes[damage]}), peer)
+
+
+@pytest.mark.parametrize("damage", ("record", "members", "scope", "untyped", "verification"))
+def test_wrong_or_unverified_partition_receipt_never_releases_source_veto(
+    shared_wall_partition_claim, damage, monkeypatch,
+):
+    from types import SimpleNamespace
+    from pb_source_observation_authority import ObservationSelector
+
+    baseline, full, authority, new, peer = shared_wall_partition_claim
+    selectors = [ObservationSelector(
+        o.document_id, o.revision_id, o.source_sha256, o.snapshot_id, o.representative_observation_id,
+    ) for o in (new, peer)]
+    receipt = authority.partition_receipt(*selectors)
+    assert receipt.is_physically_distinct
+    if damage == "verification":
+        monkeypatch.setattr(authority, "verify_partition_receipt", lambda *_: False)
+    else:
+        invalid = {
+            "record": lambda: replace(receipt, left_record_id="foreign-record"),
+            "members": lambda: replace(receipt, left_source_observation_ids=("foreign-ink",)),
+            "scope": lambda: replace(receipt, snapshot_id="foreign-snapshot"),
+            "untyped": lambda: SimpleNamespace(is_physically_distinct=True),
+        }[damage]()
+        monkeypatch.setattr(authority, "partition_receipt", lambda *_: invalid)
+    with pytest.raises(SourceClosedRunConflictError, match="partition"):
+        _append_reproved_areas(
+            baseline, full.canonical_openings, full.opening_quantity_evidence,
+            physical_opening_authority=authority,
+        )
+
+
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+def test_partition_consumer_checks_fresh_only_unsupported_rival(
+    shared_wall_partition_claim, reverse_inventory,
+):
+    baseline, full, authority, new, _peer = shared_wall_partition_claim
+    unproven = replace(
+        new, canonical_opening_id="fresh-unsupported-unproven", physical_opening_id="fresh-unsupported-unproven",
+        representative_observation_id="fresh-unproven-ink", source_observation_ids=("fresh-unproven-ink",),
+        source_lineage_root_ids=("fresh-unproven-lineage",), source_geometries=((600., 600., 630., 600.),),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+        geometry_complete=False, wall_local_frame_id=None,
+    )
+    roster = full.canonical_openings + (unproven,)
+    if reverse_inventory:
+        roster = tuple(reversed(roster))
+    with pytest.raises(SourceClosedRunConflictError, match="partition"):
+        _append_reproved_areas(
+            baseline, roster, full.opening_quantity_evidence, physical_opening_authority=authority,
+        )
+
+
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+def test_source_reproved_unmeasured_representative_reissue_preserves_historical_object(
+    shared_wall_partition_claim, reverse_inventory,
+):
+    from pb_source_observation_authority import ObservationSelector
+
+    baseline, full, authority, new, peer = shared_wall_partition_claim
+    if baseline.opening_quantity_evidence:
+        # A measured peer's complete signed representation must not change.
+        pytest.skip("representative reissue is only allowed for unmeasured history")
+    alternatives = []
+    for member in peer.source_observation_ids:
+        if member == peer.representative_observation_id:
+            continue
+        proof = authority.prove_existence(ObservationSelector(
+            peer.document_id, peer.revision_id, peer.source_sha256, peer.snapshot_id, member,
+        ))
+        if proof.existence_record is not None and proof.existence_record.record_id == peer.physical_opening_id:
+            alternatives.append((member, proof.source_observation.observation.geometry))
+    assert alternatives
+    member, geometry = alternatives[0]
+    reissued = replace(peer, representative_observation_id=member, source_geometries=(tuple(geometry),))
+    roster = (new, reissued) if reverse_inventory else (reissued, new)
+    result = _append_reproved_areas(
+        baseline, roster, full.opening_quantity_evidence, physical_opening_authority=authority,
+    )
+    assert result.canonical_openings[0] is peer
+    assert reissued in result.opening_area_replay_source_inventory
+    assert peer.source_geometries != reissued.source_geometries
+    sealed = seal_live_opening_area_claim_run(result, workspace_id=1, project_id="partition-reissue")
+    rows = project_live_opening_customer_rows(result, workspace_id=1, project_id="partition-reissue")
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 1
+
+
+@pytest.mark.parametrize("damage", ("unowned_old_ink", "old_geometry", "old_members", "old_lineage"))
+def test_representative_reissue_cannot_authenticate_fabricated_history(shared_wall_partition_claim, damage):
+    baseline, full, authority, new, peer = shared_wall_partition_claim
+    if baseline.opening_quantity_evidence:
+        pytest.skip("unmeasured history control; signed history has stricter retention")
+    changes = {
+        "unowned_old_ink": {"representative_observation_id": "unowned-historical-ink"},
+        "old_geometry": {"source_geometries": ((999., 999., 1001., 999.),)},
+        "old_members": {"source_observation_ids": peer.source_observation_ids + ("unowned-ink",)},
+        "old_lineage": {"source_lineage_root_ids": ("unowned-lineage",)},
+    }
+    historical = replace(peer, **changes[damage])
+    baseline = replace(baseline, canonical_openings=(historical,))
+    with pytest.raises(SourceClosedRunConflictError, match="historical opening source identity"):
+        _append_reproved_areas(
+            baseline, (new, peer), full.opening_quantity_evidence, physical_opening_authority=authority,
+        )
+
+
+def test_raster_representative_reissue_uses_its_authenticated_primitive_receipt(original_claim):
+    """Raster visibility returns a raw-source proposition after receipt checks."""
+    from pb_live_append_only_opening_area_composition import _source_representative_reissue_is_authenticated
+    from pb_page_view_class_source_adapter import page_viewport_id
+    from tests.test_raster_framed_opening_g17_contract import _corroborated_records, _prepare, _selector
+
+    producer, published = _prepare(frame_lines=2)
+    record, = _corroborated_records(producer, published)
+    authority = producer.physical_opening_authority()
+    representatives = []
+    for member in record.source_observation_ids:
+        proof = authority.prove_existence(_selector(published, member))
+        if proof.existence_record is not None and proof.existence_record.record_id == record.record_id:
+            representatives.append((member, tuple(proof.source_observation.observation.geometry)))
+    assert len(representatives) >= 2
+    template = original_claim[1].canonical_openings[0]
+    # These objects exercise source reproof only, and never issue a quantity.
+    fields = {name: getattr(record, name) for name in (
+        "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id",
+        "semantic_class", "structural_pattern", "source_observation_ids", "source_lineage_root_ids",
+    )}
+    previous = replace(
+        template, **fields, canonical_opening_id=record.record_id, physical_opening_id=record.record_id,
+        viewport_id=record.viewport_id or page_viewport_id(record.page_id),
+        representative_observation_id=representatives[0][0], source_geometries=(representatives[0][1],),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    current = replace(previous, representative_observation_id=representatives[1][0], source_geometries=(representatives[1][1],))
+    assert _source_representative_reissue_is_authenticated(authority, previous, current)
+    assert not _source_representative_reissue_is_authenticated(
+        authority, replace(previous, source_geometries=((999., 999., 1000., 999.),)), current,
+    )
+
+
 @pytest.mark.parametrize("collision", (
     "same_source_observations", "partial_source_observation_overlap", "same_physical_geometry",
 ))

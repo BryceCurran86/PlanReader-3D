@@ -25,3 +25,19 @@ The stacked #4145 source replay and customer output still require a trusted SHA-
 ## Benchmark firewall
 
 No expected BOQ, scoring threshold, benchmark denominator, labels, private PDF contents or source identities are used as prediction inputs. The frozen 120-item benchmark, 20,000 primitive cap and 2.5 pt snap are untouched.
+
+## Source partition consumer — 2 November 2026
+
+Observed: `recover_source_opening_areas` compares a new area only with baseline competitors, while `_append_reproved_areas` rejects every shared observation even when it is wall support between separate gaps. Claude #4147 now supplies extent-first `partition_receipt` and recomputing `verify_partition_receipt`; its old source-ID-only shortcut is removed. The real original explicit recovery separately fails immutable historical representative/source geometry retention. Default eight signed/customer bodies pass byte retention on both Python versions.
+
+Inference: a source-owned partition can distinguish shared wall support from competing aperture readings, but cannot authenticate a changed historical representative, missing rival, host, figure or metric void. A caller's receipt list or record IDs are insufficient.
+
+Proposed integration: have the original replayer pass its concrete physical-opening authority to the existing composer. Reprove both canonical objects' exact source scope, representative geometry, members and lineage, then obtain and independently verify the authority's pairwise receipt for every fresh rival. Permit shared members only with that verified physical partition. Preserve unconditional same-physical-ID, exact-geometry and complete metric-overlap negatives, the historical immutable-source guard, and the final source-snapshot check. No new authority or receipt allowlist is introduced. Tests use real generated PDF producers and the existing issuer/sealer/customer path, with wrong-pair, altered-source, stale-snapshot, overlap and inventory-order controls.
+
+Benchmark observations are excluded from prediction and tests. Original-source reports remain private. This is a throwaway integration of the fixed Claude dependency with the existing MAX branch; no source or customer promotion is inferred from synthetic success.
+
+### Source-authenticated representative reissue
+
+Actual immutable original execution of the combined tree proves all 21 new-opening/rival partitions (20 disjoint, one partitioned shared-support pair), with exact canonical/source binding. Default eight signed/customer retention passes both Python versions. The remaining failure changes only an unsupported historical candidate's representative and its representative-line geometry; physical identity, complete member roster and lineage are unchanged.
+
+The canonical `source_geometries` field contains the representative observation geometry, not an aperture boundary. A changed representative must not be forced back to an ambiguous selector. Proposed narrow exception: only for an unmeasured historical object with unchanged nonrepresentative physical core, members and lineage, reprove the fresh canonical object through the concrete source authority and independently authenticate the old representative's exact unchanged raw source observation in that same source scope. Both representatives must remain members of the same producer-issued physical record. All pairwise partition checks still apply, and the returned historical canonical object stays byte-identical. Missing raw source, altered geometry/membership/lineage, foreign physical identity and measured-row rewrites remain conflicts. No guessed retirement or equivalence receipt is created.

@@ -19,7 +19,6 @@ from pb_live_physical_opening_void_composition import (
 )
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
-from pb_physical_opening_authority import PHYSICAL_OPENING_IDENTITIES_DISTINCT
 from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -96,7 +95,145 @@ def _source_owned_metric_voids_overlap(left, right):
     )
 
 
-def _append_reproved_areas(baseline, openings, quantities):
+def _canonical_source_proof(authority, opening):
+    """An independently reissued physical record for this exact canonical source."""
+    from pb_page_view_class_source_adapter import page_viewport_id
+    from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+
+    if type(authority) is not PhysicalOpeningAuthority:
+        return None
+    selector = ObservationSelector(
+        document_id=opening.document_id, revision_id=opening.revision_id,
+        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+        observation_id=opening.representative_observation_id,
+    )
+    proof = authority.prove_existence(selector)
+    record = proof.existence_record
+    observation = getattr(proof.source_observation, "observation", None)
+    viewport = (record.viewport_id if record is not None and record.viewport_id is not None
+                else page_viewport_id(opening.page_id))
+    if (
+        proof.status is not EvidenceResolutionStatus.CORROBORATED
+        or proof.proposition != PHYSICAL_OPENING_EXISTS
+        or record is None or observation is None
+        or record.record_id != opening.physical_opening_id
+        or opening.canonical_opening_id != record.record_id
+        or any(getattr(record, field) != getattr(opening, field) for field in (
+            "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id",
+            "semantic_class", "structural_pattern",
+            "source_observation_ids", "source_lineage_root_ids",
+        ))
+        or opening.viewport_id != viewport
+        or observation.observation_id != opening.representative_observation_id
+        or opening.source_geometries != (tuple(float(v) for v in observation.geometry),)
+    ):
+        return None
+    return selector, record
+
+
+def _source_representative_reissue_is_authenticated(authority, previous, current):
+    """Preserve an old unsupported object when only its source address reissues.
+
+    The old line remains exact raw support of the same physical record. It is
+    not forced to become a uniquely resolving physical selector in the fresh
+    policy; the fresh representative independently re-proves that record.
+    """
+    from pb_source_observation_authority import SOURCE_OBSERVATION_EXISTS
+    from pb_source_visibility_authority import (
+        RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS, RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
+        VISIBLE_SOURCE_OBSERVATION_EXISTS,
+    )
+
+    # Geometry here is the representative LINE, not an aperture boundary.
+    readdressed = replace(previous, source_geometries=current.source_geometries)
+    if (
+        _physical_core(readdressed) != _physical_core(current)
+        or previous.source_observation_ids != current.source_observation_ids
+        or previous.source_lineage_root_ids != current.source_lineage_root_ids
+        or previous.representative_observation_id not in current.source_observation_ids
+    ):
+        return False
+    try:
+        fresh = _canonical_source_proof(authority, current)
+        if fresh is None:
+            return False
+        selector, _record = fresh
+        old = authority.prove_existence(replace(
+            selector, observation_id=previous.representative_observation_id,
+        )).source_observation
+        observation = getattr(old, "observation", None)
+        return (
+            old is not None and old.status is EvidenceResolutionStatus.CORROBORATED
+            and observation is not None
+            and (
+                old.proposition == VISIBLE_SOURCE_OBSERVATION_EXISTS
+                or (
+                    # The physical authority obtains raster support through
+                    # resolve_raster_opening_primitive, which revalidates its
+                    # source/parent/geometry receipt then returns this raw
+                    # proposition. It is not a native visibility receipt.
+                    old.proposition == SOURCE_OBSERVATION_EXISTS
+                    and observation.observation_kind in RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS
+                    and observation.origin_kind == RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND
+                )
+            )
+            and observation.observation_id == previous.representative_observation_id
+            and all(getattr(observation, field) == getattr(current, field) for field in (
+                "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id",
+            ))
+            and previous.source_geometries == (tuple(float(v) for v in observation.geometry),)
+        )
+    except Exception:
+        return False
+
+
+def _source_partition_proves_distinct(authority, left, right):
+    """Reprove the exact canonical pair; never consume a caller receipt list."""
+    from pb_physical_opening_authority import PhysicalOpeningPartitionReceipt
+
+    selectors = []
+    records = {}
+    try:
+        for opening in (left, right):
+            proof = _canonical_source_proof(authority, opening)
+            if proof is None:
+                return False
+            selector, record = proof
+            selectors.append(selector)
+            records[record.record_id] = record
+        if len(records) != 2:
+            return False
+        receipt = authority.partition_receipt(*selectors)
+        if (
+            type(receipt) is not PhysicalOpeningPartitionReceipt
+            or not receipt.is_physically_distinct
+            or authority.verify_partition_receipt(receipt, *selectors) is not True
+            or set(records) != {receipt.left_record_id, receipt.right_record_id}
+            or receipt.grants_quantity is not False or receipt.grants_firm_authority is not False
+        ):
+            return False
+        for side in ("left", "right"):
+            record = records[getattr(receipt, f"{side}_record_id")]
+            if (
+                any(getattr(receipt, field) != getattr(record, field) for field in (
+                    "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id",
+                    "producer_method", "producer_version", "producer_generation",
+                ))
+                or getattr(receipt, f"{side}_viewport_id") != record.viewport_id
+                or getattr(receipt, f"{side}_source_observation_ids")
+                != tuple(sorted(record.source_observation_ids))
+            ):
+                return False
+        return receipt.shared_source_observation_ids == tuple(sorted(
+            set(left.source_observation_ids) & set(right.source_observation_ids)
+        ))
+    except Exception:
+        # Unreadable source or a failed receipt recomputation cannot partition
+        # a rival. This never converts an upstream exception into a positive.
+        return False
+
+
+def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_authority=None):
     """Composition only; caller owns original-source/host reauthentication."""
     from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 
@@ -185,9 +322,13 @@ def _append_reproved_areas(baseline, openings, quantities):
             or previous.source_observation_ids != current.source_observation_ids
             or previous.source_lineage_root_ids != current.source_lineage_root_ids
         ):
-            raise SourceClosedRunConflictError(
-                "historical opening source identity changed during replay"
-            )
+            if (oid in physical_claims or physical_opening_authority is None
+                    or not _source_representative_reissue_is_authenticated(
+                        physical_opening_authority, previous, current,
+                    )):
+                raise SourceClosedRunConflictError(
+                    "historical opening source identity changed during replay"
+                )
     fresh_measured_ids = {q.input_entity_ids[0] for q in fresh.values()}
     # An unsupported-only sibling is negative evidence, never quietly omitted
     # from a new area. Shared exact observation members require a source-owned
@@ -216,13 +357,26 @@ def _append_reproved_areas(baseline, openings, quantities):
         if oid in physical_claims:
             raise SourceClosedRunConflictError("new quantity aliases an already measured physical opening")
         opening = fresh_objects[oid]
+        if physical_opening_authority is not None:
+            # Every fresh hypothesis counts, including unsupported candidates
+            # absent from the old claim. An unequal ID or geometry is not a
+            # physical partition. Only this replay's actual source authority
+            # can release the shared-wall-support veto below.
+            for peer in fresh_objects.values():
+                if peer.canonical_opening_id != oid and not _source_partition_proves_distinct(
+                    physical_opening_authority, opening, peer,
+                ):
+                    raise SourceClosedRunConflictError(
+                        "fresh opening rival source partition unproven"
+                    )
         for other in measured_openings:
             if other.canonical_opening_id == oid:
                 continue
             if (
                 other.physical_opening_id == opening.physical_opening_id
                 or (
-                    other.source_observation_ids
+                    physical_opening_authority is None
+                    and other.source_observation_ids
                     and opening.source_observation_ids
                     and not set(other.source_observation_ids).isdisjoint(
                         opening.source_observation_ids
@@ -240,7 +394,8 @@ def _append_reproved_areas(baseline, openings, quantities):
         for sibling in unmeasured_rivals:
             if (sibling.physical_opening_id == opening.physical_opening_id
                     or (
-                        sibling.source_observation_ids
+                        physical_opening_authority is None
+                        and sibling.source_observation_ids
                         and opening.source_observation_ids
                         and not set(sibling.source_observation_ids).isdisjoint(
                             opening.source_observation_ids
@@ -310,8 +465,6 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
     )
     quantities = publish_live_opening_area_quantities(voids)
     published = source.published_snapshot_for_revision(published.revision.revision_id)
-    fresh_by_id = _indexed(voids.canonical_openings, "canonical_opening_id", LiveCanonicalOpeningObject)
-    old_quantity_ids = {q.quantity_id for q in baseline.opening_quantity_evidence}
     for opening in voids.canonical_openings:
         if not any(q.input_entity_ids == (opening.canonical_opening_id,) for q in quantities):
             continue
@@ -335,28 +488,10 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
                 or host.record is None or host.record.record_id != opening.host_binding_record_id
                 or host.record.host_wall_id != opening.host_wall_id):
             raise SourceClosedRunConflictError("recovered opening source or host receipt not authenticated")
-        if not any(q.quantity_id not in old_quantity_ids
-                   and q.input_entity_ids == (opening.canonical_opening_id,) for q in quantities):
-            continue
-        # Distinctness is issued by the existing physical-opening authority,
-        # within the fresh producer scope. Never infer it from a new string ID
-        # or from a changed render/snapshot. Retain all baseline competitors.
-        for previous in baseline.canonical_openings:
-            if previous.physical_opening_id == opening.physical_opening_id:
-                continue
-            peer = fresh_by_id.get(previous.physical_opening_id)
-            if peer is None:
-                raise SourceClosedRunConflictError("original physical competitor missing from source replay")
-            peer_selector = ObservationSelector(
-                document_id=selector.document_id, revision_id=selector.revision_id,
-                source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
-                observation_id=peer.representative_observation_id,
-            )
-            distinct = composition.physical_opening_authority.compare_identity(selector, peer_selector)
-            if (distinct.status is not EvidenceResolutionStatus.CORROBORATED
-                    or distinct.proven_same
-                    or distinct.physical_opening_identity != PHYSICAL_OPENING_IDENTITIES_DISTINCT):
-                raise SourceClosedRunConflictError("new physical opening distinctness unproven")
+    result = _append_reproved_areas(
+        baseline, voids.canonical_openings, quantities,
+        physical_opening_authority=composition.physical_opening_authority,
+    )
     if source.published_snapshot_for_revision(published.revision.revision_id) != published:
         raise SourceClosedRunConflictError("opening source snapshot changed during reproof")
-    return _append_reproved_areas(baseline, voids.canonical_openings, quantities)
+    return result
