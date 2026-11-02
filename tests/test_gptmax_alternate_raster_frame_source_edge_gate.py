@@ -6,8 +6,6 @@ opening, wall frame, installed quantity, or frozen score.
 from dataclasses import replace
 
 import pytest
-import inspect
-from pb_opening_host_frame_authority import OpeningHostFrameProducer
 
 from pb_raster_source_wall_frame_projection import source_edge_axis_projection
 from test_raster_source_wall_frame_projection import _fixture
@@ -26,11 +24,8 @@ def _approved_alternate_projection(record, geometry, lines):
 def test_clean_source_wall_fragment_chain_is_admissible_before_visible_owner_check():
     record, geometry, lines = _fixture()
     assert _approved_alternate_projection(record, geometry, lines)
-    # Source-claimed primitive presence alone is insufficient: alt frames
-    # must also pass the original chain proof, not W2's 2.5pt graph snap.
-    assert "and source_edge_axis_projection(" in inspect.getsource(
-        OpeningHostFrameProducer._shared_host_frame
-    )
+    # Source-claimed primitive presence never grants a frame by itself.
+    # The real producer is exercised independently in the tests below.
 
 @pytest.mark.parametrize("gap", [0.01, 0.5, 2.0])
 def test_source_edge_gap_cannot_be_joined_by_w2_snap_or_geometry(gap):
@@ -106,3 +101,36 @@ def test_actual_frame_producer_cannot_skip_unpartitioned_aligned_motif_rival(mon
             in result.reason_codes for result in results
         )
     assert repr(candidate_scope) == original_scope
+
+
+def test_actual_publisher_refuses_second_chance_after_failed_original_source_proof(monkeypatch):
+    """No geometry-only retry or second, weaker acceptance after a source veto."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture as live_fixture
+    from test_raster_connected_host_frame import _publish
+
+    _source, _composition, producer, bound = live_fixture()
+    assert all(result.status is Status.CORROBORATED
+               for result in _publish(producer, bound))
+
+    # Make an otherwise valid synthetic W4 member require the strict raster
+    # source-projection path. Then simulate one authoritative source veto.
+    # The old alternate path retried with relaxed geometry after this veto.
+    producer._raster_split_frame_shadow = True
+    selected_wall_id = bound[0][3].member_wall_candidate_ids[0]
+    original_projection = producer._record_projection
+
+    def require_source(record, axis, normal, *, strict_collinearity_shadow=False):
+        if strict_collinearity_shadow and record.wall_candidate_id == selected_wall_id:
+            return None
+        return original_projection(
+            record, axis, normal,
+            strict_collinearity_shadow=strict_collinearity_shadow,
+        )
+
+    monkeypatch.setattr(producer, "_record_projection", require_source)
+    monkeypatch.setattr(producer, "_raster_source_projection", lambda **_kwargs: None)
+    for ordering in (bound, tuple(reversed(bound))):
+        results = _publish(producer, ordering)
+        assert all(result.status is Status.ABSTAINED and result.evidence is None
+                   for result in results)
