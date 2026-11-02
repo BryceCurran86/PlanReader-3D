@@ -1,6 +1,8 @@
 """Item 23 / F24 generic opening-count authority — fail-closed attack tests."""
 from __future__ import annotations
 
+import zlib
+
 import pytest
 
 from pb_geometry_takeoff_model import AuthorityStatus
@@ -72,6 +74,15 @@ VP_PLAN = "vp-plan-1"
 VP_ELEV = "vp-elev-named-elevation-section"
 
 
+def _aperture_box(opening_id: str) -> tuple[float, float, float, float]:
+    """A separate, source-measured aperture box per synthetic opening.
+
+    Whether two openings are distinct is decided from their physical extents (and the lines they share), not from the
+    fact that their record ids differ, so a fixture that stands in for real records must carry readable extents."""
+    x = float(zlib.crc32(opening_id.encode("utf-8")) % 100000) * 100.0
+    return (x, 0.0, x + 50.0, 10.0)
+
+
 def _physical(
     opening_id: str,
     *,
@@ -98,6 +109,7 @@ def _physical(
         producer_method="native_vector",
         producer_version="1.0.0",
         producer_generation=1,
+        aperture_bbox_pt=_aperture_box(opening_id),
     )
 
 

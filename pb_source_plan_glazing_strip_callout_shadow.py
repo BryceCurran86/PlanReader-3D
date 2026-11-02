@@ -30,6 +30,17 @@ condition that is not `passed` forbids CANDIDATE):
 
 Single-panel strips are fingerprint-unmeasurable here (the count carries no
 information and the length test alone is not discriminating), so they abstain.
+
+Separating a claimant. A claimant found by location alone stays a rival until a source relationship
+accounts for it elsewhere. The one relationship accepted is an OPENING OCCUPANCY: the claimant's
+anchor (its proven visible envelope box, else its text box) lies inside the jamb-bounded aperture of
+exactly one CORROBORATED physical opening and inside no other candidate aperture, using the same
+containment the schedule-to-opening binder uses for plan tags. A separated claimant is never deleted:
+it stays on the record (`separated_claimants`) with the occupied opening's record id and observation
+ids, and a CANDIDATE that relied on a separation carries a caveat reason. Distance, a tag's letter,
+an intervening line, nearest-object choice and the expected identity never separate a claimant. The
+occupancy records are inputs built by a producer-side adapter (`pb_plan_tag_opening_occupancy_shadow`);
+this module only validates their ownership and applies them.
 """
 from __future__ import annotations
 
@@ -43,7 +54,7 @@ from typing import Callable, Iterable, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 
-PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.5.0"
+PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.6.0"
 PRODUCER_INPUT_PROVENANCE = "source_visibility_producer"
 WHOLE_PAGE_UNSEGMENTED = "whole_page_unsegmented"
 
@@ -82,6 +93,14 @@ _MAX_NATIVE_PATH_ITEMS = 1_000_000
 _MAX_SCALE_PAIRS = 5_000
 # A post between two panels of one strip is narrower than the strip's own frame depth.
 _MAX_CHAIN_GAP_DEPTHS = 1.0
+# The schedule-to-opening binder's tag containment tolerance (`_COORD_TOL` there), mirrored and pinned by a
+# parity test: the same relation, not a new threshold.
+_OCCUPANCY_CONTAINMENT_TOL = 1e-6
+OCCUPANCY_BASIS_ENVELOPE = "proven_visible_envelope_centre_in_aperture"
+OCCUPANCY_BASIS_TEXT = "trusted_text_centre_in_aperture"
+_OCCUPANCY_BASES = (OCCUPANCY_BASIS_ENVELOPE, OCCUPANCY_BASIS_TEXT)
+CLAIMANT_SEPARATED_REASON = "callout_rivals_separated_by_opening_occupancy"
+CALLOUT_OCCUPIES_OTHER_OPENING = "callout_tag_occupies_other_opening"
 # Largest relative disagreement between a record's aspect ratio and its bounding box for the
 # record's axes to be read as native x/y (or swapped); anything unclear abstains.
 _AXIS_ASPECT_FIT = 0.05
@@ -176,6 +195,66 @@ class CalloutExclusion:
             raise ValueError("native curve addresses cannot pretend to be visible envelope support")
 
 
+def _finite_pair(value) -> bool:
+    return (type(value) is tuple and len(value) == 2
+            and all(type(v) in (int, float) and math.isfinite(v) for v in value))
+
+
+@dataclass(frozen=True)
+class ClaimantOccupancy:
+    """A trusted opening-tag word's anchor lies in exactly one corroborated opening's aperture, and in no other.
+
+    Built from the producer's own candidates and existence proofs by `pb_plan_tag_opening_occupancy_shadow`;
+    this module treats it as an input whose ownership it checks. It is a location fact about a callout symbol
+    and one opening, never a claim of kind, identity, host, count or scale."""
+
+    ownership: SourceOwnership
+    word_observation_id: str
+    occupied_record_id: str
+    occupied_observation_ids: tuple[str, ...]
+    aperture_axis: tuple[float, float]
+    aperture_normal: tuple[float, float]
+    aperture_along: tuple[float, float]
+    aperture_normal_range: tuple[float, float]
+    anchor_box: tuple[float, float, float, float]
+    basis: str
+    competing_candidate_count: int
+
+    def __post_init__(self) -> None:
+        if (type(self.ownership) is not SourceOwnership
+                or any(type(v) is not str or not v for v in (self.word_observation_id, self.occupied_record_id))
+                or type(self.occupied_observation_ids) is not tuple or not self.occupied_observation_ids
+                or any(type(v) is not str or not v for v in self.occupied_observation_ids)
+                or len(set(self.occupied_observation_ids)) != len(self.occupied_observation_ids)
+                or self.basis not in _OCCUPANCY_BASES
+                or type(self.competing_candidate_count) is not int or self.competing_candidate_count != 0
+                or not all(_finite_pair(v) for v in (self.aperture_axis, self.aperture_normal, self.aperture_along,
+                                                      self.aperture_normal_range))
+                or type(self.anchor_box) is not tuple or len(self.anchor_box) != 4
+                or not all(type(v) in (int, float) and math.isfinite(v) for v in self.anchor_box)
+                or self.anchor_box[0] > self.anchor_box[2] or self.anchor_box[1] > self.anchor_box[3]
+                or self.aperture_along[0] > self.aperture_along[1]
+                or self.aperture_normal_range[0] > self.aperture_normal_range[1]):
+            raise ValueError("a claimant occupancy requires owned, finite, unambiguous single-opening evidence")
+        if (abs(math.hypot(*self.aperture_axis) - 1.0) > 1e-6 or abs(math.hypot(*self.aperture_normal) - 1.0) > 1e-6
+                or abs(self.aperture_axis[0] * self.aperture_normal[0]
+                       + self.aperture_axis[1] * self.aperture_normal[1]) > 1e-6):
+            raise ValueError("the aperture frame must be orthonormal")
+
+
+@dataclass(frozen=True)
+class SeparatedClaimant:
+    """A claimant retained on the record because an opening occupancy accounts for it elsewhere."""
+
+    word_observation_id: str
+    strip_id: str
+    occupied_record_id: str
+    occupied_observation_ids: tuple[str, ...]
+    entry: str                  # "ring" | "exclusion" | "unresolved_word"
+    entry_id: str
+    basis: str = OCCUPANCY_BASIS_TEXT    # what the occupancy anchored: the proven envelope box or the text box
+
+
 @dataclass(frozen=True)
 class PlanCalloutStripScope:
     ownership: SourceOwnership
@@ -192,6 +271,9 @@ class PlanCalloutStripScope:
     native_curve_inventory_complete: bool = True
     plan_text_inventory_complete: bool = True
     plan_ink_inventory_complete: bool = True
+    # Empty means "not evaluated", never "no claimant is occupied elsewhere".
+    claimant_occupancy: tuple[ClaimantOccupancy, ...] = ()
+    claimant_occupancy_evaluated: bool = False
 
     def __post_init__(self) -> None:
         if not (math.isfinite(self.coordinate_quantum_pt) and self.coordinate_quantum_pt > 0.0
@@ -200,8 +282,19 @@ class PlanCalloutStripScope:
         re.compile(self.callout_mark_pattern)
         if any(type(flag) is not bool for flag in (self.native_curve_inventory_complete,
                                                   self.plan_text_inventory_complete,
-                                                  self.plan_ink_inventory_complete)):
+                                                  self.plan_ink_inventory_complete,
+                                                  self.claimant_occupancy_evaluated)):
             raise ValueError("source inventory coverage must be explicit bools")
+        if type(self.claimant_occupancy) is not tuple or any(
+                type(o) is not ClaimantOccupancy for o in self.claimant_occupancy):
+            raise ValueError("claimant occupancy must be an immutable tuple of occupancy records")
+        if self.claimant_occupancy and not self.claimant_occupancy_evaluated:
+            raise ValueError("occupancy records require an evaluated occupancy inventory")
+        if any(o.ownership != self.ownership for o in self.claimant_occupancy):
+            raise ValueError("a claimant occupancy of another document, revision, snapshot or source cannot be applied")
+        words = [o.word_observation_id for o in self.claimant_occupancy]
+        if len(words) != len(set(words)):
+            raise ValueError("a word has at most one occupancy record")
 
 
 @dataclass(frozen=True)
@@ -249,6 +342,7 @@ class CalloutCorrespondence:
     rival_callout_ids: tuple[str, ...]
     numbers: tuple[tuple[str, float], ...]
     record_id: str
+    separated_claimants: tuple[SeparatedClaimant, ...] = ()
 
     def __post_init__(self) -> None:
         if (tuple(name for name, _ in self.conditions) != CONDITION_NAMES
@@ -790,6 +884,57 @@ def _position(ring: CalloutRing, strip: GlazingStrip, eq: float) -> tuple[bool, 
     return bool(inside and (beyond or before)), float(gap)
 
 
+def _occupancy_anchors(words: Sequence[PlanTextObservation], exclusions: Sequence[CalloutExclusion]):
+    """One anchor per trusted opening-tag word: where its callout symbol sits.
+
+    The symbol is the word's proven visible envelope box when exactly one distinct proven envelope exists; several
+    distinct proven envelopes make the symbol ambiguous (no anchor, so no witness and its claims stay); a word with
+    no proven envelope is anchored by its text box. Native-curve envelopes (visibility unproven) never anchor."""
+    envelopes: dict[str, set] = defaultdict(set)
+    for e in exclusions:
+        if e.label_trusted and e.reason_codes == ("visible_callout_envelope",):
+            envelopes[e.word_observation_id].add(tuple(e.bbox))
+    out = []
+    for w in sorted(words, key=lambda w: w.observation_id):
+        if _tag_key(w.text) is None:
+            continue
+        boxes = envelopes.get(w.observation_id, set())
+        if len(boxes) > 1:
+            continue
+        out.append((w.observation_id, next(iter(boxes)) if boxes else tuple(w.bbox),
+                    OCCUPANCY_BASIS_ENVELOPE if boxes else OCCUPANCY_BASIS_TEXT))
+    return out
+
+
+def _occupancy_aperture_box(o: ClaimantOccupancy) -> tuple[float, float, float, float]:
+    """Axis-aligned bounds of the occupied opening's aperture rectangle (its frame may be rotated)."""
+    corners = [(a * o.aperture_axis[0] + n * o.aperture_normal[0], a * o.aperture_axis[1] + n * o.aperture_normal[1])
+               for a in o.aperture_along for n in o.aperture_normal_range]
+    xs, ys = zip(*corners)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _occupancy_contains(o: ClaimantOccupancy, box) -> bool:
+    """The binder's tag containment: the box centre inside both the along range and the normal range."""
+    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+    along = cx * o.aperture_axis[0] + cy * o.aperture_axis[1]
+    normal = cx * o.aperture_normal[0] + cy * o.aperture_normal[1]
+    tol = _OCCUPANCY_CONTAINMENT_TOL
+    return bool(o.aperture_along[0] - tol <= along <= o.aperture_along[1] + tol
+                and o.aperture_normal_range[0] - tol <= normal <= o.aperture_normal_range[1] + tol)
+
+
+def _occupied_elsewhere(o: Optional[ClaimantOccupancy], box, strip: GlazingStrip, eq: float) -> bool:
+    """True when `o` accounts for the entry at `box` by an opening that is neither the strip's own nor overlapping it."""
+    if o is None or not _occupancy_contains(o, box):
+        return False
+    if set(o.occupied_observation_ids) & set(strip.ink_ids):
+        return False
+    a, s = _occupancy_aperture_box(o), _strip_box(strip)
+    touches = (a[0] <= s[2] + eq and s[0] <= a[2] + eq and a[1] <= s[3] + eq and s[1] <= a[3] + eq)
+    return not touches
+
+
 _INCONCLUSIVE_RING = {"callout_ring_search_budget_exceeded", "callout_ring_not_unique", "callout_local_ink_unbounded"}
 
 
@@ -964,6 +1109,18 @@ def audit_plan_callout_to_glazing_strip_shadow(
     position: dict[tuple[str, str], tuple[bool, float]] = {}
     claimants: dict[str, list[str]] = defaultdict(list)
     uncertain: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    # an occupancy only ever applies to the trusted word it names; an untrusted word has none
+    occupancy = {o.word_observation_id: o for o in scope.claimant_occupancy}
+    separated: dict[str, list[SeparatedClaimant]] = defaultdict(list)
+
+    def separate(word_id: str, box, strip: GlazingStrip, entry: str, entry_id: str) -> bool:
+        o = occupancy.get(word_id)
+        if not _occupied_elsewhere(o, box, strip, eq):
+            return False
+        separated[strip.strip_id].append(SeparatedClaimant(
+            word_observation_id=word_id, strip_id=strip.strip_id, occupied_record_id=o.occupied_record_id,
+            occupied_observation_ids=o.occupied_observation_ids, entry=entry, entry_id=entry_id, basis=o.basis))
+        return True
 
     def note_claims(word: PlanTextObservation, ring: Optional[CalloutRing], reason: str, label: str) -> None:
         if ring is None:
@@ -973,12 +1130,15 @@ def audit_plan_callout_to_glazing_strip_shadow(
                 ok, gap = _position(ring, strip, eq)
                 if label == "":
                     position[(word.observation_id, strip.strip_id)] = (ok, gap)
-                    if ok:
+                    if ok and not separate(word.observation_id, _ring_box(ring), strip, "ring", word.observation_id):
                         claimants[strip.strip_id].append(word.observation_id)
                 elif ok:
                     uncertain[strip.strip_id].append((reason, label + word.observation_id))
             elif set(ring.reason_codes) & _INCONCLUSIVE_RING and _word_claims(word, strip, eq):
-                uncertain[strip.strip_id].append(("strip_has_unresolved_ring_claimant", "unresolved:" + word.observation_id))
+                if not (label == "" and separate(word.observation_id, word.bbox, strip, "unresolved_word",
+                                                 word.observation_id)):
+                    uncertain[strip.strip_id].append(
+                        ("strip_has_unresolved_ring_claimant", "unresolved:" + word.observation_id))
 
     for w in claim_words:
         note_claims(w, all_rings.get(w.observation_id), "", "")
@@ -1028,6 +1188,8 @@ def audit_plan_callout_to_glazing_strip_shadow(
                 box = (cx,cy,cx,cy)
             if not _box_can_oppose_strip(box, strip, eq):
                 continue
+            if e.label_trusted and separate(e.word_observation_id, e.bbox, strip, "exclusion", e.record_id):
+                continue
             if e.label_trusted and proven_envelope:
                 claimants[strip.strip_id].append(e.word_observation_id)
             else:
@@ -1035,6 +1197,8 @@ def audit_plan_callout_to_glazing_strip_shadow(
                           else "strip_has_claimant_with_untrusted_label")
                 uncertain[strip.strip_id].append((reason, "exclusion:" + e.record_id))
     claimants = {sid: sorted(set(ids)) for sid, ids in claimants.items()}
+    separated_by_strip = {sid: tuple(sorted(set(items), key=lambda s: (s.word_observation_id, s.entry, s.entry_id)))
+                          for sid, items in separated.items()}
     fingerprint_owners: dict[str, set[str]] = defaultdict(set)
     for key, sids in supported.items():
         for sid in sids:
@@ -1044,7 +1208,8 @@ def audit_plan_callout_to_glazing_strip_shadow(
     for word in callouts:
         correspondences.append(_decide(
             word, scope, rings.get(word.observation_id), key_count, types_by_key, facts, strips, by_id,
-            supported, supporters, fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons))
+            supported, supporters, fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons,
+            occupancy, separated_by_strip, eq))
     correspondences.sort(key=lambda c: (c.tag_mark, c.tag_observation_id))
     return PlanCalloutStripShadow(
         ownership=ownership, plan_page_id=scope.plan_page_id, elevation_page_id=scope.elevation_page_id,
@@ -1054,7 +1219,8 @@ def audit_plan_callout_to_glazing_strip_shadow(
 
 
 def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, supported, supporters,
-            fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons) -> CalloutCorrespondence:
+            fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons,
+            occupancy=None, separated_by_strip=None, eq=0.0) -> CalloutCorrespondence:
     oid = word.observation_id
     key = _tag_key(word.text)
     states: dict[str, str] = {}
@@ -1072,12 +1238,15 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
         rivals = sorted((set(count_matching) | set(position_ids) | set(scale_consistent)
                          | ({chosen} if chosen else set())) - ({selected} if selected else set()))
         callout_rivals = tuple(sorted(set(rival_callouts)))
+        # claimants of the CHOSEN strip that an opening occupancy accounts for elsewhere; kept, never dropped
+        sep = tuple(x for x in (separated_by_strip or {}).get(chosen, ()) if x.word_observation_id != oid) if chosen else ()
         record_id = stable_contract_id("shadow_plan_callout_strip_correspondence", {
             "ownership": (scope.ownership.document_id, scope.ownership.revision_id,
                           scope.ownership.snapshot_id, scope.ownership.source_sha256),
             "page": scope.plan_page_id, "tag": oid, "mark": word.text, "status": status.value,
             "strip": selected, "rivals": tuple(rivals), "callouts": callout_rivals,
             "conditions": conditions, "reasons": tuple(reasons),
+            "separated": tuple((x.word_observation_id, x.entry, x.entry_id, x.occupied_record_id) for x in sep),
         }, digest_chars=24)
         ring_view = ring or CalloutRing(status=EvidenceResolutionStatus.ABSTAINED, tag_observation_id=oid,
                                         tag_mark=word.text, reason_codes=("callout_ring_not_evaluated",))
@@ -1087,7 +1256,8 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
             ring=ring_view, plan_viewport_id=viewport, count_matching_strip_ids=tuple(sorted(count_matching)),
             scale_consistent_strip_ids=tuple(sorted(scale_consistent)),
             position_strip_ids=tuple(sorted(position_ids)), rival_strip_ids=tuple(rivals),
-            rival_callout_ids=callout_rivals, numbers=tuple(sorted(numbers.items())), record_id=record_id)
+            rival_callout_ids=callout_rivals, numbers=tuple(sorted(numbers.items())), record_id=record_id,
+            separated_claimants=sep)
 
     ABSTAIN, CONFLICT = EvidenceResolutionStatus.ABSTAINED, EvidenceResolutionStatus.CONFLICT
 
@@ -1185,6 +1355,10 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
     # 7 location is necessary only
     ok, gap = position.get((oid, chosen), (False, 0.0))
     numbers["callout_normal_gap_pt"] = gap
+    if _occupied_elsewhere((occupancy or {}).get(oid), _ring_box(ring), strip, eq):
+        # this callout's own symbol is anchored in a different corroborated opening
+        states["callout_beside_fingerprint_strip"] = FAILED
+        return finish(ABSTAIN, (CALLOUT_OCCUPIES_OTHER_OPENING,))
     if not ok:
         states["callout_beside_fingerprint_strip"] = FAILED
         return finish(ABSTAIN, ("callout_not_at_fingerprint_strip",))
@@ -1196,6 +1370,8 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
     rival_callouts.extend(trusted_rivals + [ident for _, ident in uncertain_rivals])
     numbers["other_callout_claimants"] = float(len(trusted_rivals))
     numbers["unresolved_or_unverified_claimants"] = float(len(uncertain_rivals))
+    numbers["separated_claimants"] = float(len({x.word_observation_id for x in (separated_by_strip or {}).get(chosen, ())
+                                                if x.word_observation_id != oid}))
     if trusted_rivals:
         states["no_other_callout_claims_strip"] = FAILED
         return finish(CONFLICT, ("strip_has_other_callout_claimants",))
@@ -1212,6 +1388,8 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
         return finish(ABSTAIN, ("strip_outside_callout_viewport",))
     states["strip_in_callout_viewport"] = PASSED
     reasons = ["source_correspondence_candidate_not_authority"]
+    if any(x.word_observation_id != oid for x in (separated_by_strip or {}).get(chosen, ())):
+        reasons.append(CLAIMANT_SEPARATED_REASON)
     if scope.elevation_viewport_id is None:
         reasons.append("elevation_viewport_unproven")
     if kind.outside_frame_mark_count:
@@ -1270,9 +1448,15 @@ def _source_geometry(value, *, bbox: bool = False):
 def audit_plan_callout_to_glazing_strip_from_source(
     source, *, revision_id: str, plan_page_id: int, elevation_page_id: int,
     callout_mark_pattern: str, panel_token: str, coordinate_quantum_pt: float,
-    dimension_quantum_mm: float,
+    dimension_quantum_mm: float, claimant_occupancy: bool = False,
 ) -> PlanCalloutStripShadow:
-    """Run the shadow on a published revision of a `SourceVisibilityProducer`."""
+    """Run the shadow on a published revision of a `SourceVisibilityProducer`.
+
+    `claimant_occupancy` (an explicit bool, default False, which leaves every result byte-identical) adds the
+    opening-occupancy separation witness: a second pass in which every trusted opening-tag word that a
+    corroborated opening's aperture alone contains is a SEPARATED claimant (retained, never deleted)."""
+    if type(claimant_occupancy) is not bool:
+        raise TypeError("claimant_occupancy must be an explicit bool")
     import fitz
 
     from pb_opening_elevation_frame_area_authority import (
@@ -1488,7 +1672,23 @@ def audit_plan_callout_to_glazing_strip_from_source(
 
     scope = replace(scope, plan_text_inventory_complete=text_inventory_complete,
                     plan_ink_inventory_complete=ink_inventory_complete)
-    return audit_plan_callout_to_glazing_strip_shadow(scope, ink=ink, words=plan_words, elevation_types=types)
+    first = audit_plan_callout_to_glazing_strip_shadow(scope, ink=ink, words=plan_words, elevation_types=types)
+    if not claimant_occupancy:
+        return first
+
+    from pb_plan_tag_opening_occupancy_shadow import PlanTagOpeningOccupancyShadow, TagAnchor
+
+    anchors = [TagAnchor(word_id, box, basis)
+               for word_id, box, basis in _occupancy_anchors(plan_words, first.callout_exclusions)]
+    inventory = PlanTagOpeningOccupancyShadow(source, enabled=True).inventory(
+        revision_id=revision_id, page_id=plan_page_id, anchors=anchors)
+    if inventory.status is not EvidenceResolutionStatus.CANDIDATE or inventory.ownership != ownership:
+        # an inventory that could not be produced separates nothing and says so
+        return replace(first, page_reason_codes=first.page_reason_codes + ("claimant_occupancy_unavailable",))
+    second = audit_plan_callout_to_glazing_strip_shadow(
+        replace(scope, claimant_occupancy=inventory.occupancies, claimant_occupancy_evaluated=True),
+        ink=ink, words=plan_words, elevation_types=types)
+    return replace(second, page_reason_codes=second.page_reason_codes + ("claimant_occupancy_evaluated",))
 
 
 __all__ = [
@@ -1498,4 +1698,6 @@ __all__ = [
     "PlanTextObservation", "PlanViewportRef", "SourceOwnership",
     "audit_plan_callout_to_glazing_strip_from_source", "audit_plan_callout_to_glazing_strip_shadow",
     "display_horizontal_width_mm",
+    "CALLOUT_OCCUPIES_OTHER_OPENING", "CLAIMANT_SEPARATED_REASON", "ClaimantOccupancy", "OCCUPANCY_BASIS_ENVELOPE",
+    "OCCUPANCY_BASIS_TEXT", "SeparatedClaimant",
 ]
