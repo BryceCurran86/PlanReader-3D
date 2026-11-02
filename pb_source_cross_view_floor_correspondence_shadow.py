@@ -604,11 +604,41 @@ class SourceCrossViewFloorCorrespondenceProducer:
         )
         overall_reasons = [] if is_unique else [REGISTRATION_NOT_UNIQUE]
 
+        # One original physical room, canonical floor and W4 face cannot
+        # be claimed by two measured boxes, even if their ink boxes do not
+        # overlap. Census the COMPLETE source identity universe before
+        # evaluating any geometry; caller overlap hints are not authority.
+        source_id_fields = (
+            "canonical_floor_id", "physical_room_id",
+            "source_room_face_record_id",
+        )
+        if type(measured_boxes) not in (list, tuple) or len(measured_boxes)>20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(MISSING_PHYSICAL_FLOOR_IDENTITY,), records=(),
+            )
+        def source_id(row, field):
+            value = row.get(field) if isinstance(row, Mapping) else None
+            return value if (type(value) is str and value
+                             and value==value.strip() and value.isprintable()) else ""
+        identity_counts = collections.Counter(
+            (field, source_id(item, field))
+            for item in measured_boxes
+            for field in source_id_fields
+            if source_id(item, field)
+        )
         for item in measured_boxes:
             box_sup = tuple(float(v) for v in item["dimension_box_pdf_pts"])
-            canonical_floor_id = _clean(item.get("canonical_floor_id"))
-            physical_room_id = _clean(item.get("physical_room_id"))
-            source_room_face_record_id = _clean(item.get("source_room_face_record_id"))
+            canonical_floor_id = source_id(item, "canonical_floor_id")
+            physical_room_id = source_id(item, "physical_room_id")
+            source_room_face_record_id = source_id(item, "source_room_face_record_id")
+            identity_missing = not all((
+                canonical_floor_id, physical_room_id, source_room_face_record_id,
+            ))
+            identity_ambiguous = any(
+                identity_counts[(field, source_id(item, field))] > 1
+                for field in source_id_fields if source_id(item, field)
+            )
 
             corr = box_correspondence(
                 box_sup,
@@ -636,6 +666,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 marks_inside=inside_marks,
                 other_labelled_boxes_overlapping=item.get("other_labelled_boxes_overlapping", 0),
                 material_code=selector.material_code,
+                identity_missing=identity_missing,
+                identity_ambiguous=identity_ambiguous,
             )
 
             record_id = stable_contract_id(
