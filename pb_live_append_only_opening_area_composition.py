@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from hashlib import sha256
+import math
 
 from pb_live_opening_area_quantity_publication import (
     _opening_quantity, publish_live_opening_area_quantities,
@@ -56,6 +57,42 @@ def _measurement_core(quantity):
             "viewport_id", "physical_opening_id", "canonical_opening_id",
             "opening_kind", "area_basis",
         )),
+    )
+
+
+def _source_owned_metric_voids_overlap(left, right):
+    """A negative only: two complete voids cannot occupy the same wall-local patch.
+
+    Incomplete or differently scoped coordinates establish nothing. This is
+    not an assertion of physical DISTINCT for disjoint figures, or a substitute
+    for the physical-opening producer's opening-local versus wall-face proof.
+    """
+    if (
+        left.geometry_complete is not True
+        or right.geometry_complete is not True
+        or not left.wall_local_frame_id
+        or left.wall_local_frame_id != right.wall_local_frame_id
+        or left.coordinate_unit != "metre"
+        or right.coordinate_unit != "metre"
+        or left.profile_kind != "rectangular_rough_opening"
+        or right.profile_kind != "rectangular_rough_opening"
+    ):
+        return False
+    intervals = tuple(
+        (getattr(obj, a), getattr(obj, b))
+        for obj in (left, right)
+        for a, b in (("u0", "u1"), ("z0", "z1"))
+    )
+    if any(
+        type(lo) not in (int, float) or type(hi) not in (int, float)
+        or not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo
+        for lo, hi in intervals
+    ):
+        return False
+    (lu0, lu1), (lz0, lz1), (ru0, ru1), (rz0, rz1) = intervals
+    return (
+        min(lu1, ru1) > max(lu0, ru0)
+        and min(lz1, rz1) > max(lz0, rz0)
     )
 
 
@@ -195,6 +232,7 @@ def _append_reproved_areas(baseline, openings, quantities):
                     other.source_geometries
                     and other.source_geometries == opening.source_geometries
                 )
+                or _source_owned_metric_voids_overlap(other, opening)
             ):
                 raise SourceClosedRunConflictError(
                     "measured opening rival requires source-owned physical partition"
@@ -211,7 +249,8 @@ def _append_reproved_areas(baseline, openings, quantities):
                     or (
                         sibling.source_geometries
                         and sibling.source_geometries == opening.source_geometries
-                    )):
+                    )
+                    or _source_owned_metric_voids_overlap(sibling, opening)):
                 raise SourceClosedRunConflictError(
                     "unmeasured opening rival aliases a new area"
                 )

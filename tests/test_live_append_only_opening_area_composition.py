@@ -434,6 +434,84 @@ def test_historical_unmeasured_rival_allows_new_snapshot_and_host_receipt_reissu
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
 
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+@pytest.mark.parametrize("sibling_kind", ("old_measured", "fresh_unmeasured"))
+@pytest.mark.parametrize("separation", ("overlap", "separate_u", "separate_z", "touching"))
+def test_source_owned_same_wall_metric_void_collision_is_negative_only(
+    original_claim, reverse_inventory, sibling_kind, separation,
+):
+    """Two complete same-frame openings cannot occupy the same metric patch.
+
+    This does not infer DISTINCT from disjoint source geometry or overwrite
+    the real source-owned physical identity / original sealed quantity.
+    """
+    _, full = original_claim
+    baseline = subset(full)
+    old_id = baseline.opening_quantity_evidence[0].input_entity_ids[0]
+    old = next(o for o in full.canonical_openings if o.canonical_opening_id == old_id)
+    new = next(o for o in full.canonical_openings if o.canonical_opening_id != old_id)
+    rect = dict(
+        geometry_complete=True, wall_local_frame_id="authenticated-local-wall-frame",
+        profile_kind="rectangular_rough_opening", coordinate_unit="metre",
+    )
+    a_rect = dict(**rect, u0=0.0, u1=1.0, z0=0.0, z1=2.0)
+    b_rect = {
+        "overlap": dict(u0=0.5, u1=1.5, z0=0.5, z1=2.5),
+        "separate_u": dict(u0=2.0, u1=3.0, z0=0.5, z1=2.5),
+        "separate_z": dict(u0=0.5, u1=1.5, z0=3.0, z1=5.0),
+        "touching": dict(u0=1.0, u1=2.0, z0=0.5, z1=2.5),
+    }[separation]
+    if sibling_kind == "old_measured":
+        old = replace(old, **a_rect)
+        new = replace(new, **rect, **b_rect)
+        old_quantity = _opening_quantity(old)
+        new_quantity = _opening_quantity(new)
+        assert old_quantity is not None and new_quantity is not None
+        baseline = replace(
+            baseline, canonical_openings=(old,), opening_quantity_evidence=(old_quantity,),
+        )
+        roster = (old, new)
+        quantities = (old_quantity, new_quantity)
+    else:
+        unsupported = replace(
+            new,
+            canonical_opening_id="new-unmeasured-independent-ink",
+            physical_opening_id="new-unmeasured-independent-ink",
+            representative_observation_id="independent-ink-observation",
+            source_observation_ids=("independent-ink-observation",),
+            source_lineage_root_ids=("independent-ink-root",),
+            source_geometries=((700.0, 700.0, 740.0, 700.0),),
+            area_m2=None, area_basis=None, figured_area_record_id=None,
+            **rect, **b_rect,
+        )
+        new = replace(new, **a_rect)
+        new_quantity = _opening_quantity(new)
+        assert new_quantity is not None
+        roster = (old, new, unsupported)
+        quantities = (baseline.opening_quantity_evidence[0], new_quantity)
+
+    if reverse_inventory:
+        roster = tuple(reversed(roster))
+        quantities = tuple(reversed(quantities))
+    if separation == "overlap":
+        with pytest.raises(SourceClosedRunConflictError, match=(
+            "measured opening rival" if sibling_kind == "old_measured"
+            else "unmeasured opening rival"
+        )):
+            _append_reproved_areas(baseline, roster, quantities)
+        return
+    result = _append_reproved_areas(baseline, roster, quantities)
+    assert result.opening_quantity_evidence[0] is baseline.opening_quantity_evidence[0]
+    assert result.canonical_openings[0] is baseline.canonical_openings[0]
+    sealed = seal_live_opening_area_claim_run(
+        result, workspace_id=1, project_id="source-project",
+    )
+    rows = project_live_opening_customer_rows(
+        result, workspace_id=1, project_id="source-project",
+    )
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)
