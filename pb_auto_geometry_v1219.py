@@ -1717,7 +1717,10 @@ def _try_physical_net_wall_rows(
             from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
             claim_pages = tuple(sorted(group["page_indices"]))
-            claim_kwargs: Dict[str, Any] = {"pages": claim_pages}
+            claim_kwargs: Dict[str, Any] = {
+                "pages": claim_pages,
+                "recover_supported_opening_areas": True,
+            }
             # Physical topology belongs only to positively source-classified
             # floor-plan sheets. Other positively titled drawing sheets remain
             # available as cross-sheet evidence, while unproven pages are never

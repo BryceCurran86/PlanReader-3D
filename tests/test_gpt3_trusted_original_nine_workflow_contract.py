@@ -2,10 +2,12 @@
 
 No benchmark, original PDF, secrets or producer authority is used by this test.
 """
+import ast
 from pathlib import Path
 import os
 import re
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -119,7 +121,7 @@ def test_main_owner_only_immutable_source_positive_workflow():
                      '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
                      '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
                      "-e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
-                     "-p no:cacheprovider", "private details withheld"):
+                     '"-p", "no:cacheprovider"', "private details withheld"):
         assert required in test_step["run"]
     assert 'grep -E \'^(FAILED |ERROR )\'' not in test_step["run"]
     assert 'cat "$output"' not in test_step["run"]
@@ -174,10 +176,29 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
         script = execute["run"]
-        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
-        assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in script
-        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
-        assert "python -m pytest" in script
+        # The SAME immutable original pytest first reauthenticates the SHA/size
+        # inside the source-mounted offline container, then runs both issuers.
+        # The temporary duplicate preflight introduced a runtime regression.
+        # This must stay ONE isolated read-only invocation, never a host run.
+        assert script.count("docker run --rm") == 1
+        prefix = "if ! docker run --rm "
+        assert script.count(prefix) == 1
+        run = script.split(prefix, 1)[1].split(' > "$output" 2>&1; then', 1)[0]
+        assert run.startswith("--network none --read-only --cap-drop ALL")
+        for required in (
+            "--security-opt no-new-privileges",
+            "--pids-limit 256",
+            '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
+            '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
+            "--workdir /workspace",
+            '"gpt3-offline:${{ matrix.python-version }}"',
+            "python -c '",
+        ):
+            assert run.count(required) == 1
+        # Pinned test occurs in source read, traceback scope and pytest invocation.
+        assert run.count("tests/test_gpt3_lot16_original_nine_whole_retention.py") == 3
+        assert '"tests/test_gpt3_lot16_original_nine_whole_retention.py"])' in run
+        assert "python -c 'import hashlib,json,fitz;" not in script
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
@@ -328,3 +349,193 @@ def test_owner_only_replay_requires_original_and_rerun_actor(
         repository == "BryceCurran86/PlanReader-3D",
         rerunner == "BryceCurran86",
     )) is permitted
+
+def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
+    """No unreviewed private source, exception or traceback may reach Actions."""
+    try:
+        doc = _parse(raw)
+        steps = doc["jobs"]["original"]["steps"]
+        assert len(steps) == 6
+        assert _isolated_private_source_contract(raw)
+        execute = steps[4]["run"]
+        assert execute.count(
+            "docker run --rm --network none --read-only --cap-drop ALL"
+        ) == 1
+        assert execute.count("dst=/workspace/documents/sources,readonly") == 1
+        assert "python -c 'import hashlib,json,fitz;" not in execute
+        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
+        assert "python -c '" in execute and "status = pytest.main([" in execute
+        # The private source mount must execute precisely the approved test.
+        # A textual prefix check also matches pytest.main([]), which would
+        # discover and run unintended tests with the protected PDF mounted.
+        inline = _trusted_phase_probe_code(raw)
+        pytest_calls = [
+            node for node in ast.walk(ast.parse(inline))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "pytest"
+            and node.func.attr == "main"
+        ]
+        assert len(pytest_calls) == 1
+        assert len(pytest_calls[0].args) == 1 and not pytest_calls[0].keywords
+        assert ast.literal_eval(pytest_calls[0].args[0]) == [
+            "-q", "-p", "no:cacheprovider", "--tb=short",
+            "--disable-warnings",
+            "tests/test_gpt3_lot16_original_nine_whole_retention.py",
+        ]
+        assert '"--tb=short"' in execute
+        assert '"-p", "no:cacheprovider"' in execute
+        assert "sys.settrace(trace_call)" in execute
+        assert "sys.settrace(None)" in execute
+        assert 'print("GPT3_TRUSTED_PHASE=" + phase[0], flush=True)' in execute
+        for phase_label in (
+            "INSTRUMENTATION_ERROR", "COLLECTION_OR_SETUP",
+            "SOURCE_AUTH", "DEFAULT_EIGHT", "EXPLICIT_NINE",
+            "VERIFY_DEFAULT_CUSTOMER", "VERIFY_EXPLICIT_CUSTOMER",
+            "ARCHIVED_EIGHT_RETENTION", "PHYSICAL_UNIQUENESS",
+            "SNAPSHOT_IDENTITY",
+        ):
+            assert "GPT3_TRUSTED_PHASE=" + phase_label in execute or (
+                phase_label in execute and "stages[hits[0]] = safe_label" in execute
+            )
+        assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
+        assert execute.count(' > "$output" 2>&1; then') == 1
+        assert "Original default-eight producer/seal/customer FAILED" in execute
+        assert "Original explicit-nine producer/seal/customer FAILED" in execute
+        assert "Original default-eight sealed/customer receipt verification FAILED" in execute
+        assert "Original explicit-nine sealed/customer receipt verification FAILED" in execute
+        assert "Original signed-eight archive/customer retention FAILED" in execute
+        assert "Original new physical opening identity FAILED" in execute
+        assert "Original old/new source snapshot identity FAILED" in execute
+        assert "Original container/test stopped before trusted phase reporting" in execute
+        assert 'cat "$output"' not in execute
+        assert 'tee "$output"' not in execute
+        assert "actions/upload-artifact" not in raw
+        assert "github.event.inputs" not in raw
+        assert 'rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"' in steps[-1]["run"]
+        assert 'echo "$output"' not in execute
+        assert '$(<' not in execute
+        return True
+    except (AssertionError, KeyError, TypeError, ValueError, SyntaxError, yaml.YAMLError):
+        # A nonliteral or malformed pytest argument list cannot establish a
+        # pinned, source-safe private test selection.
+        return False
+
+
+def test_original_private_first_failure_classifier_is_source_safe():
+    assert _private_phase_diagnostic_is_source_safe(WORKFLOW.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("old", "bad"), [
+    ("--tb=short", "--tb=no"),
+    ("--network none", "--network host"),
+    ("status = pytest.main([", "status = pytest.NOTmain(["),
+    # A syntax-valid empty-selection mutation preserves all tracing code.
+    # Only the AST argument gate may reject it, not a string-prefix check.
+    ('status = pytest.main(["-q", "-p", "no:cacheprovider", "--tb=short",\n'
+     '                                    "--disable-warnings",\n'
+     '                                    "tests/test_gpt3_lot16_original_nine_whole_retention.py"])',
+     'status = pytest.main([])'),
+    ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
+    (' > "$output" 2>&1; then', " 2>&1; then"),
+    ('grep -Fxq', 'cat "$output"; grep -Fxq'),
+    ('echo "::error::Original default-eight producer/seal/customer FAILED',
+     'echo "$(<$output)"; echo "::error::Original default-eight producer/seal/customer FAILED'),
+    ('rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"',
+     'echo "$(<$RUNNER_TEMP/gpt3-owner-original-positive.log)"'),
+])
+def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    assert old in raw
+    assert _private_phase_diagnostic_is_source_safe(raw)
+    assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
+
+def test_offline_original_replay_runs_immutable_approved_test_not_main_checkout():
+    """Public CI may check the pinned runner path, not read PR-absent files."""
+    steps = _load()["jobs"]["original"]["steps"]
+    guarded = steps[1]["run"]
+    execute = steps[4]["run"]
+    assert f"approved_head={APPROVED}" in guarded
+    assert f"approved_base={BASE}" in guarded
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in guarded
+    assert 'test -f "$target_tree/tests/test_gpt3_lot16_original_nine_whole_retention.py"' in guarded
+    assert 'test -f "$target_tree/tools/run_gpt3_lot16_original_sealed_score_input.py"' in guarded
+    assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in steps[2]["run"]
+    assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in execute
+    assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in execute
+    assert "python -c '" in execute and "status = pytest.main([" in execute
+    assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in execute
+    assert _isolated_private_source_contract(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _trusted_phase_probe_code(raw: str) -> str:
+    """Parse the static trusted source-neutral Python phase tracer."""
+    execute = _parse(raw)["jobs"]["original"]["steps"][4]["run"]
+    prefix = "python -c '\n"
+    suffix = "' > \"$output\" 2>&1; then"
+    assert execute.count(prefix) == 1
+    assert execute.count(suffix) == 1
+    probe = execute.split(prefix, 1)[1].split(suffix, 1)[0].strip("\n")
+    assert "sys.settrace(trace_call)" in probe
+    assert "sys.settrace(None)" in probe
+    assert "status = pytest.main([" in probe
+    assert 'print("GPT3_TRUSTED_PHASE=" + phase[0], flush=True)' in probe
+    compile(probe, "<trusted source-neutral phase probe>", "exec")
+    return probe
+
+
+@pytest.mark.parametrize(("failure_point", "expected"), [
+    ("collection", "COLLECTION_OR_SETUP"),
+    ("source", "SOURCE_AUTH"),
+    ("default", "DEFAULT_EIGHT"),
+])
+def test_trusted_phase_tracer_classifies_synthetic_first_failure(
+    tmp_path, failure_point, expected,
+):
+    """Exercise the actual trusted inline tracer without any private original."""
+    probe = _trusted_phase_probe_code(WORKFLOW.read_text(encoding="utf-8"))
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    auth = (
+        'raise ValueError("synthetic authentication failure")'
+        if failure_point == "source" else 'return "SYNTHETIC"'
+    )
+    synthetic = f'''
+SOURCE = object()
+MANIFEST = object()
+old_dir = object()
+new_dir = object()
+def _verify_original_source(source, manifest):
+    {auth}
+def run_original_lot16_sealed_handoff(source, directory):
+    raise RuntimeError("synthetic default-eight issuer failure")
+def _verified_production(directory, sha):
+    return ({{}}, {{}})
+def test_owner_original_lot16_nine_seals_and_preserves_eight_whole_customer_bodies():
+    original_sha = _verify_original_source(SOURCE, MANIFEST)
+    old_receipt = run_original_lot16_sealed_handoff(SOURCE, old_dir)
+    new_receipt = run_original_lot16_sealed_handoff(
+        SOURCE, new_dir, recover_additional_opening_areas=True,
+    )
+    old_signed, old_customer = _verified_production(old_dir, original_sha)
+    new_signed, new_customer = _verified_production(new_dir, original_sha)
+    digest_lines = (ARCHIVE.parent / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+    additional_ids = set(new_signed) - set(baseline_signed)
+    physical_sources = _object(new_dir / "source_production_openings.json")
+'''
+    if failure_point == "collection":
+        synthetic = 'raise RuntimeError("synthetic collection failure")\n' + synthetic
+    (tests / "test_gpt3_lot16_original_nine_whole_retention.py").write_text(
+        synthetic, encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTHONDONTWRITEBYTECODE="1")
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=30, check=False,
+    )
+    assert result.returncode != 0
+    assert f"GPT3_TRUSTED_PHASE={expected}" in result.stdout
+    assert result.stdout.count("GPT3_TRUSTED_PHASE=") == 1
