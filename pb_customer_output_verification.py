@@ -273,6 +273,22 @@ def _verify_row_lineage(
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} finish_system differs from signed original finish material"
             )
+        # The sealed source semantic key authenticates the FT code but does
+        # NOT sign a display-mode/version witness. A customer can rewrite both
+        # mutable metadata.element and its recomputable projection fingerprint.
+        # Therefore a generic caption cannot be accepted as a legacy positive:
+        # it is indistinguishable from a coded-to-generic downgrade. Require
+        # the exact signed FT code in both provenance and customer display.
+        producer_element = producer_metadata.get("element")
+        if (
+            type(producer_element) is not str
+            or producer_element != f"Floor finish area ({parts[2]})"
+            or type(row.get("element")) is not str
+            or row["element"] != producer_element
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} element differs from signed original finish code"
+            )
 
     # A signed source-closed quantity also authenticates its evidence status,
     # authority and confidence. A row that changes these claims while keeping
