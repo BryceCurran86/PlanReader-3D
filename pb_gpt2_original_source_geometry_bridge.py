@@ -1137,6 +1137,13 @@ class GPT2OriginalSourceGeometryBridge:
                 return blocked_label
             inside = []
             for line in rows:
+                # A word such as OFFICE can occur inside a service note as
+                # well as in the actual room label. Count only independently
+                # issued COMPLETE room-label lines, never word-token hits.
+                # All alternative canonical room labels remain competitors.
+                if (type(line.text) is not str
+                        or " ".join(line.text.casefold().split()) not in normalized):
+                    continue
                 raw_box = line.bbox
                 if (type(raw_box) not in (tuple, list)
                         or len(raw_box) != 4
