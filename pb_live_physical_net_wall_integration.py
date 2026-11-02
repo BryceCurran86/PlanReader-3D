@@ -131,6 +131,10 @@ class LivePhysicalNetWallClaim:
     # unsupported/ABSTAINED siblings). Shadow witness for downstream preflight;
     # it is NOT a published opening, measured quantity, or count.
     opening_area_replay_source_inventory: tuple[LiveCanonicalOpeningObject, ...] = ()
+    # Non-serializable, in-process original-source authority proof. Only the
+    # recovery producer can issue it; caller-created/serialized claims have
+    # None and cannot acquire mixed-snapshot sealing permission.
+    opening_area_replay_source_proof: object = None
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_dimension_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
