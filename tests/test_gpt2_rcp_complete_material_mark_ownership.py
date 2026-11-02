@@ -4,6 +4,7 @@ Pure source-neutral tests; no original PDF, takeoff, FIRM or frozen scores.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus as Status
@@ -19,7 +20,8 @@ ROOT = dict(
 )
 
 
-def _sources(rival_position="outside", *, reverse=False, malformed_rival=False):
+def _sources(rival_position="outside", *, reverse=False,
+             malformed_rival=False, bad_requested=None):
     definition_selector = semantic.SourceMaterialDefinitionSelector(
         **ROOT, code="GRID",
     )
@@ -43,6 +45,8 @@ def _sources(rival_position="outside", *, reverse=False, malformed_rival=False):
         raw_text="GRID", source_evidence_id="grid-original-word",
         source_text_observation_ids=("grid-original-text",),
     )
+    if bad_requested is not None:
+        marked = replace(marked, **bad_requested)
     other_box = {
         "inside": (50., 20., 60., 30.),
         "crossing": (95., 20., 105., 30.),
@@ -138,4 +142,38 @@ def test_invalid_caller_rcp_ring_cannot_become_ceiling_material_candidate(bad):
     )
     assert result["status"] == "rcp_finish_occurrence_source_unresolved"
     assert result["first_failure"] == "original_rcp_ink_polygon_invalid"
+    assert result["new_firm_quantities"] == 0
+
+
+
+@pytest.mark.parametrize(("changed", "reason"), [
+    ({"document_id": "foreign-document"}, "source_rcp_mark_ancestry_conflict"),
+    ({"record_id": " GRID-mark "}, "source_rcp_mark_ancestry_conflict"),
+    ({"source_text_observation_ids": ()}, "source_rcp_mark_ancestry_conflict"),
+    ({"source_text_observation_ids": ("word", "word")}, "source_rcp_mark_ancestry_conflict"),
+    ({"source_text_observation_ids": (" GRID ",)}, "source_rcp_mark_ancestry_conflict"),
+    ({"bbox_pdf_pts": (float("nan"), 20., 30., 30.)}, "original_rcp_mark_geometry_invalid"),
+    ({"bbox_pdf_pts": (20., 20., float("inf"), 30.)}, "original_rcp_mark_geometry_invalid"),
+    ({"bbox_pdf_pts": ("20", 20., 30., 30.)}, None),
+    ({"bbox_pdf_pts": (20., 20., 20., 30.)}, "original_rcp_mark_geometry_invalid"),
+    ({"bbox_pdf_pts": (20., 20., 30.)}, "original_rcp_mark_geometry_invalid"),
+])
+def test_requested_grid_mark_must_keep_own_original_document_text_and_bbox(
+    changed, reason,
+):
+    rcp, authority, definition_selector, occurrence_selector = _sources(
+        "outside", bad_requested=changed,
+    )
+    result = audit_original_rcp_source_finish_occurrence(
+        rcp, authority=authority,
+        definition_selector=definition_selector,
+        occurrence_selector=occurrence_selector,
+        original_finish_code="GRID",
+    )
+    if reason is not None:
+        assert result["first_failure"] == reason
+        assert result["status"] == "rcp_finish_occurrence_source_unresolved"
+    else:
+        # Numeric formatting alone is not physical scale authority.
+        assert result["status"] == "original_rcp_material_in_ceiling_ink_candidate"
     assert result["new_firm_quantities"] == 0
