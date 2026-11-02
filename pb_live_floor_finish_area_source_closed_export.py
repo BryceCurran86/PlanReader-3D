@@ -196,6 +196,26 @@ def build_live_floor_finish_area_source_traces(
                 f"{original.quantity_id}"
             )
 
+    # A source-authenticated FT2/FT3 material occurrence can precede W4
+    # finished wall-face and original doorway-threshold measurement. Such
+    # material-only source witnesses must NOT acquire FIRM floor area via
+    # generic handoff-only sealing or a mutable customer projection flag.
+    # Optional absent field remains valid for older original figured issuers.
+    for original in claim.floor_finish_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in original_metadata
+            and original_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original material-only receipt forbids "
+                f"commercial area publication: {original.quantity_id}"
+            )
+
     # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
     # Original material records can remain attached to an ABSTAINED quantity
     # even when its physical floor cannot yet be published. A positive floor
