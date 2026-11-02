@@ -1314,6 +1314,10 @@ class CrossViewFloorFinishProducer:
             # The source-closed exporter and customer authority both require
             # the same exact two distinct, non-padded, string source IDs.
             original_figured_axes = area_metadata.get("figured_dimension_ids")
+            issued_axis_pair = (
+                area_record.horizontal_dimension_id,
+                area_record.vertical_dimension_id,
+            )
             if (
                 type(original_figured_axes) not in (tuple, list)
                 or len(original_figured_axes) != 2
@@ -1324,6 +1328,18 @@ class CrossViewFloorFinishProducer:
                     for axis in original_figured_axes
                 )
                 or original_figured_axes[0] == original_figured_axes[1]
+                or any(
+                    type(axis) is not str
+                    or not axis
+                    or axis != axis.strip()
+                    for axis in issued_axis_pair
+                )
+                or issued_axis_pair[0] == issued_axis_pair[1]
+                # The exact source-owned horizontal and vertical dimensions
+                # must be the very IDs retained in quantity metadata. Merely
+                # having two well-typed foreign IDs is not original lineage.
+                or tuple(sorted(original_figured_axes))
+                != tuple(sorted(issued_axis_pair))
             ):
                 unresolved.add(floor.canonical_floor_id)
                 continue
