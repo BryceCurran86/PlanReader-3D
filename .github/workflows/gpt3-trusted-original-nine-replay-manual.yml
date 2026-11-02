@@ -191,7 +191,7 @@ jobs:
           {
             echo '### GPT3 source-positive release acceptance'
             echo "- Immutable exact code SHA: $GPT3_APPROVED_HEAD"
-            echo '- Original Lot16: source SHA/size verified by manifest provisioner and preflight'
+            echo '- Original Lot16: source SHA/size verified by provisioner and offline original acceptance'
             echo '- Both original 8/default and 9/explicit real source production runs: PASS'
             echo '- Full sealed and customer row bodies unchanged for old 8: PASS'
             echo '- New ninth distinct physical/snapshot and verified customer: PASS'
