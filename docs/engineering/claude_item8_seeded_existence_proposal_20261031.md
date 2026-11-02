@@ -194,10 +194,10 @@ differing ids into DISTINCT, or passing a caller allowlist.
   two selectors it already has for the historical and the new opening and ask the authority; it should never accept a
   receipt, an id list or an allowlist from a caller.
 - **Fields.** `receipt_id` (stable id of every other field); `status`; `partition` (`disjoint`, `partitioned`,
-  `same_record`, `overlapping_extent`, `unproven`, `not_applicable`); `basis` (`no_shared_source_members`,
-  `native_gap_intervals`, `raster_aperture_box`, `same_existence_record`); `reason_codes`; the two existence record ids;
+  `same_record`, `overlapping_extent`, `unproven`, `not_applicable`); `basis` (`native_aperture_extents`,
+  `raster_aperture_box`, `same_existence_record`; see section 12); `reason_codes`; the two existence record ids;
   document, revision, source hash, snapshot and page; each side's viewport; each side's source observation ids and the
-  shared ones; the compared extents (gap intervals along the shared face axis, or aperture boxes); and the producer
+  shared ones; the compared extents (along start, along end, depth low, depth high in the left structure's axes, or aperture boxes); and the producer
   method, version and generation of the left record. `grants_quantity` and `grants_firm_authority` are always False.
   `is_physically_distinct` is true only for CORROBORATED `disjoint` or `partitioned`.
 - **Determinism.** The two sides are ordered by existence record id, so the receipt and its id are identical for either
@@ -214,3 +214,34 @@ differing ids into DISTINCT, or passing a caller allowlist.
 - **Not proven.** No private source run exercises a shared-member pair, so the actual Lot16 a68/993 partition is not
   established; the composer integration and the downstream equal-roster veto are MAX-owned; the receipt covers pairs, not
   a roster-wide census.
+
+## 12. Physical extents decide, not source-observation ids (owner directive 2026-11-02)
+
+**Defect.** `compare_identity` and the receipt called any two records that share no source observation `disjoint` and
+DISTINCT without looking at geometry. Reproduced on the unchanged code: two CORROBORATED records of the same stretch of
+wall read from different lines (zero shared members, overlapping gap and depth) compared DISTINCT. A wall read twice, or
+duplicated linework with different observation ids, was therefore counted as two openings.
+
+**Rule (`_apertures_overlap`, `_source_member_partition_detail`).**
+- Same wall direction: the apertures overlap when their gaps overlap along the wall AND their depth bands overlap or
+  abut. Layers of one gap abut, so they overlap; consecutive gaps along one wall, and the same gap in a wall at another
+  depth, do not. Other directions: the oriented rectangles overlap in area. Raster records: their own aperture boxes.
+- Overlapping apertures are `overlapping_extent` (CONFLICT) whether or not they share a single observation.
+- Extents that cannot be read (no readable jamb-bounded frame, or a box on one side only) are `unproven` (ABSTAINED),
+  never distinct.
+- Apart and sharing nothing: `disjoint`. Apart and sharing wall support: `partitioned` only if every shared line is a
+  face piece outside both gaps; a shared jamb or cap, or a line that enters a gap, stays `unproven`.
+- Receipt: `basis` is `native_aperture_extents` or `raster_aperture_box`; native extents are four numbers. For
+  oriented rectangles in different directions the extents are empty.
+
+**Tests, written first** (`tests/test_physical_opening_identity_extents_v1.py`, 19 tests): the same wall read twice is
+CONFLICT in five poses, both authority modes and both orders, with an empty shared set; openings with nothing in
+common and separate extents stay DISTINCT in five poses; the same gap in a wall at another depth is two openings;
+unreadable extents are unproven; raster boxes decide with or without shared observations; and the overlap helper is
+tested directly (same stretch, consecutive gaps, depth-separated walls, reversed axes, perpendicular walls that cross
+and that are apart). Superseded assertions in the earlier identity and receipt tests were updated.
+
+**Standing limits.** A cavity wall drawn as two leaves at separated depths reads as two apertures even when one
+physical opening goes through both; no distance threshold is introduced to merge them. Two openings at one depth band
+whose gaps overlap are never DISTINCT here, even if the drawing really shows two overlapping openings; that is a
+CONFLICT for the owner, not a quantity.
