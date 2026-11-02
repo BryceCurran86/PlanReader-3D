@@ -402,16 +402,19 @@ def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
     assert _private_phase_diagnostic_is_source_safe(raw)
     assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
 
-def test_original_producer_reverifies_source_sha_inside_offline_pytest():
-    """No standalone preflight may replace the original test's source attestation."""
-    root = WORKFLOW.parents[2]
-    acceptance = (root / "tests/test_gpt3_lot16_original_nine_whole_retention.py").read_text(encoding="utf-8")
-    runner = (root / "tools/run_gpt3_lot16_original_sealed_score_input.py").read_text(encoding="utf-8")
-    requirements = (root / "requirements.txt").read_text(encoding="utf-8")
-    assert "original_sha = _verify_original_source(SOURCE, MANIFEST)" in acceptance
-    assert "old_receipt = run_original_lot16_sealed_handoff(SOURCE, old_dir)" in acceptance
-    assert "new_receipt = run_original_lot16_sealed_handoff(" in acceptance
-    assert 'sha = _verify_original_source(pdf, manifest_path)' in runner
-    assert 'digest = hashlib.sha256(pdf.read_bytes()).hexdigest()' in runner
-    assert 'if digest != original["sha256"]:' in runner
-    assert "PyMuPDF==1.28.0" in requirements.splitlines()
+def test_offline_original_replay_runs_immutable_approved_test_not_main_checkout():
+    """Public CI may check the pinned runner path, not read PR-absent files."""
+    steps = _load()["jobs"]["original"]["steps"]
+    guarded = steps[1]["run"]
+    execute = steps[4]["run"]
+    assert f"approved_head={APPROVED}" in guarded
+    assert f"approved_base={BASE}" in guarded
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in guarded
+    assert 'test -f "$target_tree/tests/test_gpt3_lot16_original_nine_whole_retention.py"' in guarded
+    assert 'test -f "$target_tree/tools/run_gpt3_lot16_original_sealed_score_input.py"' in guarded
+    assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in steps[2]["run"]
+    assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in execute
+    assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in execute
+    assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+    assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in execute
+    assert _isolated_private_source_contract(WORKFLOW.read_text(encoding="utf-8"))
