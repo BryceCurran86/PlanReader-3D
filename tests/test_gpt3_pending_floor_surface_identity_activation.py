@@ -167,6 +167,9 @@ def _inputs():
         "verified_takeoff_items": [{
             "item_id": "item-1",
             "denominator_eligible": True,
+            # Original source floor finish in this fixture is authenticated
+            # TILE, not a trade-neutral generic floor or an invented label.
+            "trade_category": "tiling",
             "expected_object_refs": ["object-1"],
             "unit": "m2",
         }],
@@ -273,6 +276,31 @@ def test_floor_surface_activation_rejects_frozen_source_ancestry_drift() -> None
     ]
     with pytest.raises(ValueError, match="source ancestry differs"):
         _activate(object_universe=universe)
+
+
+
+def test_previously_mapped_floor_area_does_not_block_independent_finish() -> None:
+    # A canonical physical floor can have separately source-owned area and
+    # finish-area families. The frozen item identity is still independently
+    # checked for the newly activated finish only.
+    sealed, rows, pending, active, manifest, universe, proof = _inputs()
+    active = deepcopy(active)
+    active["bindings"] = [{
+        "benchmark_item_id": "existing-independent-floor-area",
+        "production_family": "floor_area",
+        "production_object_identity_refs": ["floor-1"],
+    }]
+    mapped, receipt = _activate(active_identity_map_payload=active)
+    assert receipt["activated_count"] == 1
+    assert mapped["bindings"] == [
+        active["bindings"][0],
+        {
+            "benchmark_item_id": "item-1",
+            "production_family": "floor_finish_area",
+            "production_object_identity_refs": ["floor-1"],
+        },
+    ]
+
 
 
 def test_floor_surface_activation_rejects_duplicate_active_identity() -> None:

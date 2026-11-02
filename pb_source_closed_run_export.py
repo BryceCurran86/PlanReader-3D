@@ -236,6 +236,31 @@ def sealed_source_closed_run_from_dict(
     """
     if not isinstance(payload, Mapping):
         raise TypeError("sealed run payload must be a mapping")
+    # V1 seals sign a FIXED wire schema. A valid old fingerprint does not
+    # authenticate optional JSON fields such as snapshot_id, decision_scope_id,
+    # project trade, estimator approval or alleged benchmark score. Refuse
+    # those UNSIGNED extras rather than allowing another consumer to mistake
+    # their presence for producer-issued source authority. Optional future
+    # scope identifiers must be carried by a separately signed versioned
+    # supplement, never squeezed into the unchanged V1 signature.
+    run_wire_fields = frozenset({
+        "schema_version", "run_id", "project_id", "source_sha256s",
+        "revision_ids", "quantities", "fingerprint",
+    })
+    if set(payload) != run_wire_fields:
+        raise SourceClosedRunConflictError(
+            "sealed V1 run has missing or unsigned additional wire fields"
+        )
+    quantity_wire_fields = frozenset({
+        "schema_version", "project_id", "quantity_id", "family",
+        "semantic_key", "value", "unit", "status", "authority",
+        "confidence", "abstained", "document_id", "source_sha256",
+        "source_page", "viewport_id", "revision_id",
+        "object_identity_refs", "trace_canonical_entity_ids",
+        "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+        "reason_codes", "lineage_ok", "lineage_reason_codes",
+        "fingerprint",
+    })
     for field in ("schema_version", "run_id", "project_id", "fingerprint"):
         original = payload.get(field)
         if type(original) is not str or not original or original != original.strip():
@@ -275,6 +300,10 @@ def sealed_source_closed_run_from_dict(
         if not isinstance(raw, Mapping):
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
+            )
+        if set(raw) != quantity_wire_fields:
+            raise SourceClosedRunConflictError(
+                f"sealed V1 quantity {index} has missing or unsigned additional wire fields"
             )
         # Original source fields are canonical strings. Coercing 123 -> "123"
         # during rehydration can preserve the same normalized fingerprint,
@@ -526,6 +555,17 @@ def _build_sealed_run(
     # different exact sets. Index each identity under its family and semantic
     # key to prevent source-sealed commercial double counting.
     physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
+    # For an individually identified opening, changing the source semantic
+    # key ("door_area:" vs "window_area:", or two different typed row keys)
+    # cannot make the same physical opening into two separate AREA/count
+    # quantities. Distinct families remain legitimate: one AREA and one
+    # separately source-complete COUNT may coexist for the same opening.
+    opening_claims: dict[tuple[str, str], SealedSourceClosedQuantity] = {}
+    opening_kinds: dict[str, tuple[str, str]] = {}
+    # One actual source floor surface can have only one geometric floor_area
+    # measurement. Distinct floor_finish_area families/layers retain their
+    # own source ownership contract; do not collapse finish semantics here.
+    physical_floor_areas: dict[str, SealedSourceClosedQuantity] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -609,6 +649,56 @@ def _build_sealed_run(
             for identity in identities:
                 claimed_ids[identity] = row
 
+        if not row.abstained and identities and row.family in (
+            "opening_area", "opening_count",
+        ):
+            for physical_identity in identities:
+                opening_key = (row.family, physical_identity)
+                previous = opening_claims.get(opening_key)
+                if previous is not None:
+                    # A duplicate under the SAME semantic key was already
+                    # rejected above. Here it is a contradiction across
+                    # separately named rows for one physical opening.
+                    raise SourceClosedRunConflictError(
+                        "conflicting signed opening identity across semantic "
+                        f"keys: {previous.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {physical_identity!r}"
+                    )
+                opening_claims[opening_key] = row
+                typed_kind = None
+                for prefix, kind in (
+                    ("door_area:", "door"), ("window_area:", "window"),
+                    ("door_count:", "door"), ("window_count:", "window"),
+                ):
+                    if row.semantic_key.startswith(prefix):
+                        typed_kind = kind
+                        break
+                if typed_kind is not None:
+                    other_kind = opening_kinds.get(physical_identity)
+                    if other_kind is not None and other_kind[0] != typed_kind:
+                        raise SourceClosedRunConflictError(
+                            "contradictory source-owned door/window kind for "
+                            f"one physical opening {physical_identity!r}: "
+                            f"{other_kind[1]!r} vs {row.quantity_id!r}"
+                        )
+                    opening_kinds[physical_identity] = (
+                        typed_kind, row.quantity_id
+                    )
+        if not row.abstained and row.family == "floor_area":
+            if not identities:
+                raise SourceClosedRunConflictError(
+                    "source geometric floor area missing physical floor identity"
+                )
+            for identity in identities:
+                prior_floor = physical_floor_areas.get(identity)
+                if prior_floor is not None:
+                    raise SourceClosedRunConflictError(
+                        "same original physical floor area signed twice across "
+                        f"semantic keys: {prior_floor.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {identity!r}"
+                    )
+                physical_floor_areas[identity] = row
+
         normalized.append(row)
 
     normalized.sort(key=lambda row: row.quantity_id)
@@ -646,6 +736,13 @@ def seal_source_closed_run(
         raise SourceClosedRunConflictError("quantity ids must be unique")
 
     rows: list[SealedSourceClosedQuantity] = []
+    # V1 cannot persist a new snapshot field without breaking historical
+    # fingerprints. While ISSUING a NEW run, however, exact producer-owned
+    # snapshot metadata is available in memory. A document cannot silently
+    # mix two positive snapshot receipts under the same source/revision.
+    # Legacy quantities without a snapshot stay unproven; a separate
+    # producer-authenticated supplement is required to prove their scope.
+    issued_snapshots: dict[tuple[str, str, str], str] = {}
     for quantity in quantities:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("quantities must contain only QuantityEvidence records")
@@ -658,6 +755,41 @@ def seal_source_closed_run(
             raise SourceClosedRunConflictError(
                 f"quantity {quantity.quantity_id} belongs to project {trace.project_id}"
             )
+        meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        trace_meta = trace.metadata if isinstance(trace.metadata, Mapping) else {}
+        # Matching producer/trace snapshot receipts are independently held
+        # claims of the same source visibility scope. Neither may override
+        # a contradictory value from the other and slip into an old V1 seal.
+        q_snapshot = meta.get("snapshot_id") if "snapshot_id" in meta else None
+        t_snapshot = (
+            trace_meta.get("snapshot_id")
+            if "snapshot_id" in trace_meta else None
+        )
+        if "snapshot_id" in meta and "snapshot_id" in trace_meta:
+            if q_snapshot != t_snapshot or type(q_snapshot) is not str:
+                raise SourceClosedRunConflictError(
+                    "original quantity/trace snapshot receipts conflict"
+                )
+        if "snapshot_id" in meta or "snapshot_id" in trace_meta:
+            source_snapshot = (
+                q_snapshot if "snapshot_id" in meta else t_snapshot
+            )
+            if (
+                type(source_snapshot) is not str or not source_snapshot
+                or source_snapshot != source_snapshot.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "explicit original producer snapshot_id must be a canonical string"
+                )
+            document_scope = (
+                trace.document_id, trace.revision_id, trace.source_sha256
+            )
+            previous = issued_snapshots.get(document_scope)
+            if previous is not None and previous != source_snapshot:
+                raise SourceClosedRunConflictError(
+                    "conflicting explicit source snapshot receipts in one signed run"
+                )
+            issued_snapshots[document_scope] = source_snapshot
         rows.append(seal_source_closed_quantity(quantity, trace=trace))
 
     return _build_sealed_run(rows, project_id=clean_project_id)

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_quantity_takeoff_adapter import quantity_status_not_publishable
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     sealed_source_closed_run_from_dict,
@@ -108,22 +109,50 @@ def assess_append_only_signed_batch(
         return _failed(result, "NO_NEW_SIGNED_QUANTITIES")
 
     prior = {row.quantity_id for row in baseline.quantities}
-    seen_areas: set[tuple[str, ...]] = set()
+    # Legacy V1 archives may predate the producer's later duplicate-opening
+    # signature gate. A+B and B+C overlap physically even though their
+    # complete source-ref tuples differ and their semantic keys can differ.
+    # One measured AREA and one independently proven COUNT are separate
+    # source families; within each family, an original physical instance
+    # must occur at most once across the complete candidate signed universe.
+    opening_owners: dict[tuple[str, str], str] = {}
+    opening_kinds: dict[str, tuple[str, str]] = {}
     for row in candidate.quantities:
-        if row.family != "opening_area":
+        if row.family not in {"opening_area", "opening_count"} or row.abstained:
             continue
-        refs = tuple(sorted(row.object_identity_refs))
-        if not refs:
-            return _failed(result, "OPENING_AREA_PHYSICAL_IDENTITY_MISSING")
-        if refs in seen_areas:
-            return _failed(result, "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY")
-        seen_areas.add(refs)
+        if not row.object_identity_refs:
+            return _failed(result, "OPENING_PHYSICAL_IDENTITY_MISSING")
+        prefixes = (
+            (("door_area:", "door"), ("window_area:", "window"))
+            if row.family == "opening_area" else
+            (("door_count:", "door"), ("window_count:", "window"))
+        )
+        source_kind = next(
+            (kind for prefix, kind in prefixes if row.semantic_key.startswith(prefix)),
+            None,
+        )
+        for physical_id in row.object_identity_refs:
+            key = (row.family, physical_id)
+            if key in opening_owners:
+                return _failed(
+                    result, (
+                        "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY"
+                        if row.family == "opening_area"
+                        else "DUPLICATE_OPENING_COUNT_PHYSICAL_IDENTITY"
+                    )
+                )
+            opening_owners[key] = row.quantity_id
+            if source_kind is not None:
+                prior_kind = opening_kinds.get(physical_id)
+                if prior_kind is not None and prior_kind[0] != source_kind:
+                    return _failed(result, "CONFLICTING_ORIGINAL_OPENING_DOOR_WINDOW_KIND")
+                opening_kinds[physical_id] = (source_kind, row.quantity_id)
     new = [row for row in candidate.quantities if row.quantity_id not in prior]
     for row in new:
         if (
             row.abstained is not False
             or row.lineage_ok is not True
-            or row.status != "corroborated"
+            or quantity_status_not_publishable(row.status)
             or row.blocking_reasons
             or not row.object_identity_refs
         ):

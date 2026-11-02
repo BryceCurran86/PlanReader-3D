@@ -26,6 +26,7 @@ from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     SourceClosedRunConflictError,
+    combine_source_closed_runs,
     seal_source_closed_run,
 )
 
@@ -220,17 +221,114 @@ def build_live_opening_area_claim_source_traces(
     )
 
 
+def _seal_explicit_source_reproved_append_only_openings(
+    claim,
+    quantities: tuple[QuantityEvidence, ...],
+    traces: Mapping[str, CommercialTakeoffSourceTrace],
+    *,
+    project_id: str,
+) -> SealedSourceClosedRun:
+    """Seal two independently authenticated snapshot scopes without rewriting either.
+
+    This exception is only for a caller that explicitly ran the original-source
+    append-only physical/host/distinctness reproof. It does NOT weaken the
+    general issuer's one-document/one-snapshot-per-seal rule. Each scope is
+    sealed by the unchanged issuer, then the unchanged overlapping-physical,
+    semantic-kind, source-envelope and duplicate-quantity combiner adjudicates
+    the joint output. No source/quantity snapshot is rewritten or aliased.
+    """
+    if claim.opening_count_quantity_evidence or claim.quantity_m2 is not None:
+        raise SourceClosedRunConflictError(
+            "append-only area replay cannot carry a stale opening count or net-wall total"
+        )
+    objects = _opening_map(claim.canonical_openings)
+    scopes: list[tuple[str, list[QuantityEvidence]]] = []
+    source_root: tuple[str, str, str] | None = None
+    old_objects: list[LiveCanonicalOpeningObject] = []
+    new_objects: list[LiveCanonicalOpeningObject] = []
+    for quantity in quantities:
+        if len(quantity.input_entity_ids) != 1:
+            raise SourceClosedRunConflictError(
+                "append-only source-reproved area requires one real physical opening"
+            )
+        opening = objects.get(quantity.input_entity_ids[0])
+        snapshot = quantity.metadata.get("snapshot_id")
+        if (
+            opening is None
+            or type(snapshot) is not str
+            or not snapshot
+            or snapshot != snapshot.strip()
+            or opening.snapshot_id != snapshot
+        ):
+            raise SourceClosedRunConflictError(
+                "source-reproved opening snapshot does not match typed producer object"
+            )
+        root = (opening.document_id, opening.revision_id, opening.source_sha256)
+        if source_root is None:
+            source_root = root
+        elif root != source_root:
+            raise SourceClosedRunConflictError(
+                "source-reproved append-only openings have conflicting original source roots"
+            )
+        if not scopes or scopes[-1][0] != snapshot:
+            if any(prior == snapshot for prior, _ in scopes) or len(scopes) >= 2:
+                raise SourceClosedRunConflictError(
+                    "append-only source scopes must be original baseline followed by one fresh producer"
+                )
+            scopes.append((snapshot, []))
+        scopes[-1][1].append(quantity)
+        if len(scopes) == 1:
+            old_objects.append(opening)
+        else:
+            new_objects.append(opening)
+
+    if len(scopes) < 2:
+        return seal_source_closed_run(
+            quantities, project_id=project_id, traces_by_quantity_id=traces,
+        )
+    if not old_objects or not new_objects:
+        raise SourceClosedRunConflictError("source-reproved append has no original or new source scope")
+
+    # Reject even a different physical-ID string if a later snapshot copied
+    # precisely the same original observation, lineage and geometry receipt.
+    # The real producer performs full authority.compare_identity proof first.
+    for fresh in new_objects:
+        for prior in old_objects:
+            if (
+                fresh.physical_opening_id == prior.physical_opening_id
+                or (
+                    fresh.source_observation_ids == prior.source_observation_ids
+                    and fresh.source_lineage_root_ids == prior.source_lineage_root_ids
+                    and fresh.source_geometries == prior.source_geometries
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    "appended source scope reuses earlier physical opening or source support"
+                )
+
+    individually_sealed = tuple(
+        seal_source_closed_run(
+            group, project_id=project_id, traces_by_quantity_id=traces,
+        )
+        for _, group in scopes
+    )
+    return combine_source_closed_runs(individually_sealed, project_id=project_id)
+
+
 def seal_live_opening_area_claim_run(
     claim,
     *,
     workspace_id: int,
     project_id: str,
+    source_reproved_append_only: bool = False,
 ) -> SealedSourceClosedRun:
     """Seal opening areas already present on one final live production claim."""
     from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
+    if type(source_reproved_append_only) is not bool:
+        raise ValueError("source-reproved append-only sealing must be explicitly boolean")
     quantities = tuple(
         quantity
         for quantity in claim.opening_quantity_evidence
@@ -241,6 +339,10 @@ def seal_live_opening_area_claim_run(
         workspace_id=workspace_id,
         project_id=project_id,
     )
+    if source_reproved_append_only:
+        return _seal_explicit_source_reproved_append_only_openings(
+            claim, quantities, traces, project_id=project_id,
+        )
     return seal_source_closed_run(
         quantities,
         project_id=project_id,

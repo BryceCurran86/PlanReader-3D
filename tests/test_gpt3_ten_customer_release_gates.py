@@ -12,7 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
+    seal_source_closed_run,
+)
 from test_source_closed_run_export import quantity, trace
 from tools.diag_gpt3_ten_customer_release_gates import (
     inspect_ten_customer_release_gates,
@@ -123,17 +126,17 @@ def test_g05_nonfirm_status_remains_blocked_even_when_source_digests_are_valid(s
 
 
 def test_g06_two_alternative_semantic_claims_on_same_physical_opening_hold():
-    raw = _synthetic(
-        _pair("one", "door_area:physical-a"),
-        _pair("two", "window_area:physical-a"),
-    )
-    got = inspect_ten_customer_release_gates(
-        raw, [], expected_project_id="project-a",
-        expected_source_sha256s=["a" * 64], original_producer_status="COMPLETED",
-    )
-    assert got["cross_semantic_physical_review_count"] == 1
-    assert not got["gates"]["G06_cross_semantic_physical_review"]["passed"]
-    assert got["customer_release_approved"] is False
+    # The actual source-closed signer now rejects two conflicting AREA
+    # semantics before a fabricated double seal can reach G06 diagnostics.
+    # This earlier fail-closed issuer is stricter than downstream review.
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="conflicting signed opening identity",
+    ):
+        _synthetic(
+            _pair("one", "door_area:physical-a"),
+            _pair("two", "window_area:physical-a"),
+        )
 
 
 @pytest.mark.parametrize("damage", ["missing", "duplicate", "foreign", "identity_stripped"])

@@ -1,0 +1,29 @@
+name: GPT3 Append-only Original Opening Member Conflict
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/gpt3_source_append_only_batch_gate.py
+      - tests/test_gpt3_append_only_opening_member_overlap.py
+      - .github/workflows/test-gpt3-append-only-opening-members.yml
+permissions:
+  contents: read
+jobs:
+  legacy-signed-opening-physical-overlap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Append-only source duplicate overlap, customer parity and original signed eight
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_append_only_opening_member_overlap.py tests/test_gpt3_source_append_only_batch_gate.py
+          ruff check --select F821,F823 tools/gpt3_source_append_only_batch_gate.py tests/test_gpt3_append_only_opening_member_overlap.py

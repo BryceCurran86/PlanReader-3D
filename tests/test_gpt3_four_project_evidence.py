@@ -517,6 +517,10 @@ def test_genuine_floor_area_and_finished_floor_keep_distinct_allowed_trades():
         semantic_key = {
             "opening_area": "window_area:physical-source-id",
             "opening_count": "door_count:physical-source-id",
+            # Real signed floor-finish issuer owns canonical floor, original
+            # material code and verified finish role. Never use a generic
+            # "source-owned" alias as positive tiling source authority.
+            "floor_finish_area": "floor_finish_area:physical-source-id:FT3:tile",
         }.get(family, "source-owned")
         fixture = _family_mapping_fixture(
             family=family, trade=trade, semantic_key=semantic_key,

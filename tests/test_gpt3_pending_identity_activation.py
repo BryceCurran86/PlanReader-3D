@@ -320,6 +320,72 @@ def test_pending_item_must_retain_exact_frozen_object_relationship():
 
 
 
+
+def test_independent_opening_count_can_share_area_physical_identity(monkeypatch):
+    # Synthetic isolation of the pending AREA consumer: the real V1 loader
+    # and signed/customer verification remain exercised by the other tests.
+    # Do not mistake the in-memory extra count for issuer-authenticated data.
+    payload = _json("source_sealed_run.json")
+    rows = _json("verified_customer_rows.json")
+    original = module.sealed_source_closed_run_from_dict(payload)
+    verified = module.verify_sealed_customer_output(original, rows)
+    area = next(
+        row for row in original.quantities
+        if row.object_identity_refs == (PHYSICAL,)
+    )
+    assert area.family == "opening_area"
+    count = replace(
+        area,
+        quantity_id="synthetic-independent-count",
+        family="opening_count",
+        semantic_key="opening_count:synthetic-independent-mark",
+        value=1,
+        unit="ea",
+    )
+    both = replace(original, quantities=(*original.quantities, count))
+    monkeypatch.setattr(
+        module, "sealed_source_closed_run_from_dict", lambda _payload: both,
+    )
+    monkeypatch.setattr(
+        module, "verify_sealed_customer_output",
+        lambda *_args, **_kwargs: verified,
+    )
+    output, receipt = _activate(sealed=payload, rows=rows)
+    assert receipt["activated_count"] == 1
+    assert output["bindings"] == [{
+        "benchmark_item_id": ITEM,
+        "production_family": "opening_area",
+        "production_object_identity_refs": [PHYSICAL],
+    }]
+
+
+def test_competing_same_physical_area_still_fails_closed(monkeypatch):
+    payload = _json("source_sealed_run.json")
+    rows = _json("verified_customer_rows.json")
+    original = module.sealed_source_closed_run_from_dict(payload)
+    verified = module.verify_sealed_customer_output(original, rows)
+    area = next(
+        row for row in original.quantities
+        if row.object_identity_refs == (PHYSICAL,)
+    )
+    duplicate = replace(area, quantity_id="synthetic-duplicate-area")
+    conflicting = replace(
+        original, quantities=(*original.quantities, duplicate),
+    )
+    monkeypatch.setattr(
+        module, "sealed_source_closed_run_from_dict",
+        lambda _payload: conflicting,
+    )
+    monkeypatch.setattr(
+        module, "verify_sealed_customer_output",
+        lambda *_args, **_kwargs: verified,
+    )
+    with pytest.raises(
+        ValueError, match="multiple sealed opening areas claim one physical identity",
+    ):
+        _activate(sealed=payload, rows=rows)
+
+
 def test_sealed_opening_identity_rejects_wrong_quantity_family(monkeypatch):
     payload = _json("source_sealed_run.json")
     rows = _json("verified_customer_rows.json")
@@ -344,9 +410,11 @@ def test_sealed_opening_identity_rejects_wrong_quantity_family(monkeypatch):
         lambda *_args, **_kwargs: verified,
     )
 
+    # A source-tampered floor_area is not eligible as opening_area at the
+    # FIRST pre-certified opening gate; do not weaken that earlier veto.
     with pytest.raises(
         ValueError,
-        match="family does not match source-proven opening family",
+        match="no pre-certified identity is newly sealed",
     ):
         _activate(sealed=payload, rows=rows)
 

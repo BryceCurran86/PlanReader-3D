@@ -59,26 +59,13 @@ def _run(*entries):
     )
 
 
-def test_same_source_opening_alternative_door_window_semantics_is_review_only():
-    run = _run(
-        _pair("one", "opening_area", "door_area", ("physical-opening-a",), value=3.0),
-        _pair("two", "opening_area", "window_area", ("physical-opening-a",), value=4.0),
-    )
-    audit = audit_cross_semantic_physical_claims(run)
-    assert audit["review_group_count"] == 1
-    flag = audit["cross_semantic_overlap_groups"][0]
-    assert flag["family"] == "opening_area"
-    assert flag["quantity_ids"] == ["one", "two"]
-    assert flag["semantic_keys"] == ["door_area", "window_area"]
-    assert flag["source_envelope_count"] == 1
-    assert flag["first_gate"] == "SOURCE_OWNED_SEMANTIC_CLAIM_EQUIVALENCE_UNPROVEN"
-    assert flag["commercial_decision"] == "ABSTAIN_REVIEW_ONLY"
-    assert "physical-opening-a" not in json.dumps(audit)
-    assert audit["source_issuer_equivalence_authenticated"] is False
-    assert audit["duplicate_claim_removed"] is False
-    assert audit["customer_output_approval_granted"] is False
-    assert audit["benchmark_score_granted"] is False
-
+def test_same_source_opening_alternative_door_window_semantics_rejected_by_new_issuer():
+    # Diagnostic readers cannot mint impossible source-signed history.
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _run(
+            _pair("one", "opening_area", "door_area", ("physical-opening-a",), value=3.0),
+            _pair("two", "opening_area", "window_area", ("physical-opening-a",), value=4.0),
+        )
 
 def test_same_room_different_family_floor_and_ceiling_remains_independent():
     run = _run(
@@ -111,49 +98,47 @@ def test_distinct_finish_subsystems_on_one_exact_room_are_flagged_not_deleted():
     assert got["duplicate_claim_removed"] is False
 
 
-def test_partially_overlapping_physical_parent_sets_are_found_without_guessing():
-    run = _run(
-        _pair("part-a", "opening_area", "door_area", ("a", "shared")),
-        _pair("part-b", "opening_area", "window_area", ("b", "shared")),
-    )
-    got = audit_cross_semantic_physical_claims(run)
-    assert got["review_group_count"] == 1
-    assert got["cross_semantic_overlap_groups"][0]["quantity_ids"] == [
-        "part-a", "part-b",
-    ]
+def test_partially_overlapping_opening_parent_sets_rejected_before_shadow():
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _run(
+            _pair("part-a", "opening_area", "door_area", ("a", "shared")),
+            _pair("part-b", "opening_area", "window_area", ("b", "shared")),
+        )
 
+def test_separate_document_envelopes_cannot_double_sign_one_physical_opening():
+    # A cross-document source claim is not license to publish a duplicate.
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _run(
+            _pair("old", "opening_area", "door_area", ("p-one",)),
+            _pair("new", "opening_area", "window_area", ("p-one",),
+                  sha="b" * 64, document="doc-b", revision="rev-b"),
+        )
 
-def test_separate_document_source_envelopes_are_review_not_auto_identity():
-    run = _run(
-        _pair("old", "opening_area", "door_area", ("p-one",)),
-        _pair("new", "opening_area", "window_area", ("p-one",),
-              sha="b" * 64, document="doc-b", revision="rev-b"),
-    )
-    group = audit_cross_semantic_physical_claims(run)["cross_semantic_overlap_groups"][0]
-    assert group["source_envelope_count"] == 2
-    assert group["cross_source_envelope_review"] is True
-    assert group["commercial_decision"] == "ABSTAIN_REVIEW_ONLY"
-
-
-def test_abstention_or_unfirm_row_does_not_create_a_false_firm_overlap():
+def test_abstained_opening_alternative_is_excluded_from_source_claims():
     run = _run(
         _pair("firm", "opening_area", "door_area", ("p-one",)),
         _pair("abstained", "opening_area", "window_area", ("p-one",),
               abstained=True),
-        _pair("review", "opening_area", "skylight_area", ("p-one",),
-              status="review_required"),
     )
     audit = audit_cross_semantic_physical_claims(run)
     assert audit["considered_firm_or_corroborated_rows"] == 1
-    assert audit["excluded_unfirm_or_abstained_quantity_ids"] == [
-        "abstained", "review",
-    ]
+    assert audit["excluded_unfirm_or_abstained_quantity_ids"] == ["abstained"]
     assert audit["review_group_count"] == 0
 
 
+def test_unfirm_but_nonabstained_review_row_cannot_double_sign_physical_opening():
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _run(
+            _pair("firm", "opening_area", "door_area", ("p-one",)),
+            _pair("review", "opening_area", "skylight_area", ("p-one",),
+                  status="review_required"),
+        )
+
 def test_diagnostic_is_deterministic_input_order_invariant_and_no_mutation():
+    # Determinism is assessed on source-valid distinct physical claims, not
+    # by minting an invalid duplicate-signature receipt for a shadow reader.
     entries = [
-        _pair("two", "opening_area", "window_area", ("p-one",)),
+        _pair("two", "opening_area", "window_area", ("p-three",)),
         _pair("three", "opening_area", "door_area", ("p-two",)),
         _pair("one", "opening_area", "door_area", ("p-one",)),
     ]
@@ -162,8 +147,16 @@ def test_diagnostic_is_deterministic_input_order_invariant_and_no_mutation():
     expected = audit_cross_semantic_physical_claims(first)
     assert audit_cross_semantic_physical_claims(_run(*reversed(entries))) == expected
     assert first.to_dict() == before
-    assert expected["review_group_count"] == 1
+    assert expected["review_group_count"] == 0
 
+
+def test_independent_door_area_and_complete_count_are_distinct_source_families():
+    run = _run(
+        _pair("area", "opening_area", "door_area:opening-one", ("opening-one",), value=2.0),
+        _pair("count", "opening_count", "door_count:opening-one", ("opening-one",), value=1.0),
+    )
+    assert len(run.quantities) == 2
+    assert audit_cross_semantic_physical_claims(run)["review_group_count"] == 0
 
 def test_existing_same_semantic_double_count_is_still_rejected_by_v1_sealer():
     with pytest.raises(SourceClosedRunConflictError, match="sealed physical claim"):

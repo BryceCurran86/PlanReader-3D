@@ -19,6 +19,16 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
+from tools.report_gpt3_four_project_evidence import (
+    _read_json_without_duplicate_keys,
+)
+from tools.gpt3_atomic_pending_activation_pair import (
+    preflight_new_activation_pair, source_input_snapshot,
+    publish_new_activation_pair, read_committed_active_identity_map,
+)
 # tests/benchmarks is also a top-level package named "benchmarks". Load the
 # actual frozen full_plan_v2 package under a private alias, matching the
 # repository's exact reconciliation runner, so pytest collection cannot resolve
@@ -48,14 +58,16 @@ SCHEMA_VERSION = "1.0.0"
 
 
 def _object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    # The same strict reader as the guarded scorer: a duplicate JSON key would
+    # otherwise silently keep the last claim before any source/identity proof.
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, dict):
         raise TypeError(f"{path} must contain a JSON object")
     return value
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, list) or any(
         not isinstance(row, dict) for row in value
     ):
@@ -420,14 +432,20 @@ def build_activation(
     active_items = {
         binding.benchmark_item_id for binding in active.bindings
     }
+    # A physical opening can legitimately carry an independently sealed
+    # opening_count AND opening_area. Only area claims compete for this
+    # area's pending benchmark identity; never promote the count as an area.
     active_physical = {
         ref
         for binding in active.bindings
+        if binding.production_family == "opening_area"
         for ref in binding.production_object_identity_refs
     }
 
     sealed_by_physical = {}
     for quantity in sealed.quantities:
+        if quantity.family != "opening_area":
+            continue
         if quantity.abstained or not quantity.lineage_ok:
             continue
         refs = tuple(quantity.object_identity_refs)
@@ -436,7 +454,7 @@ def build_activation(
         physical = refs[0]
         if physical in sealed_by_physical:
             raise ValueError(
-                "multiple sealed quantities claim one physical identity"
+                "multiple sealed opening areas claim one physical identity"
             )
         sealed_by_physical[physical] = quantity
 
@@ -519,6 +537,14 @@ def build_activation(
 
     # Reparse to enforce identity-map schema and uniqueness before publish.
     identity_map_from_dict(output)
+    # An original physical WINDOW must never become a benchmark DOOR through
+    # an independently prepared source identity activation. This is checked
+    # before the CLI's atomic create-only map-and-receipt publisher runs.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
@@ -558,6 +584,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         required=True,
     )
+    parser.add_argument("--active-identity-receipt", type=Path)
     parser.add_argument(
         "--source-manifest",
         type=Path,
@@ -584,34 +611,34 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
     )
     args = parser.parse_args(argv)
+    inputs = (
+        args.pending_ledger, args.sealed_run, args.customer_rows,
+        args.active_identity_map, args.source_manifest,
+        args.source_identity_proof, args.object_universe,
+    )
+    if args.active_identity_receipt is not None:
+        inputs += (args.active_identity_receipt,)
+    outputs = (args.output_map, args.output_receipt)
+    # Source and frozen collisions must be caught BEFORE reading any untrusted
+    # source/identity content, never after a signed handoff has been built.
+    preflight_new_activation_pair(outputs, inputs=inputs)
+    before = source_input_snapshot(inputs)
 
     output, receipt = build_activation(
         pending_ledger=_object(args.pending_ledger),
         sealed_run_payload=_object(args.sealed_run),
         customer_rows=_rows(args.customer_rows),
-        active_identity_map_payload=_object(
-            args.active_identity_map
+        active_identity_map_payload=read_committed_active_identity_map(
+            args.active_identity_map, receipt_path=args.active_identity_receipt,
         ),
         source_manifest=_object(args.source_manifest),
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),
     )
 
-    args.output_map.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    args.output_receipt.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    args.output_map.write_text(
-        json.dumps(output, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    args.output_receipt.write_text(
-        json.dumps(receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    publish_new_activation_pair(
+        outputs, (output, receipt),
+        inputs=inputs, source_snapshot=before,
     )
     print(json.dumps(receipt, sort_keys=True))
     return 0
