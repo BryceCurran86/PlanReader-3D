@@ -858,6 +858,68 @@ class GPT2OriginalSourceGeometryBridge:
                 or source_floor_rcp_correspondence.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_floor_to_RCP_original_root_mismatch")
+        # A copied RCP polygon and a matching SHA are not proof of printed
+        # A120 boundary ink. Reissue the EXACT named native edges through the
+        # immutable SourceVisibilityProducer, BEFORE allowing any material
+        # occurrence or W4 issuer to examine caller-owned geometry.
+        blocked_ink = {
+            "status": "source_RCP_ink_issuer_not_replayable",
+            "first_failure": "original_A120_source_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        if type(original_rcp_ink) is not dict:
+            return blocked_ink
+        ink_page = original_rcp_ink.get("original_rcp_page")
+        ink_view = original_rcp_ink.get("original_rcp_viewport_id")
+        graph = original_rcp_ink.get("source_boundary_graph")
+        borders = graph.get("original_native_edge_ids") if type(graph) is dict else None
+        original_grid = original_rcp_ink.get("original_grid_source_ink_candidates")
+        if (
+            type(ink_page) is not int or ink_page == original_floor_page_1_based
+            or ink_page < 1
+            or type(ink_view) is not str or not ink_view or ink_view != ink_view.strip()
+            or type(borders) is not tuple or not 3 <= len(borders) <= 20000
+            or any(type(v) is not str or not v or v != v.strip() for v in borders)
+            or len(set(borders)) != len(borders)
+            or type(original_grid) is not tuple or len(original_grid) > 20000
+        ):
+            return blocked_ink
+        grid_ids = tuple(
+            row.get("native_source_id") if type(row) is dict else None
+            for row in original_grid
+        )
+        if (
+            any(type(v) is not str or not v or v != v.strip() for v in grid_ids)
+            or len(set(grid_ids)) != len(grid_ids)
+            or set(grid_ids).intersection(borders)
+            or original_rcp_ink.get("original_source_sha256") !=
+                published.revision.source_sha256
+            or original_rcp_ink.get("original_document_id") !=
+                published.revision.document_id
+            or original_rcp_ink.get("original_revision_id") != revision_id
+            or original_rcp_ink.get("original_snapshot_id") !=
+                published.snapshot.snapshot_id
+        ):
+            return blocked_ink
+        try:
+            # The source producer itself checks F07's authentic RCP viewport,
+            # complete selected native ink, source root, and metric-free ring.
+            actual_ink = self.original_rcp_ink_graph(
+                revision_id=revision_id, page_1_based=ink_page,
+                viewport_id=ink_view, source_boundary_edge_ids=borders,
+                original_source_grid_edge_ids=grid_ids,
+            )
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError, RuntimeError):
+            return blocked_ink
+        if (
+            type(actual_ink) is not dict
+            or actual_ink.get("status") !=
+                "original_rcp_source_ink_ceiling_polygon_candidate"
+            or actual_ink != original_rcp_ink
+        ):
+            return blocked_ink
+
         # Source issue is independently repeated from the original,
         # producer-sealed A120 RCP mark and material definition. A copied
         # dict cannot supply source-verified ceiling material ownership.
