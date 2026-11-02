@@ -1293,7 +1293,8 @@ class GPT2OriginalSourceGeometryBridge:
                     "new_firm_quantities":0}
         actual_gpt1=audit_gpt2_w4_material_to_gpt1(w4,actual_material)
         if (type(actual_gpt1) is not dict
-                or actual_gpt1.get("status")!="gpt2_source_to_gpt1_candidate_only"
+                or actual_gpt1.get("status")!=
+                    "gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
                 or actual_gpt1.get("new_firm_quantities")!=0):
             return {
                 "status":"source_W4_FT_handoff_abstained",
