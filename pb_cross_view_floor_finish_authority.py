@@ -1308,20 +1308,26 @@ class CrossViewFloorFinishProducer:
                 if isinstance(area_record.area_evidence.metadata, Mapping)
                 else {}
             )
-            figured_dimension_ids = tuple(
-                sorted(
-                    {
-                        _clean(value)
-                        for value in (
-                            area_metadata.get("figured_dimension_ids") or ()
-                        )
-                        if _clean(value)
-                    }
+            # Preserve the original figured-axis census exactly. Cleaning,
+            # set-deduplicating or dropping a third source token can turn an
+            # ambiguous dimension inventory into an apparently FIRM area.
+            # The source-closed exporter and customer authority both require
+            # the same exact two distinct, non-padded, string source IDs.
+            original_figured_axes = area_metadata.get("figured_dimension_ids")
+            if (
+                type(original_figured_axes) not in (tuple, list)
+                or len(original_figured_axes) != 2
+                or any(
+                    type(axis) is not str
+                    or not axis
+                    or axis != axis.strip()
+                    for axis in original_figured_axes
                 )
-            )
-            if len(figured_dimension_ids) != 2:
+                or original_figured_axes[0] == original_figured_axes[1]
+            ):
                 unresolved.add(floor.canonical_floor_id)
                 continue
+            figured_dimension_ids = tuple(sorted(original_figured_axes))
 
             evidence_ids = tuple(
                 dict.fromkeys(
