@@ -646,3 +646,61 @@ def test_foreign_invalid_source_mark_cannot_leave_ft3_uniquely_registered(
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
     assert result.records == ()
+
+
+
+def test_overlap_of_independent_original_floor_boxes_vetoes_both_source_owners():
+    # Identical PDF box geometry cannot become two differently rekeyed
+    # source-authenticated rooms via a false caller overlap=0 hint.
+    box=(251.04,1382.72,394.80,1585.04)
+    rows=[
+        {
+            "dimension_box_pdf_pts":box, "canonical_floor_id":"floor-one",
+            "physical_room_id":"room-one", "source_room_face_record_id":"face-one",
+            "other_labelled_boxes_overlapping":0,
+        },
+        {
+            "dimension_box_pdf_pts":box, "canonical_floor_id":"floor-two",
+            "physical_room_id":"room-two", "source_room_face_record_id":"face-two",
+            "other_labelled_boxes_overlapping":0,
+        },
+    ]
+    mark={"x":327.8,"y":1437.5,"code":"FT3","registered_region":True}
+    result=SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=rows, marks=[mark],
+    )
+    assert len(result.records)==2
+    assert all(r.status is EvidenceResolutionStatus.ABSTAINED for r in result.records)
+    assert all(OVERLAPPING_MEASURED_BOXES in r.reason_codes for r in result.records)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+@pytest.mark.parametrize("bad_box", [
+    None, (2.,2.,2.,30.), (20.,30.,10.,40.),
+    (float("nan"),0.,10.,10.), (True,0.,10.,10.),
+    ("0",0.,10.,10.), (2**54,0.,10.,10.),
+])
+def test_invalid_competing_measured_box_does_not_disappear_before_ft3_selection(
+    bad_box,
+):
+    valid={
+        "dimension_box_pdf_pts":(251.04,1382.72,394.80,1585.04),
+        "canonical_floor_id":"original-office-floor",
+        "physical_room_id":"original-office",
+        "source_room_face_record_id":"original-office-face",
+    }
+    invalid={
+        **valid, "dimension_box_pdf_pts":bad_box,
+        "canonical_floor_id":"competing-floor",
+        "physical_room_id":"competing-room",
+        "source_room_face_record_id":"competing-face",
+    }
+    result=SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=[valid,invalid],
+        marks=[{"x":327.8,"y":1437.5,"code":"FT3","registered_region":True}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OVERLAPPING_MEASURED_BOXES in result.reason_codes
+    assert result.records==()
