@@ -312,6 +312,20 @@ def _matching_floor(
         return None
     if _clean(metadata.get("room_revision_id")) != floor.revision_id:
         return None
+    # Geometry and figured room area must retain the SAME original room
+    # snapshot. A distinct material-plan snapshot is allowed later, but it
+    # cannot rebind another room-area receipt to a canonical physical floor.
+    original_room_snapshot = metadata.get("room_snapshot_id")
+    if (
+        type(original_room_snapshot) is not str
+        or not original_room_snapshot
+        or original_room_snapshot != original_room_snapshot.strip()
+        or type(floor.snapshot_id) is not str
+        or not floor.snapshot_id
+        or floor.snapshot_id != floor.snapshot_id.strip()
+        or original_room_snapshot != floor.snapshot_id
+    ):
+        return None
     return floor
 
 
