@@ -37,13 +37,18 @@ def _cross():
 
 def _floor():
     return {
+        "status": "original_closed_ink_ring_candidates_only",
         "source_sha256": SHA,
         "page_1_based": 7,
         "original_native_edge_ids": FLOOR_EDGES,
         "native_candidate_ring_count": 1,
         "interior_stroke_intersections_and_overlaps": (),
         "native_components": ({
-            "source_simple_ring_candidate": {"vertices_pdf_pts": POLYGON},
+            "source_edge_ids": FLOOR_EDGES,
+            "source_simple_ring_candidate": {
+                "vertices_pdf_pts": POLYGON,
+                "source_edge_ids": FLOOR_EDGES,
+            },
         },),
     }
 
@@ -300,8 +305,23 @@ def test_unsealed_or_forged_floor_rcp_registration_abstains_before_material(
 
 
 @pytest.mark.parametrize("mutation", [
+    {"status": "original_source_branches_or_open_ends"},
     {"source_sha256": "b"*64},
     {"page_1_based": 11},
+    {"native_components": ({
+        "source_edge_ids": FLOOR_EDGES[:-1],
+        "source_simple_ring_candidate": {
+            "vertices_pdf_pts": POLYGON,
+            "source_edge_ids": FLOOR_EDGES,
+        },
+    },)},
+    {"native_components": ({
+        "source_edge_ids": FLOOR_EDGES,
+        "source_simple_ring_candidate": {
+            "vertices_pdf_pts": POLYGON,
+            "source_edge_ids": FLOOR_EDGES[:-1],
+        },
+    },)},
     {"original_native_edge_ids": FLOOR_EDGES[:-1]},
     {"original_native_edge_ids": FLOOR_EDGES + ("f0",)},
     {"original_native_edge_ids": tuple(reversed(FLOOR_EDGES)) + ("f5",)},
