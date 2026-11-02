@@ -524,3 +524,137 @@ def test_source_review_note_alone_does_not_mint_office_identity(monkeypatch):
     result,_=_call(monkeypatch,native_room_lines=(note,))
     assert result["status"] == "source_RCP_room_label_region_not_authenticated"
     assert result["new_firm_quantities"] == 0
+
+
+OPEN_FLOOR_IDS = ("f0","f1","f2","f3","f4")
+OPEN_SECOND_IDS = ("s0","s1","s2")
+
+
+def _open_floor_graph():
+    strokes=(
+        ("f0",((20.,20.),(120.,20.))),
+        ("f1",((20.,20.),(20.,120.))),
+        ("f2",((120.,20.),(120.,120.))),
+        ("f3",((20.,120.),(60.,120.))),
+        ("f4",((80.,120.),(120.,120.))),
+    )
+    nodes=(
+        ((20.,20.),2),((20.,120.),2),((60.,120.),1),
+        ((80.,120.),1),((120.,20.),2),((120.,120.),2),
+    )
+    return {
+        "status":"original_source_branches_or_open_ends",
+        "source_sha256":SHA,
+        "page_1_based":7,
+        "original_native_edge_ids":OPEN_FLOOR_IDS,
+        "native_candidate_ring_count":0,
+        "interior_stroke_intersections_and_overlaps":(),
+        "original_native_edges":tuple(
+            {"source_id":ident,"endpoints_pdf_pts":coords}
+            for ident,coords in strokes
+        ),
+        "native_components":({
+            "source_edge_ids":OPEN_FLOOR_IDS,
+            "source_simple_ring_candidate":None,
+            "source_branch_coordinates_pdf_pts":(),
+            "source_open_endpoint_coordinates_pdf_pts":(
+                (60.,120.),(80.,120.),
+            ),
+            "native_endpoint_degrees":tuple(
+                {"point_pdf_pt":xy,"degree":degree}
+                for xy,degree in nodes
+            ),
+        },),
+    }
+
+
+def _open_ancestry():
+    return {
+        "status":"original_doorway_all_printed_wall_strokes_match_candidate",
+        "original_source_sha256":SHA,
+        "source_document_id":"doc",
+        "source_revision_id":"rev",
+        "source_snapshot_id":"snap",
+        "floor_source_graph":{"original_native_edge_ids":OPEN_FLOOR_IDS},
+        "second_plan_source_graph":{"original_native_edge_ids":OPEN_SECOND_IDS},
+    }
+
+
+def _open_request(ancestry=None):
+    return {
+        "original_second_page_1_based":11,
+        "original_second_source_edge_ids":OPEN_SECOND_IDS,
+        "source_floor_to_second_translation_pdf_pts":(78.,0.),
+        "claimed_reissued_ancestry":(
+            _open_ancestry() if ancestry is None else ancestry
+        ),
+    }
+
+
+def _call_with_open_floor(monkeypatch, *, graph=None, request=None, actual=None,
+                          full_page_ink=True, cross=None):
+    registered=_cross() if cross is None else cross
+    registered["original_floor_source_ids"]=OPEN_FLOOR_IDS
+    return _call(
+        monkeypatch,cross=registered,
+        issued_floor=_open_floor_graph() if graph is None else graph,
+        open_floor=_open_request() if request is None else request,
+        issued_open_ancestry=_open_ancestry() if actual is None else actual,
+        painted_gap_inventory_complete=full_page_ink,
+    )
+
+
+def test_unchanged_original_open_floor_ring_to_closed_rcp_reaches_source_only_w4(
+    monkeypatch,
+):
+    result,events=_call_with_open_floor(monkeypatch)
+    assert result["status"]=="source_W4_original_A120_ceiling_compilation_shadow_only"
+    assert "reissue_original_open_doorway" in [v[0] for v in events]
+    assert [v[1] for v in events if v[0]=="replay_full_gap_ink"]==[7,11]
+    assert result["source_ceiling_area_m2"] is None
+    assert result["new_firm_quantities"]==0
+
+
+def test_open_original_floor_d15_without_explicit_original_replay_abstains(
+    monkeypatch,
+):
+    cross=_cross()
+    cross["original_floor_source_ids"]=OPEN_FLOOR_IDS
+    result,events=_call(
+        monkeypatch,cross=cross,issued_floor=_open_floor_graph(),
+    )
+    assert result["status"]=="source_floor_RCP_registration_issuer_not_replayable"
+    assert "material" not in [v[0] for v in events]
+    assert result["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("kind",[
+    "caller_ancestry_changed","original_ancestry_negative",
+    "painted_gap_incomplete","wrong_other_page","fake_floor_source_ids",
+])
+def test_open_doorway_without_original_full_ink_and_competitor_proof_abstains(
+    monkeypatch,kind,
+):
+    request=_open_request()
+    actual=_open_ancestry()
+    graph=_open_floor_graph()
+    complete=True
+    if kind=="caller_ancestry_changed":
+        request["claimed_reissued_ancestry"]["source_snapshot_id"]="stale-snapshot"
+    elif kind=="original_ancestry_negative":
+        actual["status"]="original_doorway_source_endpoint_rival_conflict"
+        request["claimed_reissued_ancestry"]["status"]=actual["status"]
+    elif kind=="painted_gap_incomplete":
+        complete=False
+    elif kind=="wrong_other_page":
+        request["original_second_page_1_based"]=9
+    elif kind=="fake_floor_source_ids":
+        graph["original_native_edges"][2]["source_id"]="unknown-edge"
+    result,events=_call_with_open_floor(
+        monkeypatch,graph=graph,request=request,actual=actual,
+        full_page_ink=complete,
+    )
+    assert result["status"]=="source_floor_RCP_registration_issuer_not_replayable"
+    assert "material" not in [v[0] for v in events]
+    assert result["source_ceiling_area_m2"] is None
+    assert result["new_firm_quantities"]==0
