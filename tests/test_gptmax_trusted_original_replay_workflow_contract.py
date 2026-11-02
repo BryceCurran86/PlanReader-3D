@@ -258,10 +258,12 @@ def test_private_test_token_only_in_one_trusted_stage_and_manifest_provisioner()
     assert '--repository "$SOURCE_TEST_REPOSITORY" --ref "$SOURCE_TEST_REF"' in stage["run"]
     assert "--allow-missing false" in stage["run"]
     provision = next(step for step in steps if step.get("name", "").startswith("Provision original"))
-    assert provision["run"].count("python3 .github/actions/provision-original-sources/provision.py") == 1
+    assert provision["uses"] == "./.github/actions/provision-original-sources"
+    assert "run" not in provision
+    assert set(provision["with"]) == {"names", "allow-missing"}
+    assert provision["with"]["allow-missing"] == "false"
+    assert provision["with"]["names"] == "1. Construction Plans - Lot 16 Power (REV E).pdf"
     assert "secrets." not in str(provision) and "ORIGINAL_SOURCES_TOKEN" not in str(provision)
-    assert "--allow-missing false" in provision["run"]
-    assert provision["run"].count("1. Construction Plans - Lot 16 Power (REV E).pdf") == 1
     assert steps.index(stage) < steps.index(provision)
     source = WORKFLOW.read_text(encoding="utf-8")
     assert source.count("secrets.ORIGINAL_SOURCES_TOKEN") == 1
@@ -368,7 +370,9 @@ def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
     stage_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Stage immutable private"))
     assert build_index < stage_index < provision_index
     assert 'ORIGINAL_SOURCES_TOKEN="$SOURCE_TEST_TOKEN"' in steps[stage_index]["run"]
-    assert "python3 .github/actions/provision-original-sources/provision.py" in steps[provision_index]["run"]
+    assert steps[provision_index]["uses"] == "./.github/actions/provision-original-sources"
+    assert steps[provision_index]["with"]["allow-missing"] == "false"
+    assert "token" not in steps[provision_index]["with"]
     assert "secrets.ORIGINAL_SOURCES_TOKEN" not in str(steps[provision_index])
     for step in steps[provision_index + 1:]:
         script = step.get("run", "")
