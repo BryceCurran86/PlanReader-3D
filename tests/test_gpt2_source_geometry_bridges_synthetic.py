@@ -180,11 +180,13 @@ def test_competing_original_rcp_grid_lines_not_issued_to_two_zones():
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-@pytest.mark.parametrize("rival_position", ["inside", "crossing", "outside"])
+@pytest.mark.parametrize("rival_position", ["inside", "crossing", "touch_inside", "touch_outside", "outside"])
+@pytest.mark.parametrize("rival_code", ["FT2", "FT3"])
+@pytest.mark.parametrize("primary_touches_boundary", [False, True])
 def test_source_material_handoff_keeps_all_other_finish_code_rivals(
-    reverse, rival_position,
+    reverse, rival_position, rival_code, primary_touches_boundary,
 ):
-    """A viewport-scoped original FT3 result cannot hide an in-room FT2."""
+    """Same/different-code source marks touching a room edge remain rivals."""
     from pb_migration_contracts import EvidenceResolutionStatus as Status
     import pb_source_material_semantic_authority as semantic
 
@@ -212,22 +214,26 @@ def test_source_material_handoff_keeps_all_other_finish_code_rivals(
         page_id="11", viewport_id="source-finish-plan",
         code="FT3", semantic_finish="tile",
         definition_record_id=definition.record_id,
-        bbox_pdf_pts=(20.,20.,30.,30.),
+        bbox_pdf_pts=((0.,20.,10.,30.) if primary_touches_boundary
+                      else (20.,20.,30.,30.)),
         raw_text="FT3",source_evidence_id="source-text-ft3",
         source_text_observation_ids=("source-word-ft3",),
     )
     rival_rect={
         "inside":(50.,20.,60.,30.),
         "crossing":(95.,20.,105.,30.),
+        "touch_inside":(90.,20.,100.,30.),
+        "touch_outside":(100.,20.,110.,30.),
         "outside":(130.,20.,140.,30.),
     }[rival_position]
     ft2=semantic.SourceMaterialOccurrenceRecord(
         record_id="source-ft2-rival", **lineage,
         page_id="11", viewport_id="source-finish-plan",
-        code="FT2", semantic_finish="tile",
-        definition_record_id="source-ft2-definition",
+        code=rival_code, semantic_finish="tile",
+        definition_record_id=(definition.record_id if rival_code=="FT3"
+                              else "source-ft2-definition"),
         bbox_pdf_pts=rival_rect,
-        raw_text="FT2",source_evidence_id="source-text-ft2",
+        raw_text=rival_code,source_evidence_id="source-text-ft2",
         source_text_observation_ids=("source-word-ft2",),
     )
     rows=(ft2,ft3) if reverse else (ft3,ft2)
@@ -265,13 +271,39 @@ def test_source_material_handoff_keeps_all_other_finish_code_rivals(
         occurrence_selector=occurrence_selector,
         original_finish_code="FT3",
     )
-    if rival_position=="outside":
+    if rival_position=="outside" and not primary_touches_boundary:
         assert result["status"]=="source_owned_material_on_original_ink_ring_candidate"
         assert result["original_mark_source_record_ids"]==(ft3.record_id,)
-        assert result["all_same_code_source_occurrence_record_ids"]==(ft3.record_id,)
+        assert result["all_same_code_source_occurrence_record_ids"]==(
+            (ft3.record_id,) if rival_code=="FT2"
+            else tuple(sorted((ft3.record_id,ft2.record_id)))
+        )
         assert not result["canonical_floor_finish_quantity_granted"]
     else:
         assert result["status"]=="source_finished_floor_material_handoff_abstained"
-        assert result["first_failure"]=="competing_source_material_codes_in_one_room"
-        assert result["competing_source_material_record_ids"]==(ft2.record_id,)
+        if rival_code=="FT2" and rival_position!="outside":
+            assert result["first_failure"]=="competing_source_material_codes_in_one_room"
+            assert result["competing_source_material_record_ids"]==(ft2.record_id,)
+        elif (primary_touches_boundary or rival_position in
+              ("crossing", "touch_inside", "touch_outside")):
+            assert result["first_failure"]=="original_finish_mark_boundary_ownership_unresolved"
+            expected_boundary=(
+                ([ft3.record_id] if primary_touches_boundary else []) +
+                ([ft2.record_id] if rival_code=="FT3" and rival_position in
+                  ("crossing", "touch_inside", "touch_outside") else [])
+            )
+            assert result["boundary_touching_or_crossing_source_material_record_ids"]==tuple(sorted(expected_boundary))
+            assert result["competing_source_material_record_ids"]==tuple(sorted(
+                set(expected_boundary) |
+                ({ft3.record_id} if not primary_touches_boundary else set()) |
+                ({ft2.record_id} if rival_code=="FT3" and rival_position=="inside" else set())
+            ))
+            assert result["all_same_code_source_occurrence_record_ids"]==(
+                (ft3.record_id,) if rival_code=="FT2"
+                else tuple(sorted((ft3.record_id,ft2.record_id)))
+            )
+        else:
+            assert result["first_failure"]=="original_finish_mark_missing_or_competing"
+            assert result["competing_source_material_record_ids"]==tuple(sorted((ft3.record_id,ft2.record_id)))
+            assert result["all_same_code_source_occurrence_record_ids"]==tuple(sorted((ft3.record_id,ft2.record_id)))
     assert result["new_firm_quantities"]==0
