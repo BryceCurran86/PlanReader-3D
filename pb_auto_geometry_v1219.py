@@ -650,7 +650,8 @@ def _cross_calibrate_elevations(app: Any, pages: Sequence[Dict[str, Any]], footp
 def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str, substrate: str,
                  quantity: float, status: str, source_page: str, source_reference: str,
                  confidence: str, notes: str, row_role: str = "", unit: str = "m²",
-                 preserve_quantity: bool = False) -> Tuple[Any, ...]:
+                 preserve_quantity: bool = False,
+                 finish_system: str = "To be confirmed") -> Tuple[Any, ...]:
     # Checked before rounding, which would turn NaN into a plausible 0.0 m².
     if not _is_finite_number(quantity):
         raise takeoff_contract.TakeoffRowContractError(
@@ -658,7 +659,7 @@ def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str
         )
     stamp = ""  # replaced by caller
     return (
-        workspace_id, section, element, location, substrate, "To be confirmed",
+        workspace_id, section, element, location, substrate, finish_system,
         max(0.0, quantity) if preserve_quantity else round(max(0.0, quantity), 2), unit,
         status, source_page, source_reference, "INCLUSION" if row_role == "floor_area" else "PROVISIONAL",
         0, 0, 0, 0, confidence, notes, row_role, stamp, stamp,
