@@ -46,7 +46,7 @@ def _original_ancestry():
 
 
 def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
-          inventory_complete=True):
+          inventory_complete=True, reissue_error=None):
     calls = []
     class Bridge(module.GPT2OriginalSourceGeometryBridge):
         def __init__(self):
@@ -71,6 +71,8 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
                 "original_second_source_edge_ids": FINISH_IDS,
                 "original_translation_pdf_pts": (78.0, 0.0),
             }
+            if reissue_error is not None:
+                raise reissue_error
             return deepcopy(_original_ancestry() if actual is None else actual)
 
     def material(*args, **kwargs):
@@ -160,6 +162,24 @@ def test_invalid_caller_scope_does_not_masquerade_as_real_source_failure(
     assert result["original_doorway_reissue_attempted"] is False
     assert result["original_doorway_reissued_status"] is None
     assert result["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("error", [
+    ValueError("unavailable_original_source"),
+    RuntimeError("tampered_original_source"),
+])
+def test_original_reissue_exception_preserves_typed_failure_and_never_hits_issuer(
+    monkeypatch, error,
+):
+    result, calls = _call(monkeypatch, reissue_error=error)
+    assert [entry[0] for entry in calls] == ["source", "source_reissue"]
+    assert result["status"] == "source_original_doorway_ancestry_conflict"
+    assert result["first_failure"] == "original_doorway_original_reissue_failed"
+    assert result["original_doorway_reissue_attempted"] is True
+    assert result["original_doorway_reissued_status"] is None
+    assert result["original_doorway_reissued_first_unclosed_gate"] is None
+    assert result["floor_finish_quantity_granted"] is False
+    assert result["new_firm_quantities"] == 0
 
 
 def test_negative_caller_status_cannot_bypass_positive_original_replay(
