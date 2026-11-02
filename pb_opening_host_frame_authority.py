@@ -1159,7 +1159,16 @@ class OpeningHostFrameProducer:
                             lines = host_geometry._authenticated_raster_source_lines(
                                 self._opening, opening, wall_scope.source_observation_ids)
                             req = set(records_by_id[wall_id].physical_identity.source_primitive_ids)
-                            if req and all(p in lines for p in req):
+                            # A producer-owned visible primitive does not prove
+                            # that all source-edge pieces form one original
+                            # continuous wall. The W2 2.5pt graph snap may not
+                            # bridge a 0.01pt source gap or a disconnected pier.
+                            # Reprove the typed exact source-edge chain before
+                            # accepting geometrically smoothed W4 projections.
+                            if (req and all(p in lines for p in req)
+                                    and source_edge_axis_projection(
+                                        records_by_id[wall_id], geometry, lines
+                                    ) is not None):
                                 ownership: dict[str, set[str]] = {p: set() for p in req}
                                 visibility = self._opening.source_visibility_authority()
                                 for observation_id in wall_scope.source_observation_ids:
