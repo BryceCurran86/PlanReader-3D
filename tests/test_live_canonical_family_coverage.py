@@ -802,6 +802,13 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
     )
 
     claim = _ceiling_claim(_ceiling_quantity())
+    # Independently verify the already-issued synthetic source claim.
+    from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+
+    projected = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="customer-workspace:1",
+    )
+    assert len(projected) == 1, "source-closed ceiling projector rejected test claim"
     source = tmp_path / "synthetic-ceiling-source.pdf"
     source.write_bytes(b"source-neutral-ceiling-not-an-original-PDF")
     app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
@@ -828,7 +835,10 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
         )
 
     rows = app._live_ceiling_takeoff_rows_by_workspace[1]
-    assert len(rows) == 1
+    assert len(rows) == 1, (
+        "workspace ceiling source-closed row dropout: "
+        + repr(app._ag09_family_coverage_by_workspace[1]["family_gaps"])
+    )
     customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
     original = claim.ceiling_lining_quantity_evidence[0]
     assert customer["element"] == "Ceiling lining area"
