@@ -120,7 +120,7 @@ def test_main_owner_only_immutable_source_positive_workflow():
                      '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
                      '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
                      "-e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
-                     "-p no:cacheprovider", "private details withheld"):
+                     '"-p", "no:cacheprovider"', "private details withheld"):
         assert required in test_step["run"]
     assert 'grep -E \'^(FAILED |ERROR )\'' not in test_step["run"]
     assert 'cat "$output"' not in test_step["run"]
@@ -381,8 +381,11 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert execute.count(' > "$output" 2>&1; then') == 1
         assert "Original default-eight producer/seal/customer FAILED" in execute
         assert "Original explicit-nine producer/seal/customer FAILED" in execute
-        assert "Original sealed/customer receipt verification FAILED" in execute
-        assert "Original signed-eight retention or new physical identity FAILED" in execute
+        assert "Original default-eight sealed/customer receipt verification FAILED" in execute
+        assert "Original explicit-nine sealed/customer receipt verification FAILED" in execute
+        assert "Original signed-eight archive/customer retention FAILED" in execute
+        assert "Original new physical opening identity FAILED" in execute
+        assert "Original old/new source snapshot identity FAILED" in execute
         assert "Original container/test stopped before trusted phase reporting" in execute
         assert 'cat "$output"' not in execute
         assert 'tee "$output"' not in execute
