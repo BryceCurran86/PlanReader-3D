@@ -1096,12 +1096,45 @@ def test_strict_default_seal_still_rejects_two_original_producer_snapshots(origi
         )
 
 
+def test_caller_only_cross_snapshot_opt_in_cannot_forge_source_replay(original_claim):
+    # A copied typed opening and caller bool are not an original-source replay.
+    _, forged = _two_snapshot_area_claim(original_claim)
+    assert forged.opening_area_replay_source_inventory == ()
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="complete original-source opening replay inventory required",
+    ):
+        seal_live_opening_area_claim_run(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="complete original-source opening replay inventory required",
+    ):
+        project_live_opening_customer_rows(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+
+
 def test_explicit_source_reproved_append_joins_independent_snapshot_seals_without_old_drift(
     original_claim,
 ):
     from dataclasses import replace as dc_replace
     from pb_source_closed_run_export import combine_source_closed_runs
-    _, amended = _two_snapshot_area_claim(original_claim)
+    # Positive exercises the existing append composition and its complete
+    # reissued roster, never the caller-only dataclass.replace shortcut.
+    # This is source-neutral; original PDF/partition acceptance is separate.
+    _, full = original_claim
+    baseline_claim = subset(full)
+    reissued = tuple(
+        dc_replace(opening, snapshot_id="independently-reproved-source-snapshot")
+        for opening in full.canonical_openings
+    )
+    fresh_quantities = tuple(_opening_quantity(opening) for opening in reissued)
+    assert all(quantity is not None for quantity in fresh_quantities)
+    amended = _append_reproved_areas(baseline_claim, reissued, fresh_quantities)
     old = amended.opening_quantity_evidence[0]
     original = dc_replace(
         amended,
@@ -1113,6 +1146,23 @@ def test_explicit_source_reproved_append_joins_independent_snapshot_seals_withou
     baseline = seal_live_opening_area_claim_run(
         original, workspace_id=1, project_id="source-project",
     )
+    # The append fails closed if a caller drops or mixes replay witnesses,
+    # even while the old and ninth signed quantities remain unchanged.
+    with pytest.raises(SourceClosedRunConflictError, match="drops historical physical rivals"):
+        seal_live_opening_area_claim_run(
+            dc_replace(amended, opening_area_replay_source_inventory=reissued[1:]),
+            workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+    with pytest.raises(SourceClosedRunConflictError, match="mixed or stale source scope"):
+        seal_live_opening_area_claim_run(
+            dc_replace(amended, opening_area_replay_source_inventory=(
+                dc_replace(reissued[0], snapshot_id=old.metadata["snapshot_id"]),
+                *reissued[1:],
+            )),
+            workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
     combined = seal_live_opening_area_claim_run(
         amended, workspace_id=1, project_id="source-project",
         source_reproved_append_only=True,
