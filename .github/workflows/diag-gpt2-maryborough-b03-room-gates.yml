@@ -11,32 +11,74 @@ on:
       - ".github/workflows/diag-gpt2-maryborough-b03-room-gates.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Public PR code never receives the private source token or original PDF.
+# Original source proof runs only by owner-dispatched trusted main.
 jobs:
-  real-source-room-first-gates:
+  source-neutral-b03:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: B03 synthetic checks only - original proof not run
     runs-on: ubuntu-latest
-    # Original SHA-verified B03 production needed ~41 minutes before the
-    # customer/sealing stage was added. A 45-minute cap cancelled the prior
-    # genuine source run without recording a source result; allow bounded
-    # headroom for full original-source + customer parity checks.
-    timeout-minutes: 65
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Test source-neutral B03 first-gate contract
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt2_b03_room_measurement_gates.py tests/test_gpt3_b03_private_source_workflow_contract.py
+      - name: State original-proof boundary
+        run: echo "B03_SOURCE_NEUTRAL_ONLY; original PDF/customer validation NOT RUN; no FIRM or score grant"
+
+  original-b03:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    name: Owner-only SHA-attested Maryborough B03 source and customer proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
-      - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Frozen V2 integrity
-        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Test first-gate diagnostic
-        run: PYTHONPATH=. pytest -q tests/test_gpt2_b03_room_measurement_gates.py
-      - name: Source-first exact Maryborough room closure
+      - name: Install dependencies before accessing private source
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity and source-neutral gates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_b03_room_measurement_gates.py tests/test_gpt3_b03_private_source_workflow_contract.py
+      - name: Provision SHA-verified original Maryborough PDF from private repository
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
+      - name: Authenticated original Maryborough B03 room and customer retention
         shell: bash
         run: |
-          set -o pipefail
+          # All original/claim traces remain in ephemeral runner logs, never stdout.
+          set -euo pipefail
+          exec 3>&1
+          trap 'echo "::error::Owner-authenticated Maryborough B03 original proof FAILED (private details withheld)" >&3' ERR
+          exec > "$RUNNER_TEMP/gpt2-b03-source-private.log" 2>&1
+          set -euo pipefail
           mkdir -p artifacts/gpt2-b03-room-gates
           git rev-parse HEAD > artifacts/gpt2-b03-room-gates/head_sha.txt
           PYTHONPATH=. python -u tools/diag_gpt2_room_measurement_gates.py \
@@ -44,7 +86,7 @@ jobs:
             --expected-sha256 b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007 \
             --pages 6 --topology-pages 6 --support-pages 10 \
             --output artifacts/gpt2-b03-room-gates/room_first_gates.json \
-            2>&1 | tee artifacts/gpt2-b03-room-gates/log.txt
+            > "$RUNNER_TEMP/gpt2-b03-producer-private.log" 2>&1
           python - <<'PY'
           import json
           from pathlib import Path
@@ -121,9 +163,10 @@ jobs:
               "benchmark_accuracy":None,
           },sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+          echo "Maryborough B03 original source, signed floor and customer gates verified; frozen V2 score NOT GRANTED" >&3
+      - name: Destroy original PDF and private unpublished outputs
         if: always()
-        with:
-          name: gpt2-b03-maryborough-first-gates
-          path: artifacts/gpt2-b03-room-gates
-          retention-days: 5
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts/gpt2-b03-room-gates
+          rm -f "$RUNNER_TEMP/gpt2-b03-source-private.log" "$RUNNER_TEMP/gpt2-b03-producer-private.log"
