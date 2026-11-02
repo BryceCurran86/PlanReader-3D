@@ -195,7 +195,44 @@ def audit_original_rcp_source_finish_occurrence(
             or not scope.scope_complete or not scope.source_viewport_ownership_id
             or scope.unresolved_source_text_observation_ids):
         return {**base,"first_failure":"original_rcp_occurrence_scope_incomplete"}
-    polygon=Polygon(rcp_candidate["source_ceiling_ink_polygon_pdf_pts"])
+    # An eligible RCP viewport is a COMPLETE source occurrence census, not
+    # a code-filtered list. A GRID mark cannot own a ceiling whose same
+    # physical ink zone also carries IPF1 or any other printed finish code.
+    try:
+        polygon=Polygon(rcp_candidate["source_ceiling_ink_polygon_pdf_pts"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {**base,"first_failure":"original_rcp_ink_polygon_invalid"}
+    if not polygon.is_valid or polygon.area<=0:
+        return {**base,"first_failure":"original_rcp_ink_polygon_invalid"}
+    competing=[]
+    for other in scope.records:
+        if other.code.upper()==original_finish_code.upper():
+            continue
+        if (other.document_id!=occurrence_selector.document_id
+                or other.revision_id!=occurrence_selector.revision_id
+                or other.snapshot_id!=occurrence_selector.snapshot_id
+                or other.source_sha256!=root
+                or other.page_id!=occurrence_selector.page_id
+                or other.viewport_id!=occurrence_selector.viewport_id
+                or not other.source_text_observation_ids):
+            return {**base,"first_failure":"other_rcp_finish_mark_source_lineage_unresolved"}
+        try:
+            x0,y0,x1,y1=(float(v) for v in other.bbox_pdf_pts)
+        except (TypeError,ValueError,OverflowError):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>=x1 or y0>=y1):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
+        if polygon.intersects(box(x0,y0,x1,y1)):
+            competing.append(other)
+    if competing:
+        return {
+            **base,
+            "first_failure":"competing_rcp_material_codes_in_one_ceiling_zone",
+            "competing_original_rcp_mark_record_ids":tuple(
+                sorted({row.record_id for row in competing})
+            ),
+        }
     inside=[]
     for occ in scope.records:
         if occ.code.upper()!=original_finish_code.upper():
