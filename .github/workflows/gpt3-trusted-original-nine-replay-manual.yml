@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 95
@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=cb6936403142ca6d14e85b029907b75aa19dbf79
-          approved_head=2ef34d242c73dc3b70d3cad2ac6afe4707d2c9fa
+          approved_base=a8d0fa5ef2dc0db3e1171ab8e8558bf9448f1e94
+          approved_head=296f48e8d89496afd96b4eda5a2e65f18285227b
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -41,6 +41,7 @@ jobs:
           .github/workflows/test-gpt3-v1-unsigned-scope-wire.yml
           .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
           .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+          docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
           pb_customer_output_verification.py
           pb_live_opening_customer_projection.py
           pb_live_opening_source_closed_export.py
@@ -149,6 +150,11 @@ jobs:
           # Private original never reaches candidate Python on the networked
           # runner. Only trusted main resolved the token-bearing local action.
           # Candidate code and the original are independent read-only mounts.
+          # Source integrity is verified by the trusted provisioner on host,
+          # then AGAIN by the immutable original acceptance test inside this
+          # same offline/read-only container before any producer is invoked.
+          # A separate Docker preflight added in #4159 regressed BOTH Python
+          # matrices before reaching that existing, stronger source test.
           if ! docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 256 \
               --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
@@ -158,10 +164,24 @@ jobs:
               -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
               -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
               "gpt3-offline:${{ matrix.python-version }}" \
-              python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings \
+              python -m pytest -q -p no:cacheprovider --tb=short --disable-warnings \
               tests/test_gpt3_lot16_original_nine_whole_retention.py \
               > "$output" 2>&1; then
-            echo "::error::Isolated GPT3 Lot16 8+9 replay FAILED (private details withheld)"
+            # The complete pytest traceback remains in the ephemeral private
+            # log; output only one pre-reviewed static call-site category.
+            # No exception value, source geometry, customer row or raw log
+            # content is ever echoed, uploaded, or persisted.
+            if grep -Fq 'old_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+              echo "::error::Original default-eight producer/seal/customer FAILED (private details withheld)"
+            elif grep -Fq 'new_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+              echo "::error::Original explicit-nine producer/seal/customer FAILED (private details withheld)"
+            elif grep -Eq 'old_signed, old_customer = _verified_production|new_signed, new_customer = _verified_production' "$output"; then
+              echo "::error::Original sealed/customer receipt verification FAILED (private details withheld)"
+            elif grep -Eq 'baseline_signed|baseline_customer|additional_ids|old_scopes|new_scope' "$output"; then
+              echo "::error::Original signed-eight retention or new physical identity FAILED (private details withheld)"
+            else
+              echo "::error::Original replay failed at an unclassified private test stage (private details withheld)"
+            fi
             exit 1
           fi
           if ! grep -Eq '(^|[ ,])1 passed([, ]|$)' "$output" || grep -Eq '(^|[ ,])[1-9][0-9]* skipped([, ]|$)' "$output"; then
@@ -171,7 +191,7 @@ jobs:
           {
             echo '### GPT3 source-positive release acceptance'
             echo "- Immutable exact code SHA: $GPT3_APPROVED_HEAD"
-            echo '- Original Lot16: source SHA/size verified by manifest provisioner and preflight'
+            echo '- Original Lot16: source SHA/size verified by provisioner and offline original acceptance'
             echo '- Both original 8/default and 9/explicit real source production runs: PASS'
             echo '- Full sealed and customer row bodies unchanged for old 8: PASS'
             echo '- New ninth distinct physical/snapshot and verified customer: PASS'

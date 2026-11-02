@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import fitz
+import pytest
 
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_hosted_opening_geometry import HostedOpeningEvidence, HostedOpeningSpan
@@ -13,6 +14,7 @@ from pb_hosted_opening_instance_adapter import (
     collect_hosted_opening_shadow_evidence,
     hosted_opening_span_id,
     hosted_span_to_shadow_record,
+    hosted_span_to_opening_instance,
     summarize_viewport_authority,
 )
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -255,3 +257,54 @@ def test_existing_d1_path_unchanged_when_shadow_abstains(tmp_path: Path) -> None
     assert "W1" not in preds
     assert "W2" not in preds
     assert extractor.hosted_opening_shadow["reason"] == SHADOW_BLOCKED_ON_VIEWPORT_AUTHORITY
+
+
+@pytest.mark.parametrize("bad_width", [
+    float("nan"), float("inf"), float("-inf"), True, "1.2", 0.0, -1.0,
+])
+def test_nonfinite_or_untrusted_width_never_enters_shadow_or_instance(bad_width):
+    span = _span(width_m=bad_width)
+    record = hosted_span_to_shadow_record(span)
+    assert record is not None
+    assert record["width_m"] is None
+    inst = hosted_span_to_opening_instance(span)
+    assert inst is not None
+    assert inst.width_m is None
+    assert inst.height_m is None
+    assert inst.bound_wall_id is None
+    assert record["span_id"] == hosted_opening_span_id(span)
+
+
+def test_live_hosted_shadow_collector_serializes_nan_width_as_null_not_json_nan():
+    doc = fitz.open()
+    doc.new_page()
+    with (
+        patch(
+            "pb_hosted_opening_instance_adapter.authoritative_floor_plan_viewports",
+            return_value=[_viewport()],
+        ),
+        patch(
+            "pb_hosted_opening_geometry.resolve_hosted_opening_spans",
+            return_value=HostedOpeningEvidence(
+                status="found", openings=(_span(width_m=float("nan")),), reason="found"
+            ),
+        ),
+    ):
+        shadow = collect_hosted_opening_shadow_evidence(doc, [0])
+    doc.close()
+    assert shadow["status"] == "found"
+    assert len(shadow["evidence"]) == 1
+    assert shadow["evidence"][0]["width_m"] is None
+    assert "height_m" not in shadow["evidence"][0]
+    assert "bound_wall_id" not in shadow["evidence"][0]
+
+
+def test_finite_positive_hosted_width_remains_unchanged_in_both_shadow_consumers():
+    span = _span(width_m=1.23456)
+    record = hosted_span_to_shadow_record(span)
+    instance = hosted_span_to_opening_instance(span)
+    assert record is not None and instance is not None
+    assert record["width_m"] == 1.2346
+    assert instance.width_m == 1.2346
+    assert instance.height_m is None
+    assert instance.bound_wall_id is None

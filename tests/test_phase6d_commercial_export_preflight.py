@@ -376,6 +376,10 @@ class Phase6DPreflightTests(unittest.TestCase):
                 source="A-401", reviewed_by="Estimator", reviewed_at="2026-09-04T10:00:00+10:00",
             ),
         ])
+        # Source SQLite gives every row the same native positive workspace PK.
+        # An omitted key on unrelated rows makes pandas coerce the approved
+        # model row's int(1) into untrusted float(1.0); do not weaken authority.
+        df_mixed["workspace_id"] = 1
         work_df = takeoff_work_rows(df_mixed)
         # Floor references, exclusions, and unapproved model surfaces are all non-publishable.
         self.assertEqual(len(work_df), 3)

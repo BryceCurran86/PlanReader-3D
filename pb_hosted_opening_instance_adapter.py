@@ -9,6 +9,7 @@ perimeter_walling.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from pb_hosted_opening_geometry import HostedOpeningSpan
@@ -55,10 +56,22 @@ def hosted_opening_span_id(span: HostedOpeningSpan) -> str:
 
 
 def _evidenced_width_m(span: HostedOpeningSpan) -> Optional[float]:
+    """Only finite, positive numeric widths may enter shadow metric fields.
+
+    HostedOpeningSpan is a candidate data carrier without post-init numeric
+    validation. NaN/Inf (or Boolean) values must not reach JSON or F.9 shadow
+    adapters as apparent metric evidence.
+    """
     width_m = span.width_m
-    if width_m is None or width_m <= 0.0:
+    if type(width_m) not in (int, float):
         return None
-    return round(float(width_m), 4)
+    try:
+        numeric = float(width_m)
+    except (OverflowError, ValueError, TypeError):
+        return None
+    if not math.isfinite(numeric) or numeric <= 0.0:
+        return None
+    return round(numeric, 4)
 
 
 def _bounding_box(span: HostedOpeningSpan) -> List[float]:

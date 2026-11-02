@@ -13,19 +13,58 @@ on:
       - "tests/test_cross_view_floor_finish_authority_v1.py"
       - "pb_live_physical_opening_void_composition.py"
       - "tests/test_live_opening_area_quantity_publication.py"
+      - "tests/test_gpt3_lot16_room_face_workflow_source_privacy.py"
       - ".github/workflows/diag-lot16-room-face-scope.yml"
+
+permissions:
+  contents: read
+
 jobs:
-  source-room-face:
+  source-neutral:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install pinned dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-free room-label and workflow privacy checks
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q tests/test_source_room_label_authority_v1.py tests/test_gpt3_lot16_room_face_workflow_source_privacy.py
+
+  source-room-face:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove immutable trusted main checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Provision exact owner-private original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
       - name: Run original Lot16 source page-3 diagnostic
         env:
           PYTHONPATH: .
@@ -35,6 +74,7 @@ jobs:
           import subprocess
           import sys
           from pathlib import Path
+          from tempfile import TemporaryDirectory
 
           expected = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           candidates = sorted(Path("documents/sources").glob("*.pdf"))
@@ -44,21 +84,31 @@ jobs:
           ]
           if len(matched) != 1:
               raise SystemExit(f"Lot16 SHA-verified architecture PDF unavailable: matches={len(matched)}")
-          subprocess.run(
-              [
-                  sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
-                  "--pdf", str(matched[0]), "--page-index", "2",
-                  "--diagnostic-label", "BED",
-                  "--diagnostic-label", "2",
-                  "--diagnostic-label", "3",
-                  "--output", "lot16-room-face-scope.json",
-              ],
-              check=True,
-          )
+          # The diagnostic's detailed output includes original-owned room
+          # names, source face identities, drawing coordinates and polygons.
+          # Never emit that private material to PR logs or GitHub artifacts.
+          # TemporaryDirectory removes its report after PASS and FAIL alike.
+          with TemporaryDirectory(prefix="gpt3-lot16-private-source-") as temporary:
+              completed = subprocess.run(
+                  [
+                      sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
+                      "--pdf", str(matched[0]), "--page-index", "2",
+                      "--diagnostic-label", "BED",
+                      "--diagnostic-label", "2",
+                      "--diagnostic-label", "3",
+                      "--output", str(Path(temporary) / "lot16-room-face-scope.json"),
+                  ],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  check=False,
+              )
+              if completed.returncode != 0:
+                  raise SystemExit(
+                      "Original Lot16 room-face validation FAILED "
+                      "(private source details withheld)"
+                  )
+          print("Original Lot16 room-face validation PASS (private report unpublished)")
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private original and unpublished reports
         if: always()
-        with:
-          name: lot16-room-face-source-diagnostic
-          path: lot16-room-face-scope.json
-          retention-days: 14
+        run: rm -rf documents/sources

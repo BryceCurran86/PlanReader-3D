@@ -217,6 +217,10 @@ _OWNER_TRUSTED_MAIN_SOURCE_IF = (
     "    if: ${{ github.event_name == 'workflow_dispatch' && "
     "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
 )
+_OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF = (
+    _OWNER_TRUSTED_MAIN_SOURCE_IF.removesuffix(" }}")
+    + " && github.triggering_actor == 'BryceCurran86' }}"
+)
 _OWNER_ORIGINAL_JOB_NAMES = frozenset({
     "original-source", "original-source-score", "original-lot16",
     "original-lot16-real-seal", "original-paired-source-customer",
@@ -238,7 +242,7 @@ def replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow_text: str) -> N
             current_job = job_match.group(1)
         if re.match(r"^    (if|continue-on-error):", line):
             if (
-                line == _OWNER_TRUSTED_MAIN_SOURCE_IF
+                line in (_OWNER_TRUSTED_MAIN_SOURCE_IF, _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF)
                 and current_job in _OWNER_ORIGINAL_JOB_NAMES
                 and re.search(r"^  workflow_dispatch:\s*$", workflow_text, re.M)
             ):
@@ -538,3 +542,26 @@ def test_a_workflow_limited_to_a_stacking_branch_is_rejected_and_unfiltered_form
         pull_request_trigger_reaches_main(fine)  # must not raise
     for no_trigger in ("on:\n  workflow_dispatch:\n", "on:\n  push:\n    branches: [release]\n"):
         assert not _has_block_pull_request_trigger(no_trigger)
+
+
+def test_stricter_owner_rerun_source_replay_remains_mandatory_and_fail_closed():
+    import pytest
+
+    base = ("name: Owner original only\non:\n  pull_request:\n"
+            "  workflow_dispatch:\njobs:\n  original-lot16:\n")
+    guarded = base + _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF + "\n    runs-on: ubuntu-latest\n"
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(guarded)
+    for bad in (
+        _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF.replace(
+            "github.triggering_actor == 'BryceCurran86'",
+            "github.triggering_actor == 'foreign-writer'"),
+        _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF.replace(
+            " && github.triggering_actor ==", " || github.triggering_actor =="),
+        _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF.replace(" }}", " || true }}"),
+        _OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF.replace(
+            "github.actor == 'BryceCurran86'", "github.actor == 'foreign-writer'"),
+    ):
+        with pytest.raises(ValueError):
+            replay_jobs_cannot_be_disabled_or_made_non_blocking(
+                guarded.replace(_OWNER_TRUSTED_MAIN_RERUN_SOURCE_IF, bad)
+            )

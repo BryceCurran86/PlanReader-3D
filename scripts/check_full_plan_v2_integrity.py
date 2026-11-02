@@ -86,6 +86,35 @@ def _regular_entry(path: Path, *, directory: bool = False) -> bool:
     return S_ISDIR(mode) if directory else S_ISREG(mode)
 
 
+def _unaliased_directory_chain(path: Path, *, allow_missing: bool = False) -> bool:
+    """Reject ancestor symlinks/junctions before trusting a frozen/source root.
+
+    lstat(root) alone follows any aliased *parent* component. Inspect the
+    lexical path from the filesystem anchor without resolving symlinks; a
+    genuine missing private-source directory is allowed only when its
+    existing ancestors are ordinary directories. Never normalize away '..'
+    before checking for an aliased intermediate component.
+    """
+    if ".." in path.parts:
+        return False
+    absolute = Path(os.path.abspath(path))
+    for component in reversed((absolute, *absolute.parents)):
+        try:
+            metadata = component.lstat()
+        except FileNotFoundError:
+            if allow_missing:
+                continue
+            return False
+        if not S_ISDIR(metadata.st_mode):
+            return False
+        # Windows junctions can report a directory mode without being a
+        # symlink; they must not redirect source/frozen namespace authority.
+        is_junction = getattr(component, "is_junction", None)
+        if is_junction is not None and is_junction():
+            return False
+    return True
+
+
 def _json(path: Path) -> Any:
     """Read one stable, regular frozen JSON inode without following final symlinks.
 
@@ -194,14 +223,10 @@ def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_D
     # directory is an alias. Missing private originals are permitted in public
     # CI, but a *present* symlink, file or unreadable source root is not.
     try:
-        source_root = source_dir.lstat()
-    except FileNotFoundError:
-        pass
+        if not _unaliased_directory_chain(source_dir, allow_missing=True):
+            return ["original source directory is not a regular directory"]
     except OSError:
         return ["original source directory cannot be inspected"]
-    else:
-        if not S_ISDIR(source_root.st_mode):
-            return ["original source directory is not a regular directory"]
     for manifest in manifests:
         for source in manifest.source_documents:
             if not _safe_path_component(source.name):
@@ -273,7 +298,11 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
     # Checking only final JSON files and child directories is insufficient:
     # a symlinked suite root can redirect every otherwise-regular child into
     # an external frozen-truth namespace. Reject that alias before any read.
-    if not _regular_entry(root, directory=True):
+    try:
+        suite_root_safe = _unaliased_directory_chain(root)
+    except OSError:
+        suite_root_safe = False
+    if not suite_root_safe:
         return ["suite/manifest validation failed: frozen suite root is missing or aliased"]
 
     try:

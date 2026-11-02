@@ -13,9 +13,19 @@ HEADS = {
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
     "cache": "6a937ad7d44da2c63e2fae04492c332a03b3b623",
-    "vertical": "d43de44b05b70944588c611b02da44a69b4aa533",
-    "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
+    "vertical": "f7e2872a56d920f28043af29474f82dfd5a401b4",
+    "horizontal": "98deb79aa5d4f1c45b666d8b7a71a77f82a5c825",
 }
+BASES = {
+    "host": BASE,
+    "frame": BASE,
+    "receipt": BASE,
+    "cache": "f480fc84d2e7486319e9b52a3a72790bb7435e69",
+    "vertical": "5a3649001830efd119c28c9a40db795ce815f4c2",
+    "horizontal": "fa7b2bd77adaa8ddf3c5af2e2ff80e755f44c512",
+}
+
+
 PATHS = {
     "host": (
         "pb_opening_host_binding_authority.py",
@@ -39,10 +49,12 @@ PATHS = {
         "tests/test_raster_opening_cached_source_integrity.py",
     ),
     "vertical": (
+        "docs/engineering/gptmax_vertical_third_root_ownership_20261029.md",
         "pb_gptmax_raster_tile_seam_shadow.py",
         "tests/test_gptmax_raster_tile_seam_source.py",
     ),
     "horizontal": (
+        "docs/engineering/gptmax_horizontal_third_root_ownership_20261029.md",
         "pb_gptmax_horizontal_raster_tile_seam_shadow.py",
         "tests/test_gptmax_horizontal_raster_tile_seam_shadow.py",
     ),
@@ -93,10 +105,38 @@ def test_manual_only_owner_main_context_never_pr_or_push():
     assert "github.event_name == 'workflow_dispatch'" in job["if"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
+    assert "github.triggering_actor == 'BryceCurran86'" in job["if"]
     assert job["strategy"]["matrix"]["target"] == list(HEADS)
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     assert job["strategy"]["fail-fast"] is False
     assert "github.event.inputs" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_owner_rerun_guard_rejects_foreign_writer_and_non_manual_context():
+    # github.actor is the ORIGINAL workflow initiator on a rerun; the
+    # rerunning writer is github.triggering_actor. Both must be the owner.
+    guard = _load()["jobs"]["verify"]["if"]
+    assert guard == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.triggering_actor == 'BryceCurran86' }}"
+    )
+    cases = (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "foreign-writer", False),
+        ("workflow_dispatch", "refs/heads/main", "foreign-writer", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("pull_request", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+        ("push", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    )
+    for event, ref, original, rerunner, allowed in cases:
+        assert all((
+            event == "workflow_dispatch",
+            ref == "refs/heads/main",
+            original == "BryceCurran86",
+            rerunner == "BryceCurran86",
+        )) is allowed
 
 
 def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
@@ -116,6 +156,7 @@ def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
     for name, head in HEADS.items():
         assert f"{name})" in guard
         assert f"approved_head={head}" in guard
+        assert f"approved_base={BASES[name]}" in guard
         for path in PATHS[name]:
             assert path in guard
     assert "ORIGINAL_SOURCES_TOKEN" not in guard
@@ -142,8 +183,8 @@ def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes
     steps = _load()["jobs"]["verify"]["steps"]
     guard = next(step["run"] for step in steps if step.get("name", "").startswith("Authenticate immutable"))
     assert "vertical)" in guard
-    assert "approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed" in guard
-    assert "approved_head=d43de44b05b70944588c611b02da44a69b4aa533" in guard
+    assert f"approved_base={BASES['vertical']}" in guard
+    assert f"approved_head={HEADS['vertical']}" in guard
     assert "focused_test=tests/test_gptmax_raster_tile_seam_source.py" in guard
     assert 'echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"' in guard
     focused = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))
@@ -164,8 +205,8 @@ def test_horizontal_original_source_gap_guard_cannot_be_satisfied_by_synthetic_p
         if step.get("name", "").startswith("Authenticate immutable")
     )
     assert "horizontal)" in guard
-    assert "approved_base=96d6c737167c8dcc94e006488c86f47bf573274a" in guard
-    assert "approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0" in guard
+    assert f"approved_base={BASES['horizontal']}" in guard
+    assert f"approved_head={HEADS['horizontal']}" in guard
     assert "focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py" in guard
     assert "git diff --name-only" in guard
     focused = next(

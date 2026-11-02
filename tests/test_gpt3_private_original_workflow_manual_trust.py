@@ -10,6 +10,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 WORKFLOWS = ["test-gpt3-maryborough-original-floor-score-input.yml","test-gpt3-lot16-original-sealed-score-input.yml","test-gpt3-1215-paired-customer-retention.yml","gpt3-original-opening-customer-inventory.yml","diag-gpt3-maryborough-ft3-source-firstgate.yml","test-gpt3-original-scope-v1-consumer.yml","score-gpt3-lot16-1215-opening-local.yml","diag-gpt3-lot16-1215-identity-readiness.yml","diag-gpt3-lot16-internal-870-identity-readiness.yml","test-gpt3-source-frame-proof.yml","test-gpt3-raster-source-discovery.yml","test-gpt3-native-dimension-original-source-cache.yml","test-gpt3-1215-opening-local-retention.yml","test-gpt3-1215-room-face-owned-retention.yml","score-gpt3-selected-two-original-projects.yml"]
 OWNER_GUARD = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
+RERUN_OWNER_GUARD = (
+    OWNER_GUARD.removesuffix(" }}")
+    + " && github.triggering_actor == 'BryceCurran86' }}"
+)
 TRUSTED_SHA = "${{ github.sha }}"
 
 
@@ -43,7 +47,7 @@ def validate_source_job(raw):
     ]
     assert 1 <= len(token_jobs) <= 2
     for name, job in token_jobs:
-        assert job.get("if") == OWNER_GUARD, name
+        assert job.get("if") in (OWNER_GUARD, RERUN_OWNER_GUARD), name
         steps = job["steps"]
         checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout@")]
         assert len(checkouts) == 1
@@ -71,11 +75,12 @@ def test_private_original_is_never_run_on_pull_request_head(filename):
 @pytest.mark.parametrize("filename", WORKFLOWS)
 def test_mutated_unsafe_guard_fails(filename):
     raw = (ROOT / filename).read_text(encoding="utf-8")
-    assert OWNER_GUARD in raw
+    guard = RERUN_OWNER_GUARD if RERUN_OWNER_GUARD in raw else OWNER_GUARD
+    assert guard in raw
     with pytest.raises(AssertionError):
         validate_source_job(raw.replace(
-            OWNER_GUARD,
-            OWNER_GUARD.replace("workflow_dispatch", "pull_request"),
+            guard,
+            guard.replace("workflow_dispatch", "pull_request"),
             1,
         ))
 
@@ -122,3 +127,24 @@ def test_owner_original_provision_smoke_is_not_an_untrusted_dispatch():
     assert "rm -rf documents/sources" in steps[-1]["run"]
     assert "upload-artifact" not in str(job)
     assert "pull_request.head.sha" not in str(job)
+
+
+@pytest.mark.parametrize("filename", [
+    "test-gpt3-maryborough-original-floor-score-input.yml",
+    "test-gpt3-lot16-original-sealed-score-input.yml",
+])
+def test_stricter_owner_rerun_guard_rejects_foreign_or_injected_context(filename):
+    raw = (ROOT / filename).read_text(encoding="utf-8")
+    assert RERUN_OWNER_GUARD in raw
+    assert validate_source_job(raw)
+    for bad in (
+        RERUN_OWNER_GUARD.replace("github.triggering_actor == 'BryceCurran86'",
+                                  "github.triggering_actor == 'foreign-writer'"),
+        RERUN_OWNER_GUARD.replace(" && github.triggering_actor ==",
+                                  " || github.triggering_actor =="),
+        RERUN_OWNER_GUARD.replace(" }}", " || true }}"),
+        RERUN_OWNER_GUARD.replace("github.actor == 'BryceCurran86'",
+                                  "github.actor == 'foreign-writer'"),
+    ):
+        with pytest.raises(AssertionError):
+            validate_source_job(raw.replace(RERUN_OWNER_GUARD, bad, 1))
