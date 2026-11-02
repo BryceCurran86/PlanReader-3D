@@ -15,6 +15,35 @@ import pb_gpt2_original_source_geometry_bridge as module
 
 SHA = "a" * 64
 BORDERS = ("d0i0", "d1i0", "d2i0", "d3i0")
+FLOOR_EDGES = ("f0", "f1", "f2", "f3")
+POLYGON = ((20., 20.), (120., 20.), (120., 120.), (20., 120.))
+
+
+def _cross():
+    return {
+        "status": "original_source_ink_ring_translation_candidate",
+        "geometric_ink_correspondence_only": True,
+        "original_source_sha256": SHA,
+        "original_floor_page": 7,
+        "original_finish_page": 9,
+        "original_floor_source_ids": FLOOR_EDGES,
+        "original_finish_source_ids": BORDERS,
+        "source_cross_sheet_translation_pdf_pts": [0., 0.],
+        "source_floor_perimeter_polygon_pdf_pts": POLYGON,
+        "source_finishes_perimeter_polygon_pdf_pts": POLYGON,
+    }
+
+
+def _floor():
+    return {
+        "source_sha256": SHA,
+        "page_1_based": 7,
+        "native_candidate_ring_count": 1,
+        "interior_stroke_intersections_and_overlaps": (),
+        "native_components": ({
+            "source_simple_ring_candidate": {"vertices_pdf_pts": POLYGON},
+        },),
+    }
 
 
 def _ink():
@@ -36,7 +65,8 @@ def _ink():
     }
 
 
-def _call(monkeypatch, ink=None, *, issued=None, error=None):
+def _call(monkeypatch, ink=None, *, issued=None, error=None,
+          cross=None, issued_floor=None, floor_error=None):
     events = []
     actual = _ink() if issued is None else issued
 
@@ -69,6 +99,17 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None):
                 raise error
             return deepcopy(actual)
 
+        def original_room_ink_graph(
+            self, *, revision_id, page_1_based, original_source_edge_ids,
+        ):
+            events.append((
+                "reissue_floor", revision_id, page_1_based,
+                original_source_edge_ids,
+            ))
+            if floor_error is not None:
+                raise floor_error
+            return deepcopy(_floor() if issued_floor is None else issued_floor)
+
     monkeypatch.setattr(
         module, "audit_original_rcp_source_finish_occurrence",
         lambda *a, **k: (
@@ -89,7 +130,7 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None):
     result = Bridge().original_rcp_ceiling_source_handoff_for_gpt1(
         revision_id="rev",
         original_floor_page_1_based=7,
-        source_floor_rcp_correspondence={"original_source_sha256": SHA},
+        source_floor_rcp_correspondence=deepcopy(_cross() if cross is None else cross),
         original_rcp_ink=deepcopy(_ink() if ink is None else ink),
         original_rcp_material={
             "status": "original_rcp_material_in_ceiling_ink_candidate",
@@ -108,7 +149,8 @@ def test_exact_reissued_ink_reaches_source_only_material_and_w4(monkeypatch):
     result, events = _call(monkeypatch)
     assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
     assert [item[0] for item in events] == [
-        "original_source", "reissue_ink", "material", "w4", "ceiling_handoff",
+        "original_source", "reissue_ink", "reissue_floor",
+        "material", "w4", "ceiling_handoff",
     ]
     assert events[1][1:] == (
         "rev", 9, "source-p9-original-rcp", BORDERS, ("d5i0",),
@@ -169,3 +211,75 @@ def test_original_f07_viewport_abstention_cannot_be_called_positive(monkeypatch)
     )
     assert result["status"] == "source_RCP_ink_issuer_not_replayable"
     assert not any(item[0] in ("material", "w4", "ceiling_handoff") for item in events)
+
+
+
+def test_original_floor_source_ids_are_replayed_before_material_and_w4(monkeypatch):
+    result, events = _call(monkeypatch)
+    assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
+    assert events[2] == ("reissue_floor", "rev", 7, FLOOR_EDGES)
+    assert result["source_ceiling_area_m2"] is None
+
+
+@pytest.mark.parametrize(("field", "bad"), [
+    ("status", "unissued-caller-copy"),
+    ("geometric_ink_correspondence_only", 1),
+    ("original_floor_page", True),
+    ("original_finish_page", "9"),
+    ("original_floor_source_ids", FLOOR_EDGES[:-1]),
+    ("original_floor_source_ids", FLOOR_EDGES + ("f0",)),
+    ("original_finish_source_ids", BORDERS[:-1]),
+    ("source_cross_sheet_translation_pdf_pts", [True, 0.]),
+    ("source_cross_sheet_translation_pdf_pts", [float("nan"), 0.]),
+    ("source_cross_sheet_translation_pdf_pts", ["0", 0.]),
+    ("source_floor_perimeter_polygon_pdf_pts", (
+        (20.,20.),(125.,20.),(125.,120.),(20.,120.),
+    )),
+    ("source_finishes_perimeter_polygon_pdf_pts", (
+        (20.,20.),(125.,20.),(125.,120.),(20.,120.),
+    )),
+])
+def test_unsealed_or_forged_floor_rcp_registration_abstains_before_material(
+    monkeypatch, field, bad,
+):
+    fake = _cross()
+    fake[field] = bad
+    result, events = _call(monkeypatch, cross=fake)
+    assert result["status"] == "source_floor_RCP_registration_issuer_not_replayable"
+    assert result["first_failure"] == "original_floor_to_A120_ink_not_reauthenticated"
+    assert all(x[0] not in ("material","w4","ceiling_handoff") for x in events)
+    assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("mutation", [
+    {"source_sha256": "b"*64},
+    {"page_1_based": 11},
+    {"native_candidate_ring_count": 0},
+    {"interior_stroke_intersections_and_overlaps": ("false-wall-crossing",)},
+    {"native_components": ()},
+    {"native_components": ({
+        "source_simple_ring_candidate": {
+            "vertices_pdf_pts": ((20.,20.),(125.,20.),(125.,120.),(20.,120.))
+        },
+    },)},
+])
+def test_reissued_original_floor_page_graph_must_equal_claimed_source_ink(
+    monkeypatch, mutation,
+):
+    fake = _floor()
+    fake.update(mutation)
+    result, events = _call(monkeypatch, issued_floor=fake)
+    assert result["status"] == "source_floor_RCP_registration_issuer_not_replayable"
+    assert "reissue_floor" in [event[0] for event in events]
+    assert all(x[0] not in ("material","w4","ceiling_handoff") for x in events)
+    assert result["new_firm_quantities"] == 0
+
+
+def test_failed_private_source_floor_reissue_abstains_before_material(monkeypatch):
+    result, events = _call(
+        monkeypatch, floor_error=RuntimeError("unavailable-source-floor")
+    )
+    assert result["status"] == "source_floor_RCP_registration_issuer_not_replayable"
+    assert "reissue_floor" in [event[0] for event in events]
+    assert all(x[0] not in ("material","w4","ceiling_handoff") for x in events)
+    assert result["source_ceiling_area_m2"] is None
