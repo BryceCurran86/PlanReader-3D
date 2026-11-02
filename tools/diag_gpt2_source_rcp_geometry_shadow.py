@@ -216,8 +216,12 @@ def audit_original_rcp_source_finish_occurrence(
                 or other.viewport_id!=occurrence_selector.viewport_id
                 or not other.source_text_observation_ids):
             return {**base,"first_failure":"other_rcp_finish_mark_source_lineage_unresolved"}
+        raw_bbox=other.bbox_pdf_pts
+        if (type(raw_bbox) is not tuple or len(raw_bbox)!=4
+                or any(type(v) not in (int,float) for v in raw_bbox)):
+            return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
         try:
-            x0,y0,x1,y1=(float(v) for v in other.bbox_pdf_pts)
+            x0,y0,x1,y1=(float(v) for v in raw_bbox)
         except (TypeError,ValueError,OverflowError):
             return {**base,"first_failure":"other_rcp_finish_mark_geometry_unresolved"}
         if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
@@ -255,8 +259,12 @@ def audit_original_rcp_source_finish_occurrence(
                 or any(type(v) is not str or not v or v!=v.strip()
                        for v in native_ids)):
             return {**base,"first_failure":"source_rcp_mark_ancestry_conflict"}
+        raw_bbox=occ.bbox_pdf_pts
+        if (type(raw_bbox) is not tuple or len(raw_bbox)!=4
+                or any(type(v) not in (int,float) for v in raw_bbox)):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
         try:
-            x0,y0,x1,y1=(float(v) for v in occ.bbox_pdf_pts)
+            x0,y0,x1,y1=(float(v) for v in raw_bbox)
         except (TypeError,ValueError,OverflowError):
             return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
         if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
