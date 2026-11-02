@@ -475,6 +475,7 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert row["quantity_status"] == "To review"
     assert row["origin"] == "AI"
     assert row["row_role"] == "ceiling_area"
+    assert row["element"] == "Ceiling lining area (GRID)"
     assert row["finish_system"] == "ceiling_grid"
 
     report = verify_sealed_customer_output(run, rows)
@@ -503,6 +504,35 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+@pytest.mark.parametrize("unowned_code", (
+    None, "", " GRID", "GRID ", "IPF1", True, 23,
+))
+def test_ceiling_customer_cannot_relabel_original_firm_finish(
+    unowned_code,
+) -> None:
+    """Commercial RCP material code must be the original signed code."""
+    signed = _quantity()
+    metadata = {**dict(signed.metadata), "finish_code": unowned_code}
+    tampered = replace(signed, metadata=metadata)
+    original_claim = _claim(signed)
+    claim = replace(
+        original_claim,
+        ceiling_lining_quantity_evidence=(tampered,),
+    )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_ceiling_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    # An invalid imported source must not alter the valid signed customer
+    # output, even when the source decoder is replayed in the same process.
+    rows = project_live_ceiling_customer_rows(
+        original_claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == signed.value
 
 
 @pytest.mark.parametrize("stolen", (
