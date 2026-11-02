@@ -44,6 +44,7 @@ def original_producer_area():
             "source_dimension_page_id":"7",
             "source_sha256":SHA,
             "room_revision_id":"rev",
+            "room_snapshot_id":"snapshot",
             "figured_dimension_ids":("original-figured-h","original-figured-v"),
         }
     )
@@ -136,7 +137,7 @@ def test_source_figure_id_identity_cannot_come_from_rekeyed_numeric_label():
     tampered=replace(original.records[0],area_evidence=unowned)
     result=bind(same_view=replace(original,records=(tampered,)))
     assert result.status is Status.ABSTAINED
-    assert result.reason_codes==("source_producer_figured_polygon_physical_scope_conflict",)
+    assert result.reason_codes==("source_producer_figured_canonical_floor_binding_unavailable",)
 
 
 def test_source_room_face_is_not_selected_by_matched_label_or_equal_area():
