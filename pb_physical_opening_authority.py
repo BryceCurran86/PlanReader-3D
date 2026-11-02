@@ -910,7 +910,10 @@ def _seeded_ink_checks(
     jamb, running jamb to jamb, or several segments that together do) is wall face continuing across the opening: the
     enumerator keeps such a line as a possible cap for the annotation checks, but an existence proof for a named
     opening cannot, so it is its own negative and, unlike interior ink, no naming by the caller excuses it. Any other
-    visible line that overlaps the gap and lies strictly between the outermost faces must be named by the caller."""
+    visible line that overlaps the gap and lies strictly between the outermost faces must be named by the caller. That
+    includes a line running ACROSS the aperture (a post, a mullion, a full-thickness pier): it has no length along the
+    wall, but it is inside the gap when its position along the wall lies strictly between the jamb stations and its
+    depth overlaps the wall band. A line on a jamb station (a return), or outside the gap or the band, is not."""
     low, high = frame.gap_start + _FRAME_TOL, frame.gap_end - _FRAME_TOL
     inner_low, inner_high = min(frame.face_offsets) + _FRAME_TOL, max(frame.face_offsets) - _FRAME_TOL
     stubs: list[str] = []
@@ -925,12 +928,15 @@ def _seeded_ink_checks(
         if line is None:
             continue
         a = sorted((_projection((line[0], line[1]), frame.direction), _projection((line[2], line[3]), frame.direction)))
-        if not (a[1] > low and a[0] < high and min(a[1], high) - max(a[0], low) > _FRAME_TOL):
+        if not (a[1] > low and a[0] < high):
             continue
         offsets = (_projection((line[0], line[1]), frame.normal), _projection((line[2], line[3]), frame.normal))
         if (abs(_cross(frame.direction, _unit_direction(line))) <= _COORD_EQ_ABS_TOL
                 and abs(offsets[0] - offsets[1]) <= _FRAME_TOL
                 and any(abs(offsets[0] - face) <= _FRAME_TOL for face in frame.face_offsets)):
+            # a line lying ON a face must overlap the gap by a positive length to be face ink in it
+            if not min(a[1], high) - max(a[0], low) > _FRAME_TOL:
+                continue
             if a[0] > frame.gap_start + _COORD_EQ_ABS_TOL and a[1] < frame.gap_end - _COORD_EQ_ABS_TOL:
                 stubs.append(observation_id)
             else:
