@@ -1157,6 +1157,13 @@ class GPT2OriginalSourceGeometryBridge:
 
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
+            "original_rcp_room_label_text":inside[0].text,
+            "original_rcp_room_label_source_partition_id":inside[0].source_partition_id,
+            "original_rcp_room_label_native_block_no":inside[0].block_no,
+            "original_rcp_room_label_native_line_no":inside[0].line_no,
+            "original_rcp_room_label_observation_ids":inside[0].observation_ids,
+            "original_rcp_room_label_receipt_ids":inside[0].receipt_ids,
+            "original_rcp_label_and_material_native_block_join":"source_closed_zone_not_same_block",
             "source_w4_room_face_claim":w4,
             "source_original_rcp_ceiling_input_for_gpt1":result,
             "source_original_document_id":published.revision.document_id,
