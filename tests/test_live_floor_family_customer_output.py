@@ -242,3 +242,86 @@ def test_rejects_malformed_project_scope(
             workspace_id=workspace_id,
             project_id=project_id,
         )
+
+
+
+def _production_shaped_source_area_and_finish_claim():
+    """Use the real original-source sealers, not monkeypatched family runs."""
+    from dataclasses import replace
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _claim as _finish_claim,
+        _independent_source_room_area,
+    )
+
+    return replace(
+        _finish_claim(),
+        room_area_quantity_evidence=(_independent_source_room_area(),),
+    )
+
+
+def test_real_source_floor_area_and_finish_are_two_distinct_verified_customer_rows():
+    from pb_customer_output_verification import verify_sealed_customer_output
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    original_floor_area = publish_live_floor_area_quantities(claim)
+    assert len(original_floor_area) == 1
+
+    signed, rows = module.project_live_floor_family_customer_output(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 2
+    by_family = {row["quantity_family"]: row for row in rows}
+    assert set(by_family) == {"floor_area", "floor_finish_area"}
+    plain = by_family["floor_area"]
+    finish = by_family["floor_finish_area"]
+    assert plain["quantity_id"] == original_floor_area[0].quantity_id
+    assert plain["quantity"] == finish["quantity"] == 8.64
+    assert finish["element"] == "Floor finish area (FT1)"
+    assert finish["finish_system"] == "tile"
+    assert plain["quantity_id"] != finish["quantity_id"]
+    assert all(row["quantity_status"] == "To review" for row in rows)
+    verified = verify_sealed_customer_output(signed, rows)
+    assert set(verified.verified_quantity_ids) == {
+        row["quantity_id"] for row in rows
+    }
+
+
+def test_forged_finish_cannot_reclassify_or_erase_original_source_floor_area():
+    from dataclasses import replace
+    from pb_customer_output_verification import verify_sealed_customer_output
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+
+    original = _production_shaped_source_area_and_finish_claim()
+    baseline = seal_live_floor_area_run(
+        original, workspace_id=1, project_id="project-1",
+    )
+    plain_rows = project_live_floor_area_customer_rows(
+        original, workspace_id=1, project_id="project-1",
+    )
+    assert len(baseline.quantities) == len(plain_rows) == 1
+
+    material = original.floor_finish_quantity_evidence[0]
+    forged = replace(
+        original,
+        floor_finish_quantity_evidence=(replace(
+            material, metadata={**material.metadata, "finish_code": "FT3"},
+        ),),
+    )
+    with pytest.raises(SourceClosedRunConflictError):
+        module.project_live_floor_family_customer_output(
+            forged, workspace_id=1, project_id="project-1",
+        )
+    # Rejecting the foreign finish code is NOT permission to retract or
+    # overwrite the separately signed original whole-room floor area.
+    assert seal_live_floor_area_run(
+        forged, workspace_id=1, project_id="project-1",
+    ).to_dict() == baseline.to_dict()
+    assert verify_sealed_customer_output(
+        baseline, plain_rows,
+    ).verified_quantity_ids == (baseline.quantities[0].quantity_id,)
