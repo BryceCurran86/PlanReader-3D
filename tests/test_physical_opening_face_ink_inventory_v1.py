@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_physical_opening_authority import SeededFaceInkInventory, _seeded_ink_checks, _structure_frame
-from test_physical_opening_seeded_existence_review_v1 import FLUSH_OUTER_ONE, HALF_MIDDLE, POSES, SPLIT_MIDDLE  # noqa: F401
+from pb_physical_opening_authority import _seeded_ink_checks, _structure_frame
+from test_physical_opening_seeded_existence_review_v1 import FLUSH_OUTER_ONE, POSES, SPLIT_MIDDLE
 from test_physical_opening_seeded_existence_v1 import (
     FLUSH_MIDDLE, FLUSH_OUTER, GLAZING, LAYERED, PLAIN, SILL_STUB, _fixture, _ids, _selector)
 
