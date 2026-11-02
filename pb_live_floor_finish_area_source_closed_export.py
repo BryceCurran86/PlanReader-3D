@@ -396,6 +396,38 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish original measurement lacks exact figured "
                     f"dimension pair: {quantity.quantity_id}"
                 )
+        if (
+            claim.room_area_quantity_evidence
+            and original_method
+            == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        ):
+            # It is not enough for each family to cite *some* two valid
+            # original axis IDs. The finish must reuse the exact horizontal
+            # and vertical source axes from the already-published ORIGINAL
+            # room area that owns this canonical floor. Otherwise a foreign
+            # dimension pair may be spliced into a copied FIRM finish.
+            original_area_metadata = published_original_owners[0].metadata
+            original_area_axes = (
+                original_area_metadata.get("figured_dimension_ids")
+                if isinstance(original_area_metadata, Mapping)
+                else None
+            )
+            if (
+                type(original_area_axes) not in (tuple, list)
+                or len(original_area_axes) != 2
+                or any(
+                    type(axis) is not str or not axis
+                    or axis != axis.strip()
+                    for axis in original_area_axes
+                )
+                or original_area_axes[0] == original_area_axes[1]
+                or tuple(sorted(figured_ids))
+                != tuple(sorted(original_area_axes))
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish figured axes do not match the independent "
+                    f"original room-area producer: {quantity.quantity_id}"
+                )
         else:
             scale_id = metadata.get("resolved_scale_id")
             scale_status = metadata.get("scale_status")
