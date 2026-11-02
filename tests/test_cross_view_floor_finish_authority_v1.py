@@ -341,6 +341,68 @@ def test_exact_original_figured_axes_remain_replayable_without_mutation(
     assert repr(original.area_evidence) == evidence_before
 
 
+@pytest.mark.parametrize("foreign_axis_mutation", ("metadata_both", "metadata_one", "producer_horizontal", "producer_vertical"))
+def test_source_figured_pair_must_match_original_room_area_producer_ids(
+    monkeypatch, foreign_axis_mutation,
+) -> None:
+    """Well-formed but foreign axis strings cannot grant a FIRM finish."""
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    real_ids = list(original.area_evidence.metadata["figured_dimension_ids"])
+    if foreign_axis_mutation.startswith("metadata"):
+        metadata = dict(original.area_evidence.metadata)
+        metadata["figured_dimension_ids"] = (
+            ["unowned-horizontal", "unowned-vertical"]
+            if foreign_axis_mutation == "metadata_both"
+            else [real_ids[0], "unowned-vertical"]
+        )
+        updated = replace(
+            original, area_evidence=replace(
+                original.area_evidence, metadata=metadata,
+            ),
+        )
+    elif foreign_axis_mutation == "producer_horizontal":
+        updated = replace(original, horizontal_dimension_id="unowned-horizontal")
+    else:
+        updated = replace(original, vertical_dimension_id="unowned-vertical")
+    changed = replace(room_areas, records=(updated,))
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=changed, floors=floors,
+    ).publish()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
+def test_reversed_but_exact_source_axis_pair_preserves_positive_floor_finish(
+    monkeypatch,
+) -> None:
+    """Source order is arbitrary; only signed producer identity is binding."""
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    metadata = dict(original.area_evidence.metadata)
+    original_ids = tuple(metadata["figured_dimension_ids"])
+    metadata["figured_dimension_ids"] = list(reversed(original_ids))
+    changed = replace(
+        room_areas, records=(replace(
+            original, area_evidence=replace(
+                original.area_evidence, metadata=metadata,
+            ),
+        ),),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=changed, floors=floors,
+    ).publish()
+    assert len(result.quantities) == 1
+    assert result.quantities[0].value == 8.64
+    assert result.quantities[0].metadata["figured_dimension_ids"] == sorted(
+        original_ids
+    )
+
+
 def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
     monkeypatch,
 ) -> None:
