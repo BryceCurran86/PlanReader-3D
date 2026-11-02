@@ -1023,6 +1023,7 @@ class CrossViewCeilingFinishProducer:
         label_receipts = proof.get("original_rcp_room_label_receipt_ids")
         partition = proof.get("original_rcp_room_label_source_partition_id")
         block = proof.get("original_rcp_room_label_native_block_no")
+        line_number = proof.get("original_rcp_room_label_native_line_no")
         if (type(label_ids) is not tuple or not label_ids
                 or type(label_receipts) is not tuple
                 or len(label_receipts) != len(label_ids)
@@ -1032,6 +1033,7 @@ class CrossViewCeilingFinishProducer:
                        for v in (*label_ids, *label_receipts))
                 or type(partition) is not str or not partition
                 or type(block) is not int or block < 0
+                or type(line_number) is not int or line_number < 0
                 or _norm(proof.get("original_rcp_room_label_text")) !=
                     _norm(room.room_label)):
             return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
@@ -1070,6 +1072,8 @@ class CrossViewCeilingFinishProducer:
                 or scope.status is not EvidenceResolutionStatus.CORROBORATED
                 or scope.scope_complete is not True
                 or not scope.source_viewport_ownership_id
+                or scope.source_viewport_ownership_id !=
+                    original_rcp_material.get("original_rcp_scope_ownership_id")
                 or scope.unresolved_source_text_observation_ids):
             return abstain()
         mark_ids = bound.get("original_ceiling_source_mark_ids")
@@ -1094,8 +1098,11 @@ class CrossViewCeilingFinishProducer:
         line = _occurrence_line(
             self._source, revision_id=revision_id, occurrence=occurrence,
         )
-        if line is None or line.page_id != occurrence.page_id:
-            return abstain()
+        if (line is None or line.page_id != occurrence.page_id
+                or line.source_partition_id != partition
+                or not set(label_ids).isdisjoint(line.observation_ids)
+                or not set(label_receipts).isdisjoint(line.receipt_ids)):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
         payload = {
             "physical_room_id": room.physical_room_id,
             "canonical_room_id": room.canonical_room_id,
