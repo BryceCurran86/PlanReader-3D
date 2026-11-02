@@ -1205,7 +1205,7 @@ class OpeningHostFrameProducer:
                 allowance = host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
                 points = record.wall_candidate.centerline_pts
                 excluded = not any(
-                    data is not None and abs(data[2]) <= wall_thickness / 2.0 + allowance
+                    data is not None and abs(data[2]) <= allowance
                     for data in (
                         host_geometry._source_line_axis_data((*start, *end), geometry)
                         for start, end in zip(points, points[1:])
