@@ -736,7 +736,10 @@ def test_ceiling_contested_pair_does_not_poison_unrelated_room(monkeypatch) -> N
     assert rejected == ("room-1", "room-2")
 
 
-def _source_closed_cross_block_case(monkeypatch, *, altered=None, rooms_override=None):
+def _source_closed_cross_block_case(
+    monkeypatch, *, altered=None, rooms_override=None,
+    original_floor_open_doorway_source=None,
+):
     """Mock an independently reissued upstream producer, never a PDF test."""
     from types import SimpleNamespace
     from pb_source_material_semantic_authority import (
@@ -848,6 +851,7 @@ def _source_closed_cross_block_case(monkeypatch, *, altered=None, rooms_override
         occurrence_selector=occurrence_selector,
         original_ceiling_finish_code="GRID",
         physical_room_id=room.physical_room_id,
+        original_floor_open_doorway_source=original_floor_open_doorway_source,
     )
     return result, called
 
@@ -869,6 +873,32 @@ def test_source_reissued_cross_native_block_rcp_finish_is_candidate_not_quantity
     assert record.commercial_projection_allowed is False
     assert result.unresolved_physical_room_ids == ()
     assert not hasattr(record, "area_m2")
+
+
+def test_source_closed_cross_block_default_does_not_invent_doorway_receipt(
+    monkeypatch,
+):
+    result, called = _source_closed_cross_block_case(monkeypatch)
+    assert len(called) == 1
+    assert called[0]["original_floor_open_doorway_source"] is None
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].commercial_projection_allowed is False
+
+
+def test_source_closed_cross_block_explicit_open_floor_receipt_reaches_bridge(
+    monkeypatch,
+):
+    # The bridge (not the publisher) must reissue and validate this source
+    # receipt; a mocked bridge proves wiring only, never original authority.
+    source_receipt = {"source_native_doorway_receipt_id": "synthetic-source-id"}
+    result, called = _source_closed_cross_block_case(
+        monkeypatch, original_floor_open_doorway_source=source_receipt,
+    )
+    assert len(called) == 1
+    assert called[0]["original_floor_open_doorway_source"] is source_receipt
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].commercial_projection_allowed is False
+    assert not hasattr(result.records[0], "area_m2")
 
 
 def test_default_same_block_ceiling_publisher_is_not_weakened(monkeypatch):

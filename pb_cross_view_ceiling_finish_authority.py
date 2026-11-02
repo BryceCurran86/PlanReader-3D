@@ -926,6 +926,7 @@ class CrossViewCeilingFinishProducer:
         original_rcp_material: dict, material_authority,
         definition_selector, occurrence_selector,
         original_ceiling_finish_code: str, physical_room_id: str,
+        original_floor_open_doorway_source: dict | None = None,
     ) -> CrossViewCeilingFinishResult:
         """Opt-in, fully reissued cross-native-block RCP material binding.
 
@@ -994,6 +995,7 @@ class CrossViewCeilingFinishProducer:
                 original_ceiling_finish_code=original_ceiling_finish_code,
                 canonical_rooms=self._rooms,
                 physical_room_id=physical_room_id,
+                original_floor_open_doorway_source=original_floor_open_doorway_source,
             )
         except (ValueError, TypeError, KeyError, IndexError,
                 OverflowError, RuntimeError):
