@@ -431,8 +431,8 @@ def test_original_private_first_failure_classifier_is_source_safe():
     ("status = pytest.main([", "status = pytest.NOTmain(["),
     # A syntax-valid empty-selection mutation preserves all tracing code.
     # Only the AST argument gate may reject it, not a string-prefix check.
-    ('status = pytest.main(["-q", "-p", "no:cacheprovider", "--tb=short",\\n'
-     '                                    "--disable-warnings",\\n'
+    ('status = pytest.main(["-q", "-p", "no:cacheprovider", "--tb=short",\n'
+     '                                    "--disable-warnings",\n'
      '                                    "tests/test_gpt3_lot16_original_nine_whole_retention.py"])',
      'status = pytest.main([])'),
     ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
