@@ -801,8 +801,9 @@ def test_original_gap_vetoes_crossing_ink_regardless_of_selected_ids(
 
 
 @pytest.mark.parametrize("vertical", [False, True])
-def test_original_gap_boundary_touching_curve_does_not_veto(vertical):
-    """A curve leaving a doorway endpoint outward is not an interior rival."""
+@pytest.mark.parametrize("enters_gap", [False, True])
+def test_original_gap_boundary_curve_paint_envelope(vertical, enters_gap):
+    """An inward painted curve vetoes; a nearby fully outward curve does not."""
     import fitz
 
     def turn(point):
@@ -816,11 +817,11 @@ def test_original_gap_boundary_touching_curve_does_not_veto(vertical):
         ((80,20),(120,20)),
     ):
         page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
-    page.draw_bezier(*(
-        turn(p) for p in (
-            (24,20),(25,10),(30,10),(35,10)
-        )
-    ),color=(1,0,0))
+    points = (
+        ((24,20),(25,10),(30,10),(35,10)) if enters_gap
+        else ((22,20),(20,10),(15,10),(10,10))
+    )
+    page.draw_bezier(*(turn(p) for p in points),color=(1,0,0),width=1.0)
     graph={
         "page_1_based":1,
         "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
@@ -835,7 +836,7 @@ def test_original_gap_boundary_touching_curve_does_not_veto(vertical):
     doc.close()
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=1,original_room_graph=graph,
-    )
+    ) is (not enters_gap)
 
 
 @pytest.mark.parametrize("vertical", [False, True])
