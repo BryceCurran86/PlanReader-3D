@@ -486,11 +486,15 @@ def test_private_original_tests_are_content_pinned_and_inert_until_offline_execu
     focused = next(i for i, n in enumerate(names) if n.startswith("Verify original-provisioned"))
     assert auth < build < stage < provision < focused
     script = steps[stage]["run"]
-    for sha in ("f1b2edacf9b1e13b3d60e874bf1a18f6926254b2",
-                "6759c003ec85115b2bc528e681f993458304d892"):
+    for sha in ("1a1de74e07776727f01ce3af7aa02f8ade817ff7",
+                "ad02703c837e683ac2ddbba06bfa347e1e333c72"):
         assert sha in script
     assert "/git/blobs/{sha}" in script
     assert "hashlib.sha1" in script and "observed != sha" in script
+    assert 'b"b.opening_identity_id == key" not in data' in script
+    assert 'b"key in b.opening_identity_id" in data' in script
+    assert 'b"pytest.skip(" in data' in script
+    assert 'data.count(b"def test_") != 1' in script
     assert "os.O_EXCL" in script and "0o400" in script
     assert "python -m pytest" not in script
     assert "upload-artifact" not in WORKFLOW.read_text(encoding="utf-8")
