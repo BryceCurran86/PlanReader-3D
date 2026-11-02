@@ -154,7 +154,8 @@ def test_invalid_caller_rcp_ring_cannot_become_ceiling_material_candidate(bad):
     ({"source_text_observation_ids": (" GRID ",)}, "source_rcp_mark_ancestry_conflict"),
     ({"bbox_pdf_pts": (float("nan"), 20., 30., 30.)}, "original_rcp_mark_geometry_invalid"),
     ({"bbox_pdf_pts": (20., 20., float("inf"), 30.)}, "original_rcp_mark_geometry_invalid"),
-    ({"bbox_pdf_pts": ("20", 20., 30., 30.)}, None),
+    ({"bbox_pdf_pts": ("20", 20., 30., 30.)}, "original_rcp_mark_geometry_invalid"),
+    ({"bbox_pdf_pts": (True, 20., 30., 30.)}, "original_rcp_mark_geometry_invalid"),
     ({"bbox_pdf_pts": (20., 20., 20., 30.)}, "original_rcp_mark_geometry_invalid"),
     ({"bbox_pdf_pts": (20., 20., 30.)}, "original_rcp_mark_geometry_invalid"),
 ])
