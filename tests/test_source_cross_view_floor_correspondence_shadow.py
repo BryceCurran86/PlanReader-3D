@@ -23,6 +23,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     OVERLAPPING_MEASURED_BOXES,
     REGISTRATION_NOT_UNIQUE,
     STANDING_AUTHORITY_BLOCKERS,
+    SOURCE_FINISH_MARK_IDENTITY_INVALID,
     build_lines,
     rank_registrations,
     box_correspondence,
@@ -609,3 +610,39 @@ def test_missing_or_coerced_original_physical_source_identity_abstains(
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
     assert "missing_physical_floor_identity" in result.records[0].reason_codes
+
+
+
+@pytest.mark.parametrize("bad_mark", [
+    {"x": float("nan"), "y": 100., "code": "FT2"},
+    {"x": float("inf"), "y": 100., "code": "FT2"},
+    {"x": True, "y": 100., "code": "FT2"},
+    {"x": "500", "y": 100., "code": "FT2"},
+    {"x": 2**54, "y": 100., "code": "FT2"},
+    {"x": 500., "y": 100., "code": " FT2 "},
+    {"x": 500., "y": 100., "code": None},
+    {"y": 100., "code": "FT2"},
+    "malformed-original-observation",
+])
+def test_foreign_invalid_source_mark_cannot_leave_ft3_uniquely_registered(
+    bad_mark,
+):
+    # Invalid competing source evidence is not silently omitted merely
+    # because a second original FT3 glyph remains inside the target box.
+    valid = {"x": 327.8, "y": 1437.5,
+             "code": "FT3", "registered_region": True}
+    producer = SourceCrossViewFloorCorrespondenceProducer()
+    result = producer.evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "floor-office",
+            "physical_room_id": "physical-office",
+            "source_room_face_record_id": "w4-office",
+        }],
+        marks=[valid, bad_mark],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert result.records == ()
