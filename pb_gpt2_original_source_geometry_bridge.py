@@ -980,6 +980,8 @@ class GPT2OriginalSourceGeometryBridge:
                 or len(issued_floor_ids) != len(floor_ids)
                 or len(set(issued_floor_ids)) != len(issued_floor_ids)
                 or set(issued_floor_ids) != set(floor_ids)
+                or floor_source.get("status") !=
+                    "original_closed_ink_ring_candidates_only"
                 or floor_source.get("source_sha256") !=
                     published.revision.source_sha256
                 or floor_source.get("page_1_based") != original_floor_page_1_based
@@ -990,6 +992,20 @@ class GPT2OriginalSourceGeometryBridge:
             ):
                 return blocked_registration
             source_ring = components[0].get("source_simple_ring_candidate")
+            source_edges = components[0].get("source_edge_ids")
+            ring_edges = (
+                source_ring.get("source_edge_ids")
+                if type(source_ring) is dict else None
+            )
+            if (
+                type(source_edges) is not tuple
+                or type(ring_edges) is not tuple
+                or len(source_edges) != len(floor_ids)
+                or len(ring_edges) != len(floor_ids)
+                or set(source_edges) != set(floor_ids)
+                or set(ring_edges) != set(floor_ids)
+            ):
+                return blocked_registration
             if type(source_ring) is not dict:
                 return blocked_registration
             floor = Polygon(source_ring["vertices_pdf_pts"])
