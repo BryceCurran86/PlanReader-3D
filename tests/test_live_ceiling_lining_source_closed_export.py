@@ -535,6 +535,110 @@ def test_ceiling_customer_cannot_relabel_original_firm_finish(
     assert rows[0]["quantity"] == signed.value
 
 
+@pytest.mark.parametrize("customer_field,bad", (
+    ("element", "Ceiling lining area"),
+    ("element", "Ceiling lining area (IPF1)"),
+    ("element", "Ceiling lining area (GRID) "),
+    ("element", None),
+    ("element", True),
+    ("finish_system", "plasterboard"),
+    ("finish_system", "ceiling_grid "),
+    ("finish_system", None),
+))
+def test_signed_rcp_finish_code_and_material_cannot_be_relabelled_for_customer(
+    customer_field, bad,
+):
+    from copy import deepcopy
+    from pb_customer_output_verification import CustomerOutputVerificationError
+
+    quantity = _quantity()
+    claim = _claim(quantity)
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    source = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    forged = deepcopy(source[0])
+    forged[customer_field] = bad
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, (forged,))
+    assert verify_sealed_customer_output(
+        sealed, source,
+    ).verified_quantity_ids == ("qty-ceiling-1",)
+
+
+@pytest.mark.parametrize("metadata_field,wrong", (
+    ("canonical_ceiling_id", "other-original-ceiling"),
+    ("finish_code", "IPF1"),
+    ("semantic_finish", "plasterboard"),
+    ("finish_code", None),
+))
+def test_forged_machine_rcp_material_does_not_override_signed_ceiling_source(
+    metadata_field, wrong,
+):
+    from copy import deepcopy
+    from pb_customer_output_verification import CustomerOutputVerificationError
+
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    row = deepcopy(project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )[0])
+    row["commercial_projection_provenance"]["quantity"]["metadata"][
+        metadata_field
+    ] = wrong
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, (row,))
+
+
+@pytest.mark.parametrize("notes_only", (False, True))
+def test_recomputed_customer_fingerprint_cannot_resign_foreign_rcp_code(
+    notes_only,
+):
+    from copy import deepcopy
+    import json
+    from pb_customer_output_verification import CustomerOutputVerificationError
+    from pb_quantity_takeoff_adapter import (
+        CommercialTakeoffSourceTrace,
+        CommercialMeasurementAuthority,
+        compute_commercial_projection_fingerprint,
+    )
+
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    original = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    forged = deepcopy(original[0])
+    element = "Ceiling lining area (IPF1)"
+    forged["element"] = element
+    receipt = forged["commercial_projection_provenance"]
+    receipt["quantity"]["metadata"]["element"] = element
+    forged["notes"] = json.dumps(receipt)
+    forged["commercial_projection_fingerprint"] = (
+        compute_commercial_projection_fingerprint(
+            QuantityEvidence(**dict(receipt["quantity"])),
+            trace=CommercialTakeoffSourceTrace(**dict(receipt["source_trace"])),
+            authority=CommercialMeasurementAuthority(
+                **dict(receipt["measurement_authority"])
+            ),
+        )
+    )
+    if notes_only:
+        forged.pop("commercial_projection_provenance")
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="element differs from signed original RCP code",
+    ):
+        verify_sealed_customer_output(sealed, (forged,))
+    assert original[0]["element"] == "Ceiling lining area (GRID)"
+
+
 @pytest.mark.parametrize("stolen", (
     "finish_occurrence_record_id", "finish_occurrence_evidence_id",
 ))
