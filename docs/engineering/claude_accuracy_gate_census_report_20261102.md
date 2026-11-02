@@ -64,5 +64,5 @@ Proposed first step on approval: candidate 2 (measurement), then candidate 1 (me
 
 - **Candidate 2 done (measurement).** Maryborough callout, strip and aperture chain re-measured on current main: unchanged since 2026-10-31, no regression from #4148, #4126, #4158 or #4160. Result and the `fontTools` setup trap are in the comment on this PR.
 - **Candidate 4 done (comment-only review).** #4167 at head `9791293db`: two existing fail-closed tests fail at that head and in its own public run, the branch is 112 commits behind main, and the section 9 tests are missing. See the comment on #4167.
-- **Candidate 1 drafted.** `claude_door_height_owner_decision_memo_20261102.md`. Finding: a height approval would move only 1 of 13 unsigned Lot16 openings today; the other 12 fail an earlier host, frame or kind gate.
+- **Candidate 1 done (owner decision recorded).** `claude_door_height_owner_decision_memo_20261102.md`. Finding: a height approval would move only 1 of 13 unsigned Lot16 openings today; the other 12 fail an earlier host, frame or kind gate. The owner chose Option A (keep abstaining) on 2026-11-02; no code or authority change follows.
 - Candidates 3, 5 and 6 not started.

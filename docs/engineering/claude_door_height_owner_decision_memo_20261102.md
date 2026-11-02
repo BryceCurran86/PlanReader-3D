@@ -1,6 +1,6 @@
 # Door-height owner decision memo (2026-11-02)
 
-**Status.** Decision memo for the owner. Docs only; no code, test, workflow or truth change. It grants no authority, implements no default and is not an input to any producer. It follows candidate 1 of `claude_accuracy_gate_census_report_20261102.md` and the open decision in section 4 of `ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md`.
+**Status.** Decided 2026-11-02: Option A, keep abstaining (section 7). Docs only; no code, test, workflow or truth change. It grants no authority, implements no default and is not an input to any producer. It follows candidate 1 of `claude_accuracy_gate_census_report_20261102.md` and the open decision in section 4 of `ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md`.
 
 ## 1. The question
 
@@ -33,3 +33,12 @@ Option A for now, with Option B recorded as the allowed path. Reason: section 3 
 ## 6. Not decided here
 
 Distinct reviewer identities (B1 in the levers document), any opening-count or frame claim, and any change to a signed output.
+
+## 7. Owner decision (2026-11-02)
+
+**Option A: keep abstaining.** The owner chose this in chat on 2026-11-02. Consequences:
+
+- No door-height approval record is created, and no height is supplied by default, convention or datum label.
+- `pb_door_height_owner_gate_shadow.py` stays as it is (shadow-only, publishes nothing). Its bare `user_approved_height` flag is not consumed by any producer, so nothing changes.
+- Option B (per-opening approval) stays the allowed path. Revisit it when host, frame and kind gates release more openings (section 3); it needs a fresh owner decision then, not this one.
+- No code, test, workflow, threshold or truth change follows from this decision.
