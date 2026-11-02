@@ -214,6 +214,19 @@ def test_original_f07_viewport_abstention_cannot_be_called_positive(monkeypatch)
 
 
 
+
+
+def test_same_original_rcp_native_members_in_different_source_order_are_valid(
+    monkeypatch,
+):
+    cross = _cross()
+    cross["original_finish_source_ids"] = tuple(reversed(BORDERS))
+    result, events = _call(monkeypatch, cross=cross)
+    assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
+    assert "reissue_floor" in [event[0] for event in events]
+    assert result["new_firm_quantities"] == 0
+
+
 def test_original_floor_source_ids_are_replayed_before_material_and_w4(monkeypatch):
     result, events = _call(monkeypatch)
     assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
