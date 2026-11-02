@@ -805,6 +805,7 @@ def _source_closed_cross_block_case(monkeypatch, *, altered=None, rooms_override
         original_rcp_room_label_text="OFFICE",
         original_rcp_room_label_source_partition_id="partition-2",
         original_rcp_room_label_native_block_no=9,
+        original_rcp_room_label_native_line_no=0,
         original_rcp_room_label_observation_ids=("office-native-observation",),
         original_rcp_room_label_receipt_ids=("office-native-receipt",),
     )
@@ -841,7 +842,7 @@ def _source_closed_cross_block_case(monkeypatch, *, altered=None, rooms_override
         original_floor_page_1_based=1,
         source_floor_rcp_correspondence={"untrusted_candidate":True},
         original_rcp_ink={"untrusted_candidate":True},
-        original_rcp_material={"untrusted_candidate":True},
+        original_rcp_material={"original_rcp_scope_ownership_id":"f07-original-owner"},
         material_authority=auth,
         definition_selector=definition_selector,
         occurrence_selector=occurrence_selector,
@@ -949,3 +950,24 @@ def test_cross_block_duplicate_physical_room_label_fails_closed(monkeypatch):
     )
     assert result.records == ()
     assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+
+def test_cross_block_foreign_text_partition_cannot_borrow_grid_source(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_source_partition_id="other-source-partition",
+        ),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+
+
+def test_cross_block_forged_source_line_index_abstains(monkeypatch):
+    result,_ = _source_closed_cross_block_case(
+        monkeypatch, altered=lambda proof,bound: proof.update(
+            original_rcp_room_label_native_line_no=True,
+        ),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
