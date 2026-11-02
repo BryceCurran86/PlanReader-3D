@@ -209,6 +209,27 @@ def build_live_ceiling_lining_source_traces(
                 "numeric ceiling-lining source quantity retains unresolved blockers: "
                 f"{original.quantity_id}"
             )
+    # An original RCP material mark may be source-authenticated before an
+    # independent ceiling AREA exists. The source-owned material-only issuer
+    # explicitly forbids commercial projection. A caller cannot present
+    # a fabricated FIRM area with that denial and use the generic sealing
+    # path (including quantity_handoff_only) to bypass the material stage.
+    # Legacy true FIRM receipts without this optional marker are unchanged.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in original_metadata
+            and original_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original material-only receipt forbids commercial "
+                f"area publication: {original.quantity_id}"
+            )
+
     source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
