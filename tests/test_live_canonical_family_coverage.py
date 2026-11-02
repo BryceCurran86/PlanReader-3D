@@ -745,6 +745,50 @@ def test_runtime_source_closed_floor_finish_writes_coded_customer_takeoff_row(tm
     )
 
 
+
+def test_source_closed_floor_and_ceiling_inclusion_does_not_reclassify_wall_rows():
+    """Real core writer accepts both source-closed customer surface families."""
+    kwargs = dict(
+        workspace_id=1, section="Internal", element="Source surface",
+        location="source-room", substrate="Floor", quantity=8.64,
+        status="To review", source_page="p1", source_reference="source:test",
+        confidence="Documented", notes="synthetic contract only",
+    )
+    for row_role in ("floor_area", "ceiling_area"):
+        row = dict(zip(auto.TAKEOFF_ROW_FIELDS, auto._takeoff_row(
+            **kwargs, row_role=row_role, inclusion_status="INCLUSION",
+            finish_system="tile", preserve_quantity=True,
+        )))
+        assert row["inclusion_status"] == "INCLUSION"
+        assert row["finish_system"] == "tile"
+        assert row["quantity"] == 8.64
+
+    wall_legacy = dict(zip(auto.TAKEOFF_ROW_FIELDS, auto._takeoff_row(
+        **kwargs, row_role="external_wall",
+    )))
+    assert wall_legacy["inclusion_status"] == "PROVISIONAL"
+    assert wall_legacy["finish_system"] == "To be confirmed"
+
+
+@pytest.mark.parametrize("role,value", [
+    ("external_wall", "INCLUSION"),
+    ("ceiling_area", "PROVISIONAL"),
+    ("floor_area", ""),
+    ("floor_area", "INCLUSION "),
+    ("floor_area", True),
+])
+def test_core_writer_cannot_infer_source_inclusion_from_invalid_override(role, value):
+    with pytest.raises(auto.takeoff_contract.TakeoffRowContractError,
+                       match="explicit takeoff inclusion"):
+        auto._takeoff_row(
+            workspace_id=1, section="Internal", element="Source surface",
+            location="source-room", substrate="Floor", quantity=8.64,
+            status="To review", source_page="p1", source_reference="source:test",
+            confidence="Documented", notes="source-neutral contract",
+            row_role=role, inclusion_status=value,
+        )
+
+
 def test_runtime_floor_finish_bad_source_code_does_not_write_customer_row(tmp_path):
     """A forged FT caption cannot be converted into a saleable app row."""
     from tests.test_live_floor_finish_area_source_closed_export import (
