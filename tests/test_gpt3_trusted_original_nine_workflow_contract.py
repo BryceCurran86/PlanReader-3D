@@ -388,7 +388,7 @@ def test_original_private_first_failure_classifier_is_source_safe():
     ("--tb=short", "--tb=no"),
     ("--network none", "--network host"),
     ("python -m pytest -q -p no:cacheprovider --tb=short", "python -m pytest -q -p no:cacheprovider --tb=no"),
-    ("tests/test_gpt3_lot16_original_nine_whole_retention.py", "tests/test_gpt3_lot16_original_nine_whole_retention_DISABLED.py"),
+    ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
     (' > "$output" 2>&1; then', " 2>&1; then"),
     ('grep -Fq', 'cat "$output"; grep -Fq'),
     ('echo "::error::Original default-eight producer/seal/customer FAILED',
