@@ -949,7 +949,12 @@ class GPT2OriginalSourceGeometryBridge:
         shift = correspondence.get("source_cross_sheet_translation_pdf_pts")
         if (
             type(floor_ids) is not tuple or not 3 <= len(floor_ids) <= 20000
-            or type(rcp_ids) is not tuple or rcp_ids != borders
+            or type(rcp_ids) is not tuple
+            or len(rcp_ids) != len(borders)
+            or len(set(rcp_ids)) != len(rcp_ids)
+            or set(rcp_ids) != set(borders)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in rcp_ids)
             or len(set(floor_ids)) != len(floor_ids)
             or any(type(x) is not str or not x or x != x.strip()
                    for x in floor_ids)
