@@ -1450,3 +1450,83 @@ def test_explicit_original_ft_customer_permission_retains_signed_area_and_code()
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (original.quantity_id,)
+
+
+@pytest.mark.parametrize("kind", (
+    "source_other_two_axes",
+    "source_missing_axes",
+    "source_duplicate_axes",
+    "source_extra_axis",
+    "source_string_axes",
+    "source_integer_axis",
+    "finish_other_two_axes",
+))
+def test_finish_figured_axes_must_equal_independent_original_room_area_axes(
+    kind,
+):
+    """An independently valid but foreign dimension pair is not room lineage."""
+    source = _independent_source_room_area()
+    finish = _quantity()
+    if kind.startswith("source_"):
+        axes = {
+            "source_other_two_axes": ("foreign-h", "foreign-v"),
+            "source_missing_axes": None,
+            "source_duplicate_axes": ("dim-h-source", "dim-h-source"),
+            "source_extra_axis": ("dim-h-source", "dim-v-source", "foreign"),
+            "source_string_axes": "dim-h-source dim-v-source",
+            "source_integer_axis": ("dim-h-source", 12345),
+        }[kind]
+        mutated_source = replace(
+            source, metadata={
+                **source.metadata, "figured_dimension_ids": axes,
+            },
+        )
+        claim = replace(
+            _claim(), room_area_quantity_evidence=(mutated_source,),
+        )
+    else:
+        mutated_finish = replace(
+            finish, metadata={
+                **finish.metadata,
+                "figured_dimension_ids": ("foreign-h", "foreign-v"),
+            },
+        )
+        claim = replace(
+            _claim(), room_area_quantity_evidence=(source,),
+            floor_finish_quantity_evidence=(mutated_finish,),
+        )
+    for projector in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="figured axes do not match the independent original room-area",
+        ):
+            projector(claim, workspace_id=1, project_id="project-1")
+
+
+def test_authentic_room_axes_can_arrive_in_opposite_order_to_finish_axes():
+    source = _independent_source_room_area()
+    reversed_axes = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "figured_dimension_ids": ("dim-v-source", "dim-h-source"),
+        },
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(reversed_axes,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
