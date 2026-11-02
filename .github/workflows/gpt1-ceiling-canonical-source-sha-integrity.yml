@@ -1,29 +1,30 @@
 name: GPT1 Ceiling Canonical Source SHA Integrity
-
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - "pb_live_ceiling_area_quantity_publication.py"
-      - "tests/test_live_ceiling_area_quantity_publication.py"
-      - ".github/workflows/gpt1-ceiling-canonical-source-sha-integrity.yml"
-  workflow_dispatch:
-
+      - pb_live_ceiling_area_quantity_publication.py
+      - tests/test_live_ceiling_area_quantity_publication.py
+      - .github/workflows/gpt1-ceiling-canonical-source-sha-integrity.yml
+  workflow_dispatch: null
 concurrency:
   group: gpt1-ceiling-sha-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
   focused:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.13", "3.14"]
+        python-version:
+          - '3.13'
+          - '3.14'
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -34,23 +35,35 @@ jobs:
           PYTHONPATH=. python -m pytest -q tests/test_live_ceiling_area_quantity_publication.py tests/test_gpt1_firm_floor_area_source_integrity.py tests/test_gpt1_floor_seal_raw_room_area_source_ids.py
           ruff check --select F821,F823 pb_live_ceiling_area_quantity_publication.py tests/test_live_ceiling_area_quantity_publication.py
           python scripts/check_full_plan_v2_integrity.py
-
   original-partial-source:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Provision SHA-verified original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 3LAUREL - Construction Plan Set Rev3 08.05.26.pdf
+          allow-missing: 'false'
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: '3.13'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Source-first 3Laurel partial scoped ceilings / floor controls
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/cleanup-original-original-partial-source-3.sh"
+          private_log="$RUNNER_TEMP/cleanup-original-original-partial-source-3.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           set -euo pipefail
           mkdir -p artifacts/gpt1-ceiling-source-sha
           python - <<'PY'
@@ -109,9 +122,19 @@ jobs:
               },sort_keys=True,indent=2))
           PY
           python scripts/check_full_plan_v2_integrity.py
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_log" 2>&1; then
+            echo "Private original assertions passed; source details withheld"
+          else
+            echo "::error::Private original assertions failed; source details withheld"
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt1-original-ceiling-source-sha-first-gate
-          path: artifacts/gpt1-ceiling-source-sha/
-          retention-days: 14
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f "$RUNNER_TEMP"/cleanup-original-*.sh "$RUNNER_TEMP"/cleanup-original-*.log
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+permissions:
+  contents: read

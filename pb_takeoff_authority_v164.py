@@ -334,15 +334,14 @@ def approve_model_surface_row(
     """Create a complete approval record for the current immutable row state."""
     if not is_model_surface_row(row):
         raise ValueError("Only a 3D model-surface row can receive model authority.")
+    # This reviewer stamp is bound to a physical source workspace.
+    # int(7.9) and int("07") fabricate workspace 7 and would mint a
+    # completely new fingerprint on a different supplied project identity.
     workspace_id = row.get("workspace_id")
-    if isinstance(workspace_id, bool):
-        raise ValueError("A positive workspace identity is required for model authority.")
-    try:
-        valid_workspace_id = int(workspace_id) > 0
-    except (TypeError, ValueError, OverflowError):
-        valid_workspace_id = False
-    if not valid_workspace_id:
-        raise ValueError("A positive workspace identity is required for model authority.")
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError(
+            "An exact positive integer workspace identity is required for model authority."
+        )
     source_text = _text(source)
     reviewer_text = _text(reviewed_by)
     reviewed_at_text = _text(reviewed_at)
@@ -357,7 +356,7 @@ def approve_model_surface_row(
     ):
         raise ValueError("Source evidence, reviewer identity, and review timestamp are required.")
     approved = dict(row)
-    approved["workspace_id"] = int(workspace_id)
+    approved["workspace_id"] = workspace_id
     approved[AUTHORITY_STATUS_FIELD] = AUTHORITY_APPROVED
     approved[AUTHORITY_SOURCE_FIELD] = source_text
     approved[AUTHORITY_REVIEWED_BY_FIELD] = reviewer_text
@@ -386,14 +385,8 @@ def model_surface_authority(row: Mapping[str, Any]) -> Tuple[bool, str]:
 
     # Workspace binding: row must carry a valid positive workspace identity
     workspace_id = row.get("workspace_id")
-    if isinstance(workspace_id, bool):
-        return False, "3D model surface approval requires a positive workspace identity"
-    try:
-        valid_workspace_id = int(workspace_id) > 0
-    except (TypeError, ValueError, OverflowError):
-        valid_workspace_id = False
-    if not valid_workspace_id:
-        return False, "3D model surface approval requires a positive workspace identity"
+    if type(workspace_id) is not int or workspace_id <= 0:
+        return False, "3D model surface approval requires a positive workspace identity (exact positive integer workspace identity required)"
 
     # Provenance fields must be non-empty and not sentinel strings
     sentinels = {"nan", "none", "null"}

@@ -13,19 +13,58 @@ on:
       - "tests/test_cross_view_floor_finish_authority_v1.py"
       - "pb_live_physical_opening_void_composition.py"
       - "tests/test_live_opening_area_quantity_publication.py"
+      - "tests/test_gpt3_lot16_room_face_workflow_source_privacy.py"
       - ".github/workflows/diag-lot16-room-face-scope.yml"
+
+permissions:
+  contents: read
+
 jobs:
-  source-room-face:
+  source-neutral:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install pinned dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-free room-label and workflow privacy checks
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q tests/test_source_room_label_authority_v1.py tests/test_gpt3_lot16_room_face_workflow_source_privacy.py
+
+  source-room-face:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove immutable trusted main checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Provision exact owner-private original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
       - name: Run original Lot16 source page-3 diagnostic
         env:
           PYTHONPATH: .
@@ -70,3 +109,6 @@ jobs:
                   )
           print("Original Lot16 room-face validation PASS (private report unpublished)")
           PY
+      - name: Destroy private original and unpublished reports
+        if: always()
+        run: rm -rf documents/sources

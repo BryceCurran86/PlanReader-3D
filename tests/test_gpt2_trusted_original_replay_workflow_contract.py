@@ -11,12 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / ".github/workflows/gpt2-trusted-original-source-replay-manual.yml"
 SOURCE = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 HEADS = {
-    "a600": "14d50e0b58c62e624974e481e4805a72bebb1ba7",
+    "a600": "f32e01ed58369bf400a7a91a0360fd25963b3d1a",
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
-    "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
-    "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
+    "grid": "9b0657d54957061a46148857226250500ad35f57",
+    "rcp_ink": "20c0b7e9978683ddb1e6f6490bfbfd8c2db259f6",
     "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
     "finish_page": "cb19b928982f8565f86443af11c7e2ccc0c5f672",
     "office_caps": "80ab45ddb082f3364cd9c7f429814f921e8b889d",
@@ -60,11 +60,14 @@ _WorkflowLoader.add_constructor(
 
 def _target_matrix_expression():
     # Never interpolate caller-provided text into the JSON matrix or shell.
-    # Only two immutable approved targets may be individually selected;
+    # Only five immutable reviewed targets may be individually selected;
     # the default preserves the full historical matrix.
     all_targets = "[" + ",".join('"' + target + '"' for target in HEADS) + "]"
     return (
-        "${{ fromJSON(inputs.target == 'finish_page' && '[\"finish_page\"]' "
+        "${{ fromJSON(inputs.target == 'a600' && '[\"a600\"]' "
+        "|| inputs.target == 'grid' && '[\"grid\"]' "
+        "|| inputs.target == 'rcp_ink' && '[\"rcp_ink\"]' "
+        "|| inputs.target == 'finish_page' && '[\"finish_page\"]' "
         "|| inputs.target == 'office_caps' && '[\"office_caps\"]' "
         "|| '" + all_targets + "') }}"
     )
@@ -81,7 +84,7 @@ def _parse_workflow(raw):
         "required": True,
         "type": "choice",
         "default": "all",
-        "options": ["all", "finish_page", "office_caps"],
+        "options": ["all", "a600", "grid", "rcp_ink", "finish_page", "office_caps"],
     }}}}
     return document
 
@@ -97,7 +100,7 @@ def test_owner_only_manual_source_triggers():
         "required": True,
         "type": "choice",
         "default": "all",
-        "options": ["all", "finish_page", "office_caps"],
+        "options": ["all", "a600", "grid", "rcp_ink", "finish_page", "office_caps"],
     }}}}
     assert document["permissions"] == {"contents": "read"}
     assert tuple(document["jobs"]) == ("original",)
@@ -192,22 +195,26 @@ def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
     guard = next(s for s in _load()["jobs"]["original"]["steps"]
                  if s["name"].startswith("Validate immutable"))
     script = guard["run"]
-    approved_base = "d66087e6471c1bbdbf8c38617b8b85e646529417"
+    # Each immutable source head is pinned to its own independently reviewed
+    # base tree. RCP includes the already-merged #4136 replay infrastructure;
+    # grid deliberately retains its earlier approved base.
     expected = {
         "grid": (
+            "65dc4684fbcf1ce36c704457d896fc7c12a651de",
             "pb_gpt2_native_grid_row_membership_shadow.py|"
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
             "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
         ),
         "rcp_ink": (
+            "837befe133e89db7d5cb5878bff141e1e6d08923",
             "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
             "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
             "test_real_original_page9_native_source_rivals_if_available",
             "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
         ),
     }
-    for target, (paths, original_test, test_path) in expected.items():
+    for target, (approved_base, paths, original_test, test_path) in expected.items():
         matches = re.findall(
             r"(?m)^  " + re.escape(target) +
             r"\)\n(?P<body>.*?)(?=^    ;;)",
@@ -236,7 +243,7 @@ def test_new_immutable_targets_are_collected_source_free_before_private_replay()
         "required": True,
         "type": "choice",
         "default": "all",
-        "options": ["all", "finish_page", "office_caps"],
+        "options": ["all", "a600", "grid", "rcp_ink", "finish_page", "office_caps"],
     }}}}
     expected = {
         "grid": (
@@ -645,10 +652,10 @@ def test_office_caps_original_replay_pin_is_immutable_and_source_free():
     assert "secrets." not in public
 
 def test_manual_replay_selects_only_static_reviewed_targets():
-    """A selected original-positive replay must not run eight unrelated targets."""
+    """A selected original-positive replay must run only its reviewed target."""
     document = _load()
     assert document["on"]["workflow_dispatch"]["inputs"]["target"]["options"] == [
-        "all", "finish_page", "office_caps",
+        "all", "a600", "grid", "rcp_ink", "finish_page", "office_caps",
     ]
     job = document["jobs"]["original"]
     matrix = job["strategy"]["matrix"]
@@ -701,3 +708,104 @@ def test_public_offline_matrix_exactly_matches_trusted_private_target_pins():
     assert "ORIGINAL_SOURCES_TOKEN" not in raw
     assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
     assert "secrets." not in raw
+
+
+def test_latest_gpt2_private_replay_pins_match_public_sourcefree_smoke():
+    """Owner-only source-positive targets and public source-free heads stay aligned."""
+    guard = next(s for s in _load()["jobs"]["original"]["steps"]
+                 if s["name"].startswith("Validate immutable"))["run"]
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    for target, expected_base, paths in (
+        ("a600", "65dc4684fbcf1ce36c704457d896fc7c12a651de",
+         "pb_gpt2_original_a600_table_row_scope_shadow.py|"
+         "pb_source_door_schedule_authority.py|"
+         "pb_source_plan_door_correspondence_authority.py|"
+         "tests/test_gpt2_original_a600_table_row_scope_shadow.py"),
+        ("grid", "65dc4684fbcf1ce36c704457d896fc7c12a651de",
+         "pb_gpt2_native_grid_row_membership_shadow.py|"
+         "tests/test_gpt2_native_grid_row_membership_shadow.py"),
+        ("rcp_ink", "837befe133e89db7d5cb5878bff141e1e6d08923",
+         "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
+         "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py"),
+    ):
+        match = re.search(
+            r"(?m)^  " + re.escape(target) +
+            r"\)\n(?P<body>.*?)(?=^    ;;)",
+            guard, flags=re.DOTALL | re.MULTILINE,
+        )
+        assert match is not None
+        body = match.group("body")
+        assert "approved_base=" + expected_base in body
+        assert "approved_head=" + HEADS[target] in body
+        assert "expected_paths='" + paths + "'" in body
+        assert public.count(target + "|" + HEADS[target] + "|") == 1
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "secrets." not in public
+
+
+def _rcp_ink_exact_sourcefree_pin_contract(manual_raw, offline_raw):
+    """Current RCP candidate must be compared to the reviewed post-#4136 base."""
+    try:
+        steps = _parse_workflow(manual_raw)["jobs"]["original"]["steps"]
+        guard = next(step["run"] for step in steps
+                     if step["name"].startswith("Validate immutable"))
+        blocks = re.findall(
+            r"(?m)^  rcp_ink\)\n(?P<body>.*?)(?=^    ;;)",
+            guard, flags=re.DOTALL | re.MULTILINE,
+        )
+        if len(blocks) != 1:
+            return False
+        body = blocks[0]
+        row = (
+            "rcp_ink|" + HEADS["rcp_ink"] + "|"
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::"
+            "test_real_original_page9_native_source_rivals_if_available|"
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::"
+            "test_later_native_text_whitespace_advance_is_not_painted_overprint"
+        )
+        return all((
+            "approved_base=837befe133e89db7d5cb5878bff141e1e6d08923" in body,
+            "approved_head=" + HEADS["rcp_ink"] in body,
+            "expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'" in body,
+            "original_test=test_real_original_page9_native_source_rivals_if_available" in body,
+            "test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py" in body,
+            offline_raw.count(row + "\n") == 1,
+            "ORIGINAL_SOURCES_TOKEN" not in offline_raw,
+            "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in offline_raw,
+            "--network none --read-only --cap-drop ALL" in offline_raw,
+        ))
+    except (AssertionError, KeyError, StopIteration, TypeError, yaml.YAMLError):
+        return False
+
+
+def test_rcp_ink_replay_current_head_and_reviewed_base_are_consistent():
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    assert _rcp_ink_exact_sourcefree_pin_contract(
+        FILE.read_text(encoding="utf8"), public,
+    )
+
+
+@pytest.mark.parametrize(("target", "old", "new"), (
+    ("manual", "approved_base=837befe133e89db7d5cb5878bff141e1e6d08923",
+     "approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de"),
+    ("manual", "approved_head=20c0b7e9978683ddb1e6f6490bfbfd8c2db259f6",
+     "approved_head=bd9aff98dd1bc644b14de916e8f88e8f7159cadc"),
+    ("public", "rcp_ink|20c0b7e9978683ddb1e6f6490bfbfd8c2db259f6|",
+     "rcp_ink|bd9aff98dd1bc644b14de916e8f88e8f7159cadc|"),
+))
+def test_rcp_ink_stale_base_or_head_pin_mutations_fail_closed(target, old, new):
+    manual = FILE.read_text(encoding="utf8")
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    assert _rcp_ink_exact_sourcefree_pin_contract(manual, public)
+    if target == "manual":
+        assert manual.count(old) == 1
+        manual = manual.replace(old, new, 1)
+    else:
+        assert public.count(old) == 1
+        public = public.replace(old, new, 1)
+    assert not _rcp_ink_exact_sourcefree_pin_contract(manual, public)

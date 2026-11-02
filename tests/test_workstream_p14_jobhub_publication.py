@@ -586,6 +586,9 @@ class TestJobHubRowEligibility:
             },
         ])
 
+        # Every source SQLite takeoff row belongs to workspace 1. A sparse
+        # mixed DataFrame wrongly promotes the approved native int into 1.0.
+        mixed_takeoff["workspace_id"] = 1
         with patch("pb_planreader_3d_app.dataframe_for_takeoff", return_value=mixed_takeoff), \
              patch("pb_planreader_3d_app.quote_workbook_bytes", return_value=b"quote_bytes"), \
              patch("pb_planreader_3d_app.progress_package_bytes", return_value=b"progress_bytes"):

@@ -1,5 +1,4 @@
 name: TEST GPT2 Final Material RCP
-
 on:
   push:
     branches:
@@ -8,25 +7,27 @@ on:
     branches:
       - main
     paths:
-      - "pb_source_material_semantic_authority.py"
-      - "pb_cross_view_ceiling_finish_authority.py"
-      - "tests/test_source_material_semantic_authority_v1.py"
-      - "tests/test_cross_view_ceiling_finish_authority.py"
-      - "tests/test_cross_view_ceiling_quantity_authority.py"
-      - ".github/workflows/test-gpt2-final-material-rcp.yml"
+      - pb_source_material_semantic_authority.py
+      - pb_cross_view_ceiling_finish_authority.py
+      - tests/test_source_material_semantic_authority_v1.py
+      - tests/test_cross_view_ceiling_finish_authority.py
+      - tests/test_cross_view_ceiling_quantity_authority.py
+      - .github/workflows/test-gpt2-final-material-rcp.yml
+  workflow_dispatch: null
 concurrency:
   group: test-gpt2-final-material-rcp-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
   focused:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: '3.13'
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
@@ -40,15 +41,25 @@ jobs:
             tests/test_cross_view_ceiling_quantity_authority.py \
             tests/test_cross_view_room_area_authority_v1.py \
             tests/test_source_closed_project_handoff.py
-
   maryborough-material:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Provision SHA-verified original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: 'false'
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: '3.13'
           cache: pip
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
@@ -59,6 +70,10 @@ jobs:
       - name: Prove real Maryborough FPB and GRID definitions
         shell: bash
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/cleanup-original-maryborough-material-5.sh"
+          private_log="$RUNNER_TEMP/cleanup-original-maryborough-material-5.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           set -o pipefail
           ROOT=artifacts/gpt2-final-material-rcp/maryborough
           mkdir -p "$ROOT"
@@ -219,9 +234,19 @@ jobs:
           assert "GRID" not in parsed, out
           assert "GRID" not in blocked, out
           PY
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_log" 2>&1; then
+            echo "Private original assertions passed; source details withheld"
+          else
+            echo "::error::Private original assertions failed; source details withheld"
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt2-final-material-rcp-maryborough
-          path: artifacts/gpt2-final-material-rcp/maryborough
-          retention-days: 3
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f "$RUNNER_TEMP"/cleanup-original-*.sh "$RUNNER_TEMP"/cleanup-original-*.log
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+permissions:
+  contents: read

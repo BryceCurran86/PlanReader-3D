@@ -21,6 +21,7 @@ def test_positive_compliant_lintel_bearing(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),  # clear span = 100 pt
         left_pier_width_pt=20.0,  # 350mm pier
@@ -31,12 +32,12 @@ def test_positive_compliant_lintel_bearing(
         lintel_callout_text="200 PFC LINTEL",
     )
     assert (
-        eval_res.classification == LintelBearingClassification.LINTEL_BEARING_CONFIRMED
+        eval_res.classification == LintelBearingClassification.LINTEL_BEARING_GEOMETRIC_CANDIDATE
     )
     assert eval_res.clear_span_pt == pytest.approx(100.0, abs=0.01)
     assert eval_res.total_lintel_length_pt == pytest.approx(117.0, abs=0.01)
-    assert eval_res.left_bearing.is_bearing_compliant is True
-    assert eval_res.right_bearing.is_bearing_compliant is True
+    assert eval_res.left_bearing.is_bearing_compliant is False
+    assert eval_res.right_bearing.is_bearing_compliant is False
     assert eval_res.status == EvidenceResolutionStatus.CANDIDATE
     assert eval_res.shadow_only is True
     assert eval_res.commercial_projection_allowed is False
@@ -46,6 +47,7 @@ def test_subminimum_bearing_length_fails_closed(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=20.0,
@@ -58,13 +60,15 @@ def test_subminimum_bearing_length_fails_closed(
         == LintelBearingClassification.ABSTAINED_INSUFFICIENT_BEARING
     )
     assert eval_res.status == EvidenceResolutionStatus.ABSTAINED
-    assert "below minimum" in eval_res.notes
+    assert "below reference 100mm" in eval_res.notes
+    assert "unverified scale" in eval_res.notes
 
 
 def test_pier_narrower_than_bearing_fails_closed(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=7.0,  # pier width (7.0 pt) < bearing length (8.5 pt)
@@ -83,6 +87,7 @@ def test_missing_flanking_pier_fails_closed(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=0.0,  # missing host pier
@@ -101,6 +106,7 @@ def test_excessive_overhang_fails_closed(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=30.0,
@@ -119,6 +125,7 @@ def test_degenerate_clear_span_fails_closed(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(110.0, 200.0),  # clear span = 10 pt (< 20 pt minimum)
         left_pier_width_pt=20.0,
@@ -136,6 +143,7 @@ def test_jamb_ordering_invariance(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_fwd = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=20.0,
@@ -144,6 +152,7 @@ def test_jamb_ordering_invariance(
         right_bearing_length_pt=8.50,
     )
     eval_rev = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(200.0, 200.0),
         jamb_b=(100.0, 200.0),
         left_pier_width_pt=20.0,
@@ -160,6 +169,7 @@ def test_to_dict_schema_invariants(
     authority: StructuralLintelPierBearingAuthority,
 ) -> None:
     eval_res = authority.evaluate_lintel_bearing(
+        scale_ratio=0.01764,
         jamb_a=(100.0, 200.0),
         jamb_b=(200.0, 200.0),
         left_pier_width_pt=20.0,

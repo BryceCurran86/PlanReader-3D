@@ -218,18 +218,14 @@ def select_prior_reviewed_row_ids_to_retain(
                 "duplicate reviewed commercial rows share one physical claim"
             )
         seen.add(key)
+        # Retention refers to the exact SQLite physical takeoff primary key.
+        # int("017") and int(17.9) invent identity 17 from untrusted input.
         raw_id = row.get("id")
-        if isinstance(raw_id, bool):
-            raise ValueError("reviewed commercial row id must be a positive integer")
-        try:
-            row_id = int(raw_id)
-        except (TypeError, ValueError, OverflowError) as exc:
+        if type(raw_id) is not int or raw_id <= 0:
             raise ValueError(
-                "reviewed commercial row id must be a positive integer"
-            ) from exc
-        if row_id <= 0:
-            raise ValueError("reviewed commercial row id must be a positive integer")
-        retained.append(row_id)
+                "reviewed commercial row id must be an exact positive integer"
+            )
+        retained.append(raw_id)
     return tuple(sorted(retained))
 
 

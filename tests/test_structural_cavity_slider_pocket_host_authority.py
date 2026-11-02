@@ -29,9 +29,10 @@ def test_positive_compliant_cavity_slider(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     assert (
-        record.classification == CavitySliderClassification.CAVITY_SLIDER_HOST_CONFIRMED
+        record.classification == CavitySliderClassification.CAVITY_SLIDER_GEOMETRIC_CANDIDATE
     )
     assert record.clear_span_pt == pytest.approx(46.48, abs=0.01)
     assert record.pocket_depth_pt == pytest.approx(48.52, abs=0.01)
@@ -53,6 +54,7 @@ def test_insufficient_pocket_depth_fails_closed(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     assert (
         record.classification
@@ -74,6 +76,7 @@ def test_misaligned_pocket_axis_fails_closed(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     assert (
         record.classification
@@ -94,6 +97,7 @@ def test_degenerate_clear_span_fails_closed(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     assert record.classification == CavitySliderClassification.ABSTAINED_DEGENERATE_SPAN
     assert record.status == EvidenceResolutionStatus.ABSTAINED
@@ -111,6 +115,7 @@ def test_metamorphic_rotation_and_translation_invariance(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
 
     # Rotate 90 deg: (x, y) -> (-y + 300, x - 100)
@@ -122,10 +127,11 @@ def test_metamorphic_rotation_and_translation_invariance(
         pocket_mouth_jamb=rot(mouth),
         pocket_back_stud=rot(back),
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     assert (
         rot_rec.classification
-        == CavitySliderClassification.CAVITY_SLIDER_HOST_CONFIRMED
+        == CavitySliderClassification.CAVITY_SLIDER_GEOMETRIC_CANDIDATE
     )
     assert rot_rec.clear_span_pt == pytest.approx(base_rec.clear_span_pt, abs=0.01)
     assert rot_rec.pocket_depth_pt == pytest.approx(base_rec.pocket_depth_pt, abs=0.01)
@@ -146,6 +152,7 @@ def test_to_dict_schema_invariants(
         pocket_mouth_jamb=mouth,
         pocket_back_stud=back,
         host_through_wall_id="WALL_ENSUITE",
+        scale_ratio=0.01764,
     )
     d = record.to_dict()
     assert d["schema_version"] == "1.0.0"
