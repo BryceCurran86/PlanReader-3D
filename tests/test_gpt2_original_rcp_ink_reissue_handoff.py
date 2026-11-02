@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import pb_gpt2_original_source_geometry_bridge as module
+import pb_cross_view_ceiling_finish_authority as ceiling_module
 
 
 SHA = "a" * 64
@@ -68,13 +69,13 @@ def _ink():
 
 def _call(monkeypatch, ink=None, *, issued=None, error=None,
           cross=None, issued_floor=None, floor_error=None,
-          issued_w4=None, issued_ceiling=None):
+          issued_w4=None, issued_ceiling=None, native_room_lines=None):
     events = []
     actual = _ink() if issued is None else issued
 
     class Bridge(module.GPT2OriginalSourceGeometryBridge):
         def __init__(self):
-            pass
+            self._source = object()
 
         def _source_revision(self, revision_id, *, page_1_based):
             events.append(("original_source", revision_id, page_1_based))
@@ -139,6 +140,26 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
         ),
     )
 
+    def original_room_text_line(
+        text="OFFICE", block=9,
+        bbox=(26., 45., 46., 57.),
+        observations=("office-obs",), receipts=("office-receipt",),
+    ):
+        return SimpleNamespace(
+            page_id="9", source_partition_id="original-rcp-page9",
+            block_no=block, line_no=0, text=text, bbox=bbox,
+            observation_ids=observations, receipt_ids=receipts,
+        )
+    lines = (
+        (original_room_text_line(),)
+        if native_room_lines is None else native_room_lines
+    )
+    monkeypatch.setattr(
+        ceiling_module, "_trusted_room_labels_for_pages",
+        lambda *a, **k: events.append(("trusted_room_labels",)) or
+            {"9": lines},
+    )
+
     result = Bridge().original_rcp_ceiling_source_handoff_for_gpt1(
         revision_id="rev",
         original_floor_page_1_based=7,
@@ -151,7 +172,9 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
         source_definition_selector=None,
         source_occurrence_selector=None,
         original_ceiling_finish_code="GRID",
-        canonical_rooms=(),
+        canonical_rooms=SimpleNamespace(rooms=(
+            SimpleNamespace(physical_room_id="OFFICE", room_label="OFFICE"),
+        )),
         physical_room_id="OFFICE",
     )
     return result, events
@@ -162,7 +185,7 @@ def test_exact_reissued_ink_reaches_source_only_material_and_w4(monkeypatch):
     assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
     assert [item[0] for item in events] == [
         "original_source", "reissue_ink", "reissue_floor",
-        "material", "w4", "ceiling_handoff",
+        "material", "w4", "ceiling_handoff", "trusted_room_labels",
     ]
     assert events[1][1:] == (
         "rev", 9, "source-p9-original-rcp", BORDERS, ("d5i0",),
@@ -353,3 +376,70 @@ def test_missing_sealed_w4_physical_owner_abstains_before_ceiling_adapter(
     assert result["new_firm_quantities"] == 0
     assert result["source_ceiling_area_m2"] is None
     assert "ceiling_handoff" not in [x[0] for x in events]
+
+
+
+@pytest.mark.parametrize("native_room_lines", [
+    (),
+    (SimpleNamespace(
+        page_id="9", source_partition_id="original-rcp-page9",
+        block_no=9, line_no=0, text="LAUNDRY",
+        bbox=(26.,45.,46.,57.),
+        observation_ids=("laundry-obs",), receipt_ids=("laundry-receipt",),
+    ),),
+    (SimpleNamespace(
+        page_id="9", source_partition_id="original-rcp-page9",
+        block_no=9, line_no=0, text="OFFICE",
+        bbox=(150.,145.,165.,157.),
+        observation_ids=("office-obs",), receipt_ids=("office-receipt",),
+    ),),
+    (SimpleNamespace(
+        page_id="9", source_partition_id="original-rcp-page9",
+        block_no=9, line_no=0, text="OFFICE",
+        bbox=(26.,45.,46.,57.),
+        observation_ids=(), receipt_ids=(),
+    ),),
+    (SimpleNamespace(
+        page_id="9", source_partition_id="original-rcp-page9",
+        block_no=9, line_no=0, text="OFFICE",
+        bbox=(26.,45.,46.,57.),
+        observation_ids=("office-obs","office-obs"),
+        receipt_ids=("r1","r2"),
+    ),),
+])
+def test_missing_foreign_outside_or_untrusted_rcp_room_text_never_owns_grid(
+    monkeypatch, native_room_lines,
+):
+    result, events = _call(monkeypatch, native_room_lines=native_room_lines)
+    assert result["status"] == "source_RCP_room_label_region_not_authenticated"
+    assert result["new_firm_quantities"] == 0
+    assert result["source_ceiling_area_m2"] is None
+    assert "trusted_room_labels" in [v[0] for v in events]
+
+
+def test_two_independently_issued_room_labels_inside_same_rcp_zone_abstain(
+    monkeypatch,
+):
+    def line(block, text):
+        return SimpleNamespace(
+            page_id="9", source_partition_id="original-rcp-page9",
+            block_no=block, line_no=0, text=text,
+            bbox=(26.,45.,46.,57.),
+            observation_ids=(f"{text}-{block}",),
+            receipt_ids=(f"{text}-{block}-proof",),
+        )
+    result, _ = _call(
+        monkeypatch, native_room_lines=(
+            line(9, "OFFICE"),line(14, "OFFICE")
+        ),
+    )
+    assert result["status"] == "source_RCP_room_label_region_not_authenticated"
+    assert result["new_firm_quantities"] == 0
+
+
+def test_source_closed_cross_block_office_label_is_candidate_only(monkeypatch):
+    result, events = _call(monkeypatch)
+    assert result["status"] == "source_W4_original_A120_ceiling_compilation_shadow_only"
+    assert "trusted_room_labels" in [v[0] for v in events]
+    assert result["new_firm_quantities"] == 0
+    assert result["source_ceiling_area_m2"] is None
