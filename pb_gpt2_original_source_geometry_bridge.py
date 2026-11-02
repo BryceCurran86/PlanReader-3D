@@ -49,6 +49,7 @@ from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
 
 def _original_doorway_gap_native_ink_inventory_complete(
     original_pdf_bytes: bytes, *, page_1_based: int, original_room_graph: dict,
+    rival_receipt: dict | None = None,
 ) -> bool:
     """Veto omitted real painted strokes occupying a caller's claimed door gap.
 
@@ -60,6 +61,18 @@ def _original_doorway_gap_native_ink_inventory_complete(
     import math
     import re
 
+    def record(first_failure, rivals=(), *, complete=False):
+        # Internal source-only receipt; never a commercial quantity claim.
+        if type(rival_receipt) is dict:
+            rival_receipt.clear()
+            rival_receipt.update({
+                "page_1_based": page_1_based,
+                "first_failure": first_failure,
+                "original_native_rival_ids": tuple(sorted(set(rivals))),
+                "inventory_complete": complete,
+            })
+
+    record("original_doorway_gap_inventory_not_replayed")
     if (type(original_pdf_bytes) is not bytes or not original_pdf_bytes
             or type(page_1_based) is not int or page_1_based < 1
             or type(original_room_graph) is not dict
@@ -305,7 +318,16 @@ def _original_doorway_gap_native_ink_inventory_complete(
 
     # A malformed visible/possibly-visible stroke anywhere on this source
     # page cannot certify a complete native-ink inventory.
-    if any(unresolved_stroke_paint(row) for row in drawings):
+    unresolved_rows = [
+        (ix, row) for ix, row in enumerate(drawings)
+        if unresolved_stroke_paint(row)
+    ]
+    if unresolved_rows:
+        record(
+            "original_doorway_unknown_visible_stroke",
+            (f"d{ix}i{j}" for ix, row in unresolved_rows
+             for j, _ in enumerate(row.get("items") or ())),
+        )
         return False
 
     # Independently confirm that selected strokes actually border the
@@ -314,6 +336,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
     has_selected_left_ink_at_gap=False
     has_selected_right_ink_at_gap=False
     selected_flank_paint_orders=[]
+    selected_gap_rivals=[]
     selected=set(ids)
     for name in selected:
         match=re.fullmatch(r"d(\d+)i(\d+)",name)
@@ -330,7 +353,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # whitelist. Original ink inside an allegedly empty doorway gap
         # conflicts even if the caller included its ID in the wall roster.
         if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j],row["width"])):
-            return False
+            selected_gap_rivals.append(name)
         if (any(abs(span[1]-low)<=tolerance for span in selected_spans)
                 or any(abs(span[0]-high)<=tolerance for span in selected_spans)):
             seqno=row.get("seqno")
@@ -346,6 +369,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
     # other side cannot prove the missing physical wall fragment. This
     # is source completeness only, not an independently authenticated W4.
     if not (has_selected_left_ink_at_gap and has_selected_right_ink_at_gap):
+        record("original_doorway_selected_flank_missing", selected_gap_rivals)
         return False
 
     first_flank_paint_order=min(selected_flank_paint_orders)
@@ -387,15 +411,24 @@ def _original_doorway_gap_native_ink_inventory_complete(
         return (y0<=low+tolerance and y1>=high-tolerance
                 and x0<=fixed+tolerance and x1>=fixed-tolerance)
 
+    rival_ids=set(selected_gap_rivals)
     for ix,row in enumerate(drawings):
         if not (stroke_paint(row) or fill_paint(row)):
             continue
-        for j,item in enumerate(row.get("items",())):
+        items=row.get("items",())
+        if type(items) not in (tuple,list) or not items:
+            record("original_doorway_painted_path_items_unresolved", rival_ids)
+            return False
+        for j,item in enumerate(items):
             if f"d{ix}i{j}" in selected:
                 continue
             if (filled_gap(row) and not earlier_white_rect_underlay(row)
                     or stroke_paint(row) and crosses_gap(item,row["width"])):
-                return False
+                rival_ids.add(f"d{ix}i{j}")
+    if rival_ids:
+        record("original_doorway_gap_painted_ink_inventory_incomplete", rival_ids)
+        return False
+    record(None, complete=True)
     return True
 
 
@@ -1230,21 +1263,28 @@ class GPT2OriginalSourceGeometryBridge:
             # can hide the disagreeing left-hand wall stub and produce a false
             # positive open-room ancestry. Reinspect both full original source
             # pages for same-ink strokes actually occupying the alleged door gap.
-            if not (
-                _original_doorway_gap_native_ink_inventory_complete(
-                    original_source_bytes,
-                    page_1_based=original_floor_page_1_based,
-                    original_room_graph=reissued["floor_source_graph"],
-                )
-                and _original_doorway_gap_native_ink_inventory_complete(
-                    original_source_bytes,
-                    page_1_based=finish_page,
-                    original_room_graph=reissued["second_plan_source_graph"],
-                )
-            ):
+            floor_ink_rivals={}
+            finish_ink_rivals={}
+            floor_gap_complete=_original_doorway_gap_native_ink_inventory_complete(
+                original_source_bytes,
+                page_1_based=original_floor_page_1_based,
+                original_room_graph=reissued["floor_source_graph"],
+                rival_receipt=floor_ink_rivals,
+            )
+            # Inspect both source pages even if the first page already vetoes.
+            finish_gap_complete=_original_doorway_gap_native_ink_inventory_complete(
+                original_source_bytes,
+                page_1_based=finish_page,
+                original_room_graph=reissued["second_plan_source_graph"],
+                rival_receipt=finish_ink_rivals,
+            )
+            if not (floor_gap_complete and finish_gap_complete):
                 return {
                     "status":"source_original_doorway_ancestry_conflict",
                     "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
+                    "source_original_doorway_gap_rival_receipts":(
+                        floor_ink_rivals, finish_ink_rivals,
+                    ),
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }

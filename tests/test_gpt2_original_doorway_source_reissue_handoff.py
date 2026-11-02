@@ -109,12 +109,25 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
             "new_firm_quantities":0,
         }
 
-    def census(original_pdf_bytes, *, page_1_based, original_room_graph):
+    def census(original_pdf_bytes, *, page_1_based, original_room_graph,
+               rival_receipt=None):
         calls.append(("source_ink_inventory", page_1_based))
         assert original_pdf_bytes == b"sealed-source"
         assert original_room_graph["original_native_edge_ids"] in (
             FLOOR_IDS, FINISH_IDS,
         )
+        if rival_receipt is not None:
+            rival_receipt.update({
+                "page_1_based": page_1_based,
+                "first_failure": (
+                    None if inventory_complete
+                    else "original_doorway_gap_painted_ink_inventory_incomplete"
+                ),
+                "original_native_rival_ids": (
+                    () if inventory_complete else (f"d{page_1_based}i0",)
+                ),
+                "inventory_complete": inventory_complete,
+            })
         return inventory_complete
 
     monkeypatch.setattr(
@@ -396,8 +409,18 @@ def test_original_source_gap_inventory_prevents_selected_stroke_omission(
     assert result["first_failure"]=="original_doorway_gap_painted_ink_inventory_incomplete"
     assert result["new_firm_quantities"]==0
     assert [r[0] for r in calls]==[
-        "source","source_reissue","source_ink_inventory",
+        "source","source_reissue","source_ink_inventory","source_ink_inventory",
     ]
+    assert result["source_original_doorway_gap_rival_receipts"] == (
+        {"page_1_based": 7,
+         "first_failure": "original_doorway_gap_painted_ink_inventory_incomplete",
+         "original_native_rival_ids": ("d7i0",),
+         "inventory_complete": False},
+        {"page_1_based": 11,
+         "first_failure": "original_doorway_gap_painted_ink_inventory_incomplete",
+         "original_native_rival_ids": ("d11i0",),
+         "inventory_complete": False},
+    )
 
 
 def test_real_native_pdf_same_axis_ink_inventory_detects_omitted_wall_stub():
@@ -439,6 +462,44 @@ def test_real_native_pdf_same_axis_ink_inventory_detects_omitted_wall_stub():
     assert not audit(raw,page_1_based=2,original_room_graph=issued(
         ("d0i0","d1i0","d2i0","d3i0","d4i0"),(24,20),
     ))
+
+
+def test_synthetic_original_ink_receipt_keeps_every_competing_path():
+    """Two independent painted rivals must survive the source-negative veto."""
+    import fitz
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for p,q in (
+        ((20,20),(20,140)), ((120,20),(120,140)),
+        ((20,140),(120,140)), ((20,20),(24,20)),
+        ((80,20),(120,20)),
+        ((35,20),(49,20)), ((62,19.85),(62,20.15)),
+        ((142,20),(149,20)),
+    ):
+        page.draw_line(p,q,color=(0,0,0),width=0.48)
+    raw=doc.tobytes()
+    doc.close()
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":(24,20)},
+                {"degree":1,"point_pdf_pt":(80,20)},
+            ),
+        },),
+    }
+    receipt={}
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,rival_receipt=receipt,
+    ) is False
+    assert receipt == {
+        "page_1_based":1,
+        "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
+        "original_native_rival_ids":("d5i0","d6i0"),
+        "inventory_complete":False,
+    }
 
 
 def test_private_original_omitted_same_axis_d15_stub_is_rejected_at_actual_handoff(
