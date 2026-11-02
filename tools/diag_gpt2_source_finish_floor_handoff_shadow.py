@@ -205,7 +205,7 @@ def audit_gpt2_source_material_floor_handoff(
                 sorted({record.record_id for record in competing})
             ),
         }
-    inside=[];all_matching=[]
+    inside=[];all_matching=[];boundary_rivals=[]
     for occurrence in scope.records:
         if occurrence.code.upper()!=original_finish_code.upper():
             continue
@@ -234,10 +234,32 @@ def audit_gpt2_source_material_floor_handoff(
             boundary=box(*occurrence.bbox_pdf_pts)
         except (TypeError,ValueError,OverflowError):
             return {**result,"first_failure":"original_material_mark_geometry_invalid"}
-        if polygon.contains(boundary):
+        # GEOS contains() accepts some marks touching the room boundary.
+        # Any crossing or touching mark has unresolved physical ownership.
+        if polygon.boundary.intersects(boundary):
+            boundary_rivals.append(occurrence.record_id)
+        elif polygon.contains(boundary):
             inside.append(occurrence)
+    if boundary_rivals:
+        return {
+            **result,
+            "first_failure":"original_finish_mark_boundary_ownership_unresolved",
+            "boundary_touching_or_crossing_source_material_record_ids":
+                tuple(sorted(set(boundary_rivals))),
+            "competing_source_material_record_ids":tuple(sorted(
+                set(boundary_rivals) | {x.record_id for x in inside})),
+            "all_same_code_source_occurrence_record_ids":tuple(sorted(
+                x.record_id for x in all_matching)),
+        }
     if len(inside)!=1:
-        return {**result,"first_failure":"original_finish_mark_missing_or_competing"}
+        return {
+            **result,
+            "first_failure":"original_finish_mark_missing_or_competing",
+            "competing_source_material_record_ids":tuple(sorted(
+                x.record_id for x in inside)),
+            "all_same_code_source_occurrence_record_ids":tuple(sorted(
+                x.record_id for x in all_matching)),
+        }
     matched=inside[0]
     return {
         **result,"status":"source_owned_material_on_original_ink_ring_candidate",
