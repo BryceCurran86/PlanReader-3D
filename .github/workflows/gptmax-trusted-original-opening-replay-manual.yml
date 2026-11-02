@@ -153,14 +153,15 @@ jobs:
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
           DOCKERFILE
       - name: Stage immutable private north and south tests as inert owner-only data
-        if: ${{ matrix.target == 'antigravity' }}
         shell: bash
         env:
           SOURCE_TEST_TOKEN: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
           SOURCE_TEST_REPOSITORY: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          SOURCE_TEST_REF: ${{ vars.ORIGINAL_SOURCES_REF }}
         run: |
           set -euo pipefail
-          if ! python3 - <<'PY'
+          if [[ "$GPTMAX_TARGET" == "antigravity" ]]; then
+            if ! python3 - <<'PY'
           import base64
           import hashlib
           import json
@@ -220,20 +221,28 @@ jobs:
           except Exception:
               sys.exit(1)
           PY
-          then
-            echo "::error::Pinned private original-test staging failed"
-            exit 1
+            then
+              echo "::error::Pinned private original-test staging failed"
+              exit 1
+            fi
+            echo "Two immutable private original-test blobs staged without execution."
           fi
-          echo "Two immutable private original-test blobs staged without execution."
+          # One owner-only token boundary: reuse the trusted main SHA-256/size
+          # manifest provisioner after staging inert private test blobs.
+          # No reviewed PR-head code runs on this credentialed host.
+          ORIGINAL_SOURCES_TOKEN="$SOURCE_TEST_TOKEN" \
+            python3 .github/actions/provision-original-sources/provision.py \
+              --repository "$SOURCE_TEST_REPOSITORY" --ref "$SOURCE_TEST_REF" \
+              --names '1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --allow-missing false
       - name: Provision original Lot16 authenticated SHA and size
-        uses: ./.github/actions/provision-original-sources
-        with:
-          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
-          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
-          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
-          names: |
-            1. Construction Plans - Lot 16 Power (REV E).pdf
-          allow-missing: "false"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Recheck the immutable manifest WITHOUT a token: fail on missing/wrong PDF.
+          python3 .github/actions/provision-original-sources/provision.py \
+            --names '1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --allow-missing false
       - name: Verify real original source nine rows and all eight predecessors
         shell: bash
         env:
