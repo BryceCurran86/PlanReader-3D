@@ -141,11 +141,25 @@ def project_live_ceiling_customer_rows(
             if isinstance(quantity.metadata, Mapping)
             else {}
         )
+        # The complete source-closed trace has already authenticated the
+        # exact original RCP occurrence and schedule definition. Preserve
+        # that SOURCE code in the commercial element rather than presenting
+        # different original ceiling systems under one generic label. Never
+        # trim/cast an invalid code into a customer-facing material identity.
+        source_finish_code = metadata.get("finish_code")
+        if (
+            type(source_finish_code) is not str
+            or not source_finish_code
+            or source_finish_code != source_finish_code.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling customer source finish code is not exact"
+            )
         metadata.update(
             {
                 "commercial_projection_allowed": True,
                 "section": "Internal",
-                "element": "Ceiling lining area",
+                "element": f"Ceiling lining area ({source_finish_code})",
                 "location": _clean(
                     metadata.get("physical_room_id")
                     or metadata.get("canonical_room_id")
