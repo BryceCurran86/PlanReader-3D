@@ -789,6 +789,64 @@ def test_core_writer_cannot_infer_source_inclusion_from_invalid_override(role, v
         )
 
 
+
+def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
+    """Test the REAL app ceiling conversion with a synthetic signed claim.
+
+    The independent original A120 physical ceiling authority is not bypassed
+    or claimed: only the already-issued QuantityEvidence handoff is mocked.
+    """
+    from tests.test_live_ceiling_lining_source_closed_export import (
+        _claim as _ceiling_claim,
+        _quantity as _ceiling_quantity,
+    )
+
+    claim = _ceiling_claim(_ceiling_quantity())
+    source = tmp_path / "synthetic-ceiling-source.pdf"
+    source.write_bytes(b"source-neutral-ceiling-not-an-original-PDF")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    # The separate legacy ceiling fallback has no source in this synthetic
+    # test. Retain its normal production behavior outside this isolated path.
+    legacy = SimpleNamespace(canonical_ceilings=())
+    with (
+        patch(
+            "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+            return_value=claim,
+        ),
+        patch(
+            "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
+            return_value=legacy,
+        ),
+        patch(
+            "pb_live_ceiling_area_quantity_publication.publish_live_ceiling_area_quantities",
+            return_value=(),
+        ),
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    rows = app._live_ceiling_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1
+    customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    original = claim.ceiling_lining_quantity_evidence[0]
+    assert customer["element"] == "Ceiling lining area"
+    assert customer["finish_system"] == "ceiling_grid"
+    assert customer["quantity"] == original.value == 9.05352
+    assert customer["unit"] == "m²"
+    assert customer["quantity_status"] == "To review"
+    assert customer["inclusion_status"] == "INCLUSION"
+    assert customer["row_role"] == "ceiling_area"
+    assert original.quantity_id in customer["notes"]
+    assert not any(
+        "live_ceiling_customer_projection_failed" in reason
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "ceiling", ()
+        )
+    )
+
+
 def test_runtime_floor_finish_bad_source_code_does_not_write_customer_row(tmp_path):
     """A forged FT caption cannot be converted into a saleable app row."""
     from tests.test_live_floor_finish_area_source_closed_export import (
