@@ -11,7 +11,10 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
-from pb_live_floor_area_quantity_publication import _valid_original_source_sha
+from pb_live_floor_area_quantity_publication import (
+    _valid_original_source_sha,
+    publish_live_floor_area_quantities,
+)
 from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
@@ -159,6 +162,23 @@ def build_live_floor_finish_area_source_traces(
                 f"duplicate original floor-finish quantity id: {original_id}"
             )
         seen_original_quantity_ids.add(original_id)
+    # A live claim that supplies original room-area QuantityEvidence must
+    # reprove it through the INDEPENDENT canonical-floor area issuer before
+    # the same room can receive a commercially FIRM material finish. Without
+    # this, a valid-looking floor.metric_area_quantity_id can be replayed
+    # against a different/blocked original room-area record. The explicit
+    # source-area inventory and signed floor-area producer are the authority;
+    # numeric equality and matching room labels alone are not.
+    #
+    # An older figured-only claim may legitimately carry no separate
+    # room_area QuantityEvidence family; its existing source-figured proof
+    # remains intact, not silently converted to a new source-area claim.
+    independently_published_room_areas = ()
+    if claim.room_area_quantity_evidence:
+        independently_published_room_areas = (
+            publish_live_floor_area_quantities(claim)
+        )
+
     # The customer boundary already rejects a non-abstained numeric source
     # that retains producer blockers. Apply the same veto at the independent
     # source-seal boundary: a caller must not bypass customer projection and
@@ -273,6 +293,30 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source metric area receipt is missing: {floor_id}"
             )
+
+        if claim.room_area_quantity_evidence:
+            published_original_owners = [
+                source_quantity
+                for source_quantity in independently_published_room_areas
+                if (
+                    isinstance(source_quantity.metadata, Mapping)
+                    and source_quantity.metadata.get("canonical_floor_id")
+                    == floor.canonical_floor_id
+                    and source_quantity.metadata.get(
+                        "upstream_room_area_quantity_id"
+                    ) == area_receipt_id
+                    and source_quantity.input_entity_ids
+                    == (floor.physical_floor_surface_id,)
+                    and source_quantity.value == floor.metric_area_m2
+                    and source_quantity.authority == floor.metric_area_authority
+                )
+            ]
+            if len(published_original_owners) != 1:
+                raise SourceClosedRunConflictError(
+                    "floor-finish original room-area quantity is not "
+                    "independently published on the same canonical floor: "
+                    f"{quantity.quantity_id}"
+                )
 
         if (
             type(quantity.value) not in (int, float)
