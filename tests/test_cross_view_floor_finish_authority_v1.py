@@ -283,6 +283,64 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert set(quantity.evidence_ids).issubset(enriched.floors[0].evidence_ids)
 
 
+@pytest.mark.parametrize("axes", (
+    None, (), ("dim-h",), ("dim-h", "dim-h"),
+    ("dim-h", "dim-v", "dim-h"), ("dim-h", "dim-v", "dim-w"),
+    (" dim-h", "dim-v"), ("dim-h", "dim-v "),
+    ("dim-h", ""), (True, "dim-v"), (7, "dim-v"),
+    "dim-h", {"horizontal": "dim-h", "vertical": "dim-v"},
+))
+def test_original_figured_axis_inventory_cannot_be_repaired_into_firm_finish(
+    monkeypatch, axes,
+) -> None:
+    """Malformed original axis evidence must abstain at the true producer.
+
+    The customer projector and final source sealer are downstream gates.
+    Neither can undo an invented FIRM producer receipt after normalization.
+    """
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    source_metadata = dict(original.area_evidence.metadata)
+    source_metadata["figured_dimension_ids"] = axes
+    disputed_area = replace(
+        original.area_evidence, metadata=source_metadata,
+    )
+    disputed_record = replace(original, area_evidence=disputed_area)
+    disputed_result = replace(room_areas, records=(disputed_record,))
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=disputed_result, floors=floors,
+    ).publish()
+
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+    assert room_areas.records[0].area_evidence.metadata == (
+        original.area_evidence.metadata
+    )
+
+
+def test_exact_original_figured_axes_remain_replayable_without_mutation(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    evidence_before = repr(original.area_evidence)
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    assert len(result.quantities) == 1
+    original_axes = original.area_evidence.metadata["figured_dimension_ids"]
+    assert result.quantities[0].metadata["figured_dimension_ids"] == sorted(
+        original_axes
+    )
+    assert repr(original.area_evidence) == evidence_before
+
+
 def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
     monkeypatch,
 ) -> None:
