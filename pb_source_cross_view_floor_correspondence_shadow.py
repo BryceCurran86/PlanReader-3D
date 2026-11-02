@@ -632,6 +632,53 @@ class SourceCrossViewFloorCorrespondenceProducer:
         )
         overall_reasons = [] if is_unique else [REGISTRATION_NOT_UNIQUE]
 
+        # Original measured-box geometry, not a caller "overlap" hint,
+        # owns box competition. Validate the COMPLETE set before electing a
+        # source region and sweep source-native x intervals with bounded
+        # active comparisons (never publish from a partial search).
+        if type(measured_boxes) not in (list, tuple) or len(measured_boxes)>20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+            )
+        validated_boxes=[]
+        for item in measured_boxes:
+            raw=item.get("dimension_box_pdf_pts") if isinstance(item,Mapping) else None
+            if (type(raw) not in (tuple,list) or len(raw)!=4
+                    or any(type(value) not in (int,float)
+                           or abs(value)>2**53 for value in raw)):
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            coords=tuple(float(v) for v in raw)
+            if (any(not math.isfinite(v) for v in coords)
+                    or coords[0]>=coords[2] or coords[1]>=coords[3]):
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            validated_boxes.append(coords)
+        overlap_flags=[False]*len(validated_boxes)
+        active=[]
+        inspected=0
+        for i in sorted(range(len(validated_boxes)),
+                        key=lambda k:(validated_boxes[k][0],k)):
+            x0,y0,x1,y1=validated_boxes[i]
+            active=[j for j in active if validated_boxes[j][2]>x0]
+            inspected+=len(active)
+            if inspected>500_000:
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            for j in active:
+                a=validated_boxes[j]
+                if a[1]<y1 and y0<a[3]:
+                    overlap_flags[i]=True
+                    overlap_flags[j]=True
+            active.append(i)
+
         # One original physical room, canonical floor and W4 face cannot
         # be claimed by two measured boxes, even if their ink boxes do not
         # overlap. Census the COMPLETE source identity universe before
@@ -655,8 +702,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
             for field in source_id_fields
             if source_id(item, field)
         )
-        for item in measured_boxes:
-            box_sup = tuple(float(v) for v in item["dimension_box_pdf_pts"])
+        for box_index,item in enumerate(measured_boxes):
+            box_sup = validated_boxes[box_index]
             canonical_floor_id = source_id(item, "canonical_floor_id")
             physical_room_id = source_id(item, "physical_room_id")
             source_room_face_record_id = source_id(item, "source_room_face_record_id")
@@ -692,7 +739,10 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=item.get("other_labelled_boxes_overlapping", 0),
+                other_labelled_boxes_overlapping=(
+                    bool(item.get("other_labelled_boxes_overlapping", 0))
+                    or overlap_flags[box_index]
+                ),
                 material_code=selector.material_code,
                 identity_missing=identity_missing,
                 identity_ambiguous=identity_ambiguous,
