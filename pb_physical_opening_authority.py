@@ -12,6 +12,7 @@ publication remain separate downstream authorities.
 """
 from __future__ import annotations
 
+import collections
 from dataclasses import dataclass, field, replace
 import math
 from typing import Mapping, Optional, Sequence
@@ -317,6 +318,61 @@ class PhysicalOpeningPartitionReceipt:
     def is_physically_distinct(self) -> bool:
         """True only for two different openings the source proves apart (no shared members, or a proven partition)."""
         return self.status is EvidenceResolutionStatus.CORROBORATED and self.partition in {"disjoint", "partitioned"}
+
+
+@dataclass(frozen=True)
+class SeededFaceInk:
+    """One non-member visible line collinear with a structure's face and overlapping its gap, located by where each
+    of its ends lies relative to the two jamb stations: ``beyond`` them (outside the gap), ``at`` one, or ``within``
+    the gap. ``start_relation`` and ``end_relation`` follow the structure's own axis; ``extent_class`` is the two
+    sorted and joined (at_at, at_beyond, at_within, beyond_beyond, beyond_within, within_within), so it does not
+    change when the drawing is rotated or reflected. ``locality`` says whether the line stays within the opening
+    (``opening_local``) or runs on past one or both jambs as shared wall face. A description of geometry, not a role."""
+
+    observation_id: str
+    face_offset: float
+    along_start: float
+    along_end: float
+    start_relation: str
+    end_relation: str
+    extent_class: str
+    locality: str
+
+
+@dataclass(frozen=True)
+class SeededStructureInventory:
+    """One jamb-bounded structure among the named members, survivor or set aside, with the ink on and across it."""
+
+    candidate_id: str
+    status: str                                  # survivor | set_aside (interior stub or unreadable frame)
+    member_ids: tuple[str, ...]
+    shared_member_ids: tuple[str, ...]           # members that another structure found here also rests on
+    direction: tuple[float, float]
+    normal: tuple[float, float]
+    gap_start: float
+    gap_end: float
+    face_offsets: tuple[float, ...]
+    face_ink: tuple[SeededFaceInk, ...]
+    interior_ink_ids: tuple[str, ...]            # lines between the faces that are not on a face
+
+
+@dataclass(frozen=True)
+class SeededFaceInkInventory:
+    """Every structure the six-line rule finds among the named members, none dropped, with its face ink classified.
+
+    Read-only and unwired. It decides nothing, asserts no role and grants no quantity, count or firm authority."""
+
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    page_id: Optional[str]
+    structures: tuple[SeededStructureInventory, ...]
+    asserts_role: bool = False
+    grants_quantity: bool = False
+    grants_firm_authority: bool = False
+
+    def __post_init__(self) -> None:
+        if self.asserts_role or self.grants_quantity or self.grants_firm_authority:
+            raise ValueError("a face ink inventory asserts no role and grants no quantity or firm authority")
 
 
 @dataclass(frozen=True)
@@ -1044,6 +1100,34 @@ def _source_member_partition(
     """Whether two openings that rest on some of the same source lines are physically apart (see the detail function)."""
     return _source_member_partition_detail(
         left_ids, right_ids, records_by_id, left_box=left_box, right_box=right_box)[0]
+
+
+def _face_ink_inventory(
+    frame: _StructureFrame,
+    member_ids: frozenset,
+    records_by_id: Mapping[str, SourceObservationRecord],
+    records: Sequence[SourceObservationRecord],
+) -> tuple[tuple[SeededFaceInk, ...], tuple[str, ...]]:
+    """(face ink located relative to the gap, interior ink ids) for one structure.
+
+    The set of lines is exactly the one ``_seeded_ink_checks`` returns as stubs and continuing face ink (and its
+    interior ink), so the veto and the inventory cannot disagree about what is there."""
+    stubs, interior, continuing = _seeded_ink_checks(frame, member_ids, frozenset(), records)
+    eq = _COORD_EQ_ABS_TOL
+    ink = []
+    for observation_id in sorted(set(stubs) | set(continuing)):
+        line = _line_geometry(records_by_id[observation_id])
+        along = sorted((_projection((line[0], line[1]), frame.direction), _projection((line[2], line[3]), frame.direction)))
+        start, end = along
+        start_relation = "beyond" if start < frame.gap_start - eq else ("at" if start <= frame.gap_start + eq else "within")
+        end_relation = "beyond" if end > frame.gap_end + eq else ("at" if end >= frame.gap_end - eq else "within")
+        beyond = (start_relation, end_relation).count("beyond")
+        locality = ("opening_local", "extends_past_one_jamb", "extends_past_both_jambs")[beyond]
+        ink.append(SeededFaceInk(
+            observation_id=observation_id, face_offset=_projection((line[0], line[1]), frame.normal),
+            along_start=start, along_end=end, start_relation=start_relation, end_relation=end_relation,
+            extent_class="_".join(sorted((start_relation, end_relation))), locality=locality))
+    return tuple(ink), tuple(interior)
 
 
 def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
@@ -4479,6 +4563,50 @@ class PhysicalOpeningAuthority:
             reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
         )
 
+    def seeded_face_ink_inventory(
+        self,
+        selector: ObservationSelector,
+        member_observation_ids: Sequence[str],
+    ) -> SeededFaceInkInventory:
+        """Every jamb-bounded structure among the named members, none dropped, with the ink on and across its faces.
+
+        Source-owned and read-only: it applies this authority's own six-line rule to the named members and then reads
+        the full visible inventory of the selector's authenticated snapshot and page for the lines the restriction
+        left out. For each structure (a set-aside one, carrying an interior stub, is kept and marked) it lists every
+        non-member visible line collinear with one of its faces that overlaps its gap, classified by where it starts
+        and ends relative to the jamb stations (``opening_local`` against ``extends_past_one_jamb`` /
+        ``extends_past_both_jambs``, i.e. shared wall face), the lines between the faces that are not on a face, and
+        the members shared with another structure. It decides nothing, asserts no role and uses and writes none of
+        the per-page memos."""
+
+        failure, source_result, records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
+        if failure is not None:
+            return SeededFaceInkInventory(
+                status=failure.status, reason_codes=tuple(failure.reason_codes), page_id=failure.page_id, structures=())
+        found = self._visible_structural_candidates(source_result.observation, restricted)
+        used = collections.Counter(i for structure in found for i in set(structure.source_observation_ids))
+        structures = []
+        for structure in sorted(found, key=lambda c: c.candidate_id):
+            frame = _structure_frame(structure.source_observation_ids, by_id)
+            members = tuple(sorted(structure.source_observation_ids))
+            shared = tuple(i for i in members if used[i] > 1)
+            if frame is None:
+                structures.append(SeededStructureInventory(
+                    candidate_id=structure.candidate_id, status="set_aside", member_ids=members, shared_member_ids=shared,
+                    direction=(0.0, 0.0), normal=(0.0, 0.0), gap_start=0.0, gap_end=0.0, face_offsets=(),
+                    face_ink=(), interior_ink_ids=()))
+                continue
+            face_ink, interior = _face_ink_inventory(frame, frozenset(members), by_id, records)
+            structures.append(SeededStructureInventory(
+                candidate_id=structure.candidate_id,
+                status="set_aside" if any(i.extent_class == "within_within" for i in face_ink) else "survivor",
+                member_ids=members, shared_member_ids=shared, direction=frame.direction, normal=frame.normal,
+                gap_start=frame.gap_start, gap_end=frame.gap_end, face_offsets=frame.face_offsets,
+                face_ink=face_ink, interior_ink_ids=interior))
+        return SeededFaceInkInventory(
+            status=EvidenceResolutionStatus.CANDIDATE, reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
+            page_id=str(source_result.observation.page_id), structures=tuple(structures))
+
     def prove_seeded_existence(
         self,
         selector: ObservationSelector,
@@ -5285,6 +5413,9 @@ __all__ = [
     "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_OVERLAPPING_EXTENT",
     "PHYSICAL_OPENING_IDENTITY_SHARED_MEMBERS_PARTITION_UNPROVEN",
     "PhysicalOpeningPartitionReceipt",
+    "SeededFaceInk",
+    "SeededFaceInkInventory",
+    "SeededStructureInventory",
     "PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH",
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
     "PhysicalOpeningAuthority",
