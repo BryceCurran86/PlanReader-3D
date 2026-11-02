@@ -701,3 +701,79 @@ def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path)
         for reasons in coverage["family_gaps"].values()
         for reason in reasons
     )
+
+def test_runtime_source_closed_floor_finish_writes_coded_customer_takeoff_row(tmp_path):
+    """Real app row conversion must retain the signed source FT code.
+
+    This uses an explicitly synthetic source-neutral fixture; an OFFICE FT3
+    original-source quantity still requires GPT2 physical and D15 authority.
+    """
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _claim as _floor_finish_claim,
+    )
+
+    claim = _floor_finish_claim()
+    source = tmp_path / "synthetic-floor-finish-source.pdf"
+    source.write_bytes(b"source-neutral-test-fixture-not-an-original-PDF")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    rows = app._live_floor_finish_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1
+    customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    original = claim.floor_finish_quantity_evidence[0]
+    assert customer["element"] == "Floor finish area (FT1)"
+    assert customer["finish_system"] == "tile"
+    assert customer["quantity"] == original.value == 8.64
+    assert customer["unit"] == "m²"
+    assert customer["quantity_status"] == "To review"
+    assert customer["inclusion_status"] == "INCLUSION"
+    assert customer["row_role"] == "floor_area"
+    assert original.quantity_id in customer["notes"]
+    assert not any(
+        "live_floor_finish_customer_projection_failed" in reason
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "floor_finish", ()
+        )
+    )
+
+
+def test_runtime_floor_finish_bad_source_code_does_not_write_customer_row(tmp_path):
+    """A forged FT caption cannot be converted into a saleable app row."""
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _claim as _floor_finish_claim,
+    )
+
+    claim = _floor_finish_claim()
+    original = claim.floor_finish_quantity_evidence[0]
+    invalid = replace(
+        original,
+        metadata={**dict(original.metadata), "finish_code": "FT9"},
+    )
+    claim = replace(claim, floor_finish_quantity_evidence=(invalid,))
+    source = tmp_path / "synthetic-bad-finish-source.pdf"
+    source.write_bytes(b"source-neutral-bad-FT-code-test")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    assert app._live_floor_finish_takeoff_rows_by_workspace[1] == []
+    assert any(
+        reason.startswith("live_floor_finish_customer_projection_failed:")
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "floor_finish", ()
+        )
+    )
