@@ -202,3 +202,70 @@ def test_atomic_writer_fails_closed_without_hardlinks(tmp_path, monkeypatch):
         handoff._publish_new(path, {"source": "authenticated"})
     assert not path.exists()
     assert not list(tmp_path.glob(".sealed_run.json.*.tmp"))
+
+
+
+def test_explicit_original_recovery_forwards_producer_reproof_to_both_commercial_consumers(
+    tmp_path, monkeypatch,
+):
+    """The ninth original must reach the same source-closed/customer opt-in gate.
+
+    This checks routing only, never original-source authority or a ninth area.
+    The protected owner-original test separately proves physical evidence and
+    immutable eight-customer-body retention.
+    """
+    pdf, sha, manifest = _source(tmp_path)
+    observed = []
+
+    def _inspect_source(pdf_file, page, *, on_original_claim, recover_additional_opening_areas):
+        assert pdf_file == pdf and page == 2
+        assert recover_additional_opening_areas is True
+        opening = SimpleNamespace(to_dict=lambda: {
+            "canonical_opening_id": "physical-original",
+            "physical_opening_id": "physical-original",
+            "source_sha256": sha,
+            "host_binding_record_id": "original-source-host",
+        })
+        on_original_claim(SimpleNamespace(canonical_openings=(opening,)))
+        return {
+            "pdf_sha256": sha,
+            "opening_sealing_diagnostic": {
+                "status": "source_sealed_and_customer_rows_verified",
+                "sealed_quantity_ids": ["original-opening-quantity-1"],
+            },
+        }
+
+    def _seal(_claim, *, workspace_id, project_id, source_reproved_append_only):
+        assert workspace_id == 1 and project_id == handoff.PROJECT
+        assert source_reproved_append_only is True
+        observed.append("original-reproved-sealer")
+        return _signed(sha)
+
+    def _rows(_claim, *, workspace_id, project_id, source_reproved_append_only):
+        assert workspace_id == 1 and project_id == handoff.PROJECT
+        assert source_reproved_append_only is True
+        observed.append("original-reproved-customer")
+        return ({"quantity_id": "original-opening-quantity-1"},)
+
+    def _verify(_sealed, _rows):
+        observed.append("customer-verified")
+        return _verified()
+
+    monkeypatch.setattr(handoff, "inspect_source", _inspect_source)
+    monkeypatch.setattr(handoff, "seal_live_opening_area_claim_run", _seal)
+    monkeypatch.setattr(handoff, "project_live_opening_customer_rows", _rows)
+    monkeypatch.setattr(handoff, "verify_sealed_customer_output", _verify)
+
+    output = tmp_path / "fresh-original-source-reproof"
+    result = handoff.run_original_lot16_sealed_handoff(
+        pdf, output, manifest_path=manifest,
+        recover_additional_opening_areas=True,
+    )
+    assert observed == [
+        "original-reproved-sealer",
+        "original-reproved-customer",
+        "customer-verified",
+    ]
+    assert result["signed_run_and_customer_parity"] is True
+    assert result["benchmark_score_granted"] is False
+    assert (output / "source_production_openings.json").is_file()
