@@ -178,3 +178,60 @@ def test_requested_grid_mark_must_keep_own_original_document_text_and_bbox(
         # Numeric formatting alone is not physical scale authority.
         assert result["status"] == "original_rcp_material_in_ceiling_ink_candidate"
     assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("bbox", [
+    (0.,20.,10.,30.),
+    (90.,20.,100.,30.),
+    (0.,0.,10.,10.),
+    (95.,20.,105.,30.),
+    (-5.,20.,5.,30.),
+    (100.,20.,110.,30.),
+])
+def test_grid_printed_mark_touching_or_crossing_original_zone_boundary_abstains(
+    bbox,
+):
+    rcp,authority,definition_selector,occurrence_selector=_sources(
+        "outside",bad_requested={"bbox_pdf_pts":bbox},
+    )
+    result=audit_original_rcp_source_finish_occurrence(
+        rcp, authority=authority,
+        definition_selector=definition_selector,
+        occurrence_selector=occurrence_selector,
+        original_finish_code="GRID",
+    )
+    assert result["status"] == "rcp_finish_occurrence_source_unresolved"
+    assert result["first_failure"] == "original_rcp_finish_mark_touches_zone_boundary"
+    assert result["boundary_touch_original_rcp_mark_record_ids"] == (
+        "GRID-plan-source",
+    )
+    assert result["new_firm_quantities"] == 0
+
+
+def test_grid_mark_wholly_inside_original_zone_remains_source_candidate_only():
+    rcp,authority,definition_selector,occurrence_selector=_sources("outside")
+    result=audit_original_rcp_source_finish_occurrence(
+        rcp, authority=authority,
+        definition_selector=definition_selector,
+        occurrence_selector=occurrence_selector,
+        original_finish_code="GRID",
+    )
+    assert result["status"] == "original_rcp_material_in_ceiling_ink_candidate"
+    assert result["original_source_finish_record_ids"] == ("GRID-plan-source",)
+    assert result["new_firm_quantities"] == 0
+    assert result["source_ceiling_metric_area_issued"] is False
+
+
+def test_other_source_finish_mark_touching_grid_zone_vetoes_unique_grid_owner():
+    rcp,authority,definition_selector,occurrence_selector=_sources(
+        "crossing",
+    )
+    result=audit_original_rcp_source_finish_occurrence(
+        rcp, authority=authority,
+        definition_selector=definition_selector,
+        occurrence_selector=occurrence_selector,
+        original_finish_code="GRID",
+    )
+    assert result["status"] == "rcp_finish_occurrence_source_unresolved"
+    assert result["first_failure"] == "competing_rcp_material_codes_in_one_ceiling_zone"
+    assert result["new_firm_quantities"] == 0
