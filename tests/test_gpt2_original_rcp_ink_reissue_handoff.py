@@ -6,6 +6,7 @@ acceptance or a grant of ceiling square metres.
 from __future__ import annotations
 
 from copy import deepcopy
+from math import dist
 from types import SimpleNamespace
 
 import pytest
@@ -551,7 +552,7 @@ def _open_floor_graph():
         "interior_stroke_intersections_and_overlaps":(),
         "original_native_edges":tuple(
             {"source_id":ident,"endpoints_pdf_pts":coords,
-             "source_ink_length_pdf_pt":__import__("math").dist(*coords)}
+             "source_ink_length_pdf_pt":dist(*coords)}
             for ident,coords in strokes
         ),
         "native_components":({
