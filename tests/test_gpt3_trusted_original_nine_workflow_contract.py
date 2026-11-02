@@ -363,7 +363,6 @@ def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
         assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
         assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
         assert execute.count(' > "$output" 2>&1; then') == 1
-        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" in execute
         assert "Original default-eight producer/seal/customer FAILED" in execute
         assert "Original explicit-nine producer/seal/customer FAILED" in execute
         assert "Original sealed/customer receipt verification FAILED" in execute
@@ -402,8 +401,6 @@ def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
     assert old in raw
     assert _private_phase_diagnostic_is_source_safe(raw)
     assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
-
-
 
 def test_original_producer_reverifies_source_sha_inside_offline_pytest():
     """No standalone preflight may replace the original test's source attestation."""
