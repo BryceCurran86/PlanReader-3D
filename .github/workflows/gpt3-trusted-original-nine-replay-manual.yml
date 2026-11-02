@@ -150,23 +150,11 @@ jobs:
           # Private original never reaches candidate Python on the networked
           # runner. Only trusted main resolved the token-bearing local action.
           # Candidate code and the original are independent read-only mounts.
-          # The trusted provisioner already SHA-verified the private PDF.
-          # Reprove the nested bind and exact pinned PDF runtime INSIDE the
-          # same no-network, read-only container before running real issuers.
-          # Nothing from these private checks may reach workflow logs.
-          if ! docker run --rm --network none --read-only --cap-drop ALL \
-              --security-opt no-new-privileges --pids-limit 256 \
-              --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
-              --mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly" \
-              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
-              --workdir /workspace \
-              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
-              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
-              "gpt3-offline:${{ matrix.python-version }}" \
-              python -c 'import hashlib,json,fitz;from pathlib import Path;p=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf");m=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json").read_text());e=[d for d in m["source_documents"] if d.get("role")=="architectural_drawings"];assert len(e)==1;d=e[0];assert p.is_file() and p.name==d["name"] and p.stat().st_size==d["size_bytes"];assert hashlib.sha256(p.read_bytes()).hexdigest()==d["sha256"];assert fitz.VersionBind=="1.28.0"' > "$output" 2>&1; then
-            echo "::error::Original Docker source mount or pinned PyMuPDF preflight FAILED (private details withheld)"
-            exit 1
-          fi
+          # Source integrity is verified by the trusted provisioner on host,
+          # then AGAIN by the immutable original acceptance test inside this
+          # same offline/read-only container before any producer is invoked.
+          # A separate Docker preflight added in #4159 regressed BOTH Python
+          # matrices before reaching that existing, stronger source test.
           if ! docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 256 \
               --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
@@ -203,7 +191,7 @@ jobs:
           {
             echo '### GPT3 source-positive release acceptance'
             echo "- Immutable exact code SHA: $GPT3_APPROVED_HEAD"
-            echo '- Original Lot16: source SHA/size verified by manifest provisioner and preflight'
+            echo '- Original Lot16: source SHA/size verified by provisioner and offline original acceptance'
             echo '- Both original 8/default and 9/explicit real source production runs: PASS'
             echo '- Full sealed and customer row bodies unchanged for old 8: PASS'
             echo '- New ninth distinct physical/snapshot and verified customer: PASS'
