@@ -2,7 +2,7 @@
 
 No original PDF, physical W4 closure, wall snap, m2 or customer records.
 """
-from copy import deepcopy
+from math import dist
 
 import pytest
 
@@ -34,7 +34,7 @@ def original_open_graph():
         "original_native_edge_ids":IDS,
         "original_native_edges":tuple(
             {"source_id":key,"endpoints_pdf_pts":tuple(map(tuple,ends)),
-             "source_ink_length_pdf_pt":1.}
+             "source_ink_length_pdf_pt":dist(*ends)}
             for key,ends in EDGES
         ),
         "native_components":({
@@ -92,6 +92,12 @@ def test_exact_source_open_room_one_unprinted_doorway_chord_is_not_physical_wall
     ),
     lambda g:g["original_native_edges"][2].update(
         source_id="foreign-edge",
+    ),
+    lambda g:g["original_native_edges"][2].update(
+        source_ink_length_pdf_pt=1.,
+    ),
+    lambda g:g["original_native_edges"][2].update(
+        source_ink_length_pdf_pt=float("inf"),
     ),
     lambda g:g["original_native_edges"][2].update(
         endpoints_pdf_pts=((100.,0.),(True,100.)),
