@@ -355,6 +355,17 @@ def _seal_explicit_source_reproved_append_only_openings(
         claim, source_root=source_root,
         old_objects=old_objects, new_objects=new_objects,
     )
+    # A matching replay inventory remains entirely caller-controlled.
+    # Accept mixed producer snapshots ONLY when the original-byte collector
+    # minted the live proof after reissuing the complete source/host/physical
+    # partition authorities; the proof independently reconsults those owners.
+    from pb_live_append_only_opening_area_composition import (
+        _verify_original_opening_area_replay_proof,
+    )
+    if not _verify_original_opening_area_replay_proof(claim):
+        raise SourceClosedRunConflictError(
+            "original-source opening replay authority proof required"
+        )
 
     # Reject even a different physical-ID string if a later snapshot copied
     # precisely the same original observation, lineage and geometry receipt.
