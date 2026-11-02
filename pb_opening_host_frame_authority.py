@@ -1151,42 +1151,6 @@ class OpeningHostFrameProducer:
                         projection = (data[0] + _dot(geometry.origin, axis),
                                       data[1] + _dot(geometry.origin, axis),
                                       data[2] + _dot(geometry.origin, normal))
-                    elif host_geometry._candidate_axis_data(records_by_id[wall_id], geometry) is not None:
-                        unrelaxed = self._record_projection(records_by_id[wall_id], axis, normal,
-                            strict_collinearity_shadow=False)
-                        if unrelaxed is not None:
-                            lines = host_geometry._authenticated_raster_source_lines(
-                                self._opening, opening, wall_scope.source_observation_ids)
-                            req = set(records_by_id[wall_id].physical_identity.source_primitive_ids)
-                            # A producer-owned visible primitive does not prove
-                            # that all source-edge pieces form one original
-                            # continuous wall. The W2 2.5pt graph snap may not
-                            # bridge a 0.01pt source gap or a disconnected pier.
-                            # Reprove the typed exact source-edge chain before
-                            # accepting geometrically smoothed W4 projections.
-                            if (req and all(p in lines for p in req)
-                                    and source_edge_axis_projection(
-                                        records_by_id[wall_id], geometry, lines
-                                    ) is not None):
-                                ownership: dict[str, set[str]] = {p: set() for p in req}
-                                visibility = self._opening.source_visibility_authority()
-                                for observation_id in wall_scope.source_observation_ids:
-                                    result = visibility.resolve_visible(ObservationSelector(
-                                        document_id=opening.document_id, revision_id=opening.revision_id,
-                                        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
-                                        observation_id=observation_id))
-                                    obs = result.observation
-                                    if result.status is not EvidenceResolutionStatus.CORROBORATED or obs is None:
-                                        continue
-                                    primitive_id = str(obs.source_primitive_ref or "").removeprefix("visible:")
-                                    if (primitive_id in req and obs.page_id == opening.page_id
-                                            and host_geometry._line(obs) == lines[primitive_id]):
-                                        ownership[primitive_id].add(observation_id)
-                                if all(ids for ids in ownership.values()):
-                                    projection = unrelaxed
-                                    projection_observation_ids.update(
-                                        oid for ids in ownership.values() for oid in ids
-                                    )
             if projection is None:
                 return None
             u_min, u_max, offset = projection
