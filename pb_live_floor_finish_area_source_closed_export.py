@@ -396,6 +396,23 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish original measurement lacks exact figured "
                     f"dimension pair: {quantity.quantity_id}"
                 )
+        else:
+            scale_id = metadata.get("resolved_scale_id")
+            scale_status = metadata.get("scale_status")
+            # Missing source census is not proof of zero competing scales.
+            scale_conflicts = metadata.get("scale_conflicts")
+            if (
+                type(scale_id) is not str or not scale_id
+                or scale_id != scale_id.strip()
+                or type(scale_status) is not str
+                or scale_status not in ("resolved", "verified")
+                or type(scale_conflicts) not in (tuple, list)
+                or bool(scale_conflicts)
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original measurement lacks exact resolved "
+                    f"physical scale without conflicts: {quantity.quantity_id}"
+                )
         if (
             claim.room_area_quantity_evidence
             and original_method
@@ -427,23 +444,6 @@ def build_live_floor_finish_area_source_traces(
                 raise SourceClosedRunConflictError(
                     "floor-finish figured axes do not match the independent "
                     f"original room-area producer: {quantity.quantity_id}"
-                )
-        else:
-            scale_id = metadata.get("resolved_scale_id")
-            scale_status = metadata.get("scale_status")
-            # Missing source census is not proof of zero competing scales.
-            scale_conflicts = metadata.get("scale_conflicts")
-            if (
-                type(scale_id) is not str or not scale_id
-                or scale_id != scale_id.strip()
-                or type(scale_status) is not str
-                or scale_status not in ("resolved", "verified")
-                or type(scale_conflicts) not in (tuple, list)
-                or bool(scale_conflicts)
-            ):
-                raise SourceClosedRunConflictError(
-                    "floor-finish original measurement lacks exact resolved "
-                    f"physical scale without conflicts: {quantity.quantity_id}"
                 )
         if _clean(metadata.get("canonical_floor_id")) != floor_id:
             raise SourceClosedRunConflictError(
