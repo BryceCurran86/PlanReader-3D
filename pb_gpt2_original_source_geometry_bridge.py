@@ -294,6 +294,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
     # other original ink, which may carry a competing physical source role.
     has_selected_left_ink_at_gap=False
     has_selected_right_ink_at_gap=False
+    selected_flank_paint_orders=[]
     selected=set(ids)
     for name in selected:
         match=re.fullmatch(r"d(\d+)i(\d+)",name)
@@ -311,6 +312,12 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # conflicts even if the caller included its ID in the wall roster.
         if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j])):
             return False
+        if (any(abs(span[1]-low)<=tolerance for span in selected_spans)
+                or any(abs(span[0]-high)<=tolerance for span in selected_spans)):
+            seqno=row.get("seqno")
+            if type(seqno) is not int or seqno<0:
+                return False
+            selected_flank_paint_orders.append(seqno)
         if any(abs(span[1]-low)<=tolerance for span in selected_spans):
             has_selected_left_ink_at_gap=True
         if any(abs(span[0]-high)<=tolerance for span in selected_spans):
@@ -321,13 +328,54 @@ def _original_doorway_gap_native_ink_inventory_complete(
     # is source completeness only, not an independently authenticated W4.
     if not (has_selected_left_ink_at_gap and has_selected_right_ink_at_gap):
         return False
+
+    first_flank_paint_order=min(selected_flank_paint_orders)
+
+    def earlier_white_rect_underlay(row):
+        # A WHITE, fully opaque, native RECTANGLE painted before BOTH selected
+        # wall flanks and covering the WHOLE door interval is a page/canvas
+        # underlay, not evidence of a later painted structural closure.
+        # Merely white-looking ink, a partial gap patch, a later D15 callout
+        # whiteout, a curved fill or an unknown paint order must still veto.
+        # This only removes a false source-ink veto; W4/threshold/quantity
+        # authority is neither inferred nor released.
+        seqno=row.get("seqno")
+        fill=row.get("fill")
+        items=row.get("items")
+        if (row.get("type")!="f" or type(seqno) is not int or seqno<0
+                or seqno>=first_flank_paint_order
+                or type(row.get("fill_opacity")) not in (int,float)
+                or row["fill_opacity"]!=1
+                or type(fill) not in (tuple,list) or len(fill)!=3
+                or any(type(c) not in (int,float) or c!=1 for c in fill)
+                or type(items) not in (tuple,list) or len(items)!=1
+                or type(items[0]) is not tuple or len(items[0])!=3
+                or items[0][0]!="re"):
+            return False
+        native_rect=items[0][1]
+        try:
+            x0,y0,x1,y1=(
+                float(native_rect.x0),float(native_rect.y0),
+                float(native_rect.x1),float(native_rect.y1),
+            )
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return False
+        if not all(math.isfinite(v) for v in (x0,y0,x1,y1)):
+            return False
+        if horizontal:
+            return (x0<=low+tolerance and x1>=high-tolerance
+                    and y0<=fixed+tolerance and y1>=fixed-tolerance)
+        return (y0<=low+tolerance and y1>=high-tolerance
+                and x0<=fixed+tolerance and x1>=fixed-tolerance)
+
     for ix,row in enumerate(drawings):
         if not (stroke_paint(row) or fill_paint(row)):
             continue
         for j,item in enumerate(row.get("items",())):
             if f"d{ix}i{j}" in selected:
                 continue
-            if filled_gap(row) or (stroke_paint(row) and crosses_gap(item)):
+            if (filled_gap(row) and not earlier_white_rect_underlay(row)
+                    or stroke_paint(row) and crosses_gap(item)):
                 return False
     return True
 
