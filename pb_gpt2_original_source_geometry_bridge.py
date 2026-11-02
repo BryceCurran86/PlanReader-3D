@@ -1073,6 +1073,88 @@ class GPT2OriginalSourceGeometryBridge:
                 "source_ceiling_area_m2":None,
                 "new_firm_quantities":0,
             }
+        # The original RCP room label and its GRID occurrence need not be in
+        # the same PDF native text block. They may join ONLY when both have
+        # independent original text receipts INSIDE the SAME reissued ink
+        # ring and the label belongs to exactly one sealed W4 room. This
+        # makes no physical ceiling scale, area or commercial claim.
+        blocked_label = {
+            "status": "source_RCP_room_label_region_not_authenticated",
+            "first_failure": "original_A120_room_label_not_uniquely_source_owned",
+            "source_w4_room_face_claim": w4,
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        try:
+            from pb_cross_view_ceiling_finish_authority import (
+                _trusted_room_labels_for_pages,
+            )
+            from shapely.geometry import box as native_box
+            candidate_rooms = tuple(canonical_rooms.rooms)
+            owned_rooms = [
+                r for r in candidate_rooms
+                if r.physical_room_id == physical_room_id
+            ]
+            if len(owned_rooms) != 1:
+                return blocked_label
+            room_label = owned_rooms[0].room_label
+            if (type(room_label) is not str or not room_label
+                    or room_label != room_label.strip()):
+                return blocked_label
+            all_labels = tuple(
+                r.room_label for r in candidate_rooms
+                if type(r.room_label) is str and r.room_label.strip()
+            )
+            # A duplicated named room in the sealed W4 source universe
+            # cannot become one material owner merely by text overlap.
+            normalized = tuple(" ".join(v.casefold().split()) for v in all_labels)
+            if (not all_labels or len(set(normalized)) != len(normalized)
+                    or " ".join(room_label.casefold().split()) not in normalized):
+                return blocked_label
+            trusted = _trusted_room_labels_for_pages(
+                self._source, revision_id=revision_id,
+                page_ids=(str(ink_page),), candidate_labels=all_labels,
+            )
+            rows = trusted.get(str(ink_page), ())
+            zone = Polygon(actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if not zone.is_valid or zone.area <= 0:
+                return blocked_label
+            inside = []
+            for line in rows:
+                raw_box = line.bbox
+                if (type(raw_box) not in (tuple, list)
+                        or len(raw_box) != 4
+                        or any(type(v) not in (float, int) for v in raw_box)
+                        or not all(math.isfinite(v) for v in raw_box)
+                        or raw_box[0] >= raw_box[2]
+                        or raw_box[1] >= raw_box[3]):
+                    return blocked_label
+                if not zone.contains(native_box(*raw_box)):
+                    continue
+                if (
+                    type(line.source_partition_id) is not str
+                    or not line.source_partition_id
+                    or type(line.block_no) is not int
+                    or type(line.line_no) is not int
+                    or type(line.observation_ids) is not tuple
+                    or not line.observation_ids
+                    or type(line.receipt_ids) is not tuple
+                    or len(line.receipt_ids) != len(line.observation_ids)
+                    or len(set(line.observation_ids)) != len(line.observation_ids)
+                    or len(set(line.receipt_ids)) != len(line.receipt_ids)
+                    or any(type(v) is not str or not v or v != v.strip()
+                           for v in (*line.observation_ids, *line.receipt_ids))
+                ):
+                    return blocked_label
+                inside.append(line)
+            if (len(inside) != 1
+                    or " ".join(inside[0].text.casefold().split())
+                    != " ".join(room_label.casefold().split())):
+                return blocked_label
+        except (AttributeError, KeyError, TypeError, ValueError,
+                OverflowError, RuntimeError):
+            return blocked_label
+
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
             "source_w4_room_face_claim":w4,
