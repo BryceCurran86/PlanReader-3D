@@ -1189,3 +1189,82 @@ def test_native_gap_rejects_competing_paint_but_not_earlier_canvas_underlay(
         raw,page_1_based=1,original_room_graph=graph,
     )
     assert result is (paint_case=="early_opaque_white_full")
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("rival_first", [False, True])
+@pytest.mark.parametrize("shift", [(0, 0), (50, 70)])
+@pytest.mark.parametrize("shape", ["line", "curve", "rectangle", "quad"])
+@pytest.mark.parametrize("offset,width,blocked", [
+    (0.2, 1.0, True), (1.0, 0.5, False),
+    (0.0, 0.5, True), (0.6, 1.0, False),
+])
+def test_native_door_gap_vetoes_painted_width_not_just_path_centreline(
+    vertical, rival_first, shift, shape, offset, width, blocked,
+):
+    """Near-parallel original paint is a rival; genuine flanks still pass."""
+    import fitz
+
+    def turn(point):
+        x, y = point[0] + shift[0], point[1] + shift[1]
+        return (y, x) if vertical else (x, y)
+
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=400)
+
+    def draw_rival():
+        y = 20 + offset
+        if shape == "line":
+            page.draw_line(
+                turn((35, y)), turn((45, y)),
+                color=(0, 0, 0), width=width,
+            )
+        elif shape == "curve":
+            page.draw_bezier(
+                *(fitz.Point(*turn(point)) for point in (
+                    (35, y), (38, y), (42, y), (45, y)
+                )), color=(0, 0, 0), width=width,
+            )
+        elif shape == "rectangle":
+            page.draw_rect(
+                fitz.Rect(*turn((35, y)), *turn((45, y + 0.1))),
+                color=(0, 0, 0), width=width,
+            )
+        else:
+            page.draw_quad(
+                fitz.Quad(*(fitz.Point(*turn(point)) for point in (
+                    (35, y), (45, y), (35, y + 0.1), (45, y + 0.1)
+                ))), color=(0, 0, 0), width=width,
+            )
+
+    if rival_first:
+        draw_rival()
+    for a, b in (
+        ((20, 20), (20, 140)),
+        ((120, 20), (120, 140)),
+        ((20, 140), (120, 140)),
+        ((20, 20), (24, 20)),
+        ((80, 20), (120, 20)),
+    ):
+        page.draw_line(turn(a), turn(b), color=(0, 0, 0), width=0.48)
+    if not rival_first:
+        draw_rival()
+    raw = doc.tobytes()
+    doc.close()
+
+    start = 1 if rival_first else 0
+    graph = {
+        "page_1_based": 1,
+        "original_native_edge_ids": tuple(
+            f"d{i}i0" for i in range(start, start + 5)
+        ),
+        "native_components": ({
+            "native_endpoint_degrees": (
+                {"degree": 1, "point_pdf_pt": turn((24, 20))},
+                {"degree": 1, "point_pdf_pt": turn((80, 20))},
+            ),
+        },),
+    }
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw, page_1_based=1, original_room_graph=graph,
+    ) is (not blocked)

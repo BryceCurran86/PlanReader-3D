@@ -211,7 +211,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
             return ()
 
 
-    def crosses_gap(item):
+    def crosses_gap(item, stroke_width_pt):
         """Conservatively veto any painted native path crossing the open gap.
 
         A perpendicular, diagonal or curved source stroke can invalidate a
@@ -220,6 +220,12 @@ def _original_doorway_gap_native_ink_inventory_complete(
         """
         if type(item) is not tuple or not item:
             return False
+        # get_drawings() rect bounds stroke centre-lines, not painted width.
+        # This negative-only gap census must include the half-width envelope.
+        if (type(stroke_width_pt) not in (int,float)
+                or not math.isfinite(stroke_width_pt) or stroke_width_pt<0):
+            return True
+        half_width=stroke_width_pt/2
 
         def axis_point(point):
             x,y=round(float(point.x),3),round(float(point.y),3)
@@ -230,16 +236,29 @@ def _original_doorway_gap_native_ink_inventory_complete(
         def edge_crosses(p,q):
             a0,o0=axis_point(p)
             a1,o1=axis_point(q)
-            if abs(o0-fixed)<=tolerance and abs(o1-fixed)<=tolerance:
-                return (min(a0,a1)<high-tolerance
-                        and max(a0,a1)>low+tolerance)
-            if abs(o1-o0)<=tolerance:
+            # Clip the centre-line to the OPEN longitudinal gap first, so
+            # selected wall flanks ending at a jamb are not false rivals.
+            # Then test the actual stroked transverse envelope, including
+            # parallel near-axis ink that never crosses the centre axis.
+            lo,hi=low+tolerance,high-tolerance
+            if max(a0,a1)<=lo or min(a0,a1)>=hi:
                 return False
-            t=(fixed-o0)/(o1-o0)
-            if not 0<=t<=1:
-                return False
-            hit=a0+t*(a1-a0)
-            return low+tolerance<hit<high-tolerance
+            if a0==a1:
+                if not lo<a0<hi:
+                    return False
+                o_min,o_max=sorted((o0,o1))
+            else:
+                ta=(lo-a0)/(a1-a0)
+                tb=(hi-a0)/(a1-a0)
+                t0=max(0.0,min(ta,tb))
+                t1=min(1.0,max(ta,tb))
+                if t0>t1:
+                    return False
+                o_min,o_max=sorted((
+                    o0+t0*(o1-o0),o0+t1*(o1-o0),
+                ))
+            return (o_min<=fixed+half_width+tolerance
+                    and o_max>=fixed-half_width-tolerance)
 
         def curve_crosses(points,depth=0):
             # Bezier curves stay within the convex hull of their controls.
@@ -248,8 +267,8 @@ def _original_doorway_gap_native_ink_inventory_complete(
             axes=[p[0] for p in points]
             orth=[p[1] for p in points]
             if (max(axes)<=low+tolerance or min(axes)>=high-tolerance
-                    or min(orth)>fixed+tolerance
-                    or max(orth)<fixed-tolerance):
+                    or min(orth)>fixed+half_width+tolerance
+                    or max(orth)<fixed-half_width-tolerance):
                 return False
             if depth==16:
                 return True
@@ -310,7 +329,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # The caller's selected source IDs are NOT a physical-role
         # whitelist. Original ink inside an allegedly empty doorway gap
         # conflicts even if the caller included its ID in the wall roster.
-        if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j])):
+        if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j],row["width"])):
             return False
         if (any(abs(span[1]-low)<=tolerance for span in selected_spans)
                 or any(abs(span[0]-high)<=tolerance for span in selected_spans)):
@@ -375,7 +394,7 @@ def _original_doorway_gap_native_ink_inventory_complete(
             if f"d{ix}i{j}" in selected:
                 continue
             if (filled_gap(row) and not earlier_white_rect_underlay(row)
-                    or stroke_paint(row) and crosses_gap(item)):
+                    or stroke_paint(row) and crosses_gap(item,row["width"])):
                 return False
     return True
 
