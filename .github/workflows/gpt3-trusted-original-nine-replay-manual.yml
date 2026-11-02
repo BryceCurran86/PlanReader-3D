@@ -164,23 +164,84 @@ jobs:
               -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
               -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
               "gpt3-offline:${{ matrix.python-version }}" \
-              python -m pytest -q -p no:cacheprovider --tb=short --disable-warnings \
-              tests/test_gpt3_lot16_original_nine_whole_retention.py \
-              > "$output" 2>&1; then
-            # The complete pytest traceback remains in the ephemeral private
-            # log; output only one pre-reviewed static call-site category.
-            # No exception value, source geometry, customer row or raw log
-            # content is ever echoed, uploaded, or persisted.
-            if grep -Fq 'old_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+              python -c '
+          import sys
+          from pathlib import Path
+          import pytest
+          
+          acceptance = Path("tests/test_gpt3_lot16_original_nine_whole_retention.py")
+          lines = acceptance.read_text(encoding="utf-8").splitlines()
+          anchors = (
+              ("original_sha = _verify_original_source(SOURCE, MANIFEST)", "SOURCE_AUTH"),
+              ("old_receipt = run_original_lot16_sealed_handoff(SOURCE, old_dir)", "DEFAULT_EIGHT"),
+              ("new_receipt = run_original_lot16_sealed_handoff(", "EXPLICIT_NINE"),
+              ("old_signed, old_customer = _verified_production(old_dir, original_sha)", "VERIFY_DEFAULT_CUSTOMER"),
+              ("new_signed, new_customer = _verified_production(new_dir, original_sha)", "VERIFY_EXPLICIT_CUSTOMER"),
+              ("digest_lines = (ARCHIVE.parent / \"SHA256SUMS\").read_text(encoding=\"ascii\").splitlines()", "ARCHIVED_EIGHT_RETENTION"),
+              ("additional_ids = set(new_signed) - set(baseline_signed)", "PHYSICAL_UNIQUENESS"),
+              ("physical_sources = _object(new_dir / \"source_production_openings.json\")", "SNAPSHOT_IDENTITY"),
+          )
+          stages = {}
+          for source_line, safe_label in anchors:
+              hits = [n for n, line in enumerate(lines, 1) if line.strip() == source_line]
+              if len(hits) != 1:
+                  print("GPT3_TRUSTED_PHASE=INSTRUMENTATION_ERROR", flush=True)
+                  sys.exit(3)
+              stages[hits[0]] = safe_label
+          phase = ["COLLECTION_OR_SETUP"]
+          
+          def trace_original(frame, event, arg):
+              if event == "line":
+                  label = stages.get(frame.f_lineno)
+                  if label is not None:
+                      phase[0] = label
+              return trace_original
+          
+          def trace_call(frame, event, arg):
+              if (event == "call" and frame.f_code.co_name ==
+                  "test_owner_original_lot16_nine_seals_and_preserves_eight_whole_customer_bodies" and
+                  frame.f_code.co_filename.endswith("/tests/test_gpt3_lot16_original_nine_whole_retention.py")):
+                  phase[0] = "TEST_STARTED"
+                  return trace_original
+              return None
+          
+          sys.settrace(trace_call)
+          try:
+              status = pytest.main(["-q", "-p", "no:cacheprovider", "--tb=short",
+                                    "--disable-warnings",
+                                    "tests/test_gpt3_lot16_original_nine_whole_retention.py"])
+          finally:
+              sys.settrace(None)
+          print("GPT3_TRUSTED_PHASE=" + phase[0], flush=True)
+          sys.exit(status)
+          ' > "$output" 2>&1; then
+            # Only fixed, reviewed safe stage labels are published. Private original
+            # assertions, exception values, traceback, geometry and rows remain
+            # in the ephemeral unuploaded log and are deleted after the job.
+            if grep -Fxq "GPT3_TRUSTED_PHASE=INSTRUMENTATION_ERROR" "$output"; then
+              echo "::error::Original pinned acceptance phase anchors changed; test did not establish source authority (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=COLLECTION_OR_SETUP" "$output"; then
+              echo "::error::Original acceptance collection or fixture setup FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=TEST_STARTED" "$output"; then
+              echo "::error::Original acceptance test failed before original-source SHA authentication (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=SOURCE_AUTH" "$output"; then
+              echo "::error::Original source authentication FAILED inside offline acceptance (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=DEFAULT_EIGHT" "$output"; then
               echo "::error::Original default-eight producer/seal/customer FAILED (private details withheld)"
-            elif grep -Fq 'new_receipt = run_original_lot16_sealed_handoff(' "$output"; then
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=EXPLICIT_NINE" "$output"; then
               echo "::error::Original explicit-nine producer/seal/customer FAILED (private details withheld)"
-            elif grep -Eq 'old_signed, old_customer = _verified_production|new_signed, new_customer = _verified_production' "$output"; then
-              echo "::error::Original sealed/customer receipt verification FAILED (private details withheld)"
-            elif grep -Eq 'baseline_signed|baseline_customer|additional_ids|old_scopes|new_scope' "$output"; then
-              echo "::error::Original signed-eight retention or new physical identity FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=VERIFY_DEFAULT_CUSTOMER" "$output"; then
+              echo "::error::Original default-eight sealed/customer receipt verification FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=VERIFY_EXPLICIT_CUSTOMER" "$output"; then
+              echo "::error::Original explicit-nine sealed/customer receipt verification FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=ARCHIVED_EIGHT_RETENTION" "$output"; then
+              echo "::error::Original signed-eight archive/customer retention FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=PHYSICAL_UNIQUENESS" "$output"; then
+              echo "::error::Original new physical opening identity FAILED (private details withheld)"
+            elif grep -Fxq "GPT3_TRUSTED_PHASE=SNAPSHOT_IDENTITY" "$output"; then
+              echo "::error::Original old/new source snapshot identity FAILED (private details withheld)"
             else
-              echo "::error::Original replay failed at an unclassified private test stage (private details withheld)"
+              echo "::error::Original container/test stopped before trusted phase reporting (private details withheld)"
             fi
             exit 1
           fi
