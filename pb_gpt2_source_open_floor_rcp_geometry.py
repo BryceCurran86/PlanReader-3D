@@ -69,10 +69,16 @@ def audit_source_open_floor_native_ink_virtual_gap(
             return base
         if degree == 1:
             endpoints.append(tuple(round(float(v),3) for v in pt))
+    original_open_points=comps[0].get("source_open_endpoint_coordinates_pdf_pts")
+    if (type(original_open_points) not in (tuple,list)
+            or len(original_open_points)!=2
+            or any(type(p) not in (tuple,list) or len(p)!=2
+                   or any(type(v) not in (int,float) or not math.isfinite(v)
+                          for v in p) for p in original_open_points)):
+        return base
     if (len(endpoints) != 2 or endpoints[0] == endpoints[1]
             or {tuple(round(float(v),3) for v in p)
-                for p in comps[0].get("source_open_endpoint_coordinates_pdf_pts",())}
-                != set(endpoints)):
+                for p in original_open_points} != set(endpoints)):
         return base
     if (type(virtual_floor_vertices_pdf_pts) not in (tuple,list)
             or not 4 <= len(virtual_floor_vertices_pdf_pts) <= 20001):
