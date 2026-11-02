@@ -93,7 +93,7 @@ def source_edge_axis_projection(record, geometry, source_lines: Mapping[str, Seq
         return None
     lo, hi = sorted(intervals)[0]
     for start, end in sorted(intervals)[1:]:
-        if start > hi + _COORD_TOL:
+        if start > hi + (DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL):
             return None
         hi = max(hi, end)
 
