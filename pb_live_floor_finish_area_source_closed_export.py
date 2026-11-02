@@ -173,6 +173,35 @@ def build_live_floor_finish_area_source_traces(
     # An older figured-only claim may legitimately carry no separate
     # room_area QuantityEvidence family; its existing source-figured proof
     # remains intact, not silently converted to a new source-area claim.
+    # The complete source ROOM-area inventory is part of a final floor-finish
+    # claim, not just the subset conveniently retained by the independent
+    # floor-area publisher. An original duplicate ID (including an abstained
+    # conflicting replay), malformed source identity or foreign family must
+    # not disappear from the material seal through FIRM-only selection.
+    seen_original_room_area_ids: set[str] = set()
+    for original_area in claim.room_area_quantity_evidence:
+        if not isinstance(original_area, QuantityEvidence):
+            raise TypeError(
+                "room_area_quantity_evidence must contain QuantityEvidence"
+            )
+        if original_area.family != "room_area":
+            raise SourceClosedRunConflictError(
+                "floor-finish original room-area inventory contains "
+                f"foreign family: {original_area.quantity_id}"
+            )
+        original_area_id = original_area.quantity_id
+        if (
+            type(original_area_id) is not str
+            or not original_area_id
+            or original_area_id != original_area_id.strip()
+            or original_area_id in seen_original_room_area_ids
+        ):
+            raise SourceClosedRunConflictError(
+                "duplicate or invalid original room-area quantity ID "
+                "at floor-finish seal"
+            )
+        seen_original_room_area_ids.add(original_area_id)
+
     independently_published_room_areas = ()
     if claim.room_area_quantity_evidence:
         independently_published_room_areas = (
