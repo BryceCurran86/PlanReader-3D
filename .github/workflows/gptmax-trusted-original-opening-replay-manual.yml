@@ -89,9 +89,9 @@ jobs:
             antigravity)
               # Source-backed and source-negative north/south original replay.
               approved_base=782b4e3ef4028e9463f39a4a64feb5c50b9332f6
-              approved_head=1bb99be3e869d00bc1e9d4b0cf106e8fe688a4f1
-              expected_paths='pb_live_wall_opening_authority_composition.py|pb_opening_host_frame_authority.py|tests/test_antigravity_lot16_north_wall_frame.py|tests/test_antigravity_lot16_south_wall_frame.py'
-              focused_test=tests/test_antigravity_lot16_north_wall_frame.py
+              approved_head=0377a077d94552f4297e73ae1f1e0d0b44bcd53d
+              expected_paths='.github/workflows/test-gptmax-original-split-frame-shadow.yml|pb_live_wall_opening_authority_composition.py|pb_opening_host_frame_authority.py|tests/test_gptmax_alternate_raster_frame_source_edge_gate.py|tests/test_gptmax_raster_split_frame_shadow.py'
+              focused_test=tests/test_gptmax_alternate_raster_frame_source_edge_gate.py
               ;;
             *)
               echo "::error::Unknown source replay target"
@@ -112,10 +112,13 @@ jobs:
           mkdir -p "$approved_tree"
           git archive "$approved_head" | tar -x -C "$approved_tree"
           mkdir -p "$approved_tree/documents/sources"
+          private_tests="$RUNNER_TEMP/gptmax-private-tests"
+          mkdir -m 700 -p "$private_tests"
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
           [[ -f "$approved_tree/$focused_test" ]]
           echo "GPTMAX_APPROVED_TREE=$approved_tree" >> "$GITHUB_ENV"
+          echo "GPTMAX_PRIVATE_TESTS=$private_tests" >> "$GITHUB_ENV"
           echo "GPTMAX_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
           echo "GPTMAX_FOCUSED_TEST=$focused_test" >> "$GITHUB_ENV"
           echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"
@@ -149,6 +152,72 @@ jobs:
           COPY requirements.txt requirements-ci-v1228.txt /deps/
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
           DOCKERFILE
+      - name: Stage immutable private north and south tests as inert owner-only data
+        if: ${{ matrix.target == 'antigravity' }}
+        shell: bash
+        env:
+          SOURCE_TEST_TOKEN: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          SOURCE_TEST_REPOSITORY: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          if ! python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          def stage_immutable_tests():
+              repo = os.environ.get("SOURCE_TEST_REPOSITORY", "")
+              token = os.environ.get("SOURCE_TEST_TOKEN", "")
+              target = Path(os.environ["GPTMAX_PRIVATE_TESTS"])
+              if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*", repo):
+                  raise ValueError("Invalid private source repository")
+              if not token or not target.is_dir() or target.is_symlink():
+                  raise ValueError("Unavailable private source test destination")
+              blobs = (
+                  ("north", "f1b2edacf9b1e13b3d60e874bf1a18f6926254b2"),
+                  ("south", "6759c003ec85115b2bc528e681f993458304d892"),
+              )
+              for side, sha in blobs:
+                  request = Request(
+                      f"https://api.github.com/repos/{repo}/git/blobs/{sha}",
+                      headers={
+                          "Authorization": f"Bearer {token}",
+                          "Accept": "application/vnd.github+json",
+                          "X-GitHub-Api-Version": "2022-11-28",
+                          "User-Agent": "PlanReader-Owner-Original-Replay",
+                      },
+                  )
+                  with urlopen(request, timeout=20) as response:
+                      payload = json.loads(response.read(40000))
+                  if payload.get("sha") != sha or payload.get("encoding") != "base64":
+                      raise ValueError("Private test blob identity mismatch")
+                  data = base64.b64decode(payload["content"], validate=False)
+                  if not 0 < len(data) <= 16000 or payload.get("size") != len(data):
+                      raise ValueError("Private test blob size mismatch")
+                  header = b"blob " + str(len(data)).encode("ascii") + bytes([0])
+                  observed = hashlib.sha1(header + data).hexdigest()
+                  if observed != sha:
+                      raise ValueError("Private test blob content mismatch")
+                  dest = target / f"test_antigravity_lot16_{side}_wall_frame.py"
+                  fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+                  with os.fdopen(fd, "wb") as stream:
+                      stream.write(data)
+
+          try:
+              stage_immutable_tests()
+          except Exception:
+              sys.exit(1)
+          PY
+          then
+            echo "::error::Pinned private original-test staging failed"
+            exit 1
+          fi
+          echo "Two immutable private original-test blobs staged without execution."
       - name: Provision original Lot16 authenticated SHA and size
         uses: ./.github/actions/provision-original-sources
         with:
@@ -210,6 +279,7 @@ jobs:
               --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
               --mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly" \
               --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly" \
+              --mount "type=bind,src=$GPTMAX_PRIVATE_TESTS,dst=/private-tests,readonly" \
               --workdir /repo \
               --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
               --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
@@ -255,17 +325,20 @@ jobs:
             fi
           fi
           if [[ "$GPTMAX_TARGET" == "antigravity" ]]; then
-            # NORTH already required by focused_test, require separate SOUTH positive.
-            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
-              tests/test_antigravity_lot16_south_wall_frame.py \
-              > "$output" 2>&1; then
-              echo "::error::Original Lot16 south wall frame test FAILED"
-              exit 1
-            fi
-            if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
-              echo "::error::Original Lot16 south wall frame skipped or missing"
-              exit 1
-            fi
+            # Both separately SHA-pinned original tests MUST pass, not skip.
+            # Private tests remain a separate read-only mount in the no-egress sandbox.
+            for side in north south; do
+              if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
+                "/private-tests/test_antigravity_lot16_${side}_wall_frame.py" \
+                > "$output" 2>&1; then
+                echo "::error::Pinned private original wall-frame test FAILED"
+                exit 1
+              fi
+              if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
+                echo "::error::Pinned private original wall-frame test skipped or missing"
+                exit 1
+              fi
+            done
           fi
           {
             echo "### Owner-trusted GPT MAX original source replay"
@@ -280,4 +353,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
-          rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources
+          rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" "$RUNNER_TEMP/gptmax-private-tests" documents/sources

@@ -15,7 +15,7 @@ HEADS = {
     "cache": "5ae6170f03b81c58df15423b997caacd9e778f87",
     "vertical": "f7e2872a56d920f28043af29474f82dfd5a401b4",
     "horizontal": "98deb79aa5d4f1c45b666d8b7a71a77f82a5c825",
-    "antigravity": "1bb99be3e869d00bc1e9d4b0cf106e8fe688a4f1",
+    "antigravity": "0377a077d94552f4297e73ae1f1e0d0b44bcd53d",
 }
 BASES = {
     "host": BASE,
@@ -61,8 +61,9 @@ PATHS = {
     "antigravity": (
         "pb_live_wall_opening_authority_composition.py",
         "pb_opening_host_frame_authority.py",
-        "tests/test_antigravity_lot16_north_wall_frame.py",
-        "tests/test_antigravity_lot16_south_wall_frame.py",
+        ".github/workflows/test-gptmax-original-split-frame-shadow.yml",
+        "tests/test_gptmax_alternate_raster_frame_source_edge_gate.py",
+        "tests/test_gptmax_raster_split_frame_shadow.py",
     ),
 }
 
@@ -239,11 +240,17 @@ def test_horizontal_original_source_gap_guard_cannot_be_satisfied_by_synthetic_p
     assert "github.event.pull_request" not in source
 
 
-def test_secret_only_in_manifest_authenticated_source_provisioner():
+def test_private_test_token_only_in_trusted_staging_and_manifest_provisioner():
     steps = _load()["jobs"]["verify"]["steps"]
     matches = [step for step in steps if "ORIGINAL_SOURCES_TOKEN" in str(step)]
-    assert len(matches) == 1
-    provision = matches[0]
+    assert len(matches) == 2
+    stage, provision = matches
+    assert stage["name"].startswith("Stage immutable private")
+    assert stage["if"] == "${{ matrix.target == 'antigravity' }}"
+    assert stage["env"]["SOURCE_TEST_TOKEN"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
+    assert stage["env"]["SOURCE_TEST_REPOSITORY"] == "${{ vars.ORIGINAL_SOURCES_REPOSITORY }}"
+    assert "python -m pytest" not in stage["run"]
+    assert "git checkout" not in stage["run"]
     assert provision["uses"] == "./.github/actions/provision-original-sources"
     assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
     assert provision["with"]["repository"] == "${{ vars.ORIGINAL_SOURCES_REPOSITORY }}"
@@ -273,7 +280,7 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert "grep -Eq" in other["run"]
     cleanup = steps[-1]
     assert cleanup["if"] == "always()"
-    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources' in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" "$RUNNER_TEMP/gptmax-private-tests" documents/sources' in cleanup["run"]
     assert "rm -f" in cleanup["run"]
 
 
@@ -333,8 +340,9 @@ def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs()
     # south-wall test, never a shell/host-side private-source test.
     assert focused_script.count("run_isolated python -m pytest") == 4
     assert '[[ "$GPTMAX_TARGET" == "antigravity" ]]' in focused_script
-    assert "tests/test_antigravity_lot16_south_wall_frame.py" in focused_script
-    assert "Original Lot16 south wall frame skipped or missing" in focused_script
+    assert "for side in north south; do" in focused_script
+    assert "/private-tests/test_antigravity_lot16_${side}_wall_frame.py" in focused_script
+    assert "Pinned private original wall-frame test skipped or missing" in focused_script
     assert steps[replay_index]["run"].count("run_isolated python -m pytest") == 1
 
 
@@ -365,7 +373,7 @@ def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
             assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
             assert "docker run --rm --network none --read-only --cap-drop ALL" in script
     cleanup = steps[-1]
-    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources' in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" "$RUNNER_TEMP/gptmax-private-tests" documents/sources' in cleanup["run"]
 
 
 def _assert_approved_dependency_context(build):
@@ -458,11 +466,37 @@ def test_antigravity_original_both_walls_sha_pinned_before_private_source_provis
     assert "antigravity)" in source
     assert f"approved_base={BASES['antigravity']}" in source
     assert f"approved_head={HEADS['antigravity']}" in source
-    assert "focused_test=tests/test_antigravity_lot16_north_wall_frame.py" in source
+    assert "focused_test=tests/test_gptmax_alternate_raster_frame_source_edge_gate.py" in source
     for path in PATHS["antigravity"]:
         assert path in source
     execute=next(s["run"] for s in steps if s.get("name","").startswith("Verify original-provisioned"))
     assert '[[ "$GPTMAX_TARGET" == "antigravity" ]]' in execute
-    assert "tests/test_antigravity_lot16_south_wall_frame.py" in execute
-    assert "Original Lot16 south wall frame skipped or missing" in execute
+    assert "for side in north south; do" in execute
+    assert "/private-tests/test_antigravity_lot16_${side}_wall_frame.py" in execute
+    assert "Pinned private original wall-frame test skipped or missing" in execute
     assert "--network none --read-only --cap-drop ALL" in execute
+
+def test_private_original_tests_are_content_pinned_and_inert_until_offline_execution():
+    steps = _load()["jobs"]["verify"]["steps"]
+    names = [s.get("name", "") for s in steps]
+    auth = next(i for i, n in enumerate(names) if n.startswith("Authenticate immutable"))
+    build = next(i for i, n in enumerate(names) if n.startswith("Build no-network"))
+    stage = next(i for i, n in enumerate(names) if n.startswith("Stage immutable private"))
+    provision = next(i for i, n in enumerate(names) if n.startswith("Provision original"))
+    focused = next(i for i, n in enumerate(names) if n.startswith("Verify original-provisioned"))
+    assert auth < build < stage < provision < focused
+    script = steps[stage]["run"]
+    for sha in ("f1b2edacf9b1e13b3d60e874bf1a18f6926254b2",
+                "6759c003ec85115b2bc528e681f993458304d892"):
+        assert sha in script
+    assert "/git/blobs/{sha}" in script
+    assert "hashlib.sha1" in script and "observed != sha" in script
+    assert "os.O_EXCL" in script and "0o400" in script
+    assert "python -m pytest" not in script
+    assert "upload-artifact" not in WORKFLOW.read_text(encoding="utf-8")
+    assert "SOURCE_TEST_TOKEN" not in steps[focused]["run"]
+    focused_script = steps[focused]["run"]
+    assert '--mount "type=bind,src=$GPTMAX_PRIVATE_TESTS,dst=/private-tests,readonly"' in focused_script
+    assert "for side in north south; do" in focused_script
+    assert "Pinned private original wall-frame test skipped or missing" in focused_script
+    assert '"$RUNNER_TEMP/gptmax-private-tests"' in steps[-1]["run"]
