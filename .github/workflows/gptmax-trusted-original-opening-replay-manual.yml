@@ -47,12 +47,12 @@ jobs:
               focused_test=tests/test_raster_opening_receipt_registration.py
               ;;
             cache)
-              # Source-cache integrity #3405 is a separate immutable child of
-              # the already merged G17 receipt registration; pin its exact
-              # reviewed main parent, never an arbitrary PR branch or input.
-              approved_base=f480fc84d2e7486319e9b52a3a72790bb7435e69
-              approved_head=6a937ad7d44da2c63e2fae04492c332a03b3b623
-              expected_paths='.github/workflows/gptmax-g17-source-receipt-integrity.yml|docs/engineering/gptmax_g17_cached_source_integrity_20261020.md|pb_physical_opening_authority.py|tests/test_raster_opening_cached_source_integrity.py'
+              # Source-cache integrity #4166 is the reviewed non-overlapping
+              # current-main two-file recovery of historical #3405.
+              # Only exact source/test blobs are approved; no PR input.
+              approved_base=86c0193c157cd1333a11470b45d50ab3f5cf44fc
+              approved_head=5ae6170f03b81c58df15423b997caacd9e778f87
+              expected_paths='pb_physical_opening_authority.py|tests/test_raster_opening_cached_source_integrity.py'
               focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
             vertical)

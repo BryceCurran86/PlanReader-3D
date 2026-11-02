@@ -1,24 +1,10 @@
-"""Producer-Owned Structural Corner Aperture and Pier Miter Continuity Shadow Authority.
+"""Source-neutral two-leg corner-aperture shadow evidence.
 
-Resolves non-collinear corner openings (e.g. frameless glass butt-joints, corner stacking sliders,
-or corner bifold doors) wrapping around perpendicular or angled wall runs.
-
-Engineering rationale:
-- Existing opening host authorities assume a 1D scalar interval [u0, u1] projected along a single
-  linear wall centerline vector.
-- When an opening wraps a corner (meeting at corner vertex v_c), naive linear algorithms fail:
-  1. They take the Euclidean diagonal chord between the far jambs:
-     W_chord = ||p_B - p_A|| = sqrt(L_A^2 + L_B^2),
-     which cuts diagonally through internal floor space rather than along the building perimeter.
-  2. Or they bind to only one host wall and drop the perpendicular leg as an unhosted orphan.
-- Structural Corner Authority evaluates composite two-leg openings, detects post conditions
-  (postless frameless butt-joint vs structural corner post), validates orthogonal corner angles,
-  and binds dual host wall frames to accurately quantify total physical perimeter girth (L_A + L_B).
-
-Invariants:
-- Shadow mode only: zero commercial projection, candidate status only, non-publishing.
-- Fails closed on non-orthogonal corner angles (|theta - 90 deg| > 15 deg) or degenerate spans.
-- Enforces strict 2.5 pt snap compliance and deterministically sorted stable contract IDs.
+This producer only evaluates geometry. It cannot authenticate an opening,
+physical host, corner post, frame, or measurement scale; it never publishes
+commercial quantities. Missing or conflicting evidence abstains, preserving
+the existing 15–300 pt leg, 75–105 degree angle and 15 pt post bounds.
+The separate wall-topology snap limit remains unchanged.
 """
 
 from __future__ import annotations
@@ -54,7 +40,9 @@ class CornerPostCondition(str, Enum):
 class CornerApertureClassification(str, Enum):
     """Classification outcome for a corner aperture candidate."""
 
-    CORNER_APERTURE_CONFIRMED = "corner_aperture_confirmed"
+    CORNER_APERTURE_CONFIRMED = "corner_aperture_confirmed"  # reserved for original-source authority
+    GEOMETRIC_CANDIDATE = "geometric_candidate"
+    ABSTAINED_UNVERIFIED_SOURCE = "abstained_unverified_source"
     ABSTAINED_NON_ORTHOGONAL_ANGLE = "abstained_non_orthogonal_angle"
     ABSTAINED_DEGENERATE_LEG = "abstained_degenerate_leg"
     ABSTAINED_NON_INTERSECTING_AXES = "abstained_non_intersecting_axes"
@@ -70,17 +58,51 @@ class CornerOpeningLegRecord:
     corner_vertex: tuple[float, float]
     axis_vector: tuple[float, float]
     leg_span_pt: float
-    leg_span_m: float
+    leg_span_m: float | None
     host_wall_id: str
 
+    def __post_init__(self) -> None:
+        # Public frozen records can be directly constructed or replaced.
+        # Keep their numeric shadow evidence physical before serialization.
+        for point in (self.terminal_jamb, self.corner_vertex, self.axis_vector):
+            if (type(point) is not tuple or len(point) != 2
+                    or any(not _finite_real(v) for v in point)):
+                raise ValueError("corner leg numeric evidence must be finite and physical")
+        if (any(not _finite_source_coordinate(v) for v in
+                (*self.terminal_jamb, *self.corner_vertex))
+                or any(abs(v) > 1.0 for v in self.axis_vector)
+                or not _finite_real(self.leg_span_pt)
+                or self.leg_span_pt < 0
+                or (self.leg_span_m is not None and
+                    (not _finite_real(self.leg_span_m) or self.leg_span_m <= 0))):
+            raise ValueError("corner leg numeric evidence must be finite and physical")
+        # Frozen receipts require exact producer arithmetic, not tolerance-based
+        # near-equality that aliases distinct derived values under one ID.
+        # Direct dataclass replacement cannot substitute an unrelated wall
+        # direction or span. A genuinely degenerate source leg has zero axis
+        # and stays a typed abstention at the parent record, never a host.
+        dx = self.terminal_jamb[0] - self.corner_vertex[0]
+        dy = self.terminal_jamb[1] - self.corner_vertex[1]
+        span = math.hypot(dx, dy)
+        if (not math.isfinite(span)
+                or self.leg_span_pt != span):
+            raise ValueError("corner leg numeric evidence conflicts with geometry")
+        if span == 0.0:
+            if self.axis_vector != (0.0, 0.0):
+                raise ValueError("corner leg axis conflicts with degenerate geometry")
+        elif (self.axis_vector != (dx / span, dy / span)):
+            raise ValueError("corner leg axis conflicts with geometry")
+
     def to_dict(self) -> Mapping[str, Any]:
+        # Native shadow evidence must retain the coordinates used by contract_id.
+        # Display rounding here would alias distinct source hypotheses.
         return {
             "leg_id": self.leg_id,
-            "terminal_jamb": [round(c, 2) for c in self.terminal_jamb],
-            "corner_vertex": [round(c, 2) for c in self.corner_vertex],
-            "axis_vector": [round(c, 4) for c in self.axis_vector],
-            "leg_span_pt": round(self.leg_span_pt, 2),
-            "leg_span_m": round(self.leg_span_m, 4),
+            "terminal_jamb": list(self.terminal_jamb),
+            "corner_vertex": list(self.corner_vertex),
+            "axis_vector": list(self.axis_vector),
+            "leg_span_pt": self.leg_span_pt,
+            "leg_span_m": self.leg_span_m,
             "host_wall_id": self.host_wall_id,
         }
 
@@ -97,9 +119,11 @@ class StructuralCornerApertureRecord:
     corner_angle_deg: float
     post_condition: CornerPostCondition
     total_girth_pt: float
-    total_girth_m: float
+    total_girth_m: float | None
     diagonal_chord_pt: float
     status: EvidenceResolutionStatus
+    context_label: str
+    scale_ratio: float | None
     post_dimension_pt: float | None = None
     first_remaining_gate: str | None = None
     notes: str = ""
@@ -107,22 +131,176 @@ class StructuralCornerApertureRecord:
     takeoff_eligible: bool = False
     shadow_only: bool = True
 
+    def __post_init__(self) -> None:
+        # Frozen records can be directly constructed/replaced without the
+        # shadow producer. A caller cannot manufacture source or post authority.
+        abstained_gates = {
+            CornerApertureClassification.ABSTAINED_DEGENERATE_LEG:
+                ("corner_leg_span_out_of_bounds",),
+            CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE:
+                ("corner_angle_non_orthogonal",),
+            CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION:
+                ("corner_post_dimension_excessive",),
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE:
+                ("original_source_scale_or_post_unverified",
+                 "distinct_corner_host_walls_unverified"),
+        }
+        if (type(self.classification) is not CornerApertureClassification
+                or type(self.status) is not EvidenceResolutionStatus
+                or self.post_condition is not CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral corner cannot grant commercial or post authority")
+        if self.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE:
+            valid = (self.status is EvidenceResolutionStatus.CANDIDATE
+                     and self.first_remaining_gate
+                     == "original_source_corner_host_frame_unverified")
+        else:
+            valid = (self.status is EvidenceResolutionStatus.ABSTAINED
+                     and self.first_remaining_gate in abstained_gates.get(
+                         self.classification, ())
+                     and self.total_girth_m is None
+                     and self.leg_a.leg_span_m is None
+                     and self.leg_b.leg_span_m is None)
+        if not valid:
+            raise ValueError("source-neutral corner classification and source gate conflict")
+        if (type(self.leg_a) is not CornerOpeningLegRecord
+                or type(self.leg_b) is not CornerOpeningLegRecord
+                or type(self.corner_vertex) is not tuple
+                or len(self.corner_vertex) != 2
+                or any(not _finite_source_coordinate(v) for v in self.corner_vertex)
+                or self.leg_a.corner_vertex != self.corner_vertex
+                or self.leg_b.corner_vertex != self.corner_vertex
+                or not _finite_real(self.corner_angle_deg)
+                or not 0 <= self.corner_angle_deg <= 180
+                or not _finite_real(self.total_girth_pt)
+                or self.total_girth_pt < 0
+                or not _finite_real(self.diagonal_chord_pt)
+                or self.diagonal_chord_pt < 0
+                or (self.post_dimension_pt is not None and
+                    (not _finite_real(self.post_dimension_pt)
+                     or self.post_dimension_pt < 0))
+                or (self.total_girth_m is not None and
+                    (not _finite_real(self.total_girth_m)
+                     or self.total_girth_m <= 0))):
+            raise ValueError("corner record numeric evidence must be finite and physical")
+        # A frozen record must not claim an angle different from the two
+        # independently validated outward leg axes. A zero-length leg keeps
+        # its producer's zero-axis/typed-abstention angle convention.
+        dot = max(-1.0, min(1.0,
+            self.leg_a.axis_vector[0] * self.leg_b.axis_vector[0]
+            + self.leg_a.axis_vector[1] * self.leg_b.axis_vector[1]))
+        expected_angle = math.degrees(math.acos(dot))
+        if self.corner_angle_deg != expected_angle:
+            raise ValueError("corner record numeric evidence conflicts with leg angle")
+        expected_girth = self.leg_a.leg_span_pt + self.leg_b.leg_span_pt
+        expected_chord = math.hypot(
+            self.leg_a.terminal_jamb[0] - self.leg_b.terminal_jamb[0],
+            self.leg_a.terminal_jamb[1] - self.leg_b.terminal_jamb[1],
+        )
+        if (not math.isfinite(expected_girth)
+                or not math.isfinite(expected_chord)
+                or self.total_girth_pt != expected_girth
+                or self.diagonal_chord_pt != expected_chord):
+            raise ValueError("corner record numeric evidence conflicts with leg geometry")
+        # Producer identity is a receipt, not an arbitrary caller label.
+        # Reconstruct it from exact native points, ordered hosts, context,
+        # post and the explicitly supplied *hypothetical* scale. This does
+        # not authenticate any of those inputs as original source evidence.
+        identities = (self.context_label, self.leg_a.host_wall_id,
+                      self.leg_b.host_wall_id)
+        if any(type(value) is not str or not value
+               or value != value.strip() or not value.isprintable()
+               for value in identities):
+            raise ValueError("corner identity receipt requires exact printable source identity")
+        if (self.scale_ratio is not None and
+                (not _finite_real(self.scale_ratio) or self.scale_ratio <= 0)):
+            raise ValueError("corner hypothetical scale receipt must be finite and positive")
+        if ((self.leg_a.host_wall_id, self.leg_a.terminal_jamb)
+                > (self.leg_b.host_wall_id, self.leg_b.terminal_jamb)):
+            raise ValueError("corner identity receipt has noncanonical leg ordering")
+        expected_id = _corner_contract_id(
+            self.context_label, self.corner_vertex,
+            self.leg_a.terminal_jamb, self.leg_b.terminal_jamb,
+            self.leg_a.host_wall_id, self.leg_b.host_wall_id,
+            self.post_dimension_pt, self.scale_ratio,
+        )
+        if (type(self.contract_id) is not str or self.contract_id != expected_id
+                or type(self.leg_a.leg_id) is not str
+                or self.leg_a.leg_id != f"{expected_id}:LEG_A"
+                or type(self.leg_b.leg_id) is not str
+                or self.leg_b.leg_id != f"{expected_id}:LEG_B"):
+            raise ValueError("corner identity receipt conflicts with producer geometry")
+        if self.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE:
+            if (self.scale_ratio is None or self.post_dimension_pt is None
+                    or self.post_dimension_pt > MAX_CORNER_POST_DIM_PT
+                    or self.leg_a.host_wall_id == self.leg_b.host_wall_id
+                    or not MIN_LEG_SPAN_PT <= self.leg_a.leg_span_pt <= MAX_LEG_SPAN_PT
+                    or not MIN_LEG_SPAN_PT <= self.leg_b.leg_span_pt <= MAX_LEG_SPAN_PT
+                    or not MIN_CORNER_ANGLE_DEG <= self.corner_angle_deg <= MAX_CORNER_ANGLE_DEG):
+                raise ValueError("corner geometric candidate exceeds source-neutral bounds")
+            expected_metric = (
+                self.leg_a.leg_span_pt * self.scale_ratio,
+                self.leg_b.leg_span_pt * self.scale_ratio,
+                self.total_girth_pt * self.scale_ratio,
+            )
+            recorded_metric = (
+                self.leg_a.leg_span_m, self.leg_b.leg_span_m, self.total_girth_m,
+            )
+            if any(not math.isfinite(expected) or expected <= 0
+                   or recorded is None
+                   or recorded != expected
+                   for recorded, expected in zip(recorded_metric, expected_metric)):
+                raise ValueError("corner hypothetical metric evidence conflicts with scale")
+
+        # A caller can directly replace a frozen record without invoking the
+        # producer. Preserve the *first* failing gate, not merely a plausible
+        # enum/status combination: later source reconciliation depends on the
+        # exact reason the geometric hypothesis was withheld.
+        if (not MIN_LEG_SPAN_PT <= self.leg_a.leg_span_pt <= MAX_LEG_SPAN_PT
+                or not MIN_LEG_SPAN_PT <= self.leg_b.leg_span_pt <= MAX_LEG_SPAN_PT):
+            expected_classification = CornerApertureClassification.ABSTAINED_DEGENERATE_LEG
+            expected_gate = "corner_leg_span_out_of_bounds"
+        elif not MIN_CORNER_ANGLE_DEG <= self.corner_angle_deg <= MAX_CORNER_ANGLE_DEG:
+            expected_classification = CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE
+            expected_gate = "corner_angle_non_orthogonal"
+        elif (self.post_dimension_pt is not None
+              and self.post_dimension_pt > MAX_CORNER_POST_DIM_PT):
+            expected_classification = CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION
+            expected_gate = "corner_post_dimension_excessive"
+        elif self.scale_ratio is None or self.post_dimension_pt is None:
+            expected_classification = CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+            expected_gate = "original_source_scale_or_post_unverified"
+        elif self.leg_a.host_wall_id == self.leg_b.host_wall_id:
+            expected_classification = CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+            expected_gate = "distinct_corner_host_walls_unverified"
+        else:
+            expected_classification = CornerApertureClassification.GEOMETRIC_CANDIDATE
+            expected_gate = "original_source_corner_host_frame_unverified"
+        if (self.classification is not expected_classification
+                or self.first_remaining_gate != expected_gate):
+            raise ValueError("corner first failing gate conflicts with frozen geometry")
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
+            "context_label": self.context_label,
+            "scale_ratio": self.scale_ratio,
             "classification": self.classification.value,
             "leg_a": self.leg_a.to_dict(),
             "leg_b": self.leg_b.to_dict(),
-            "corner_vertex": [round(c, 2) for c in self.corner_vertex],
-            "corner_angle_deg": round(self.corner_angle_deg, 2),
+            "corner_vertex": list(self.corner_vertex),
+            "corner_angle_deg": self.corner_angle_deg,
             "post_condition": self.post_condition.value,
-            "post_dimension_pt": round(self.post_dimension_pt, 2)
-            if self.post_dimension_pt is not None
-            else None,
-            "total_girth_pt": round(self.total_girth_pt, 2),
-            "total_girth_m": round(self.total_girth_m, 4),
-            "diagonal_chord_pt": round(self.diagonal_chord_pt, 2),
+            "post_dimension_pt": self.post_dimension_pt,
+            "total_girth_pt": self.total_girth_pt,
+            "total_girth_m": self.total_girth_m,
+            "diagonal_chord_pt": self.diagonal_chord_pt,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
             "notes": self.notes,
@@ -132,22 +310,49 @@ class StructuralCornerApertureRecord:
         }
 
 
+def _finite_real(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    # Conversion to float would alias distinct integer source hypotheses.
+    if type(value) is int and abs(value) > 2**53:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
+def _finite_source_coordinate(value: object) -> bool:
+    # Match the existing inclusive 2**53 native source-point identity limit
+    # for floats and ints, without constraining independent scale/post scalars.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
+
+def _corner_contract_id(
+    context_label: str,
+    vertex: tuple[float, float],
+    jamb_a: tuple[float, float],
+    jamb_b: tuple[float, float],
+    host_a: str,
+    host_b: str,
+    post_dimension_pt: float | None,
+    scale_ratio: float | None,
+) -> str:
+    """Producer-equivalent exact identity for unverified corner hypotheses."""
+    return stable_contract_id(
+        f"CORNER_APERTURE_{context_label}",
+        (
+            *(float(value).hex() for value in (*vertex, *jamb_a, *jamb_b)),
+            host_a, host_b,
+            "missing_post" if post_dimension_pt is None else float(post_dimension_pt).hex(),
+            "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
+        ),
+    )
+
+
 class StructuralCornerApertureContinuityAuthority:
-    """Evaluates multi-leg corner openings, post conditions, and dual host continuity."""
-
-    @staticmethod
-    def _normalize_vector(dx: float, dy: float) -> tuple[float, float]:
-        mag = math.hypot(dx, dy)
-        if mag < 1e-6:
-            return 0.0, 0.0
-        return dx / mag, dy / mag
-
-    @staticmethod
-    def _compute_angle_between(
-        u1: tuple[float, float], u2: tuple[float, float]
-    ) -> float:
-        dot = max(-1.0, min(1.0, u1[0] * u2[0] + u1[1] * u2[1]))
-        return math.degrees(math.acos(dot))
+    """Source-neutral corner-leg hypotheses; never authenticates an opening."""
 
     def evaluate_corner_aperture(
         self,
@@ -157,158 +362,145 @@ class StructuralCornerApertureContinuityAuthority:
         corner_vertex: tuple[float, float],
         host_wall_a_id: str,
         host_wall_b_id: str,
-        post_dimension_pt: float = 0.0,
-        scale_ratio: float = 0.01764,  # default 1:100 scale ratio in m/pt
+        post_dimension_pt: float | None = None,
+        scale_ratio: float | None = None,
         context_label: str = "CORNER_APERTURE",
     ) -> StructuralCornerApertureRecord:
-        """Evaluates a composite two-leg corner opening."""
-        # Calculate leg geometry from corner vertex to each terminal jamb
-        dx_a = jamb_a[0] - corner_vertex[0]
-        dy_a = jamb_a[1] - corner_vertex[1]
-        span_a = math.hypot(dx_a, dy_a)
-        axis_a = self._normalize_vector(dx_a, dy_a)
-
-        dx_b = jamb_b[0] - corner_vertex[0]
-        dy_b = jamb_b[1] - corner_vertex[1]
-        span_b = math.hypot(dx_b, dy_b)
-        axis_b = self._normalize_vector(dx_b, dy_b)
-
-        # Deterministic leg ordering: sort by host_wall_id or jamb coordinates
-        if (host_wall_a_id, jamb_a) > (host_wall_b_id, jamb_b):
-            jamb_a, jamb_b = jamb_b, jamb_a
-            host_wall_a_id, host_wall_b_id = host_wall_b_id, host_wall_a_id
-            span_a, span_b = span_b, span_a
-            axis_a, axis_b = axis_b, axis_a
-
-        total_girth_pt = span_a + span_b
-        total_girth_m = total_girth_pt * scale_ratio
-
-        # Contrast with naive diagonal chord
-        diag_chord_pt = math.hypot(jamb_b[0] - jamb_a[0], jamb_b[1] - jamb_a[1])
-
-        # Angle between the two legs radiating from corner vertex
-        corner_angle_deg = self._compute_angle_between(axis_a, axis_b)
-
-        leg_rec_a = CornerOpeningLegRecord(
-            leg_id=f"{context_label}_LEG_A",
-            terminal_jamb=jamb_a,
-            corner_vertex=corner_vertex,
-            axis_vector=axis_a,
-            leg_span_pt=span_a,
-            leg_span_m=span_a * scale_ratio,
-            host_wall_id=host_wall_a_id,
-        )
-        leg_rec_b = CornerOpeningLegRecord(
-            leg_id=f"{context_label}_LEG_B",
-            terminal_jamb=jamb_b,
-            corner_vertex=corner_vertex,
-            axis_vector=axis_b,
-            leg_span_pt=span_b,
-            leg_span_m=span_b * scale_ratio,
-            host_wall_id=host_wall_b_id,
-        )
-
-        contract_id = stable_contract_id(
-            f"CORNER_APERTURE_{context_label}",
-            (
-                round(corner_vertex[0], 2),
-                round(corner_vertex[1], 2),
-                round(jamb_a[0], 2),
-                round(jamb_a[1], 2),
-                round(jamb_b[0], 2),
-                round(jamb_b[1], 2),
-                host_wall_a_id,
-                host_wall_b_id,
-                round(post_dimension_pt, 2),
-            ),
-        )
-
-        # Gate 1: Degenerate leg span check
-        if (
-            span_a < MIN_LEG_SPAN_PT
-            or span_a > MAX_LEG_SPAN_PT
-            or span_b < MIN_LEG_SPAN_PT
-            or span_b > MAX_LEG_SPAN_PT
+        """Return a shadow candidate or a typed abstention, never FIRM."""
+        for name, point in (
+            ("jamb_a", jamb_a), ("jamb_b", jamb_b),
+            ("corner_vertex", corner_vertex),
         ):
-            return StructuralCornerApertureRecord(
-                contract_id=contract_id,
-                classification=CornerApertureClassification.ABSTAINED_DEGENERATE_LEG,
-                leg_a=leg_rec_a,
-                leg_b=leg_rec_b,
-                corner_vertex=corner_vertex,
-                corner_angle_deg=corner_angle_deg,
-                post_condition=CornerPostCondition.UNRESOLVED_CORNER_CONDITION,
-                total_girth_pt=total_girth_pt,
-                total_girth_m=total_girth_m,
-                diagonal_chord_pt=diag_chord_pt,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                post_dimension_pt=post_dimension_pt,
-                first_remaining_gate="corner_leg_span_out_of_bounds",
-                notes=f"Leg span (A={span_a:.2f}pt, B={span_b:.2f}pt) outside bounds [{MIN_LEG_SPAN_PT}, {MAX_LEG_SPAN_PT}]pt.",
-            )
-
-        # Gate 2: Non-orthogonal corner angle check
-        if (
-            corner_angle_deg < MIN_CORNER_ANGLE_DEG
-            or corner_angle_deg > MAX_CORNER_ANGLE_DEG
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise ValueError(f"{name} requires exactly two coordinates")
+            if any(not _finite_source_coordinate(value) for value in point):
+                raise ValueError(f"{name} requires finite real coordinates")
+        for name, value in (
+            ("post_dimension_pt", post_dimension_pt),
+            ("scale_ratio", scale_ratio),
         ):
+            if value is not None and (
+                not _finite_real(value) or float(value) < 0
+                or (name == "scale_ratio" and value == 0)
+            ):
+                raise ValueError(f"{name} must be finite and nonnegative")
+        for name, value in (
+            ("host_wall_a_id", host_wall_a_id),
+            ("host_wall_b_id", host_wall_b_id),
+            ("context_label", context_label),
+        ):
+            # A padded or nonprintable caller identity is not a second
+            # source wall. Reject it before dual-host comparison and stable ID
+            # construction rather than silently aliasing physical ownership.
+            if (type(value) is not str or not value
+                    or value != value.strip() or not value.isprintable()):
+                raise ValueError(f"{name} must be an exact printable source identity")
+
+        a = (float(jamb_a[0]), float(jamb_a[1]))
+        b = (float(jamb_b[0]), float(jamb_b[1]))
+        vertex = (float(corner_vertex[0]), float(corner_vertex[1]))
+        legs = sorted(((host_wall_a_id, a), (host_wall_b_id, b)))
+        (host_a, a), (host_b, b) = legs
+
+        dx_a, dy_a = a[0] - vertex[0], a[1] - vertex[1]
+        dx_b, dy_b = b[0] - vertex[0], b[1] - vertex[1]
+        span_a, span_b = math.hypot(dx_a, dy_a), math.hypot(dx_b, dy_b)
+        total_pt = span_a + span_b
+        chord_pt = math.hypot(b[0] - a[0], b[1] - a[1])
+        if not all(math.isfinite(v) for v in (
+            dx_a, dy_a, dx_b, dy_b, span_a, span_b, total_pt, chord_pt,
+        )):
+            raise ValueError("nonfinite corner geometry")
+        axis_a = (dx_a / span_a, dy_a / span_a) if span_a else (0.0, 0.0)
+        axis_b = (dx_b / span_b, dy_b / span_b) if span_b else (0.0, 0.0)
+        dot = max(-1.0, min(1.0, axis_a[0] * axis_b[0] + axis_a[1] * axis_b[1]))
+        angle = math.degrees(math.acos(dot))
+
+        # Full-precision identity includes source-neutral scale, post, host and
+        # geometry; sorting makes input-order swaps invariant.
+        contract_id = _corner_contract_id(
+            context_label, vertex, a, b, host_a, host_b,
+            post_dimension_pt, scale_ratio,
+        )
+
+        def record(
+            classification: CornerApertureClassification,
+            status: EvidenceResolutionStatus,
+            gate: str,
+            notes: str,
+            ratio: float | None = None,
+            post: CornerPostCondition = CornerPostCondition.UNRESOLVED_CORNER_CONDITION,
+        ) -> StructuralCornerApertureRecord:
+            if ratio is not None:
+                metric_lengths = (span_a * ratio, span_b * ratio, total_pt * ratio)
+                if not all(math.isfinite(v) and v > 0 for v in metric_lengths):
+                    raise ValueError("invalid or underflowed hypothetical metric conversion")
+            else:
+                metric_lengths = (None, None, None)
+            leg_a = CornerOpeningLegRecord(
+                leg_id=f"{contract_id}:LEG_A",
+                terminal_jamb=a, corner_vertex=vertex, axis_vector=axis_a,
+                leg_span_pt=span_a, leg_span_m=metric_lengths[0], host_wall_id=host_a,
+            )
+            leg_b = CornerOpeningLegRecord(
+                leg_id=f"{contract_id}:LEG_B",
+                terminal_jamb=b, corner_vertex=vertex, axis_vector=axis_b,
+                leg_span_pt=span_b, leg_span_m=metric_lengths[1], host_wall_id=host_b,
+            )
             return StructuralCornerApertureRecord(
-                contract_id=contract_id,
-                classification=CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE,
-                leg_a=leg_rec_a,
-                leg_b=leg_rec_b,
-                corner_vertex=corner_vertex,
-                corner_angle_deg=corner_angle_deg,
-                post_condition=CornerPostCondition.UNRESOLVED_CORNER_CONDITION,
-                total_girth_pt=total_girth_pt,
-                total_girth_m=total_girth_m,
-                diagonal_chord_pt=diag_chord_pt,
-                status=EvidenceResolutionStatus.ABSTAINED,
+                contract_id=contract_id, classification=classification,
+                leg_a=leg_a, leg_b=leg_b, corner_vertex=vertex,
+                corner_angle_deg=angle, post_condition=post,
+                total_girth_pt=total_pt, total_girth_m=metric_lengths[2],
+                diagonal_chord_pt=chord_pt, status=status,
+                context_label=context_label, scale_ratio=scale_ratio,
                 post_dimension_pt=post_dimension_pt,
-                first_remaining_gate="corner_angle_non_orthogonal",
-                notes=f"Corner angle {corner_angle_deg:.2f}deg outside orthogonal bounds [{MIN_CORNER_ANGLE_DEG}, {MAX_CORNER_ANGLE_DEG}]deg.",
+                first_remaining_gate=gate, notes=notes,
             )
 
-        # Gate 3: Excessive post dimension check
-        if post_dimension_pt > MAX_CORNER_POST_DIM_PT:
-            return StructuralCornerApertureRecord(
-                contract_id=contract_id,
-                classification=CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
-                leg_a=leg_rec_a,
-                leg_b=leg_rec_b,
-                corner_vertex=corner_vertex,
-                corner_angle_deg=corner_angle_deg,
-                post_condition=CornerPostCondition.UNRESOLVED_CORNER_CONDITION,
-                total_girth_pt=total_girth_pt,
-                total_girth_m=total_girth_m,
-                diagonal_chord_pt=diag_chord_pt,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                post_dimension_pt=post_dimension_pt,
-                first_remaining_gate="corner_post_dimension_excessive",
-                notes=f"Post dimension {post_dimension_pt:.2f}pt exceeds maximum allowable post size {MAX_CORNER_POST_DIM_PT:.2f}pt.",
+        if (span_a < MIN_LEG_SPAN_PT or span_a > MAX_LEG_SPAN_PT
+                or span_b < MIN_LEG_SPAN_PT or span_b > MAX_LEG_SPAN_PT):
+            return record(
+                CornerApertureClassification.ABSTAINED_DEGENERATE_LEG,
+                EvidenceResolutionStatus.ABSTAINED, "corner_leg_span_out_of_bounds",
+                "Corner leg span outside existing bounds.",
             )
-
-        # Post condition classification
-        if post_dimension_pt > 2.0:
-            post_cond = CornerPostCondition.STRUCTURAL_CORNER_POST
-            gate_note = f"Structural corner post ({post_dimension_pt:.2f}pt) confirmed; dual-leg aperture verified."
-        else:
-            post_cond = CornerPostCondition.POSTLESS_BUTT_JOINT
-            gate_note = "Postless frameless butt-joint confirmed; continuous corner girth verified."
-
-        return StructuralCornerApertureRecord(
-            contract_id=contract_id,
-            classification=CornerApertureClassification.CORNER_APERTURE_CONFIRMED,
-            leg_a=leg_rec_a,
-            leg_b=leg_rec_b,
-            corner_vertex=corner_vertex,
-            corner_angle_deg=corner_angle_deg,
-            post_condition=post_cond,
-            post_dimension_pt=post_dimension_pt,
-            total_girth_pt=total_girth_pt,
-            total_girth_m=total_girth_m,
-            diagonal_chord_pt=diag_chord_pt,
-            status=EvidenceResolutionStatus.CANDIDATE,
-            first_remaining_gate="corner_aperture_shadow_authenticated",
-            notes=gate_note,
+        if angle < MIN_CORNER_ANGLE_DEG or angle > MAX_CORNER_ANGLE_DEG:
+            return record(
+                CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE,
+                EvidenceResolutionStatus.ABSTAINED, "corner_angle_non_orthogonal",
+                "Corner angle outside orthogonal bounds.",
+            )
+        if post_dimension_pt is not None and post_dimension_pt > MAX_CORNER_POST_DIM_PT:
+            return record(
+                CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
+                EvidenceResolutionStatus.ABSTAINED, "corner_post_dimension_excessive",
+                "Corner post exceeds existing maximum.",
+            )
+        if scale_ratio is None or post_dimension_pt is None:
+            return record(
+                CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+                EvidenceResolutionStatus.ABSTAINED,
+                "original_source_scale_or_post_unverified",
+                "Missing scale or post receipt; no metric corner aperture.",
+            )
+        # Two legs cannot be independently hosted by the same physical wall ID.
+        # Preserve the native geometry but abstain before a dual-host candidate
+        # or hypothetical metric girth can be inferred from duplicate identity.
+        if host_a == host_b:
+            return record(
+                CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+                EvidenceResolutionStatus.ABSTAINED,
+                "distinct_corner_host_walls_unverified",
+                "Both legs claim the same host wall; distinct physical hosts unverified.",
+            )
+        # A caller's post dimension is not an original-source post receipt.
+        # Preserve the numeric hypothesis, but never assert a physical post.
+        post = CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+        return record(
+            CornerApertureClassification.GEOMETRIC_CANDIDATE,
+            EvidenceResolutionStatus.CANDIDATE,
+            "original_source_corner_host_frame_unverified",
+            "Unverified two-leg geometry only; NOT a source-confirmed opening.",
+            float(scale_ratio), post,
         )
