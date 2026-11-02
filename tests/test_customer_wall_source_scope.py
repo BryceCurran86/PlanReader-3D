@@ -67,8 +67,8 @@ def test_all_selected_independent_pdfs_publish_even_with_same_filename_and_type_
         rows, facades = auto._build_facade_rows(app, 1, pages)
     assert collect.call_count == 2
     assert collect.call_args_list[0].args == (Path(documents[0]["path"]),)
-    assert collect.call_args_list[0].kwargs == {"pages": (1,)}
-    assert collect.call_args_list[1].kwargs == {"pages": (2,)}
+    assert collect.call_args_list[0].kwargs == {"pages": (1,), "recover_supported_opening_areas": True}
+    assert collect.call_args_list[1].kwargs == {"pages": (2,), "recover_supported_opening_areas": True}
     assert [row["quantity"] for row in _named(rows)] == [12.123456, 25.654321]
     assert all(row["unit"] == "m²" for row in _named(rows))
     assert all(facade["superseded_by_physical_net_wall"] for facade in facades)
@@ -80,7 +80,7 @@ def test_byte_identical_uploads_replay_selected_page_union_once(tmp_path):
     with patch(CLAIM_TOOL, return_value=_claim()) as collect:
         rows, facades = auto._build_facade_rows(app, 1, pages)
     collect.assert_called_once()
-    assert collect.call_args.kwargs == {"pages": (0, 2)}
+    assert collect.call_args.kwargs == {"pages": (0, 2), "recover_supported_opening_areas": True}
     assert len(rows) == 1
     assert all(facade["superseded_by_physical_net_wall"] for facade in facades)
     assert app._ag09_family_coverage_by_workspace[1]["physical_net_document_ids"] == [1, 2]
