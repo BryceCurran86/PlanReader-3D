@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=cc5f58a7ae95801a45b4d348319fa184f91115cc
-          approved_head=a3afced106dd07e083f24723f33f3eac43e0517b
+          approved_base=782b4e3ef4028e9463f39a4a64feb5c50b9332f6
+          approved_head=2937084701e614bf929fab4d08544820b488b21b
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -44,10 +44,12 @@ jobs:
           docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
           pb_auto_geometry_v1219.py
           pb_customer_output_verification.py
+          pb_live_append_only_opening_area_composition.py
           pb_live_floor_finish_area_source_closed_export.py
           pb_live_floor_finish_customer_projection.py
           pb_live_opening_customer_projection.py
           pb_live_opening_source_closed_export.py
+          pb_live_physical_net_wall_integration.py
           pb_quantity_takeoff_adapter.py
           pb_source_closed_run_export.py
           tests/test_gpt1_floor_finish_exact_original_face_seal.py
