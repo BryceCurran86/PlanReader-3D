@@ -149,11 +149,13 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         pages=None,
         topology_pages=None,
         room_area_support_pages=None,
+        recover_supported_opening_areas=False,
     ):
         seen["pdf_path"] = pdf_path
         seen["pages"] = list(pages or ())
         seen["topology_pages"] = list(topology_pages or ())
         seen["room_area_support_pages"] = list(room_area_support_pages or ())
+        seen["recover_supported_opening_areas"] = recover_supported_opening_areas
         return SimpleNamespace(
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=("test_physical_net_wall_resolved",),
@@ -195,6 +197,7 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     )
 
     assert seen["pages"] == [0]
+    assert seen["recover_supported_opening_areas"] is True
     # The evidence-only support universe may include non-topology pages, but it
     # must not expand the wall/topology page selection asserted above.
     assert set(seen["topology_pages"]).issubset(set(seen["pages"]))
@@ -451,6 +454,7 @@ def test_extractor_routes_marked_opening_elevation_as_evidence_only(
     )
 
     assert seen["pages"] == (0, 1)
+    assert seen["recover_supported_opening_areas"] is True
     assert seen["topology_pages"] == (0,)
     assert 2 not in seen["pages"]
 
