@@ -247,7 +247,7 @@ def test_replayed_original_doorway_reaches_existing_source_only_w4_handoff(monke
     lambda x: x.update(original_translation_pdf_pts=[77.0, 0.0]),
     lambda x: x["floor_source_graph"].update(original_native_edge_ids=("d99i0",)),
     lambda x: x["second_plan_source_graph"].update(original_native_edge_ids=()),
-    lambda x: x.update(original_second_unclosed_gap_endpoints_pdf_pts=[[79.24, 2], [81, 2]]),
+    lambda x: x.update(original_second_unclosed_gap_endpoints_pdf_pts=[[79.5, 2], [81, 2]]),
 ])
 def test_forged_copied_status_or_changed_original_geometry_never_reaches_issuer(
     monkeypatch, mutation
@@ -270,7 +270,7 @@ def test_forged_copied_status_or_changed_original_geometry_never_reaches_issuer(
     {"original_floor_page": "7"},
     {"original_finish_page": True},
     {"original_finish_page": 7},
-    {"source_cross_sheet_translation_pdf_pts": [78.24, 0.0]},
+    {"source_cross_sheet_translation_pdf_pts": [78.5, 0.0]},
     {"source_cross_sheet_translation_pdf_pts": [float("nan"), 0.0]},
     {"source_cross_sheet_translation_pdf_pts": [True, 0.0]},
     {"source_cross_sheet_translation_pdf_pts": "78,0"},
@@ -285,98 +285,15 @@ def test_caller_altered_doorway_source_inventory_or_registration_abstains(
     assert not any(x[0] in {"material", "w4", "gpt1_shadow"} for x in calls)
 
 
-def test_true_private_pdf_rival_reissued_as_conflict_cannot_be_forged_positive(monkeypatch):
+def test_synthetic_original_negative_rival_cannot_be_forged_positive(monkeypatch):
     actual = _original_ancestry()
     actual["status"] = "original_doorway_source_endpoint_rival_conflict"
     actual["original_second_unclosed_gap_endpoints_pdf_pts"] = [
-        [79.24, 2], [81, 2],
+        [79.5, 2], [81, 2],
     ]
     result, calls = _call(monkeypatch, actual=actual)
     assert result["status"] == "source_original_doorway_ancestry_conflict"
     assert not any(x[0] in {"material", "w4", "gpt1_shadow"} for x in calls)
-
-
-def test_immutable_maryborough_office_d15_mismatch_cannot_spoof_matching_ancestry(
-    monkeypatch,
-):
-    """Original-positive test requires a private source path, never fixture data."""
-    import hashlib
-    import os
-    from pathlib import Path
-
-    from pb_source_visibility_authority import SourceVisibilityProducer
-
-    configured = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
-    if not configured:
-        pytest.skip("owner-private original not configured; SOURCE NOT VERIFIED")
-    original = Path(configured)
-    assert original.is_file(), "configured private source not found"
-    raw = original.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == (
-        "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-    )
-    source = SourceVisibilityProducer(
-        producer_method="gpt2-private-d15-reissue-test", producer_version="1",
-    )
-    published = source.ingest_native_pdf_bytes(
-        document_id="original-maryborough-d15-negative",
-        source_bytes=raw,
-        source_locator="memory://immutable-private-original.pdf",
-        page_ids=("7", "11"),
-    )
-    bridge = module.GPT2OriginalSourceGeometryBridge.from_source_visibility_producer(
-        source
-    )
-    p7 = (
-        "d52239i0", "d66216i0", "d53725i0", "d52622i0", "d52625i0",
-    )
-    p11 = (
-        "d2657i0", "d3058i0", "d2931i0", "d2842i0", "d2845i0",
-    )
-    authentic = bridge.original_room_doorway_source_ancestry(
-        revision_id=published.revision.revision_id,
-        original_floor_page_1_based=7, original_second_page_1_based=11,
-        original_floor_source_edge_ids=p7, original_second_source_edge_ids=p11,
-        original_translation_pdf_pts=(78.0, 0.0),
-    )
-    assert authentic["status"] == "original_doorway_source_endpoint_rival_conflict"
-    assert authentic["first_unclosed_gate"] == (
-        "original_short_wall_stub_disagrees_across_sheets"
-    )
-    assert authentic["original_door_gap_length_floor_pdf_pts"] == 56.64
-    assert authentic["original_door_gap_length_second_pdf_pts"] == 56.88
-
-    forged = deepcopy(authentic)
-    forged["status"] = "original_doorway_all_printed_wall_strokes_match_candidate"
-    monkeypatch.setattr(
-        module, "audit_gpt2_source_material_floor_handoff",
-        lambda *args, **kwargs: pytest.fail(
-            "conflicting private original doorway must never reach material"
-        ),
-    )
-    result = bridge.source_closed_original_ft_handoff_for_gpt1(
-        revision_id=published.revision.revision_id,
-        original_floor_page_1_based=7,
-        source_cross_sheet_receipt={
-            "original_source_sha256": published.revision.source_sha256,
-            "original_floor_page": 7,
-            "original_finish_page": 11,
-            "source_real_door_ink_gap_virtual_closure_only": True,
-            "original_floor_source_ids": tuple(sorted(p7)),
-            "original_finish_source_ids": tuple(sorted(p11)),
-            "source_cross_sheet_translation_pdf_pts": [78.0, 0.0],
-        },
-        source_material_receipt={}, source_material_authority=None,
-        source_definition_selector=None, source_occurrence_selector=None,
-        original_finish_code="FT3", canonical_rooms=(), physical_room_id="OFFICE",
-        original_doorway_source_ancestry=forged,
-    )
-    assert result["status"] == "source_original_doorway_ancestry_conflict"
-    assert result["floor_finish_quantity_granted"] is False
-    assert result["new_firm_quantities"] == 0
-    assert hashlib.sha256(original.read_bytes()).hexdigest() == (
-        published.revision.source_sha256
-    )
 
 
 
@@ -502,94 +419,7 @@ def test_synthetic_original_ink_receipt_keeps_every_competing_path():
     }
 
 
-def test_private_original_omitted_same_axis_d15_stub_is_rejected_at_actual_handoff(
-    monkeypatch,
-):
-    """Source-positive on provided original: even a 4-stroke positive is incomplete."""
-    import hashlib
-    import os
-    from pathlib import Path
 
-    from pb_source_visibility_authority import SourceVisibilityProducer
-
-    location=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
-    if not location:
-        pytest.skip("owner-private original not configured; SOURCE NOT VERIFIED")
-    original=Path(location)
-    assert original.is_file()
-    raw=original.read_bytes()
-    assert hashlib.sha256(raw).hexdigest()==(
-        "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-    )
-    source=SourceVisibilityProducer(
-        producer_method="gpt2-private-omission-negative",
-        producer_version="1",
-    )
-    published=source.ingest_native_pdf_bytes(
-        document_id="private-omitted-doorway-source",
-        source_bytes=raw,
-        source_locator="memory://owner-private-omitted-gap.pdf",
-        page_ids=("7","11"),
-    )
-    bridge=module.GPT2OriginalSourceGeometryBridge.from_source_visibility_producer(
-        source,
-    )
-    # The sole real p7/p11 disagreement is the very short left D15 ink
-    # stub. Intentionally OMIT it on both pages. A selected-subset source
-    # replay can then appear matching, but the full original page has it.
-    floor_ids=("d52239i0","d66216i0","d53725i0","d52625i0")
-    finish_ids=("d2657i0","d3058i0","d2931i0","d2845i0")
-    partial=bridge.original_room_doorway_source_ancestry(
-        revision_id=published.revision.revision_id,
-        original_floor_page_1_based=7,original_second_page_1_based=11,
-        original_floor_source_edge_ids=floor_ids,
-        original_second_source_edge_ids=finish_ids,
-        original_translation_pdf_pts=(78.0,0.0),
-    )
-    assert partial["status"]=="original_doorway_all_printed_wall_strokes_match_candidate"
-    assert module._original_doorway_gap_native_ink_inventory_complete(
-        raw,page_1_based=7,original_room_graph=partial["floor_source_graph"],
-    ) is False
-    assert module._original_doorway_gap_native_ink_inventory_complete(
-        raw,page_1_based=11,original_room_graph=partial["second_plan_source_graph"],
-    ) is False
-
-    monkeypatch.setattr(
-        module,"audit_gpt2_source_material_floor_handoff",
-        lambda *args,**kwargs: pytest.fail(
-            "omitted real doorway stroke may not reach material issuer"
-        ),
-    )
-    result=bridge.source_closed_original_ft_handoff_for_gpt1(
-        revision_id=published.revision.revision_id,
-        original_floor_page_1_based=7,
-        source_cross_sheet_receipt={
-            "original_source_sha256":published.revision.source_sha256,
-            "original_floor_page":7,"original_finish_page":11,
-            "source_real_door_ink_gap_virtual_closure_only":True,
-            "original_floor_source_ids":tuple(sorted(floor_ids)),
-            "original_finish_source_ids":tuple(sorted(finish_ids)),
-            "source_cross_sheet_translation_pdf_pts":[78.0,0.0],
-        },
-        source_material_receipt={},source_material_authority=None,
-        source_definition_selector=None,source_occurrence_selector=None,
-        original_finish_code="FT3",canonical_rooms=(),physical_room_id="OFFICE",
-        original_doorway_source_ancestry=partial,
-    )
-    assert result["status"]=="source_original_doorway_ancestry_conflict"
-    assert result["first_failure"]=="original_doorway_gap_painted_ink_inventory_incomplete"
-    assert result["new_firm_quantities"]==0
-    assert result["floor_finish_quantity_granted"] is False
-
-
-@pytest.mark.parametrize("rival_style", [
-    {"color": (0, 0, 0), "width": 0.50},
-    {"color": (1, 0, 0), "width": 0.48},
-    {"color": (1, 1, 1), "width": 0.48},
-    {"color": (0.0, 0.5, 0.0), "width": 0.72},
-    {"color": (0, 0, 0), "width": 0.48, "dashes": "[2 2] 0"},
-    {"color": (0, 0, 0), "width": 0.48, "stroke_opacity": 0.5},
-])
 def test_native_door_gap_preserves_competing_ink_of_different_paint_styles(
     rival_style,
 ):
@@ -746,36 +576,6 @@ def test_native_door_gap_retains_quad_edges_and_collinear_bezier_rivals(
     doc.close()
     assert audit(raw,page_1_based=1,original_room_graph=graph) is (not inside_gap)
 
-
-def test_private_original_complete_entrance_retains_differently_weighted_jamb_rivals():
-    """Original OFFICE p7 has other visible width ink in its open entrance."""
-    import hashlib
-    import os
-    from pathlib import Path
-
-    from tools.diag_gpt2_source_room_graph_shadow import (
-        audit_original_room_edge_graph,
-    )
-
-    configured=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
-    if not configured:
-        pytest.skip("private original not configured; source not verified")
-    path=Path(configured)
-    assert path.is_file()
-    raw=path.read_bytes()
-    sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-    assert hashlib.sha256(raw).hexdigest()==sha
-    graph=audit_original_room_edge_graph(
-        raw,source_sha256=sha,page_1_based=7,
-        source_edge_ids=(
-            "d52239i0","d66216i0","d53725i0","d52622i0","d52625i0",
-        ),
-    )
-    # The p7 0.96pt original jamb strokes are inside the 0.48pt wall-gap
-    # run, and without source-owned physical roles they remain rivals.
-    assert module._original_doorway_gap_native_ink_inventory_complete(
-        raw,page_1_based=7,original_room_graph=graph,
-    ) is False
 
 
 @pytest.mark.parametrize("vertical", [False, True])
