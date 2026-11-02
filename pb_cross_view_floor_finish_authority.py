@@ -312,6 +312,20 @@ def _matching_floor(
         return None
     if _clean(metadata.get("room_revision_id")) != floor.revision_id:
         return None
+    # Geometry and figured room area must retain the SAME original room
+    # snapshot. A distinct material-plan snapshot is allowed later, but it
+    # cannot rebind another room-area receipt to a canonical physical floor.
+    original_room_snapshot = metadata.get("room_snapshot_id")
+    if (
+        type(original_room_snapshot) is not str
+        or not original_room_snapshot
+        or original_room_snapshot != original_room_snapshot.strip()
+        or type(floor.snapshot_id) is not str
+        or not floor.snapshot_id
+        or floor.snapshot_id != floor.snapshot_id.strip()
+        or original_room_snapshot != floor.snapshot_id
+    ):
+        return None
     return floor
 
 
@@ -1308,20 +1322,42 @@ class CrossViewFloorFinishProducer:
                 if isinstance(area_record.area_evidence.metadata, Mapping)
                 else {}
             )
-            figured_dimension_ids = tuple(
-                sorted(
-                    {
-                        _clean(value)
-                        for value in (
-                            area_metadata.get("figured_dimension_ids") or ()
-                        )
-                        if _clean(value)
-                    }
-                )
+            # Preserve the original figured-axis census exactly. Cleaning,
+            # set-deduplicating or dropping a third source token can turn an
+            # ambiguous dimension inventory into an apparently FIRM area.
+            # The source-closed exporter and customer authority both require
+            # the same exact two distinct, non-padded, string source IDs.
+            original_figured_axes = area_metadata.get("figured_dimension_ids")
+            issued_axis_pair = (
+                area_record.horizontal_dimension_id,
+                area_record.vertical_dimension_id,
             )
-            if len(figured_dimension_ids) != 2:
+            if (
+                type(original_figured_axes) not in (tuple, list)
+                or len(original_figured_axes) != 2
+                or any(
+                    type(axis) is not str
+                    or not axis
+                    or axis != axis.strip()
+                    for axis in original_figured_axes
+                )
+                or original_figured_axes[0] == original_figured_axes[1]
+                or any(
+                    type(axis) is not str
+                    or not axis
+                    or axis != axis.strip()
+                    for axis in issued_axis_pair
+                )
+                or issued_axis_pair[0] == issued_axis_pair[1]
+                # The exact source-owned horizontal and vertical dimensions
+                # must be the very IDs retained in quantity metadata. Merely
+                # having two well-typed foreign IDs is not original lineage.
+                or tuple(sorted(original_figured_axes))
+                != tuple(sorted(issued_axis_pair))
+            ):
                 unresolved.add(floor.canonical_floor_id)
                 continue
+            figured_dimension_ids = tuple(sorted(original_figured_axes))
 
             evidence_ids = tuple(
                 dict.fromkeys(
