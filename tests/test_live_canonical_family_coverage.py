@@ -800,6 +800,7 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
         _claim as _ceiling_claim,
         _quantity as _ceiling_quantity,
     )
+    from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 
     claim = _ceiling_claim(_ceiling_quantity())
     # Independently verify the already-issued synthetic source claim.
@@ -813,9 +814,14 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
     source.write_bytes(b"source-neutral-ceiling-not-an-original-PDF")
     app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
 
-    # The separate legacy ceiling fallback has no source in this synthetic
-    # test. Retain its normal production behavior outside this isolated path.
-    legacy = SimpleNamespace(canonical_ceilings=())
+    # The production application suppresses legacy ceilings via dataclasses.replace.
+    # A SimpleNamespace is NOT a valid LiveCeilingLiningResult and creates a
+    # swallowed TypeError masquerading as a missing source-closed customer row.
+    legacy = LiveCeilingLiningResult(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("source-neutral-no-legacy-ceiling",),
+        claims=(),
+    )
     with (
         patch(
             "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
@@ -824,10 +830,6 @@ def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
         patch(
             "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
             return_value=legacy,
-        ),
-        patch(
-            "pb_live_ceiling_area_quantity_publication.publish_live_ceiling_area_quantities",
-            return_value=(),
         ),
     ):
         auto._try_physical_net_wall_rows(
