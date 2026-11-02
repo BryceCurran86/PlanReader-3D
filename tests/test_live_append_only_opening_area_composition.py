@@ -681,11 +681,46 @@ def test_historical_unmeasured_rival_allows_new_snapshot_and_host_receipt_reissu
     assert result.opening_area_replay_source_inventory == tuple(
         sorted(reissued, key=lambda opening: opening.canonical_opening_id)
     )
+    # The prior signed source quantity retains its immutable old snapshot.
+    # A freshly reissued *positive* quantity on another snapshot for the same
+    # original document/revision must be refused by the V1 source sealer.
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="conflicting explicit source snapshot receipts in one signed run",
+    ):
+        seal_live_opening_area_claim_run(
+            result, workspace_id=1, project_id="source-project",
+        )
+
+    # Receipt freshness alone is valid when the positive quantities retain
+    # one independently producer-issued original snapshot. Reissue only the
+    # *unmeasured* historical rival's host receipt; do not re-key an old
+    # measurement or fabricate cross-snapshot authority.
+    old_snapshot = baseline.canonical_openings[0].snapshot_id
+    assert old_snapshot == previous.metadata["snapshot_id"]
+    compatible_roster = tuple(
+        replace(o, host_binding_record_id="fresh-host-receipt")
+        if o.canonical_opening_id == historical.canonical_opening_id else o
+        for o in full.canonical_openings + (historical,)
+    )
+    compatible_quantities = tuple(
+        q for o in compatible_roster
+        if (q := _opening_quantity(o)) is not None
+    )
+    compatible = _append_reproved_areas(
+        baseline, compatible_roster, compatible_quantities,
+    )
+    assert compatible.canonical_openings[:2] == baseline.canonical_openings
+    assert compatible.opening_quantity_evidence[0] is previous
+    assert len(compatible.opening_quantity_evidence) == 2
+    assert compatible.opening_area_replay_source_inventory == tuple(
+        sorted(compatible_roster, key=lambda opening: opening.canonical_opening_id)
+    )
     sealed = seal_live_opening_area_claim_run(
-        result, workspace_id=1, project_id="source-project",
+        compatible, workspace_id=1, project_id="source-project",
     )
     rows = project_live_opening_customer_rows(
-        result, workspace_id=1, project_id="source-project",
+        compatible, workspace_id=1, project_id="source-project",
     )
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
