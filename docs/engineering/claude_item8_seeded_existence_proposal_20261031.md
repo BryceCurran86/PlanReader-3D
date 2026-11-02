@@ -245,3 +245,27 @@ and that are apart). Superseded assertions in the earlier identity and receipt t
 physical opening goes through both; no distance threshold is introduced to merge them. Two openings at one depth band
 whose gaps overlap are never DISTINCT here, even if the drawing really shows two overlapping openings; that is a
 CONFLICT for the owner, not a quantity.
+
+## 13. Ink across the aperture, and the fixtures that relied on 'different ids means distinct' (2026-11-02)
+
+**Defect found while building the S2 inventory.** `_seeded_ink_checks` measured every line's overlap with the gap ALONG the
+wall. A line that runs across the aperture (a post, a mullion, a full-thickness pier) has no length along the wall, so it
+never reached the veto, and the seeded proof returned CORROBORATED for an opening with a solid pier in the middle of it
+(16 tests failed on the unchanged code). A line off the faces is now inside the opening when its position along the wall lies
+strictly between the jamb stations and its depth overlaps the wall band; a line on a jamb station (a return), beside the gap
+or outside the band is not; a line ON a face still needs a positive overlap length to be face ink. Fail-closed only: the
+proof can now abstain where it used to issue a record. The page-level `prove_existence` is not changed by this and has its
+own, separate behaviour for a pier inside a gap, which is the authority owner's to review.
+
+**Consequence of section 12 for consumers.** Because identity is now decided from physical extents, a record that stands
+in for a real one must carry readable extents. The generic opening count tests used synthetic records with fake observation
+ids and no geometry and relied on different ids being distinct; 13 of them failed until each synthetic opening was given a
+separate source-measured aperture box (test fixture only, no production code). Every real CORROBORATED record has readable
+extents (a native six-line frame, or the raster record's own aperture box), so no real count is lost to this; 62 further
+consumer test files that touch the count, host-binding, composition and publication authorities pass.
+
+**Evidence at the final code head (`0fc1f920d`, Python 3.13 local).** 1744 passed / 29 skipped across the G17,
+physical-opening, identity, receipt, correspondence and opening suites; 1142 passed / 2 skipped across the 62 further
+consumer files; Lot16 signed-output retention passes; the 28 env-gated Maryborough correspondence tests pass. Lint shows
+only the findings already on main. Not proven: Python 3.14 locally, and any private-source run that exercises two openings
+with overlapping extents.
