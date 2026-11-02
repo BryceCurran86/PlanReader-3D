@@ -420,6 +420,11 @@ def test_synthetic_original_ink_receipt_keeps_every_competing_path():
 
 
 
+@pytest.mark.parametrize("rival_style", [
+    {"color":(1,0,0),"width":0.48},
+    {"color":(0,0,1),"width":0.96},
+    {"color":(0,0,0),"width":1.5},
+])
 def test_native_door_gap_preserves_competing_ink_of_different_paint_styles(
     rival_style,
 ):
