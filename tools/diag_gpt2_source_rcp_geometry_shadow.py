@@ -237,15 +237,32 @@ def audit_original_rcp_source_finish_occurrence(
     for occ in scope.records:
         if occ.code.upper()!=original_finish_code.upper():
             continue
+        # The requested mark must be no less source-authenticated than
+        # OTHER finish codes. Its document and native text/box ancestry are
+        # separate from matching a raw code or the original PDF SHA.
+        native_ids=occ.source_text_observation_ids
         if (occ.definition_record_id!=definition.record.record_id
+                or occ.document_id!=occurrence_selector.document_id
                 or occ.revision_id!=occurrence_selector.revision_id
                 or occ.snapshot_id!=occurrence_selector.snapshot_id
                 or occ.source_sha256!=root
                 or occ.page_id!=occurrence_selector.page_id
                 or occ.viewport_id!=occurrence_selector.viewport_id
-                or not occ.source_text_observation_ids):
+                or type(occ.record_id) is not str
+                or not occ.record_id or occ.record_id!=occ.record_id.strip()
+                or type(native_ids) is not tuple or not native_ids
+                or len(set(native_ids))!=len(native_ids)
+                or any(type(v) is not str or not v or v!=v.strip()
+                       for v in native_ids)):
             return {**base,"first_failure":"source_rcp_mark_ancestry_conflict"}
-        if polygon.contains(box(*occ.bbox_pdf_pts)):
+        try:
+            x0,y0,x1,y1=(float(v) for v in occ.bbox_pdf_pts)
+        except (TypeError,ValueError,OverflowError):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>=x1 or y0>=y1):
+            return {**base,"first_failure":"original_rcp_mark_geometry_invalid"}
+        if polygon.contains(box(x0,y0,x1,y1)):
             inside.append(occ)
     if len(inside)!=1:
         return {**base,"first_failure":"original_rcp_finish_mark_missing_or_competing"}
