@@ -104,6 +104,26 @@ def project_live_ceiling_customer_rows(
                 f"{source_id}"
             )
 
+    # GPT2's source-issued original RCP GRID/IPF1 MATERIAL witness can
+    # precede independently measured ceiling m². A downstream adapter
+    # must never change an explicit producer denial to True while creating
+    # a customer-facing square metre estimate. Do not reject legacy source
+    # quantities that carry no such optional commercial marker.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        source_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in source_metadata
+            and source_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original material-only receipt forbids customer "
+                f"area projection: {original.quantity_id}"
+            )
+
     quantities = tuple(
         quantity
         for quantity in claim.ceiling_lining_quantity_evidence
