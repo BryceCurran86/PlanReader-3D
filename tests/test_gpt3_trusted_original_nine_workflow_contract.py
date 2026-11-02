@@ -174,10 +174,27 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
         script = execute["run"]
-        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
-        assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in script
-        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
-        assert "python -m pytest" in script
+        # The SAME immutable original pytest first reauthenticates the SHA/size
+        # inside the source-mounted offline container, then runs both issuers.
+        # The temporary duplicate preflight introduced a runtime regression.
+        # This must stay ONE isolated read-only invocation, never a host run.
+        assert script.count("docker run --rm") == 1
+        prefix = "if ! docker run --rm "
+        assert script.count(prefix) == 1
+        run = script.split(prefix, 1)[1].split(' > "$output" 2>&1; then', 1)[0]
+        assert run.startswith("--network none --read-only --cap-drop ALL")
+        for required in (
+            "--security-opt no-new-privileges",
+            "--pids-limit 256",
+            '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"',
+            '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"',
+            "--workdir /workspace",
+            '"gpt3-offline:${{ matrix.python-version }}"',
+            "python -m pytest -q -p no:cacheprovider --tb=short",
+            "tests/test_gpt3_lot16_original_nine_whole_retention.py",
+        ):
+            assert run.count(required) == 1
+        assert "python -c 'import hashlib,json,fitz;" not in script
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
@@ -328,3 +345,76 @@ def test_owner_only_replay_requires_original_and_rerun_actor(
         repository == "BryceCurran86/PlanReader-3D",
         rerunner == "BryceCurran86",
     )) is permitted
+
+def _private_phase_diagnostic_is_source_safe(raw: str) -> bool:
+    """No unreviewed private source, exception or traceback may reach Actions."""
+    try:
+        doc = _parse(raw)
+        steps = doc["jobs"]["original"]["steps"]
+        assert len(steps) == 6
+        assert _isolated_private_source_contract(raw)
+        execute = steps[4]["run"]
+        assert execute.count(
+            "docker run --rm --network none --read-only --cap-drop ALL"
+        ) == 1
+        assert execute.count("dst=/workspace/documents/sources,readonly") == 1
+        assert "python -c 'import hashlib,json,fitz;" not in execute
+        assert "Original Docker source mount or pinned PyMuPDF preflight FAILED" not in execute
+        assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+        assert 'tests/test_gpt3_lot16_original_nine_whole_retention.py' in execute
+        assert execute.count(' > "$output" 2>&1; then') == 1
+        assert "Original default-eight producer/seal/customer FAILED" in execute
+        assert "Original explicit-nine producer/seal/customer FAILED" in execute
+        assert "Original sealed/customer receipt verification FAILED" in execute
+        assert "Original signed-eight retention or new physical identity FAILED" in execute
+        assert "unclassified private test stage" in execute
+        assert 'cat "$output"' not in execute
+        assert 'tee "$output"' not in execute
+        assert "actions/upload-artifact" not in raw
+        assert "github.event.inputs" not in raw
+        assert 'rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"' in steps[-1]["run"]
+        assert 'echo "$output"' not in execute
+        assert '$(<' not in execute
+        return True
+    except (AssertionError, KeyError, TypeError, yaml.YAMLError):
+        return False
+
+
+def test_original_private_first_failure_classifier_is_source_safe():
+    assert _private_phase_diagnostic_is_source_safe(WORKFLOW.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("old", "bad"), [
+    ("--tb=short", "--tb=no"),
+    ("--network none", "--network host"),
+    ("python -m pytest -q -p no:cacheprovider --tb=short", "python -m pytest -q -p no:cacheprovider --tb=no"),
+    ('--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"', '--mount "type=bind,src=/tmp/incorrect-source,dst=/workspace/documents/sources,readonly"'),
+    (' > "$output" 2>&1; then', " 2>&1; then"),
+    ('grep -Fq', 'cat "$output"; grep -Fq'),
+    ('echo "::error::Original default-eight producer/seal/customer FAILED',
+     'echo "$(<$output)"; echo "::error::Original default-eight producer/seal/customer FAILED'),
+    ('rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"',
+     'echo "$(<$RUNNER_TEMP/gpt3-owner-original-positive.log)"'),
+])
+def test_private_first_failure_diagnostics_reject_unsafe_mutations(old, bad):
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    assert old in raw
+    assert _private_phase_diagnostic_is_source_safe(raw)
+    assert not _private_phase_diagnostic_is_source_safe(raw.replace(old, bad, 1))
+
+def test_offline_original_replay_runs_immutable_approved_test_not_main_checkout():
+    """Public CI may check the pinned runner path, not read PR-absent files."""
+    steps = _load()["jobs"]["original"]["steps"]
+    guarded = steps[1]["run"]
+    execute = steps[4]["run"]
+    assert f"approved_head={APPROVED}" in guarded
+    assert f"approved_base={BASE}" in guarded
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in guarded
+    assert 'test -f "$target_tree/tests/test_gpt3_lot16_original_nine_whole_retention.py"' in guarded
+    assert 'test -f "$target_tree/tools/run_gpt3_lot16_original_sealed_score_input.py"' in guarded
+    assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in steps[2]["run"]
+    assert '--mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly"' in execute
+    assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in execute
+    assert "python -m pytest -q -p no:cacheprovider --tb=short" in execute
+    assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in execute
+    assert _isolated_private_source_contract(WORKFLOW.read_text(encoding="utf-8"))
