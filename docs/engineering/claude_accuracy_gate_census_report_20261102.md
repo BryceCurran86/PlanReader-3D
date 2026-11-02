@@ -59,3 +59,10 @@ The Lot16 counts above come from production receipts read after the producer, as
 ## 7. Stop for review
 
 Proposed first step on approval: candidate 2 (measurement), then candidate 1 (memo to the owner). Candidates 3 and 4 follow only on an explicit go-ahead.
+
+## 8. Follow-up status (same day)
+
+- **Candidate 2 done (measurement).** Maryborough callout, strip and aperture chain re-measured on current main: unchanged since 2026-10-31, no regression from #4148, #4126, #4158 or #4160. Result and the `fontTools` setup trap are in the comment on this PR.
+- **Candidate 4 done (comment-only review).** #4167 at head `9791293db`: two existing fail-closed tests fail at that head and in its own public run, the branch is 112 commits behind main, and the section 9 tests are missing. See the comment on #4167.
+- **Candidate 1 drafted.** `claude_door_height_owner_decision_memo_20261102.md`. Finding: a height approval would move only 1 of 13 unsigned Lot16 openings today; the other 12 fail an earlier host, frame or kind gate.
+- Candidates 3, 5 and 6 not started.
