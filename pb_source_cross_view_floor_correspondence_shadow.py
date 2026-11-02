@@ -573,6 +573,34 @@ class SourceCrossViewFloorCorrespondenceProducer:
         trials: int = 60,
     ) -> SourceCrossViewFloorCorrespondenceResult:
         """Pure geometric evaluation using in-memory segments and boxes."""
+        # The entire native mark set is authority input, including rivals
+        # outside the first measured box. Do not silently omit an unreadable,
+        # nonfinite or aliased competing source mark while retaining the
+        # apparently unique FT3 mark. This is source-only fail-closed.
+        def source_mark_is_finite_native(mark):
+            if not isinstance(mark, Mapping):
+                return False
+            if (type(mark.get("code")) is not str
+                    or not mark["code"]
+                    or mark["code"] != mark["code"].strip()):
+                return False
+            for name in ("x", "y"):
+                v = mark.get(name)
+                if (type(v) not in (int, float) or abs(v)>2**53):
+                    return False
+                try:
+                    if not math.isfinite(float(v)):
+                        return False
+                except (ValueError, OverflowError):
+                    return False
+            return True
+        if (type(marks) not in (tuple,list) or len(marks)>20000
+                or any(not source_mark_is_finite_native(mark) for mark in marks)):
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+                records=(),
+            )
         lines_sup = build_lines(support_segments)
         lines_tgt = build_lines(target_segments)
 
