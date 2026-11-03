@@ -154,11 +154,25 @@ def require_signed_v2_family_trade_integrity(
             # ABSTAINED source receipts stay unscored by the frozen evaluator.
             # New independent ceiling-area issuers may use their own proved
             # formula and remain subject to their normal source lineage gates.
+            # A V1 sealed quantity intentionally does NOT persist its raw
+            # producer formula, but it DOES seal the producer's reason_codes
+            # inside the fingerprint-checked quantity payload. Consult both:
+            # formula catches live typed records in source-neutral checks;
+            # reason_codes catches real sealed V1 JSON and rehydrated objects.
+            source_reasons = _field(quantity, "reason_codes")
+            borrowed_room_area = (
+                _field(quantity, "formula")
+                == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+                or (
+                    type(source_reasons) in (list, tuple)
+                    and "authenticated_room_area_with_rcp_ceiling_finish"
+                    in source_reasons
+                )
+            )
             if (
                 family in {"ceiling_area", "ceiling_lining", "ceiling_finish_area"}
                 and _field(quantity, "abstained") is not True
-                and _field(quantity, "formula")
-                == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+                and borrowed_room_area
             ):
                 raise ValueError(
                     "mapped ceiling source metric is borrowed from room floor area"
