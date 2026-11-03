@@ -358,6 +358,30 @@ def build_live_ceiling_lining_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        # Native RCP material observations can be borrowed from a same-name
+        # adjacent room. A direct source sealer must reject an explicitly
+        # contradictory material-room name, not leave that veto solely to
+        # the optional customer display path. Absence of a native room label
+        # is not permission to synthesize one.
+        source_room_label = getattr(room, "room_label", None)
+        issued_room_label = metadata.get("room_label")
+        if issued_room_label is not None:
+            if (
+                type(issued_room_label) is not str
+                or not issued_room_label
+                or issued_room_label != issued_room_label.strip()
+                or (
+                    type(source_room_label) is str
+                    and source_room_label
+                    and " ".join(issued_room_label.casefold().split())
+                    != " ".join(source_room_label.casefold().split())
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling original material room label contradicts "
+                    f"canonical source room: {quantity.quantity_id}"
+                )
+
         if type(quantity.value) not in (int, float) or type(ceiling.area_m2) not in (int, float):
             raise SourceClosedRunConflictError(
                 f"ceiling quantity is not typed metric: {quantity.quantity_id}"
