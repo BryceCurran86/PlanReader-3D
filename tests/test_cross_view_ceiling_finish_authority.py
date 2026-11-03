@@ -1002,3 +1002,22 @@ def test_cross_block_forged_source_line_index_abstains(monkeypatch):
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.records == ()
+
+
+
+def test_source_only_original_rcp_lineage_cannot_gain_commercial_flag_by_replace(
+    monkeypatch,
+):
+    source_only,_ = _source_closed_cross_block_case(monkeypatch)
+    assert source_only.status is EvidenceResolutionStatus.CANDIDATE
+    record=source_only.records[0]
+    assert record.record_id.startswith(
+        "cross_view_ceiling_finish_original_zone_"
+    )
+    assert record.commercial_projection_allowed is False
+    try:
+        replace(record, commercial_projection_allowed=True)
+    except TypeError as error:
+        assert "cannot authorize ceiling FIRM" in str(error)
+    else:
+        raise AssertionError("original source-only ceiling material could become FIRM")
