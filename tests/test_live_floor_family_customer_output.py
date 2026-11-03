@@ -444,3 +444,40 @@ def test_original_source_floor_area_exclusion_remains_exclusion_in_customer_outp
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+def test_source_room_area_material_string_cannot_become_unproven_customer_finish():
+    """A signed floor surface cannot inherit FT3/tile without FIRM FT source."""
+    from dataclasses import replace
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    source_area = claim.room_area_quantity_evidence[0]
+    forged_material = replace(
+        source_area,
+        metadata={
+            **source_area.metadata,
+            "finish_code": "FT3",
+            "finish_system": "vinyl",
+        },
+    )
+    claim = replace(
+        claim, room_area_quantity_evidence=(forged_material,),
+    )
+    signed, rows = module.project_live_floor_family_customer_output(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(signed.quantities) == 2
+    source_floor = next(x for x in rows if x["quantity_family"] == "floor_area")
+    source_finish = next(x for x in rows if x["quantity_family"] == "floor_finish_area")
+    assert source_floor["finish_system"] == ""
+    assert source_floor["element"] == "Floor area"
+    assert source_floor["quantity"] == 8.64
+    assert source_finish["finish_system"] == "tile"
+    assert source_finish["element"] == "Floor finish area (FT1)"
+    assert source_finish["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).valid_quantity_count == 2
+    # The original FIRM room-area evidence remains immutable.
+    assert claim.room_area_quantity_evidence[0].metadata["finish_system"] == "vinyl"
