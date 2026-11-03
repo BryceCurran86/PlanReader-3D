@@ -1087,3 +1087,47 @@ def test_direct_ceiling_seal_accepts_original_room_label_casefold_without_relabe
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (original.quantity_id,)
+
+
+@pytest.mark.parametrize("revoked", (
+    None, False, 1, "", "EXCLUSION", "PROVISIONAL", "INCLUSION ",
+))
+def test_revoked_original_rcp_inclusion_cannot_be_revived_as_firm_customer_m2(
+    revoked,
+):
+    original = _quantity()
+    denied = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": revoked},
+    )
+    claim = _claim(denied)
+    for consumer in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original inclusion revoked",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+def test_exact_original_rcp_inclusion_keeps_independently_signed_customer_area():
+    original = _quantity()
+    approved = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "INCLUSION"},
+    )
+    claim = _claim(approved)
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
