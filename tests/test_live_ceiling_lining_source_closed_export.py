@@ -1033,7 +1033,7 @@ def test_ceiling_material_cannot_relabel_another_original_room_in_customer_row()
     claim = _claim(changed)
     with pytest.raises(
         SourceClosedRunConflictError,
-        match="material room label contradicts canonical original room",
+        match="material room label contradicts canonical source room",
     ):
         project_live_ceiling_customer_rows(
             claim, workspace_id=1, project_id="project-1",
