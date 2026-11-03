@@ -265,7 +265,9 @@ def test_source_signed_room_area_and_ft_material_reach_real_workspace_as_separat
     assert floor["element"] == "Floor area"
     assert floor["location"] == "room-1"
     assert floor["substrate"] == "Floor"
-    assert floor["finish_system"] == ""
+    # The workspace persistence boundary replaces an unassigned material with
+    # its honest unresolved display value; it must not copy FT1/tile.
+    assert floor["finish_system"] == "To be confirmed"
     assert floor["quantity"] == 8.64
     assert floor["quantity_status"] == "To review"
     assert source_area.quantity_id in floor["source_reference"]
