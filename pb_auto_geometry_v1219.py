@@ -1409,6 +1409,9 @@ def _try_physical_net_wall_rows(
         from pb_live_ceiling_area_quantity_publication import (
             publish_live_ceiling_area_quantities,
         )
+        from pb_ceiling_independent_customer_metric_gate import (
+            independently_sourced_ceiling_customer_metric,
+        )
         from pb_live_ceiling_customer_projection import (
             project_live_ceiling_customer_rows,
         )
@@ -1488,7 +1491,26 @@ def _try_physical_net_wall_rows(
                 ),
             )
 
-        legacy_quantities = publish_live_ceiling_area_quantities(legacy_result)
+        original_legacy_quantities = publish_live_ceiling_area_quantities(
+            legacy_result
+        )
+        # Legacy source area was copied from a floor-room measurement.
+        # Its original publisher correctly says material-only/hand-off-only,
+        # but the former customer projector rewrote that source denial.
+        # Keep this per-source failure visible and do not let a legacy
+        # fallback silently undo the independent-RCP gate above.
+        legacy_quantities = tuple(
+            quantity for quantity in original_legacy_quantities
+            if independently_sourced_ceiling_customer_metric(quantity)
+        )
+        for denied in original_legacy_quantities:
+            if not independently_sourced_ceiling_customer_metric(denied):
+                current_coverage["family_gaps"].setdefault(
+                    "ceiling", []
+                ).append(
+                    "legacy_ceiling_independent_rcp_metric_unproven:"
+                    f"{denied.quantity_id}"
+                )
         if legacy_quantities:
             projected.extend(
                 project_live_ceiling_area_customer_rows(
