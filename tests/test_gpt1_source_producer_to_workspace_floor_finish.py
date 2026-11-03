@@ -226,3 +226,51 @@ def test_foreign_revision_semantic_snapshot_cannot_sign_floor_finish(
     assert disputed.status is Status.CONFLICT
     assert disputed.quantities == ()
     assert disputed.records == ()
+
+
+def test_source_signed_room_area_and_ft_material_reach_real_workspace_as_separate_rows(
+    tmp_path,
+):
+    """Actual workspace adapter must not discard a source-closed floor for blank UI fields."""
+    from tests.test_live_floor_family_customer_output import (
+        _production_shaped_source_area_and_finish_claim,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    source_area = claim.room_area_quantity_evidence[0]
+    assert not source_area.metadata.get("location")
+    assert not source_area.metadata.get("section")
+    assert not source_area.metadata.get("substrate")
+
+    pdf_file = tmp_path / "gpt1-source-neutral-area-workspace.pdf"
+    pdf_file.write_bytes(_payload())
+    app = SimpleNamespace(lquery=lambda *_: [
+        {"id": 1, "path": str(pdf_file)},
+    ])
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    floor_rows = app._live_room_area_takeoff_rows_by_workspace[1]
+    finish_rows = app._live_floor_finish_takeoff_rows_by_workspace[1]
+    gaps = app._ag09_family_coverage_by_workspace[1]["family_gaps"]
+    assert len(floor_rows) == len(finish_rows) == 1, repr(gaps)
+    floor = dict(zip(auto.TAKEOFF_ROW_FIELDS, floor_rows[0]))
+    finish = dict(zip(auto.TAKEOFF_ROW_FIELDS, finish_rows[0]))
+    assert floor["section"] == "Internal"
+    assert floor["element"] == "Floor area"
+    assert floor["location"] == "room-1"
+    assert floor["substrate"] == "Floor"
+    assert floor["finish_system"] == ""
+    assert floor["quantity"] == 8.64
+    assert floor["quantity_status"] == "To review"
+    assert source_area.quantity_id in floor["source_reference"]
+    assert finish["element"] == "Floor finish area (FT1)"
+    assert finish["finish_system"] == "tile"
+    assert finish["quantity"] == floor["quantity"]
+    assert finish["quantity_status"] == "To review"
+    assert finish["notes"] != floor["notes"]
