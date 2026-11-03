@@ -139,7 +139,15 @@ def _source_floor_area_customer_fields(
             )
         metadata[field] = current or default
     metadata["row_role"] = "floor_area"
-    metadata["inclusion_status"] = "INCLUSION"
+    original_inclusion = metadata.get("inclusion_status")
+    if original_inclusion is not None and (
+        type(original_inclusion) is not str
+        or original_inclusion != original_inclusion.strip()
+    ):
+        raise SourceClosedRunConflictError(
+            "floor-area original inclusion status is malformed"
+        )
+    metadata["inclusion_status"] = original_inclusion or "INCLUSION"
     metadata["commercial_projection_allowed"] = True
     return metadata
 
