@@ -63,8 +63,10 @@ def test_legacy_source_firm_ceiling_reissue_is_not_independent_customer_metric(
     {"commercial_projection_allowed": "true"},
     {"commercial_projection_allowed": 1},
     {"quantity_handoff_only": True},
+    {"quantity_handoff_only": 1},
     {"shadow_only": True},
-    {"independent_rcp_ceiling_area_quantity_id": "room-area-qty-1"},
+    {"shadow_only": 1},
+    {"independent_rcp_ceiling_area_quantity_id": "__ORIGINAL_FLOOR_AREA__"},
     {"independent_rcp_ceiling_area_quantity_id": ""},
     {"independent_rcp_ceiling_area_quantity_id": 123},
     {"independent_rcp_ceiling_area_evidence_id": "unowned-original-rcp"},
@@ -87,6 +89,11 @@ def test_independent_ceiling_customer_metric_requires_original_source_issuer_rec
         "support_page_id": "9",
         "support_viewport_id": "rcp-vp",
     }
+    if mutation.get("independent_rcp_ceiling_area_quantity_id") == "__ORIGINAL_FLOOR_AREA__":
+        mutation = {
+            "independent_rcp_ceiling_area_quantity_id":
+                source.metadata["room_area_quantity_id"],
+        }
     source = replace(
         source,
         formula="authenticated_independent_rcp_ceiling_area_from_original_figures",
@@ -119,3 +126,34 @@ def test_independent_metric_source_receipt_contract_does_not_need_floor_area_reu
     assert eligible(independently_issued)
     assert not eligible(source)
     assert source.metadata["commercial_projection_allowed"] is False
+
+
+@pytest.mark.parametrize("invented_formula", (
+    "",
+    "claimed_independent",
+    "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+    "reuse exact firm documented room area on canonical ceiling",
+    "reuse exact firm scaled room area on canonical ceiling",
+))
+def test_renaming_or_reusing_original_floor_area_cannot_grant_ceiling_metric(
+    invented_formula,
+):
+    _, source = _legacy_source()
+    claimed = replace(
+        source,
+        formula=invented_formula,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "quantity_handoff_only": False,
+            "upstream_room_area_quantity_id": source.metadata["room_area_quantity_id"],
+            "independent_rcp_ceiling_area_quantity_id": "independent-ceiling-1",
+            "independent_rcp_ceiling_area_evidence_id": "rcp-indep-evidence",
+            "independent_rcp_ceiling_area_page_id": "9",
+            "independent_rcp_ceiling_area_viewport_id": "rcp-vp",
+            "support_page_id": "9",
+            "support_viewport_id": "rcp-vp",
+        },
+        evidence_ids=(*source.evidence_ids, "rcp-indep-evidence"),
+    )
+    assert not eligible(claimed)
