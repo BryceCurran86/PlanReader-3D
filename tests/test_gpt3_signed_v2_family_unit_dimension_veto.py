@@ -203,3 +203,182 @@ def test_explicit_source_count_three_and_true_abstention_are_separate_authoritie
     for value, abstained in [(3, False), (None, True)]:
         veto(verified_items=manifest, sealed_quantities=source(value, abstained),
              identity_bindings=bindings)
+
+
+@pytest.mark.parametrize("family", (
+    "ceiling_area", "ceiling_lining", "ceiling_finish_area",
+))
+@pytest.mark.parametrize("source_shape", ("signed_json", "typed_record"))
+def test_mapped_borrowed_room_floor_area_can_never_score_as_ceiling(
+    family, source_shape,
+):
+    """An authenticated RCP material mark is NOT an RCP metric-area receipt."""
+    from types import SimpleNamespace
+
+    item = {
+        "item_id": "original-ceiling-1",
+        "denominator_eligible": True,
+        "trade_category": "ceilings",
+    }
+    source = {
+        "object_identity_refs": ("original-ceiling-surface",),
+        "family": family,
+        "semantic_key": "ceiling_lining:original-ceiling-surface:GRID:ceiling_grid",
+        "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+        "unit": "m2",
+        "value": 9.05352,
+        "abstained": False,
+        "status": "firm",
+        "authority": "documented_dimension",
+    }
+    if source_shape == "typed_record":
+        source = SimpleNamespace(**source)
+    binding = {
+        "benchmark_item_id": item["item_id"],
+        "production_object_identity_refs": ["original-ceiling-surface"],
+        "production_family": family,
+    }
+    with pytest.raises(ValueError, match="borrowed from room floor area"):
+        veto(
+            verified_items=[item],
+            sealed_quantities=[source],
+            identity_bindings=[binding],
+        )
+
+
+@pytest.mark.parametrize("variant", (
+    "true_abstention", "unmapped_original", "independent_ceiling_metric",
+    "legitimate_floor_area",
+))
+def test_borrowed_ceiling_score_gate_preserves_independent_and_unmapped_evidence(
+    variant,
+):
+    """No benchmark identities or metrics are created by this negative gate."""
+    item = {
+        "item_id": "original-quantity",
+        "denominator_eligible": True,
+        "trade_category": "flooring" if variant == "legitimate_floor_area" else "ceilings",
+    }
+    source = {
+        "object_identity_refs": ("original-source-surface",),
+        "family": "floor_area" if variant == "legitimate_floor_area" else "ceiling_lining",
+        "semantic_key": "ceiling_lining:original-source-surface:GRID:ceiling_grid",
+        "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+        "unit": "m2",
+        "value": 9.05352,
+        "abstained": False,
+    }
+    binding = {
+        "benchmark_item_id": item["item_id"],
+        "production_object_identity_refs": ["original-source-surface"],
+        "production_family": source["family"],
+    }
+    if variant == "true_abstention":
+        source["value"] = None
+        source["abstained"] = True
+    elif variant == "unmapped_original":
+        binding["production_object_identity_refs"] = ["independent-different-surface"]
+    elif variant == "independent_ceiling_metric":
+        source["formula"] = "source_authenticated_ceiling_figured_dimensions"
+    veto(
+        verified_items=[item],
+        sealed_quantities=[source],
+        identity_bindings=[binding],
+    )
+
+
+def test_mapped_signed_borrowed_ceiling_abstention_must_be_literal_true():
+    """Truthy strings or integers cannot make a reused room area scoreable."""
+    item = {"item_id": "ceiling", "denominator_eligible": True,
+            "trade_category": "ceilings"}
+    binding = {"benchmark_item_id": "ceiling", "production_family": "ceiling_lining",
+               "production_object_identity_refs": ["ceiling-physical"]}
+    for flag in (None, False, 0, 1, "true", "false", [], {}):
+        source = {
+            "object_identity_refs": ["ceiling-physical"],
+            "family": "ceiling_lining",
+            "unit": "m2",
+            "value": 9.05352,
+            "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+            "abstained": flag,
+        }
+        with pytest.raises(ValueError, match="borrowed from room floor area"):
+            veto(verified_items=[item], sealed_quantities=[source],
+                 identity_bindings=[binding])
+
+
+@pytest.mark.parametrize("wire_shape", ("real_signed_v1_record", "signed_v1_json"))
+def test_actual_v1_sealed_ceiling_reason_survives_missing_formula_and_blocks_score(
+    wire_shape,
+):
+    """Real V1 signed schema seals reason_codes, not transient producer formula."""
+    from pb_source_closed_run_export import SealedSourceClosedQuantity
+
+    signed = SealedSourceClosedQuantity(
+        project_id="original-source-project",
+        quantity_id="original-ceiling-area",
+        family="ceiling_lining",
+        semantic_key="ceiling_lining:ceiling-physical:GRID:ceiling_grid",
+        value=9.05352,
+        unit="m2",
+        status="firm",
+        authority="documented_dimension",
+        confidence=1.0,
+        abstained=False,
+        document_id="original-drawing",
+        source_sha256="a" * 64,
+        source_page="9",
+        viewport_id="authenticated-rcp-viewport",
+        revision_id="original-revision",
+        object_identity_refs=("ceiling-physical",),
+        trace_canonical_entity_ids=("ceiling-physical",),
+        evidence_ids=("floor-source-area", "rcp-material"),
+        trace_evidence_ids=("floor-source-area", "rcp-material"),
+        blocking_reasons=(),
+        reason_codes=("authenticated_room_area_with_rcp_ceiling_finish",),
+        lineage_ok=True,
+        lineage_reason_codes=(),
+    )
+    source = signed if wire_shape == "real_signed_v1_record" else signed.to_dict()
+    assert not hasattr(signed, "formula")
+    assert "formula" not in signed.to_dict()
+    assert signed.to_dict()["reason_codes"] == [
+        "authenticated_room_area_with_rcp_ceiling_finish"
+    ]
+    with pytest.raises(ValueError, match="borrowed from room floor area"):
+        veto(
+            verified_items=[{
+                "item_id": "original-ceiling",
+                "denominator_eligible": True,
+                "trade_category": "ceilings",
+            }],
+            sealed_quantities=[source],
+            identity_bindings=[{
+                "benchmark_item_id": "original-ceiling",
+                "production_family": "ceiling_lining",
+                "production_object_identity_refs": ["ceiling-physical"],
+            }],
+        )
+
+
+def test_independent_source_ceiling_reason_on_v1_wire_remains_eligible():
+    """A legitimate independent ceiling is not denied by other room-area data."""
+    item = {"item_id": "original-ceiling", "denominator_eligible": True,
+            "trade_category": "ceilings"}
+    source = {
+        "family": "ceiling_lining",
+        "object_identity_refs": ["ceiling-physical"],
+        "unit": "m2",
+        "value": 8.9463,
+        "abstained": False,
+        "reason_codes": ["authenticated_independent_rcp_metric_zone"],
+    }
+    veto(
+        verified_items=[item],
+        sealed_quantities=[source],
+        identity_bindings=[{
+            "benchmark_item_id": "original-ceiling",
+            "production_family": "ceiling_lining",
+            "production_object_identity_refs": ["ceiling-physical"],
+        }],
+    )
