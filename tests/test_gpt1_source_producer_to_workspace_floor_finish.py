@@ -276,3 +276,47 @@ def test_source_signed_room_area_and_ft_material_reach_real_workspace_as_separat
     assert finish["quantity"] == floor["quantity"]
     assert finish["quantity_status"] == "To review"
     assert finish["notes"] != floor["notes"]
+
+
+def test_real_workspace_cannot_reclassify_revoked_room_area_or_retain_its_ft(
+    tmp_path,
+):
+    """Both workspace family paths fail closed when original area is EXCLUDED."""
+    from tests.test_live_floor_family_customer_output import (
+        _production_shaped_source_area_and_finish_claim,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    original = claim.room_area_quantity_evidence[0]
+    excluded = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "EXCLUSION"},
+    )
+    claim = replace(claim, room_area_quantity_evidence=(excluded,))
+    pdf_file = tmp_path / "gpt1-source-neutral-excluded-workspace.pdf"
+    pdf_file.write_bytes(_payload())
+    app = SimpleNamespace(lquery=lambda *_: [
+        {"id": 1, "path": str(pdf_file)},
+    ])
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    assert app._live_room_area_takeoff_rows_by_workspace[1] == []
+    assert app._live_floor_finish_takeoff_rows_by_workspace[1] == []
+    gaps = app._ag09_family_coverage_by_workspace[1]["family_gaps"]
+    assert any(
+        "live_room_area_customer_projection_failed:ValueError" in reason
+        for reason in gaps.get("floor", ())
+    ), repr(gaps)
+    assert any(
+        "live_floor_finish_customer_projection_failed:SourceClosedRunConflictError"
+        in reason
+        for reason in gaps.get("floor_finish", ())
+    ), repr(gaps)
+    assert excluded.value == 8.64
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
