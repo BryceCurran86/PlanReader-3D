@@ -205,6 +205,17 @@ class CrossViewCeilingFinishRecord:
     def __post_init__(self) -> None:
         if self._seal is not _RECORD_SEAL:
             raise TypeError("CrossViewCeilingFinishRecord is producer-owned")
+        # The original closed-ink RCP route creates MATERIAL evidence only.
+        # A frozen dataclass can still be copied with dataclasses.replace(),
+        # carrying its private seal; never let such a copy turn a source-only
+        # material line into a permission to publish metric ceiling area.
+        if (
+            self.record_id.startswith("cross_view_ceiling_finish_original_zone_")
+            and self.commercial_projection_allowed is not False
+        ):
+            raise TypeError(
+                "original RCP source-zone material cannot authorize ceiling FIRM"
+            )
 
 
 @dataclass(frozen=True)
