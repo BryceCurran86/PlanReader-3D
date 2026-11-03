@@ -1579,3 +1579,53 @@ def test_original_room_area_inventory_cannot_hide_disputed_source_before_finish_
             claim, workspace_id=1, project_id="project-1",
         )
     assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+@pytest.mark.parametrize("bad_label", ("FREEZER", "OFFICE ", "", 123, True))
+def test_direct_floor_finish_source_seal_denies_foreign_original_material_room_label(
+    bad_label,
+):
+    """A direct signed source export may not borrow another room's label."""
+    original = _quantity()
+    forged = replace(
+        original,
+        metadata={**original.metadata, "room_label": bad_label},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(forged,),
+    )
+    for sealer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original room label contradicts canonical room",
+        ):
+            sealer(claim, workspace_id=1, project_id="project-1")
+
+
+def test_direct_floor_finish_seal_accepts_original_office_label_casefold():
+    original = _quantity()
+    lowercase = replace(
+        original, metadata={**original.metadata, "room_label": "office"},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(lowercase,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
