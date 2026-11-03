@@ -243,7 +243,7 @@ jobs:
         with:
           names: 1. Construction Plans - Lot 16 Power (REV E).pdf
           allow-missing: "false"
-      - name: Verify real original source nine rows and all eight predecessors
+      - name: Verify real original default eight and explicit nine complete customer bodies
         shell: bash
         env:
           PYTHONPATH: .
@@ -266,6 +266,52 @@ jobs:
               --env "PLANREADER_LOT16_ORIGINAL_PDF=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
               "gptmax-original-sandbox:${{ matrix.python-version }}" "$@"
           }
+          # Reproduce the CURRENT approved tree default separately. Retaining
+          # eight predecessors inside explicit recovery does not test default.
+          default_output="$RUNNER_TEMP/gptmax-original-default-eight.log"
+          if ! run_isolated python -c '
+          import json
+          import os
+          from pathlib import Path
+          import tempfile
+
+          from tools.run_gpt3_lot16_original_sealed_score_input import run_original_lot16_sealed_handoff
+
+          def unique_bodies(items):
+              indexed = {item["quantity_id"]: item for item in items}
+              assert len(items) == len(indexed) == 8
+              assert all(isinstance(key, str) and key for key in indexed)
+              return indexed
+
+          pdf = Path(os.environ["PLANREADER_LOT16_ORIGINAL_PDF"])
+          with tempfile.TemporaryDirectory(prefix="gptmax-default-eight-") as temporary:
+              production = Path(temporary) / "production"
+              receipt = run_original_lot16_sealed_handoff(
+                  pdf, production, recover_additional_opening_areas=False,
+              )
+              # Read historical receipts only AFTER original-source prediction.
+              archive = Path("docs/engineering/lot16_original_signed_eight_row_20261015/production")
+              before = json.loads((archive / "source_sealed_run.json").read_text())
+              after = json.loads((production / "source_sealed_run.json").read_text())
+              before_rows = json.loads((archive / "verified_customer_rows.json").read_text())
+              after_rows = json.loads((production / "verified_customer_rows.json").read_text())
+              assert unique_bodies(after["quantities"]) == unique_bodies(before["quantities"])
+              assert unique_bodies(after_rows) == unique_bodies(before_rows)
+              assert after == before
+              assert receipt["project_id"] == before["project_id"]
+              assert set(before["source_sha256s"]) == {receipt["source_sha256"]}
+              assert receipt["quantity_count"] == 8
+              assert receipt["signed_run_and_customer_parity"] is True
+              assert receipt["benchmark_score_granted"] is False
+          print("GPTMAX_DEFAULT_EIGHT_COMPLETE_BODY_PARITY=PASS")
+          ' > "$default_output" 2>&1; then
+            echo "::error::Current-tree default original signed/customer replay FAILED"
+            exit 1
+          fi
+          if ! grep -Fxq 'GPTMAX_DEFAULT_EIGHT_COMPLETE_BODY_PARITY=PASS' "$default_output"; then
+            echo "::error::Current-tree default eight replay did not complete"
+            exit 1
+          fi
           output="$RUNNER_TEMP/gptmax-original-positive.log"
           if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
               tests/test_live_append_only_opening_area_original.py::test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies \
@@ -277,7 +323,7 @@ jobs:
             echo "::error::Original source-positive replay skipped or missing"
             exit 1
           fi
-          echo "Original Lot16 nine-source-quantity/customer complete-body parity PASS"
+          echo "Original Lot16 default-eight and explicit-nine complete-body parity PASS"
       - name: Verify original-provisioned branch source-authority regression suite
         shell: bash
         env:
@@ -360,7 +406,8 @@ jobs:
             echo "### Owner-trusted GPT MAX original source replay"
             echo "- Code SHA: $GPTMAX_APPROVED_HEAD"
             echo "- Original SHA and size: frozen manifest verified"
-            echo "- 9 sealed/customer rows and immutable 8 predecessor bodies: PASS"
+            echo "- Current-tree default 8 complete signed/customer bodies: PASS"
+            echo "- Explicit 9 sealed/customer rows and immutable 8 predecessor bodies: PASS"
             echo "- Exact source guard suite: PASS"
             echo "- New benchmark score: NOT CLAIMED"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -368,5 +415,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
+          rm -f "$RUNNER_TEMP/gptmax-original-default-eight.log" "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
           rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" "$RUNNER_TEMP/gptmax-private-tests" documents/sources

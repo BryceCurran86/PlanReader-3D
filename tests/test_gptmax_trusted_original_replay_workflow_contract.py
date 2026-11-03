@@ -1,6 +1,7 @@
 """Security contract for manual, immutable MAX original-source validation."""
 from pathlib import Path
 import re
+import pytest
 import yaml
 
 WORKFLOW = (
@@ -278,6 +279,14 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     steps = _load()["jobs"]["verify"]["steps"]
     source = next(step for step in steps if step.get("name", "").startswith("Verify real original"))
     script = source["run"]
+    assert "recover_additional_opening_areas=False" in script
+    assert script.index("recover_additional_opening_areas=False") < script.index(
+        "test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies"
+    )
+    assert "if ! run_isolated python -c '" in script
+    assert "grep -Fxq 'GPTMAX_DEFAULT_EIGHT_COMPLETE_BODY_PARITY=PASS'" in script
+    assert "Current-tree default original signed/customer replay FAILED" in script
+    assert "Current-tree default eight replay did not complete" in script
     assert "test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies" in script
     assert "PLANREADER_LOT16_ORIGINAL_PDF" in source["env"]
     assert "grep -Eq" in script and " passed" in script
@@ -289,6 +298,114 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert cleanup["if"] == "always()"
     assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" "$RUNNER_TEMP/gptmax-private-tests" documents/sources' in cleanup["run"]
     assert "rm -f" in cleanup["run"]
+    assert '"$RUNNER_TEMP/gptmax-original-default-eight.log"' in cleanup["run"]
+
+
+def _default_eight_replay_program():
+    steps = _load()["jobs"]["verify"]["steps"]
+    script = next(step["run"] for step in steps
+                  if step.get("name", "").startswith("Verify real original"))
+    match = re.search(
+        r"if ! run_isolated python -c '\n(.*?)\n' > \"\$default_output\" 2>&1; then",
+        script, re.DOTALL,
+    )
+    assert match is not None
+    program = match.group(1)
+    compile(program, "<isolated-default-eight>", "exec")
+    return program
+
+
+@pytest.mark.parametrize("mutation", (
+    "unchanged", "signed_body", "customer_body", "duplicate_signed",
+    "duplicate_customer", "extra_signed", "extra_customer", "missing_signed",
+    "missing_customer", "project_scope", "revision_scope", "source_scope",
+    "receipt_source", "receipt_count", "receipt_parity", "receipt_score",
+))
+def test_current_default_replay_executes_and_rejects_incomplete_or_rewritten_bodies(
+    tmp_path, monkeypatch, capsys, mutation,
+):
+    """Execute the actual isolated Python with source-neutral issuer outputs."""
+    import copy
+    import json
+    import sys
+    from types import ModuleType
+
+    quantities = [{"quantity_id": f"opening-{i}", "signed_body": {"evidence": f"ink-{i}"}}
+                  for i in range(8)]
+    rows = [{"quantity_id": q["quantity_id"], "customer_body": {"verified": True}}
+            for q in quantities]
+    baseline = {
+        "project_id": "source-neutral-project", "revision_ids": ["original-revision"],
+        "source_sha256s": ["a" * 64], "quantities": quantities,
+        "run_id": "original-run", "fingerprint": "original-fingerprint",
+    }
+    archive = tmp_path / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+    archive.mkdir(parents=True)
+    (archive / "source_sealed_run.json").write_text(json.dumps(baseline))
+    (archive / "verified_customer_rows.json").write_text(json.dumps(rows))
+    after, after_rows = copy.deepcopy(baseline), copy.deepcopy(rows)
+    receipt = {
+        "project_id": baseline["project_id"], "source_sha256": "a" * 64,
+        "quantity_count": 8, "signed_run_and_customer_parity": True,
+        "benchmark_score_granted": False,
+    }
+    if mutation == "signed_body":
+        after["quantities"][0]["signed_body"]["evidence"] = "different-ink"
+    elif mutation == "customer_body":
+        after_rows[0]["customer_body"]["verified"] = False
+    elif mutation == "duplicate_signed":
+        after["quantities"][1] = copy.deepcopy(after["quantities"][0])
+    elif mutation == "duplicate_customer":
+        after_rows[1] = copy.deepcopy(after_rows[0])
+    elif mutation == "extra_signed":
+        after["quantities"].append({"quantity_id": "unexpected-ninth"})
+    elif mutation == "extra_customer":
+        after_rows.append({"quantity_id": "unexpected-ninth"})
+    elif mutation == "missing_signed":
+        after["quantities"].pop()
+    elif mutation == "missing_customer":
+        after_rows.pop()
+    elif mutation == "project_scope":
+        after["project_id"] = "foreign-project"
+    elif mutation == "revision_scope":
+        after["revision_ids"] = ["foreign-revision"]
+    elif mutation == "source_scope":
+        after["source_sha256s"] = ["b" * 64]
+    elif mutation == "receipt_source":
+        receipt["source_sha256"] = "b" * 64
+    elif mutation == "receipt_count":
+        receipt["quantity_count"] = 9
+    elif mutation == "receipt_parity":
+        receipt["signed_run_and_customer_parity"] = False
+    elif mutation == "receipt_score":
+        receipt["benchmark_score_granted"] = True
+
+    calls = []
+
+    def run_original(pdf, production, *, recover_additional_opening_areas):
+        assert pdf == Path("source-neutral-original.pdf")
+        assert recover_additional_opening_areas is False
+        calls.append(recover_additional_opening_areas)
+        production.mkdir(parents=True)
+        (production / "source_sealed_run.json").write_text(json.dumps(after))
+        (production / "verified_customer_rows.json").write_text(json.dumps(after_rows))
+        return receipt
+
+    module_name = "tools.run_gpt3_lot16_original_sealed_score_input"
+    fake = ModuleType(module_name)
+    fake.run_original_lot16_sealed_handoff = run_original
+    monkeypatch.setitem(sys.modules, module_name, fake)
+    monkeypatch.setenv("PLANREADER_LOT16_ORIGINAL_PDF", "source-neutral-original.pdf")
+    monkeypatch.chdir(tmp_path)
+    program = _default_eight_replay_program()
+    if mutation == "unchanged":
+        exec(compile(program, "<isolated-default-eight>", "exec"), {})
+        assert capsys.readouterr().out == "GPTMAX_DEFAULT_EIGHT_COMPLETE_BODY_PARITY=PASS\n"
+    else:
+        with pytest.raises(AssertionError):
+            exec(compile(program, "<isolated-default-eight>", "exec"), {})
+        assert "GPTMAX_DEFAULT_EIGHT_COMPLETE_BODY_PARITY=PASS" not in capsys.readouterr().out
+    assert calls == [False]
 
 
 def test_trigger_aliases_and_duplicates_cannot_bypass_manual_only_gate():
