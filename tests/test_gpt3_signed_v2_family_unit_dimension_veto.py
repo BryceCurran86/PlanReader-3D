@@ -193,3 +193,105 @@ def test_explicit_source_count_three_and_true_abstention_are_separate_authoritie
     for value, abstained in [(3, False), (None, True)]:
         veto(verified_items=manifest, sealed_quantities=source(value, abstained),
              identity_bindings=bindings)
+
+
+@pytest.mark.parametrize("family", (
+    "ceiling_area", "ceiling_lining", "ceiling_finish_area",
+))
+@pytest.mark.parametrize("source_shape", ("signed_json", "typed_record"))
+def test_mapped_borrowed_room_floor_area_can_never_score_as_ceiling(
+    family, source_shape,
+):
+    """An authenticated RCP material mark is NOT an RCP metric-area receipt."""
+    from types import SimpleNamespace
+
+    item = {
+        "item_id": "original-ceiling-1",
+        "denominator_eligible": True,
+        "trade_category": "ceilings",
+    }
+    source = {
+        "object_identity_refs": ("original-ceiling-surface",),
+        "family": family,
+        "semantic_key": "ceiling_lining:original-ceiling-surface:GRID:ceiling_grid",
+        "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+        "unit": "m2",
+        "value": 9.05352,
+        "abstained": False,
+        "status": "firm",
+        "authority": "documented_dimension",
+    }
+    if source_shape == "typed_record":
+        source = SimpleNamespace(**source)
+    binding = {
+        "benchmark_item_id": item["item_id"],
+        "production_object_identity_refs": ["original-ceiling-surface"],
+        "production_family": family,
+    }
+    with pytest.raises(ValueError, match="borrowed from room floor area"):
+        veto(
+            verified_items=[item],
+            sealed_quantities=[source],
+            identity_bindings=[binding],
+        )
+
+
+@pytest.mark.parametrize("variant", (
+    "true_abstention", "unmapped_original", "independent_ceiling_metric",
+    "legitimate_floor_area",
+))
+def test_borrowed_ceiling_score_gate_preserves_independent_and_unmapped_evidence(
+    variant,
+):
+    """No benchmark identities or metrics are created by this negative gate."""
+    item = {
+        "item_id": "original-quantity",
+        "denominator_eligible": True,
+        "trade_category": "flooring" if variant == "legitimate_floor_area" else "ceilings",
+    }
+    source = {
+        "object_identity_refs": ("original-source-surface",),
+        "family": "floor_area" if variant == "legitimate_floor_area" else "ceiling_lining",
+        "semantic_key": "ceiling_lining:original-source-surface:GRID:ceiling_grid",
+        "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+        "unit": "m2",
+        "value": 9.05352,
+        "abstained": False,
+    }
+    binding = {
+        "benchmark_item_id": item["item_id"],
+        "production_object_identity_refs": ["original-source-surface"],
+        "production_family": source["family"],
+    }
+    if variant == "true_abstention":
+        source["value"] = None
+        source["abstained"] = True
+    elif variant == "unmapped_original":
+        binding["production_object_identity_refs"] = ["independent-different-surface"]
+    elif variant == "independent_ceiling_metric":
+        source["formula"] = "source_authenticated_ceiling_figured_dimensions"
+    veto(
+        verified_items=[item],
+        sealed_quantities=[source],
+        identity_bindings=[binding],
+    )
+
+
+def test_mapped_signed_borrowed_ceiling_abstention_must_be_literal_true():
+    """Truthy strings or integers cannot make a reused room area scoreable."""
+    item = {"item_id": "ceiling", "denominator_eligible": True,
+            "trade_category": "ceilings"}
+    binding = {"benchmark_item_id": "ceiling", "production_family": "ceiling_lining",
+               "production_object_identity_refs": ["ceiling-physical"]}
+    for flag in (None, False, 0, 1, "true", "false", [], {}):
+        source = {
+            "object_identity_refs": ["ceiling-physical"],
+            "family": "ceiling_lining",
+            "unit": "m2",
+            "value": 9.05352,
+            "formula": "reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+            "abstained": flag,
+        }
+        with pytest.raises(ValueError, match="borrowed from room floor area"):
+            veto(verified_items=[item], sealed_quantities=[source],
+                 identity_bindings=[binding])
