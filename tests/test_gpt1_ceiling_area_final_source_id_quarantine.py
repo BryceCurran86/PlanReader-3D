@@ -110,7 +110,9 @@ def test_independent_unavailable_source_does_not_poison_authentic_final_ceiling(
     customer_rows = project_live_ceiling_area_customer_rows(
         result, workspace_id=7, project_id="same-source-project"
     )
-    assert len(traces) == len(run.quantities) == len(customer_rows) == 1
+    assert len(traces) == len(run.quantities) == 1
     assert run.quantities[0].value == 13.270425
     assert run.quantities[0].lineage_ok is True
-    assert customer_rows[0]["quantity_id"] == run.quantities[0].quantity_id
+    # Source handoff can still sign; the old floor-derived number must not
+    # become independently measured ceiling m² for the customer.
+    assert customer_rows == ()
