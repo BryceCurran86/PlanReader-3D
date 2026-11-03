@@ -27,7 +27,7 @@ def graph(parts, shift=0., *, extra=()):
             "endpoints_pdf_pts":(left,right),
             "source_ink_length_pdf_pt":dist(left,right),
         })
-    return {"original_native_edges":tuple(edges)}
+    return {"original_native_edges":tuple(edges),"original_native_edge_ids":tuple(row["source_id"] for row in edges)}
 
 
 def test_five_exact_open_wall_source_strokes_survive_cross_page_registration():
