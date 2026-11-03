@@ -57,6 +57,7 @@ from pb_cross_view_floor_finish_authority import (
 )
 from pb_cross_view_ceiling_finish_authority import CrossViewCeilingFinishProducer
 from pb_cross_view_ceiling_quantity_authority import (
+    CrossViewCeilingQuantityResult,
     publish_cross_view_ceiling_quantities,
 )
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
@@ -146,6 +147,50 @@ class LivePhysicalNetWallClaim:
     physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
     ceiling_metric_first_failure_codes: tuple[tuple[str, str], ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+
+
+
+def _rcp_ceiling_floor_area_reuse_blockers(
+    result: CrossViewCeilingQuantityResult,
+) -> tuple[tuple[str, str], ...]:
+    """Source-scoped physical rooms without an INDEPENDENT RCP ceiling area.
+
+    A fully authenticated RCP material mark and a separately documented
+    FLOOR-room area are different source facts. The cross-view composition
+    is still useful to diagnose the original code/room correspondence, but
+    its generated FIRM ceiling m² has no original ceiling-zone metric owner.
+    Do not transfer its quantity or canonical ceiling into customer output.
+    Any future independent ceiling issuer must take a separate commercial
+    path rather than modifying the floor-room source formula here.
+    """
+    if type(result) is not CrossViewCeilingQuantityResult:
+        raise TypeError("ceiling source candidate must be producer result")
+    blocked: dict[str, str] = {}
+    for record in result.records:
+        # All current producer records borrow the floor m². Do not silently
+        # authorize an unknown reconstructed formula as independent either.
+        if (
+            type(record.physical_room_id) is not str
+            or not record.physical_room_id
+            or record.physical_room_id != record.physical_room_id.strip()
+        ):
+            continue
+        reason = (
+            "independent_rcp_ceiling_metric_area_unproven"
+            if (
+                record.quantity.formula
+                == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+            )
+            else "independent_rcp_ceiling_metric_issuer_unavailable"
+        )
+        old = blocked.get(record.physical_room_id)
+        if old is not None and old != reason:
+            blocked[record.physical_room_id] = (
+                "conflicting_rcp_ceiling_source_metric_claims"
+            )
+        else:
+            blocked[record.physical_room_id] = reason
+    return tuple(sorted(blocked.items()))
 
 
 def _selected_page_indices(
@@ -994,13 +1039,9 @@ def _collect_live_physical_net_wall_claim(
             # Original material identity does not independently measure a
             # physical ceiling zone. Do not let these borrowed FIRM values or
             # canonical ceiling surfaces enter the actual customer claim.
-            for record in ceiling_quantities.records:
-                ceiling_metric_failures_by_room[record.physical_room_id] = (
-                    "independent_rcp_ceiling_metric_area_unproven"
-                    if record.quantity.formula
-                    == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
-                    else "independent_rcp_ceiling_metric_issuer_unavailable"
-                )
+            ceiling_metric_failures_by_room.update(
+                _rcp_ceiling_floor_area_reuse_blockers(ceiling_quantities)
+            )
             # Distinct independent RCP metric issuers can be integrated here
             # only after their own source-owned geometry and area seal exist.
 
