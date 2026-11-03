@@ -210,7 +210,10 @@ class CrossViewCeilingFinishRecord:
         # carrying its private seal; never let such a copy turn a source-only
         # material line into a permission to publish metric ceiling area.
         if (
-            self.record_id.startswith("cross_view_ceiling_finish_original_zone_")
+            type(self.record_id) is str
+            and self.record_id.startswith(
+                "cross_view_ceiling_finish_original_zone_"
+            )
             and self.commercial_projection_allowed is not False
         ):
             raise TypeError(
