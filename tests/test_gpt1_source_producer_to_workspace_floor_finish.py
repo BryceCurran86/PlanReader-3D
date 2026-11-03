@@ -376,3 +376,64 @@ def test_one_excluded_floor_customer_candidate_cannot_suppress_another_valid_roo
         "live_room_area_original_inclusion_excluded:"
         "excluded-independent-room-candidate"
     ) in gaps.get("floor", ())
+
+
+def test_real_workspace_legacy_floor_reused_ceiling_abstains_without_losing_floors(
+    tmp_path,
+):
+    """Noncommercial RCP legacy fallback cannot erase valid signed floor/FT rows."""
+    from tests.test_live_floor_family_customer_output import (
+        _production_shaped_source_area_and_finish_claim,
+    )
+    from tests.test_live_ceiling_area_quantity_publication import (
+        _result as _legacy_ceiling_source,
+    )
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    legacy = _legacy_ceiling_source()
+    original_ceiling_quantities = publish_live_ceiling_area_quantities(legacy)
+    assert len(original_ceiling_quantities) == 1
+    assert original_ceiling_quantities[0].metadata[
+        "commercial_projection_allowed"
+    ] is False
+    assert original_ceiling_quantities[0].metadata[
+        "quantity_handoff_only"
+    ] is True
+
+    source_pdf = tmp_path / "gpt1-source-neutral-legacy-rcp.pdf"
+    source_pdf.write_bytes(_payload())
+    app = SimpleNamespace(lquery=lambda *_: [
+        {"id": 1, "path": str(source_pdf)},
+    ])
+    with (
+        patch(
+            "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+            return_value=claim,
+        ),
+        patch(
+            "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
+            return_value=legacy,
+        ),
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    assert len(app._live_room_area_takeoff_rows_by_workspace[1]) == 1
+    assert len(app._live_floor_finish_takeoff_rows_by_workspace[1]) == 1
+    assert app._live_ceiling_takeoff_rows_by_workspace[1] == []
+    assert any(
+        reason.startswith("legacy_ceiling_independent_rcp_metric_unproven:")
+        for reason in app._ag09_family_coverage_by_workspace[1][
+            "family_gaps"
+        ].get("ceiling", ())
+    )
+    # A rejected legacy RCP area never rewrites the source floor/FT quantity.
+    assert claim.room_area_quantity_evidence[0].value == 8.64
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+    assert original_ceiling_quantities == publish_live_ceiling_area_quantities(
+        legacy
+    )
