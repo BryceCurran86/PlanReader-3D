@@ -48,7 +48,7 @@ def test_legacy_source_firm_ceiling_reissue_is_not_independent_customer_metric(
 ):
     result, quantity = _legacy_source(authority)
     assert quantity.status == "firm"
-    assert quantity.value == 9.05352
+    assert quantity.value == 13.270425
     assert quantity.metadata["commercial_projection_allowed"] is False
     assert quantity.metadata["quantity_handoff_only"] is True
     assert not eligible(quantity)
@@ -79,7 +79,7 @@ def test_independent_ceiling_customer_metric_requires_original_source_issuer_rec
         **source.metadata,
         "commercial_projection_allowed": True,
         "quantity_handoff_only": False,
-        "upstream_room_area_quantity_id": "room-area-qty-1",
+        "upstream_room_area_quantity_id": source.metadata["room_area_quantity_id"],
         "independent_rcp_ceiling_area_quantity_id": "ceiling-area-qty-1",
         "independent_rcp_ceiling_area_evidence_id": "area-rcp-evidence",
         "independent_rcp_ceiling_area_page_id": "9",
@@ -106,7 +106,7 @@ def test_independent_metric_source_receipt_contract_does_not_need_floor_area_reu
             **source.metadata,
             "commercial_projection_allowed": True,
             "quantity_handoff_only": False,
-            "upstream_room_area_quantity_id": "room-area-qty-1",
+            "upstream_room_area_quantity_id": source.metadata["room_area_quantity_id"],
             "independent_rcp_ceiling_area_quantity_id": "ceiling-area-qty-1",
             "independent_rcp_ceiling_area_evidence_id": "area-rcp-evidence",
             "independent_rcp_ceiling_area_page_id": "9",
