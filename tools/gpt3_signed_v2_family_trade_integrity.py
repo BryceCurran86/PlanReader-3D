@@ -143,6 +143,26 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound signed source unit disagrees with physical family dimension"
                 )
+            # The currently signed cross-view ceiling issuer can copy a
+            # previously measured ROOM FLOOR area into a new RCP ceiling row.
+            # Its source material mark does not independently prove ceiling
+            # geometry or scale. Never turn that known borrowed-area formula
+            # into a *mapped* original-source ceiling benchmark hit.
+            #
+            # This is a negative scoring gate only: no source/issuer mutation,
+            # no expected-value comparisons and no reclassification. Genuine
+            # ABSTAINED source receipts stay unscored by the frozen evaluator.
+            # New independent ceiling-area issuers may use their own proved
+            # formula and remain subject to their normal source lineage gates.
+            if (
+                family in {"ceiling_area", "ceiling_lining", "ceiling_finish_area"}
+                and _field(quantity, "abstained") is not True
+                and _field(quantity, "formula")
+                == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+            ):
+                raise ValueError(
+                    "mapped ceiling source metric is borrowed from room floor area"
+                )
             if family == "opening_count":
                 # A source-authenticated count has an integer cardinality.
                 # Do not accept a fractional, negative, boolean or nonfinite
