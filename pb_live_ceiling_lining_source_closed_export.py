@@ -209,6 +209,26 @@ def build_live_ceiling_lining_source_traces(
                 "numeric ceiling-lining source quantity retains unresolved blockers: "
                 f"{original.quantity_id}"
             )
+    # The RCP producer can revoke a material quantity by explicitly
+    # changing its source inclusion state. A direct sealer must honor
+    # that revocation even if a downstream adapter would unconditionally
+    # rewrite inclusion_status to INCLUSION for customer display.
+    # Optional omission preserves earlier independently sourced FIRM runs.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "inclusion_status" in original_metadata
+            and original_metadata["inclusion_status"] != "INCLUSION"
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original inclusion revoked before commercial "
+                f"seal: {original.quantity_id}"
+            )
+
     # An original RCP material mark may be source-authenticated before an
     # independent ceiling AREA exists. The source-owned material-only issuer
     # explicitly forbids commercial projection. A caller cannot present
