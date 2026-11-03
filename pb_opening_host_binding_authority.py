@@ -46,6 +46,7 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateRecord,
     PhysicalWallCandidateScopeResult,
     PhysicalWallCandidateSelector,
+    PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
 )
 from pb_physical_wall_identity import (
     PhysicalEquivalenceClass,
@@ -367,6 +368,37 @@ class OpeningHostWallUniverseAuthority:
         """Internal producer-owned wall scope; never exposed as host authority."""
         if not isinstance(selector, OpeningHostWallUniverseSelector):
             raise TypeError("selector must be OpeningHostWallUniverseSelector")
+        # A viewport address includes producer-owned boundary fingerprints.
+        # Copying only its decision_scope_id into a page-kind selector loses
+        # that context. Reuse the exact sealed selector, without interpreting
+        # any caller string as a viewport ID or supplying new geometry.
+        owned = self._wall_authority.selectors_for_authenticated_viewports(
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            page_id=selector.page_id,
+        )
+        matches = tuple(
+            address for address in owned
+            if address.decision_scope_id == selector.decision_scope_id
+        )
+        if len(matches) == 1:
+            return self._wall_authority.resolve_scope(matches[0])
+        if len(matches) > 1:
+            return PhysicalWallCandidateScopeResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                scope_complete=False,
+                records=(),
+                source_observation_ids=(),
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+                reason_codes=(PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,),
+            )
         return self._wall_authority.resolve_scope(
             PhysicalWallCandidateSelector(
                 document_id=selector.document_id,

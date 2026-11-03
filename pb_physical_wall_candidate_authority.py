@@ -1026,6 +1026,37 @@ def _segment_lies_on_bbox_edge(segment: Mapping[str, object], bbox: Sequence[flo
     )
 
 
+def _has_authenticated_derived_sheet_frame(viewport) -> bool:
+    """Distinguish an original drawn sheet frame from derived spatial bounds.
+
+    F.07 can authenticate a crop or a physical-plan component without a drawn
+    annotation frame. Only its source-owned native sheet-frame modes carry
+    the separate original frame geometry needed for this exclusion.
+    """
+    provenance = getattr(viewport, "provenance", None)
+    bbox = getattr(viewport, "bounding_box", None)
+    if (
+        not isinstance(provenance, Mapping)
+        or not isinstance(bbox, (tuple, list))
+        or len(bbox) != 4
+        or not is_segment_page_viewports_product(viewport)
+        or not is_authoritative_derived_viewport(viewport)
+        or provenance.get("partition_mode") not in {
+            "single_floor_plan_sheet_frame",
+            "single_floor_finish_plan_sheet_frame",
+            "single_reflected_ceiling_sheet_frame",
+        }
+    ):
+        return False
+    frame = provenance.get("sheet_frame_bbox")
+    return (
+        isinstance(frame, (tuple, list))
+        and len(frame) == 4
+        and all(type(value) in (int, float) and math.isfinite(value) for value in (*bbox, *frame))
+        and tuple(frame) == tuple(bbox)
+    )
+
+
 def _segment_is_authenticated_vector_frame_edge(
     segment: Mapping[str, object],
     *,
@@ -1034,13 +1065,19 @@ def _segment_is_authenticated_vector_frame_edge(
     """Recognize only a whole edge of F.07's authenticated vector frame.
 
     This is not a semantic wall exclusion. It is the exact producer-owned
-    boundary primitive already used to establish the RESOLVED viewport. A
-    partial line merely lying on that boundary remains ambiguous.
+    boundary primitive used by a RESOLVED viewport or a source-proven native
+    sheet-frame derived viewport. A partial line merely lying on that
+    boundary remains ambiguous.
     """
     if (
         viewport.bounding_box is None
-        or viewport.status != ViewportSegmentationStatus.RESOLVED.value
-        or str(viewport.boundary_source) != "vector_frame"
+        or not (
+            (
+                viewport.status == ViewportSegmentationStatus.RESOLVED.value
+                and str(viewport.boundary_source) == "vector_frame"
+            )
+            or _has_authenticated_derived_sheet_frame(viewport)
+        )
     ):
         return False
     x1, y1, x2, y2 = _segment_geometry(segment)
@@ -1709,7 +1746,10 @@ def _scope_boundary_reason_from_viewports(
         resolved_viewports = [
             v
             for v in relevant_viewports
-            if v.status == ViewportSegmentationStatus.RESOLVED.value
+            if (
+                v.status == ViewportSegmentationStatus.RESOLVED.value
+                or _has_authenticated_derived_sheet_frame(v)
+            )
             and v.bounding_box
         ]
 
@@ -1720,8 +1760,8 @@ def _scope_boundary_reason_from_viewports(
         ]
         if not containing:
             # This page has authenticated viewport structure, but this
-            # dangling end falls outside every RESOLVED viewport's bounds
-            # (e.g. only DERIVED/AMBIGUOUS regions cover it) -- its true
+            # dangling end falls outside every authenticated boundary
+            # (e.g. only unproven derived/ambiguous regions cover it) -- its true
             # scope cannot be authenticated from this page alone.
             return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
         if any(
