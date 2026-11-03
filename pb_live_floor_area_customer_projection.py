@@ -139,6 +139,12 @@ def _source_floor_area_customer_fields(
             )
         metadata[field] = current or default
     metadata["row_role"] = "floor_area"
+    # Source-authenticated ROOM area is a measured physical surface, not
+    # an authenticated FT2/FT3 material occurrence. An inherited material
+    # string on the upstream room record must not create a false priced
+    # floor-finish claim. The separately sealed floor_finish_area family
+    # owns exact FT source code and material attribution.
+    metadata["finish_system"] = ""
     original_inclusion = metadata.get("inclusion_status")
     if original_inclusion is not None and (
         type(original_inclusion) is not str
