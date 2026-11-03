@@ -320,3 +320,59 @@ def test_real_workspace_cannot_reclassify_revoked_room_area_or_retain_its_ft(
     ), repr(gaps)
     assert excluded.value == 8.64
     assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+def test_one_excluded_floor_customer_candidate_cannot_suppress_another_valid_room(
+    tmp_path,
+):
+    """Workspace isolation regression: a revoked candidate is skipped per row."""
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from tests.test_live_floor_family_customer_output import (
+        _production_shaped_source_area_and_finish_claim,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    good = project_live_floor_area_customer_rows(
+        claim, workspace_id=1, project_id="customer-workspace:1",
+    )[0]
+    revoked = {
+        **good,
+        "quantity_id": "excluded-independent-room-candidate",
+        "location": "room-2",
+        "inclusion_status": "EXCLUSION",
+    }
+    source_file = tmp_path / "gpt1-two-floor-candidate-workspace.pdf"
+    source_file.write_bytes(_payload())
+    app = SimpleNamespace(lquery=lambda *_: [
+        {"id": 1, "path": str(source_file)},
+    ])
+    # Only the second candidate presentation is injected here to exercise
+    # row-scoped workspace isolation. The first quantity, floor producer,
+    # source seal and all FT material paths stay real and independently FIRM.
+    with (
+        patch(
+            "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+            return_value=claim,
+        ),
+        patch(
+            "pb_live_floor_area_customer_projection.project_live_floor_area_customer_rows",
+            return_value=(good, revoked),
+        ),
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+    actual = app._live_room_area_takeoff_rows_by_workspace[1]
+    assert len(actual) == 1
+    kept = dict(zip(auto.TAKEOFF_ROW_FIELDS, actual[0]))
+    assert kept["location"] == "room-1"
+    assert kept["quantity"] == 8.64
+    assert kept["inclusion_status"] == "INCLUSION"
+    assert len(app._live_floor_finish_takeoff_rows_by_workspace[1]) == 1
+    gaps = app._ag09_family_coverage_by_workspace[1]["family_gaps"]
+    assert (
+        "live_room_area_original_inclusion_excluded:"
+        "excluded-independent-room-candidate"
+    ) in gaps.get("floor", ())
