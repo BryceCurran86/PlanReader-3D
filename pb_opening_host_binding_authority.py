@@ -1294,9 +1294,9 @@ def _resolve_gap_lineage_host_from_records(
             (HOST_GAP_LINEAGE_UNAVAILABLE,),
         )
 
-    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
-    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
+    unsafe_ids = _unsafe_original_lineage_group_members(equivalence)
     group_lookup = _equivalence_group_lookup(equivalence)
+    pair_lookup = _pair_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
     for raw_id in (left_raw, right_raw):
         owners = tuple(
@@ -1311,12 +1311,23 @@ def _resolve_gap_lineage_host_from_records(
                 (),
                 (HOST_GAP_LINEAGE_UNMAPPED,),
             )
-        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+        if any(record.wall_candidate_id in unsafe_ids for record in owners):
             return _HostBandResolution(
                 EvidenceResolutionStatus.CONFLICT,
                 (),
                 (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
             )
+        if len(owners) > 1:
+            for idx, o1 in enumerate(owners):
+                for o2 in owners[idx + 1 :]:
+                    k = tuple(sorted((o1.wall_candidate_id, o2.wall_candidate_id)))
+                    cls = pair_lookup.get(k)
+                    if cls is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return _HostBandResolution(
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
+                        )
 
         by_group: dict[tuple[str, ...], list[PhysicalWallCandidateRecord]] = {}
         for record in owners:
@@ -1505,9 +1516,9 @@ def _resolve_two_face_lineage_host_from_records(
             (HOST_TWO_FACE_LINEAGE_UNAVAILABLE,),
         )
 
-    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
-    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
+    unsafe_ids = _unsafe_original_lineage_group_members(equivalence)
     group_lookup = _equivalence_group_lookup(equivalence)
+    pair_lookup = _pair_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
 
     for raw_id in raw_ids:
@@ -1524,7 +1535,7 @@ def _resolve_two_face_lineage_host_from_records(
                 (),
                 (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
             )
-        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+        if any(record.wall_candidate_id in unsafe_ids for record in owners):
             return _HostBandResolution(
                 EvidenceResolutionStatus.CONFLICT,
                 (),
@@ -1533,6 +1544,20 @@ def _resolve_two_face_lineage_host_from_records(
                     HOST_EQUIVALENCE_AMBIGUOUS,
                 ),
             )
+        if len(owners) > 1:
+            for idx, o1 in enumerate(owners):
+                for o2 in owners[idx + 1 :]:
+                    k = tuple(sorted((o1.wall_candidate_id, o2.wall_candidate_id)))
+                    cls = pair_lookup.get(k)
+                    if cls is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return _HostBandResolution(
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (
+                                HOST_TWO_FACE_LINEAGE_AMBIGUOUS,
+                                HOST_EQUIVALENCE_AMBIGUOUS,
+                            ),
+                        )
 
         by_group: dict[
             tuple[str, ...], list[PhysicalWallCandidateRecord]
