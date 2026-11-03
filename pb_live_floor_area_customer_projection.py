@@ -7,6 +7,7 @@ measure rooms/floors, infer scale, create identity, or grant estimator approval.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
@@ -31,6 +32,116 @@ LIVE_FLOOR_AREA_CUSTOMER_PROJECTION_SCHEMA_VERSION = "1.0.0"
 
 def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
+
+
+def _source_floor_area_customer_fields(
+    claim: LivePhysicalNetWallClaim,
+    quantity: QuantityEvidence,
+) -> dict[str, Any]:
+    """Supply required workspace fields from a uniquely authenticated floor.
+
+    The original room-area producer signs measurement/source lineage, but
+    may not supply presentation fields. A correct FIRM m² was previously
+    discarded by the real workspace adapter because 'location', 'section'
+    or 'substrate' was empty. Never fabricate a room name: use original
+    bound label when unique, otherwise the canonical source room identity.
+    """
+    metadata = (
+        dict(quantity.metadata)
+        if isinstance(quantity.metadata, Mapping) else {}
+    )
+    canonical_id = metadata.get("canonical_floor_id")
+    physical_id = metadata.get("physical_floor_surface_id")
+    floors = [
+        floor for floor in claim.canonical_floors
+        if (
+            floor.canonical_floor_id == canonical_id
+            and floor.physical_floor_surface_id == physical_id
+            and floor.physical_floor_surface_id in quantity.input_entity_ids
+        )
+    ]
+    if len(floors) != 1:
+        raise SourceClosedRunConflictError(
+            "floor-area customer row lacks unique original canonical floor"
+        )
+    floor = floors[0]
+    room_id = floor.room_entity_id
+    if type(room_id) is not str or not room_id or room_id != room_id.strip():
+        raise SourceClosedRunConflictError(
+            "floor-area customer row lacks original physical room identity"
+        )
+    rooms = [
+        room for room in claim.canonical_rooms
+        if getattr(room, "canonical_room_id", None) == room_id
+    ]
+    bound_label = None
+    if len(rooms) == 1:
+        room = rooms[0]
+        label = getattr(room, "room_label", None)
+        receipt = getattr(room, "room_label_binding_record_id", None)
+        receipts = getattr(room, "room_label_evidence_ids", None)
+        if (
+            type(label) is str and label and label == label.strip()
+            and type(receipt) is str and receipt and receipt == receipt.strip()
+            and type(receipts) in (tuple, list) and receipts
+            and all(
+                type(value) is str and value and value == value.strip()
+                for value in receipts
+            )
+            and len(set(receipts)) == len(receipts)
+            and room.document_id == floor.document_id
+            and room.revision_id == floor.revision_id
+            and room.source_sha256.lower() == floor.source_sha256.lower()
+            and room.snapshot_id == floor.snapshot_id
+            and room.source_room_face_record_id == floor.source_room_face_record_id
+            and not any(
+                other is not room
+                and type(getattr(other, "room_label", None)) is str
+                and " ".join(other.room_label.casefold().split())
+                == " ".join(label.casefold().split())
+                for other in claim.canonical_rooms
+            )
+        ):
+            bound_label = label
+
+    original_location = metadata.get("location")
+    if original_location is not None and (
+        type(original_location) is not str
+        or original_location != original_location.strip()
+    ):
+        raise SourceClosedRunConflictError(
+            "floor-area original customer location is not canonical source text"
+        )
+    if (
+        bound_label and original_location
+        and " ".join(original_location.casefold().split())
+        != " ".join(bound_label.casefold().split())
+    ):
+        raise SourceClosedRunConflictError(
+            "floor-area original customer location contradicts canonical room"
+        )
+
+    # The source-reissued location/section/element are presentation fields.
+    # Never change signed value, source SHA, evidence or area authority.
+    metadata["location"] = original_location or bound_label or room_id
+    for field, default in (
+        ("section", "Internal"),
+        ("element", "Floor area"),
+        ("substrate", "Floor"),
+    ):
+        current = metadata.get(field)
+        if current is not None and (
+            type(current) is not str
+            or current != current.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-area original customer {field} is malformed"
+            )
+        metadata[field] = current or default
+    metadata["row_role"] = "floor_area"
+    metadata["inclusion_status"] = "INCLUSION"
+    metadata["commercial_projection_allowed"] = True
+    return metadata
 
 
 def _measurement_authority(
@@ -184,11 +295,22 @@ def project_live_floor_area_customer_rows(
         if authority is not None
     }
 
+    # Keep the already-FIRM source QuantityEvidence immutable. Only the
+    # customer presentation copy gains source-backed location and required
+    # workspace fields; the independently signed run below still uses the
+    # original production quantity IDs/values/evidence.
+    customer_quantities = tuple(
+        replace(
+            quantity,
+            metadata=_source_floor_area_customer_fields(claim, quantity),
+        )
+        for quantity in quantities
+    )
     # Missing measurement authority remains a hard adapter failure rather than
     # silently dropping an otherwise valid sealed floor quantity.
     rows = tuple(
         quantities_to_takeoff_output_rows(
-            quantities,
+            customer_quantities,
             traces_by_quantity_id=traces,
             authorities_by_quantity_id=authorities,
         )
