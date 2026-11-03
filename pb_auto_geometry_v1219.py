@@ -1260,6 +1260,18 @@ def _try_physical_net_wall_rows(
             }
             if not all(required.values()):
                 raise ValueError("floor-area projection is missing customer row identity")
+            # _takeoff_row() and _auto_row_problem() treat a floor_area
+            # workspace row as an included reference by default. The source
+            # projector intentionally retains EXCLUSION/PROVISIONAL exactly;
+            # never silently convert that revoked original source status
+            # into INCLUSION when persisting the automatic customer row.
+            # Fail closed and report the source gap instead of publishing a
+            # misleading priced/included quantity.
+            if item.get("inclusion_status") != "INCLUSION":
+                raise ValueError(
+                    "floor-area original inclusion is not eligible for "
+                    "automatic workspace publication"
+                )
             quantity_id = str(item.get("quantity_id") or "").strip()
             if not quantity_id:
                 raise ValueError("floor-area projection is missing quantity identity")
