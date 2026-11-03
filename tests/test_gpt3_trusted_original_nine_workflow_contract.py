@@ -13,8 +13,8 @@ import pytest
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/gpt3-trusted-original-nine-replay-manual.yml"
-APPROVED = "a3afced106dd07e083f24723f33f3eac43e0517b"
-BASE = "cc5f58a7ae95801a45b4d348319fa184f91115cc"
+APPROVED = "e54a6047b4045c3c2667a5f7b7dd9dd202672c56"
+BASE = "782b4e3ef4028e9463f39a4a64feb5c50b9332f6"
 OWNER_REPOSITORY_GUARD = (
     "${{ github.event_name == 'workflow_dispatch' && "
     "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && "
@@ -94,6 +94,12 @@ def test_main_owner_only_immutable_source_positive_workflow():
         assert required in script
     assert "git checkout --detach" not in script
     assert "tests/test_gpt3_lot16_original_nine_whole_retention.py" in script
+    assert "pb_live_append_only_opening_area_composition.py" in script
+    assert "pb_live_physical_net_wall_integration.py" in script
+    assert "tests/test_gpt3_lot16_original_sealed_score_input.py" in script
+    assert "pb_live_ceiling_customer_projection.py" in script
+    assert "pb_customer_output_verification.py" in script
+    assert "pb_cross_view_floor_finish_authority.py" in script
     # Source is received only after unchanged code and dependencies are checked.
     source_index = next(i for i, x in enumerate(steps) if "ORIGINAL_SOURCES_TOKEN" in str(x))
     guard_index = steps.index(guards[0])
