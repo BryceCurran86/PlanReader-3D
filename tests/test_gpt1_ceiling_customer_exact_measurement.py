@@ -17,12 +17,13 @@ def _quantity(authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value):
     return replace(original, authority=authority)
 
 
-def test_source_authenticated_ceiling_customer_projection_preserves_real_result():
+def test_legacy_room_area_ceiling_issuer_cannot_authorize_customer_m2():
+    # The original upstream ceiling issuer is explicitly handoff-only.
+    # A source area and ceiling material mark do not measure a ceiling zone.
     rows = project_live_ceiling_area_customer_rows(
         _result(), workspace_id=7, project_id="source-project",
     )
-    assert len(rows) == 1
-    assert rows[0]["measurement_method"] == "figured_dimension"
+    assert rows == ()
 
 
 @pytest.mark.parametrize("source_ids", [
