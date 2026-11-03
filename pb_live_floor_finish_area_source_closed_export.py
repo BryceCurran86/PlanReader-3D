@@ -225,6 +225,26 @@ def build_live_floor_finish_area_source_traces(
                 f"{original.quantity_id}"
             )
 
+    # Original producer inclusion revocation is source authority, not a
+    # mutable customer display flag. A caller cannot revive an FT2/FT3
+    # FIRM area by replacing EXCLUSION/PROVISIONAL/None with INCLUSION in
+    # the later customer projector. Older original receipts without the
+    # optional field retain their existing source-seal contract.
+    for original in claim.floor_finish_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "inclusion_status" in original_metadata
+            and original_metadata["inclusion_status"] != "INCLUSION"
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original inclusion revoked before commercial "
+                f"seal: {original.quantity_id}"
+            )
+
     # A source-authenticated FT2/FT3 material occurrence can precede W4
     # finished wall-face and original doorway-threshold measurement. Such
     # material-only source witnesses must NOT acquire FIRM floor area via
