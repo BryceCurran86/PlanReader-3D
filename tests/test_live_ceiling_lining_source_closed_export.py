@@ -1038,6 +1038,52 @@ def test_ceiling_material_cannot_relabel_another_original_room_in_customer_row()
         project_live_ceiling_customer_rows(
             claim, workspace_id=1, project_id="project-1",
         )
-    assert seal_live_ceiling_lining_run(
+    # The direct signed source path now refuses the same foreign material
+    # name; bypassing customer presentation cannot turn this into FIRM.
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical source room",
+    ):
+        seal_live_ceiling_lining_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize("bad_label", (
+    "FREEZER", "OFFICE ", "", 123, True,
+))
+def test_direct_ceiling_source_seal_denies_foreign_or_untyped_material_room_label(
+    bad_label,
+):
+    quantity = _quantity()
+    claim = _claim(replace(
+        quantity, metadata={**quantity.metadata, "room_label": bad_label},
+    ))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical source room",
+    ):
+        seal_live_ceiling_lining_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_direct_ceiling_seal_accepts_original_room_label_casefold_without_relabeling():
+    original = _quantity()
+    quantity = replace(
+        original,
+        metadata={**original.metadata, "room_label": "office"},
+    )
+    claim = _claim(quantity)
+    sealed = seal_live_ceiling_lining_run(
         claim, workspace_id=1, project_id="project-1",
-    ).quantities[0].value == 9.05352
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
