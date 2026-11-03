@@ -325,3 +325,122 @@ def test_forged_finish_cannot_reclassify_or_erase_original_source_floor_area():
     assert verify_sealed_customer_output(
         baseline, plain_rows,
     ).verified_quantity_ids == (baseline.quantities[0].quantity_id,)
+
+
+def test_real_original_floor_area_customer_row_has_all_workspace_required_fields():
+    """Original sealed 8.64 m² must not vanish for an empty source label."""
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    original_room = claim.room_area_quantity_evidence[0]
+    assert not original_room.metadata.get("location")
+    signed, rows = module.project_live_floor_family_customer_output(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(signed.quantities) == 2
+    area = next(row for row in rows if row["quantity_family"] == "floor_area")
+    assert area["section"] == "Internal"
+    assert area["element"] == "Floor area"
+    assert area["location"] == "room-1"
+    assert area["substrate"] == "Floor"
+    assert area["row_role"] == "floor_area"
+    assert area["quantity_status"] == "To review"
+    assert area["quantity"] == 8.64
+    assert original_room.metadata.get("location") is None
+    assert set(verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids) == {row["quantity_id"] for row in rows}
+
+
+def test_original_source_owned_room_label_projects_onto_floor_area_without_quantity_change():
+    from dataclasses import replace
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+    from pb_customer_output_verification import verify_sealed_customer_output
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _original_labeled_room,
+    )
+
+    source = _production_shaped_source_area_and_finish_claim()
+    claim = replace(source, canonical_rooms=(_original_labeled_room(),))
+    signed = seal_live_floor_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_area_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(signed.quantities) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["section"] == "Internal"
+    assert rows[0]["substrate"] == "Floor"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (signed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("bad_original", (
+    {"location": "FREEZER"},
+    {"location": " OFFICE "},
+    {"location": 123},
+    {"section": 123},
+    {"substrate": True},
+    {"inclusion_status": 0},
+))
+def test_source_floor_area_customer_fields_cannot_be_forged_or_type_coerced(
+    bad_original,
+):
+    from dataclasses import replace
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _original_labeled_room,
+    )
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    source_area = claim.room_area_quantity_evidence[0]
+    altered = replace(
+        source_area, metadata={**source_area.metadata, **bad_original},
+    )
+    claim = replace(
+        claim,
+        room_area_quantity_evidence=(altered,),
+        canonical_rooms=(_original_labeled_room(),),
+    )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.room_area_quantity_evidence[0].value == 8.64
+
+
+def test_original_source_floor_area_exclusion_remains_exclusion_in_customer_output():
+    from dataclasses import replace
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    source_area = claim.room_area_quantity_evidence[0]
+    excluded = replace(
+        source_area,
+        metadata={**source_area.metadata, "inclusion_status": "EXCLUSION"},
+    )
+    claim = replace(claim, room_area_quantity_evidence=(excluded,))
+    sealed = seal_live_floor_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_area_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["inclusion_status"] == "EXCLUSION"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
