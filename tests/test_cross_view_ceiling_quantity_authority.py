@@ -785,3 +785,35 @@ def test_source_only_ceiling_mark_does_not_suppress_legacy_sealed_room_area(
     assert legacy_result.quantities[0].value == 9.05352
     assert source_only_result.quantities == ()
     assert source_only_result.records == ()
+
+
+
+def test_original_rcp_source_zone_lineage_veto_survives_forced_flag_mutation(
+) -> None:
+    # A frozen dataclass is still mutable via object.__setattr__. This is a
+    # negative customer boundary: a source-only original GRID receipt cannot
+    # become signed m2 by replacing or patching its commercial flag.
+    original=_finish()
+    source_only=replace(
+        original.records[0],
+        record_id="cross_view_ceiling_finish_original_zone_"+"a"*32,
+        commercial_projection_allowed=False,
+    )
+    object.__setattr__(source_only, "commercial_projection_allowed", True)
+    mutated=replace(
+        original,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        records=(source_only,),
+    )
+    result=ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),room_area_bridges=(_bridge(),),finishes=mutated,
+    )
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.canonical_ceilings == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+    legacy=ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),room_area_bridges=(_bridge(),),finishes=original,
+    )
+    assert len(legacy.quantities)==1
+    assert legacy.quantities[0].value==9.05352
