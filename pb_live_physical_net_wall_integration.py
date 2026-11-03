@@ -144,6 +144,7 @@ class LivePhysicalNetWallClaim:
     # Source-owned physical-scale failures are independent of documented area.
     # Each entry owns an exact physical-room ID and the scale producer's reasons.
     physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    ceiling_metric_first_failure_codes: tuple[tuple[str, str], ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -584,6 +585,7 @@ def _collect_live_physical_net_wall_claim(
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
+    ceiling_metric_failures_by_room: dict[str, str] = {}
     same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
@@ -987,12 +989,20 @@ def _collect_live_physical_net_wall_claim(
                 room_area_bridges=tuple(room_area_bridges),
                 finishes=ceiling_finishes,
             )
-            canonical_ceiling_objects.extend(
-                ceiling_quantities.canonical_ceilings
-            )
-            ceiling_lining_quantity_evidence.extend(
-                ceiling_quantities.quantities
-            )
+            # The legacy cross-view RCP issuer carries a real source finish
+            # mark but REUSES the documented floor-room m² as ceiling m².
+            # Original material identity does not independently measure a
+            # physical ceiling zone. Do not let these borrowed FIRM values or
+            # canonical ceiling surfaces enter the actual customer claim.
+            for record in ceiling_quantities.records:
+                ceiling_metric_failures_by_room[record.physical_room_id] = (
+                    "independent_rcp_ceiling_metric_area_unproven"
+                    if record.quantity.formula
+                    == "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+                    else "independent_rcp_ceiling_metric_issuer_unavailable"
+                )
+            # Distinct independent RCP metric issuers can be integrated here
+            # only after their own source-owned geometry and area seal exist.
 
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
@@ -1108,6 +1118,9 @@ def _collect_live_physical_net_wall_claim(
             physical_scale_first_failure_codes=tuple(sorted(
                 physical_scale_failures_by_room.items()
             )),
+            ceiling_metric_first_failure_codes=tuple(sorted(
+                ceiling_metric_failures_by_room.items()
+            )),
         )
 
     return LivePhysicalNetWallClaim(
@@ -1161,6 +1174,9 @@ def _collect_live_physical_net_wall_claim(
         ),
         physical_scale_first_failure_codes=tuple(sorted(
             physical_scale_failures_by_room.items()
+        )),
+        ceiling_metric_first_failure_codes=tuple(sorted(
+            ceiling_metric_failures_by_room.items()
         )),
     )
 
