@@ -40,14 +40,25 @@ def independently_sourced_ceiling_customer_metric(
         or quantity.blocking_reasons
         or type(quantity.formula) is not str
         or quantity.formula in _BORROWED_CEILING_FORMULAS
+        # A renamed floor-reuse formula is not an independent source
+        # measurement. No generic, unknown or model-derived formula may
+        # bypass a missing original RCP ceiling-area issuer.
+        or quantity.formula
+        != "authenticated_independent_rcp_ceiling_area_from_original_figures"
         or not isinstance(quantity.metadata, Mapping)
     ):
         return False
     metadata = quantity.metadata
     if (
         metadata.get("commercial_projection_allowed") is not True
-        or metadata.get("quantity_handoff_only") is True
-        or metadata.get("shadow_only") is True
+        or (
+            "quantity_handoff_only" in metadata
+            and metadata["quantity_handoff_only"] is not False
+        )
+        or (
+            "shadow_only" in metadata
+            and metadata["shadow_only"] is not False
+        )
     ):
         return False
 
