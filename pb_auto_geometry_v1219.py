@@ -1260,21 +1260,20 @@ def _try_physical_net_wall_rows(
             }
             if not all(required.values()):
                 raise ValueError("floor-area projection is missing customer row identity")
-            # _takeoff_row() and _auto_row_problem() treat a floor_area
-            # workspace row as an included reference by default. The source
-            # projector intentionally retains EXCLUSION/PROVISIONAL exactly;
-            # never silently convert that revoked original source status
-            # into INCLUSION when persisting the automatic customer row.
-            # Fail closed and report the source gap instead of publishing a
-            # misleading priced/included quantity.
-            if item.get("inclusion_status") != "INCLUSION":
-                raise ValueError(
-                    "floor-area original inclusion is not eligible for "
-                    "automatic workspace publication"
-                )
             quantity_id = str(item.get("quantity_id") or "").strip()
             if not quantity_id:
                 raise ValueError("floor-area projection is missing quantity identity")
+            # _takeoff_row() and _auto_row_problem() authorize INCLUSION on
+            # floor_area rows by default. Never turn an original EXCLUSION
+            # into a saleable included quantity. Quarantine only this source
+            # quantity: another independently signed room on the same plan
+            # must not disappear because its neighbour was excluded.
+            if item.get("inclusion_status") != "INCLUSION":
+                current_coverage["family_gaps"].setdefault("floor", []).append(
+                    "live_room_area_original_inclusion_excluded:"
+                    f"{quantity_id}"
+                )
+                continue
             unit = str(item.get("unit") or "").strip().lower()
             if unit == "m2":
                 unit = "m²"
