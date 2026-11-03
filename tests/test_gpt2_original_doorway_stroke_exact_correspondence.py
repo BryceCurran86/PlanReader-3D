@@ -86,3 +86,26 @@ def test_incomplete_native_wall_ink_census_cannot_emit_exact_source_pairs(bad):
     assert pairs==()
     assert complete is False
     assert rivals==("original_source_stroke_inventory_invalid",)
+
+
+@pytest.mark.parametrize("which", ["missing-id","duplicate-id","bad-length","nan-length"])
+def test_original_source_stroke_id_roster_and_lengths_are_complete(which):
+    first=graph(BASE)
+    if which=="missing-id":
+        first["original_native_edge_ids"]=first["original_native_edge_ids"][:-1]
+    elif which=="duplicate-id":
+        first["original_native_edge_ids"]+=("source-line-0",)
+    elif which=="bad-length":
+        first["original_native_edges"][2]["source_ink_length_pdf_pt"]=1.
+    else:
+        first["original_native_edges"][2]["source_ink_length_pdf_pt"]=float("nan")
+    matched,rivals,complete=audit(first,graph(BASE,78.),translation=(78.,0.))
+    assert not matched and not complete
+    assert rivals==("original_source_stroke_inventory_invalid",)
+
+
+@pytest.mark.parametrize("shift",[(True,0.),("78",0.),(float("inf"),0.),[78.,0.]])
+def test_source_registration_requires_typed_finite_original_coordinates(shift):
+    matched,rivals,complete=audit(graph(BASE),graph(BASE,78.),translation=shift)
+    assert not matched and not complete
+    assert rivals==("original_source_stroke_inventory_invalid",)
