@@ -838,6 +838,28 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish original canonical room geometry/source mismatch: "
                     f"{quantity.quantity_id}"
                 )
+            # Room labels are presentation, not measurement authority, but a
+            # source-issued material/room label that contradicts the exact
+            # authenticated canonical room must never be FIRM-sealed through a
+            # direct source-only adapter bypassing the customer projector.
+            source_room_label = getattr(room, "room_label", None)
+            issued_room_label = metadata.get("room_label")
+            if issued_room_label is not None:
+                if (
+                    type(issued_room_label) is not str
+                    or not issued_room_label
+                    or issued_room_label != issued_room_label.strip()
+                    or (
+                        type(source_room_label) is str
+                        and source_room_label
+                        and " ".join(issued_room_label.casefold().split())
+                        != " ".join(source_room_label.casefold().split())
+                    )
+                ):
+                    raise SourceClosedRunConflictError(
+                        "floor-finish original room label contradicts canonical "
+                        f"room: {quantity.quantity_id}"
+                    )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
