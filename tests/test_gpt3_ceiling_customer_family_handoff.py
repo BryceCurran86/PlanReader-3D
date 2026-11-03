@@ -62,21 +62,18 @@ def test_new_original_ceiling_seal_reaches_exact_family_customer_receipt(
     )
 
 
-def test_legacy_source_positive_ceiling_reaches_own_verified_customer_path(
+def test_legacy_room_derived_ceiling_is_quarantined_before_project_handoff(
     tmp_path, monkeypatch,
 ):
     claim = _new_claim(_new_quantity())
     claim = replace(claim, ceiling_lining_quantity_evidence=(), canonical_ceilings=())
     summary = _run(tmp_path, monkeypatch, claim=claim, legacy=_legacy_result())
-    assert summary["family_counts"]["ceiling_area"] == 1
-    assert summary["ceiling_authority_path"] == "legacy_same_scope_ceiling_lining"
-    assert summary["ceiling_customer_rows_verified"] is True
-    assert summary["ceiling_customer_row_count"] == 1
-    run = load_verified_sealed_run(Path(summary["family_run_files"]["ceiling_area"]))
-    rows = json.loads(Path(summary["ceiling_customer_rows_file"]).read_text())
-    assert verify_sealed_customer_output(run, rows).verified_quantity_ids == (
-        run.quantities[0].quantity_id,
-    )
+    assert summary["family_counts"]["ceiling_area"] == 0
+    assert summary["ceiling_authority_path"] == "unavailable"
+    assert summary["ceiling_customer_rows_verified"] is False
+    assert summary["ceiling_customer_row_count"] == 0
+    assert summary["ceiling_customer_rows_file"] is None
+    assert summary["ceiling_unverified_metric_source_quantity_ids"]
     assert summary["customer_rows_verified"] is False
 
 
