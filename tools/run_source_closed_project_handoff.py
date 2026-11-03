@@ -29,6 +29,9 @@ import fitz
 from pb_live_ceiling_area_quantity_publication import (
     publish_live_ceiling_area_quantities,
 )
+from pb_ceiling_independent_customer_metric_gate import (
+    independently_sourced_ceiling_customer_metric,
+)
 from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
 from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
 from pb_live_ceiling_lining_source_closed_export import (
@@ -765,8 +768,21 @@ def _generate_project_handoff_locked(
                     if _clean(quantity.quantity_id) in retained_shadow_ids
                 ),
             )
-        legacy_ceiling_quantities = _non_abstained(
+        legacy_candidates = _non_abstained(
             publish_live_ceiling_area_quantities(ceiling_result)
+        )
+        # The old canonical adapter can SIGN a handoff-only area derived
+        # from the original floor room, but that is not an independent RCP
+        # ceiling-zone metric. Do not put it into the combined customer
+        # family or write a sealed project ceiling file. The original
+        # source receipts remain available via the legacy producer.
+        legacy_ceiling_quantities = tuple(
+            quantity for quantity in legacy_candidates
+            if independently_sourced_ceiling_customer_metric(quantity)
+        )
+        summary["ceiling_unverified_metric_source_quantity_ids"] = sorted(
+            quantity.quantity_id for quantity in legacy_candidates
+            if not independently_sourced_ceiling_customer_metric(quantity)
         )
 
     ceiling_quantities = (
