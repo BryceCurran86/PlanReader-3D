@@ -51,22 +51,18 @@ def test_ordinary_provisional_unresolved_source_stays_nonpublishing():
     assert _project((blocked,)) == ()
 
 
-def test_unrelated_provisional_unresolved_source_preserves_legitimate_customer():
+def test_unrelated_provisional_unresolved_source_still_cannot_mint_customer_area():
     valid = _shadow_quantity()
     blocked = replace(
         valid,
         quantity_id="unrelated-provisional-original-ceiling",
         blocking_reasons=("source_original_area_unavailable",),
     )
-    rows = _project((blocked, valid))
-    assert len(rows) == 1
-    assert rows[0]["quantity_family"] == "ceiling_lining"
+    assert _project((blocked, valid)) == ()
 
 
-def test_existing_authentic_legacy_ceiling_customer_preserved():
-    rows = _project((_shadow_quantity(),))
-    assert len(rows) == 1
-    assert rows[0]["quantity_family"] == "ceiling_lining"
+def test_legacy_source_area_remains_handoff_only_for_customer():
+    assert _project((_shadow_quantity(),)) == ()
 
 
 def test_legacy_ceiling_blocker_rejection_does_not_mutate_original_source():
