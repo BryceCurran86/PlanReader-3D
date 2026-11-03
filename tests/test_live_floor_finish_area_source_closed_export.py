@@ -1680,3 +1680,57 @@ def test_exact_source_inclusion_keeps_legitimate_floor_finish_firm_and_customer(
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_inclusion", (
+    "EXCLUSION", "PROVISIONAL", "", None, False, 0, "INCLUSION ",
+))
+def test_original_excluded_room_area_cannot_authorize_saleable_ft_finish(
+    source_inclusion,
+):
+    """A physically measured but revoked room is not an INCLUDED FT takeoff."""
+    original = _independent_source_room_area()
+    revoked = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "inclusion_status": source_inclusion,
+        },
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(revoked,),
+    )
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="upstream original room-area inclusion revoked",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert original.value == revoked.value == 8.64
+    assert claim.floor_finish_quantity_evidence[0].metadata["finish_code"] == "FT1"
+
+
+def test_original_included_room_area_still_supports_exact_signed_ft_finish():
+    original = _independent_source_room_area()
+    included = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "INCLUSION"},
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(included,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
