@@ -1553,7 +1553,10 @@ def test_original_room_area_inventory_cannot_hide_disputed_source_before_finish_
     elif bad_source == "duplicate_abstained_original":
         inventory = (
             source,
-            replace(source, abstained=True, value=None, status="blocked"),
+            replace(
+                source, abstained=True, value=None, status="blocked",
+                blocking_reasons=("original_source_identity_contested",),
+            ),
         )
         expected = "duplicate or invalid original room-area quantity ID"
     elif bad_source == "foreign_family_original":
