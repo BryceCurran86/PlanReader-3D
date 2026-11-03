@@ -386,6 +386,27 @@ def build_live_floor_finish_area_source_traces(
                     "independently published on the same canonical floor: "
                     f"{quantity.quantity_id}"
                 )
+            original_area_metadata = published_original_owners[0].metadata
+            original_area_inclusion = (
+                original_area_metadata.get("inclusion_status")
+                if isinstance(original_area_metadata, Mapping)
+                else None
+            )
+            # An FT finish cannot inherit a numeric room area whose ORIGINAL
+            # source explicitly excluded or revoked customer inclusion. The
+            # floor-area projector preserves that non-inclusion, while the
+            # final workspace floor-row adapter refuses to rewrite it. Apply
+            # the same original decision to the material family; otherwise
+            # a revoked floor could still become an included saleable FT m².
+            if (
+                isinstance(original_area_metadata, Mapping)
+                and "inclusion_status" in original_area_metadata
+                and original_area_inclusion != "INCLUSION"
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish upstream original room-area inclusion revoked: "
+                    f"{quantity.quantity_id}"
+                )
 
         if (
             type(quantity.value) not in (int, float)
