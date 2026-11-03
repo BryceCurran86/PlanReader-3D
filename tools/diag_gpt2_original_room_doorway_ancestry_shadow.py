@@ -69,10 +69,28 @@ def _independently_reissued_exact_native_stroke_pairs(
                 ))
             if points[0]==points[1]:
                 raise ValueError("source_zero_length_stroke_invalid")
+            # The native stroke issuer publishes a length computed from
+            # exact rounded source endpoints. A forged/rewritten line must
+            # not keep the original source ID yet move the geometry.
+            original=tuple(
+                (float(point[0]),float(point[1])) for point in pts
+            )
+            native_length=math.dist(*original)
+            if abs(native_length-float(length))>0.001:
+                raise ValueError("source_stroke_length_receipt_mismatch")
             key=tuple(sorted(points))
             by_line.setdefault(key,[]).append(ident)
+        roster=graph.get("original_native_edge_ids")
+        if (type(roster) is not tuple
+                or len(roster)!=len(seen)
+                or set(roster)!=seen):
+            raise ValueError("original_complete_source_stroke_roster_missing")
         return by_line
     try:
+        if (type(translation) is not tuple or len(translation)!=2
+                or any(type(v) not in (float,int) or not math.isfinite(v)
+                       for v in translation)):
+            raise ValueError("typed_original_translation_required")
         dx,dy=translation
         a=source_index(floor_graph,dx,dy)
         b=source_index(other_graph,0.0,0.0)
