@@ -310,7 +310,7 @@ def test_real_workspace_cannot_reclassify_revoked_room_area_or_retain_its_ft(
     assert app._live_floor_finish_takeoff_rows_by_workspace[1] == []
     gaps = app._ag09_family_coverage_by_workspace[1]["family_gaps"]
     assert any(
-        "live_room_area_customer_projection_failed:ValueError" in reason
+        reason.startswith("live_room_area_original_inclusion_excluded:")
         for reason in gaps.get("floor", ())
     ), repr(gaps)
     assert any(
