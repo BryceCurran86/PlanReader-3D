@@ -213,3 +213,29 @@ def test_live_schedule_source_shadow_is_bool_not_test_ocr_injection():
             source,revision_id=published.revision.revision_id,page_id="1",
             raster_text_source_shadow="true",
         )
+
+
+def test_compound_native_description_can_classify_glazed_kind_candidate_only():
+    words=(
+        *_row(1,"DOOR","SCHEDULE"),
+        *_row(2,"D02","900","2050","ALUMINIUM FRAMED GLASS DOOR"),
+    )
+    rows=_original_source_row_candidates(words)
+    assert len(rows)==1
+    assert rows[0].door_kind_candidate=="glazed_access_candidate"
+    assert rows[0].source_dimension_column_roles_authenticated is False
+    assert rows[0].width_height_metric_units_authenticated is False
+    assert rows[0].physical_host_or_frame_authenticated is False
+    assert rows[0].default_opening_count is None
+    assert rows[0].new_customer_quantity_authority is False
+
+
+def test_compound_native_roles_keep_opposing_source_kinds_in_conflict():
+    words=(
+        *_row(1,"DOOR","SCHEDULE"),
+        *_row(2,"D04","900","2050","DISPLAY SHELVING","SWING DOOR"),
+    )
+    rows=_original_source_row_candidates(words)
+    assert len(rows)==1
+    assert rows[0].door_kind_candidate=="original_door_kind_conflicting_source_roles"
+    assert rows[0].new_customer_quantity_authority is False
