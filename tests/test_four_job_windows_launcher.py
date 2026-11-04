@@ -353,3 +353,217 @@ def test_owner_partial_source_modes_are_explicit_and_default_remains_unmodified(
     assert selected.source_plan_page_index == 6
     with pytest.raises(SystemExit):
         parser.parse_args(["--family-group", "unverified"])
+
+
+def test_original_role_command_reuses_installed_source_closed_producer_not_a_new_launcher():
+    project = launcher.PROJECTS[1]
+    command = launcher.source_role_handoff_command(
+        Path("private-venv/python"), project,
+        Path("private-sources") / project, Path("new-private-output"),
+        family_group="all", timeout_min=60,
+        max_private_gb=10.0, min_free_commit_gb=3.0,
+    )
+    assert command[:3] == [
+        str(Path("private-venv/python")), "-m",
+        "tools.gpt3_owner_all_source_role_handoff",
+    ]
+    assert command[command.index("--project-id") + 1] == project
+    assert "--source-dir" in command and "--output-dir" in command
+    assert "--timeout-min" in command and "--max-private-gb" in command
+    assert "--min-free-commit-gb" in command
+    assert "--pdf" not in command and "reference_takeoff" not in repr(command)
+
+
+@pytest.mark.parametrize("family,timeout,private,free", [
+    ("all", 0, 10.0, 3.0), ("UNKNOWN", 30, 10.0, 3.0),
+    ("all", 30, -1.0, 3.0), ("all", 30, 10.0, -1.0),
+    ("all", True, 10.0, 3.0),
+])
+def test_original_role_command_rejects_unsafe_policy(family, timeout, private, free):
+    with pytest.raises(ValueError):
+        launcher.source_role_handoff_command(
+            Path("venv/python"), launcher.PROJECTS[0],
+            Path("sources"), Path("out"), family_group=family,
+            timeout_min=timeout, max_private_gb=private,
+            min_free_commit_gb=free,
+        )
+
+
+def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_rows(tmp_path):
+    project = launcher.PROJECTS[0]
+    file = tmp_path / "SOURCE_ROLE_STATUS.json"
+    assert launcher.source_role_handoff_status(
+        file, project=project, expected_roles=2,
+        process_status="COMPLETED", exit_code=0,
+    )["first_failure"] == "source_role_receipt_missing"
+    valid = {
+        "project_id": project, "expected_source_document_roles": 2,
+        "source_sha_verified": True,
+        "status": "ALL_ROLES_SEALED_CUSTOMER_AND_V2_PENDING",
+        "source_role_coverage_verified": True,
+        "customer_bijection_verified": False,
+        "benchmark_score_granted": False,
+        "official_four_project_accuracy": None,
+        "roles": [
+            {"sealed": True, "process_status": "COMPLETED", "first_failure": None},
+            {"sealed": True, "process_status": "COMPLETED", "first_failure": None},
+        ],
+    }
+    file.write_text(json.dumps(valid), encoding="utf-8")
+    result = launcher.source_role_handoff_status(
+        file, project=project, expected_roles=2,
+        process_status="COMPLETED", exit_code=0,
+    )
+    assert result == {
+        "source_role_coverage_verified": True, "sealed_roles": 2,
+        "expected_roles": 2, "first_failure": None,
+    }
+    for mutate in (
+        {"source_role_coverage_verified": False},
+        {"customer_bijection_verified": True},
+        {"benchmark_score_granted": True},
+        {"project_id": "other"},
+        {"source_sha_verified": False},
+        {"expected_source_document_roles": 1},
+    ):
+        file.write_text(json.dumps({**valid, **mutate}), encoding="utf-8")
+        assert launcher.source_role_handoff_status(
+            file, project=project, expected_roles=2,
+            process_status="COMPLETED", exit_code=0,
+        )["source_role_coverage_verified"] is False
+    file.write_text('{"project_id":"a","project_id":"b"}', encoding="utf-8")
+    assert launcher.source_role_handoff_status(
+        file, project=project, expected_roles=2,
+        process_status="COMPLETED", exit_code=0,
+    )["first_failure"] == "source_role_receipt_invalid"
+
+
+def test_pinned_original_role_runtime_rejects_changed_code_checkout(monkeypatch):
+    head = "a" * 40
+    def good(args, _repo):
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return _GitResult(0, head + "\n")
+        return _GitResult(0, "")
+    monkeypatch.setattr(launcher, "git", good)
+    assert launcher.pinned_source_tree_unchanged(Path("repo"), head) is True
+    monkeypatch.setattr(launcher, "git", lambda args, repo: (
+        _GitResult(0, "tracked-original-code-changed\n")
+        if args[0] == "status" else _GitResult(0, head + "\n")
+    ))
+    assert launcher.pinned_source_tree_unchanged(Path("repo"), head) is False
+    assert launcher.pinned_source_tree_unchanged(Path("repo"), "main") is False
+
+
+def test_all_source_roles_rejects_source_plan_page_selector(monkeypatch):
+    monkeypatch.setattr(sys, "argv", [
+        "four_job_windows_launcher.py", "--all-source-roles",
+        "--only", launcher.PROJECTS[0], "--source-plan-page-index", "2",
+    ])
+    with pytest.raises(SystemExit) as err:
+        launcher.main()
+    assert err.value.code == 2
+
+
+@pytest.mark.parametrize("failed_project", [None, "au_qld_maryborough_service_station"])
+def test_owner_four_job_opt_in_uses_existing_multi_role_source_producer(
+    tmp_path, monkeypatch, failed_project,
+):
+    from types import SimpleNamespace
+    kit = _kit(tmp_path / "private-kit")
+    home = tmp_path / "home"
+    runroot = home / "Documents" / "PlanReader_Private_V2_Run"
+    repo = runroot / "repo_readonly_snapshot"
+    inventory = json.loads((kit / "LOCAL_SOURCE_INVENTORY.json").read_text())
+    for project in launcher.PROJECTS:
+        doc_count = sum(row["project_id"] == project for row in inventory["docs"])
+        manifest = (
+            repo / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+            / "projects" / project / "source_manifest.json"
+        )
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({
+            "source_documents": [{"name": "original"}] * doc_count,
+        }), encoding="utf-8")
+    monkeypatch.chdir(kit)
+    monkeypatch.setattr(launcher.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: "git")
+    monkeypatch.setattr(launcher, "refresh_snapshot", lambda *a: "a" * 40)
+    monkeypatch.setattr(launcher, "pinned_source_tree_unchanged", lambda *a: True)
+    def fake_venv(folder, *, with_pip):
+        target = Path(folder) / (
+            "Scripts/python.exe" if launcher.os.name == "nt" else "bin/python"
+        )
+        target.parent.mkdir(parents=True)
+        target.write_text("synthetic interpreter")
+    monkeypatch.setattr(launcher.venv, "create", fake_venv)
+    def environment(args, **kwargs):
+        return SimpleNamespace(stdout=(
+            "3.13.0\n" if "-c" in args else "PyMuPDF==1.28.0\npytest==8.4.0\n"
+        ))
+    monkeypatch.setattr(launcher.subprocess, "run", environment)
+    invoked = []
+    def fake_logged(command, _cwd, logfile, **kwargs):
+        usage = {
+            "peak_working_set_kb": 0, "peak_private_kb": 0,
+            "min_system_free_commit_kb": None,
+        }
+        if "tools.gpt3_owner_all_source_role_handoff" not in command:
+            return 0, "COMPLETED", usage
+        invoked.append(command)
+        project = command[command.index("--project-id") + 1]
+        output = Path(command[command.index("--output-dir") + 1])
+        count = len(json.loads((
+            repo / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+            / "projects" / project / "source_manifest.json"
+        ).read_text())["source_documents"])
+        okay = project != failed_project
+        output.mkdir(parents=True)
+        (output / "SOURCE_ROLE_STATUS.json").write_text(json.dumps({
+            "project_id": project,
+            "expected_source_document_roles": count,
+            "source_sha_verified": True,
+            "status": (
+                "ALL_ROLES_SEALED_CUSTOMER_AND_V2_PENDING"
+                if okay else "SOURCE_ROLES_INCOMPLETE"
+            ),
+            "source_role_coverage_verified": okay,
+            "customer_bijection_verified": False,
+            "benchmark_score_granted": False,
+            "official_four_project_accuracy": None,
+            "roles": [
+                {
+                    "sealed": okay or i < count - 1,
+                    "process_status": "COMPLETED",
+                    "first_failure": (
+                        None if okay or i < count - 1
+                        else "role_producer_no_sealable_result"
+                    ),
+                }
+                for i in range(count)
+            ],
+        }), encoding="utf-8")
+        return (0, "COMPLETED", usage) if okay else (2, "PROCESS_FAILED", usage)
+    monkeypatch.setattr(launcher, "run_logged", fake_logged)
+    monkeypatch.setattr(sys, "argv", [
+        "four_job_windows_launcher.py", "--ref", "a" * 40,
+        "--all-source-roles", "--timeout-min", "1",
+    ])
+    result_code = launcher.main()
+    assert result_code == (0 if failed_project is None else 8)
+    assert len(invoked) == len(launcher.PROJECTS)
+    assert all("--pdf" not in cmd for cmd in invoked)
+    assert [cmd[cmd.index("--project-id") + 1] for cmd in invoked] == list(launcher.PROJECTS)
+    reports = list(runroot.glob("*/BENCHMARK_DIAGNOSTIC_STATUS.json"))
+    assert len(reports) == 1
+    status = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert status["repo_head"] == "a" * 40
+    assert len(status["project_handoffs"]) == 4
+    assert status["all_source_roles_requested"] is True
+    assert status["private_runtime_environment_unchanged"] is True
+    assert len(status["private_runtime_environment_sha256"]) == 64
+    assert status["source_scope_complete"] is (failed_project is None)
+    assert status["source_role_coverage_verified"] is (failed_project is None)
+    assert status["full_suite_publication_status"] == "UNPUBLISHED"
+    assert status["official_four_project_coverage_accuracy"] is None
+    assert all(x["customer_bijection_verified"] is False for x in status["project_handoffs"])
+    assert list(runroot.glob("*/PRIVATE_SOURCE_RUNTIME_PACKAGES.txt"))
