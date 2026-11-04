@@ -227,7 +227,13 @@ def _raster_corroborated_schedule_words(
 
 
 def _native_door_kind(words: tuple[str, ...]) -> str:
-    values=set(words)
+    # A CAD exporter may store a printed phrase in one native text span.
+    # Tokenise complete printed words only; substrings (INDOORING, etc.)
+    # never establish a mechanism. This remains a door-KIND CANDIDATE:
+    # full trusted text, table, metric/host and customer gates are separate.
+    values = set(words)
+    for source_span in words:
+        values.update(re.findall(r"[A-Za-z]+", source_span.upper()))
     # Contradictory original source roles must not elect a door category
     # by the ordering of our if-statements. Display shelving and an
     # opening-access leaf are physically different objects.
