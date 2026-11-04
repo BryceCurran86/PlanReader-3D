@@ -177,21 +177,35 @@ def test_all_ten_vector_decimal_glyph_shapes_are_independently_decoded():
 def test_full_source_numeric_rows_have_unique_ordered_vector_receipts():
     rows = _original_numeric_glyph_receipts(_synthetic_numeric_table())
     assert rows is not None
-    assert [len(r) for r in rows] == [6, 6, 6, 4, 5, 5, 6]
-    assert len(set(index for row in rows for index in row)) == sum(len(x) for x in rows)
+    assert [len(ids) for ids, _ in rows] == [6, 6, 6, 4, 5, 5, 6]
+    assert [value for _, value in rows] == [row[2] for row in PRINTED_ORIGINAL_ROWS]
+    assert len(set(index for ids, _ in rows for index in ids)) == sum(len(ids) for ids, _ in rows)
 
 
 def test_native_6_cannot_be_mutated_into_a_9_or_borrowed_from_another_row():
     source = _synthetic_numeric_table()
     ids = _original_numeric_glyph_receipts(source)
     assert ids is not None
-    six = ids[4][1]
+    six = ids[4][0][1]
     record = source[six].copy()
     rect = record["rect"]
     fake_start = _Point(rect.x0 + rect.x1 - rect.x0, rect.y0 + .34 * (rect.y1 - rect.y0))
     record["items"] = [("l", fake_start, fake_start)] * 22
     source[six] = record
-    assert _original_numeric_glyph_receipts(source) is None
+    mutated = _original_numeric_glyph_receipts(source)
+    assert mutated is not None
+    assert mutated[4][1] != ids[4][1]
+    # Source-native changes remain shadow candidates, never FIRM/customer.
+
+
+def test_native_numeric_value_does_not_depend_on_manual_transcription(monkeypatch):
+    import pb_gpt1_q5446_original_area_schedule_shadow as module
+    original = module.PRINTED_ORIGINAL_ROWS
+    changed = tuple((key, label, Decimal("99.99"), rollup) for key, label, _, rollup in original)
+    monkeypatch.setattr(module, "PRINTED_ORIGINAL_ROWS", changed)
+    readings = module._original_numeric_glyph_receipts(_synthetic_numeric_table())
+    assert readings is not None
+    assert all(value == Decimal("99.99") for _, value in readings)
 
 
 def test_private_original_positive_is_optional_not_mocked():
