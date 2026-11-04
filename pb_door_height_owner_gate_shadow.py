@@ -68,3 +68,198 @@ def assess_door_height_owner_gate_shadow(
         "measurement_published": False,
         "shadow_only": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Owner-approved second axis for a door that prints exactly ONE figure
+# ---------------------------------------------------------------------------
+#
+# The owner may approve a documented door height for a named scope (see
+# docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md s4). That
+# approval is an ASSUMPTION the owner supplies, not a measurement: it is never
+# FIRM, never a default in code, and it exists only as an explicit
+# ``MeasurementRecord`` bound to one proven physical opening. This function is a
+# review-only shadow: it publishes nothing and changes no quantity.
+
+_OWNER_AREA_REVIEW_GATE = "owner_approved_door_area_review_only"
+
+
+def _owner_area_result(record_id: str, gate: str, **extra: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "physical_opening_id": record_id,
+        "first_remaining_gate": gate,
+        "width_mm": None,
+        "height_mm": None,
+        "area_m2": None,
+        "second_axis_basis": None,
+        "approval_id": None,
+        "approved_by": None,
+        "label_evidence_id": None,
+        "invalid_reasons": [],
+        "used_typical_door_height_convention": False,
+        "measurement_published": False,
+        "shadow_only": True,
+    }
+    result.update(extra)
+    return result
+
+
+def _is_real_number(value: object) -> bool:
+    import math
+
+    return (
+        type(value) in (int, float)
+        and math.isfinite(value)  # type: ignore[arg-type]
+        and value > 0  # type: ignore[operator]
+    )
+
+
+def _owner_approval_issues(
+    approval: Any, *, page_id: str, source_sha256: str,
+) -> list[str]:
+    """Why an approval cannot stand as the owner's record for this opening."""
+    from datetime import datetime
+
+    from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+
+    issues: list[str] = []
+    if approval.source_type != MeasurementAuthorityType.USER_APPROVED.value:
+        issues.append("approval_source_type_not_user_approved")
+    if approval.authority_status != AuthorityStatus.USER_APPROVED.value:
+        issues.append("approval_authority_status_not_user_approved")
+    if type(approval.approved_by) is not str or not approval.approved_by.strip():
+        issues.append("approval_named_approver_missing")
+    stamp = None
+    if type(approval.approved_at) is str:
+        try:
+            stamp = datetime.fromisoformat(approval.approved_at)
+        except ValueError:
+            stamp = None
+    if stamp is None or stamp.tzinfo is None or stamp.utcoffset() is None:
+        issues.append("approval_timezone_aware_date_missing")
+    if approval.unit != "mm":
+        issues.append("approval_unit_not_mm")
+    if not _is_real_number(approval.value):
+        issues.append("approval_value_not_finite_positive")
+    if type(approval.page) is not int or str(approval.page) != str(page_id):
+        issues.append("approval_page_mismatch")
+    metadata = approval.metadata if isinstance(approval.metadata, dict) else {}
+    if metadata.get("second_axis") != "height":
+        issues.append("approval_second_axis_not_height")
+    if metadata.get("single_figure_axis") != "width":
+        issues.append("approval_single_figure_axis_not_width")
+    if metadata.get("source_sha256") != source_sha256:
+        issues.append("approval_source_sha256_mismatch")
+    return issues
+
+
+def assess_owner_approved_door_area_shadow(
+    *,
+    existence_record: Any,
+    label_result: Any,
+    approvals: Sequence[Any],
+) -> dict[str, Any]:
+    """Combine ONE printed door figure with the owner's approved height (review only).
+
+    Every input is a sealed record: the opening's existence record, the label
+    authority's result for that same opening, and explicit ``MeasurementRecord``
+    approvals. Nothing is read from geometry, scale, a swing radius, a default or
+    a caller-supplied area. A two-figure label always keeps its own path; the
+    approval is ignored there so existing signed areas cannot change.
+    """
+    import math
+
+    from pb_geometry_takeoff_model import MeasurementRecord
+    from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+    from pb_opening_label_dimension_authority import (
+        _MAX_OPENING_DIMENSION_MM,
+        _MIN_OPENING_DIMENSION_MM,
+        OpeningLabelDimensionResult,
+    )
+    from pb_physical_opening_authority import (
+        PHYSICAL_OPENING_EXISTS,
+        PhysicalOpeningExistenceRecord,
+    )
+
+    if type(existence_record) is not PhysicalOpeningExistenceRecord:
+        raise TypeError("existence_record must be PhysicalOpeningExistenceRecord")
+    if type(label_result) is not OpeningLabelDimensionResult:
+        raise TypeError("label_result must be OpeningLabelDimensionResult")
+    if not isinstance(approvals, (list, tuple)):
+        raise TypeError("approvals must be a list or tuple of MeasurementRecord")
+    if any(type(item) is not MeasurementRecord for item in approvals):
+        raise TypeError("every approval must be a MeasurementRecord")
+
+    record_id = str(existence_record.record_id)
+    if (
+        existence_record.status is not EvidenceResolutionStatus.CORROBORATED
+        or existence_record.proposition != PHYSICAL_OPENING_EXISTS
+    ):
+        return _owner_area_result(record_id, "physical_opening_not_proven")
+
+    evidence = label_result.evidence
+    if label_result.status is not EvidenceResolutionStatus.CORROBORATED or evidence is None:
+        return _owner_area_result(record_id, "label_dimension_not_corroborated")
+    label_id = str(evidence.evidence_id)
+    if (
+        evidence.opening_record_id != record_id
+        or str(evidence.page_id) != str(existence_record.page_id)
+    ):
+        return _owner_area_result(record_id, "label_not_bound_to_opening")
+
+    figures = tuple(evidence.dimension_values_mm)
+    if len(figures) == 2:
+        return _owner_area_result(
+            record_id, "printed_second_axis_present", label_evidence_id=label_id)
+    if len(figures) != 1:
+        return _owner_area_result(
+            record_id, "single_figure_not_available", label_evidence_id=label_id)
+    if evidence.semantic_kind != "door":
+        return _owner_area_result(
+            record_id, "opening_kind_not_door_authenticated", label_evidence_id=label_id)
+    width = figures[0]
+    if (
+        not _is_real_number(width)
+        or not (_MIN_OPENING_DIMENSION_MM <= width <= _MAX_OPENING_DIMENSION_MM)
+        or evidence.area_m2 is not None
+    ):
+        return _owner_area_result(
+            record_id, "printed_figure_invalid", label_evidence_id=label_id)
+
+    from dataclasses import asdict
+
+    targeted: dict[str, Any] = {}
+    for approval in approvals:
+        if approval.geometry_ref == record_id:
+            approval_id = stable_contract_id(
+                "opening_owner_height_approval", asdict(approval), digest_chars=32)
+            targeted.setdefault(approval_id, approval)
+    if not targeted:
+        return _owner_area_result(
+            record_id, "owner_approval_absent", label_evidence_id=label_id)
+    if len(targeted) > 1:
+        return _owner_area_result(
+            record_id, "owner_approval_conflict", label_evidence_id=label_id)
+
+    (approval_id, approval), = targeted.items()
+    issues = _owner_approval_issues(
+        approval, page_id=str(existence_record.page_id),
+        source_sha256=str(existence_record.source_sha256))
+    if issues:
+        return _owner_area_result(
+            record_id, "owner_approval_invalid", label_evidence_id=label_id,
+            approval_id=approval_id, invalid_reasons=issues)
+    height = float(approval.value)
+    if not (_MIN_OPENING_DIMENSION_MM <= height <= _MAX_OPENING_DIMENSION_MM):
+        return _owner_area_result(
+            record_id, "approved_height_outside_opening_bounds",
+            label_evidence_id=label_id, approval_id=approval_id)
+    area = float(width) * height / 1_000_000.0
+    if not math.isfinite(area) or area <= 0.0:
+        return _owner_area_result(
+            record_id, "printed_figure_invalid", label_evidence_id=label_id)
+    return _owner_area_result(
+        record_id, _OWNER_AREA_REVIEW_GATE,
+        width_mm=float(width), height_mm=height, area_m2=area,
+        second_axis_basis="user_approved", approval_id=approval_id,
+        approved_by=str(approval.approved_by), label_evidence_id=label_id)
