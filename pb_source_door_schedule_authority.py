@@ -17,6 +17,10 @@ import re
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 
 
 _DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
@@ -35,6 +39,8 @@ class SourceDoorScheduleWord:
     literal: str
     trusted: bool
     bbox_pdf_pts: tuple[float,float,float,float] = (0.,0.,0.,0.)
+    # Read-only two-render source proof when native font/clip text abstains.
+    raster_text_receipt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,7 @@ class SourceDoorScheduleRow:
     physical_host_or_frame_authenticated: bool = False
     default_opening_count: int | None = None
     new_customer_quantity_authority: bool = False
+    source_raster_text_receipt_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -152,6 +159,73 @@ def _producer_owned_native_words(
         w.block_no,w.line_no,w.word_no,w.observation_id)))
 
 
+
+def _raster_corroborated_schedule_words(
+    producer: SourceVisibilityProducer,
+    published,
+    words: tuple[SourceDoorScheduleWord, ...],
+    *,
+    raster_text_producer: RasterTextCorroborationProducer,
+) -> tuple[SourceDoorScheduleWord, ...]:
+    """Opt-in exact-source text lift for plausible native schedule blocks.
+
+    This does not merge blocks, infer printed numeric cells or assert table,
+    units, physical opening, host, frame or quantity. A raster producer must
+    belong to the very same immutable visibility producer. Only positive,
+    source-owned, dual-render native-word corroboration may lift glyph/clip
+    uncertainty; an OCR guess is never usable as an independent candidate.
+    """
+    if type(raster_text_producer) is not RasterTextCorroborationProducer:
+        raise TypeError("raster_text_producer must be source-owned")
+    if raster_text_producer._source is not producer:
+        raise ValueError("raster_source_schedule_producer_mismatch")
+    groups: dict[int, list[SourceDoorScheduleWord]] = defaultdict(list)
+    for word in words:
+        groups[word.block_no].append(word)
+    eligible = set()
+    for block, entries in groups.items():
+        printed = tuple(item.literal for item in entries)
+        role_headers = (
+            printed == ("DOOR", "SCHEDULE")
+            or {"WIDTH", "HEIGHT", "THICKNESS"} <= set(printed)
+            or {"No.", "ROOM", "NAME", "TYPE"} <= set(printed)
+        )
+        if (entries and _DOOR_CODE.fullmatch(entries[0].literal)) or role_headers:
+            eligible.add(block)
+    output = []
+    for word in words:
+        if word.trusted or word.block_no not in eligible:
+            output.append(word)
+            continue
+        selector = RasterTextCorroborationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=word.observation_id,
+        )
+        proof = raster_text_producer.publish(selector)
+        record = proof.record
+        if (
+            proof.status is EvidenceResolutionStatus.CORROBORATED
+            and record is not None
+            and record.native_observation_id == word.observation_id
+            and record.document_id == published.revision.document_id
+            and record.revision_id == published.revision.revision_id
+            and record.source_sha256 == published.revision.source_sha256
+            and record.snapshot_id == published.snapshot.snapshot_id
+            and record.page_id == word.page_id
+            and record.corroborated_text == word.literal
+            and proof.corroborated_text == word.literal
+            and record.record_id
+        ):
+            output.append(replace(word, trusted=True,
+                                  raster_text_receipt_id=record.record_id))
+        else:
+            output.append(word)
+    return tuple(output)
+
+
 def _native_door_kind(words: tuple[str, ...]) -> str:
     values=set(words)
     # Contradictory original source roles must not elect a door category
@@ -234,6 +308,10 @@ def _original_source_row_candidates(
             door_kind_candidate=_native_door_kind(strings),
             source_title_observation_ids=title_ids,
             complete_native_row_text_trusted=words_trusted,
+            source_raster_text_receipt_ids=tuple(sorted(
+                w.raster_text_receipt_id for w in source_words
+                if w.raster_text_receipt_id is not None
+            )),
             status="source_schedule_row_text_authenticated" if authenticated
                    else "source_schedule_row_text_unverified",
             first_unclosed_gate=(
@@ -433,6 +511,7 @@ def _original_door_schedule_column_proof(
 def inspect_published_door_schedule(
     producer: SourceVisibilityProducer, *,
     revision_id: str, page_id: str,
+    raster_text_producer: RasterTextCorroborationProducer | None = None,
 ) -> SourceDoorScheduleResult:
     if type(producer) is not SourceVisibilityProducer:
         raise TypeError("door_source_requires_existing_visibility_producer")
@@ -447,6 +526,10 @@ def inspect_published_door_schedule(
     if int(page_id) not in {int(x) for x in published.coverage.decoded_pages}:
         raise ValueError("source_door_page_not_in_published_source_coverage")
     words=_producer_owned_native_words(producer,published,page_id)
+    if raster_text_producer is not None:
+        words=_raster_corroborated_schedule_words(
+            producer,published,words,raster_text_producer=raster_text_producer,
+        )
     candidate_rows=_original_source_row_candidates(words)
     # Count all native code-bearing blocks before lexical row filtering.
     # A Dxx header with unrecognised hardware/description is negative
