@@ -407,6 +407,28 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish upstream original room-area inclusion revoked: "
                     f"{quantity.quantity_id}"
                 )
+            # The floor issuer must preserve source ownership and explicit
+            # commercial denial. A valid original room-area m² can still be
+            # internally FIRM but non-commercial; it cannot become INCLUDED
+            # FT2/FT3 just because material occurrence was authenticated.
+            if (
+                "commercial_projection_allowed" in original_area_metadata
+                and original_area_metadata["commercial_projection_allowed"]
+                is not True
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish upstream original room-area commercial "
+                    f"permission revoked: {quantity.quantity_id}"
+                )
+            for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+                if (
+                    restricted_flag in original_area_metadata
+                    and original_area_metadata[restricted_flag] is not False
+                ):
+                    raise SourceClosedRunConflictError(
+                        "floor-finish upstream original room-area source is "
+                        f"{restricted_flag}: {quantity.quantity_id}"
+                    )
 
         if (
             type(quantity.value) not in (int, float)
