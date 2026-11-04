@@ -82,7 +82,7 @@ def test_compound_role_must_be_full_printed_word_not_substring():
     assert _original_source_row_candidates(words)==()
 
 
-def test_opt_in_native_raster_source_proves_exact_door_code_without_quantity():
+def test_opt_in_native_raster_source_proves_exact_door_code_without_quantity(monkeypatch):
     from pb_source_door_schedule_authority import (
         _producer_owned_native_words, _raster_corroborated_schedule_words,
         inspect_published_door_schedule,
@@ -107,9 +107,14 @@ def test_opt_in_native_raster_source_proves_exact_door_code_without_quantity():
     original = inspect_published_door_schedule(
         setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
     )
+    from pb_raster_text_corroboration_authority import RasterTextCorroborationProducer
+    monkeypatch.setattr(
+        RasterTextCorroborationProducer, "from_source_visibility_producer",
+        lambda source: setup.producer if source is setup.svp else object(),
+    )
     optional = inspect_published_door_schedule(
         setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
-        raster_text_producer=setup.producer,
+        raster_text_source_shadow=True,
     )
     # Source-proven code alone does NOT mint a row without role/table cells.
     assert original.rows == optional.rows == ()
@@ -186,3 +191,25 @@ def test_raster_schedule_text_does_not_upgrade_unrelated_non_door_note():
         setup.svp, setup.published, words, raster_text_producer=setup.producer,
     )
     assert upgraded == words
+
+
+def test_live_schedule_source_shadow_is_bool_not_test_ocr_injection():
+    import pytest
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    import fitz
+    pdf = fitz.open()
+    pdf.new_page(width=200,height=200)
+    data = pdf.tobytes()
+    pdf.close()
+    source = SourceVisibilityProducer(producer_method="a600-opt-in-type-guard",
+                                      producer_version="1")
+    published = source.ingest_native_pdf_bytes(
+        document_id="a600-type-guard",source_bytes=data,
+        source_locator="memory://synthetic.pdf",page_ids=("1",),
+    )
+    with pytest.raises(TypeError,match="raster_text_source_shadow must be bool"):
+        inspect_published_door_schedule(
+            source,revision_id=published.revision.revision_id,page_id="1",
+            raster_text_source_shadow="true",
+        )
