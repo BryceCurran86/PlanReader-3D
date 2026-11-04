@@ -26,3 +26,15 @@ The frozen four-project 120-item score and expected quantities do not inform the
 ## Files/ownership
 
 Claimed for this bounded work: `pb_opening_schedule_v171.py::{parse_schedule_rows,parse_schedule_page}`, new `tests/test_gptmax_two_level_schedule_header_shadow.py` and this report. Protected GPT3 release pins, source-owned A600 producer/consumer, physical host/frame, GPT1 takeoff, original PDFs and #4194 remain untouched.
+
+## Subsequent live consumer correction (same bounded case)
+
+Read `pb_schedule_opening_instance_binding_authority._header_table_specs` and its existing `_schedule_entries_for_page` consumer, which extracts rows from producer-owned `SourceVisibilityProducer` trusted text with printed geometry. The live source-owned binder previously accepted mark+notes/description alone as a schedule table. Such a header could admit an unrelated labeled note as `ScheduleOpeningInstanceBindingRecord` with neither printed width nor height; `BINDING_RESOLVED` still reported source row ownership, not metric authority.
+
+The narrowly claimed additional change requires mark plus combined dimensions, or mark plus both separate width and height. Other type-only/notes-like text cannot masquerade as a dimensioned schedule table, while explicitly drawn side-by-side complete tables remain individually discoverable and competing rows still fail closed. The new tests call the *real binder's* `_header_table_specs` and `_schedule_entries_for_page`, exercising notes-before-real-table, complete/compound and side-by-side cases.
+
+**This is a live correctness/safety change, not yet a confirmed Maryborough recovery.** The handover's original A600 printed header has multiple native groups and a rotated coordinate frame; selecting a complete header from one flattened source row alone may still abstain. A source-backed next step must bind native column ownership already represented by `pb_source_door_schedule_authority._original_door_schedule_column_proof`, with source metric unit proof before mapping numeric fields into `*_mm`. A lexical integer is not an authenticated millimetre dimension. Preserve the original SourceDoorScheduleResult rivals and source word IDs. Enabling the optional compatibility parser in the live path would require the same original-positive source/physical/customer validation.
+
+For 3Laurel, the original text-trust diagnostic already attributes the zero-native-trust gate primarily to subset Type0 Identity-H fonts without an independently verifiable Unicode glyph cmap. Existing raster corroboration and amortized glyph shadows are the appropriate producers; do not grant trust from ToUnicode alone. No 3Laurel font, tag or quantity promotion is made in this PR.
+
+Full source-neutral Python3.13/3.14 CI and trusted owner-original replay are still required for the current exact head, and all candidate impacts remain unscored.
