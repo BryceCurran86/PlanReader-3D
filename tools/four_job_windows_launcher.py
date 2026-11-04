@@ -487,7 +487,10 @@ def source_role_handoff_status(
 def pinned_source_tree_unchanged(repo: Path, expected_head: str) -> bool:
     """Do not combine project receipts from a changed tracked source checkout."""
     actual = git(["rev-parse", "HEAD"], repo)
-    dirty = git(["status", "--porcelain", "--untracked-files=no"], repo)
+    # Untracked source modules can override tracked imports without changing
+    # HEAD. Reject those too: ignored private PDFs belong outside this code
+    # checkout, in the owner kit, not beside executable producer modules.
+    dirty = git(["status", "--porcelain", "--untracked-files=all"], repo)
     return (
         len(expected_head) == 40 and all(c in "0123456789abcdef" for c in expected_head)
         and actual.returncode == 0 and actual.stdout.strip() == expected_head
@@ -818,7 +821,11 @@ def main() -> int:
             stable_tree and stable_environment and selected_complete
             and len(projects) == len(PROJECTS) and opts.family_group == "all"
         )
-        summary["source_scope_complete"] = summary["source_role_coverage_verified"]
+        # A sealed document-role census is NOT completed physical/semantic
+        # quantity-universe closure, customer verification or V2 publication.
+        # Keep the legacy broad source-scope claim false until those separately
+        # authenticated production contracts exist.
+        summary["source_scope_complete"] = False
     output_report(session / "BENCHMARK_DIAGNOSTIC_STATUS.json", summary)
     output_report(session / "SHARE_SAFE_STATUS.json", share_safe(summary, str(Path.home())))
     note("\nPrivate diagnostic complete. Do not claim an official four-job accuracy score.")
