@@ -167,7 +167,8 @@ def build_viewer_html(*, title: str, image_data_url: str, image_size: tuple[int,
     marks live in this one file and in the owner's browser. The owner downloads the label file from the page."""
     payload = dict(document=document, page=page, structures_sha256=structures_sha256, render_sha256=render_sha256,
                    width=image_size[0], height=image_size[1],
-                   structures=[dict(id=s["id"], bbox=list(s["bbox"])) for s in structures_px])
+                   structures=[dict(id=s["id"], bbox=list(s["bbox"]), lines=[list(l) for l in s.get("lines", ())])
+                               for s in structures_px])
     html = _VIEWER_TEMPLATE
     html = html.replace("__TITLE__", _escape(title))
     html = html.replace("__PAYLOAD__", json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"))
@@ -200,7 +201,7 @@ button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 <div id="app"><div id="stage"><canvas id="cv"></canvas></div>
 <div id="side">
 <h1>Framed windows: mark each one</h1>
-<p class="muted">Click a window. Every outline that contains the click is drawn and listed; pick the one that is that window's frame, or say none fits. Windows only (not doors). Drag to pan, wheel to zoom. Nothing leaves this browser tab until you download the file.</p>
+<p class="muted">Click a window. Every outline that contains the click is listed, and the actual lines inside each outline are drawn in that outline's colour over a faded page (dashed box = its extent). Pick the one whose lines are that window's frame, or say none fits. Hover a button to see only that outline's lines. Windows only (not doors). Drag to pan, wheel to zoom. Nothing leaves this browser tab until you download the file.</p>
 <div id="count"></div>
 <div id="current"></div>
 <div id="actions">
@@ -237,12 +238,20 @@ function draw() {
   });
   if (pending) {
     ctx.strokeStyle = "#ff00ff"; ctx.lineWidth = lw; ctx.beginPath(); ctx.arc(pending.cx, pending.cy, 14 / scale, 0, 6.2832); ctx.stroke();
+    if (pending.ids.length) { ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fillRect(0, 0, P.width, P.height); }
     pending.ids.forEach(function (id, k) {
       const s = P.structures.find(function (t) { return t.id === id; });
-      ctx.strokeStyle = COLORS[k % COLORS.length]; ctx.lineWidth = (pending.hot === k ? 6 : 2.5) / scale;
+      const col = COLORS[k % COLORS.length], hot = pending.hot === k, dim = pending.hot !== null && pending.hot !== undefined && !hot;
+      ctx.globalAlpha = dim ? 0.3 : 1;
+      ctx.strokeStyle = col; ctx.lineWidth = (hot ? 2.5 : 1.5) / scale; ctx.setLineDash([6 / scale, 4 / scale]);
       ctx.strokeRect(s.bbox[0], s.bbox[1], s.bbox[2] - s.bbox[0], s.bbox[3] - s.bbox[1]);
-      ctx.fillStyle = COLORS[k % COLORS.length]; ctx.font = "bold " + (16 / scale) + "px sans-serif";
+      ctx.setLineDash([]);
+      ctx.lineWidth = (hot ? 5 : 3) / scale; ctx.beginPath();
+      (s.lines || []).forEach(function (l) { ctx.moveTo(l[0], l[1]); ctx.lineTo(l[2], l[3]); });
+      ctx.stroke();
+      ctx.fillStyle = col; ctx.font = "bold " + (16 / scale) + "px sans-serif";
       ctx.fillText(String(k + 1), s.bbox[0], s.bbox[1] - 3 / scale);
+      ctx.globalAlpha = 1;
     });
   }
   ctx.restore();
@@ -257,7 +266,8 @@ function ui() {
   el.appendChild(h);
   pending.ids.forEach(function (id, k) {
     const b = document.createElement("button");
-    b.innerHTML = '<span class="sw" style="background:' + COLORS[k % COLORS.length] + '"></span>Outline ' + (k + 1) + " is the window frame";
+    const st = P.structures.find(function (t) { return t.id === id; });
+    b.innerHTML = '<span class="sw" style="background:' + COLORS[k % COLORS.length] + '"></span>Outline ' + (k + 1) + " is the window frame (" + (st.lines || []).length + " lines)";
     b.onclick = function () { record("picked", id); };
     b.onmouseenter = function () { pending.hot = k; draw(); };
     b.onmouseleave = function () { pending.hot = null; draw(); };

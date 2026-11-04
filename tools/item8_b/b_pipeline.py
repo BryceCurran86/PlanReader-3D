@@ -27,6 +27,7 @@ class PageStructures:
     structures: list          # CandidateSemanticOpening, in candidate-id order
     extents: dict             # candidate_id -> (x0, y0, x1, y1) in the producer's (unrotated page) coordinates
     selector_for: object      # callable(observation_id) -> ObservationSelector
+    lines: dict               # candidate_id -> [(x0, y0, x1, y1), ...] member lines, same coordinates as `extents` (display only)
 
 
 def enumerate_page(label: str, pdf: Path, page_no: int) -> PageStructures:
@@ -51,12 +52,14 @@ def enumerate_page(label: str, pdf: Path, page_no: int) -> PageStructures:
     structures = sorted(physical._visible_structural_candidates(source_result.observation, tuple(records)),
                         key=lambda c: c.candidate_id)
     extents = {}
+    member_lines = {}
     for structure in structures:
         lines = [g for g in (_line_geometry(by_id[i]) for i in structure.source_observation_ids if i in by_id) if g]
         box = bbox_of_lines(lines)
         if box is not None:
             extents[structure.candidate_id] = box
-    return PageStructures(sha, producer, published, physical, structures, extents, selector)
+            member_lines[structure.candidate_id] = lines
+    return PageStructures(sha, producer, published, physical, structures, extents, selector, member_lines)
 
 
 def relation_rows(page: PageStructures, candidate_ids) -> list[dict]:

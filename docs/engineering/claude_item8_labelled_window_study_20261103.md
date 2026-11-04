@@ -87,6 +87,15 @@ Definitions R-A, R-B and R-C are those of S3 section A3, computed by the same co
    enumeration (refuses on any difference) and writes counts and id-free per-structure rows.
 4. `python tools/item8_b/b_aggregate.py <out> [<out> ...]` applies A4 and prints the verdicts.
 
+### A9. Instrument note (2026-11-05, before any result was read)
+The first viewer drew only each outline's bounding box. The owner reported that it "makes boxes and doesn't register the lines
+inside of them": with four to nine overlapping boxes per click, the box alone does not show which one holds the window's own
+lines. The viewer now also draws each listed outline's member lines in that outline's colour over a faded page, keeps the
+dashed box as the extent, and shows only the hovered outline's lines on hover. This changes what the owner can see, not what is
+recorded: the label file, the structure fingerprint (ids only), the relations and the decision rules are untouched, and the lines
+never enter any decision. Nothing about the Maryborough labels made with the first viewer had been analysed beyond file validation
+(counts of marks only); the owner may redo or confirm them with the lines viewer, and only the final label files are used.
+
 ---
 
 ## Part B. RESULTS

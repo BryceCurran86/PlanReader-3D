@@ -41,8 +41,14 @@ def build(label: str, pdf: Path, page_no: int, out_dir: Path) -> dict:
         structures_px = []
         for cid, (x0, y0, x1, y1) in sorted(page.extents.items()):
             corners = [fitz.Point(x, y) * matrix for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+            # The member lines are drawn by the viewer so the owner can see what is inside each outline. They are display only:
+            # the structure fingerprint (ids) and the label file never involve them.
+            drawn = []
+            for lx0, ly0, lx1, ly1 in page.lines[cid]:
+                a, b = fitz.Point(lx0, ly0) * matrix, fitz.Point(lx1, ly1) * matrix
+                drawn.append([round(a.x, 1), round(a.y, 1), round(b.x, 1), round(b.y, 1)])
             structures_px.append(dict(id=cid, bbox=[min(p.x for p in corners), min(p.y for p in corners),
-                                                    max(p.x for p in corners), max(p.y for p in corners)]))
+                                                    max(p.x for p in corners), max(p.y for p in corners)], lines=drawn))
     digest = structures_digest(structures_px)
     render_sha = sha256(png).hexdigest()
     html = build_viewer_html(title="Mark framed windows (%s p%d)" % (label, page_no),

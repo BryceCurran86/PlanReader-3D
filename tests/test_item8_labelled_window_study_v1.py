@@ -263,6 +263,18 @@ def test_viewer_embeds_the_payload_and_escapes_the_title_and_script_breakouts():
     assert data["structures"][0]["id"] == "x</script><b>"
 
 
+def test_viewer_carries_and_draws_the_member_lines_but_the_fingerprint_ignores_them():
+    with_lines = [dict(id="a", bbox=(0, 0, 10, 10), lines=[(0, 0, 10, 0), (0, 0, 0, 10)]), dict(id="b", bbox=(1, 1, 5, 5))]
+    html = viewer(with_lines)
+    payload = re.search(r"const P = (\{.*?\});\nconst COLORS", html, re.S).group(1).replace("<\\/", "</")
+    data = json.loads(payload)
+    assert data["structures"][0]["lines"] == [[0, 0, 10, 0], [0, 0, 0, 10]]
+    assert data["structures"][1]["lines"] == []          # a structure without lines still renders as an outline
+    assert "s.lines" in html and "moveTo(l[0], l[1])" in html
+    # display data must not change which structures exist: the fingerprint is over ids only
+    assert structures_digest(with_lines) == structures_digest([dict(id="a", bbox=(9, 9, 9, 9)), dict(id="b", bbox=(0, 0, 0, 0))])
+
+
 def test_the_label_file_the_viewer_writes_carries_no_coordinates():
     html = viewer()
     out = re.search(r'const out = \{(.*?)\};', html, re.S).group(1)
