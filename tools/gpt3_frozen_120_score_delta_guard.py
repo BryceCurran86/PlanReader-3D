@@ -29,6 +29,7 @@ _HEAD40 = re.compile(r"^[0-9a-f]{40}$")
 _WIN = "MATCHED_WITHIN_TOLERANCE"
 _SCHEMA = "gpt3-120-target-ledger-v1"
 _OUTPUT_SCHEMA = "gpt3-postscore-delta-v1"
+_SIGNED_RETENTION_SCHEMA = "gpt3-signed-customer-retention-v1"
 
 
 def _expected_inputs_and_targets() -> tuple[dict, dict, dict]:
@@ -321,22 +322,153 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
     }
 
 
+
+def _strict_signed_json(path: Path) -> Any:
+    """Reject missing/symlinked receipts and ambiguous duplicate JSON keys."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("signed retention input must be a regular source receipt")
+    def unique(pairs):
+        values = {}
+        for key, value in pairs:
+            if key in values:
+                raise ValueError("signed retention receipt has duplicate JSON key")
+            values[key] = value
+        return values
+    try:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError("signed retention receipt cannot be parsed") from exc
+
+
+def _canonical_signed_body(record: Mapping[str, Any]) -> str:
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def compare_signed_customer_retention(
+    baseline_seal_file: Path, candidate_seal_file: Path,
+    baseline_customer_file: Path, candidate_customer_file: Path,
+) -> dict[str, Any]:
+    """Compare every existing sealed/customer row without requiring 4/4 score.
+
+    This checks the exact signed/verified data supplied at BOTH paths. It
+    cannot attest that the candidate was freshly executed from a PDF; the
+    independent original-source production gate still owns that assertion.
+    """
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    if (
+        baseline_seal_file.resolve() == candidate_seal_file.resolve()
+        or baseline_customer_file.resolve() == candidate_customer_file.resolve()
+    ):
+        raise ValueError("baseline and candidate must be separate evidence files")
+
+    before = sealed_source_closed_run_from_dict(
+        _strict_signed_json(baseline_seal_file)
+    )
+    after = sealed_source_closed_run_from_dict(
+        _strict_signed_json(candidate_seal_file)
+    )
+    if not before.quantities or before.project_id != after.project_id:
+        raise ValueError("signed retention requires a real matching project baseline")
+    if not set(before.source_sha256s).issubset(set(after.source_sha256s)):
+        raise ValueError("source SHA universe dropped an existing signed source")
+
+    baseline_customers = _strict_signed_json(baseline_customer_file)
+    candidate_customers = _strict_signed_json(candidate_customer_file)
+    if type(baseline_customers) is not list or type(candidate_customers) is not list:
+        raise ValueError("signed retention customer receipts must be arrays")
+    before_verified = verify_sealed_customer_output(before, baseline_customers)
+    after_verified = verify_sealed_customer_output(after, candidate_customers)
+
+    def signed_by_id(run):
+        by_id = {q.quantity_id: q.to_dict() for q in run.quantities}
+        if len(by_id) != len(run.quantities):
+            raise ValueError("duplicate signed quantity identity")
+        return by_id
+
+    def customer_by_id(rows):
+        by_id = {}
+        for row in rows:
+            if type(row) is not dict:
+                raise ValueError("customer receipt must contain row mappings")
+            key = row.get("quantity_id")
+            if type(key) is str and key:
+                if key in by_id:
+                    raise ValueError("duplicate customer quantity identity")
+                by_id[key] = row
+        return by_id
+
+    old_signed = signed_by_id(before)
+    new_signed = signed_by_id(after)
+    old_customer = customer_by_id(baseline_customers)
+    new_customer = customer_by_id(candidate_customers)
+    if set(old_signed) - set(new_signed):
+        raise ValueError("candidate dropped an existing signed quantity")
+    if set(old_customer) - set(new_customer):
+        raise ValueError("candidate dropped an existing signed customer quantity")
+    if set(old_customer) != set(old_signed):
+        raise ValueError("baseline signed/customer quantity universe inconsistent")
+    for quantity_id, old in old_signed.items():
+        if _canonical_signed_body(old) != _canonical_signed_body(new_signed[quantity_id]):
+            raise ValueError("candidate rekeyed or modified an existing signed row")
+        if _canonical_signed_body(old_customer[quantity_id]) != _canonical_signed_body(
+            new_customer[quantity_id]
+        ):
+            raise ValueError("candidate changed an existing signed customer body")
+    if before_verified.valid_quantity_count != len(old_signed) or (
+        after_verified.valid_quantity_count != len(new_signed)
+    ):
+        raise ValueError("signed/customer receipt is incomplete")
+
+    return {
+        "schema_version": _SIGNED_RETENTION_SCHEMA,
+        "comparison_status": "SIGNED_AND_CUSTOMER_BODIES_PRESERVED",
+        "project_id": before.project_id,
+        "baseline_signed_quantity_count": len(old_signed),
+        "candidate_signed_quantity_count": len(new_signed),
+        "additional_signed_quantity_count": len(new_signed) - len(old_signed),
+        "baseline_customer_quantity_count": len(old_customer),
+        "candidate_customer_quantity_count": len(new_customer),
+        "baseline_body_retention": True,
+        "source_sha_universe_retained": True,
+        "official_score_comparison_available": False,
+        "original_source_producer_reexecuted_by_this_guard": False,
+    }
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--before-ledger", type=Path, required=True)
-    parser.add_argument("--after-ledger", type=Path, required=True)
+    parser.add_argument("--before-ledger", type=Path)
+    parser.add_argument("--after-ledger", type=Path)
+    parser.add_argument("--before-sealed-run", type=Path)
+    parser.add_argument("--after-sealed-run", type=Path)
+    parser.add_argument("--before-customer", type=Path)
+    parser.add_argument("--after-customer", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    signed_inputs = (
+        args.before_sealed_run, args.after_sealed_run,
+        args.before_customer, args.after_customer,
+    )
+    signed = any(path is not None for path in signed_inputs)
+    if signed:
+        if not all(path is not None for path in signed_inputs) or (
+            args.before_ledger is not None or args.after_ledger is not None
+        ):
+            parser.error("signed retention requires all four signed/customer files and no official ledgers")
+        inputs = signed_inputs
+        output_schema = _SIGNED_RETENTION_SCHEMA
+    else:
+        if args.before_ledger is None or args.after_ledger is None:
+            parser.error("official score delta requires both before/after ledgers")
+        inputs = (args.before_ledger, args.after_ledger)
+        output_schema = _OUTPUT_SCHEMA
+
     if (
         args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
-        or args.output.resolve() in (
-            args.before_ledger.resolve(), args.after_ledger.resolve()
-        )
+        or args.output.resolve() in tuple(path.resolve() for path in inputs)
     ):
         raise ValueError("cannot overwrite scoring inputs or benchmark truth")
-    # Only a fresh diagnostic or a previously written copy of *this* report
-    # is an admissible destination. Refuse to overwrite an unrelated customer,
-    # source, signed V1, or identity-map JSON in the same folder by accident.
     if args.output.is_symlink():
         raise ValueError("score comparison report cannot follow an output symlink")
     if args.output.exists():
@@ -344,23 +476,31 @@ def main(argv: list[str] | None = None) -> int:
             existing = _json_object(args.output)
         except (OSError, UnicodeError, ValueError) as exc:
             raise ValueError("score comparison may not overwrite other evidence") from exc
-        if existing.get("schema_version") != _OUTPUT_SCHEMA:
+        if existing.get("schema_version") != output_schema:
             raise ValueError("score comparison may not overwrite other evidence")
-    result = compare_postscore_ledgers(
-        _json_object(args.before_ledger), _json_object(args.after_ledger),
-    )
+    if signed:
+        result = compare_signed_customer_retention(*inputs)
+    else:
+        result = compare_postscore_ledgers(
+            _json_object(args.before_ledger), _json_object(args.after_ledger),
+        )
     _write_readiness_report(
         args.output, json.dumps(result, indent=2, sort_keys=True) + "\n",
-        # The two input files are protected above by exact resolved paths.
-        # Their containing directory is a valid location for a NEW report.
         protected_roots=(FROZEN_ROOT,),
     )
     print(json.dumps({
         "comparison_status": result["comparison_status"],
-        "score_comparison_available": result["score_comparison_available"],
-        "net_additional_correct_items": result["net_additional_correct_items"],
+        "score_comparison_available": (
+            False if signed else result["score_comparison_available"]
+        ),
+        "net_additional_correct_items": (
+            None if signed else result["net_additional_correct_items"]
+        ),
+        "baseline_signed_quantity_count": (
+            result["baseline_signed_quantity_count"] if signed else None
+        ),
     }, sort_keys=True))
-    return 0 if result["score_comparison_available"] else 2
+    return 0 if signed or result["score_comparison_available"] else 2
 
 
 if __name__ == "__main__":
