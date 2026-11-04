@@ -48,6 +48,8 @@ def provisional_full_120_results(
     """
     if type(frozen_score) is not dict or type(frozen_ledger) is not dict:
         raise ValueError("frozen development receipts must be objects")
+    if frozen_root.resolve() != _FROZEN_ROOT.resolve():
+        raise ValueError("development wrapper requires the immutable repository V2 truth")
     manifests = tuple(load_suite_manifests(frozen_root))
     if len(manifests) != 4:
         raise ValueError("expected four unchanged frozen projects")
@@ -203,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--failure-ledger-output", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.root.resolve() != _FROZEN_ROOT.resolve():
+        raise ValueError("only the immutable Full Plan V2 manifest root is allowed")
     if args.output.resolve() == args.failure_ledger_output.resolve():
         raise ValueError("provisional score and failure ledger need distinct outputs")
     protected = (args.root, args.sealed_dir, args.identity_map_dir)
