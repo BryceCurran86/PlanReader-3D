@@ -7,6 +7,7 @@ original drawing acceptance with synthetic receipts.
 import hashlib
 from pathlib import Path
 
+import fitz
 import pytest
 
 from tools.diag_gpt2_source_rcp_geometry_shadow import (
@@ -30,12 +31,12 @@ PWD={
 }
 
 @pytest.mark.skipif(not PDF.is_file(),reason="owner-private source required; not CI-verified")
-@pytest.mark.parametrize("pairs,code,word_address,anchor,gap",[
-    (OFFICE,"GRID",[10,1,0],"right",60.24),
-    (PWD,"IPF1",[80,3,0],"left",59.52),
+@pytest.mark.parametrize("pairs,code,anchor,gap",[
+    (OFFICE,"GRID","right",60.24),
+    (PWD,"IPF1","left",59.52),
 ])
 def test_original_p7_p9_ink_encloses_one_actual_mark_without_m2(
-    pairs,code,word_address,anchor,gap
+    pairs,code,anchor,gap
 ):
     raw=PDF.read_bytes()
     assert hashlib.sha256(raw).hexdigest()==SHA
@@ -53,8 +54,16 @@ def test_original_p7_p9_ink_encloses_one_actual_mark_without_m2(
     marks=result["original_RCP_source_mark_census"]
     assert marks["unique_native_code_word_in_enclosure"]
     assert len(marks["in_enclosure_candidates"])==1
-    assert marks["in_enclosure_candidates"][0][
-        "original_source_word_address"]==word_address
+    mark = marks["in_enclosure_candidates"][0]
+    # Native block numbers belong to the installed extractor version, not
+    # immutable PDF object identity. Reauthenticate the emitted address in
+    # these exact original bytes instead of pinning an older parser's index.
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        addressed = [word for word in doc[8].get_text("words")
+                     if list(word[5:8]) == mark["original_source_word_address"]]
+    assert len(addressed) == 1
+    assert addressed[0][4] == code
+    assert list(addressed[0][:4]) == mark["original_source_bbox_pdf_pts"]
     assert not result["source_ceiling_material_occurrence_issued"]
     assert not result["physical_ceiling_room_identity_proven"]
     assert not result["original_top_door_gap_physically_closed"]

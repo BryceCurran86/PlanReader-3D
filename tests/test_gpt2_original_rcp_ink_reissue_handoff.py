@@ -77,7 +77,7 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
           cross=None, issued_floor=None, floor_error=None,
           issued_w4=None, issued_ceiling=None, native_room_lines=None,
           open_floor=None, issued_open_ancestry=None,
-          painted_gap_inventory_complete=True):
+          painted_gap_inventory_complete=True, inventory_error_page=None):
     events = []
     actual = _ink() if issued is None else issued
 
@@ -125,12 +125,33 @@ def _call(monkeypatch, ink=None, *, issued=None, error=None,
             events.append(("reissue_original_open_doorway",kwargs))
             return deepcopy(issued_open_ancestry)
 
+    def inventory(original_bytes, *, page_1_based, original_room_graph,
+                  rival_receipt=None):
+        events.append(("replay_full_gap_ink", page_1_based))
+        assert original_bytes == b"source-neutral-bytes"
+        if page_1_based == inventory_error_page:
+            raise RuntimeError("original_source_page_inventory_unavailable")
+        complete = (
+            painted_gap_inventory_complete[page_1_based]
+            if type(painted_gap_inventory_complete) is dict
+            else painted_gap_inventory_complete
+        )
+        if rival_receipt is not None:
+            rival_receipt.update({
+                "page_1_based": page_1_based,
+                "first_failure": (
+                    None if complete
+                    else "original_doorway_gap_painted_ink_inventory_incomplete"
+                ),
+                "original_native_rival_ids": (
+                    () if complete else (f"d{page_1_based}i0",)
+                ),
+                "inventory_complete": complete,
+            })
+        return complete
+
     monkeypatch.setattr(
-        module, "_original_doorway_gap_native_ink_inventory_complete",
-        lambda *a, **k: (
-            events.append(("replay_full_gap_ink",k.get("page_1_based")))
-            or painted_gap_inventory_complete
-        ),
+        module, "_original_doorway_gap_native_ink_inventory_complete", inventory,
     )
 
     monkeypatch.setattr(
@@ -594,7 +615,7 @@ def _open_request(ancestry=None):
 
 
 def _call_with_open_floor(monkeypatch, *, graph=None, request=None, actual=None,
-                          full_page_ink=True, cross=None):
+                          full_page_ink=True, cross=None, inventory_error_page=None):
     registered=_cross() if cross is None else cross
     registered["original_floor_source_ids"]=OPEN_FLOOR_IDS
     return _call(
@@ -603,6 +624,7 @@ def _call_with_open_floor(monkeypatch, *, graph=None, request=None, actual=None,
         open_floor=_open_request() if request is None else request,
         issued_open_ancestry=_open_ancestry() if actual is None else actual,
         painted_gap_inventory_complete=full_page_ink,
+        inventory_error_page=inventory_error_page,
     )
 
 
@@ -628,6 +650,99 @@ def test_open_original_floor_d15_without_explicit_original_replay_abstains(
     assert result["status"]=="source_floor_RCP_registration_issuer_not_replayable"
     assert "material" not in [v[0] for v in events]
     assert result["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("failed_pages", [(7,), (11,), (7, 11)])
+def test_open_floor_rcp_rejection_retains_both_independent_gap_inventories(
+    monkeypatch, failed_pages,
+):
+    request = _open_request()
+    original_request = deepcopy(request)
+    result, events = _call_with_open_floor(
+        monkeypatch, request=request,
+        full_page_ink={page: page not in failed_pages for page in (7, 11)},
+    )
+    assert result["status"] == "source_floor_RCP_registration_issuer_not_replayable"
+    assert result["first_failure"] == (
+        "original_doorway_gap_painted_ink_inventory_incomplete"
+    )
+    assert [e[1] for e in events if e[0] == "replay_full_gap_ink"] == [7, 11]
+    assert result["source_original_doorway_gap_rival_receipts"] == tuple(
+        {
+            "page_1_based": page,
+            "first_failure": (
+                "original_doorway_gap_painted_ink_inventory_incomplete"
+                if page in failed_pages else None
+            ),
+            "original_native_rival_ids": (
+                (f"d{page}i0",) if page in failed_pages else ()
+            ),
+            "inventory_complete": page not in failed_pages,
+        }
+        for page in (7, 11)
+    )
+    assert {"material", "w4", "ceiling_handoff"}.isdisjoint(e[0] for e in events)
+    assert result["source_ceiling_area_m2"] is None
+    assert result["new_firm_quantities"] == 0
+    assert request == original_request
+
+
+@pytest.mark.parametrize("forged_positive", [False, True])
+def test_open_floor_source_conflict_retains_reissued_rivals_before_rejecting(
+    monkeypatch, forged_positive,
+):
+    actual = _open_ancestry()
+    actual.update(
+        status="original_doorway_source_endpoint_rival_conflict",
+        first_unclosed_gate="original_short_wall_stub_disagrees_across_sheets",
+        original_gap_endpoint_rivals=({"source_rival": "original-short-stub"},),
+    )
+    request = _open_request(None if forged_positive else actual)
+    result, events = _call_with_open_floor(
+        monkeypatch, actual=actual, request=request, full_page_ink=False,
+    )
+    assert result["status"] == "source_floor_RCP_registration_issuer_not_replayable"
+    assert result["first_failure"] == (
+        "original_doorway_caller_receipt_mismatch" if forged_positive
+        else "original_short_wall_stub_disagrees_across_sheets"
+    )
+    assert result["original_doorway_source_ancestry"] == actual
+    assert result["original_doorway_reissued_status"] == actual["status"]
+    assert result["original_doorway_reissued_first_unclosed_gate"] == (
+        actual["first_unclosed_gate"]
+    )
+    assert [e[1] for e in events if e[0] == "replay_full_gap_ink"] == [7, 11]
+    receipts = result["source_original_doorway_gap_rival_receipts"]
+    assert [r["page_1_based"] for r in receipts] == [7, 11]
+    assert [r["original_native_rival_ids"] for r in receipts] == [
+        ("d7i0",), ("d11i0",),
+    ]
+    assert {"material", "w4", "ceiling_handoff"}.isdisjoint(e[0] for e in events)
+    assert result["source_ceiling_area_m2"] is None
+    assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("error_page", [7, 11])
+def test_one_gap_inventory_failure_cannot_drop_the_other_pages_original_rivals(
+    monkeypatch, error_page,
+):
+    result, events = _call_with_open_floor(
+        monkeypatch, full_page_ink=False, inventory_error_page=error_page,
+    )
+    assert [e[1] for e in events if e[0] == "replay_full_gap_ink"] == [7, 11]
+    assert result["first_failure"] == "original_doorway_gap_painted_ink_inventory_incomplete"
+    receipts = result["source_original_doorway_gap_rival_receipts"]
+    assert [r["page_1_based"] for r in receipts] == [7, 11]
+    for receipt in receipts:
+        assert receipt["inventory_complete"] is False
+        if receipt["page_1_based"] == error_page:
+            assert receipt["first_failure"] == "original_doorway_gap_inventory_reissue_failed"
+            assert receipt["original_native_rival_ids"] == ()
+        else:
+            assert receipt["original_native_rival_ids"] == (f"d{receipt['page_1_based']}i0",)
+    assert {"material", "w4", "ceiling_handoff"}.isdisjoint(e[0] for e in events)
+    assert result["source_ceiling_area_m2"] is None
+    assert result["new_firm_quantities"] == 0
 
 
 @pytest.mark.parametrize("kind",[

@@ -1587,9 +1587,7 @@ class GPT2OriginalSourceGeometryBridge:
                     original_second_source_edge_ids=second_ids,
                     original_translation_pdf_pts=tuple(second_shift),
                 )
-                if (reissued!=expected or
-                        reissued.get("status") !=
-                            "original_doorway_all_printed_wall_strokes_match_candidate"
+                if (type(reissued) is not dict
                         or reissued.get("source_document_id") !=
                             published.revision.document_id
                         or reissued.get("source_revision_id") != revision_id
@@ -1606,21 +1604,73 @@ class GPT2OriginalSourceGeometryBridge:
                         or b.get("original_native_edge_ids") !=
                            tuple(sorted(second_ids))):
                     return blocked_registration
+                # Preserve only the independently reissued source object,
+                # including a real negative and its exact source rivals.
+                # Caller receipt agreement is checked separately below.
+                blocked_registration = {
+                    **blocked_registration,
+                    "original_doorway_source_ancestry": reissued,
+                    "original_doorway_reissued_status": reissued.get("status"),
+                    "original_doorway_reissued_first_unclosed_gate": (
+                        reissued.get("first_unclosed_gate")
+                    ),
+                }
                 _,original_bytes=self._source_revision(
                     revision_id,page_1_based=original_floor_page_1_based)
-                if not (
-                    _original_doorway_gap_native_ink_inventory_complete(
-                        original_bytes,
-                        page_1_based=original_floor_page_1_based,
-                        original_room_graph=a,
-                    )
-                    and _original_doorway_gap_native_ink_inventory_complete(
-                        original_bytes,
-                        page_1_based=second,
-                        original_room_graph=b,
-                    )
+                floor_ink_rivals = {}
+                second_ink_rivals = {}
+                # Each source page owns an independent negative inventory.
+                # A veto or replay failure on one must not suppress the other.
+                inventories_complete = []
+                for page, graph, receipt in (
+                    (original_floor_page_1_based, a, floor_ink_rivals),
+                    (second, b, second_ink_rivals),
                 ):
-                    return blocked_registration
+                    try:
+                        complete = _original_doorway_gap_native_ink_inventory_complete(
+                            original_bytes, page_1_based=page,
+                            original_room_graph=graph, rival_receipt=receipt,
+                        )
+                    except (KeyError, ValueError, TypeError, IndexError,
+                            OverflowError, RuntimeError):
+                        # Retain already observed rivals if a replay stops.
+                        receipt.update({
+                            "page_1_based": page,
+                            "first_failure": "original_doorway_gap_inventory_reissue_failed",
+                            "original_native_rival_ids": receipt.get(
+                                "original_native_rival_ids", (),
+                            ),
+                            "inventory_complete": False,
+                        })
+                        complete = False
+                    inventories_complete.append(complete is True)
+                blocked_registration = {
+                    **blocked_registration,
+                    "source_original_doorway_gap_rival_receipts": (
+                        floor_ink_rivals, second_ink_rivals,
+                    ),
+                }
+                if reissued != expected:
+                    return {
+                        **blocked_registration,
+                        "first_failure": "original_doorway_caller_receipt_mismatch",
+                    }
+                if reissued.get("status") != (
+                    "original_doorway_all_printed_wall_strokes_match_candidate"
+                ):
+                    producer_gate = reissued.get("first_unclosed_gate")
+                    return {
+                        **blocked_registration,
+                        "first_failure": (
+                            producer_gate if type(producer_gate) is str and producer_gate
+                            else "original_doorway_reissued_source_conflict"
+                        ),
+                    }
+                if not all(inventories_complete):
+                    return {
+                        **blocked_registration,
+                        "first_failure": "original_doorway_gap_painted_ink_inventory_incomplete",
+                    }
                 floor=claimed_floor
             
             claimed_rcp = Polygon(
