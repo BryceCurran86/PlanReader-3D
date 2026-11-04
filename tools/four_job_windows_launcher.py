@@ -387,6 +387,109 @@ def share_safe(status: dict, home: str) -> dict:
     return json.loads(text)
 
 
+
+def source_role_handoff_command(
+    python: Path, project: str, source_root: Path, output_dir: Path, *,
+    family_group: str, timeout_min: int, max_private_gb: float,
+    min_free_commit_gb: float,
+) -> list[str]:
+    """Reuse the *existing* SHA-verified per-role producer on one pinned tree.
+
+    Unlike handoff_bootstrap, this processes every frozen source role, not
+    merely the primary architectural PDF. It does not call a benchmark scorer.
+    """
+    if (
+        project not in PROJECTS or family_group not in ("all", "core", "surfaces", "floor_area")
+        or type(timeout_min) is not int or timeout_min < 1
+        or type(max_private_gb) not in (int, float) or not 0 < max_private_gb < 100000
+        or type(min_free_commit_gb) not in (int, float)
+        or not 0 <= min_free_commit_gb < 100000
+    ):
+        raise ValueError("invalid owner original-role execution inputs")
+    return [
+        str(python), "-m", "tools.gpt3_owner_all_source_role_handoff",
+        "--project-id", project, "--source-dir", str(source_root),
+        "--output-dir", str(output_dir), "--family-group", family_group,
+        "--timeout-min", str(timeout_min),
+        "--max-private-gb", str(max_private_gb),
+        "--min-free-commit-gb", str(min_free_commit_gb),
+    ]
+
+
+def source_role_handoff_status(
+    result_file: Path, *, project: str, expected_roles: int,
+    process_status: str, exit_code: int | None,
+) -> dict:
+    """Classify actual child role seals; never promote role-only to customer."""
+    negative = {
+        "source_role_coverage_verified": False,
+        "sealed_roles": 0, "expected_roles": expected_roles,
+        "first_failure": "source_role_receipt_missing",
+    }
+    if not result_file.is_file() or result_file.is_symlink():
+        return negative
+    try:
+        def unique(pairs):
+            out = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError("duplicate source role receipt property")
+                out[key] = value
+            return out
+        report = json.loads(result_file.read_text(encoding="utf-8"), object_pairs_hook=unique)
+    except (OSError, UnicodeError, ValueError):
+        return {**negative, "first_failure": "source_role_receipt_invalid"}
+    roles = report.get("roles") if type(report) is dict else None
+    if (
+        type(report) is not dict or type(roles) is not list
+        or report.get("project_id") != project
+        or type(expected_roles) is not int or expected_roles < 1
+        or report.get("expected_source_document_roles") != expected_roles
+        or len(roles) != expected_roles
+        or report.get("source_sha_verified") is not True
+        or report.get("customer_bijection_verified") is not False
+        or report.get("benchmark_score_granted") is not False
+        or report.get("official_four_project_accuracy") is not None
+        or any(
+            type(role) is not dict or type(role.get("sealed")) is not bool
+            or type(role.get("process_status")) is not str
+            or role.get("first_failure") is not None
+            and type(role.get("first_failure")) is not str
+            for role in roles
+        )
+    ):
+        return {**negative, "first_failure": "source_role_receipt_invalid"}
+    sealed_count = sum(role["sealed"] for role in roles)
+    complete = (
+        process_status == "COMPLETED" and exit_code == 0
+        and report.get("source_role_coverage_verified") is True
+        and report.get("status") == "ALL_ROLES_SEALED_CUSTOMER_AND_V2_PENDING"
+        and sealed_count == expected_roles
+        and all(role["first_failure"] is None for role in roles)
+    )
+    first_failure = next(
+        (role["first_failure"] for role in roles if role["first_failure"] is not None),
+        "source_role_producer_incomplete",
+    )
+    return {
+        "source_role_coverage_verified": complete,
+        "sealed_roles": sealed_count,
+        "expected_roles": expected_roles,
+        "first_failure": None if complete else first_failure,
+    }
+
+
+def pinned_source_tree_unchanged(repo: Path, expected_head: str) -> bool:
+    """Do not combine project receipts from a changed tracked source checkout."""
+    actual = git(["rev-parse", "HEAD"], repo)
+    dirty = git(["status", "--porcelain", "--untracked-files=no"], repo)
+    return (
+        len(expected_head) == 40 and all(c in "0123456789abcdef" for c in expected_head)
+        and actual.returncode == 0 and actual.stdout.strip() == expected_head
+        and dirty.returncode == 0 and not dirty.stdout.strip()
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source-only", action="store_true",
