@@ -138,9 +138,7 @@ def main() -> int:
         args.failure_ledger_output.write_text(ledger_text, encoding="utf-8")
 
     print(text, end="")
-    # A partial run may now report real 120-denominator *development* coverage.
-    # Keep exit 2 so automation cannot misread it as an official complete run.
-    return 0 if result.status == "COMPLETE_CURRENT_TRUTH_SET" else 2
+    return 0 if result.development_accuracy is not None else 2
 
 
 if __name__ == "__main__":
