@@ -203,7 +203,7 @@ def _original_source_row_candidates(
         # Bare plan labels and free-form notes with no printed numeric pair
         # stay outside the schedule candidate set.
         compound_role = any(
-            re.search(r"\\b(?:DOOR|SWING|SLIDING|DISPLAY|SHELVING|AUTOMATED)\\b",
+            re.search(r"\b(?:DOOR|SWING|SLIDING|DISPLAY|SHELVING|AUTOMATED)\b",
                       word.literal, flags=re.IGNORECASE)
             for word in source_words[1:]
         )
