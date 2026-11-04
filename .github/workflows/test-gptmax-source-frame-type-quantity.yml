@@ -1,0 +1,47 @@
+name: GPT MAX source-owned nominal elevation type areas
+
+on:
+  push:
+    branches:
+      - gptmax/elevation-frame-type-evidence-20261105
+  pull_request:
+    paths:
+      - pb_source_elevation_frame_type_quantity.py
+      - tests/test_gptmax_nominal_elevation_frame_type_evidence.py
+      - .github/workflows/test-gptmax-source-frame-type-quantity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-type:
+    name: Nominal type area, no installed promotion (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      PYTHONPATH: .:tests
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install full production and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Positive source frame type and adversarial no-installed regressions
+        run: |
+          python -m pytest -q \
+            tests/test_gptmax_nominal_elevation_frame_type_evidence.py \
+            tests/test_opening_elevation_frame_area_authority.py \
+            tests/test_live_opening_area_quantity_publication.py
+      - name: Verify syntax and undefined references
+        run: |
+          python -m compileall -q pb_source_elevation_frame_type_quantity.py tests/test_gptmax_nominal_elevation_frame_type_evidence.py
+          ruff check --select F821,F823 pb_source_elevation_frame_type_quantity.py tests/test_gptmax_nominal_elevation_frame_type_evidence.py
