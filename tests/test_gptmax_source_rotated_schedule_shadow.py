@@ -126,7 +126,17 @@ def test_live_physical_composer_exposes_default_off_source_rotation():
         source_visibility_producer=source,wall_opening_composition=wall,
         rotated_native_schedule_shadow=True,
     )
-    assert shadow == original
+    # Authority objects are live producer instances and deliberately compare
+    # by identity. Compare the complete public/source contract instead.
+    assert shadow.revision_id == original.revision_id
+    assert shadow.status == original.status
+    assert shadow.reason_codes == original.reason_codes
+    assert shadow.traces == original.traces
+    assert shadow.canonical_openings == original.canonical_openings
+    assert shadow.void_selectors == original.void_selectors
+    assert set(shadow.physical_opening_void_authorities) == set(
+        original.physical_opening_void_authorities
+    )
     with pytest.raises(TypeError,match="rotated_native_schedule_shadow must be bool"):
         compose_live_physical_opening_voids(
             source_visibility_producer=source,wall_opening_composition=wall,
