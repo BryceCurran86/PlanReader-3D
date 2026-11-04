@@ -113,3 +113,64 @@ def test_missing_or_incomplete_header_abstains_without_heuristic_fallback():
 def test_only_boolean_opt_in_is_accepted(invalid):
     with pytest.raises(TypeError, match="two_level_header must be a bool"):
         parse_schedule_rows([_row("Mark\tSize")], two_level_header=invalid)
+
+
+# Actual producer-owned physical-opening instance schedule seam.
+# These are source-neutral row contracts, not fake original-source receipts.
+from pb_schedule_opening_instance_binding_authority import (
+    _header_table_specs,
+    _schedule_entries_for_page,
+)
+
+
+def _native_header(cells: tuple[str, ...], y: float):
+    return (
+        {
+            "text": "\t".join(cells),
+            "bounds": [(float(i * 80), float(i * 80 + 50)) for i in range(len(cells))],
+            "center_y": y,
+        },
+        tuple(f"source-word-{int(y)}-{i}" for i in range(len(cells))),
+    )
+
+
+@pytest.mark.parametrize("cells", [
+    ("DOOR", "NOTES"),
+    ("MARK", "DESCRIPTION"),
+    ("MARK", "WIDTH", "NOTES"),
+    ("MARK", "HEIGHT", "COUNT"),
+])
+def test_real_instance_schedule_producer_ignores_dimensionless_headers(cells):
+    row, ids = _native_header(cells, 10)
+    assert _header_table_specs(row, ids) == []
+
+
+def test_real_instance_schedule_producer_rejects_note_before_real_table():
+    note = _native_header(("DOOR", "NOTES"), 10)
+    faux = _native_header(("D01", "920x2040"), 19)
+    header = _native_header(("MARK", "WIDTH", "HEIGHT"), 30)
+    real = _native_header(("D01", "920", "2040"), 39)
+    found = _schedule_entries_for_page((note, faux, header, real), 28)
+    assert len(found) == 1
+    entry, ids = found[0]
+    assert entry.type_mark == "D01"
+    assert (entry.width_mm, entry.height_mm) == (920, 2040)
+    assert entry.dimension_basis == ""
+    assert entry.count_explicit is False
+    assert ids == real[1]
+
+
+def test_real_instance_schedule_producer_still_accepts_complete_headers():
+    for cells in (
+        ("MARK", "SIZE"),
+        ("MARK", "WIDTH", "HEIGHT"),
+        ("DOOR", "TYPE", "WIDTH", "HEIGHT"),
+    ):
+        row, ids = _native_header(cells, 10)
+        assert len(_header_table_specs(row, ids)) == 1
+
+
+def test_real_instance_schedule_producer_preserves_two_side_by_side_headers():
+    cells = ("MARK", "WIDTH", "HEIGHT", "MARK", "WIDTH", "HEIGHT")
+    row, ids = _native_header(cells, 10)
+    assert len(_header_table_specs(row, ids)) == 2
