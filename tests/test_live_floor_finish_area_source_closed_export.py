@@ -1734,3 +1734,83 @@ def test_original_included_room_area_still_supports_exact_signed_ft_finish():
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"commercial_projection_allowed": False},
+    {"commercial_projection_allowed": None},
+    {"commercial_projection_allowed": 0},
+    {"commercial_projection_allowed": "true"},
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": None},
+    {"shadow_only": True},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_room_area_denial_is_preserved_by_floor_issuer_and_blocks_ft(
+    source_denial,
+):
+    """A denied ROOM-area receipt may not reappear as included FT finish m²."""
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    original = _independent_source_room_area()
+    denied = replace(
+        original,
+        metadata={**original.metadata, **source_denial},
+    )
+    claim = replace(_claim(), room_area_quantity_evidence=(denied,))
+    reissued = publish_live_floor_area_quantities(claim)
+    assert len(reissued) == 1
+    assert reissued[0].value == 8.64
+    assert reissued[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
+    for field, flag in source_denial.items():
+        assert reissued[0].metadata[field] == flag
+    if "commercial_projection_allowed" in source_denial:
+        expected = "upstream original room-area commercial permission revoked"
+    elif "quantity_handoff_only" in source_denial:
+        expected = "upstream original room-area source is quantity_handoff_only"
+    else:
+        expected = "upstream original room-area source is shadow_only"
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match=expected):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.room_area_quantity_evidence == (denied,)
+    assert denied.value == 8.64
+
+
+def test_original_room_area_explicit_true_permission_supports_real_ft_seal():
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    source = _independent_source_room_area()
+    affirmative = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = replace(_claim(), room_area_quantity_evidence=(affirmative,))
+    reissued = publish_live_floor_area_quantities(claim)
+    assert len(reissued) == 1
+    assert reissued[0].metadata["commercial_projection_allowed"] is True
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["quantity"] == reissued[0].value == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
