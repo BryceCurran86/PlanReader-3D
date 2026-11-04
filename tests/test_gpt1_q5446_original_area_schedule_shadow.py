@@ -200,12 +200,15 @@ def test_native_6_cannot_be_mutated_into_a_9_or_borrowed_from_another_row():
 
 def test_native_numeric_value_does_not_depend_on_manual_transcription(monkeypatch):
     import pb_gpt1_q5446_original_area_schedule_shadow as module
+    source = _synthetic_numeric_table()
+    expected = module._original_numeric_glyph_receipts(source)
+    assert expected is not None
     original = module.PRINTED_ORIGINAL_ROWS
     changed = tuple((key, label, Decimal("99.99"), rollup) for key, label, _, rollup in original)
     monkeypatch.setattr(module, "PRINTED_ORIGINAL_ROWS", changed)
-    readings = module._original_numeric_glyph_receipts(_synthetic_numeric_table())
-    assert readings is not None
-    assert all(value == Decimal("99.99") for _, value in readings)
+    readings = module._original_numeric_glyph_receipts(source)
+    assert readings == expected
+    assert any(value != Decimal("99.99") for _, value in readings)
 
 
 def test_private_original_positive_is_optional_not_mocked():
