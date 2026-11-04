@@ -458,6 +458,15 @@ def test_pinned_original_role_runtime_rejects_changed_code_checkout(monkeypatch)
         return _GitResult(0, "")
     monkeypatch.setattr(launcher, "git", good)
     assert launcher.pinned_source_tree_unchanged(Path("repo"), head) is True
+    status_calls = []
+    def untracked_poison(args, repo):
+        if args[0] == "status":
+            status_calls.append(list(args))
+            return _GitResult(0, "?? tools/untracked_producer_override.py\n")
+        return _GitResult(0, head + "\n")
+    monkeypatch.setattr(launcher, "git", untracked_poison)
+    assert launcher.pinned_source_tree_unchanged(Path("repo"), head) is False
+    assert status_calls == [["status", "--porcelain", "--untracked-files=all"]]
     monkeypatch.setattr(launcher, "git", lambda args, repo: (
         _GitResult(0, "tracked-original-code-changed\n")
         if args[0] == "status" else _GitResult(0, head + "\n")
@@ -573,7 +582,9 @@ def test_owner_four_job_opt_in_uses_existing_multi_role_source_producer(
     assert status["all_source_roles_requested"] is True
     assert status["private_runtime_environment_unchanged"] is True
     assert len(status["private_runtime_environment_sha256"]) == 64
-    assert status["source_scope_complete"] is (failed_project is None)
+    # Role seals are real source-role execution, NOT completed cross-family
+    # quantity/customer source closure or frozen suite publication.
+    assert status["source_scope_complete"] is False
     assert status["source_role_coverage_verified"] is (failed_project is None)
     assert status["full_suite_publication_status"] == "UNPUBLISHED"
     assert status["official_four_project_coverage_accuracy"] is None
