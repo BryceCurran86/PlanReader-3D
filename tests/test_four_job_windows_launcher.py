@@ -391,9 +391,10 @@ def test_original_role_command_rejects_unsafe_policy(family, timeout, private, f
 
 def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_rows(tmp_path):
     project = launcher.PROJECTS[0]
+    roster = (("architectural", "a" * 64), ("structural", "b" * 64))
     file = tmp_path / "SOURCE_ROLE_STATUS.json"
     assert launcher.source_role_handoff_status(
-        file, project=project, expected_roles=2,
+        file, project=project, expected_roles=2, expected_roster=roster,
         process_status="COMPLETED", exit_code=0,
     )["first_failure"] == "source_role_receipt_missing"
     valid = {
@@ -405,19 +406,39 @@ def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_row
         "benchmark_score_granted": False,
         "official_four_project_accuracy": None,
         "roles": [
-            {"sealed": True, "process_status": "COMPLETED", "first_failure": None},
-            {"sealed": True, "process_status": "COMPLETED", "first_failure": None},
+            {"role": "architectural", "sha256": "a" * 64,
+             "sealed": True, "process_status": "COMPLETED", "first_failure": None},
+            {"role": "structural", "sha256": "b" * 64,
+             "sealed": True, "process_status": "COMPLETED", "first_failure": None},
         ],
     }
     file.write_text(json.dumps(valid), encoding="utf-8")
     result = launcher.source_role_handoff_status(
-        file, project=project, expected_roles=2,
+        file, project=project, expected_roles=2, expected_roster=roster,
         process_status="COMPLETED", exit_code=0,
     )
     assert result == {
         "source_role_coverage_verified": True, "sealed_roles": 2,
         "expected_roles": 2, "first_failure": None,
     }
+    # Replaced/duplicated SHA identities and role ordering must never
+    # become a complete source project merely by claiming two sealed rows.
+    for bad_rows in (
+        [valid["roles"][0], valid["roles"][0]],
+        [valid["roles"][1], valid["roles"][0]],
+        [{**valid["roles"][0], "sha256": "c" * 64}, valid["roles"][1]],
+        [{key: value for key, value in valid["roles"][0].items() if key != "role"},
+         valid["roles"][1]],
+        [{**valid["roles"][0], "role": "foreign"}, valid["roles"][1]],
+        [{**valid["roles"][0], "sha256": "not-a-sha"}, valid["roles"][1]],
+    ):
+        file.write_text(json.dumps({**valid, "roles": bad_rows}), encoding="utf-8")
+        rejected = launcher.source_role_handoff_status(
+            file, project=project, expected_roles=2, expected_roster=roster,
+            process_status="COMPLETED", exit_code=0,
+        )
+        assert rejected["source_role_coverage_verified"] is False
+        assert rejected["first_failure"] == "source_role_receipt_invalid"
     for mutate in (
         {"source_role_coverage_verified": False},
         {"customer_bijection_verified": True},
@@ -428,7 +449,7 @@ def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_row
     ):
         file.write_text(json.dumps({**valid, **mutate}), encoding="utf-8")
         assert launcher.source_role_handoff_status(
-            file, project=project, expected_roles=2,
+            file, project=project, expected_roles=2, expected_roster=roster,
             process_status="COMPLETED", exit_code=0,
         )["source_role_coverage_verified"] is False
     # A contradictory child result is not source authority merely because
@@ -439,15 +460,28 @@ def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_row
     ]}
     file.write_text(json.dumps(inconsistent), encoding="utf-8")
     assert launcher.source_role_handoff_status(
-        file, project=project, expected_roles=2,
+        file, project=project, expected_roles=2, expected_roster=roster,
         process_status="COMPLETED", exit_code=0,
     )["source_role_coverage_verified"] is False
 
     file.write_text('{"project_id":"a","project_id":"b"}', encoding="utf-8")
     assert launcher.source_role_handoff_status(
-        file, project=project, expected_roles=2,
+        file, project=project, expected_roles=2, expected_roster=roster,
         process_status="COMPLETED", exit_code=0,
     )["first_failure"] == "source_role_receipt_invalid"
+
+
+@pytest.mark.parametrize("roster", [
+    (),
+    (("floor", "a" * 64), ("ceiling", "a" * 64)),
+    (("floor", "a" * 64), ("ceiling", "BAD")),
+    (("floor", "A" * 64), ("ceiling", "b" * 64)),
+    (("", "a" * 64), ("ceiling", "b" * 64)),
+    (("floor", "a" * 64), ("ceiling", None)),
+    [("floor", "a" * 64), ("ceiling", "b" * 64)],
+])
+def test_original_role_manifest_is_complete_typed_and_distinct(roster):
+    assert launcher._valid_original_source_role_roster(roster, expected_roles=2) is False
 
 
 def test_pinned_original_role_runtime_rejects_changed_code_checkout(monkeypatch):
@@ -503,7 +537,11 @@ def test_owner_four_job_opt_in_uses_existing_multi_role_source_producer(
         )
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({
-            "source_documents": [{"name": "original"}] * doc_count,
+            "source_documents": [
+                {"name": f"original-{i}", "role": f"role-{i}",
+                 "sha256": f"{i + 1:064x}"}
+                for i in range(doc_count)
+            ],
         }), encoding="utf-8")
     monkeypatch.chdir(kit)
     monkeypatch.setattr(launcher.Path, "home", classmethod(lambda cls: home))
@@ -553,6 +591,7 @@ def test_owner_four_job_opt_in_uses_existing_multi_role_source_producer(
             "official_four_project_accuracy": None,
             "roles": [
                 {
+                    "role": f"role-{i}", "sha256": f"{i + 1:064x}",
                     "sealed": okay or i < count - 1,
                     "process_status": "COMPLETED",
                     "first_failure": (
