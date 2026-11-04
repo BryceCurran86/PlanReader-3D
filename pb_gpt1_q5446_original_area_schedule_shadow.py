@@ -236,16 +236,14 @@ def _numeric_vector_digit(record: dict[str, Any]) -> str | None:
 
 def _original_numeric_glyph_receipts(
     drawings: list[dict[str, Any]],
-) -> tuple[tuple[int, ...], ...] | None:
-    """Require ALL seven row values from ordered, independent native vectors.
+) -> tuple[tuple[tuple[int, ...], Decimal], ...] | None:
+    """Read ALL seven row values from ordered, independent native vectors.
 
     Only source-numeric outlines are authenticated here, not their physical
     wall ownership, gross/net meaning, or printed category label glyphs.
     """
-    results: list[tuple[int, ...]] = []
-    for (_, _, numeric, _), (y0, y1) in zip(
-        PRINTED_ORIGINAL_ROWS, ORIGINAL_ROW_Y_BOUNDS
-    ):
+    results: list[tuple[tuple[int, ...], Decimal]] = []
+    for y0, y1 in ORIGINAL_ROW_Y_BOUNDS:
         located = []
         for index, record in enumerate(drawings):
             rect = record.get("rect")
@@ -261,15 +259,23 @@ def _original_numeric_glyph_receipts(
                 return None
         located.sort(key=lambda record: (record[1], record[0]))
         decoded = "".join(_numeric_vector_digit(record) or "?" for _, _, record in located)
-        if decoded != str(numeric):
+        # The source ink, not a manually transcribed numeric constant, owns
+        # the candidate value. Reject malformed decimal strings fail-closed.
+        if "?" in decoded or decoded.count(".") != 1:
+            return None
+        try:
+            parsed = Decimal(decoded)
+        except Exception:
+            return None
+        if not parsed.is_finite() or parsed <= 0 or parsed.as_tuple().exponent != -2:
             return None
         ids = tuple(index for index, _, _ in located)
         if len(set(ids)) != len(ids):
             return None
-        results.append(ids)
+        results.append((ids, parsed))
     if len(results) != len(PRINTED_ORIGINAL_ROWS):
         return None
-    all_ids = tuple(index for ids in results for index in ids)
+    all_ids = tuple(index for ids, _ in results for index in ids)
     if len(all_ids) != len(set(all_ids)):
         return None
     return tuple(results)
@@ -312,18 +318,18 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
     rows = tuple(
         OriginalAreaScheduleCandidate(
             original_row_id=f"q5446_source_p1_area_schedule_row_{i + 1}_{key}",
-            printed_label=label, printed_area_m2=value, is_rollup=rollup,
+            printed_label=label, printed_area_m2=original_numeric_source_ids[i][1], is_rollup=rollup,
             original_page_index=SOURCE_PAGE_INDEX,
             table_row_number=i + 1,
             original_source_sha256=source_sha,
             glyph_correspondence_authenticated=True,
-            original_numeric_vector_path_ids=original_numeric_source_ids[i],
+            original_numeric_vector_path_ids=original_numeric_source_ids[i][0],
             original_label_vector_path_ids=original_label_source_ids[i],
             label_stroke_presence_verified=True,
         )
         for i, (key, label, value, rollup) in enumerate(PRINTED_ORIGINAL_ROWS)
     )
-    value_by_key = {key: val for key, _, val, _ in PRINTED_ORIGINAL_ROWS}
+    value_by_key = {key: original_numeric_source_ids[i][1] for i, (key, _, _, _) in enumerate(PRINTED_ORIGINAL_ROWS)}
     floor_delta = value_by_key["subtotal"] - (
         value_by_key["ground_floor"] + value_by_key["first_floor"]
     )
