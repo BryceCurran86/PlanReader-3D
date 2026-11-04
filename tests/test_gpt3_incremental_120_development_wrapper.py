@@ -135,3 +135,18 @@ def test_provisional_wrapper_rejects_output_under_immutable_truth(tmp_path: Path
             "--output", str(live._FROZEN_ROOT / "unwanted-score.json"),
             "--failure-ledger-output", str(tmp_path / "ledger.json"),
         ])
+
+
+def test_provisional_wrapper_rejects_alt_frozen_truth_root(tmp_path):
+    sealed, maps = _inputs(tmp_path)
+    fake_root = tmp_path / "altered-source-truth"
+    fake_root.mkdir()
+    with pytest.raises(ValueError, match="immutable Full Plan V2"):
+        live.main([
+            "--root", str(fake_root),
+            "--sealed-dir", str(sealed),
+            "--identity-map-dir", str(maps),
+            "--output", str(tmp_path / "score.json"),
+            "--failure-ledger-output", str(tmp_path / "ledger.json"),
+        ])
+    assert not (tmp_path / "score.json").exists()
