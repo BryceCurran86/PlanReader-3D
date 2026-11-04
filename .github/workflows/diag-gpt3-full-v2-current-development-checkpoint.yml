@@ -8,6 +8,8 @@ on:
       - "docs/engineering/gpt3_full_v2_current_development_checkpoint_20261013.md"
       - "benchmarks/frozen_holdout/full_plan_v2/run_development_scoreboard.py"
       - "benchmarks/frozen_holdout/full_plan_v2/development_scoreboard.py"
+      - "tools/gpt3_incremental_120_development_wrapper.py"
+      - "tests/test_gpt3_incremental_120_development_wrapper.py"
       - "benchmarks/frozen_holdout/full_plan_v2/sealed_reconciliation.py"
       - "docs/engineering/lot16_original_identity_reconciliation_20261012/**"
       - "docs/engineering/lot16_original_signed_eight_row_20261015/**"
@@ -41,6 +43,8 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Immutable-frozen live development wrapper regression
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_incremental_120_development_wrapper.py
       - name: Replay SHA-pinned eight-quantity original Lot16 evidence through the four-project development scoreboard
         shell: bash
         run: |
@@ -93,7 +97,7 @@ jobs:
             "$MAPS/au_qld_lot16_power.identity_map.json"
 
           set +e
-          PYTHONPATH=. python benchmarks/frozen_holdout/full_plan_v2/run_development_scoreboard.py \
+          PYTHONPATH=. python tools/gpt3_incremental_120_development_wrapper.py \
             --sealed-dir "$SEALED" \
             --identity-map-dir "$MAPS" \
             --output "$ROOT/score.json" \
@@ -113,6 +117,9 @@ jobs:
           score=json.loads((root/"score.json").read_text())
           ledger=json.loads((root/"failure-ledger.json").read_text())
 
+          assert score["schema_version"]=="gpt3-provisional-frozen120-development-v1"
+          assert score["official_score_published"] is False
+          assert score["official_four_project_accuracy"] is None
           assert score["status"]=="PARTIAL_OR_BLOCKED"
           assert score["configured_projects"]==4
           assert score["executed_projects"]==1
