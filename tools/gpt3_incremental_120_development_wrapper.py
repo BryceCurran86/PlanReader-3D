@@ -7,7 +7,6 @@ This is not the official V2 publication evaluator and cannot set its status.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, asdict
 import json
 import math
 from pathlib import Path
@@ -16,10 +15,11 @@ import sys
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
-
-
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
 _FROZEN_ROOT = _REPO_ROOT / "benchmarks" / "frozen_holdout" / "full_plan_v2"
 _FROZEN_RUNNER = _FROZEN_ROOT / "run_development_scoreboard.py"
 _SCHEMA = "gpt3-provisional-frozen120-development-v1"
