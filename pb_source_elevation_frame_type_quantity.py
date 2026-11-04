@@ -11,7 +11,11 @@ import math
 import re
 
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence, stable_contract_id
-from pb_opening_elevation_frame_area_authority import OpeningElevationFrameAreaRecord
+from pb_opening_elevation_frame_area_authority import (
+    OpeningElevationFrameAreaAuthority,
+    OpeningElevationFrameAreaRecord,
+    OpeningElevationFrameAreaSelector,
+)
 
 
 SOURCE_ELEVATION_FRAME_TYPE_AREA_SCHEMA_VERSION = "1.0.0"
@@ -34,6 +38,8 @@ def _ids(values) -> tuple[str, ...] | None:
 
 def publish_nominal_elevation_frame_type_area(
     record: OpeningElevationFrameAreaRecord,
+    *,
+    authority: OpeningElevationFrameAreaAuthority,
 ) -> QuantityEvidence | None:
     """Reissue only a real sealed frame type with independent exact source IDs.
 
@@ -43,6 +49,25 @@ def publish_nominal_elevation_frame_type_area(
     """
     if type(record) is not OpeningElevationFrameAreaRecord:
         raise TypeError("producer-owned OpeningElevationFrameAreaRecord required")
+    if type(authority) is not OpeningElevationFrameAreaAuthority:
+        raise TypeError("producer-owned OpeningElevationFrameAreaAuthority required")
+    # The record dataclass's private constructor seal survives dataclasses.replace.
+    # A copied receipt can carry altered witness/frame fields and still look
+    # CORROBORATED. Re-resolve exact source/snapshot/type from the producer-owned
+    # authority and compare the WHOLE record before any numeric evidence issues.
+    parent = authority.resolve(OpeningElevationFrameAreaSelector(
+        document_id=record.document_id,
+        revision_id=record.revision_id,
+        source_sha256=record.source_sha256,
+        snapshot_id=record.snapshot_id,
+        type_mark=record.type_mark,
+    ))
+    if (
+        parent.status is not EvidenceResolutionStatus.CORROBORATED
+        or parent.record is None
+        or parent.record != record
+    ):
+        return None
     source_ids = _ids(record.source_observation_ids)
     frame_ids = _ids(record.frame_geometry_ids)
     title_ids = _ids(record.title_observation_ids)
