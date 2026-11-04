@@ -297,6 +297,7 @@ def _generate_project_handoff_locked(
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
 ) -> dict[str, Any]:
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
@@ -455,6 +456,8 @@ def _generate_project_handoff_locked(
     }
     if source_native_finish_text_shadow:
         summary["source_native_finish_text_shadow"] = True
+    if source_glyph_ledger_text_trust:
+        summary["source_glyph_ledger_text_trust"] = True
 
     output_dir.mkdir(parents=True, exist_ok=True)
     # The extractor may be terminated by an external memory/time limit rather
@@ -488,6 +491,8 @@ def _generate_project_handoff_locked(
             surface_semantic_pages=semantic_execution_pages,
             **({"source_native_finish_text_shadow": True}
                if source_native_finish_text_shadow else {}),
+            **({"source_glyph_ledger_text_trust": True}
+               if source_glyph_ledger_text_trust else {}),
         )
         _gc_stage_boundary()
     except Exception as exc:
@@ -1185,6 +1190,7 @@ def generate_project_handoff(
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
 ) -> dict[str, Any]:
     """Serialize one source run per output directory without trusting stale seals.
 
@@ -1196,6 +1202,8 @@ def generate_project_handoff(
     _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("source_native_finish_text_shadow must be an explicit boolean")
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("source_glyph_ledger_text_trust must be an explicit boolean")
     if output_dir.is_symlink():
         raise FileExistsError("output directory cannot be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1215,6 +1223,8 @@ def generate_project_handoff(
                 source_plan_page_index=source_plan_page_index,
                 **({"source_native_finish_text_shadow": True}
                    if source_native_finish_text_shadow else {}),
+                **({"source_glyph_ledger_text_trust": True}
+                   if source_glyph_ledger_text_trust else {}),
             )
     finally:
         os.close(descriptor)
@@ -1247,6 +1257,14 @@ def _parser() -> argparse.ArgumentParser:
             "text proof (needs fontTools; default off, grants no quantity)"
         ),
     )
+    parser.add_argument(
+        "--source-glyph-ledger-text-trust", action="store_true",
+        help=(
+            "Opt in to trusting words blocked only by the glyph proof, through sealed "
+            "raster corroboration plus verified glyph mappings (needs an OCR backend; "
+            "default off, grants no quantity)"
+        ),
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -1262,6 +1280,8 @@ def main() -> int:
         source_plan_page_index=args.source_plan_page_index,
         **({"source_native_finish_text_shadow": True}
            if args.source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if args.source_glyph_ledger_text_trust else {}),
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

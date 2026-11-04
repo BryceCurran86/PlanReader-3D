@@ -415,6 +415,7 @@ def _collect_live_physical_net_wall_claim(
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -434,10 +435,14 @@ def _collect_live_physical_net_wall_claim(
 
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
-    native_text_kwargs = (
-        {"source_native_finish_text_shadow": True}
-        if source_native_finish_text_shadow else {}
-    )
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("glyph ledger text trust must be an explicit boolean")
+    native_text_kwargs = {
+        **({"source_native_finish_text_shadow": True}
+           if source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if source_glyph_ledger_text_trust else {}),
+    }
     path = Path(pdf_path)
     payload = path.read_bytes()
     source_sha = hashlib.sha256(payload).hexdigest()
@@ -1175,6 +1180,7 @@ def collect_live_physical_net_wall_claim(
     recover_additional_opening_areas: bool = False,
     recover_supported_opening_areas: bool = False,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1191,6 +1197,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("choose one opening area recovery policy")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("glyph ledger text trust must be an explicit boolean")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1216,6 +1224,8 @@ def collect_live_physical_net_wall_claim(
         surface_semantic_pages=surface_semantic_pages,
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if source_glyph_ledger_text_trust else {}),
     )
     if recovery_page_id is None:
         return claim
