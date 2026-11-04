@@ -103,6 +103,77 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     }
 
 
+
+def _authenticated_explicit_non_floor_competitor(
+    authority: SourceMaterialSemanticAuthority,
+    selector: SourceMaterialOccurrenceSelector,
+    occurrence,
+) -> bool:
+    """Exclude only a source-DEFINITION-proven non-floor code, never an unknown rival.
+
+    This is a negative material-role decision, NOT an election of floor finish,
+    physical room, threshold, area or customer authority. The exact competing
+    occurrence stays in the producer's full original source universe.
+    """
+    import re
+
+    from pb_cross_view_floor_finish_authority import _definition_is_floor_finish
+    from pb_source_material_semantic_authority import (
+        SourceMaterialDefinitionRecord,
+        SourceMaterialOccurrenceRecord,
+    )
+
+    if (type(occurrence) is not SourceMaterialOccurrenceRecord
+            or type(occurrence.code) is not str or not occurrence.code
+            or occurrence.code != occurrence.code.strip()
+            or type(occurrence.definition_record_id) is not str
+            or not occurrence.definition_record_id):
+        return False
+    try:
+        rival_selector = SourceMaterialDefinitionSelector(
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            code=occurrence.code,
+        )
+        resolved = authority.resolve_definition(rival_selector)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        return False
+    definition = resolved.record
+    if (resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or type(definition) is not SourceMaterialDefinitionRecord
+            or definition.record_id != occurrence.definition_record_id
+            or definition.code.upper() != occurrence.code.upper()
+            or definition.semantic_finish != occurrence.semantic_finish
+            or definition.document_id != occurrence.document_id
+            or definition.revision_id != occurrence.revision_id
+            or definition.source_sha256 != occurrence.source_sha256
+            or definition.snapshot_id != occurrence.snapshot_id
+            or not definition.source_definition_ids
+            or not definition.source_page_ids
+            or not definition.source_viewport_ids):
+        return False
+    if _definition_is_floor_finish(definition):
+        return False
+    source_text = " ".join(
+        str(value).strip().casefold()
+        for value in (definition.description, definition.substrate, definition.finish)
+        if type(value) is str and value.strip()
+    )
+    # A source line that also names a floor role is genuinely mixed or unclear.
+    # Generic unrecognized non-tile semantics are NOT enough to exclude it.
+    if re.search(r"\b(?:floor(?:ing)?|sub[\s-]*floor|under[\s-]*floor)\b", source_text):
+        return False
+    return bool(re.search(
+        r"\b(?:wall[\s-]+(?:framing|cladding|lining|panels?|tiles?)"
+        r"|metal[\s-]+stud[\s-]+(?:wall|framing|partition)"
+        r"|partition[\s-]+(?:wall|framing)"
+        r"|ceiling[\s-]+(?:lining|tiles?|grid))\b",
+        source_text,
+    ))
+
+
 def audit_gpt2_source_material_floor_handoff(
     source_registration: dict, *,
     material_authority: SourceMaterialSemanticAuthority,
@@ -174,6 +245,7 @@ def audit_gpt2_source_material_floor_handoff(
     # if a different code is also printed inside that same physical ring.
     # Retain every source-owned rival instead of electing the requested code.
     competing=[]
+    authenticated_non_floor=[]
     for other in scope.records:
         if other.code.upper()==original_finish_code.upper():
             continue
@@ -196,7 +268,12 @@ def audit_gpt2_source_material_floor_handoff(
             return {**result,
                 "first_failure":"other_material_occurrence_geometry_unresolved"}
         if polygon.intersects(box(x0,y0,x1,y1)):
-            competing.append(other)
+            if _authenticated_explicit_non_floor_competitor(
+                material_authority, occurrence_selector, other,
+            ):
+                authenticated_non_floor.append(other.record_id)
+            else:
+                competing.append(other)
     if competing:
         return {
             **result,
@@ -204,6 +281,8 @@ def audit_gpt2_source_material_floor_handoff(
             "competing_source_material_record_ids":tuple(
                 sorted({record.record_id for record in competing})
             ),
+            "source_authenticated_non_floor_record_ids":
+                tuple(sorted(set(authenticated_non_floor))),
         }
     inside=[];all_matching=[]
     for occurrence in scope.records:
@@ -263,6 +342,8 @@ def audit_gpt2_source_material_floor_handoff(
         "original_mark_text_observation_ids":matched.source_text_observation_ids,
         "all_same_code_source_occurrence_record_ids":
             tuple(sorted(x.record_id for x in all_matching)),
+        "source_authenticated_non_floor_record_ids":
+            tuple(sorted(set(authenticated_non_floor))),
         # Optional only for independently rechecked original doorway rings;
         # never synthesize a threshold for ordinary closed-room polygons.
         "source_original_floor_door_ink_gap_pdf_pts":
