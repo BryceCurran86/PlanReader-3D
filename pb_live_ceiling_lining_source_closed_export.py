@@ -249,6 +249,19 @@ def build_live_ceiling_lining_source_traces(
                 "ceiling original material-only receipt forbids commercial "
                 f"area publication: {original.quantity_id}"
             )
+        # Authenticated material and a numeric ceiling candidate can still
+        # be producer-designated handoff-only or shadow-only. Customer display
+        # cannot grant saleable RCP m² by erasing either source restriction.
+        # Older signed FIRM receipts with absent optional flags are unchanged.
+        for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+            if (
+                restricted_flag in original_metadata
+                and original_metadata[restricted_flag] is not False
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling original source is "
+                    f"{restricted_flag}: {original.quantity_id}"
+                )
 
     source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
