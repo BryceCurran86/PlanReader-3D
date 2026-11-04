@@ -2,8 +2,10 @@
 
 This module intentionally does not relax the V2 publication gate. It scores only
 independently VERIFIED, denominator-eligible truth items while projects are still
-being source-closed, and publishes a development headline only after every
-configured project has a sealed production-output file for the same run.
+being source-closed. The provisional development headline uses the entire frozen
+truth denominator even if only some projects have genuinely executed. Missing
+project executions remain explicitly NOT_EXECUTED, never invented MISSED outputs.
+The independent official V2 publication gate is unchanged.
 """
 from __future__ import annotations
 
@@ -82,6 +84,7 @@ class DevelopmentFailureLedgerV2:
     failure_items: tuple[DevelopmentFailureLedgerItemV2, ...]
     unsupported_outputs: tuple[DevelopmentUnsupportedOutputV2, ...]
     missing_execution_project_ids: tuple[str, ...]
+    not_executed_items: tuple[DevelopmentFailureLedgerItemV2, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,7 @@ class DevelopmentSuiteResultV2:
     source_closed_truth_items: int
     non_denominator_verified_controls: int
     executed_denominator: int
+    unexecuted_denominator: int
     execution_coverage: float | None
     matched_within_tolerance: int
     matched_outside_tolerance: int
@@ -102,6 +106,7 @@ class DevelopmentSuiteResultV2:
     abstained_outputs: int
     lineage_conflicts: int
     observed_accuracy: float | None
+    coverage_accuracy: float | None
     development_accuracy: float | None
     precision_adjusted_accuracy: float | None
     project_results: tuple[DevelopmentProjectResultV2, ...]
@@ -224,6 +229,7 @@ def build_development_failure_ledger_v2(
         )
 
     failure_items: list[DevelopmentFailureLedgerItemV2] = []
+    not_executed_items: list[DevelopmentFailureLedgerItemV2] = []
     unsupported_outputs: list[DevelopmentUnsupportedOutputV2] = []
     missing_execution: list[str] = []
 
@@ -231,6 +237,24 @@ def build_development_failure_ledger_v2(
         produced = produced_map.get(manifest.project_id)
         if produced is None:
             missing_execution.append(manifest.project_id)
+            # These denominator items have not been attempted. Keep a
+            # per-target backlog without contaminating evaluator MISSED counts.
+            for item in manifest.verified_items:
+                if not item.denominator_eligible:
+                    continue
+                not_executed_items.append(
+                    DevelopmentFailureLedgerItemV2(
+                        project_id=manifest.project_id,
+                        item_id=item.item_id,
+                        state="NOT_EXECUTED",
+                        trade_category=item.trade_category,
+                        unit=item.unit,
+                        produced_quantity_id=None,
+                        error_fraction=None,
+                        expected_object_refs=item.expected_object_refs,
+                        matched_object_refs=(),
+                    )
+                )
             continue
 
         scorable = _scorable_manifest(manifest)
@@ -301,6 +325,9 @@ def build_development_failure_ledger_v2(
             )
         ),
         missing_execution_project_ids=tuple(sorted(missing_execution)),
+        not_executed_items=tuple(sorted(
+            not_executed_items, key=lambda row: (row.project_id, row.item_id)
+        )),
     )
 
 
@@ -354,6 +381,15 @@ def evaluate_development_suite_v2(
     observed_accuracy = (
         matched / executed_denominator if executed_denominator else None
     )
+    # Incremental *development* coverage is always normalized to ALL frozen
+    # denominator-eligible items, including projects not yet executed. It must
+    # never be mistaken for observed accuracy on only the executed subset.
+    # A conflicting lineage cannot establish a meaningful development headline.
+    coverage_accuracy = (
+        matched / truth_denominator
+        if executed_denominator and truth_denominator and not lineage_conflicts
+        else None
+    )
 
     reasons: list[str] = []
     missing = tuple(
@@ -371,7 +407,9 @@ def evaluate_development_suite_v2(
         and not lineage_conflicts
         and truth_denominator > 0
     )
-    development_accuracy = observed_accuracy if complete_execution else None
+    # Owner-authorized live development headline. Partial execution does not
+    # become official publication; the status and explicit missing ledger stay.
+    development_accuracy = coverage_accuracy
     precision_denominator = truth_denominator + extras
     precision_adjusted = (
         matched / precision_denominator
@@ -390,6 +428,7 @@ def evaluate_development_suite_v2(
         source_closed_truth_items=truth_denominator,
         non_denominator_verified_controls=controls,
         executed_denominator=executed_denominator,
+        unexecuted_denominator=truth_denominator - executed_denominator,
         execution_coverage=execution_coverage,
         matched_within_tolerance=matched,
         matched_outside_tolerance=outside,
@@ -400,6 +439,7 @@ def evaluate_development_suite_v2(
         abstained_outputs=abstained,
         lineage_conflicts=lineage_conflicts,
         observed_accuracy=observed_accuracy,
+        coverage_accuracy=coverage_accuracy,
         development_accuracy=development_accuracy,
         precision_adjusted_accuracy=precision_adjusted,
         project_results=projects,
