@@ -50,6 +50,27 @@ def _source_floor_area_customer_fields(
         dict(quantity.metadata)
         if isinstance(quantity.metadata, Mapping) else {}
     )
+    # The original room-area issuer alone owns the commercial permission.
+    # Previously the *presentation copy* unconditionally rewrote an explicit
+    # material-only/hand-off-only source denial into True, which could
+    # publish unapproved floor m² in the real takeoff. Omitted flags retain
+    # pre-existing independently signed room-area compatibility; a present
+    # revocation is never silently repaired.
+    if (
+        "commercial_projection_allowed" in metadata
+        and metadata["commercial_projection_allowed"] is not True
+    ):
+        raise SourceClosedRunConflictError(
+            "floor-area original source forbids commercial projection"
+        )
+    for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+        if (
+            restricted_flag in metadata
+            and metadata[restricted_flag] is not False
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-area original source is {restricted_flag}"
+            )
     canonical_id = metadata.get("canonical_floor_id")
     physical_id = metadata.get("physical_floor_surface_id")
     floors = [
