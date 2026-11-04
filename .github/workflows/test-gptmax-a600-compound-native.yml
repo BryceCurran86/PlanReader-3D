@@ -1,0 +1,52 @@
+name: GPT MAX native compound A600 source-row regressions
+
+on:
+  push:
+    branches:
+      - gptmax/a600-printed-compound-door-20261105
+  pull_request:
+    paths:
+      - pb_source_door_schedule_authority.py
+      - tests/test_gptmax_a600_compound_native_row_candidate.py
+      - .github/workflows/test-gptmax-a600-compound-native.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-a600-candidates:
+    name: Native A600 source-neutral (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      PYTHONPATH: .
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install complete test and source dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Existing trusted schedule/column negatives and compound candidate
+        run: |
+          python -m pytest -q \
+            tests/test_gptmax_a600_compound_native_row_candidate.py \
+            tests/test_gpt2_source_owned_a600_door_schedule_receipt.py::test_synthetic_authenticated_native_schedule_source_never_signs_host_count \
+            tests/test_gpt2_source_owned_a600_door_schedule_receipt.py::test_untrusted_source_title_or_row_never_mints_schedule_source_authority \
+            tests/test_gpt2_source_owned_a600_door_schedule_receipt.py::test_duplicate_source_door_code_and_unrelated_note_never_issue_unique_row \
+            tests/test_gpt2_a600_native_column_header_source_roles.py::test_independent_table_caption_overrides_repeated_drawing_sheet_title \
+            tests/test_gpt2_a600_native_column_header_source_roles.py::test_competing_original_table_headers_or_titles_fail_closed \
+            tests/test_gpt2_a600_native_column_header_source_roles.py::test_wrong_numeric_source_column_can_not_authenticate_2040_height
+      - name: No undefined identifiers
+        run: |
+          python -m compileall -q pb_source_door_schedule_authority.py tests/test_gptmax_a600_compound_native_row_candidate.py
+          ruff check --select F821,F823 pb_source_door_schedule_authority.py tests/test_gptmax_a600_compound_native_row_candidate.py
