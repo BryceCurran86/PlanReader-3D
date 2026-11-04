@@ -659,6 +659,14 @@ def _header_table_specs(
         else:
             right = math.inf
 
+        if stop_boundary:
+            # Stop only a table whose established source window intersects
+            # this later printed header.  The admission windows deliberately
+            # extend into gutters; extending a partial stop through infinity
+            # would incorrectly suppress an independent side-by-side table.
+            left = float(bounds[start][0])
+            right = float(bounds[end - 1][1])
+
         specs.append(
             (
                 {
