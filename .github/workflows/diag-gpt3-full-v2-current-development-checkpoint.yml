@@ -118,6 +118,7 @@ jobs:
           assert score["executed_projects"]==1
           assert score["source_closed_truth_items"]==120
           assert score["executed_denominator"]==27
+          assert score["unexecuted_denominator"]==93
           assert score["execution_coverage"]==27/120
           assert score["matched_within_tolerance"]==8
           assert score["matched_outside_tolerance"]==0
@@ -127,7 +128,9 @@ jobs:
           assert score["hallucinations"]==0
           assert score["lineage_conflicts"]==0
           assert score["observed_accuracy"]==8/27
-          assert score["development_accuracy"] is None
+          # Provisional *full* benchmark coverage, never 8/27 as the headline.
+          assert score["coverage_accuracy"]==8/120
+          assert score["development_accuracy"]==8/120
           assert score["precision_adjusted_accuracy"] is None
 
           projects={row["project_id"]:row for row in score["project_results"]}
@@ -150,6 +153,10 @@ jobs:
           } == missing
           assert set(ledger["missing_execution_project_ids"])==missing
           assert len(ledger["failure_items"])==19
+          assert len(ledger["not_executed_items"])==93
+          assert {row["project_id"] for row in ledger["not_executed_items"]}==missing
+          assert all(row["state"]=="NOT_EXECUTED" for row in ledger["not_executed_items"])
+          assert all(row["produced_quantity_id"] is None for row in ledger["not_executed_items"])
           assert ledger["unsupported_outputs"]==[]
           assert all(item["project_id"]=="au_qld_lot16_power" for item in ledger["failure_items"])
           assert all(item["state"]=="MISSED" for item in ledger["failure_items"])
@@ -162,10 +169,12 @@ jobs:
               "configured_projects": score["configured_projects"],
               "executed_projects": score["executed_projects"],
               "executed_denominator": score["executed_denominator"],
+              "unexecuted_denominator": score["unexecuted_denominator"],
               "full_denominator": score["source_closed_truth_items"],
               "execution_coverage": score["execution_coverage"],
               "matched_within_tolerance": score["matched_within_tolerance"],
               "observed_accuracy_on_executed_projects": score["observed_accuracy"],
+              "provisional_frozen_120_coverage_accuracy": score["coverage_accuracy"],
               "development_accuracy": score["development_accuracy"],
               "precision_adjusted_accuracy": score["precision_adjusted_accuracy"],
               "missing_execution_project_ids": sorted(missing),
