@@ -80,3 +80,109 @@ def test_compound_role_must_be_full_printed_word_not_substring():
         *_row(2,"D02","900","2050","INDOORING","SLIDINGLY"),
     )
     assert _original_source_row_candidates(words)==()
+
+
+def test_opt_in_native_raster_source_proves_exact_door_code_without_quantity():
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+        inspect_published_door_schedule,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+
+    setup = _Setup(_glyph_unverified_pdf([("D02", 40, 120)]), _both("D02"))
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    assert len(words) == 1 and words[0].literal == "D02"
+    assert words[0].trusted is False
+
+    upgraded = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert upgraded[0].trusted is True
+    assert upgraded[0].observation_id == words[0].observation_id
+    assert upgraded[0].raster_text_receipt_id
+    assert words[0].trusted is False  # immutable native record
+
+    original = inspect_published_door_schedule(
+        setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
+    )
+    optional = inspect_published_door_schedule(
+        setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
+        raster_text_producer=setup.producer,
+    )
+    # Source-proven code alone does NOT mint a row without role/table cells.
+    assert original.rows == optional.rows == ()
+    assert original.unparsed_original_door_codes == ("D02",)
+    assert optional.unparsed_original_door_codes == ("D02",)
+    assert optional.new_opening_counts == optional.new_opening_areas_m2 == 0
+    assert optional.title_source_trusted is False
+    assert optional.complete_source_word_universe is False
+
+
+def test_opt_in_native_raster_source_rejects_wrong_reading_and_foreign_owner():
+    import pytest
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+
+    data = _glyph_unverified_pdf([("D02", 40, 120)])
+    setup = _Setup(data, _both("D03"))
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    bad = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert bad == words
+    other = _Setup(data, _both("D02"))
+    with pytest.raises(ValueError, match="raster_source_schedule_producer_mismatch"):
+        _raster_corroborated_schedule_words(
+            setup.svp, setup.published, words,
+            raster_text_producer=other.producer,
+        )
+    with pytest.raises(TypeError, match="raster_text_producer must be source-owned"):
+        _raster_corroborated_schedule_words(
+            setup.svp, setup.published, words,
+            raster_text_producer=object(),
+        )
+
+
+def test_source_corroborated_raster_receipt_is_retained_as_row_lineage():
+    from dataclasses import replace
+    source_words = (
+        *_row(1, "DOOR", "SCHEDULE"),
+        *_row(2, "D02", "ROOM", "SWING", "900", "2050", "DOOR"),
+    )
+    selected = tuple(
+        replace(w, raster_text_receipt_id="raster-verified-receipt")
+        if w.literal == "D02" else w
+        for w in source_words
+    )
+    result = _original_source_row_candidates(selected)
+    assert len(result) == 1
+    assert result[0].source_raster_text_receipt_ids == (
+        "raster-verified-receipt",
+    )
+    assert result[0].width_height_metric_units_authenticated is False
+    assert result[0].physical_host_or_frame_authenticated is False
+    assert result[0].new_customer_quantity_authority is False
+
+
+def test_raster_schedule_text_does_not_upgrade_unrelated_non_door_note():
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+    setup = _Setup(
+        _glyph_unverified_pdf([("UNRELATED", 40, 120)]),
+        _both("UNRELATED"),
+    )
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    upgraded = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert upgraded == words
