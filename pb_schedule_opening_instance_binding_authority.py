@@ -576,6 +576,8 @@ def _is_header_row(cells: Sequence[str]) -> bool:
 def _header_table_specs(
     row: dict[str, Any],
     ids: Sequence[str],
+    *,
+    stop_boundary: bool = False,
 ) -> list[tuple[dict[str, Any], float, float]]:
     """Split one visual header line into independent horizontal tables.
 
@@ -585,6 +587,10 @@ def _header_table_specs(
     consume cells from the second. This helper finds every MARK/TYPE-style
     header start, validates each slice with the shared header rules, and gives
     each table a non-overlapping horizontal source-derived window.
+
+    A partial mark/type/description header must STOP an earlier table even
+    though it cannot START a new typed dimensioned table.  Keep the older
+    conservative stop classification separate from admission authority.
     """
     cells = [cell.strip() for cell in str(row.get("text", "")).split("\t")]
     bounds = list(row.get("bounds", []) or [])
@@ -630,10 +636,14 @@ def _header_table_specs(
         # "DOOR | NOTES" merely because the first cell denotes a mark.
         # Only complete printed dimension columns may establish a header;
         # unknown basis remains unknown and is never rough-opening authority.
-        if not (
+        complete_dimensions = (
             "dims" in mapping
             or ("width" in mapping and "height" in mapping)
-        ):
+        )
+        conservative_boundary = any(
+            key in mapping for key in ("dims", "width", "height", "count", "desc")
+        )
+        if not (conservative_boundary if stop_boundary else complete_dimensions):
             continue
 
         if position == 0:
@@ -648,6 +658,14 @@ def _header_table_specs(
             ) / 2.0
         else:
             right = math.inf
+
+        if stop_boundary:
+            # Stop only a table whose established source window intersects
+            # this later printed header.  The admission windows deliberately
+            # extend into gutters; extending a partial stop through infinity
+            # would incorrectly suppress an independent side-by-side table.
+            left = float(bounds[start][0])
+            right = float(bounds[end - 1][1])
 
         specs.append(
             (
@@ -730,7 +748,7 @@ def _schedule_entries_for_page(
             if current_y - last_y > max_y_gap:
                 break
 
-            later_headers = _header_table_specs(row, ids)
+            later_headers = _header_table_specs(row, ids, stop_boundary=True)
             if any(
                 not (candidate_right <= left or candidate_left >= right)
                 for _candidate, candidate_left, candidate_right in later_headers
