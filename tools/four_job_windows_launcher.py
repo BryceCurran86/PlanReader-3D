@@ -465,7 +465,12 @@ def source_role_handoff_status(
         and report.get("source_role_coverage_verified") is True
         and report.get("status") == "ALL_ROLES_SEALED_CUSTOMER_AND_V2_PENDING"
         and sealed_count == expected_roles
-        and all(role["first_failure"] is None for role in roles)
+        and all(
+            role["sealed"] is True
+            and role["process_status"] == "COMPLETED"
+            and role["first_failure"] is None
+            for role in roles
+        )
     )
     first_failure = next(
         (role["first_failure"] for role in roles if role["first_failure"] is not None),
