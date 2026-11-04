@@ -288,11 +288,16 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "floor_finish_area": 1,
         "opening_area": 1,
         "opening_count": 1,
-        "ceiling_area": 1,
+        # A generic legacy ceiling candidate has no independently owned
+        # original RCP zone-area issuer/evidence. The commercial handoff
+        # must keep the four source-sealed other families, without converting
+        # that floor-room-derived shadow into customer ceiling square metres.
+        "ceiling_area": 0,
         "opening_width": 0,
         "opening_height": 0,
     }
-    assert summary["combined_quantity_count"] == 5
+    assert summary["combined_quantity_count"] == 4
+    assert summary["ceiling_unverified_metric_source_quantity_ids"] == ["q-ceiling"]
     assert (output / f"{project_id}.json").is_file()
     assert (output / "production_summary.json").is_file()
     assert sorted((output / "family_runs").glob("*.sealed.json"))
