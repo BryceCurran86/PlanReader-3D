@@ -102,3 +102,33 @@ def test_only_boolean_opt_in_for_live_rotated_native_schedule():
         source,rotated_native_schedule_shadow=True)
     assert normal._rotated_native_schedule_shadow is False
     assert rotated._rotated_native_schedule_shadow is True
+
+
+def test_live_physical_composer_exposes_default_off_source_rotation():
+    from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+    from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+    from test_live_physical_opening_void_composition import _complete_void_pdf
+    source=SourceVisibilityProducer(
+        producer_method="rotated-composer-integration-test", producer_version="1",
+    )
+    pub=source.ingest_native_pdf_bytes(
+        document_id="rotated-composer-integration",source_bytes=_complete_void_pdf(),
+        source_locator="memory://rotated-composer.pdf",page_ids=("1",),
+    )
+    wall=compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=pub.revision.revision_id,page_ids=("1",),
+    )
+    original=compose_live_physical_opening_voids(
+        source_visibility_producer=source,wall_opening_composition=wall,
+    )
+    shadow=compose_live_physical_opening_voids(
+        source_visibility_producer=source,wall_opening_composition=wall,
+        rotated_native_schedule_shadow=True,
+    )
+    assert shadow == original
+    with pytest.raises(TypeError,match="rotated_native_schedule_shadow must be bool"):
+        compose_live_physical_opening_voids(
+            source_visibility_producer=source,wall_opening_composition=wall,
+            rotated_native_schedule_shadow="true",
+        )
