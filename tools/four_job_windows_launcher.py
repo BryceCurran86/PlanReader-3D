@@ -416,9 +416,33 @@ def source_role_handoff_command(
     ]
 
 
+
+def _valid_original_source_role_roster(
+    roster: object, *, expected_roles: int,
+) -> bool:
+    """Only unique, exactly typed frozen role/SHA pairs can prove coverage."""
+    if (
+        type(expected_roles) is not int or expected_roles < 1
+        or type(roster) is not tuple or len(roster) != expected_roles
+    ):
+        return False
+    if any(
+        type(pair) is not tuple or len(pair) != 2
+        or type(pair[0]) is not str or not pair[0].strip()
+        or type(pair[1]) is not str or len(pair[1]) != 64
+        or any(ch not in "0123456789abcdef" for ch in pair[1])
+        for pair in roster
+    ):
+        return False
+    # The per-role composer signs a set of source SHAs; repeating one PDF
+    # cannot authenticate two independent source-document roles.
+    return len({pair[1] for pair in roster}) == expected_roles
+
+
 def source_role_handoff_status(
     result_file: Path, *, project: str, expected_roles: int,
     process_status: str, exit_code: int | None,
+    expected_roster: tuple[tuple[str, str], ...],
 ) -> dict:
     """Classify actual child role seals; never promote role-only to customer."""
     negative = {
@@ -426,6 +450,8 @@ def source_role_handoff_status(
         "sealed_roles": 0, "expected_roles": expected_roles,
         "first_failure": "source_role_receipt_missing",
     }
+    if not _valid_original_source_role_roster(expected_roster, expected_roles=expected_roles):
+        return {**negative, "first_failure": "frozen_original_source_roles_invalid"}
     if not result_file.is_file() or result_file.is_symlink():
         return negative
     try:
@@ -457,6 +483,10 @@ def source_role_handoff_status(
             and type(role.get("first_failure")) is not str
             for role in roles
         )
+        # Source-verified is only meaningful for the exact, ordered frozen
+        # document roster, not N optimistic or duplicated child statuses.
+        or tuple((role.get("role"), role.get("sha256")) for role in roles)
+        != expected_roster
     ):
         return {**negative, "first_failure": "source_role_receipt_invalid"}
     sealed_count = sum(role["sealed"] for role in roles)
@@ -700,7 +730,14 @@ def main() -> int:
                 / "projects" / project / "source_manifest.json"
             )
             documents = json.loads(manifest.read_text(encoding="utf-8")).get("source_documents")
-            if type(documents) is not list or not documents:
+            expected_roster = (
+                tuple((row.get("role"), row.get("sha256")) for row in documents)
+                if type(documents) is list and all(type(row) is dict for row in documents)
+                else ()
+            )
+            if not _valid_original_source_role_roster(
+                expected_roster, expected_roles=len(expected_roster),
+            ):
                 summary["project_handoffs"].append({
                     "project_id": project, "status": "SOURCE_ROLE_MANIFEST_INVALID",
                     "source_role_coverage_verified": False,
@@ -727,7 +764,7 @@ def main() -> int:
             receipt = source_role_handoff_status(
                 out / "SOURCE_ROLE_STATUS.json", project=project,
                 expected_roles=len(documents), process_status=status,
-                exit_code=rc,
+                exit_code=rc, expected_roster=expected_roster,
             )
             if not pinned_source_tree_unchanged(repo, head):
                 receipt["source_role_coverage_verified"] = False
