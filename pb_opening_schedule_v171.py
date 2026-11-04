@@ -426,29 +426,87 @@ def _is_header_row(words: Sequence[str]) -> bool:
     return "mark" in mapping or "dims" in mapping
 
 
+def _explicit_two_level_schedule_header(cells: Sequence[str]) -> Dict[str, Any]:
+    """Default-off schedule header candidate: require a complete typed schema.
+
+    A notes heading such as DOOR | NOTES must never become the table header.
+    Composite labels (DOOR NO / WINDOW MARK) describe a mark *column*, not
+    an independently proven instance. Dimension basis rules remain unchanged.
+    """
+    normalised: List[str] = []
+    for cell in cells:
+        label = cell.strip()
+        if re.fullmatch(
+            r"(?:door|window)\s+(?:no\.?|number|mark|code|type)",
+            label, re.IGNORECASE,
+        ):
+            label = "Mark"
+        normalised.append(label)
+    mapping = detect_header(normalised)
+    if "mark" not in mapping:
+        return {}
+    separate = "width" in mapping and "height" in mapping
+    combined = "dims" in mapping
+    # Both column layouts simultaneously would require a second dimension
+    # basis/ownership decision and cannot be selected by header precedence.
+    if separate == combined:
+        return {}
+    return mapping
+
+
 def parse_schedule_rows(
     rows: Sequence[Dict[str, Any]],
     page_no: int = 0,
+    *,
+    two_level_header: bool = False,
 ) -> List[ScheduleEntry]:
+    if type(two_level_header) is not bool:
+        raise TypeError("two_level_header must be a bool")
     if not rows:
         return []
 
     entries: List[ScheduleEntry] = []
     col_map: Dict[str, int] = {}
     header_idx = -1
+    header_rows: set[int] = set()
 
-    for idx, row in enumerate(rows):
-        text = row.get("text", "")
-        cells = [c.strip() for c in text.split("\t")]
-        if _is_header_row(cells):
-            col_map = detect_header(cells)
-            header_idx = idx
-            break
+    if two_level_header:
+        # Explicit source-text table schemas only. Different plausible column
+        # assignments are a conflict, not permission to elect the first/last.
+        candidates: List[Tuple[int, Dict[str, Any]]] = []
+        for idx, row in enumerate(rows):
+            cells = [v.strip() for v in row.get("text", "").split("\t")]
+            mapping = _explicit_two_level_schedule_header(cells)
+            if mapping:
+                candidates.append((idx, mapping))
+        if not candidates:
+            return []
+        fields = ("mark", "dims", "width", "height", "count", "desc",
+                  "dimension_basis", "basis_source")
+        signatures = {
+            tuple(mapping.get(field) for field in fields)
+            for _, mapping in candidates
+        }
+        if len(signatures) != 1:
+            return []
+        header_idx, col_map = candidates[0]
+        header_rows = {idx for idx, _ in candidates}
+    else:
+        # Historical production path is byte-for-byte behaviourally unchanged.
+        for idx, row in enumerate(rows):
+            text = row.get("text", "")
+            cells = [v.strip() for v in text.split("\t")]
+            if _is_header_row(cells):
+                col_map = detect_header(cells)
+                header_idx = idx
+                break
 
     if header_idx < 0:
         return _parse_rows_without_header(rows, page_no)
 
-    for row in rows[header_idx + 1:]:
+    for row_idx, row in enumerate(rows[header_idx + 1:], header_idx + 1):
+        if two_level_header and row_idx in header_rows:
+            continue
         text = row.get("text", "")
         bbox = row.get("bbox", (0, 0, 0, 0))
         cells = [c.strip() for c in text.split("\t")]
@@ -555,6 +613,8 @@ def _parse_rows_without_header(
 def parse_schedule_page(
     pdf_page: Any,
     page_no: int = 0,
+    *,
+    two_level_header: bool = False,
 ) -> List[ScheduleEntry]:
     try:
         from pb_plan_read_engine_v1228 import _word_rows
@@ -565,7 +625,9 @@ def parse_schedule_page(
         except Exception:
             return []
         rows = _basic_word_rows(words)
-    return parse_schedule_rows(rows, page_no=page_no)
+    return parse_schedule_rows(
+        rows, page_no=page_no, two_level_header=two_level_header,
+    )
 
 
 def _basic_word_rows(words: list) -> List[Dict[str, Any]]:
