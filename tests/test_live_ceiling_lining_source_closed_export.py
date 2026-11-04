@@ -1131,3 +1131,73 @@ def test_exact_original_rcp_inclusion_keeps_independently_signed_customer_area()
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": None},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": "false"},
+    {"shadow_only": True},
+    {"shadow_only": None},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_rcp_handoff_or_shadow_denial_blocks_firm_seal_and_customer(
+    source_denial,
+):
+    """Original material-only source flags survive both quantity boundaries."""
+    source = _quantity()
+    denied = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            **source_denial,
+        },
+    )
+    claim = _claim(denied)
+    flag = next(iter(source_denial))
+    for consumer in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match=f"ceiling original source is {flag}",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.ceiling_lining_quantity_evidence == (denied,)
+    assert denied.quantity_id == source.quantity_id
+    assert denied.value == source.value == 9.05352
+
+
+def test_original_ceiling_explicit_false_restrictions_preserve_legacy_seal_contract():
+    """Typed False is not a revocation; actual RCP metric release is separate."""
+    source = _quantity()
+    permitted = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = _claim(permitted)
+    signed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == permitted.value == 9.05352
+    assert rows[0]["finish_system"] == "ceiling_grid"
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (permitted.quantity_id,)
