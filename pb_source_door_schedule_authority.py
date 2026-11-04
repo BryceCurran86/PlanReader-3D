@@ -511,7 +511,7 @@ def _original_door_schedule_column_proof(
 def inspect_published_door_schedule(
     producer: SourceVisibilityProducer, *,
     revision_id: str, page_id: str,
-    raster_text_producer: RasterTextCorroborationProducer | None = None,
+    raster_text_source_shadow: bool = False,
 ) -> SourceDoorScheduleResult:
     if type(producer) is not SourceVisibilityProducer:
         raise TypeError("door_source_requires_existing_visibility_producer")
@@ -525,10 +525,17 @@ def inspect_published_door_schedule(
         raise ValueError("source_door_revision_not_producer_owned")
     if int(page_id) not in {int(x) for x in published.coverage.decoded_pages}:
         raise ValueError("source_door_page_not_in_published_source_coverage")
+    if type(raster_text_source_shadow) is not bool:
+        raise TypeError("raster_text_source_shadow must be bool")
     words=_producer_owned_native_words(producer,published,page_id)
-    if raster_text_producer is not None:
+    if raster_text_source_shadow:
+        # The live producer creates its own OCR backend. A caller cannot
+        # supply a test-only MockOCRBackend or a foreign raster reading.
+        raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+            producer,
+        )
         words=_raster_corroborated_schedule_words(
-            producer,published,words,raster_text_producer=raster_text_producer,
+            producer,published,words,raster_text_producer=raster,
         )
     candidate_rows=_original_source_row_candidates(words)
     # Count all native code-bearing blocks before lexical row filtering.
