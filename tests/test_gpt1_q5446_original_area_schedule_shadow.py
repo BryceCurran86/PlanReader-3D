@@ -17,6 +17,7 @@ from pb_gpt1_q5446_original_area_schedule_shadow import (
     _table_witnesses_valid,
     _numeric_vector_digit,
     _original_numeric_glyph_receipts,
+    _source_numeric_glyph_readings,
     _original_label_stroke_receipts,
     ORIGINAL_LABEL_STROKE_PATHS,
     ORIGINAL_ROW_Y_BOUNDS,
@@ -214,3 +215,47 @@ def test_private_original_positive_is_optional_not_mocked():
     assert all(not r.customer_projection_allowed for r in report.rows)
     assert report.printed_floor_subtotal_delta_m2 == Decimal("0.01")
     assert report.printed_total_rollup_delta_m2 == Decimal("0.00")
+
+
+def test_original_numeric_readings_derive_values_from_vector_glyphs():
+    """A source reading is never copied from the manually transcribed ledger."""
+    decoded = _source_numeric_glyph_readings(_synthetic_numeric_table())
+    assert decoded is not None
+    assert tuple(value for _, value in decoded) == tuple(
+        value for _, _, value, _ in PRINTED_ORIGINAL_ROWS
+    )
+    assert len(set(path_id for ids, _ in decoded for path_id in ids)) == sum(
+        len(ids) for ids, _ in decoded
+    )
+
+
+def test_original_numeric_source_drives_value_even_if_transcription_disagrees():
+    """An independently decoded change is not normalized back to old source text."""
+    records = _synthetic_numeric_table()
+    original = _source_numeric_glyph_readings(records)
+    assert original is not None
+    original_digit_source_id = original[4][0][1]  # the original garage 6 glyph
+    source = records[original_digit_source_id]
+    rect = source["rect"]
+    last_corner = _Point(rect.x1, rect.y0 + .34 * (rect.y1 - rect.y0))
+    changed = dict(source, items=[("l", last_corner, last_corner)] * 22)
+    records[original_digit_source_id] = changed
+    decoded = _source_numeric_glyph_readings(records)
+    assert decoded is not None
+    assert decoded[4][1] == Decimal("39.40")
+    assert decoded[4][1] != original[4][1]
+    # Legacy exact-original transcription check still detects the mutation.
+    assert _original_numeric_glyph_receipts(records) is None
+
+
+def test_original_numeric_unknown_or_extra_character_abstains():
+    records = _synthetic_numeric_table()
+    good = _source_numeric_glyph_readings(records)
+    assert good is not None
+    digit_source_id = good[5][0][0]
+    records[digit_source_id] = dict(records[digit_source_id], width=.71)
+    assert _source_numeric_glyph_readings(records) is None
+
+    records = _synthetic_numeric_table()
+    records.append(_outlined_numeral("3", 1041 + 4.5 * 6, ORIGINAL_ROW_Y_BOUNDS[0][0] + 1.6))
+    assert _source_numeric_glyph_readings(records) is None
