@@ -494,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source-only", action="store_true",
                         help="Verify bundled files only; skip network, packages and production")
+    parser.add_argument("--all-source-roles", action="store_true",
+                        help="Use the existing manifest-complete source-role sealer for each project instead of its primary PDF")
     parser.add_argument("--ref", default="main", help="Branch or commit of the public repository to run (default main)")
     parser.add_argument("--only", nargs="*", choices=PROJECTS, help="Run production for these projects only")
     parser.add_argument(
@@ -527,6 +529,8 @@ def main() -> int:
         opts.source_plan_page_index < 0 or len(projects) != 1
     ):
         parser.error("source plan page index must be nonnegative and specify exactly one --only project")
+    if opts.all_source_roles and opts.source_plan_page_index is not None:
+        parser.error("all-source-roles cannot use a single primary-PDF page selection")
 
     kit = Path(__file__).resolve().parent
     if not (kit / "LOCAL_SOURCE_INVENTORY.json").is_file():
@@ -607,9 +611,45 @@ def main() -> int:
         if not ocr_installed:
             note(f"OCR extras were not installed; continuing without them. See {session / 'install_ocr_extras.log'}.")
 
+    # Opt-in role-complete production uses the same pinned checkout and Python
+    # interpreter for every source role. Record the installed environment
+    # privately, so independent original runs cannot be conflated when a
+    # mutable venv receives a new dependency after checkout.
+    environment_bytes = None
+    environment_fingerprint = None
+    python_version = None
+    if opts.all_source_roles:
+        if not pinned_source_tree_unchanged(repo, head):
+            note("The pinned source checkout is not clean; no source roles will execute.")
+            return 7
+        try:
+            version_run = subprocess.run(
+                [str(python), "-c", "import sys; print(sys.version.split()[0])"],
+                cwd=repo, capture_output=True, text=True, check=True, timeout=30,
+            )
+            packages_run = subprocess.run(
+                [str(python), "-m", "pip", "freeze", "--all"],
+                cwd=repo, capture_output=True, text=True, check=True, timeout=120,
+            )
+            python_version = version_run.stdout.strip()
+            if not python_version or not packages_run.stdout.strip():
+                raise ValueError("installed source runtime cannot be fingerprinted")
+            environment_bytes = (
+                "python=" + python_version + "\n"
+                + packages_run.stdout.replace("\r\n", "\n")
+            ).encode("utf-8")
+            environment_fingerprint = hashlib.sha256(environment_bytes).hexdigest()
+            (session / "PRIVATE_SOURCE_RUNTIME_PACKAGES.txt").write_bytes(environment_bytes)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            note("Failed to record the isolated Python package environment; no source roles will execute.")
+            return 7
+
     note("Step 7: running separate source-closed production diagnostics, one project at a time")
-    note("NOTE: the main architectural PDF is the per-project handoff input. Multi-document roles are NOT silently "
-         "treated as a complete source-closed project.")
+    if opts.all_source_roles:
+        note("Using EXISTING role-complete SHA-verified producer on every frozen document; role-only is not customer or score authority.")
+    else:
+        note("NOTE: the main architectural PDF is the per-project handoff input. Multi-document roles are NOT silently "
+             "treated as a complete source-closed project.")
     summary = {
         "benchmark_id": "full_plan_takeoff_reconciliation_v2",
         "launcher_version": 2,
@@ -619,10 +659,12 @@ def main() -> int:
         "source_preflight": "VERIFIED",
         "family_group": opts.family_group,
         "source_plan_page_index": opts.source_plan_page_index,
-        "source_scope_complete": (
-            opts.family_group == "all" and opts.source_plan_page_index is None
-            and len(projects) == len(PROJECTS)
-        ),
+        # Command-line selection alone never proves complete original roles.
+        "source_scope_complete": False,
+        "source_role_coverage_verified": False,
+        "all_source_roles_requested": bool(opts.all_source_roles),
+        "private_runtime_environment_sha256": environment_fingerprint,
+        "private_runtime_python_version": python_version,
         "per_project_timeout_min": opts.timeout_min,
         "ocr_extras_requested": bool(opts.with_ocr),
         "ocr_extras_installed": ocr_installed,
@@ -632,11 +674,80 @@ def main() -> int:
         "official_four_project_coverage_accuracy": None,
         "official_four_project_precision_adjusted_accuracy": None,
         "full_suite_publication_status": "UNPUBLISHED",
-        "explanation": "Single primary-PDF project handoffs are partial diagnostics and do not contain independent "
-                       "four-project signed identity maps and complete multi-document source authority. "
+        "explanation": "Each role remains unscored until its own source SHA and signed run verify; "
+                       "a role-complete seal is NOT an independently verified customer or four-project identity map. "
                        "No official V2 evaluator was run.",
     }
     for project in projects:
+        if opts.all_source_roles:
+            if not pinned_source_tree_unchanged(repo, head):
+                summary["project_handoffs"].append({
+                    "project_id": project, "status": "SOURCE_TREE_CHANGED",
+                    "source_role_coverage_verified": False,
+                    "first_failure": "pinned_source_tree_changed",
+                })
+                break
+            manifest = (
+                repo / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+                / "projects" / project / "source_manifest.json"
+            )
+            documents = json.loads(manifest.read_text(encoding="utf-8")).get("source_documents")
+            if type(documents) is not list or not documents:
+                summary["project_handoffs"].append({
+                    "project_id": project, "status": "SOURCE_ROLE_MANIFEST_INVALID",
+                    "source_role_coverage_verified": False,
+                    "first_failure": "frozen_original_source_roles_invalid",
+                })
+                continue
+            out = session / "project_outputs" / project
+            out.parent.mkdir(parents=True, exist_ok=True)
+            command = source_role_handoff_command(
+                python, project, kit / "sources" / project, out,
+                family_group=opts.family_group, timeout_min=opts.timeout_min,
+                max_private_gb=opts.max_private_gb,
+                min_free_commit_gb=opts.min_free_commit_gb,
+            )
+            note(f"  Starting {project} across {len(documents)} independently sealed source roles")
+            started = time.monotonic()
+            rc, status, usage = run_logged(
+                command, repo, session / "logs" / f"{project}.source_roles.log",
+                timeout_s=opts.timeout_min * 60 * len(documents) + 300,
+                track_memory=True,
+                max_private_mb=int(opts.max_private_gb * 1024),
+                min_free_commit_mb=int(opts.min_free_commit_gb * 1024),
+            )
+            receipt = source_role_handoff_status(
+                out / "SOURCE_ROLE_STATUS.json", project=project,
+                expected_roles=len(documents), process_status=status,
+                exit_code=rc,
+            )
+            if not pinned_source_tree_unchanged(repo, head):
+                receipt["source_role_coverage_verified"] = False
+                receipt["first_failure"] = "pinned_source_tree_changed"
+                status = "SOURCE_TREE_CHANGED"
+            handoff = {
+                "project_id": project, "status": status, "exit_code": rc,
+                "family_group": opts.family_group,
+                "elapsed_s": round(time.monotonic() - started, 1),
+                "peak_working_set_mb_sampled": round(usage["peak_working_set_kb"] / 1024, 1),
+                "peak_private_mb_sampled": round(usage["peak_private_kb"] / 1024, 1),
+                "min_system_free_commit_mb_sampled": (
+                    None if usage["min_system_free_commit_kb"] is None
+                    else round(usage["min_system_free_commit_kb"] / 1024, 1)
+                ),
+                "single_document_handoff_only": False,
+                "output_folder": str(out),
+                **receipt,
+                # This outer runner never issues benchmark identities, a
+                # verified customer bijection or a global frozen score.
+                "customer_bijection_verified": False,
+                "benchmark_score_granted": False,
+            }
+            summary["project_handoffs"].append(handoff)
+            note(f"  {project}: {status} / {receipt['sealed_roles']} of {receipt['expected_roles']} authentic role seals")
+            output_report(session / "BENCHMARK_DIAGNOSTIC_STATUS.json", summary)
+            output_report(session / "SHARE_SAFE_STATUS.json", share_safe(summary, str(Path.home())))
+            continue
         pdf = kit / "sources" / project / PRIMARY_PDF[project]
         if not pdf.is_file():
             summary["project_handoffs"].append({"project_id": project, "status": "PRIMARY_SOURCE_UNAVAILABLE"})
@@ -673,10 +784,50 @@ def main() -> int:
         # Written after every project so an interrupted run keeps what already finished.
         output_report(session / "BENCHMARK_DIAGNOSTIC_STATUS.json", summary)
         output_report(session / "SHARE_SAFE_STATUS.json", share_safe(summary, str(Path.home())))
+    if opts.all_source_roles:
+        # Frozen all-four source-role coverage needs four distinct completed
+        # project envelopes; partial family/project attempts are never global.
+        stable_tree = pinned_source_tree_unchanged(repo, head)
+        try:
+            after = subprocess.run(
+                [str(python), "-m", "pip", "freeze", "--all"],
+                cwd=repo, capture_output=True, text=True, check=True, timeout=120,
+            )
+            after_bytes = (
+                "python=" + python_version + "\n"
+                + after.stdout.replace("\r\n", "\n")
+            ).encode("utf-8")
+            stable_environment = environment_bytes == after_bytes
+        except (OSError, subprocess.SubprocessError):
+            stable_environment = False
+        summary["private_runtime_environment_unchanged"] = stable_environment
+        summary["private_code_tree_unchanged"] = stable_tree
+        selected_complete = (
+            len(summary["project_handoffs"]) == len(projects)
+            and all(
+                row.get("source_role_coverage_verified") is True
+                for row in summary["project_handoffs"]
+            )
+        )
+        summary["source_role_coverage_verified"] = bool(
+            stable_tree and stable_environment and selected_complete
+            and len(projects) == len(PROJECTS) and opts.family_group == "all"
+        )
+        summary["source_scope_complete"] = summary["source_role_coverage_verified"]
     output_report(session / "BENCHMARK_DIAGNOSTIC_STATUS.json", summary)
     output_report(session / "SHARE_SAFE_STATUS.json", share_safe(summary, str(Path.home())))
     note("\nPrivate diagnostic complete. Do not claim an official four-job accuracy score.")
     note(f"Please share SHARE_SAFE_STATUS.json and the logs from: {session}")
+    if opts.all_source_roles:
+        return 0 if (
+            summary["private_runtime_environment_unchanged"]
+            and summary["private_code_tree_unchanged"]
+            and len(summary["project_handoffs"]) == len(projects)
+            and all(
+                row.get("source_role_coverage_verified") is True
+                for row in summary["project_handoffs"]
+            )
+        ) else 8
     return 0 if all(x["status"] == "COMPLETED" for x in summary["project_handoffs"]) else 8
 
 
