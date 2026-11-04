@@ -431,6 +431,18 @@ def test_original_role_receipt_does_not_promote_missing_partial_or_duplicate_row
             file, project=project, expected_roles=2,
             process_status="COMPLETED", exit_code=0,
         )["source_role_coverage_verified"] is False
+    # A contradictory child result is not source authority merely because
+    # a top-level report claims two successful role seals.
+    inconsistent = {**valid, "roles": [
+        {**valid["roles"][0], "process_status": "PROCESS_FAILED"},
+        valid["roles"][1],
+    ]}
+    file.write_text(json.dumps(inconsistent), encoding="utf-8")
+    assert launcher.source_role_handoff_status(
+        file, project=project, expected_roles=2,
+        process_status="COMPLETED", exit_code=0,
+    )["source_role_coverage_verified"] is False
+
     file.write_text('{"project_id":"a","project_id":"b"}', encoding="utf-8")
     assert launcher.source_role_handoff_status(
         file, project=project, expected_roles=2,
