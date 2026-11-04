@@ -54,7 +54,6 @@ def test_original_source_neutral_figured_frame_reissues_type_only_evidence():
     {"title_observation_ids":()},
     {"dimension_line_ids":()},
     {"witness_line_ids":()},
-    {"opening_kind":"unknown"},
 ])
 def test_replayed_or_damaged_frame_receipt_never_reissues_nominal_quantity(update):
     record=_record()
@@ -65,3 +64,9 @@ def test_replayed_or_damaged_frame_receipt_never_reissues_nominal_quantity(updat
 def test_no_raw_caller_can_issue_nominal_type_without_sealed_record():
     with pytest.raises(TypeError,match="producer-owned"):
         publish_nominal_elevation_frame_type_area(object())
+
+
+def test_original_producer_record_rejects_invalid_opening_kind_before_issuer():
+    record=_record()
+    with pytest.raises(ValueError, match="opening_kind must be door or window"):
+        replace(record, opening_kind="unknown")
