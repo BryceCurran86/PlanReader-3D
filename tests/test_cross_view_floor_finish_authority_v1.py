@@ -1485,3 +1485,39 @@ def test_source_owned_original_finish_mark_cannot_cross_physical_floor_page_with
         _source_owned_mark_eligible_for_existing_physical_floor(
             floor=floor, occurrence=mark, source_owned_shadow="true",
         )
+
+
+@pytest.mark.parametrize(
+    ("description", "semantic", "eligible"),
+    (
+        ("Polyurethane floor coating", "polyurethane", True),
+        ("Polyurethane floor finish system", "polyurethane", True),
+        ("Polyurethane wall coating", "polyurethane", False),
+        ("Polyurethane coating", "polyurethane", False),
+        ("Polyurethane underfloor insulation", "polyurethane", False),
+        ("Polyurethane floor drain protection", "polyurethane", False),
+        ("Polyurethane floor coating over wall tile", "polyurethane", False),
+        ("Polyurethane floor coating", "", False),
+        ("EPX", "polyurethane", False),
+    ),
+)
+def test_producer_accepts_only_explicit_source_polyurethane_floor_coating(
+    description, semantic, eligible,
+):
+    """No code-only EPX meaning or polyurethane wall finish can mint floor m²."""
+    definition = material_semantic.SourceMaterialDefinitionRecord(
+        record_id="source-definition-epx",
+        document_id="source-document",
+        revision_id="source-revision",
+        source_sha256="a" * 64,
+        snapshot_id="source-snapshot",
+        code="EPX",
+        description=description,
+        substrate="",
+        finish="",
+        semantic_finish=semantic,
+        source_definition_ids=("native-definition-witness",),
+        source_page_ids=("3",),
+        source_viewport_ids=("source-schedule-vp",),
+    )
+    assert floor_finish_authority._definition_is_floor_finish(definition) is eligible
