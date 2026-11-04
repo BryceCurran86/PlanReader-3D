@@ -15,12 +15,12 @@ def _record():
     result = authority.resolve(_selector(published,"W1"))
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
-    return result.record
+    return result.record, authority
 
 
 def test_original_source_neutral_figured_frame_reissues_type_only_evidence():
-    record=_record()
-    evidence=publish_nominal_elevation_frame_type_area(record)
+    record, authority = _record()
+    evidence=publish_nominal_elevation_frame_type_area(record, authority=authority)
     assert type(evidence) is QuantityEvidence
     assert evidence.value == 7.2  # synthetic 3000 x 2400, not benchmark truth
     assert evidence.family == "opening_nominal_frame_type_area"
@@ -38,7 +38,7 @@ def test_original_source_neutral_figured_frame_reissues_type_only_evidence():
         record.mark_observation_id,*record.dimension_observation_ids,
         *record.title_observation_ids,*record.frame_geometry_ids,
     ))
-    assert publish_nominal_elevation_frame_type_area(record) == evidence
+    assert publish_nominal_elevation_frame_type_area(record, authority=authority) == evidence
 
 
 @pytest.mark.parametrize("update",[
@@ -54,19 +54,40 @@ def test_original_source_neutral_figured_frame_reissues_type_only_evidence():
     {"title_observation_ids":()},
     {"dimension_line_ids":()},
     {"witness_line_ids":()},
+    {"dimension_line_ids":("synthetic-fake-x","synthetic-fake-y")},
+    {"witness_line_ids":("synthetic-fake-witness",)},
+    {"frame_geometry_ids":("synthetic-fake-frame",)},
+    {"frame_bbox":(0.0,0.0,1.0,1.0)},
+    {"reason_codes":("unrelated_positive",)},
 ])
 def test_replayed_or_damaged_frame_receipt_never_reissues_nominal_quantity(update):
-    record=_record()
+    record, authority = _record()
     altered=replace(record,**update)
-    assert publish_nominal_elevation_frame_type_area(altered) is None
+    assert publish_nominal_elevation_frame_type_area(altered, authority=authority) is None
 
 
 def test_no_raw_caller_can_issue_nominal_type_without_sealed_record():
+    record, authority = _record()
     with pytest.raises(TypeError,match="producer-owned"):
-        publish_nominal_elevation_frame_type_area(object())
+        publish_nominal_elevation_frame_type_area(object(), authority=authority)
+    with pytest.raises(TypeError,match="producer-owned"):
+        publish_nominal_elevation_frame_type_area(record, authority=object())
 
 
 def test_original_producer_record_rejects_invalid_opening_kind_before_issuer():
-    record=_record()
+    record, authority = _record()
     with pytest.raises(ValueError, match="opening_kind must be door or window"):
         replace(record, opening_kind="unknown")
+
+def test_source_authority_must_resolve_exact_unmodified_receipt():
+    record, authority = _record()
+    assert publish_nominal_elevation_frame_type_area(record, authority=authority)
+    # The producer seal survives replace(), but authority-owned receipts don't.
+    for changed in (
+        replace(record, dimension_line_ids=("forged-x", "forged-y")),
+        replace(record, witness_line_ids=("forged-witness",)),
+        replace(record, frame_bbox=(0.0, 0.0, 1.0, 1.0)),
+    ):
+        assert publish_nominal_elevation_frame_type_area(
+            changed, authority=authority,
+        ) is None
