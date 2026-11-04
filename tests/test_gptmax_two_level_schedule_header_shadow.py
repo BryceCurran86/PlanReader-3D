@@ -174,3 +174,41 @@ def test_real_instance_schedule_producer_preserves_two_side_by_side_headers():
     cells = ("MARK", "WIDTH", "HEIGHT", "MARK", "WIDTH", "HEIGHT")
     row, ids = _native_header(cells, 10)
     assert len(_header_table_specs(row, ids)) == 2
+
+
+def test_dimensional_admission_cannot_run_past_partial_header_boundary():
+    """A notes/partial table is a stop signal, not a dimensioned new table."""
+    first = _native_header(("MARK", "WIDTH", "HEIGHT"), 10)
+    first_row = _native_header(("D01", "820", "2040"), 19)
+    partial = _native_header(("MARK", "DESCRIPTION"), 29)
+    ghost = _native_header(("D02", "920", "2040"), 39)
+    new_header = _native_header(("MARK", "WIDTH", "HEIGHT"), 49)
+    new_row = _native_header(("D03", "900", "2100"), 59)
+    assert _header_table_specs(partial[0], partial[1]) == []
+    assert _header_table_specs(partial[0], partial[1], stop_boundary=True)
+    matches = _schedule_entries_for_page(
+        (first, first_row, partial, ghost, new_header, new_row), 28,
+    )
+    assert [entry.type_mark for entry, _ in matches] == ["D01", "D03"]
+    assert [ids for _, ids in matches] == [first_row[1], new_row[1]]
+
+
+def test_partial_stop_header_does_not_suppress_adjacent_independent_table():
+    """Stop boundaries use observed ink bounds, not an infinite x window."""
+    header = _native_header(
+        ("MARK", "WIDTH", "HEIGHT", "MARK", "WIDTH", "HEIGHT"), 10,
+    )
+    row1 = _native_header(
+        ("D01", "820", "2040", "W01", "900", "2100"), 19,
+    )
+    left_partial = _native_header(("MARK", "DESCRIPTION"), 29)
+    row2 = _native_header(
+        ("D02", "820", "2040", "W02", "900", "2100"), 39,
+    )
+    matches = _schedule_entries_for_page(
+        (header, row1, left_partial, row2), 28,
+    )
+    assert [entry.type_mark for entry, _ in matches] == [
+        "D01", "W01", "W02",
+    ]
+    assert matches[-1][1] == row2[1][3:]
