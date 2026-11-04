@@ -264,6 +264,19 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish original material-only receipt forbids "
                 f"commercial area publication: {original.quantity_id}"
             )
+        # An original finish may be numerically FIRM for a source handoff
+        # yet explicitly restricted from customer sale. Preserve the source
+        # producer's present handoff/shadow denial; no final row projector may
+        # replace either flag with a commercial permission.
+        for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+            if (
+                restricted_flag in original_metadata
+                and original_metadata[restricted_flag] is not False
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original source is "
+                    f"{restricted_flag}: {original.quantity_id}"
+                )
 
     # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
     # Original material records can remain attached to an ABSTAINED quantity
