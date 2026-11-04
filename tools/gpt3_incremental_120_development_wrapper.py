@@ -19,7 +19,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
+# This repository deliberately loads frozen V2 modules by exact file path:
+# benchmarks/ may be shadowed by a third-party package. Reuse the installed
+# source-verified reporter's loader without modifying frozen files.
+from tools.report_gpt3_four_project_evidence import load_suite_manifests
 _FROZEN_ROOT = _REPO_ROOT / "benchmarks" / "frozen_holdout" / "full_plan_v2"
 _FROZEN_RUNNER = _FROZEN_ROOT / "run_development_scoreboard.py"
 _SCHEMA = "gpt3-provisional-frozen120-development-v1"
