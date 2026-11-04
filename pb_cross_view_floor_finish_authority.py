@@ -96,6 +96,10 @@ _FLOOR_FINISH_SEMANTICS = frozenset(
         "tile",
         "vinyl",
         "epoxy",
+        # Authenticated polyurethane FLOOR coatings are a distinct source
+        # family, not epoxy merely because a drawing calls them EPX. The
+        # role gate below still requires explicit original floor wording.
+        "polyurethane",
     }
 )
 
