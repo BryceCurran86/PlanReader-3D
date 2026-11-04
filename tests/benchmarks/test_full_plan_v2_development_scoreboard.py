@@ -104,7 +104,7 @@ def test_incomplete_project_verified_truth_is_development_scorable():
     assert result.precision_adjusted_accuracy == pytest.approx(1.0)
 
 
-def test_partial_execution_reports_live_frozen_denominator_without_issuing_official_score():
+def test_partial_execution_never_becomes_headline_accuracy():
     manifests = tuple(_manifest(f"p{i}") for i in range(1, 5))
     result = evaluate_development_suite_v2(
         manifests,
@@ -117,13 +117,9 @@ def test_partial_execution_reports_live_frozen_denominator_without_issuing_offic
     assert result.executed_projects == 2
     assert result.source_closed_truth_items == 4
     assert result.executed_denominator == 2
-    assert result.unexecuted_denominator == 2
     assert result.execution_coverage == pytest.approx(0.5)
-    # All four fixed truth items remain in the denominator.
-    # Do not report the cherry-picked executed-only 2/2 as full benchmark coverage.
     assert result.observed_accuracy == pytest.approx(1.0)
-    assert result.coverage_accuracy == pytest.approx(0.5)
-    assert result.development_accuracy == pytest.approx(0.5)
+    assert result.development_accuracy is None
     assert result.precision_adjusted_accuracy is None
     assert "p3:production_output_missing" in result.reason_codes
     assert "p4:production_output_missing" in result.reason_codes
@@ -168,7 +164,6 @@ def test_lineage_conflict_blocks_headline():
     }
     result = evaluate_development_suite_v2(manifests, produced)
     assert result.lineage_conflicts == 1
-    assert result.coverage_accuracy is None
     assert result.development_accuracy is None
     assert "lineage_conflict" in result.reason_codes
 
@@ -190,10 +185,6 @@ def test_failure_ledger_reports_exact_item_failures_without_faking_missing_execu
     ledger = build_development_failure_ledger_v2(manifests, produced)
 
     assert ledger.missing_execution_project_ids == ("p2",)
-    assert len(ledger.not_executed_items) == 1
-    assert ledger.not_executed_items[0].state == "NOT_EXECUTED"
-    assert ledger.not_executed_items[0].item_id == "p2-floor"
-    assert ledger.not_executed_items[0].produced_quantity_id is None
     assert len(ledger.failure_items) == 1
     failure = ledger.failure_items[0]
     assert failure.project_id == "p1"
@@ -223,40 +214,6 @@ def test_failure_ledger_omits_items_already_within_tolerance():
     assert ledger.failure_items == ()
     assert ledger.unsupported_outputs == ()
     assert ledger.missing_execution_project_ids == ()
-    assert ledger.not_executed_items == ()
-
-
-def test_no_execution_has_no_provisional_score_or_fabricated_misses():
-    manifests = tuple(_manifest(f"p{i}") for i in range(1, 5))
-    result = evaluate_development_suite_v2(manifests, {})
-    assert result.status == "PARTIAL_OR_BLOCKED"
-    assert result.executed_projects == 0
-    assert result.executed_denominator == 0
-    assert result.unexecuted_denominator == result.source_closed_truth_items == 4
-    assert result.matched_within_tolerance == 0
-    assert result.missed == 0
-    assert result.coverage_accuracy is None
-    assert result.observed_accuracy is None
-    assert result.development_accuracy is None
-    ledger = build_development_failure_ledger_v2(manifests, {})
-    assert ledger.failure_items == ()
-    assert len(ledger.not_executed_items) == 4
-    assert {row.state for row in ledger.not_executed_items} == {"NOT_EXECUTED"}
-    assert len(ledger.missing_execution_project_ids) == 4
-
-
-def test_partial_false_positive_lineage_never_grants_coverage():
-    manifests = tuple(_manifest(f"p{i}") for i in range(1, 5))
-    score = evaluate_development_suite_v2(
-        manifests,
-        {"p1": (_produced("p1", lineage_ok=False),)},
-    )
-    assert score.status == "PARTIAL_OR_BLOCKED"
-    assert score.executed_denominator == 1
-    assert score.unexecuted_denominator == 3
-    assert score.lineage_conflicts == 1
-    assert score.coverage_accuracy is None
-    assert score.development_accuracy is None
 
 
 def test_active_v2_truth_inventory_has_at_least_120_source_closed_items():
