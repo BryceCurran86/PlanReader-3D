@@ -481,3 +481,84 @@ def test_source_room_area_material_string_cannot_become_unproven_customer_finish
     ).valid_quantity_count == 2
     # The original FIRM room-area evidence remains immutable.
     assert claim.room_area_quantity_evidence[0].metadata["finish_system"] == "vinyl"
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"commercial_projection_allowed": False},
+    {"commercial_projection_allowed": None},
+    {"commercial_projection_allowed": 0},
+    {"commercial_projection_allowed": "true"},
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": None},
+    {"shadow_only": True},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_floor_area_commercial_denial_cannot_be_restamped_for_customer(
+    source_denial,
+):
+    """An internally FIRM floor receipt can be explicitly NON-commercial."""
+    from dataclasses import replace
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    original = claim.room_area_quantity_evidence[0]
+    changed = replace(
+        original,
+        metadata={**original.metadata, **source_denial},
+    )
+    claim = replace(claim, room_area_quantity_evidence=(changed,))
+    # The source-only run retains the immutable original (including a
+    # material-only restriction); customer projection must not relabel it.
+    source_run = seal_live_floor_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(source_run.quantities) == 1
+    assert source_run.quantities[0].value == 8.64
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="original source (forbids commercial projection|is quantity_handoff_only|is shadow_only)",
+    ):
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.room_area_quantity_evidence == (changed,)
+    assert changed.metadata == {**original.metadata, **source_denial}
+
+
+def test_original_floor_area_explicit_true_permission_and_false_source_flags_survive():
+    from dataclasses import replace
+    from pb_live_floor_area_customer_projection import (
+        project_live_floor_area_customer_rows,
+    )
+    from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    claim = _production_shaped_source_area_and_finish_claim()
+    original = claim.room_area_quantity_evidence[0]
+    positive = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "commercial_projection_allowed": True,
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = replace(claim, room_area_quantity_evidence=(positive,))
+    rows = project_live_floor_area_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    signed = seal_live_floor_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(signed.quantities) == 1
+    assert rows[0]["quantity"] == 8.64
+    assert rows[0]["element"] == "Floor area"
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (signed.quantities[0].quantity_id,)
