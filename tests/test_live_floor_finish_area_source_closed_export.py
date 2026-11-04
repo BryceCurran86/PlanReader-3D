@@ -1814,3 +1814,74 @@ def test_original_room_area_explicit_true_permission_supports_real_ft_seal():
     assert verify_sealed_customer_output(
         sealed, rows,
     ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": None},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": "false"},
+    {"shadow_only": True},
+    {"shadow_only": None},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_finish_handoff_or_shadow_denial_cannot_mint_saleable_ft_area(
+    source_denial,
+):
+    """Even a FIRM numeric FT receipt cannot revoke its own noncommercial veto."""
+    original = _quantity()
+    denied = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            **source_denial,
+        },
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(denied,))
+    flagged = next(iter(source_denial))
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match=f"floor-finish original source is {flagged}",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.floor_finish_quantity_evidence == (denied,)
+    assert denied.value == original.value == 8.64
+    assert denied.quantity_id == original.quantity_id
+
+
+def test_original_finish_explicitly_non_shadow_source_still_reaches_customer():
+    """Opted-in original FT quantity preserves signed ID and full numeric area."""
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(permitted,))
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert sealed.quantities[0].quantity_id == permitted.quantity_id
+    assert rows[0]["quantity"] == permitted.value == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (permitted.quantity_id,)
