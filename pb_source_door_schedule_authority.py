@@ -193,8 +193,29 @@ def _original_source_row_candidates(
         # Native door schedule rows may describe a SLIDING or FIXED panel
         # without repeating the literal DOOR. Preserve it as a candidate,
         # but require the independently authenticated table before use.
-        if not ({"DOOR","SWING","SLIDING","DISPLAY","SHELVING","AUTOMATED"}
-                & set(strings)):
+        visible_roles = {"DOOR","SWING","SLIDING","DISPLAY","SHELVING","AUTOMATED"}
+        explicit_role = bool(visible_roles & set(strings))
+        # Source-native word grouping can place a printed compound title
+        # (e.g. "ALUMINIUM FRAMED GLASS DOOR") in ONE trusted text span.
+        # A printed word-boundary role plus two independently observed
+        # numeric source words admits a candidate, NEVER a table/member,
+        # physical instance, millimetre basis or customer quantity.
+        # Bare plan labels and free-form notes with no printed numeric pair
+        # stay outside the schedule candidate set.
+        compound_role = any(
+            re.search(r"\\b(?:DOOR|SWING|SLIDING|DISPLAY|SHELVING|AUTOMATED)\\b",
+                      word.literal, flags=re.IGNORECASE)
+            for word in source_words[1:]
+        )
+        numeric_source_words = [
+            word for word in source_words[1:]
+            if _NUMERIC.fullmatch(word.literal) is not None
+        ]
+        if not (explicit_role or (
+            compound_role and len(numeric_source_words) >= 2
+            and len({w.observation_id for w in numeric_source_words})
+                == len(numeric_source_words)
+        )):
             continue
         if sum(_DOOR_CODE.fullmatch(x) is not None for x in strings)!=1:
             continue
