@@ -234,19 +234,22 @@ def _numeric_vector_digit(record: dict[str, Any]) -> str | None:
     return None
 
 
-def _original_numeric_glyph_receipts(
+def _source_numeric_glyph_readings(
     drawings: list[dict[str, Any]],
-) -> tuple[tuple[int, ...], ...] | None:
-    """Require ALL seven row values from ordered, independent native vectors.
+) -> tuple[tuple[tuple[int, ...], Decimal], ...] | None:
+    """Read printed m² directly from native path glyphs, never from the transcription.
 
-    Only source-numeric outlines are authenticated here, not their physical
-    wall ownership, gross/net meaning, or printed category label glyphs.
+    This does not prove that the handwritten source category is a physical
+    floor or that a floor has the same inner-face extent as its area table.
+    Original SHA, table rows, source numeric strokes and label strokes are
+    reauthenticated separately by the only public inspector.
     """
-    results: list[tuple[int, ...]] = []
-    for (_, _, numeric, _), (y0, y1) in zip(
-        PRINTED_ORIGINAL_ROWS, ORIGINAL_ROW_Y_BOUNDS
-    ):
-        located = []
+    import re
+
+    results: list[tuple[tuple[int, ...], Decimal]] = []
+    seen: set[int] = set()
+    for y0, y1 in ORIGINAL_ROW_Y_BOUNDS:
+        located: list[tuple[int, float, dict[str, Any]]] = []
         for index, record in enumerate(drawings):
             rect = record.get("rect")
             if rect is None:
@@ -256,23 +259,40 @@ def _original_numeric_glyph_receipts(
                     ORIGINAL_NUMERIC_COLUMNS[0] < rect.x0 < rect.x1 < ORIGINAL_NUMERIC_COLUMNS[1]
                     and y0 + 0.35 < rect.y0 < rect.y1 < y1 - 0.35
                 ):
-                    located.append((index, rect.x0, record))
-            except (TypeError, ValueError, AttributeError):
+                    located.append((index, float(rect.x0), record))
+            except (TypeError, ValueError, OverflowError, AttributeError):
                 return None
-        located.sort(key=lambda record: (record[1], record[0]))
-        decoded = "".join(_numeric_vector_digit(record) or "?" for _, _, record in located)
-        if decoded != str(numeric):
+        located.sort(key=lambda row: (row[1], row[0]))
+        if not located:
+            return None
+        glyphs = tuple(_numeric_vector_digit(record) for _, _, record in located)
+        if any(glyph is None for glyph in glyphs):
+            return None
+        printed = "".join(glyphs)
+        # The original schedule has an explicit decimal currency-style
+        # square-metre format. A missing decimal or extra precision is not
+        # allowed to be inferred from nearby values or row totals.
+        if re.fullmatch(r"(?:0|[1-9][0-9]*)\.[0-9]{2}", printed) is None:
             return None
         ids = tuple(index for index, _, _ in located)
-        if len(set(ids)) != len(ids):
+        if len(set(ids)) != len(ids) or seen.intersection(ids):
             return None
-        results.append(ids)
-    if len(results) != len(PRINTED_ORIGINAL_ROWS):
+        seen.update(ids)
+        results.append((ids, Decimal(printed)))
+    return tuple(results) if len(results) == len(ORIGINAL_ROW_Y_BOUNDS) else None
+
+
+def _original_numeric_glyph_receipts(
+    drawings: list[dict[str, Any]],
+) -> tuple[tuple[int, ...], ...] | None:
+    """Compatibility original-transcription witness, NOT a value issuer."""
+    decoded = _source_numeric_glyph_readings(drawings)
+    if decoded is None or len(decoded) != len(PRINTED_ORIGINAL_ROWS):
         return None
-    all_ids = tuple(index for ids in results for index in ids)
-    if len(all_ids) != len(set(all_ids)):
+    if any(value != transcription[2]
+           for (_, value), transcription in zip(decoded, PRINTED_ORIGINAL_ROWS)):
         return None
-    return tuple(results)
+    return tuple(path_ids for path_ids, _ in decoded)
 
 
 def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446SourceAreaScheduleShadow:
@@ -300,9 +320,10 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
             drawings = page.get_drawings()
             if not _table_witnesses_valid(drawings):
                 return _abstain("original_area_schedule_vector_table_witness_missing", source_sha)
-            original_numeric_source_ids = _original_numeric_glyph_receipts(drawings)
-            if original_numeric_source_ids is None:
+            original_numeric_readings = _source_numeric_glyph_readings(drawings)
+            if original_numeric_readings is None:
                 return _abstain("original_area_schedule_numeric_vector_glyphs_unverified", source_sha)
+            original_numeric_source_ids = tuple(ids for ids, _ in original_numeric_readings)
             original_label_source_ids = _original_label_stroke_receipts(drawings)
             if original_label_source_ids is None:
                 return _abstain("original_area_schedule_label_vector_ink_missing", source_sha)
@@ -312,7 +333,8 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
     rows = tuple(
         OriginalAreaScheduleCandidate(
             original_row_id=f"q5446_source_p1_area_schedule_row_{i + 1}_{key}",
-            printed_label=label, printed_area_m2=value, is_rollup=rollup,
+            printed_label=label, printed_area_m2=original_numeric_readings[i][1],
+            is_rollup=rollup,
             original_page_index=SOURCE_PAGE_INDEX,
             table_row_number=i + 1,
             original_source_sha256=source_sha,
@@ -323,7 +345,13 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
         )
         for i, (key, label, value, rollup) in enumerate(PRINTED_ORIGINAL_ROWS)
     )
-    value_by_key = {key: val for key, _, val, _ in PRINTED_ORIGINAL_ROWS}
+    # Even the printed subtotal discrepancy is computed only from decoded
+    # source glyphs; frozen truth or the manually transcribed table never
+    # becomes an input to the emitted original-source observations.
+    value_by_key = {
+        key: original_numeric_readings[i][1]
+        for i, (key, _, _, _) in enumerate(PRINTED_ORIGINAL_ROWS)
+    }
     floor_delta = value_by_key["subtotal"] - (
         value_by_key["ground_floor"] + value_by_key["first_floor"]
     )
