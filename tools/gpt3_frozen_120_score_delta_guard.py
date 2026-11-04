@@ -407,17 +407,23 @@ def compare_signed_customer_retention(
         raise ValueError("candidate dropped an existing signed quantity")
     if set(old_customer) - set(new_customer):
         raise ValueError("candidate dropped an existing signed customer quantity")
-    if set(old_customer) != set(old_signed):
-        raise ValueError("baseline signed/customer quantity universe inconsistent")
+    before_valid_ids = {row.quantity_id for row in before.quantities if not row.abstained}
+    after_valid_ids = {row.quantity_id for row in after.quantities if not row.abstained}
+    if set(old_customer) != before_valid_ids or set(new_customer) != after_valid_ids:
+        raise ValueError("signed/customer valid quantity universe inconsistent")
     for quantity_id, old in old_signed.items():
         if _canonical_signed_body(old) != _canonical_signed_body(new_signed[quantity_id]):
             raise ValueError("candidate rekeyed or modified an existing signed row")
-        if _canonical_signed_body(old_customer[quantity_id]) != _canonical_signed_body(
-            new_customer[quantity_id]
+        if quantity_id in old_customer and (
+            _canonical_signed_body(old_customer[quantity_id])
+            != _canonical_signed_body(new_customer[quantity_id])
         ):
             raise ValueError("candidate changed an existing signed customer body")
-    if before_verified.valid_quantity_count != len(old_signed) or (
-        after_verified.valid_quantity_count != len(new_signed)
+    if (
+        before_verified.sealed_quantity_count != len(old_signed)
+        or after_verified.sealed_quantity_count != len(new_signed)
+        or before_verified.valid_quantity_count != len(old_customer)
+        or after_verified.valid_quantity_count != len(new_customer)
     ):
         raise ValueError("signed/customer receipt is incomplete")
 
