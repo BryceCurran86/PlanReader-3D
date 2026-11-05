@@ -1,0 +1,142 @@
+"""Source-neutral witness tests plus optional SHA-original Q5446 private replay.
+
+A synthetic drawing list only tests rejection/geometry invariants. It never
+establishes real source authority or an accuracy gain.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+from decimal import Decimal
+import os
+
+import fitz
+import pytest
+
+from pb_gpt1_q5446_alfresco_figure_authority import (
+    FIGURE_HORIZONTAL_PATHS, FIGURE_VERTICAL_PATHS,
+    FIGURE_HORIZONTAL_LINE, FIGURE_VERTICAL_LINE,
+    PLAN_ALFRESCO_LABEL_PATHS, SOURCE_PRIMITIVE_CAP,
+    original_alfresco_figure_witness,
+)
+from pb_gpt1_q5446_alfresco_original_customer import (
+    issue_original_q5446_alfresco_customer_area,
+)
+
+
+def _ink(bounds, *, count=1, width=.72, first=None):
+    x0,y0,x1,y1 = bounds
+    first = first if first is not None else (x0,y0)
+    return {
+        "rect": fitz.Rect(*bounds), "type": "s",
+        "width": width, "color": (0.,0.,0.),
+        "items": [("l", fitz.Point(*first), fitz.Point(x1,y1))] * count,
+    }
+
+
+def _source_neutral_native_fixture():
+    rows = [{} for _ in range(10686)]
+    boxes_h = (
+        (831.12,654.6,834.48,660.36),
+        (835.92,654.6,839.28,660.36),
+        (840.72,654.6,844.08,660.36),
+        (845.52,654.6,849.12,660.36),
+    )
+    for pos,(i,rect) in enumerate(zip(FIGURE_HORIZONTAL_PATHS,boxes_h)):
+        first = (rect[0]+.48,rect[1]) if pos == 0 else (rect[0]+1.44,rect[1])
+        rows[i] = _ink(rect,count=14 if pos == 0 else 16,first=first)
+    boxes_v = (
+        (1054.08,412.56,1059.84,416.16),
+        (1054.08,408.0,1059.84,411.36),
+        (1054.08,403.2,1059.84,406.56),
+        (1054.08,398.4,1059.84,401.76),
+    )
+    for pos,(i,rect) in enumerate(zip(FIGURE_VERTICAL_PATHS,boxes_v)):
+        first = ((rect[2],rect[1]+1.2) if pos == 0
+                 else (rect[0],rect[1]+1.92))
+        rows[i] = _ink(rect,count=3 if pos == 0 else 16,first=first)
+    rows[FIGURE_HORIZONTAL_LINE] = _ink(
+        (799.68,661.8,880.32,661.8),width=.48)
+    rows[FIGURE_VERTICAL_LINE] = _ink(
+        (1061.28,352.8,1061.28,461.64),width=.48)
+    for i in PLAN_ALFRESCO_LABEL_PATHS:
+        rows[i] = _ink((820.,396.,824.,400.),width=.96)
+    rows[PLAN_ALFRESCO_LABEL_PATHS[0]] = _ink(
+        (813.84,395.28,817.,399.),width=.96)
+    rows[PLAN_ALFRESCO_LABEL_PATHS[-1]] = _ink(
+        (863.,398.,867.84,402.24),width=.96)
+    return rows
+
+
+def test_native_figures_are_source_area_not_a_benchmark_value():
+    original = _source_neutral_native_fixture()
+    witness = original_alfresco_figure_witness(original)
+    assert witness is not None
+    assert witness.horizontal_mm == 3000
+    assert witness.vertical_mm == 4000
+    assert witness.area_m2 == Decimal("12")
+    assert witness.diagnostic_only is True
+    assert len(witness.source_vector_path_ids) == len(set(witness.source_vector_path_ids))
+
+
+@pytest.mark.parametrize("change", [
+    "missing_digit", "wrong_digit_strokes", "wall_side_figure",
+    "shift_horizontal_dimension", "shift_vertical_dimension",
+    "foreign_label", "missing_label", "oversized_source",
+])
+def test_native_figured_source_conflicts_abstain(change):
+    rows = _source_neutral_native_fixture()
+    if change == "missing_digit":
+        rows[FIGURE_HORIZONTAL_PATHS[0]] = {}
+    elif change == "wrong_digit_strokes":
+        rows[FIGURE_HORIZONTAL_PATHS[0]]["items"] = rows[FIGURE_HORIZONTAL_PATHS[0]]["items"][:5]
+    elif change == "wall_side_figure":
+        rows[FIGURE_VERTICAL_PATHS[0]]["items"] = rows[FIGURE_VERTICAL_PATHS[0]]["items"] * 2
+    elif change == "shift_horizontal_dimension":
+        rows[FIGURE_HORIZONTAL_LINE]["rect"] = fitz.Rect(799.68,663,880.32,663)
+    elif change == "shift_vertical_dimension":
+        rows[FIGURE_VERTICAL_LINE]["rect"] = fitz.Rect(1062.8,352.8,1062.8,461.64)
+    elif change == "foreign_label":
+        rows[PLAN_ALFRESCO_LABEL_PATHS[-1]]["rect"] = fitz.Rect(900,398,905,402.24)
+    elif change == "missing_label":
+        rows[PLAN_ALFRESCO_LABEL_PATHS[-1]] = {}
+    elif change == "oversized_source":
+        rows += [{} for _ in range(SOURCE_PRIMITIVE_CAP)]
+    assert original_alfresco_figure_witness(rows) is None
+
+
+def test_no_original_alfresco_cannot_mint_customer_area(tmp_path):
+    missing = issue_original_q5446_alfresco_customer_area(
+        str(tmp_path / "missing.pdf"), workspace_id=12)
+    assert missing.status == "ABSTAIN"
+    assert missing.quantity is None and missing.customer_rows == ()
+    false_pdf = tmp_path / "lookalike.pdf"
+    false_pdf.write_bytes(b"%PDF-1.7 fake")
+    false = issue_original_q5446_alfresco_customer_area(
+        str(false_pdf), workspace_id=12)
+    assert false.status == "ABSTAIN"
+    assert false.quantity is None and false.sealed_run is None
+
+
+@pytest.mark.parametrize("workspace", [None, True, 0, -1, "1", 1.5])
+def test_bad_workspace_never_issues_original_customer_area(workspace):
+    r = issue_original_q5446_alfresco_customer_area("private.pdf",workspace_id=workspace)
+    assert r.status == "ABSTAIN" and r.customer_rows == ()
+
+
+def test_original_sha_alfresco_issues_one_figured_area_and_customer_to_review():
+    private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
+    if not private:
+        pytest.skip("private source not in public checkout: no original-positive claim")
+    result = issue_original_q5446_alfresco_customer_area(
+        private, workspace_id=14)
+    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW", result.reason_codes
+    assert result.quantity is not None and result.trace is not None
+    assert result.sealed_run is not None and len(result.sealed_run.quantities) == 1
+    assert result.sealed_run.quantities[0].lineage_ok
+    assert len(result.customer_rows) == 1
+    row = result.customer_rows[0]
+    assert row["quantity"] == result.quantity.value
+    assert row["quantity_status"] == "To review"
+    assert row["quantity_family"] == "floor_area"
+    assert result.quantity.metadata["tiled_floor_finish_authorized"] is False
+    assert result.quantity.metadata["net_internal_finished_face_authorized"] is False
