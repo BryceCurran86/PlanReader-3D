@@ -8,6 +8,8 @@ Under GPT MAX structural direction (SPRINT directive 2 November 2026):
   without being poisoned by remote unscaled parallel wall ambiguity.
 - Preserves all fail-closed properties for local unsafe lineage group members.
 """
+from dataclasses import replace
+import math
 from pathlib import Path
 import pytest
 
@@ -82,13 +84,15 @@ def test_3laurel_authoritative_derived_viewport_and_host_bindings():
     assert univ_res.scope_complete is True
 
     # 3. Verify host bindings advance
+    phys_opening_auth = source.physical_opening_authority()
     host_producer = OpeningHostBindingProducer.from_authorities(
-        physical_opening_authority=source.physical_opening_authority(),
+        physical_opening_authority=phys_opening_auth,
         host_wall_universe_authority=universe_auth,
         source_fragment_roles_shadow=True,
     )
 
-    corroborated_hosts = []
+    corroborated_by_opening_id = {}
+    opening_centers = {}
     for b in composition.opening_bindings:
         obs_sel = ObservationSelector(
             document_id=published.revision.document_id,
@@ -97,17 +101,48 @@ def test_3laurel_authoritative_derived_viewport_and_host_bindings():
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=b.representative_observation_id,
         )
+        proof = phys_opening_auth.prove_existence(obs_sel)
+        if proof.existence_record is not None:
+            xs, ys = [], []
+            for oid in proof.existence_record.source_observation_ids:
+                src_obs = phys_opening_auth.prove_existence(
+                    replace(obs_sel, observation_id=oid)
+                ).source_observation
+                obs = getattr(src_obs, "observation", None)
+                if obs is not None and len(obs.geometry) == 4:
+                    xs.extend((float(obs.geometry[0]), float(obs.geometry[2])))
+                    ys.extend((float(obs.geometry[1]), float(obs.geometry[3])))
+            if xs and ys:
+                opening_centers[b.opening_identity_id] = (
+                    0.5 * (min(xs) + max(xs)),
+                    0.5 * (min(ys) + max(ys)),
+                )
         host_res = host_producer.publish(
             opening_left_selector=obs_sel,
             opening_right_selector=obs_sel,
             host_universe_selector=universe_sel,
         )
         if host_res.status is EvidenceResolutionStatus.CORROBORATED:
-            corroborated_hosts.append((b, host_res))
+            corroborated_by_opening_id[b.opening_identity_id] = (b, host_res)
 
     # At least 26 openings must corroborate their host binding on Page 3
-    assert len(corroborated_hosts) >= 26
+    assert len(corroborated_by_opening_id) >= 26
 
-    # Verify ASW candidates corroborate their host bindings
+    # Verify all 14 ASW window openings corroborate their host bindings
     asw_data = read_original_3laurel_asw_candidates(source_bytes)
     assert len(asw_data["two_axis_candidates"]) == 14
+
+    asw_corroborated = []
+    for cand in asw_data["two_axis_candidates"]:
+        bx0, by0, bx1, by1 = cand["source"]["bbox_pdf_pt"]
+        cx, cy = 0.5 * (bx0 + bx1), 0.5 * (by0 + by1)
+        nearest_id = min(
+            opening_centers,
+            key=lambda oid: math.hypot(opening_centers[oid][0] - cx, opening_centers[oid][1] - cy),
+        )
+        assert nearest_id in corroborated_by_opening_id
+        b, host_res = corroborated_by_opening_id[nearest_id]
+        assert b.status is EvidenceResolutionStatus.CORROBORATED
+        assert host_res.status is EvidenceResolutionStatus.CORROBORATED
+        asw_corroborated.append(nearest_id)
+    assert len(asw_corroborated) == 14

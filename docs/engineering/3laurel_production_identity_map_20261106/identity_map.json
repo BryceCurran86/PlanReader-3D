@@ -1,0 +1,170 @@
+{
+  "project_id": "au_qld_3laurel",
+  "schema_version": "1.0.0",
+  "source_sha256s": [
+    "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+  ],
+  "bindings": [
+    {
+      "benchmark_item_id": "3laurel-1200x1810-asw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_061f472c4a7a854421230244b848ef48"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1200x1810-asw-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_11c907ab0f14bb71ba0dcb349655e2c5"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1200x1810-asw-03-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_3d8f16b8181dd7bdb61e875d1d24a047"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1200x1810-asw-04-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_74dcd4ee2f52068f94e0b6d416dbfa35"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x2410-asw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_1fade45f90e6446aaf31e1ae27385560"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x2410-asw-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_311169b151dd0c6a4b0b2488dda46320"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x2410-asw-03-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_3ea2517cfd4dd2adc20bca00d7b86f62"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x2410-asw-04-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_5482683d4bff11247b723168e8d30376"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x610-asw-obs-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_f8ec7b0cf266e6dad4af27d359ea93f9"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x900-adh-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_6f4a6579dd6e5591a71dbe6bf632a433"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x900-adh-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_720e1989490bc51f943a14e59b408583"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1800x910-asw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_2f6d6ac4f35eb0951abcb414017873e1"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-2100x1500-asd-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_cfa43c9dbc96a3e099077995b5091e15"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-2100x2100-asd-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_9d5985124063372cf1e51cf4836b31c3"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-2100x2700-assd-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_63aa4140ac162a05198fe83096c3130e"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-2100x4800-panel-lift-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_06d68efb28e9125d9168b50343e9ec92"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-600x1210-asw-obs-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_60545256456c220cca1d56362bcc8658"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-600x1210-asw-obs-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_9ebe0231745eb44fe8f463a7ed691892"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-600x1510-asw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_0da2d89bc9c535909f218fa26349ee93"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-600x1510-asw-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_4bb468ade96741b49ad3d4f8c8ba1938"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-1200-main-entry-hinged-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_86386bae1a5959e71d3cbacb9463cc43"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-0870-gf-entry-hinged-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_b5eabe759038ab5f9868db718d93b125"
+      ]
+    },
+    {
+      "benchmark_item_id": "3laurel-0870-garage-personnel-hinged-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_774cc47b2bcdd17946cc1e98a0414678"
+      ]
+    }
+  ]
+}

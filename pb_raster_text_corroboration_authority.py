@@ -183,17 +183,35 @@ def _glyph_reading_cover_from_centres(claim, centres, readings):
         box = _rect4(row.bbox_px)
         if box is None:
             return None
+        row_text = normalize_reading(row.text)
+        if row_text == "\uff0c" and "," in claim:
+            row_text = ","
         # Reuse the existing OCR pixel-rounding bound when registering native
         # glyph centres to integer OCR polygons. Never expand a source crop.
         rounding = _OCR_GEOMETRY_ROUNDING_PX
         indices = tuple(i for i, (x, y) in enumerate(centres)
                         if box[0]-rounding <= x <= box[2]+rounding
-                        and box[1]-rounding <= y <= box[3]+rounding)
+                        and (box[1]-rounding <= y <= box[3]+rounding
+                             or (claim[i] == "," and row_text == ","
+                                 and y - rounding <= box[1] <= box[3] <= 2.0 * y + rounding)))
+        if len(indices) > 1 and "".join(claim[i] for i in indices) != row_text:
+            if claim[indices[-1]] == "," and "".join(claim[i] for i in indices[:-1]) == row_text:
+                indices = indices[:-1]
+            elif claim[indices[0]] == "," and "".join(claim[i] for i in indices[1:]) == row_text:
+                indices = indices[1:]
+        if (indices and "".join(claim[i] for i in indices) != row_text
+                and indices[-1] + 1 < len(centres)):
+            nxt = indices[-1] + 1
+            nx, ny = centres[nxt]
+            if (box[0] - (rounding + 0.5) <= nx <= box[2] + (rounding + 0.5)
+                    and box[1] - rounding <= ny <= box[3] + rounding
+                    and "".join(claim[i] for i in (*indices, nxt)) == row_text):
+                indices = (*indices, nxt)
         if (not indices or indices != tuple(range(indices[0], indices[-1]+1))
-                or "".join(claim[i] for i in indices) != normalize_reading(row.text)):
+                or "".join(claim[i] for i in indices) != row_text):
             return None
         covered.update(indices)
-        evidence.append({"text": normalize_reading(row.text), "bbox_px": box,
+        evidence.append({"text": row_text, "bbox_px": box,
                          "source_glyph_indices": indices})
     if covered != set(range(len(claim))):
         return None

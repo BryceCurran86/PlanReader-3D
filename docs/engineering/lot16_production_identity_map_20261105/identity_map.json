@@ -1,0 +1,121 @@
+{
+  "bindings": [
+    {
+      "benchmark_item_id": "lot16-1218-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-1218-sgw-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_91ae06327d4fcc8004a557b116a77820"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0615-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-2148-panel-lift-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0621-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0906-sgw-obs-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0630-fg-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-1215-sgw-obs-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-2127-stacker-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_993560b2bdf85cdd668047edd7043f81"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0870-laundry-external-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0870-garage-personnel-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-internal-access-0870-bath-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-internal-access-0870-bed1-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-internal-access-0870-bed2-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-internal-access-0870-bed3-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-internal-access-0870-laundry-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_8ecb81b6524804c80710ec323050be6b"
+      ]
+    }
+  ],
+  "project_id": "au_qld_lot16_power",
+  "schema_version": "1.0.0",
+  "source_sha256s": [
+    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  ]
+}
