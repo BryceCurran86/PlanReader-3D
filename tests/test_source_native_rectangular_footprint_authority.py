@@ -121,3 +121,47 @@ def test_label_is_inside_footprint_and_geometry_not_used_as_metric_area():
     # refused rather than converting PDF point lengths to customer m².
     assert _prove(rows, width=3000, depth=4500) is None
     assert SOURCE_SNAP_TOL_PT == 2.5
+
+
+def test_sha_original_source_footprint_remains_unique_on_authentic_ink():
+    """Private original acceptance: no synthetic witness upgrades to source FIRM."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from pb_gpt1_q5446_alfresco_figure_authority import (
+        PLAN_ALFRESCO_LABEL_PATHS, original_alfresco_figure_witness,
+    )
+    from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
+
+    path = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
+    if not path:
+        pytest.skip("private SHA-original PDF is absent from public checkout")
+    data = Path(path).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == SOURCE_SHA256
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        assert len(doc) == 10
+        strokes = doc[0].get_drawings()
+    figure = original_alfresco_figure_witness(strokes)
+    assert figure is not None and figure.diagnostic_only is True
+    kwargs = dict(
+        source_label_path_ids=PLAN_ALFRESCO_LABEL_PATHS,
+        figured_width_mm=figure.horizontal_mm,
+        figured_depth_mm=figure.vertical_mm,
+        excluded_source_path_ids=figure.source_vector_path_ids,
+    )
+    footprint = prove(strokes, **kwargs)
+    assert footprint is not None and footprint.status == "CORROBORATED"
+    assert len(set(footprint.boundary_source_path_ids)) == 4
+
+    # Each separately authenticated physical edge is required. A missing edge
+    # on the genuine original must not be inferred from nearby ink.
+    for path_id in footprint.boundary_source_path_ids:
+        altered = list(strokes)
+        altered[path_id] = {**strokes[path_id], "type": "f"}
+        assert prove(altered, **kwargs) is None
+
+    # A distinct second owner for the same edge makes the footprint ambiguous.
+    altered = list(strokes)
+    altered.append(deepcopy(strokes[footprint.boundary_source_path_ids[-1]]))
+    assert prove(altered, **kwargs) is None
