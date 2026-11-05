@@ -140,7 +140,6 @@ def corroborate_source_labeled_rectangular_footprint(
     exclusions = tuple(excluded_source_path_ids)
     if (
         any(type(i) is not int or i < 0 or i >= len(drawings) for i in exclusions)
-        or set(exclusions).intersection(label_ids)
     ):
         return None
     label_bounds: list[tuple[float, float, float, float]] = []
