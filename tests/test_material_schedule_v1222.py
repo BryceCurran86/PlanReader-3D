@@ -135,6 +135,38 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
                 "finish": "Dulux low sheen paint",
             }), "paint")
 
+    def test_polyurethane_floor_ancillaries_never_become_floor_finish(self):
+        # The floor location does not turn a sealant or membrane into a finish.
+        negatives = (
+            "Polyurethane floor sealant to sawcut joints",
+            "Polyurethane floor joint sealant",
+            "Polyurethane floor membrane",
+            "Polyurethane floor waterproofing membrane",
+            "Polyurethane flooring adhesive",
+            "Polyurethane floor coating sealant to movement joints",
+            "Polyurethane floor finish underlay",
+        )
+        for phrase in negatives:
+            for field in ("description", "finish"):
+                with self.subTest(phrase=phrase, field=field):
+                    entry = {"status": "Confirmed", "description": "", "finish": ""}
+                    entry[field] = phrase
+                    self.assertNotEqual(
+                        mat.semantic_finish_from_schedule_entry(entry),
+                        "polyurethane",
+                    )
+        for phrase in (
+            "Polyurethane floor coating",
+            "Polyurethane floor finish",
+            "Polyurethane flooring system",
+        ):
+            self.assertEqual(
+                mat.semantic_finish_from_schedule_entry(
+                    {"status": "Confirmed", "description": phrase, "finish": ""}
+                ),
+                "polyurethane",
+            )
+
     def test_composite_floor_tile_row_keeps_primary_tile_role(self):
         description = (
             'Amber Tiles floor tile - 600x600 "Dura Grey". '
