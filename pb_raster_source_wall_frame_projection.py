@@ -177,9 +177,34 @@ def source_closed_pier_face_chains(
     for record in tuple(records):
         wall_id = str(getattr(record, "wall_candidate_id", ""))
         fragments = tuple(getattr(record, "source_edge_fragments", ()) or ())
-        if not wall_id or not fragments or wall_id in seen_walls:
+        if not wall_id or wall_id in seen_walls:
             return None
         seen_walls.add(wall_id)
+        if not fragments:
+            # A source-less W4 wall overlapping this local aperture flank
+            # remains a real rival. Never treat it as absent evidence.
+            try:
+                points=tuple(record.wall_candidate.centerline_pts)
+                local_wall=False
+                for p0,p1 in zip(points,points[1:]):
+                    u0=sum((float(p0[i])-geometry.origin[i])*geometry.axis[i]
+                           for i in (0,1))
+                    u1=sum((float(p1[i])-geometry.origin[i])*geometry.axis[i]
+                           for i in (0,1))
+                    n0=sum((float(p0[i])-geometry.origin[i])*geometry.normal[i]
+                           for i in (0,1))
+                    n1=sum((float(p1[i])-geometry.origin[i])*geometry.normal[i]
+                           for i in (0,1))
+                    if (min(hi,max(u0,u1))-max(lo,min(u0,u1))>_COORD_TOL
+                            and min(n0,n1)<=thickness/2.0+_COORD_TOL
+                            and max(n0,n1)>=-thickness/2.0-_COORD_TOL):
+                        local_wall=True
+                        break
+            except (AttributeError,TypeError,ValueError,OverflowError,IndexError):
+                return None
+            if local_wall:
+                return None
+            continue
         # A candidate overlapping the sealed local source band cannot vanish
         # because its W2 path is malformed or its parent was not re-proved.
         local = False
@@ -199,10 +224,10 @@ def source_closed_pier_face_chains(
                           p1[0]*normal[0]+p1[1]*normal[1])
             except (TypeError, ValueError, OverflowError, AttributeError, IndexError):
                 return None
-            if (min(u1, hi) - max(u0, lo) > _COORD_TOL
-                    or min(hi, u0)-max(u1, lo) > _COORD_TOL):
-                if min(abs(n0), abs(n1)) <= thickness/2.0 + _COORD_TOL:
-                    local = True
+            if (min(hi,max(u0,u1))-max(lo,min(u0,u1)) > _COORD_TOL
+                    and min(n0,n1) <= thickness/2.0+_COORD_TOL
+                    and max(n0,n1) >= -thickness/2.0-_COORD_TOL):
+                local = True
         if not local:
             continue
         projection = source_edge_axis_projection(record, geometry, source_lines)
