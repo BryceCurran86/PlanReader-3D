@@ -142,3 +142,69 @@ def test_live_physical_composer_exposes_default_off_source_rotation():
             source_visibility_producer=source,wall_opening_composition=wall,
             rotated_native_schedule_shadow="true",
         )
+
+
+def _sideways_native_source():
+    pdf=fitz.open()
+    page=pdf.new_page(width=400,height=400)
+    for x,y,label in (
+        (80,240,"MARK"),(80,180,"WIDTH"),(80,120,"HEIGHT"),
+        (150,240,"D01"),(150,180,"900"),(150,120,"2040"),
+    ):
+        page.insert_text((x,y),label,rotate=90)
+    data=pdf.tobytes()
+    pdf.close()
+    source=SourceVisibilityProducer(
+        producer_method="sideways-native-source-test",producer_version="1",
+    )
+    pub=source.ingest_native_pdf_bytes(
+        document_id="sideways-native-source",source_bytes=data,
+        source_locator="memory://sideways.pdf",page_ids=("1",),
+    )
+    with fitz.open(stream=data,filetype="pdf") as document:
+        raw=document[0].get_text("words",flags=fitz.TEXTFLAGS_WORDS)
+    words={}
+    geometry=[]
+    for i,word in enumerate(raw):
+        x0,y0,x1,y1,caption,block,line,index=word
+        oid="synthetic-source-word-"+str(i)
+        words[oid]=(caption,"1",block,line,index)
+        geometry.append((oid,caption,(x0,y0,x1,y1)))
+    return source,pub,words,tuple(geometry)
+
+
+def test_sideways_cad_textline_direction_from_sha_owned_original_pdf():
+    from pb_schedule_opening_instance_binding_authority import (
+        _source_owned_schedule_native_text_orientation,
+    )
+    source,pub,words,geometry=_sideways_native_source()
+    matrix=_source_owned_schedule_native_text_orientation(
+        source,pub,"1",words)
+    assert matrix==(0.0,1.0,-1.0,0.0,0.0,0.0)
+    assert _schedule_entries_for_page(_row_groups_for_page(geometry),1)==[]
+    rows=_schedule_entries_for_page(
+        _row_groups_for_page(geometry,rotation_matrix=matrix),1)
+    assert len(rows)==1
+    entry,observation_ids=rows[0]
+    assert (entry.type_mark,entry.width_mm,entry.height_mm)==("D01",900,2040)
+    assert len(observation_ids)==3
+    assert not entry.count_explicit
+
+
+def test_native_text_direction_tamper_competing_header_and_missing_source_abstain():
+    from pb_schedule_opening_instance_binding_authority import (
+        _source_owned_schedule_native_text_orientation,
+    )
+    source,pub,words,_geometry=_sideways_native_source()
+    assert _source_owned_schedule_native_text_orientation(
+        source,pub,"1",words) is not None
+    duplicate=dict(words)
+    duplicate["forged-header"]=("WIDTH","1",0,0,0)
+    assert _source_owned_schedule_native_text_orientation(
+        source,pub,"1",duplicate) is None
+    assert _source_owned_schedule_native_text_orientation(
+        source,pub,"2",words) is None
+    source._producer._store.source_bytes_by_revision[
+        pub.revision.revision_id]=b"wrong-source"
+    assert _source_owned_schedule_native_text_orientation(
+        source,pub,"1",words) is None
