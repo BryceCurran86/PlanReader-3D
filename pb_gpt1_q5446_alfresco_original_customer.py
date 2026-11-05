@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from pb_gpt1_q5446_alfresco_figure_authority import (
+    FIGURE_HORIZONTAL_LINE, FIGURE_VERTICAL_LINE, PLAN_ALFRESCO_LABEL_PATHS,
     OriginalAlfrescoFigureWitness, original_alfresco_figure_witness,
+)
+from pb_source_native_rectangular_footprint_authority import (
+    SourceNativePhysicalFootprint,
+    corroborate_source_labeled_rectangular_footprint,
 )
 from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
 from pb_gpt1_q5446_source_declared_area_firm_handoff import (
@@ -87,17 +92,10 @@ def issue_original_q5446_alfresco_customer_area(
     ):
         return _blocked("original_scheduled_area_source_permission_conflict")
 
-    # Source-signed architectural schedule explicitly withholds physical-floor
-    # ownership and commercial projection. Independent figured ink can
-    # corroborate the printed number but cannot revoke either denial.
-    # Until a generic physical-footprint authority independently grants both,
-    # this customer issuer must fail closed rather than mint a new FIRM row.
-    if (
-        source_q.metadata.get("canonical_physical_floor_owner_authenticated") is not True
-        or source_q.metadata.get("commercial_projection_allowed") is not True
-        or source_q.metadata.get("quantity_handoff_only") is not False
-    ):
-        return _blocked("original_physical_floor_and_commercial_permission_unproved")
+    # The source schedule quantity is and remains source-only. We must NOT
+    # flip its denied physical/commercial flags. A separate complete original
+    # geometric footprint may instead authenticate one distinct floor_area
+    # physical owner, with original printed figured axes as the metric.
 
     # Recheck exact bytes before reading the real plan. Keep bytes and all
     # original vector/geometry observation data private to this process.
@@ -109,7 +107,18 @@ def issue_original_q5446_alfresco_customer_area(
         with fitz.open(stream=data, filetype="pdf") as pdf:
             if len(pdf) != 10:
                 return _blocked("original_plan_page_roster_incomplete")
-            figure = original_alfresco_figure_witness(pdf[0].get_drawings())
+            drawings = pdf[0].get_drawings()
+            figure = original_alfresco_figure_witness(drawings)
+            footprint = (
+                corroborate_source_labeled_rectangular_footprint(
+                    drawings,
+                    source_label_path_ids=PLAN_ALFRESCO_LABEL_PATHS,
+                    figured_width_mm=figure.horizontal_mm,
+                    figured_depth_mm=figure.vertical_mm,
+                    excluded_source_path_ids=figure.source_vector_path_ids,
+                )
+                if type(figure) is OriginalAlfrescoFigureWitness else None
+            )
     except (OSError, RuntimeError, ValueError, TypeError):
         return _blocked("original_plan_source_not_readable")
     if (
@@ -121,25 +130,46 @@ def issue_original_q5446_alfresco_customer_area(
         return _blocked("original_alfresco_figured_ink_or_scope_unproved")
     if Decimal(str(source_q.value)) != figure.area_m2:
         return _blocked("original_scheduled_and_figured_area_disagree")
+    if (
+        type(footprint) is not SourceNativePhysicalFootprint
+        or footprint.status != "CORROBORATED"
+        or footprint.physical_scope != "source_labeled_exterior_architectural_footprint"
+        or footprint.figured_width_mm != figure.horizontal_mm
+        or footprint.figured_depth_mm != figure.vertical_mm
+        or set(footprint.boundary_source_path_ids).intersection(
+            figure.source_vector_path_ids
+        )
+    ):
+        return _blocked("original_physical_floor_and_commercial_permission_unproved")
 
-    # The original schedule, native dimension lines and full source-native
-    # ALFRESCO label together identify this architectural external footprint.
-    # They do not measure an internal finished-face floor or tiled finish.
+    # This physical owner is derived from an independently drawn unique
+    # enclosing four-edge native source footprint, not the upstream schedule's
+    # withheld commercial permission or a benchmark answer. No tiling/finish
+    # owner, interior wall-face measurement or installed quantity is inferred.
     physical_id = stable_contract_id(
         "q5446_original_alfresco_architectural_footprint",
         {"sha": SOURCE_SHA256, "source_schedule": source_q.quantity_id,
-         "figured_source_paths": list(figure.source_vector_path_ids)},
+         "figured_source_paths": list(figure.source_vector_path_ids),
+         "physical_boundary_source_paths": list(
+             footprint.boundary_source_path_ids
+         )},
         digest_chars=32,
     )
     source_paths = tuple(
         f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{i}"
         for i in figure.source_vector_path_ids
     )
+    boundary_paths = tuple(
+        f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{i}"
+        for i in footprint.boundary_source_path_ids
+    )
     figures = tuple(
         f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{i}"
-        for i in (6838, 10657)
+        for i in (FIGURE_HORIZONTAL_LINE, FIGURE_VERTICAL_LINE)
     )
-    evidence = tuple(dict.fromkeys((*source_q.evidence_ids, *source_paths)))
+    evidence = tuple(dict.fromkeys(
+        (*source_q.evidence_ids, *source_paths, *boundary_paths)
+    ))
     quantity_id = stable_contract_id(
         "q5446_original_figured_alfresco_floor_area",
         {"source_sha": SOURCE_SHA256, "physical_id": physical_id,
@@ -162,6 +192,11 @@ def issue_original_q5446_alfresco_customer_area(
             "figured_dimension_ids": list(figures),
             "upstream_architect_area_quantity_id": source_q.quantity_id,
             "physical_scope": "original_external_architectural_alfresco_footprint",
+            "canonical_physical_floor_owner_authenticated": True,
+            "physical_boundary_source_path_ids": list(
+                footprint.boundary_source_path_ids
+            ),
+            "source_schedule_commercial_permission": False,
             "net_internal_finished_face_authorized": False,
             "tiled_floor_finish_authorized": False,
             "commercial_projection_allowed": True, "quantity_handoff_only": False,
@@ -178,7 +213,7 @@ def issue_original_q5446_alfresco_customer_area(
         revision_id=Q5446_ORIGINAL_REVISION_ID,
         current_revision_id=Q5446_ORIGINAL_REVISION_ID,
         evidence_ids=evidence, canonical_entity_ids=(physical_id,),
-        source_bbox=(799.68, 352.8, 1061.28, 661.8),
+        source_bbox=footprint.native_bounds_pts,
         metadata={"original_schedule_quantity_id": source_q.quantity_id,
                   "net_finish_area": False, "review_required": True},
     )
