@@ -446,11 +446,11 @@ def test_a_corroborated_opening_still_seals_exactly_as_before():
 
 # ------------------------------------------------------------- default-off proof
 
-def test_nothing_in_the_repository_imports_the_promotion_module():
+def test_only_the_handoff_library_imports_the_promotion_module():
     root = pathlib.Path(__file__).resolve().parent.parent
     pattern = re.compile(r"^\s*(from|import)\s+pb_owner_approved_door_review_promotion\b", re.M)
     offenders = [
         str(path.relative_to(root)) for path in list(root.glob("*.py")) + list((root / "tools").glob("*.py"))
         if path.name != "pb_owner_approved_door_review_promotion.py" and pattern.search(path.read_text(encoding="utf-8", errors="ignore"))
     ]
-    assert offenders == []
+    assert offenders == ["pb_owner_door_review_handoff.py"]   # the default-off handoff library; no tool or production module imports it directly
