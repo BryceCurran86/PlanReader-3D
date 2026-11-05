@@ -387,6 +387,22 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
                     expected,
                 )
 
+    def test_confirmed_description_only_polyurethane_and_primary_tile(self):
+        cases = [
+            ("Polyurethane floor coating", "polyurethane"),
+            ("Polyurethane floor finish", "polyurethane"),
+            ("Porcelain floor tile with polyurethane floor coating", "tile"),
+            ("Polyurethane floor joint sealant", ""),
+        ]
+        for description, expected in cases:
+            with self.subTest(description=description):
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry(
+                        {"code": "F1", "status": "Confirmed", "description": description, "finish": ""}
+                    ),
+                    expected,
+                )
+
     def test_trade_semantic_requires_confirmed_schedule_authority(self):
         for status in ("Conflict", "Unknown", "Abstained", ""):
             with self.subTest(status=status):
