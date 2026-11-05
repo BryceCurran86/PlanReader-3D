@@ -61,6 +61,10 @@ def test_unique_source_labeled_rectangle_binds_original_figure_aspect_only():
     assert witness.figured_width_mm == 3000
     assert witness.figured_depth_mm == 4000
     assert witness.native_bounds_pts == (100.0, 100.0, 190.0, 220.0)
+    # An upstream figure witness can include its label paths in the complete
+    # exclusion roster; the binder excludes them once without treating
+    # authenticated shared labels as source contamination.
+    assert _prove(_drawing(), excluded=(0, 1)) == witness
 
 
 @pytest.mark.parametrize("mutate", (
