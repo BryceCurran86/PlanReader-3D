@@ -346,10 +346,13 @@ def compose_live_physical_opening_voids(
     source_visibility_producer: SourceVisibilityProducer,
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
     bifold_descriptor_shadow: bool = False,
+    rotated_native_schedule_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
     """Compose the exact sealed prerequisite chain for every proven opening."""
     if type(bifold_descriptor_shadow) is not bool:
         raise ValueError("bifold descriptor shadow must be explicit boolean")
+    if type(rotated_native_schedule_shadow) is not bool:
+        raise TypeError("rotated_native_schedule_shadow must be bool")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -422,7 +425,8 @@ def compose_live_physical_opening_voids(
 
     schedule_binding_producer = (
         ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(
-            source_visibility_producer
+            source_visibility_producer,
+            rotated_native_schedule_shadow=rotated_native_schedule_shadow,
         )
     )
     schedule_results = {}
