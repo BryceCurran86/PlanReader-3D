@@ -261,7 +261,7 @@ def _leading_composite_finish_semantic(value: Any) -> str:
             if first is None or candidate < first:
                 first = candidate
     if _explicit_polyurethane_floor_finish(text):
-        match = re.search(r"\\bpolyurethane\\b", text)
+        match = re.search(r"\bpolyurethane\b", text)
         candidate = (match.start(), "polyurethane")
         if first is None or candidate < first:
             first = candidate
