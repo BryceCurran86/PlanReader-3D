@@ -191,6 +191,26 @@ def _infer_finish(description: Any, code: str = "") -> str:
     return ""
 
 
+def _explicit_polyurethane_floor_finish(value: Any) -> bool:
+    """Recognize an actual floor finish, not a floor-located ancillary product.
+
+    A floor sealant, membrane, joint filler or adhesive can contain the words
+    "polyurethane floor" without defining a floor finish. Do not grant even
+    schedule-semantic authority to those ambiguous descriptions.
+    """
+    text = _normalise(value)
+    if not re.search(r"\\bpolyurethane\\s+(?:floor(?:ing)?|floor\\s+(?:coating|finish))\\b", text):
+        return False
+    if re.search(
+        r"\\b(?:sealants?|joint\\s+(?:sealants?|fillers?)|"
+        r"membranes?|waterproofing|adhesives?|caulking|"
+        r"underfloor|underlay(?:ment)?)\\b",
+        text,
+    ):
+        return False
+    return True
+
+
 def _leading_composite_finish_semantic(value: Any) -> str:
     """Resolve the earliest explicit finish role in one composite description.
 
@@ -205,7 +225,7 @@ def _leading_composite_finish_semantic(value: Any) -> str:
         ("tile", ("floor tile", "wall tile", "porcelain tile", "ceramic tile")),
         ("vinyl", ("vinyl flooring", "vinyl floor")),
         ("epoxy", ("epoxy flooring", "epoxy floor", "epoxy coating")),
-        ("polyurethane", ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")),
+        
         (
             "membrane",
             (
@@ -240,6 +260,11 @@ def _leading_composite_finish_semantic(value: Any) -> str:
             candidate = (position, semantic)
             if first is None or candidate < first:
                 first = candidate
+    if _explicit_polyurethane_floor_finish(text):
+        match = re.search(r"\\bpolyurethane\\b", text)
+        candidate = (match.start(), "polyurethane")
+        if first is None or candidate < first:
+            first = candidate
     return first[1] if first is not None else ""
 
 
@@ -276,7 +301,7 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "satin" in finish_text
     ):
         return "paint"
-    if any(phrase in finish_text for phrase in ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")):
+    if _explicit_polyurethane_floor_finish(finish_text):
         return "polyurethane"
     if "epoxy" in finish_text:
         return "epoxy"
@@ -308,7 +333,7 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "suspended ceiling grid" in text
     ):
         return "ceiling_grid"
-    if any(phrase in text for phrase in ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")):
+    if _explicit_polyurethane_floor_finish(text):
         return "polyurethane"
     if "epoxy" in text:
         return "epoxy"
