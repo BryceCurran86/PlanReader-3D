@@ -123,13 +123,27 @@ def test_bad_workspace_never_issues_original_customer_area(workspace):
     assert r.status == "ABSTAIN" and r.customer_rows == ()
 
 
-def test_original_sha_alfresco_respects_source_commercial_denial():
+def test_original_sha_alfresco_has_independent_physical_owner_and_customer():
     private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
     if not private:
         pytest.skip("private source not in public checkout: no original-positive claim")
-    result = issue_original_q5446_alfresco_customer_area(
-        private, workspace_id=14)
-    assert result.status == "ABSTAIN", result.reason_codes
-    assert result.reason_codes == ("original_physical_floor_and_commercial_permission_unproved",)
-    assert result.quantity is None and result.trace is None
-    assert result.sealed_run is None and result.customer_rows == ()
+    import hashlib
+    from pathlib import Path
+    from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    assert hashlib.sha256(Path(private).read_bytes()).hexdigest() == SOURCE_SHA256
+    result = issue_original_q5446_alfresco_customer_area(private, workspace_id=14)
+    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW", result.reason_codes
+    assert result.quantity is not None
+    assert result.trace is not None and result.sealed_run is not None
+    assert len(result.sealed_run.quantities) == len(result.customer_rows) == 1
+    assert result.quantity.family == "floor_area"
+    assert result.quantity.metadata["canonical_physical_floor_owner_authenticated"] is True
+    assert result.quantity.metadata["source_schedule_commercial_permission"] is False
+    assert result.quantity.metadata["tiled_floor_finish_authorized"] is False
+    assert result.quantity.metadata["net_internal_finished_face_authorized"] is False
+    assert result.customer_rows[0]["quantity_status"] == "To review"
+    assert result.customer_rows[0]["quantity_family"] == "floor_area"
+    verification = verify_sealed_customer_output(result.sealed_run, result.customer_rows)
+    assert verification.valid_quantity_count == verification.customer_row_count == 1
