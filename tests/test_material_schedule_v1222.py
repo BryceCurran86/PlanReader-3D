@@ -95,6 +95,46 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
             "paint",
         )
 
+    def test_polyurethane_requires_confirmed_explicit_floor_finish_definition(self):
+        for description in (
+            "Polyurethane floor coating, two coats",
+            "Polyurethane flooring system",
+            "Polyurethane floor finish",
+        ):
+            with self.subTest(description=description):
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry({
+                        "status": "Confirmed", "description": description, "finish": "",
+                    }), "polyurethane")
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry({
+                        "status": "Conflict", "description": description, "finish": "",
+                    }), "")
+        for description in (
+            "Polyurethane sealant to sawcut joints",
+            "Polyurethane waterproofing membrane to wall",
+            "Polyurethane insulation panel",
+            "PU",
+            "EPX",
+        ):
+            with self.subTest(description=description):
+                self.assertNotEqual(
+                    mat.semantic_finish_from_schedule_entry({
+                        "status": "Confirmed", "description": description, "finish": "",
+                    }), "polyurethane")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "status": "Confirmed",
+                "description": "Porcelain floor tile with polyurethane floor coating to adjacent area",
+                "finish": "",
+            }), "tile")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "status": "Confirmed",
+                "description": "Polyurethane floor coating",
+                "finish": "Dulux low sheen paint",
+            }), "paint")
+
     def test_composite_floor_tile_row_keeps_primary_tile_role(self):
         description = (
             'Amber Tiles floor tile - 600x600 "Dura Grey". '
