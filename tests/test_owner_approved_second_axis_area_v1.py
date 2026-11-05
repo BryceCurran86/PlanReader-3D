@@ -18,6 +18,13 @@ from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
 )
 from pb_live_opening_customer_projection import _eligible_area_quantities
+from pb_live_opening_source_closed_export import (
+    _build_opening_area_source_traces,
+    _is_owner_approved_shadow,
+    build_live_opening_area_source_traces,
+    seal_live_opening_area_claim_run,
+    seal_live_opening_area_run,
+)
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from tests.test_live_opening_area_quantity_publication import _composition, _opening
 
@@ -135,3 +142,72 @@ def test_composition_rejects_malformed_approvals_before_doing_any_work():
         compose_live_physical_opening_voids(
             source_visibility_producer=object(), wall_opening_composition=object(),
             owner_approved_second_axis="2100")
+
+
+# ---- retention: the owner-basis SHADOW must never enter the standard sealed run (found on the real Lot16 chain)
+
+def _plain_door():
+    return _opening(canonical_id="plain-door", kind="door")
+
+
+def test_the_standard_sealed_run_never_contains_the_owner_shadow_and_is_unchanged_by_it():
+    with_shadow = seal_live_opening_area_run(_composition(_plain_door(), _owner_opening()), workspace_id=3, project_id="p")
+    without = seal_live_opening_area_run(_composition(_plain_door()), workspace_id=3, project_id="p")
+    assert [q.quantity_id for q in with_shadow.quantities] == [q.quantity_id for q in without.quantities]
+    assert with_shadow.to_dict() == without.to_dict()
+    assert all(q.lineage_ok for q in with_shadow.quantities)
+
+
+def test_standard_source_traces_skip_the_owner_shadow():
+    composition = _composition(_plain_door(), _owner_opening())
+    traces = build_live_opening_area_source_traces(composition, workspace_id=3, project_id="p")
+    shadow_ids = {q.quantity_id for q in publish_live_opening_area_quantities(composition)
+                  if q.metadata.get("area_basis") == BASIS}
+    assert len(shadow_ids) == 1 and not (shadow_ids & set(traces))
+    assert len(traces) == 1
+
+
+def test_the_claim_path_helper_skips_the_owner_shadow_but_still_checks_every_identity():
+    openings = (_plain_door(), _owner_opening())
+    quantities = publish_live_opening_area_quantities(_composition(*openings))
+    traces = _build_opening_area_source_traces(quantities, openings, workspace_id=3, project_id="p")
+    assert len(traces) == 1
+    with pytest.raises(Exception):                                   # a duplicated quantity id is still refused, shadow or not
+        _build_opening_area_source_traces((*quantities, quantities[0]), openings, workspace_id=3, project_id="p")
+
+
+def test_only_the_genuine_shadow_is_skipped_a_tampered_replay_is_still_refused():
+    q = _opening_quantity(_owner_opening())
+    promoted_like = replace(q, metadata={**q.metadata, "shadow_only": False})
+    with pytest.raises(Exception, match="does not match current physical source"):
+        _build_opening_area_source_traces((promoted_like,), (_owner_opening(),), workspace_id=3, project_id="p")
+
+
+def test_the_shadow_predicate_needs_both_the_basis_and_the_shadow_flag():
+    q = _opening_quantity(_owner_opening())
+    assert _is_owner_approved_shadow(q) is True
+    assert _is_owner_approved_shadow(replace(q, metadata={**q.metadata, "shadow_only": False})) is False
+    assert _is_owner_approved_shadow(replace(q, metadata={k: v for k, v in q.metadata.items() if k != "shadow_only"})) is False
+    assert _is_owner_approved_shadow(replace(q, metadata={**q.metadata, "area_basis": "figured_opening_label"})) is False
+    assert _is_owner_approved_shadow(_opening_quantity(_opening())) is False
+
+
+def test_a_tampered_shadow_is_refused_not_silently_skipped():
+    q = _opening_quantity(_owner_opening())
+    tampered = replace(q, value=q.value + 1.0)                       # still looks like a shadow (basis and flag intact)
+    assert _is_owner_approved_shadow(tampered) is True
+    with pytest.raises(Exception, match="does not match current physical source"):
+        _build_opening_area_source_traces((tampered,), (_owner_opening(),), workspace_id=3, project_id="p")
+
+
+def test_the_final_claim_seal_also_leaves_the_shadow_out():
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    openings = (_plain_door(), _owner_opening())
+    quantities = publish_live_opening_area_quantities(_composition(*openings))
+    claim = object.__new__(LivePhysicalNetWallClaim)
+    object.__setattr__(claim, "opening_quantity_evidence", quantities)
+    object.__setattr__(claim, "canonical_openings", openings)
+    run = seal_live_opening_area_claim_run(claim, workspace_id=3, project_id="p")
+    plain_only = seal_live_opening_area_run(_composition(_plain_door()), workspace_id=3, project_id="p")
+    assert run.to_dict() == plain_only.to_dict()

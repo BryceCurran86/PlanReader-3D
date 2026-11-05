@@ -153,6 +153,19 @@ def _owner_approval_issues(
     return issues
 
 
+def owner_height_approval_id(approval: Any) -> str:
+    """Deterministic identity of one owner height approval record (the id the canonical opening retains)."""
+    from dataclasses import asdict
+
+    from pb_migration_contracts import stable_contract_id
+
+    return stable_contract_id("opening_owner_height_approval", asdict(approval), digest_chars=32)
+
+
+# Public name for the same check, so a later promotion step re-verifies approvals with the identical rule.
+owner_approval_issues = _owner_approval_issues
+
+
 def assess_owner_approved_door_area_shadow(
     *,
     existence_record: Any,
@@ -170,7 +183,7 @@ def assess_owner_approved_door_area_shadow(
     import math
 
     from pb_geometry_takeoff_model import MeasurementRecord
-    from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+    from pb_migration_contracts import EvidenceResolutionStatus
     from pb_opening_label_dimension_authority import (
         _MAX_OPENING_DIMENSION_MM,
         _MIN_OPENING_DIMENSION_MM,
@@ -226,14 +239,10 @@ def assess_owner_approved_door_area_shadow(
         return _owner_area_result(
             record_id, "printed_figure_invalid", label_evidence_id=label_id)
 
-    from dataclasses import asdict
-
     targeted: dict[str, Any] = {}
     for approval in approvals:
         if approval.geometry_ref == record_id:
-            approval_id = stable_contract_id(
-                "opening_owner_height_approval", asdict(approval), digest_chars=32)
-            targeted.setdefault(approval_id, approval)
+            targeted.setdefault(owner_height_approval_id(approval), approval)
     if not targeted:
         return _owner_area_result(
             record_id, "owner_approval_absent", label_evidence_id=label_id)
