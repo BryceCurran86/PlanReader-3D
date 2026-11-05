@@ -565,6 +565,84 @@ def _source_owned_page_rotation_matrices(
     return transforms
 
 
+def _source_owned_schedule_native_text_orientation(
+    producer: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    native_words: Mapping[str, tuple[str, str, int, int, int]],
+) -> tuple[float, ...] | None:
+    """Reprove CAD text-line writing direction from the immutable native PDF.
+
+    PDF page rotation is often zero even when a CAD schedule's text is
+    drawn sideways *inside* the page. Distinct trustworthy printed MARK,
+    WIDTH and HEIGHT headers must have one consistent native line axis;
+    competing/partial headers abstain. Direction is a coordinate transform,
+    not authorization of row text, physical instances or units.
+    """
+    import fitz
+
+    header_values: dict[str, list[tuple[int, int]]] = {
+        "MARK": [], "WIDTH": [], "HEIGHT": [],
+    }
+    for text, origin_page, block_no, line_no, word_no in native_words.values():
+        label = str(text).strip().upper()
+        key = "MARK" if label in ("MARK", "NO.") else label
+        if origin_page != page_id or key not in header_values:
+            continue
+        if (
+            type(block_no) is not int or type(line_no) is not int
+            or type(word_no) is not int
+            or min(block_no,line_no,word_no) < 0
+        ):
+            return None
+        header_values[key].append((block_no,line_no))
+    if any(len(values)!=1 for values in header_values.values()):
+        return None
+    store = getattr(getattr(producer,"_producer",None),"_store",None)
+    payload = getattr(store,"source_bytes_by_revision",{}).get(
+        published.revision.revision_id)
+    if (type(payload) is not bytes
+            or hashlib.sha256(payload).hexdigest()
+                != published.revision.source_sha256):
+        return None
+    try:
+        with fitz.open(stream=payload,filetype="pdf") as document:
+            page_number=int(page_id)
+            if page_number<1 or page_number>len(document):
+                return None
+            blocks = document[page_number-1].get_text(
+                "rawdict",flags=fitz.TEXTFLAGS_WORDS)["blocks"]
+            orientations=[]
+            for entries in header_values.values():
+                block_no,line_no=entries[0]
+                block=blocks[block_no]
+                if block.get("type")!=0:
+                    return None
+                direction=block["lines"][line_no]["dir"]
+                dx,dy=float(direction[0]),float(direction[1])
+                if not all(math.isfinite(n) for n in (dx,dy)):
+                    return None
+                # Preserve the source's discrete orthogonal CAD direction
+                # without inventing an angle or allowing near-axis bending.
+                if abs(dx-1.0)<=1e-5 and abs(dy)<=1e-5:
+                    axis=(1.0,0.0)
+                elif abs(dx+1.0)<=1e-5 and abs(dy)<=1e-5:
+                    axis=(-1.0,0.0)
+                elif abs(dy-1.0)<=1e-5 and abs(dx)<=1e-5:
+                    axis=(0.0,1.0)
+                elif abs(dy+1.0)<=1e-5 and abs(dx)<=1e-5:
+                    axis=(0.0,-1.0)
+                else:
+                    return None
+                orientations.append(axis)
+    except (ValueError,RuntimeError,IndexError,KeyError,TypeError):
+        return None
+    if len(set(orientations))!=1:
+        return None
+    dx,dy=orientations[0]
+    return (dx,-dy,dy,dx,0.0,0.0)
+
+
 def _row_groups_for_page(
     words: Sequence[tuple[str, str, Sequence[float]]],
     *,
@@ -1113,12 +1191,19 @@ class ScheduleOpeningInstanceBindingProducer:
                     ),
                 )
         for page_id, words in trusted_by_page.items():
+            matrix = source_rotations[page_id] if source_rotations is not None else None
+            if self._rotated_native_schedule_shadow:
+                # Source-ink text direction wins over a PDF rotation flag only
+                # if one unambiguous, trusted header triplet proves it.
+                native_matrix = _source_owned_schedule_native_text_orientation(
+                    self._source_visibility_producer,
+                    published, page_id, native_words,
+                )
+                if native_matrix is not None:
+                    matrix = native_matrix
             page_rows = _row_groups_for_page(
                 words,
-                rotation_matrix=(
-                    source_rotations[page_id]
-                    if source_rotations is not None else None
-                ),
+                rotation_matrix=matrix,
             )
             if not page_rows:
                 continue
