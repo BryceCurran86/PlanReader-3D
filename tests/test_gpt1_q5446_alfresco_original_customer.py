@@ -123,20 +123,13 @@ def test_bad_workspace_never_issues_original_customer_area(workspace):
     assert r.status == "ABSTAIN" and r.customer_rows == ()
 
 
-def test_original_sha_alfresco_issues_one_figured_area_and_customer_to_review():
+def test_original_sha_alfresco_respects_source_commercial_denial():
     private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
     if not private:
         pytest.skip("private source not in public checkout: no original-positive claim")
     result = issue_original_q5446_alfresco_customer_area(
         private, workspace_id=14)
-    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW", result.reason_codes
-    assert result.quantity is not None and result.trace is not None
-    assert result.sealed_run is not None and len(result.sealed_run.quantities) == 1
-    assert result.sealed_run.quantities[0].lineage_ok
-    assert len(result.customer_rows) == 1
-    row = result.customer_rows[0]
-    assert row["quantity"] == result.quantity.value
-    assert row["quantity_status"] == "To review"
-    assert row["quantity_family"] == "floor_area"
-    assert result.quantity.metadata["tiled_floor_finish_authorized"] is False
-    assert result.quantity.metadata["net_internal_finished_face_authorized"] is False
+    assert result.status == "ABSTAIN", result.reason_codes
+    assert result.reason_codes == ("original_physical_floor_and_commercial_permission_unproved",)
+    assert result.quantity is None and result.trace is None
+    assert result.sealed_run is None and result.customer_rows == ()
