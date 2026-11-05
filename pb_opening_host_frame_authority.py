@@ -45,7 +45,11 @@ from pb_physical_wall_candidate_authority import (
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
-from pb_raster_source_wall_frame_projection import source_edge_axis_projection
+from pb_raster_source_wall_frame_projection import (
+    SourceClosedPierFaceChain,
+    source_closed_pier_face_chains,
+    source_edge_axis_projection,
+)
 
 OPENING_HOST_FRAME_SCHEMA_VERSION = "1.3.0"
 OPENING_HOST_FRAME_RESOLVED = "opening_host_frame_resolved"
@@ -1323,6 +1327,98 @@ class OpeningHostFrameProducer:
             skipped_motif_wall_ids=(),
         )
 
+    def source_closed_right_pier_shadow(
+        self, *, opening_selector: ObservationSelector,
+        host_binding_selector: OpeningHostBindingSelector,
+    ) -> SourceClosedPierFaceChain | None:
+        """Consumer-ready local source chain, never a whole-wall frame.
+
+        Re-resolves BOTH original producers, immutable selectors, source
+        ancestors and each original G17 face/endcap. No caller supplies
+        coordinates, wall IDs, fragments or terminal bounds. Even a positive
+        cannot create a W4 SAME/DISTINCT classification or any quantity.
+        """
+        if (type(opening_selector) is not ObservationSelector
+                or type(host_binding_selector) is not OpeningHostBindingSelector):
+            raise TypeError("producer-owned opening and binding selectors required")
+        if not (self._raster_split_frame_shadow and self._source_fragment_roles_shadow
+                and self._supplemental_walls is not None):
+            return None
+        physical=self._opening.prove_existence(opening_selector)
+        bound=self._host.resolve(host_binding_selector)
+        opening=physical.existence_record
+        binding=bound.record
+        if (physical.status is not EvidenceResolutionStatus.CORROBORATED
+                or physical.proposition != PHYSICAL_OPENING_EXISTS
+                or opening is None
+                or opening.structural_pattern not in host_geometry.RASTER_WALL_BAND_HOST_PATTERNS
+                or bound.status is not EvidenceResolutionStatus.CORROBORATED
+                or OPENING_HOST_BINDING_RESOLVED not in bound.reason_codes
+                or binding is None):
+            return None
+        fields=("document_id","revision_id","source_sha256","snapshot_id","page_id")
+        if (any(getattr(opening,k)!=getattr(binding,k)
+                or getattr(binding,k)!=getattr(host_binding_selector,k)
+                for k in fields)
+                or opening.record_id!=binding.opening_identity_id
+                or opening.record_id!=host_binding_selector.opening_identity_id
+                or binding.decision_scope_id!=host_binding_selector.decision_scope_id):
+            return None
+        geometry=host_geometry._opening_geometry(self._opening,opening)
+        if geometry is None or not _valid_aperture_geometry(geometry):
+            return None
+        selector=PhysicalWallCandidateSelector(
+            document_id=binding.document_id,revision_id=binding.revision_id,
+            source_sha256=binding.source_sha256,snapshot_id=binding.snapshot_id,
+            page_id=binding.page_id,decision_scope_id=binding.decision_scope_id,
+        )
+        wall_scope=self._walls.resolve_scope(selector)
+        supplemental=self._supplemental_walls.resolve_scope(selector)
+        keys=(*fields,"decision_scope_id")
+        if (wall_scope.status is not EvidenceResolutionStatus.CORROBORATED
+                or wall_scope.proposition != PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+                or not wall_scope.scope_complete or wall_scope.equivalence is None
+                or supplemental.status is not EvidenceResolutionStatus.CORROBORATED
+                or supplemental.proposition != PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+                or supplemental.scope_complete or supplemental.equivalence is None
+                or any(getattr(result,k)!=getattr(binding,k)
+                       for result in (wall_scope,supplemental) for k in keys)):
+            return None
+        records=self._scope_records_by_id(wall_scope,binding)
+        if not records:
+            return None
+        visibility=self._opening.source_visibility_authority()
+        support=[]
+        for observation_id in opening.source_observation_ids:
+            receipt=visibility.resolve_raster_opening_primitive(
+                ObservationSelector(
+                    document_id=opening.document_id,
+                    revision_id=opening.revision_id,
+                    source_sha256=opening.source_sha256,
+                    snapshot_id=opening.snapshot_id,
+                    observation_id=observation_id,
+                ))
+            observation=receipt.observation
+            if (receipt.status is not EvidenceResolutionStatus.CORROBORATED
+                    or observation is None or observation.page_id!=opening.page_id):
+                return None
+            support.append(observation)
+        flanks=host_geometry._raster_source_band_flanks(support,geometry)
+        if flanks is None or set(flanks)!={"left","right"}:
+            return None
+        originals=tuple(sorted(set(
+            tuple(wall_scope.source_observation_ids)
+            +tuple(supplemental.source_observation_ids)
+        )))
+        source_lines=host_geometry._authenticated_raster_source_lines(
+            self._opening, opening, originals,
+        )
+        if not source_lines:
+            return None
+        return source_closed_pier_face_chains(
+            tuple(records.values()),geometry,source_lines,flanks["right"],
+        )
+
     def publish(
         self,
         *,
@@ -1447,6 +1543,18 @@ class OpeningHostFrameProducer:
                 failure_reasons=frame_failure_reasons,
             )
         if frame is None:
+            # A fully original-source-reproved local pier face chain is a
+            # useful upstream handoff. It is NOT a whole-wall partition or
+            # a physical DISTINCT grant. Preserve the existing ABSTAIN.
+            if self._raster_split_frame_shadow and self._source_fragment_roles_shadow:
+                local_pier=self.source_closed_right_pier_shadow(
+                    opening_selector=opening_selector,
+                    host_binding_selector=host_binding_selector,
+                )
+                if local_pier is not None:
+                    frame_failure_reasons.append(
+                        "opening_host_frame_source_closed_pier_faces_candidate_only"
+                    )
             return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
