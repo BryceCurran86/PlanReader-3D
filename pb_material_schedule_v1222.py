@@ -205,6 +205,7 @@ def _leading_composite_finish_semantic(value: Any) -> str:
         ("tile", ("floor tile", "wall tile", "porcelain tile", "ceramic tile")),
         ("vinyl", ("vinyl flooring", "vinyl floor")),
         ("epoxy", ("epoxy flooring", "epoxy floor", "epoxy coating")),
+        ("polyurethane", ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")),
         (
             "membrane",
             (
@@ -275,6 +276,8 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "satin" in finish_text
     ):
         return "paint"
+    if any(phrase in finish_text for phrase in ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")):
+        return "polyurethane"
     if "epoxy" in finish_text:
         return "epoxy"
     if "vinyl" in finish_text:
@@ -305,6 +308,8 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "suspended ceiling grid" in text
     ):
         return "ceiling_grid"
+    if any(phrase in text for phrase in ("polyurethane floor coating", "polyurethane floor finish", "polyurethane flooring", "polyurethane floor")):
+        return "polyurethane"
     if "epoxy" in text:
         return "epoxy"
     if "vinyl" in text:
