@@ -87,6 +87,18 @@ def issue_original_q5446_alfresco_customer_area(
     ):
         return _blocked("original_scheduled_area_source_permission_conflict")
 
+    # Source-signed architectural schedule explicitly withholds physical-floor
+    # ownership and commercial projection. Independent figured ink can
+    # corroborate the printed number but cannot revoke either denial.
+    # Until a generic physical-footprint authority independently grants both,
+    # this customer issuer must fail closed rather than mint a new FIRM row.
+    if (
+        source_q.metadata.get("canonical_physical_floor_owner_authenticated") is not True
+        or source_q.metadata.get("commercial_projection_allowed") is not True
+        or source_q.metadata.get("quantity_handoff_only") is not False
+    ):
+        return _blocked("original_physical_floor_and_commercial_permission_unproved")
+
     # Recheck exact bytes before reading the real plan. Keep bytes and all
     # original vector/geometry observation data private to this process.
     try:
