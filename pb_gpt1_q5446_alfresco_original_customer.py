@@ -68,7 +68,7 @@ def issue_original_q5446_alfresco_customer_area(
         return _blocked("original_source_area_schedule_not_sealed")
     original = tuple(
         q for q in source.quantities
-        if q.metadata.get("source_printed_category") == "alfresco"
+        if q.metadata.get("source_printed_category") == "architectural_ground_floor_alfresco"
     )
     if len(original) != 1:
         return _blocked("original_alfresco_schedule_owner_ambiguous")
