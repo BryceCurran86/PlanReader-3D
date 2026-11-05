@@ -41,6 +41,11 @@ RELATION_DIFFERENT_WALL_LAYERS = "different_explicit_wall_layers"
 RELATION_WALL_VERSUS_OTHER_LAYER = "wall_versus_other_layer"
 RELATION_NOT_ATTESTED = "not_attested"
 
+OPENING_WALL_LAYER = "opening_in_explicit_wall_layer"
+OPENING_OTHER_SINGLE_LAYER = "opening_in_other_single_layer"
+OPENING_MIXED_LAYERS = "opening_mixed_layers"
+OPENING_NO_LAYER = "opening_no_layer"
+
 _AGREED = "agreed"
 _FINISH_TOKENS = frozenset({"finish", "finishes", "tile", "tiles", "tiling", "lining", "cladding", "paint"})
 
@@ -140,9 +145,47 @@ def pair_layer_relation(evidence: WallLayerEvidence, left_id: str, right_id: str
     return RELATION_NOT_ATTESTED
 
 
+@dataclass(frozen=True)
+class OpeningLayerAtom:
+    """What the source layers of an opening's OWN primitives attest. A precision signal only: it never creates or rescues an opening."""
+
+    kind: str
+    layer_value: str = ""
+    opposing: bool = False
+    shadow_only: bool = True
+    live_effect: bool = False
+    grants_authority: bool = False
+
+
+def classify_opening_layers(layer_values, *, page_uses_explicit_wall_layers: bool) -> OpeningLayerAtom:
+    """Type the layer provenance of one candidate opening from the layers of its own source primitives.
+
+    ``layer_values`` is the caller's already-resolved layer of each source primitive (``None`` for an unresolved primitive, ``""`` for one
+    without a layer). Any unresolved or empty value makes the whole opening ``opening_no_layer``: provenance is never guessed. A single
+    non-wall layer is OPPOSING evidence only on a page that itself names an explicit wall layer; mixed layers are never opposed.
+    """
+    if type(page_uses_explicit_wall_layers) is not bool:
+        raise TypeError("page_uses_explicit_wall_layers must be a real bool")
+    if isinstance(layer_values, (str, bytes)) or not hasattr(layer_values, "__iter__"):
+        raise TypeError("layer_values must be a sequence of layer names")
+    values = list(layer_values)
+    if any(value is not None and type(value) is not str for value in values):
+        raise TypeError("every layer value must be a str or None")
+    if not values or any(value is None or value == "" for value in values):
+        return OpeningLayerAtom(OPENING_NO_LAYER)
+    distinct = sorted(set(values))
+    if len(distinct) > 1:
+        return OpeningLayerAtom(OPENING_MIXED_LAYERS)
+    layer = distinct[0]
+    if is_explicit_wall_layer_name(layer):
+        return OpeningLayerAtom(OPENING_WALL_LAYER, layer)
+    return OpeningLayerAtom(OPENING_OTHER_SINGLE_LAYER, layer, opposing=page_uses_explicit_wall_layers)
+
+
 __all__ = [
     "ATOM_EXPLICIT_WALL_LAYER", "ATOM_MIXED_LAYERS", "ATOM_NO_LAYER", "ATOM_OTHER_SINGLE_LAYER",
     "RELATION_DIFFERENT_WALL_LAYERS", "RELATION_NOT_ATTESTED", "RELATION_SAME_WALL_LAYER", "RELATION_WALL_VERSUS_OTHER_LAYER",
     "WALL_LAYER_EVIDENCE_SCHEMA_VERSION", "WallLayerAtom", "WallLayerEvidence",
-    "build_wall_layer_evidence", "is_explicit_wall_layer_name", "pair_layer_relation",
+    "OPENING_MIXED_LAYERS", "OPENING_NO_LAYER", "OPENING_OTHER_SINGLE_LAYER", "OPENING_WALL_LAYER", "OpeningLayerAtom",
+    "build_wall_layer_evidence", "classify_opening_layers", "is_explicit_wall_layer_name", "pair_layer_relation",
 ]
