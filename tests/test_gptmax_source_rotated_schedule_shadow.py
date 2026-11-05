@@ -149,7 +149,7 @@ def _sideways_native_source():
     page=pdf.new_page(width=400,height=400)
     for x,y,label in (
         (80,240,"MARK"),(80,180,"WIDTH"),(80,120,"HEIGHT"),
-        (150,240,"D01"),(150,180,"900"),(150,120,"2040"),
+        (115,240,"D01"),(115,180,"900"),(115,120,"2040"),
     ):
         page.insert_text((x,y),label,rotate=90)
     data=pdf.tobytes()
