@@ -199,12 +199,12 @@ def _explicit_polyurethane_floor_finish(value: Any) -> bool:
     schedule-semantic authority to those ambiguous descriptions.
     """
     text = _normalise(value)
-    if not re.search(r"\\bpolyurethane\\s+(?:floor(?:ing)?|floor\\s+(?:coating|finish))\\b", text):
+    if not re.search(r"\bpolyurethane\s+(?:floor(?:ing)?|floor\s+(?:coating|finish))\b", text):
         return False
     if re.search(
-        r"\\b(?:sealants?|joint\\s+(?:sealants?|fillers?)|"
+        r"\b(?:sealants?|joint\s+(?:sealants?|fillers?)|"
         r"membranes?|waterproofing|adhesives?|caulking|"
-        r"underfloor|underlay(?:ment)?)\\b",
+        r"underfloor|underlay(?:ment)?)\b",
         text,
     ):
         return False
