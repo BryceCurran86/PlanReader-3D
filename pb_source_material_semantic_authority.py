@@ -1654,9 +1654,174 @@ def _material_candidate_codes_with_untrusted_words(
             blocked.add(code)
     return tuple(sorted(blocked))
 
+
+
+def _original_native_word_paint_within_parent(
+    word: _TrustedTextWord, receipt, *, native_words_by_address: dict,
+    trace_by_seq: dict, bboxlog: Sequence[object], parent_bbox: Sequence[float],
+) -> bool:
+    """Recheck a trusted native word's *paint*, not its oversized font cell.
+
+    The caller must have already SHA-verified the original producer-owned PDF
+    and resolved a CORROBORATED text-integrity receipt. No raw OCR, project
+    name, guessed crop, approximate snap or candidate ranking is admitted.
+    """
+    if (type(word) is not _TrustedTextWord or receipt is None
+            or receipt.trusted is not True
+            or type(word.observation_id) is not str or not word.observation_id
+            or not word.trusted
+            or not _bbox_intersects(word.bbox, parent_bbox)
+            or _bbox_fully_inside(word.bbox, parent_bbox)
+            or receipt.raw_text != word.text
+            or receipt.page_id != word.page_id
+            or receipt.source_partition_id != word.source_partition_id
+            or tuple(receipt.geometry) != tuple(word.bbox)):
+        return False
+    address = (word.block_no, word.line_no, word.word_no)
+    original_words = native_words_by_address.get(address, ())
+    if len(original_words) != 1:
+        return False
+    original_word = original_words[0]
+    if (len(original_word) < 8
+            or original_word[4] != word.text
+            or any(
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or abs(float(value) - word.bbox[index]) > 1e-5
+                for index, value in enumerate(original_word[:4])
+            )):
+        return False
+    seqnos = receipt.trace_sequence_numbers or (receipt.sequence_number,)
+    if (type(seqnos) not in (tuple, list)
+            or not 1 <= len(seqnos) <= 2
+            or any(type(seq) is not int or seq < 0 or seq >= len(bboxlog)
+                   for seq in seqnos)
+            or len(set(seqnos)) != len(seqnos)
+            or receipt.sequence_number != seqnos[0]):
+        return False
+    if len(seqnos) == 2 and seqnos[1] != seqnos[0] + 1:
+        return False
+    seen_text = []
+    kinds = []
+    for seq in seqnos:
+        spans = trace_by_seq.get(seq, ())
+        if len(spans) != 1:
+            return False
+        span = spans[0]
+        try:
+            entry = bboxlog[seq]
+            kind, paint = entry[0], entry[1]
+            codepoints = span["chars"]
+            text = "".join(chr(int(c[0])) for c in codepoints)
+            native_type = int(span["type"])
+            paint_box = tuple(float(v) for v in paint)
+        except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+            return False
+        if (kind not in ("fill-text", "stroke-text")
+                or native_type != (0 if kind == "fill-text" else 1)
+                or not text or len(paint_box) != 4
+                or any(not math.isfinite(v) for v in paint_box)
+                or paint_box[2] <= paint_box[0]
+                or paint_box[3] <= paint_box[1]
+                or not _bbox_fully_inside(paint_box, parent_bbox, tolerance=1e-6)):
+            return False
+        kinds.append(kind)
+        seen_text.append(text)
+    # An original complementary overprint must be the identical source word
+    # in two independently checked fill/stroke operations. Split runs may be
+    # accepted only when their contiguous original text equals the full word.
+    if len(seqnos) == 2:
+        if (set(kinds) != {"fill-text", "stroke-text"}
+                or not (seen_text[0] == seen_text[1] == word.text
+                        or "".join(seen_text) == word.text)):
+            return False
+    elif word.text not in seen_text[0]:
+        return False
+    return True
+
+
+def _original_paint_owned_plan_word_ids(
+    source: SourceVisibilityProducer, published, page_number: int,
+    viewport: SegmentedViewport, words: Sequence[_TrustedTextWord],
+) -> frozenset[str]:
+    """Original-SHA-backed F07 text paint exception; never change native trust."""
+    empty = frozenset()
+    if (type(source) is not SourceVisibilityProducer
+            or type(page_number) is not int or page_number < 1
+            or viewport.bounding_box is None
+            or viewport.page_number != page_number
+            or not is_segment_page_viewports_product(viewport)):
+        return empty
+    candidates = tuple(word for word in words if
+        word.trusted and _bbox_intersects(word.bbox, viewport.bounding_box)
+        and not _bbox_fully_inside(word.bbox, viewport.bounding_box))
+    if not candidates:
+        return empty
+    revision = published.revision
+    if page_number not in published.coverage.decoded_pages:
+        return empty
+    try:
+        stored = source._producer._store.source_bytes_by_revision.get(
+            revision.revision_id
+        )
+        if stored is None:
+            return empty
+        pdf_bytes = bytes(stored)
+        if hashlib.sha256(pdf_bytes).hexdigest() != revision.source_sha256:
+            return empty
+        authority = source.text_integrity_authority()
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            if page_number > doc.page_count:
+                return empty
+            page = doc[page_number - 1]
+            native = {}
+            for row in page.get_text("words", sort=False):
+                if len(row) < 8:
+                    return empty
+                address = tuple(row[5:8])
+                native.setdefault(address, []).append(row)
+            trace = {}
+            for span in page.get_texttrace():
+                seq = span.get("seqno")
+                if type(seq) is not int:
+                    return empty
+                trace.setdefault(seq, []).append(span)
+            bboxlog = page.get_bboxlog()
+            owned = set()
+            for word in candidates:
+                selector = ObservationSelector(
+                    document_id=revision.document_id,
+                    revision_id=revision.revision_id,
+                    source_sha256=revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=word.observation_id,
+                )
+                result = authority.resolve_text(selector)
+                receipt = result.receipt
+                if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                        or result.trusted_text != word.text
+                        or receipt is None
+                        or receipt.document_id != revision.document_id
+                        or receipt.revision_id != revision.revision_id
+                        or receipt.source_sha256 != revision.source_sha256):
+                    continue
+                if _original_native_word_paint_within_parent(
+                    word, receipt, native_words_by_address=native,
+                    trace_by_seq=trace, bboxlog=bboxlog,
+                    parent_bbox=viewport.bounding_box,
+                ):
+                    owned.add(word.observation_id)
+            return frozenset(owned)
+    except (AttributeError, ValueError, TypeError, RuntimeError,
+            IndexError, OSError, OverflowError):
+        return empty
+
+
 def _trusted_lines_for_viewport(
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
+    *,
+    original_paint_owned_ids: frozenset[str] = frozenset(),
 ) -> tuple[
     tuple[tuple[str, tuple[float, float, float, float], tuple[str, ...]], ...],
     bool,
@@ -1681,7 +1846,8 @@ def _trusted_lines_for_viewport(
     for word in words:
         if not _bbox_intersects(word.bbox, viewport.bounding_box):
             continue
-        if not _bbox_fully_inside(word.bbox, viewport.bounding_box):
+        if (not _bbox_fully_inside(word.bbox, viewport.bounding_box)
+                and word.observation_id not in original_paint_owned_ids):
             complete = False
             reasons.append(SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED)
             reasons.append("text_crosses_viewport_boundary")
@@ -1725,10 +1891,13 @@ def _trusted_lines_for_viewport(
 
 def _complete_source_plan_lines(
     words: Sequence[_TrustedTextWord], viewport: SegmentedViewport,
+    *, original_paint_owned_ids: frozenset[str] = frozenset(),
 ):
-    """Keep complete original lines; never promote a readable line fragment."""
+    """Keep complete original lines; native paint exception is source-replayed."""
     assert viewport.bounding_box is not None
-    _, complete, reasons = _trusted_lines_for_viewport(words, viewport)
+    _, complete, reasons = _trusted_lines_for_viewport(
+        words, viewport, original_paint_owned_ids=original_paint_owned_ids,
+    )
     reasons = list(reasons)
     grouped = {}
     for word in words:
@@ -1742,7 +1911,9 @@ def _complete_source_plan_lines(
             continue
         line_words = sorted(line_words, key=lambda w: (w.word_no, w.observation_id))
         owned = all(
-            _bbox_fully_inside(w.bbox, viewport.bounding_box) for w in line_words
+            _bbox_fully_inside(w.bbox, viewport.bounding_box)
+            or (w.trusted and w.observation_id in original_paint_owned_ids)
+            for w in line_words
         )
         indices = [w.word_no for w in line_words]
         consecutive = indices == list(range(len(indices)))
@@ -2562,7 +2733,13 @@ class SourceMaterialSemanticProducer:
                         published, page_words, viewport,
                         {**dictionary_for_scan, **{c: {} for c in relevant_blocked_codes}},
                     )
-                    lines, text_complete, text_reasons, unresolved_text_ids = _complete_source_plan_lines(page_words, viewport)
+                    original_paint_owned = _original_paint_owned_plan_word_ids(
+                        self._source, published, page_number, viewport, page_words,
+                    )
+                    lines, text_complete, text_reasons, unresolved_text_ids = _complete_source_plan_lines(
+                        page_words, viewport,
+                        original_paint_owned_ids=original_paint_owned,
+                    )
                 else:
                     lines, text_complete, text_reasons = _trusted_lines_for_viewport(page_words, viewport)
                 if not text_complete and not plan_shadow:
