@@ -345,7 +345,7 @@ def corroborate_source_labeled_rectangular_footprint(
                 for right in vs:
                     if (
                         right.at <= lx1
-                        or right.at <= top.end + SOURCE_SNAP_TOL_PT
+                        or right.at < top.end - SOURCE_SNAP_TOL_PT
                         or right.at >= top.end + 0.20 * panel_height
                         or abs(right.stroke_width - top.stroke_width) > 0.05
                         or right.start < top.at
