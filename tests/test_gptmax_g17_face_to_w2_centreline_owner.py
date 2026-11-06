@@ -25,10 +25,69 @@ def _evidence(producer,selected):
     )
 
 
+def _source_neutral_gate_probe(producer, b):
+    """Only tests synthetic fixtures, never emits original PDFs or coordinates."""
+    import pb_opening_host_binding_authority as host
+    from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+    _sel, opening, _bs, binding = b
+    geometry=host._opening_geometry(producer._opening, opening)
+    scoped=PhysicalWallCandidateSelector(
+        document_id=binding.document_id,revision_id=binding.revision_id,
+        source_sha256=binding.source_sha256,snapshot_id=binding.snapshot_id,
+        page_id=binding.page_id,decision_scope_id=binding.decision_scope_id,
+    )
+    base=producer._walls.resolve_scope(scoped)
+    supp=producer._supplemental_walls.resolve_scope(scoped)
+    visibility=producer._opening.source_visibility_authority()
+    from pb_source_observation_authority import ObservationSelector
+    support=[]
+    for oid in opening.source_observation_ids:
+        rec=visibility.resolve_raster_opening_primitive(ObservationSelector(
+            document_id=opening.document_id,revision_id=opening.revision_id,
+            source_sha256=opening.source_sha256,snapshot_id=opening.snapshot_id,
+            observation_id=oid,
+        ))
+        if rec.observation is not None:
+            support.append(rec.observation)
+    flanks=host._raster_source_band_flanks(support,geometry)
+    baseline=host._resolve_raster_source_band_host(
+        producer._opening, opening,base.records,geometry,base.equivalence,
+        base.source_observation_ids)
+    mixed=host._resolve_opening_local_mixed_scope_source_band(
+        producer._opening, opening,geometry,base.records,supp.records,
+        base.source_observation_ids,supp.source_observation_ids,
+        source_fragment_roles_shadow=True,
+    )
+    originals=tuple(sorted(set(
+        (*base.source_observation_ids,*supp.source_observation_ids))))
+    lines=host._authenticated_raster_source_lines(
+        producer._opening,opening,originals)
+    records=producer._scope_records_by_id(base,binding)
+    projections=[]
+    from pb_raster_source_wall_frame_projection import source_edge_axis_projection
+    for wall_id in binding.member_wall_candidate_ids:
+        wall=records.get(wall_id)
+        projections.append(wall is not None and
+                           source_edge_axis_projection(wall,geometry,lines) is not None)
+    return {
+        "flank":flanks is not None,
+        "baseline_status":baseline.status.value,
+        "baseline_bands":len(baseline.bands),
+        "mixed_status":mixed.status.value,
+        "mixed_bands":len(mixed.bands),
+        "selected_members":len(binding.member_wall_candidate_ids),
+        "parent_lines":len(lines),
+        "source_projection":projections,
+        "supp_complete":supp.scope_complete,
+    }
+
+
 def test_source_owned_g17_faces_are_never_copied_from_a_w2_centreline():
     source,composition,producer,bound=_source()
     baseline=tuple(_evidence(producer,b) for b in bound)
-    assert all(isinstance(r,SourceG17RightFlankW2Owner) for r in baseline)
+    assert all(isinstance(r,SourceG17RightFlankW2Owner) for r in baseline), (
+        _source_neutral_gate_probe(producer,bound[0])
+    )
     for entry,(_,opening,_selector,binding) in zip(baseline,bound):
         assert entry.opening_identity_id==opening.record_id
         assert entry.host_binding_record_id==binding.record_id
