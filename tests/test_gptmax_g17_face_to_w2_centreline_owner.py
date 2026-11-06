@@ -85,8 +85,10 @@ def _source_neutral_gate_probe(producer, b):
 def test_source_owned_g17_faces_are_never_copied_from_a_w2_centreline():
     source,composition,producer,bound=_source()
     baseline=tuple(_evidence(producer,b) for b in bound)
+    import json
     assert all(isinstance(r,SourceG17RightFlankW2Owner) for r in baseline), (
-        _source_neutral_gate_probe(producer,bound[0])
+        json.dumps(_source_neutral_gate_probe(producer,bound[0]),
+                   sort_keys=True,separators=(",",":"))
     )
     for entry,(_,opening,_selector,binding) in zip(baseline,bound):
         assert entry.opening_identity_id==opening.record_id
