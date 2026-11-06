@@ -6,6 +6,7 @@ from dataclasses import replace
 from types import MappingProxyType
 
 import fitz
+import pytest
 
 from pb_live_physical_opening_void_composition import (
     LIVE_PHYSICAL_OPENING_VOID_RESOLVED,
@@ -342,6 +343,28 @@ def test_live_void_composition_never_uses_default_height_when_source_height_is_m
     assert opening.area_m2 is None
     assert opening.opening_void_record_id is None
     assert opening.geometry_complete is False
+
+
+@pytest.mark.parametrize("tag", ["D1", "W1"])
+def test_page_wide_height_mode_cannot_replace_target_owned_source_height(tag) -> None:
+    source = SourceVisibilityProducer(
+        producer_method="target-owned-door-height-test", producer_version="1")
+    published = source.ingest_native_pdf_bytes(
+        document_id="target-owned-door-height",
+        source_bytes=_complete_void_pdf(include_height=False, tag=tag),
+        source_locator="memory://target-owned-door-height.pdf")
+    walls = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id, page_ids=("1",))
+    before = source.published_snapshot_for_revision(published.revision.revision_id)
+
+    with pytest.raises(ValueError, match="target-owned.*height"):
+        compose_live_physical_opening_voids(
+            source_visibility_producer=source,
+            wall_opening_composition=walls,
+            single_width_uniform_page_door_height_shadow=True)
+
+    assert source.published_snapshot_for_revision(published.revision.revision_id) is before
 
 
 def test_joinery_head_note_does_not_become_opening_height_without_base_proof() -> None:

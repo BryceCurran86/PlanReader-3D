@@ -169,6 +169,25 @@ def test_source_topology_pages_preserves_full_scope_when_unrestricted(
     assert support == ()
 
 
+def test_customer_handoff_never_requests_page_wide_door_height(tmp_path, monkeypatch):
+    pdf = tmp_path / "source.pdf"
+    _three_page_pdf(pdf)
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 3))
+
+    class ProducerReached(Exception):
+        pass
+
+    def collect(*args, **kwargs):
+        assert not kwargs.get("single_width_uniform_page_door_height_shadow", False)
+        raise ProducerReached
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", collect)
+    with pytest.raises(ProducerReached):
+        handoff.generate_project_handoff(
+            pdf_path=pdf, project_id="owned-height-test", workspace_id=1,
+            output_dir=tmp_path / "handoff")
+
+
 def test_project_handoff_combines_only_available_source_closed_families(
     tmp_path,
     monkeypatch,
