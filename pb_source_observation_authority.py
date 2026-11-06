@@ -49,6 +49,7 @@ _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
+_SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
 # Representation cache only. Lookups stay the same above and below this size.
 _SNAPSHOT_FLATTEN_MIN = 4096
 
@@ -477,9 +478,9 @@ class _SourceObservationStore:
         # Identity-bound O(1) membership index for immutable snapshot records.
         # Replacement of a snapshot object causes the index to be rebuilt from
         # that replacement, preserving the previous resolution semantics.
-        self.snapshot_observation_id_sets: dict[
+        self.snapshot_observation_id_sets: OrderedDict[
             str, tuple[ProducerSnapshotRecord, frozenset[str]]
-        ] = {}
+        ] = OrderedDict()
         self.source_snapshot_by_revision: dict[str, str] = {}
         # Derived snapshots share unchanged records. Each snapshot stores only
         # its own writes, and a write on one snapshot cannot change another.
@@ -536,6 +537,15 @@ class _SourceObservationStore:
         )
         return True
 
+    def cache_snapshot_membership(self, snapshot: ProducerSnapshotRecord):
+        """Bound read hints; immutable source inventories remain authoritative."""
+        cached = (snapshot, frozenset(snapshot.observation_ids))
+        self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+        self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
+        while len(self.snapshot_observation_id_sets) > _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS:
+            self.snapshot_observation_id_sets.popitem(last=False)
+        return cached
+
     def snapshot_contains_observation(
         self,
         snapshot: ProducerSnapshotRecord,
@@ -543,8 +553,9 @@ class _SourceObservationStore:
     ) -> bool:
         cached = self.snapshot_observation_id_sets.get(snapshot.snapshot_id)
         if cached is None or cached[0] is not snapshot:
-            cached = (snapshot, frozenset(snapshot.observation_ids))
-            self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+            cached = self.cache_snapshot_membership(snapshot)
+        else:
+            self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
         return str(observation_id) in cached[1]
 
     def next_generation(self) -> int:
@@ -1955,10 +1966,7 @@ class SourceObservationProducer:
         self._store.source_bytes_by_revision[revision.revision_id] = stored_source_bytes
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
-        self._store.snapshot_observation_id_sets[snapshot.snapshot_id] = (
-            snapshot,
-            frozenset(snapshot.observation_ids),
-        )
+        self._store.cache_snapshot_membership(snapshot)
         if parent_id is not None:
             self._store.observations.fork(snapshot.snapshot_id, parent_id)
             self._store.record_fingerprints.fork(snapshot.snapshot_id, parent_id)
