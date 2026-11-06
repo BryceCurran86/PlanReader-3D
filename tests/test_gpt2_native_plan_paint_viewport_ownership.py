@@ -190,12 +190,12 @@ def test_long_native_text_paint_can_cross_f07_when_exact_word_glyphs_do_not():
         corrupted[0]=tuple(changed)
         rival={**trace,"chars":tuple(corrupted)}
         assert not _original_native_word_paint_within_parent(
-            word,receipt,{**kwargs,"trace_by_seq":{trace["seqno"]:[rival]}}
+            word,receipt,**{**kwargs,"trace_by_seq":{trace["seqno"]:[rival]}}
         )
         # The accepted glyph geometry must not be moved beyond the F07 edge.
         bad_box=(box[0],box[1],box[2]-2.,box[3])
         assert not _original_native_word_paint_within_parent(
-            word,receipt,{**kwargs,"parent_bbox":bad_box}
+            word,receipt,**{**kwargs,"parent_bbox":bad_box}
         )
     finally:
         doc.close()

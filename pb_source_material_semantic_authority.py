@@ -1767,8 +1767,10 @@ def _original_native_word_paint_within_parent(
                 foreign_box = tuple(float(v) for v in char[3])
             except (TypeError, ValueError, IndexError, OverflowError):
                 return False
-            if (_bbox_fully_inside(foreign_box, word.bbox, tolerance=1e-6)
-                    and len(foreign_box) == 4):
+            if (len(foreign_box) != 4
+                    or any(not math.isfinite(v) for v in foreign_box)):
+                return False
+            if _bbox_fully_inside(foreign_box, word.bbox, tolerance=1e-6):
                 return False
 
         kinds.append(kind)
