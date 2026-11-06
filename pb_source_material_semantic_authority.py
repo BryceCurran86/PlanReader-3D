@@ -16,6 +16,7 @@ import hashlib
 import io
 import math
 import re
+import struct
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -1658,8 +1659,73 @@ def _material_candidate_codes_with_untrusted_words(
 
 
 
+def _float32(value: object) -> float:
+    """Round to the precision of the PDF text pipeline (MuPDF stores glyph positions as float32)."""
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def _native_word_chars_by_address(page, native_words_by_address: dict) -> dict:
+    """Ordered ``(character, origin)`` pairs of each native word, keyed like ``get_text("words")``.
+
+    Only used to bind a text-trace glyph to the word's OWN native characters. A word gets an entry only when its
+    characters, rebuilt from the native text page, spell exactly the native word row and their boxes make up exactly
+    that row's box; anything irregular (ambiguous address, odd whitespace, mismatching box) gets no entry, which the
+    caller treats as "not proven".
+    """
+    lines: dict[tuple[int, int], list] = {}
+    for block in page.get_text("rawdict", sort=False).get("blocks", ()):
+        if block.get("type") != 0 or type(block.get("number")) is not int:
+            continue
+        for line_no, line in enumerate(block.get("lines", ())):
+            chars: list = []
+            for span in line.get("spans", ()):
+                chars.extend(span.get("chars", ()))
+            lines[(block["number"], line_no)] = chars
+    result: dict[tuple[int, int, int], tuple] = {}
+    for address, rows in native_words_by_address.items():
+        if len(rows) != 1 or len(address) != 3 or len(rows[0]) < 8:
+            continue
+        row = rows[0]
+        chars = lines.get((address[0], address[1]))
+        if not chars:
+            continue
+        runs: list[list] = []
+        current: list = []
+        for char in chars:
+            if str(char.get("c", " ")).isspace():
+                if current:
+                    runs.append(current)
+                    current = []
+            else:
+                current.append(char)
+        if current:
+            runs.append(current)
+        if type(address[2]) is not int or not 0 <= address[2] < len(runs):
+            continue
+        run = runs[address[2]]
+        try:
+            if "".join(str(char["c"]) for char in run) != row[4]:
+                continue
+            union = (
+                min(float(char["bbox"][0]) for char in run),
+                min(float(char["bbox"][1]) for char in run),
+                max(float(char["bbox"][2]) for char in run),
+                max(float(char["bbox"][3]) for char in run),
+            )
+            if any(abs(a - float(b)) > 1e-5 for a, b in zip(union, row[:4])):
+                continue
+            result[address] = tuple(
+                (str(char["c"]), (float(char["origin"][0]), float(char["origin"][1])))
+                for char in run
+            )
+        except (KeyError, TypeError, ValueError, IndexError, OverflowError):
+            continue
+    return result
+
+
 def _original_native_word_paint_within_parent(
     word: _TrustedTextWord, receipt, *, native_words_by_address: dict,
+    native_chars_by_address: dict,
     trace_by_seq: dict, bboxlog: Sequence[object], parent_bbox: Sequence[float],
 ) -> bool:
     """Recheck a trusted native word's *paint*, not its oversized font cell.
@@ -1667,6 +1733,13 @@ def _original_native_word_paint_within_parent(
     The caller must have already SHA-verified the original producer-owned PDF
     and resolved a CORROBORATED text-integrity receipt. No raw OCR, project
     name, guessed crop, approximate snap or candidate ranking is admitted.
+
+    The trace glyphs are bound to the word by identity, not by a rectangle
+    proxy: each glyph must be the word's own native character (same
+    character, same pen origin at float32 precision). A glyph rectangle is
+    never compared with the word cell, so float noise between the trace and
+    the native text page cannot reject (or admit) a word; the paint must
+    still lie inside the parent.
     """
     if (type(word) is not _TrustedTextWord or receipt is None
             or receipt.trusted is not True
@@ -1692,6 +1765,18 @@ def _original_native_word_paint_within_parent(
                 or abs(float(value) - word.bbox[index]) > 1e-5
                 for index, value in enumerate(original_word[:4])
             )):
+        return False
+    native_chars = native_chars_by_address.get(address, ())
+    try:
+        if (type(native_chars) not in (tuple, list)
+                or "".join(item[0] for item in native_chars) != word.text):
+            return False
+        native_origins = tuple(
+            (_float32(item[1][0]), _float32(item[1][1])) for item in native_chars
+        )
+    except (TypeError, ValueError, IndexError, OverflowError, struct.error):
+        return False
+    if any(not math.isfinite(v) for origin in native_origins for v in origin):
         return False
     seqnos = receipt.trace_sequence_numbers or (receipt.sequence_number,)
     if (type(seqnos) not in (tuple, list)
@@ -1749,16 +1834,20 @@ def _original_native_word_paint_within_parent(
                         glyph_boxes = tuple(
                             tuple(float(v) for v in char[3]) for char in part
                         )
-                    except (TypeError, ValueError, IndexError, OverflowError):
+                        glyph_origins = tuple(
+                            (_float32(char[2][0]), _float32(char[2][1]))
+                            for char in part
+                        )
+                    except (TypeError, ValueError, IndexError, OverflowError,
+                            struct.error):
                         glyph_boxes = ()
+                        glyph_origins = ()
                     if (len(glyph_boxes) == len(word.text)
+                            and glyph_origins == native_origins
                             and all(
                                 len(rect) == 4
                                 and all(math.isfinite(v) for v in rect)
                                 and rect[2] > rect[0] and rect[3] > rect[1]
-                                and _bbox_fully_inside(
-                                    rect, word.bbox, tolerance=1e-6,
-                                )
                                 and (
                                     _bbox_fully_inside(
                                         paint_box, parent_bbox, tolerance=1e-6,
@@ -1860,6 +1949,7 @@ def _original_paint_owned_plan_word_ids(
                     return empty
                 trace.setdefault(seq, []).append(span)
             bboxlog = page.get_bboxlog()
+            native_chars = _native_word_chars_by_address(page, native)
             owned = set()
             for word in candidates:
                 selector = ObservationSelector(
@@ -1880,6 +1970,7 @@ def _original_paint_owned_plan_word_ids(
                     continue
                 if _original_native_word_paint_within_parent(
                     word, receipt, native_words_by_address=native,
+                    native_chars_by_address=native_chars,
                     trace_by_seq=trace, bboxlog=bboxlog,
                     parent_bbox=viewport.bounding_box,
                 ):

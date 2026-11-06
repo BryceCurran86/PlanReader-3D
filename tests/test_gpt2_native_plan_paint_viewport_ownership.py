@@ -7,9 +7,18 @@ import pytest
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_source_material_semantic_authority import (
     _TrustedTextWord, _complete_source_plan_lines,
-    _original_native_word_paint_within_parent,
+    _native_word_chars_by_address, _original_native_word_paint_within_parent,
 )
 from pb_viewport_segmentation import SegmentedViewport, ViewportSegmentationStatus
+
+
+def _owned(page, word, receipt, **kwargs):
+    """Call the production check with the native characters the producer would build for this page."""
+    kwargs.setdefault(
+        "native_chars_by_address",
+        _native_word_chars_by_address(page, kwargs["native_words_by_address"]),
+    )
+    return _original_native_word_paint_within_parent(word, receipt, **kwargs)
 
 
 def _page():
@@ -59,7 +68,7 @@ def test_original_painted_glyph_inside_parent_cannot_be_rejected_for_font_cell()
     doc, page = _page()
     try:
         word,receipt,native,trace,bboxlog,view = _inputs(page)
-        assert _original_native_word_paint_within_parent(
+        assert _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq=trace,bboxlog=bboxlog,parent_bbox=view)
         _, before, reasons, unresolved = _complete_source_plan_lines(
@@ -111,7 +120,7 @@ def test_original_paint_exception_abstains_for_unproven_word_or_paint(tamper):
         else:
             receipt=SimpleNamespace(**{
                 **vars(receipt),"source_partition_id":"foreign"})
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,native_words_by_address=native,trace_by_seq=trace,
             bboxlog=bboxlog,parent_bbox=view)
     finally:
@@ -124,7 +133,7 @@ def test_foreign_original_text_or_changed_paint_cannot_be_admitted_as_mark():
         word,receipt,native,trace,bboxlog,view=_inputs(page)
         # Two separate native words claiming one source address are ambiguous.
         native={k:v*2 for k,v in native.items()}
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq=trace,bboxlog=bboxlog,parent_bbox=view)
         # Even a trusted word may not be promoted with an unverified token.
@@ -180,7 +189,7 @@ def test_long_native_text_paint_can_cross_f07_when_exact_word_glyphs_do_not():
             trace_by_seq={trace["seqno"]:[trace]},
             bboxlog=page.get_bboxlog(),parent_bbox=box,
         )
-        assert _original_native_word_paint_within_parent(word,receipt,**kwargs)
+        assert _owned(page,word,receipt,**kwargs)
         # A different glyph now paints in the unique word's own source cell.
         # The ambiguity cannot be resolved by selecting the first text run.
         corrupted=list(trace["chars"])
@@ -189,12 +198,12 @@ def test_long_native_text_paint_can_cross_f07_when_exact_word_glyphs_do_not():
         changed[3]=tuple(target[0][3])
         corrupted[0]=tuple(changed)
         rival={**trace,"chars":tuple(corrupted)}
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,**{**kwargs,"trace_by_seq":{trace["seqno"]:[rival]}}
         )
         # The accepted glyph geometry must not be moved beyond the F07 edge.
         bad_box=(box[0],box[1],box[2]-2.,box[3])
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,**{**kwargs,"parent_bbox":bad_box}
         )
     finally:
@@ -216,18 +225,18 @@ def test_one_text_operation_may_have_multiple_disjoint_native_trace_spans():
         )
         disjoint={**actual,"chars":far,"bbox":(450.,200.,458.,213.)}
         checked={**trace,seq:[disjoint,actual]}
-        assert _original_native_word_paint_within_parent(
+        assert _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq=checked,bboxlog=bboxlog,parent_bbox=view,
         )
-        assert _original_native_word_paint_within_parent(
+        assert _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq={seq:[actual,disjoint]},
             bboxlog=bboxlog,parent_bbox=view,
         )
         # A duplicate independent trace of the same word cannot be
         # de-duplicated by choosing first or nearest.
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq={seq:[actual,actual]},
             bboxlog=bboxlog,parent_bbox=view,
@@ -238,7 +247,7 @@ def test_one_text_operation_may_have_multiple_disjoint_native_trace_spans():
         bad=((ord("X"),ord("X"),origin,
               (origin[0],origin[1],origin[0]+2,origin[1]+3)),)
         badspan={**disjoint,"chars":bad}
-        assert not _original_native_word_paint_within_parent(
+        assert not _owned(page,
             word,receipt,native_words_by_address=native,
             trace_by_seq={seq:[actual,badspan]},
             bboxlog=bboxlog,parent_bbox=view,
