@@ -13,7 +13,11 @@ from pb_gpt2_original_native_crossview_wall_caps_shadow import (
 
 def _original_like_source(*, shifted_right=False, red_face=False,
                           invisible_cap=False, dashed_face=False,
-                          translucent_face=False):
+                          translucent_face=False, later_cover_cap=False,
+                          later_cover_face=False, invisible_cover=False,
+                          unrelated_cover=False, later_stroke_cap=False,
+                          later_stroke_face=False, thin_crossing=False,
+                          later_text_cap=False, later_text_space=False):
     pdf=fitz.open()
     for page_index,shift in enumerate((0.,78.)):
         page=pdf.new_page(width=550,height=500)
@@ -35,6 +39,46 @@ def _original_like_source(*, shifted_right=False, red_face=False,
         ink((90+shift,110),(100+shift,110))
         ink((160+shift,110),(200+shift,110))
         page.insert_text((360,180),"UNRELATED PLAN NOTE")
+        if page_index == 1:
+            if later_cover_cap or invisible_cover:
+                page.draw_rect(
+                    fitz.Rect(98+shift, 98, 102+shift, 112),
+                    color=None, fill=(1,1,1),
+                    fill_opacity=0.0 if invisible_cover else 1.0,
+                )
+            if later_cover_face:
+                page.draw_rect(
+                    fitz.Rect(92+shift, 99, 98+shift, 101),
+                    color=None, fill=(1,1,1),
+                )
+            if unrelated_cover:
+                page.draw_rect(
+                    fitz.Rect(350, 310, 400, 350),
+                    color=None, fill=(1,1,1),
+                )
+            if later_stroke_cap:
+                page.draw_line(
+                    (100+shift, 100), (100+shift, 110),
+                    color=(1,1,1), width=0.6,
+                )
+            if later_stroke_face:
+                page.draw_line(
+                    (91+shift, 100), (99+shift, 100),
+                    color=(1,1,1), width=1.0,
+                )
+            if thin_crossing:
+                page.draw_line(
+                    (98+shift, 105), (102+shift, 105),
+                    color=(0,0,0), width=0.48,
+                )
+            if later_text_cap:
+                page.insert_text(
+                    (98+shift, 108), "X", fontsize=10, color=(1,1,1),
+                )
+            if later_text_space:
+                page.insert_text(
+                    (80+shift, 108), "X       X", fontsize=10,
+                )
     data=pdf.tobytes()
     pdf.close()
     return data
@@ -158,3 +202,71 @@ def test_original_solid_opaque_walls_still_remain_source_candidate_only():
     assert not result.original_w4_wall_issued
     assert not result.doorway_threshold_issued
     assert not result.firm_area_issued
+
+
+
+@pytest.mark.parametrize("overpaint", (
+    {"later_cover_cap": True},
+    {"later_cover_face": True},
+))
+def test_later_opaque_original_paint_cannot_resurrect_hidden_wall_cap(overpaint):
+    original = _original_like_source(**overpaint)
+    fingerprint = sha256(original).hexdigest()
+    with pytest.raises(ValueError, match="later obscured"):
+        _run(original)
+    assert sha256(original).hexdigest() == fingerprint
+
+
+@pytest.mark.parametrize("unrelated", (False, True))
+def test_invisible_or_unrelated_later_paint_preserves_native_cap_source(unrelated):
+    source = _original_like_source(
+        invisible_cover=True, unrelated_cover=unrelated,
+    )
+    result = _run(source)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.compatible_translations_pdf_pt == ((78.,0.),)
+    assert not result.original_w4_wall_issued
+    assert not result.physical_jamb_issued
+    assert not result.material_issued
+    assert not result.firm_area_issued
+    assert not result.commercial_projection_allowed
+
+
+def test_unrelated_opaque_source_overlay_and_translation_permutation_stay_invariant():
+    original = _original_like_source(unrelated_cover=True)
+    before = sha256(original).hexdigest()
+    one = _run(original, shifts=((78.,0.),(43.92,0.)))
+    two = _run(original, shifts=((43.92,0.),(78.,0.)))
+    assert one == two
+    assert sha256(original).hexdigest() == before
+    assert one.status is EvidenceResolutionStatus.CANDIDATE
+
+
+@pytest.mark.parametrize("later_paint", (
+    {"later_stroke_cap": True},
+    {"later_stroke_face": True},
+    {"later_text_cap": True},
+))
+def test_later_native_stroke_or_painted_glyph_cannot_resurrect_source_cap(later_paint):
+    original = _original_like_source(**later_paint)
+    digest = sha256(original).hexdigest()
+    with pytest.raises(ValueError, match="later obscured"):
+        _run(original)
+    assert sha256(original).hexdigest() == digest
+
+
+@pytest.mark.parametrize("unrelated", (False, True))
+def test_thin_transverse_ink_and_unpainted_text_space_do_not_erase_cap(unrelated):
+    original = _original_like_source(
+        thin_crossing=True, later_text_space=True,
+        unrelated_cover=unrelated,
+    )
+    result = _run(original)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.compatible_translations_pdf_pt == ((78., 0.),)
+    assert result.shadow_only
+    assert not any((result.original_w4_wall_issued,
+                    result.physical_jamb_issued,
+                    result.doorway_threshold_issued,
+                    result.firm_area_issued,
+                    result.commercial_projection_allowed))

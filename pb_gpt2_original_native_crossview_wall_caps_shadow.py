@@ -84,6 +84,113 @@ def _source_line(drawings, address: int):
     return (*vals, round(width, 4))
 
 
+def _require_original_path_not_later_covered(page, drawings, index: int) -> None:
+    """Fail closed if subsequent source paint hides any chosen cap/face ink.
+
+    Merely being in PDF get_drawings is not proof that an original structural
+    ink segment remains visible. Match source sequence to later filled paint,
+    using a stroke-width-expanded region so horizontal/vertical zero-area
+    segment rectangles cannot silently evade the overlap test. This remains
+    SOURCE-ONLY: no W4 or installed-opening identity is minted.
+    """
+    selected = drawings[index]
+    seq = selected.get("seqno")
+    box = selected.get("rect")
+    width = selected.get("width")
+    if (type(seq) is not int or type(width) not in (int, float)
+            or not isfinite(width) or width <= 0 or box is None):
+        raise ValueError("original native path paint sequence unavailable")
+    bounds = tuple(float(v) for v in box)
+    if len(bounds) != 4 or not all(isfinite(v) for v in bounds):
+        raise ValueError("original native path paint bbox unavailable")
+    bboxlog = page.get_bboxlog()
+    if seq < 0 or seq >= len(bboxlog):
+        raise ValueError("original native source paint sequence out of scope")
+    half = max(float(width) / 2, 0.05)
+    x0, y0, x1, y1 = bounds
+    ink = fitz.Rect(x0 - half, y0 - half, x1 + half, y1 + half)
+    if bboxlog[seq][0] != "stroke-path":
+        raise ValueError("original native wall cap has no stroke paint receipt")
+    # Later strokes and painted glyphs are separate from opaque fills. A
+    # long repaint can replace an earlier black cap without ever appearing
+    # as fill-path; a text span may overlap only through unpainted spaces.
+    traces_by_seq = {}
+    for trace in page.get_texttrace():
+        if not isinstance(trace, dict):
+            raise ValueError("original native later text trace unavailable")
+        trace_seq = trace.get("seqno")
+        if type(trace_seq) is int:
+            traces_by_seq.setdefault(trace_seq, []).append(trace)
+    line = selected["items"][0]
+    start, end = line[1:3]
+    vertical = abs(end.y - start.y) >= abs(end.x - start.x)
+    for later_seq in range(seq + 1, len(bboxlog)):
+        entry = bboxlog[later_seq]
+        if len(entry) < 2 or entry[0] not in (
+                "stroke-path", "fill-text", "stroke-text"):
+            continue
+        try:
+            paint_box = fitz.Rect(entry[1])
+            if not all(isfinite(v) for v in paint_box):
+                raise ValueError("nonfinite paint box")
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("original native later paint geometry unresolved") from None
+        if not ink.intersects(paint_box):
+            continue
+        if entry[0] == "stroke-path":
+            # Ordinary thin perpendicular drafting intersections must not
+            # erase a genuine wall cap; a longer overlap is ambiguous.
+            span = (min(ink.y1, paint_box.y1) - max(ink.y0, paint_box.y0)
+                    if vertical else
+                    min(ink.x1, paint_box.x1) - max(ink.x0, paint_box.x0))
+            if span > 2 * float(width):
+                raise ValueError("original native wall cap or face is later obscured")
+            continue
+        traces = traces_by_seq.get(later_seq, ())
+        if not traces:
+            raise ValueError("later native glyph paint provenance unavailable")
+        for trace in traces:
+            glyphs = trace.get("chars")
+            if not isinstance(glyphs, (tuple, list)) or not glyphs:
+                raise ValueError("later native glyph paint provenance unavailable")
+            for glyph in glyphs:
+                if not isinstance(glyph, (tuple, list)) or len(glyph) < 4:
+                    raise ValueError("later native glyph paint provenance unresolved")
+                codepoint = glyph[0]
+                if type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff:
+                    raise ValueError("later native glyph codepoint unresolved")
+                if chr(codepoint).isspace():
+                    continue
+                try:
+                    glyph_box = fitz.Rect(glyph[3])
+                    if not all(isfinite(v) for v in glyph_box):
+                        raise ValueError("nonfinite glyph box")
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError("later native glyph geometry unresolved") from None
+                if ink.intersects(glyph_box):
+                    raise ValueError("original native wall cap or face is later obscured")
+    for later_seq in range(seq + 1, len(bboxlog)):
+        entry = bboxlog[later_seq]
+        if len(entry) < 2 or entry[0] not in (
+                "fill-path", "fill-image", "fill-shade"):
+            continue
+        try:
+            overlap = ink.intersects(fitz.Rect(entry[1]))
+        except (TypeError, ValueError):
+            raise ValueError("original native later paint geometry unresolved")
+        if not overlap:
+            continue
+        if entry[0] == "fill-path":
+            paint = [candidate for candidate in drawings
+                     if candidate.get("seqno") == later_seq]
+            if (len(paint) == 1
+                    and paint[0].get("fill") is not None
+                    and type(paint[0].get("fill_opacity")) in (int, float)
+                    and float(paint[0]["fill_opacity"]) == 0.0):
+                continue
+        raise ValueError("original native wall cap or face is later obscured")
+
+
 def _inspect_page(page, scope: NativeWallCapScope, tol: float):
     if (type(scope) is not NativeWallCapScope or
             len(scope.cap_paths) != 2 or len(scope.face_paths) != 4 or
@@ -93,6 +200,8 @@ def _inspect_page(page, scope: NativeWallCapScope, tol: float):
     caps = sorted((_source_line(drawings, p) for p in scope.cap_paths),
                   key=lambda r: r[0])
     faces = tuple(_source_line(drawings, p) for p in scope.face_paths)
+    for source_path in (*scope.cap_paths, *scope.face_paths):
+        _require_original_path_not_later_covered(page, drawings, source_path)
     left, right = caps
     if right[0] - left[0] <= tol:
         raise ValueError("source wall has no two separated cap ends")
