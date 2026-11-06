@@ -33,6 +33,7 @@ from pb_material_schedule_v1222 import (
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_migration_provider_envelope import ProviderContext
 from pb_pdf_text_integrity_authority import (
+    PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP,
     TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
 )
