@@ -1,10 +1,12 @@
 """Bound original native figure ink to one independently drawn physical footprint.
 
-This authority receives figure dimensions and an already-authenticated label's
-source-path IDs. It searches raw plan geometry for the four enclosing edges.
-No project names, gold quantities, expected object identities, scale factors,
-or benchmark tolerance policies are inputs. Incomplete or rival outlines
-ABSTAIN. It does not claim wall-face finishes or installed products.
+This authority receives independently authenticated source dimensions and a
+label path roster. It accepts either genuinely joined four-edge rectangles, or
+open-air structural bays only when native source-post squares connect the right
+edge gaps and same-alignment wall spans bridge BOTH left-side gaps. Four
+disconnected long edges alone NEVER authenticate a footprint. Reference truth,
+project name, hardcoded dimensions and scoring tolerances are not inputs.
+Incomplete, ambiguous and rival physical owners ABSTAIN.
 """
 from __future__ import annotations
 
@@ -26,6 +28,8 @@ class SourceNativePhysicalFootprint:
     figured_depth_mm: int
     status: str = "CORROBORATED"
     physical_scope: str = "source_labeled_exterior_architectural_footprint"
+    boundary_model: str = "continuous_closed_outline"
+    connector_source_path_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,135 @@ def _source_edges(drawings: list[dict[str, Any]], excluded: frozenset[int]):
     return horizontal, vertical
 
 
+def _square_post_boxes(
+    drawings: list[dict[str, Any]], excluded: frozenset[int],
+) -> tuple[tuple[int, tuple[float, float, float, float]], ...] | None:
+    """Only native drawn square post/quads; never bbox-only ink or labels."""
+    posts = []
+    for path_id, raw in enumerate(drawings):
+        if path_id in excluded or not _black_source_stroke(raw):
+            continue
+        items = raw.get("items")
+        if type(items) not in (list, tuple) or len(items) != 1 or items[0][0] != "qu":
+            continue
+        if len(items[0]) < 2:
+            continue
+        box = _finite_rect(raw)
+        if box is None:
+            continue
+        x0, y0, x1, y1 = box
+        width, height = x1 - x0, y1 - y0
+        if (
+            width <= SOURCE_SNAP_TOL_PT or height <= SOURCE_SNAP_TOL_PT
+            or abs(width - height) > SOURCE_SNAP_TOL_PT
+        ):
+            continue
+        try:
+            quad = items[0][1]
+            points = tuple((float(p.x), float(p.y)) for p in (
+                quad.ul, quad.ur, quad.ll, quad.lr,
+            ))
+        except (TypeError, AttributeError, ValueError, OverflowError):
+            continue
+        if len(set(points)) != 4 or not all(
+            math.isfinite(v) for point in points for v in point
+        ):
+            continue
+        corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+        if any(not any(
+            abs(px - cx) <= SOURCE_SNAP_TOL_PT
+            and abs(py - cy) <= SOURCE_SNAP_TOL_PT
+            for px, py in points
+        ) for cx, cy in corners):
+            continue
+        posts.append((path_id, box))
+        if len(posts) > SOURCE_PRIMITIVE_CAP:
+            return None
+    return tuple(posts)
+
+
+def _post_bounded_wall_connectors(
+    top: _Edge, bottom: _Edge, left: _Edge, right: _Edge,
+    source_vertical: Sequence[_Edge],
+    posts: Sequence[tuple[int, tuple[float, float, float, float]]],
+) -> tuple[int, int, int, int] | None:
+    """Bridge ALL four disjoint corners through original physical members.
+
+    The long strokes alone are NOT a closed floor perimeter. Right-side square
+    post symbols and left-side contiguous building-wall continuations are
+    independently sourced structural support for an open-air footprint.
+    """
+    tol = SOURCE_SNAP_TOL_PT
+    height = bottom.at - top.at
+    if (
+        not tol < left.start - top.at < 0.25 * height
+        or not tol < bottom.at - left.end < 0.25 * height
+        or not tol < right.start - top.at < 0.25 * height
+        or not tol < bottom.at - right.end < 0.25 * height
+        or not tol < right.at - top.end < 0.25 * height
+    ):
+        return None
+
+    def wall(path: _Edge, upper: bool) -> bool:
+        return (
+            path.path_id not in {
+                top.path_id, bottom.path_id, left.path_id, right.path_id,
+            }
+            and abs(path.at - left.at) <= tol
+            and abs(path.at - top.start) <= tol
+            and abs(path.at - bottom.start) <= tol
+            and (
+                path.start <= top.at + tol
+                and path.end >= left.start - tol
+                if upper else
+                path.start <= left.end + tol
+                and path.end >= bottom.at - tol
+            )
+        )
+
+    upper_wall = {path.path_id for path in source_vertical if wall(path, True)}
+    lower_wall = {path.path_id for path in source_vertical if wall(path, False)}
+    if len(upper_wall) != 1 or len(lower_wall) != 1:
+        return None
+
+    def post_matches(
+        box: tuple[float, float, float, float], upper: bool,
+    ) -> bool:
+        target = (
+            (top.end, top.at, right.at, right.start) if upper else
+            (bottom.end, right.end, right.at, bottom.at)
+        )
+        return all(abs(a - b) <= tol for a, b in zip(box, target))
+
+    upper_post = {path for path, box in posts if post_matches(box, True)}
+    lower_post = {path for path, box in posts if post_matches(box, False)}
+    if len(upper_post) != 1 or len(lower_post) != 1:
+        return None
+
+    witnesses = (
+        next(iter(upper_wall)), next(iter(lower_wall)),
+        next(iter(upper_post)), next(iter(lower_post)),
+    )
+    return witnesses if len(set(witnesses)) == 4 else None
+
+
+def _continuous_rectangle_corners(
+    top: _Edge, bottom: _Edge, left: _Edge, right: _Edge,
+) -> bool:
+    """Endpoint-connected means within 2.5pt at EACH of four corners."""
+    t = SOURCE_SNAP_TOL_PT
+    return all((
+        abs(left.at - top.start) <= t,
+        abs(left.at - bottom.start) <= t,
+        abs(right.at - top.end) <= t,
+        abs(right.at - bottom.end) <= t,
+        abs(left.start - top.at) <= t,
+        abs(right.start - top.at) <= t,
+        abs(left.end - bottom.at) <= t,
+        abs(right.end - bottom.at) <= t,
+    ))
+
+
 def corroborate_source_labeled_rectangular_footprint(
     drawings: list[dict[str, Any]],
     *,
@@ -112,11 +245,11 @@ def corroborate_source_labeled_rectangular_footprint(
     figured_depth_mm: int,
     excluded_source_path_ids: Sequence[int] = (),
 ) -> SourceNativePhysicalFootprint | None:
-    """Return one unique independently drawn rectangle, else abstain.
+    """Prove one native closed outline OR source post/wall-bounded open bay.
 
-    Native geometry is used for *identity and aspect* only. Floor m² must be
-    calculated separately from authenticated printed figures, not PDF points.
-    The label and figures are source-proven by a different producer.
+    Source geometry proves physical ownership/aspect, never converts PDF
+    points into customer square meters; independent printed figures do that.
+    Four nonintersecting arbitrary strokes cannot authorize a physical area.
     """
     if type(drawings) is not list or not 0 < len(drawings) <= SOURCE_PRIMITIVE_CAP:
         return None
@@ -156,8 +289,10 @@ def corroborate_source_labeled_rectangular_footprint(
     label_width = lx1 - lx0
     if label_width <= SOURCE_SNAP_TOL_PT or ly1 <= ly0:
         return None
-    raw_edges = _source_edges(drawings, frozenset((*label_ids, *exclusions)))
-    if raw_edges is None:
+    excluded = frozenset((*label_ids, *exclusions))
+    raw_edges = _source_edges(drawings, excluded)
+    posts = _square_post_boxes(drawings, excluded)
+    if raw_edges is None or posts is None:
         return None
     source_h, source_v = raw_edges
     center_x, center_y = (lx0 + lx1) / 2.0, (ly0 + ly1) / 2.0
@@ -230,12 +365,25 @@ def corroborate_source_labeled_rectangular_footprint(
                         SOURCE_ASPECT_TOL_FRACTION * figured_ratio
                     ):
                         continue
+                    if _continuous_rectangle_corners(top, bottom, left, right):
+                        model = "continuous_closed_outline"
+                        connectors = ()
+                    else:
+                        connected = _post_bounded_wall_connectors(
+                            top, bottom, left, right, source_v, posts,
+                        )
+                        if connected is None:
+                            continue
+                        model = "source_post_bounded_open_bay"
+                        connectors = connected
                     matched[ids] = SourceNativePhysicalFootprint(
                         boundary_source_path_ids=ids,
                         label_source_path_ids=label_ids,
                         native_bounds_pts=(left.at, top.at, right.at, bottom.at),
                         figured_width_mm=figured_width_mm,
                         figured_depth_mm=figured_depth_mm,
+                        boundary_model=model,
+                        connector_source_path_ids=connectors,
                     )
                     if len(matched) > 1:
                         return None
