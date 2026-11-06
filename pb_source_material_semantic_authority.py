@@ -1749,7 +1749,10 @@ def _original_native_word_paint_within_parent(
                             and all(math.isfinite(v) for v in rect)
                             and rect[2] > rect[0] and rect[3] > rect[1]
                             and _bbox_fully_inside(rect, word.bbox, tolerance=1e-6)
-                            and _bbox_fully_inside(rect, parent_bbox, tolerance=1e-6)
+                            and (
+                                _bbox_fully_inside(paint_box, parent_bbox, tolerance=1e-6)
+                                or _bbox_fully_inside(rect, parent_bbox, tolerance=1e-6)
+                            )
                             for rect in glyph_boxes
                         )):
                     matches.append((start, part))
