@@ -136,23 +136,40 @@ def issue_original_q5446_alfresco_customer_area(
         or footprint.physical_scope != "source_labeled_exterior_architectural_footprint"
         or footprint.figured_width_mm != figure.horizontal_mm
         or footprint.figured_depth_mm != figure.vertical_mm
-        or set(footprint.boundary_source_path_ids).intersection(
-            figure.source_vector_path_ids
+        or footprint.boundary_model not in (
+            "continuous_closed_outline", "source_post_bounded_open_bay",
         )
+        or (
+            footprint.boundary_model == "source_post_bounded_open_bay"
+            and len(footprint.connector_source_path_ids) != 4
+        )
+        or (
+            footprint.boundary_model == "continuous_closed_outline"
+            and footprint.connector_source_path_ids
+        )
+        or set((
+            *footprint.boundary_source_path_ids,
+            *footprint.connector_source_path_ids,
+        )).intersection(figure.source_vector_path_ids)
     ):
         return _blocked("original_physical_floor_and_commercial_permission_unproved")
 
-    # This physical owner is derived from an independently drawn unique
-    # enclosing four-edge native source footprint, not the upstream schedule's
-    # withheld commercial permission or a benchmark answer. No tiling/finish
-    # owner, interior wall-face measurement or installed quantity is inferred.
+    # This physically supported exterior bay is source-authorized by EITHER
+    # truly joined boundary strokes OR independently drawn square post corners
+    # and house-wall continuations closing all four ink gaps. A nonintersecting
+    # four-stroke selection alone is not an enclosed physical footprint.
+    # Metric area still comes from independent native printed dimensions.
+    # No tiling, net wall-face or installed materials are inferred.
     physical_id = stable_contract_id(
         "q5446_original_alfresco_architectural_footprint",
         {"sha": SOURCE_SHA256, "source_schedule": source_q.quantity_id,
          "figured_source_paths": list(figure.source_vector_path_ids),
          "physical_boundary_source_paths": list(
              footprint.boundary_source_path_ids
-         )},
+         ),
+         "physical_connector_source_paths": list(
+             footprint.connector_source_path_ids
+         ), "physical_boundary_model": footprint.boundary_model},
         digest_chars=32,
     )
     source_paths = tuple(
@@ -161,7 +178,10 @@ def issue_original_q5446_alfresco_customer_area(
     )
     boundary_paths = tuple(
         f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{i}"
-        for i in footprint.boundary_source_path_ids
+        for i in (
+            *footprint.boundary_source_path_ids,
+            *footprint.connector_source_path_ids,
+        )
     )
     figures = tuple(
         f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{i}"
@@ -196,6 +216,10 @@ def issue_original_q5446_alfresco_customer_area(
             "physical_boundary_source_path_ids": list(
                 footprint.boundary_source_path_ids
             ),
+            "physical_connector_source_path_ids": list(
+                footprint.connector_source_path_ids
+            ),
+            "physical_boundary_model": footprint.boundary_model,
             "source_schedule_commercial_permission": False,
             "net_internal_finished_face_authorized": False,
             "tiled_floor_finish_authorized": False,
