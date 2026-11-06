@@ -13,10 +13,12 @@ from pb_live_canonical_room_composition import (
 from pb_migration_contracts import (
     DocumentEvidence,
     EntityEvidence,
+    EvidenceAtom,
     EvidenceResolutionStatus,
     QuantityEvidence,
 )
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+from pb_room_area_quantity import _evidence_fingerprint
 from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 
 
@@ -69,10 +71,28 @@ def _bridge(
     quantity_id: str = "room-area-qty-1",
     authority: str = "documented_dimension",
 ) -> SourceRoomAreaBridgeResult:
+    atom_id = f"explicit-area-evidence-{face_id}"
+    figured_ids = (
+        ["dim-h", "dim-v"] if face_id == "face-1"
+        else [f"dim-h-{face_id}", f"dim-v-{face_id}"]
+    )
+    original_atom = EvidenceAtom(
+        evidence_id=atom_id,
+        document_id="doc-1",
+        page_id="7",
+        viewport_id="floor-vp",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimensions",
+        normalized_value=9.05352,
+        unit="m2",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        metadata={"figured_dimension_ids": figured_ids},
+    )
+    original_receipts = (face_id, "room-geometry-evidence", atom_id)
     entity = EntityEvidence(
         candidate_entity_id="source-room-1",
         candidate_type="room",
-        evidence_ids=(face_id, "room-geometry-evidence"),
+        evidence_ids=original_receipts,
         status=EvidenceResolutionStatus.CORROBORATED,
         confidence=1.0,
         reason_codes=("source_room_face_entity_bound",),
@@ -93,7 +113,9 @@ def _bridge(
         "room_label": "OFFICE",
     }
     if authority == "documented_dimension":
-        metadata["figured_dimension_ids"] = ["dim-h", "dim-v"]
+        metadata["figured_dimension_ids"] = figured_ids
+        metadata["explicit_area_evidence_id"] = atom_id
+        metadata["explicit_area_evidence_fingerprint"] = _evidence_fingerprint(original_atom)
         metadata["scale_fingerprint"] = None
     else:
         metadata["figured_dimension_ids"] = []
@@ -108,7 +130,7 @@ def _bridge(
         input_entity_ids=("source-room-1",),
         formula="authoritative_explicit_area",
         formula_version="1.1.0",
-        evidence_ids=(face_id, "room-geometry-evidence"),
+        evidence_ids=original_receipts,
         authority=authority,
         status="firm",
         confidence=1.0,
@@ -119,7 +141,7 @@ def _bridge(
         document_id="doc-1",
         source_sha256=SOURCE_SHA,
         page_count=1,
-        evidence_ids=(face_id, "room-geometry-evidence"),
+        evidence_ids=original_receipts,
         producer="test",
         producer_version="1",
     )
@@ -130,6 +152,7 @@ def _bridge(
         document=document,
         entities=(entity,),
         quantities=(quantity,),
+        original_area_evidence_receipts=(("source-room-1", original_atom),),
     )
 
 

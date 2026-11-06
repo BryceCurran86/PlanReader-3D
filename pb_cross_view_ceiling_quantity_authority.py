@@ -14,6 +14,7 @@ not invent or reconstruct scale authority.
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
@@ -30,9 +31,12 @@ from pb_live_canonical_room_composition import (
 )
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_migration_contracts import (
+    DocumentEvidence,
     EntityEvidence,
+    EvidenceAtom,
     EvidenceResolutionStatus,
     QuantityEvidence,
+    canonical_contract_json,
     stable_contract_id,
 )
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
@@ -116,10 +120,20 @@ def _valid_room_area_quantity(
     *,
     entity: EntityEvidence,
     quantity: QuantityEvidence,
+    original_area_evidence: EvidenceAtom | None,
+    source_document: DocumentEvidence,
 ) -> bool:
     if (
         entity.status is not EvidenceResolutionStatus.CORROBORATED
         or quantity.family != "room_area"
+        # The original room-area semantic is a producer-owned physical source
+        # identity. Matching only the input entity allows a rekeyed floor or
+        # unrelated room-area receipt to be borrowed for a FIRM ceiling.
+        or type(entity.candidate_entity_id) is not str
+        or not entity.candidate_entity_id
+        or entity.candidate_entity_id != entity.candidate_entity_id.strip()
+        or type(quantity.semantic_key) is not str
+        or quantity.semantic_key != f"room_area:{entity.candidate_entity_id}"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
@@ -128,6 +142,15 @@ def _valid_room_area_quantity(
         or any(type(item) is not str or not item or item != item.strip()
                for item in quantity.evidence_ids)
         or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
+        # Every area receipt must be in the independently corroborated source
+        # room's original evidence inventory, as in the real floor issuer.
+        # A foreign dimension/face receipt cannot inherit this room's identity.
+        or not isinstance(entity.evidence_ids, (tuple, list))
+        or not entity.evidence_ids
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in entity.evidence_ids)
+        or len(set(entity.evidence_ids)) != len(entity.evidence_ids)
+        or not set(quantity.evidence_ids).issubset(set(entity.evidence_ids))
         or not _valid_source_area_confidence(quantity.confidence)
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
@@ -142,7 +165,44 @@ def _valid_room_area_quantity(
     quantity_meta = (
         quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     )
-    if _source_figured_dimension_ids(quantity_meta) is None:
+    figured_pair = _source_figured_dimension_ids(quantity_meta)
+    if figured_pair is None:
+        return False
+
+    # Verify the original source-owned area EvidenceAtom, not only caller
+    # metadata. Its content fingerprint is issued by build_room_area_quantity.
+    atom = original_area_evidence
+    if type(atom) is not EvidenceAtom or type(source_document) is not DocumentEvidence:
+        return False
+    atom_meta = atom.metadata if isinstance(atom.metadata, Mapping) else {}
+    if (
+        atom.kind != "explicit_room_area"
+        or atom.method not in (
+            "authenticated_same_view_figured_dimensions",
+            "authenticated_cross_view_figured_dimensions",
+            "vector_text",
+        )
+        or atom.status is not EvidenceResolutionStatus.CORROBORATED
+        or _source_figured_dimension_ids(atom_meta) != figured_pair
+        or atom.unit not in ("m2", "m²")
+        or type(atom.normalized_value) not in (int, float)
+        or not math.isfinite(atom.normalized_value)
+        or round(atom.normalized_value, 6) != _quantity_value(quantity)
+        or quantity.formula != "authoritative_explicit_area"
+        or atom.document_id != room.document_id
+        or atom.page_id != _clean(room.page_id)
+        or atom.viewport_id not in (None, room.viewport_id)
+        or source_document.document_id != room.document_id
+        or source_document.source_sha256.lower() != room.source_sha256.lower()
+        or atom.evidence_id not in source_document.evidence_ids
+        or atom.evidence_id not in entity.evidence_ids
+        or atom.evidence_id not in quantity.evidence_ids
+        or quantity_meta.get("explicit_area_evidence_id") != atom.evidence_id
+        or quantity_meta.get("explicit_area_evidence_fingerprint")
+        != hashlib.sha256(
+            canonical_contract_json(atom.to_dict()).encode("utf-8")
+        ).hexdigest()
+    ):
         return False
 
     # Some documented dimension bridges carry explicit physical-room ownership
@@ -423,7 +483,9 @@ def publish_cross_view_ceiling_quantities(
         if len(owners) > 1
     }
 
-    bridge_pairs: list[tuple[EntityEvidence, QuantityEvidence]] = []
+    bridge_pairs: list[
+        tuple[EntityEvidence, QuantityEvidence, EvidenceAtom | None, DocumentEvidence]
+    ] = []
     for bridge in room_area_bridges:
         if bridge.status is not EvidenceResolutionStatus.CORROBORATED:
             continue
@@ -446,7 +508,16 @@ def publish_cross_view_ceiling_quantities(
                 continue
             entity = entities.get(_clean(quantity.input_entity_ids[0]))
             if entity is not None:
-                bridge_pairs.append((entity, quantity))
+                entries = bridge.original_area_evidence_receipts
+                matches = (
+                    [item[1] for item in entries
+                     if type(item) in (tuple, list)
+                     and len(item) == 2
+                     and item[0] == entity.candidate_entity_id]
+                    if isinstance(entries, (tuple, list)) else []
+                )
+                atom = matches[0] if len(matches) == 1 else None
+                bridge_pairs.append((entity, quantity, atom, bridge.document))
 
     records: list[CrossViewCeilingQuantityRecord] = []
     unresolved: set[str] = set()
@@ -478,13 +549,40 @@ def publish_cross_view_ceiling_quantities(
             ):
                 conflict = True
             continue
+        # Inventory source-room replays BEFORE discarding invalid siblings.
+        # Otherwise a changed figured pair/value under the same quantity ID
+        # disappears and leaves its genuine sibling free to publish.
+        original_claims = [
+            (entity, quantity, atom, document)
+            for entity, quantity, atom, document in bridge_pairs
+            if room.source_room_face_record_id in entity.evidence_ids
+            and quantity.input_entity_ids == (entity.candidate_entity_id,)
+            and isinstance(entity.metadata, Mapping)
+            and _clean(entity.metadata.get("source_sha256")).lower()
+            == room.source_sha256.lower()
+            and _clean(entity.metadata.get("revision_id")) == room.revision_id
+            and _clean(entity.metadata.get("page_id")) == _clean(room.page_id)
+        ]
+        replay_by_id: dict[str, tuple] = {}
+        source_replay_conflicts: set[str] = set()
+        for candidate in original_claims:
+            qid = candidate[1].quantity_id
+            if type(qid) is not str or not qid or qid != qid.strip():
+                continue
+            if qid in source_replay_conflicts:
+                continue
+            earlier = replay_by_id.get(qid)
+            if earlier is not None and earlier != candidate:
+                source_replay_conflicts.add(qid)
+                replay_by_id.pop(qid, None)
+            else:
+                replay_by_id[qid] = candidate
         area_candidates = [
             (entity, quantity)
-            for entity, quantity in bridge_pairs
+            for entity, quantity, atom, document in original_claims
             if _valid_room_area_quantity(
-                room,
-                entity=entity,
-                quantity=quantity,
+                room, entity=entity, quantity=quantity,
+                original_area_evidence=atom, source_document=document,
             )
         ]
         deduped: dict[str, tuple[EntityEvidence, QuantityEvidence]] = {}
@@ -505,9 +603,9 @@ def publish_cross_view_ceiling_quantities(
             deduped[qid] = pair
         area_candidates = list(deduped.values())
 
-        if contradictory_ids or len(area_candidates) != 1:
+        if source_replay_conflicts or contradictory_ids or len(area_candidates) != 1:
             unresolved.add(physical_id)
-            if contradictory_ids or len(area_candidates) > 1:
+            if source_replay_conflicts or contradictory_ids or len(area_candidates) > 1:
                 conflict = True
             continue
 

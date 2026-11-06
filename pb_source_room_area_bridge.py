@@ -68,6 +68,8 @@ class SourceRoomAreaBridgeResult:
     entities: tuple[EntityEvidence, ...]
     quantities: tuple[QuantityEvidence, ...]
     schema_version: str = SOURCE_ROOM_AREA_BRIDGE_SCHEMA_VERSION
+    # Original producer EvidenceAtoms; retain duplicates for fail-closed review.
+    original_area_evidence_receipts: tuple[tuple[str, EvidenceAtom], ...] = ()
 
     @property
     def entities_by_room_id(self) -> Mapping[str, EntityEvidence]:
@@ -290,6 +292,13 @@ def build_source_room_area_bridge(
         document=owned_document,
         entities=entities,
         quantities=quantities,
+        original_area_evidence_receipts=tuple(
+            (room_id, evidence)
+            for room_id, evidence in sorted(explicit_area_evidence.items())
+            if type(room_id) is str
+            and room_id in entities_by_room_id
+            and type(evidence) is EvidenceAtom
+        ),
     )
 
 
