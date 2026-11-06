@@ -470,16 +470,11 @@ def publish_cross_view_ceiling_quantities(
         # square metres by copying the floor's documented room area.
         if (
             finish.commercial_projection_allowed is not True
-            or (
-                type(finish.record_id) is str
-                and finish.record_id.startswith(
-                    "cross_view_ceiling_finish_original_zone_"
-                )
-            )
+            or finish.material_only
         ):
             # Original-page material/source-zone proof is NOT a measured
             # ceiling area. This lineage veto is independent of the mutable
-            # caller-side flag so that an edited/reconstructed receipt cannot
+            # caller-side flag/ID so that an edited/reconstructed receipt cannot
             # borrow the signed FLOOR area as ceiling FIRM.
             unresolved.add(physical_id)
             continue

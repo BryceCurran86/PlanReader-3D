@@ -1021,3 +1021,26 @@ def test_source_only_original_rcp_lineage_cannot_gain_commercial_flag_by_replace
         assert "cannot authorize ceiling FIRM" in str(error)
     else:
         raise AssertionError("original source-only ceiling material could become FIRM")
+
+
+def test_source_only_producer_origin_survives_benign_id_copies(monkeypatch):
+    result, _ = _source_closed_cross_block_case(monkeypatch)
+    record = result.records[0]
+    assert record.material_only is True
+    for new_id in ("rekeyed-material", "legacy-looking-ceiling", ""):
+        copied = replace(record, record_id=new_id)
+        assert copied.material_only is True
+        assert copied.commercial_projection_allowed is False
+        assert copied._seal is record._seal
+        try:
+            replace(copied, commercial_projection_allowed=True)
+        except TypeError as error:
+            assert "cannot authorize ceiling FIRM" in str(error)
+        else:
+            raise AssertionError("copied source-zone origin authorized ceiling FIRM")
+        try:
+            replace(record, record_id=new_id, commercial_projection_allowed=True)
+        except TypeError as error:
+            assert "cannot authorize ceiling FIRM" in str(error)
+        else:
+            raise AssertionError("rekeying erased source-only ceiling origin")

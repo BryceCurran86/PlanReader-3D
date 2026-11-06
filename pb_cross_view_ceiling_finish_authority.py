@@ -78,6 +78,7 @@ CROSS_VIEW_CEILING_FINISH_NATIVE_BLOCK_UNAVAILABLE = (
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
+_MATERIAL_ONLY_RECORD_SEAL = object()
 
 # Material meaning comes from the authenticated schedule definition. Ceiling
 # role comes from the independently authenticated RCP occurrence, so the
@@ -202,23 +203,33 @@ class CrossViewCeilingFinishRecord:
     schema_version: str = CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION
     _seal: object = None
 
+    @property
+    def material_only(self) -> bool:
+        """Producer origin, retained when public receipt IDs are copied."""
+        return self._seal is _MATERIAL_ONLY_RECORD_SEAL or (
+            type(self.record_id) is str
+            and self.record_id.startswith(
+                "cross_view_ceiling_finish_original_zone_"
+            )
+        )
+
     def __post_init__(self) -> None:
-        if self._seal is not _RECORD_SEAL:
+        if (self._seal is not _RECORD_SEAL
+                and self._seal is not _MATERIAL_ONLY_RECORD_SEAL):
             raise TypeError("CrossViewCeilingFinishRecord is producer-owned")
         # The original closed-ink RCP route creates MATERIAL evidence only.
         # A frozen dataclass can still be copied with dataclasses.replace(),
         # carrying its private seal; never let such a copy turn a source-only
         # material line into a permission to publish metric ceiling area.
-        if (
-            type(self.record_id) is str
-            and self.record_id.startswith(
-                "cross_view_ceiling_finish_original_zone_"
-            )
-            and self.commercial_projection_allowed is not False
-        ):
-            raise TypeError(
-                "original RCP source-zone material cannot authorize ceiling FIRM"
-            )
+        if self.material_only:
+            if self.commercial_projection_allowed is not False:
+                raise TypeError(
+                    "original RCP source-zone material cannot authorize ceiling FIRM"
+                )
+            # Ordinary dataclass copies carry this producer capability even
+            # after their public record ID changes. Keep the original route
+            # categorically material-only at construction and consumption.
+            object.__setattr__(self, "_seal", _MATERIAL_ONLY_RECORD_SEAL)
 
 
 @dataclass(frozen=True)
@@ -1160,7 +1171,7 @@ class CrossViewCeilingFinishProducer:
             occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
             support_snapshot_id=room.snapshot_id,
             commercial_projection_allowed=False,
-            _seal=_RECORD_SEAL,
+            _seal=_MATERIAL_ONLY_RECORD_SEAL,
         )
         remaining = tuple(sorted(r.physical_room_id for r in rooms
                                  if r.physical_room_id != physical_room_id))

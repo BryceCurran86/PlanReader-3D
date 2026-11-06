@@ -131,29 +131,6 @@ def _decode_native_page_for_cache(
         return _NativePageDecodeCacheEntry(True, tuple(items), None)
 
 
-def _pending_dicts_from_cached_page(
-    entry: _NativePageDecodeCacheEntry,
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "page_id": page_id,
-            "partition_id": partition_id,
-            "kind": kind,
-            "primitive_ref": primitive_ref,
-            "raw_text": raw_text,
-            "geometry": geometry,
-        }
-        for (
-            page_id,
-            partition_id,
-            kind,
-            primitive_ref,
-            raw_text,
-            geometry,
-        ) in entry.pending_items
-    ]
-
-
 class ProducerIntegrityError(RuntimeError):
     """Producer-owned records violate an immutable identity/integrity rule."""
 
@@ -1316,7 +1293,9 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        pending: list[dict[str, Any]] = []
+        # Retain native immutable tuples, not redundant per-primitive dictionaries.
+        # Final records and source identities below remain unchanged.
+        pending: list[tuple[str, str, str, str, str, tuple[float, ...]]] = []
         decoded_pages: list[int] = []
         failed_pages: list[int] = []
         pdf: Optional[fitz.Document] = None
@@ -1390,7 +1369,7 @@ class SourceObservationProducer:
                             ) from exc
                     cached_page = _decode_native_page_for_cache(pdf, page_number)
                     self._remember_native_page(digest, page_number, cached_page)
-                pending.extend(_pending_dicts_from_cached_page(cached_page))
+                pending.extend(cached_page.pending_items)
                 if cached_page.failed:
                     failed_pages.append(page_number)
                 else:
@@ -1446,16 +1425,23 @@ class SourceObservationProducer:
         )
 
         records: list[SourceObservationRecord] = []
-        for item in pending:
+        for (
+            page_id,
+            partition_id,
+            kind,
+            primitive_ref,
+            raw_text,
+            geometry,
+        ) in pending:
             identity = {
                 "document_id": document_id,
                 "revision_id": revision_id,
-                "partition_id": item["partition_id"],
-                "page_id": item["page_id"],
-                "kind": item["kind"],
-                "primitive_ref": item["primitive_ref"],
-                "raw_text": item["raw_text"],
-                "geometry": item["geometry"],
+                "partition_id": partition_id,
+                "page_id": page_id,
+                "kind": kind,
+                "primitive_ref": primitive_ref,
+                "raw_text": raw_text,
+                "geometry": geometry,
             }
             observation_id = stable_contract_id(
                 "source_observation", identity, digest_chars=32
@@ -1465,13 +1451,13 @@ class SourceObservationProducer:
                 document_id=document_id,
                 revision_id=revision_id,
                 source_sha256=digest,
-                source_partition_id=str(item["partition_id"]),
-                page_id=str(item["page_id"]),
+                source_partition_id=str(partition_id),
+                page_id=str(page_id),
                 viewport_id=None,
-                observation_kind=str(item["kind"]),
-                source_primitive_ref=str(item["primitive_ref"]),
-                raw_text=str(item["raw_text"]),
-                geometry=_finite_tuple(item["geometry"]),
+                observation_kind=str(kind),
+                source_primitive_ref=str(primitive_ref),
+                raw_text=str(raw_text),
+                geometry=_finite_tuple(geometry),
                 origin_kind="native",
                 derivation_parent_ids=(),
                 producer_method=self._producer_method,

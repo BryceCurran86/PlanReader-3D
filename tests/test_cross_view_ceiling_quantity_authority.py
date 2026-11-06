@@ -817,3 +817,28 @@ def test_original_rcp_source_zone_lineage_veto_survives_forced_flag_mutation(
     )
     assert len(legacy.quantities)==1
     assert legacy.quantities[0].value==9.05352
+
+
+def test_original_source_only_ceiling_origin_survives_rekey_and_flag_mutation():
+    original = _finish()
+    source_only = replace(
+        original.records[0],
+        record_id="cross_view_ceiling_finish_original_zone_" + "b" * 32,
+        commercial_projection_allowed=False,
+    )
+    # Reconstructing public metadata must not erase source-only origin.
+    # Exercise the actual issuer, including its ordinary legacy positive.
+    object.__setattr__(source_only, "record_id", "rekeyed-source-zone")
+    object.__setattr__(source_only, "commercial_projection_allowed", True)
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(_bridge(),),
+        finishes=replace(original, records=(source_only,)),
+    )
+    assert result.quantities == ()
+    assert result.records == ()
+    assert result.canonical_ceilings == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+    legacy = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(_bridge(),), finishes=original,
+    )
+    assert len(legacy.quantities) == 1
