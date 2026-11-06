@@ -47,6 +47,24 @@ def test_positive_original_workspace_identity_reaches_only_supported_empty_path(
             _claim(),workspace_id=7,project_id="project-1",
         )==()
         return
+    if module_name=="pb_live_ceiling_area_customer_projection":
+        # The ceiling customer preflight inspects the complete original
+        # source inventory, including canonical ceiling identities. A fake
+        # monkeypatched class without those typed fields is not a positive
+        # source contract. Keep the real empty typed claim on this path.
+        from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
+        from pb_migration_contracts import EvidenceResolutionStatus
+        claim=LiveCeilingLiningResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(),
+            claims=(),
+            canonical_ceilings=(),
+            quantity_evidence=(),
+        )
+        assert getattr(module,function_name)(
+            claim,workspace_id=7,project_id="project-1",
+        )==()
+        return
     class EmptyClaim:
         opening_quantity_evidence=()
         opening_count_quantity_evidence=()
