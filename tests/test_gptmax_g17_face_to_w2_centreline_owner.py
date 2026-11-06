@@ -12,10 +12,27 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from test_gptmax_source_face_frame import _fixture
 
 
-def _source():
+def _source(monkeypatch=None, *, clean_supplement=True):
     source,composition,producer,bound=_fixture()
     producer._raster_split_frame_shadow=True
     producer._g17_face_w2_owner_shadow=True
+    if clean_supplement:
+        if monkeypatch is None:
+            raise ValueError("synthetic clean source fixture needs pytest ownership")
+        b=bound[0][3]
+        selector=PhysicalWallCandidateSelector(
+            document_id=b.document_id,revision_id=b.revision_id,
+            source_sha256=b.source_sha256,snapshot_id=b.snapshot_id,
+            page_id=b.page_id,decision_scope_id=b.decision_scope_id,
+        )
+        scope=producer._supplemental_walls.resolve_scope(selector)
+        # The synthetic SOURCE has a separately authenticated base-only
+        # owner. Give it a producer-scoped empty optional supplemental graph
+        # while retaining its original root, version and observations.
+        clean=replace(scope,records=())
+        monkeypatch.setattr(
+            producer._supplemental_walls,"resolve_scope",lambda _selector:clean,
+        )
     return source,composition,producer,bound
 
 
@@ -82,8 +99,8 @@ def _source_neutral_gate_probe(producer, b):
     }
 
 
-def test_source_owned_g17_faces_are_never_copied_from_a_w2_centreline():
-    source,composition,producer,bound=_source()
+def test_source_owned_g17_faces_are_never_copied_from_a_w2_centreline(monkeypatch):
+    source,composition,producer,bound=_source(monkeypatch)
     baseline=tuple(_evidence(producer,b) for b in bound)
     import json
     assert all(isinstance(r,SourceG17RightFlankW2Owner) for r in baseline), (
@@ -107,8 +124,8 @@ def test_source_owned_g17_faces_are_never_copied_from_a_w2_centreline():
     assert all(x is None or x.right_wall_candidate_id for x in baseline)
 
 
-def test_source_g17_to_w2_owner_requires_exact_original_shadow_and_selectors():
-    _,comp,producer,bound=_source()
+def test_source_g17_to_w2_owner_requires_exact_original_shadow_and_selectors(monkeypatch):
+    _,comp,producer,bound=_source(monkeypatch)
     b=bound[0]
     original=_evidence(producer,b)
     assert original is not None
@@ -140,7 +157,7 @@ def test_source_face_or_w2_ownership_tamper_cannot_grant_local_pier(monkeypatch,
     from pb_migration_contracts import EvidenceResolutionStatus as Status
     from pb_source_observation_authority import ObservationSelector
     from pb_opening_host_frame_authority import OpeningHostFrameProducer
-    _,comp,producer,bound=_source()
+    _,comp,producer,bound=_source(monkeypatch)
     b=bound[0]
     assert _evidence(producer,b) is not None
     if damage=="foreign_scope":
@@ -175,7 +192,7 @@ def test_source_face_or_w2_ownership_tamper_cannot_grant_local_pier(monkeypatch,
 
 def test_new_shadow_requires_explicit_boolean_and_sealed_original_source_roles():
     from pb_opening_host_frame_authority import OpeningHostFrameProducer
-    _source_visibility,comp,_producer,_bound=_source()
+    _source_visibility,comp,_producer,_bound=_source(clean_supplement=False)
     base=dict(
         physical_opening_authority=comp.physical_opening_authority,
         host_binding_authority=comp.opening_host_binding_authority,
@@ -196,3 +213,9 @@ def test_new_shadow_requires_explicit_boolean_and_sealed_original_source_roles()
     original=OpeningHostFrameProducer.from_authorities(
         **base,raster_split_frame_shadow=True,source_fragment_roles_shadow=True)
     assert original._g17_face_w2_owner_shadow is False
+
+
+def test_conflicting_original_supplemental_graph_must_never_be_ignored():
+    _,_,producer,bound=_source(clean_supplement=False)
+    assert _source_neutral_gate_probe(producer,bound[0])["mixed_status"]=="conflict"
+    assert all(_evidence(producer,b) is None for b in bound)
