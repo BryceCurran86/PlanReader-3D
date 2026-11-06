@@ -1705,79 +1705,101 @@ def _original_native_word_paint_within_parent(
     owned_glyph_runs = []
     for seq in seqnos:
         spans = trace_by_seq.get(seq, ())
-        if len(spans) != 1:
+        if (type(spans) not in (tuple, list) or not 1 <= len(spans) <= 16):
             return False
-        span = spans[0]
         try:
             entry = bboxlog[seq]
             kind, paint = entry[0], entry[1]
-            codepoints = tuple(span["chars"])
-            text = "".join(chr(int(c[0])) for c in codepoints)
-            native_type = int(span["type"])
             paint_box = tuple(float(v) for v in paint)
         except (TypeError, ValueError, IndexError, KeyError, OverflowError):
             return False
         if (kind not in ("fill-text", "stroke-text")
-                or native_type != (0 if kind == "fill-text" else 1)
-                or not text or len(paint_box) != 4
+                or len(paint_box) != 4
                 or any(not math.isfinite(v) for v in paint_box)
                 or paint_box[2] <= paint_box[0]
                 or paint_box[3] <= paint_box[1]):
             return False
 
-        # CAD exporters can paint an entire long text row in ONE operator,
-        # while get_text("words") exposes each native word separately.
-        # A full bboxlog text-op rectangle can therefore legitimately extend
-        # outside the F07 plan. Do not use a nearby/first substring: require
-        # EXACTLY ONE source-glyph run whose character bboxes belong wholly to
-        # the original native word AND the unchanged F07 parent rectangle.
+        # Multiple native source text spans can share ONE paint sequence:
+        # PyMuPDF splits glyph runs by font/orientation while bboxlog records
+        # one paint operation. Retain EVERY span in this source operation and
+        # require a single source-glyph word run, without ranking by distance.
         matches = []
-        start = text.find(word.text)
-        while start >= 0:
-            part = codepoints[start:start + len(word.text)]
-            if len(part) == len(word.text):
-                try:
-                    glyph_boxes = tuple(
-                        tuple(float(v) for v in char[3])
-                        for char in part
-                    )
-                except (TypeError, ValueError, IndexError, OverflowError):
-                    glyph_boxes = ()
-                if (len(glyph_boxes) == len(word.text)
-                        and all(
-                            len(rect) == 4
-                            and all(math.isfinite(v) for v in rect)
-                            and rect[2] > rect[0] and rect[3] > rect[1]
-                            and _bbox_fully_inside(rect, word.bbox, tolerance=1e-6)
-                            and (
-                                _bbox_fully_inside(paint_box, parent_bbox, tolerance=1e-6)
-                                or _bbox_fully_inside(rect, parent_bbox, tolerance=1e-6)
-                            )
-                            for rect in glyph_boxes
-                        )):
-                    matches.append((start, part))
-            start = text.find(word.text, start + 1)
-        if len(matches) != 1:
-            return False
-        start, part = matches[0]
-        # An unrelated source glyph painted substantially inside the *same*
-        # native word rectangle is a competing source text owner, not a clean
-        # text-run continuation. Reject rather than electing this candidate.
-        for offset, char in enumerate(codepoints):
-            if start <= offset < start + len(word.text):
-                continue
+        for span in spans:
+            if not isinstance(span, dict):
+                return False
             try:
-                foreign_box = tuple(float(v) for v in char[3])
-            except (TypeError, ValueError, IndexError, OverflowError):
+                codepoints = tuple(span["chars"])
+                text = "".join(chr(int(c[0])) for c in codepoints)
+                native_type = int(span["type"])
+            except (TypeError, ValueError, IndexError, KeyError, OverflowError):
                 return False
-            if (len(foreign_box) != 4
-                    or any(not math.isfinite(v) for v in foreign_box)):
-                return False
-            if _bbox_fully_inside(foreign_box, word.bbox, tolerance=1e-6):
+            if (not text
+                    or native_type != (0 if kind == "fill-text" else 1)):
                 return False
 
+            span_matches = []
+            start = text.find(word.text)
+            while start >= 0:
+                part = codepoints[start:start + len(word.text)]
+                if len(part) == len(word.text):
+                    try:
+                        glyph_boxes = tuple(
+                            tuple(float(v) for v in char[3]) for char in part
+                        )
+                    except (TypeError, ValueError, IndexError, OverflowError):
+                        glyph_boxes = ()
+                    if (len(glyph_boxes) == len(word.text)
+                            and all(
+                                len(rect) == 4
+                                and all(math.isfinite(v) for v in rect)
+                                and rect[2] > rect[0] and rect[3] > rect[1]
+                                and _bbox_fully_inside(
+                                    rect, word.bbox, tolerance=1e-6,
+                                )
+                                and (
+                                    _bbox_fully_inside(
+                                        paint_box, parent_bbox, tolerance=1e-6,
+                                    )
+                                    or _bbox_fully_inside(
+                                        rect, parent_bbox, tolerance=1e-6,
+                                    )
+                                )
+                                for rect in glyph_boxes
+                            )):
+                        span_matches.append((start, tuple(part)))
+                start = text.find(word.text, start + 1)
+            matches.extend(span_matches)
+
+            # An overlapping character not belonging to the unique source
+            # word remains a competing paint owner even in another span with
+            # the SAME sequence. Do not ignore it as irrelevant by index.
+            protected_indices = set()
+            for match_start, _part in span_matches:
+                protected_indices.update(
+                    range(match_start, match_start + len(word.text))
+                )
+            for offset, char in enumerate(codepoints):
+                if offset in protected_indices:
+                    continue
+                try:
+                    foreign_box = tuple(float(v) for v in char[3])
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    return False
+                if (len(foreign_box) != 4
+                        or any(not math.isfinite(v) for v in foreign_box)
+                        or foreign_box[2] <= foreign_box[0]
+                        or foreign_box[3] <= foreign_box[1]):
+                    return False
+                if _intersection_ratio(
+                    foreign_box, word.bbox,
+                ) >= PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP:
+                    return False
+
+        if len(matches) != 1:
+            return False
         kinds.append(kind)
-        owned_glyph_runs.append(tuple(part))
+        owned_glyph_runs.append(matches[0][1])
     # A second span can only be the SAME original word overprinted with
     # complementary fill/stroke source glyphs. Separate/different words or
     # mismatched glyphs remain evidence conflicts.

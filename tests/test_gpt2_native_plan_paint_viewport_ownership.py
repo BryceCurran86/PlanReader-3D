@@ -199,3 +199,49 @@ def test_long_native_text_paint_can_cross_f07_when_exact_word_glyphs_do_not():
         )
     finally:
         doc.close()
+
+
+def test_one_text_operation_may_have_multiple_disjoint_native_trace_spans():
+    doc,page=_page()
+    try:
+        word,receipt,native,trace,bboxlog,view=_inputs(page)
+        seq=receipt.sequence_number
+        actual=trace[seq][0]
+        # A source paint operator may be split into unrelated trace spans.
+        # Both are retained; only the span matching the original word may
+        # own the word's *original* source geometry.
+        far=tuple(
+            (ord("X"),ord("X"),(450.,200.),(450.,200.,458.,213.))
+            for _ in range(2)
+        )
+        disjoint={**actual,"chars":far,"bbox":(450.,200.,458.,213.)}
+        checked={**trace,seq:[disjoint,actual]}
+        assert _original_native_word_paint_within_parent(
+            word,receipt,native_words_by_address=native,
+            trace_by_seq=checked,bboxlog=bboxlog,parent_bbox=view,
+        )
+        assert _original_native_word_paint_within_parent(
+            word,receipt,native_words_by_address=native,
+            trace_by_seq={seq:[actual,disjoint]},
+            bboxlog=bboxlog,parent_bbox=view,
+        )
+        # A duplicate independent trace of the same word cannot be
+        # de-duplicated by choosing first or nearest.
+        assert not _original_native_word_paint_within_parent(
+            word,receipt,native_words_by_address=native,
+            trace_by_seq={seq:[actual,actual]},
+            bboxlog=bboxlog,parent_bbox=view,
+        )
+        # A different printed glyph in the same source word cell is a
+        # competing text identity even when the correct span is also present.
+        origin=(word.bbox[0]+1,word.bbox[1]+1)
+        bad=((*[ord("X"),ord("X"),origin,
+               (origin[0],origin[1],origin[0]+2,origin[1]+3)]),)
+        badspan={**disjoint,"chars":bad}
+        assert not _original_native_word_paint_within_parent(
+            word,receipt,native_words_by_address=native,
+            trace_by_seq={seq:[actual,badspan]},
+            bboxlog=bboxlog,parent_bbox=view,
+        )
+    finally:
+        doc.close()
