@@ -34,6 +34,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_migration_provider_envelope import ProviderContext
 from pb_pdf_text_integrity_authority import (
     PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP,
+    _intersection_ratio,
     TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
 )
