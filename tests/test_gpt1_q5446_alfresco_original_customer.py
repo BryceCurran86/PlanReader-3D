@@ -150,8 +150,11 @@ def test_original_sha_alfresco_has_independent_physical_owner_and_customer():
     # The signed physical lineage must include independently witnessed native
     # wall continuations and corner-post quads, NOT disconnected four ink edges.
     assert all(
-        str(i) in " ".join(result.quantity.evidence_ids)
-        for i in connector_ids
+        any(
+            evidence_id.endswith(f"_p1_path_{path_id}")
+            for evidence_id in result.quantity.evidence_ids
+        )
+        for path_id in connector_ids
     )
     assert result.customer_rows[0]["quantity_status"] == "To review"
     assert result.customer_rows[0]["quantity_family"] == "floor_area"
