@@ -1483,10 +1483,26 @@ class OpeningHostFrameProducer:
             base.source_observation_ids,supp.source_observation_ids,
             source_fragment_roles_shadow=True,
         )
-        if (proof.status is not EvidenceResolutionStatus.CORROBORATED
-                or len(proof.bands)!=1
+        if proof.status is not EvidenceResolutionStatus.CORROBORATED:
+            # The incomplete supplemental W4 scope may contain a real
+            # conflicting owner. A base positive cannot override that.
+            return None
+        source_bands=proof.bands
+        if not source_bands:
+            # A valid ordinary/base G17 host can legitimately have no
+            # supplemental local role. This is not an excuse to ignore a
+            # conflicting or independently nominated supplemental owner:
+            # the mixed resolver has just returned a clean, empty result.
+            ordinary=host_geometry._resolve_raster_source_band_host(
+                self._opening,opening,base.records,geometry,
+                base.equivalence,base.source_observation_ids,
+            )
+            if ordinary.status is not EvidenceResolutionStatus.CORROBORATED:
+                return None
+            source_bands=ordinary.bands
+        if (len(source_bands)!=1
                 or tuple(sorted(binding.member_wall_candidate_ids))
-                    !=tuple(sorted(proof.bands[0].member_ids))):
+                    !=tuple(sorted(source_bands[0].member_ids))):
             return None
 
         owner_ids=[]
