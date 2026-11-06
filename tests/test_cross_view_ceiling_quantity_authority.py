@@ -744,3 +744,44 @@ def test_same_canonical_room_cannot_reissue_two_distinct_source_area_receipts() 
     assert result.unresolved_physical_room_ids == (
         "physical-room-1", "physical-room-2"
     )
+
+
+
+def test_source_only_cross_block_rcp_grid_never_copies_room_area_as_ceiling_firm() -> None:
+    original_finish=_finish()
+    source_only=replace(
+        original_finish.records[0], commercial_projection_allowed=False,
+    )
+    source_only_finish=replace(
+        original_finish,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        records=(source_only,),
+    )
+    result=ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(_bridge(),),
+        finishes=source_only_finish,
+    )
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.canonical_ceilings == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def test_source_only_ceiling_mark_does_not_suppress_legacy_sealed_room_area(
+) -> None:
+    source_only=replace(
+        _finish().records[0], commercial_projection_allowed=False,
+    )
+    source_only_result=ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(_bridge(),),
+        finishes=replace(_finish(), records=(source_only,)),
+    )
+    legacy_result=ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(_bridge(),),
+        finishes=_finish(),
+    )
+    assert len(legacy_result.quantities) == 1
+    assert legacy_result.quantities[0].value == 9.05352
+    assert source_only_result.quantities == ()
+    assert source_only_result.records == ()

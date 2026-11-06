@@ -195,6 +195,10 @@ class CrossViewCeilingFinishRecord:
     # the topology snapshot that minted the canonical room. It is admissible
     # only when both snapshots belong to the exact same immutable revision.
     support_snapshot_id: str = ""
+    # Legacy same-block source material retains its existing policy. A new
+    # source-closed cross-native-block region is MATERIAL-ONLY until GPT1
+    # independently authenticates actual RCP metric ceiling geometry.
+    commercial_projection_allowed: bool = True
     schema_version: str = CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION
     _seal: object = None
 
@@ -913,6 +917,242 @@ class CrossViewCeilingFinishProducer:
             reason_codes=reasons,
             records=tuple(records),
             unresolved_physical_room_ids=unresolved_ids,
+        )
+
+
+    def publish_original_rcp_source_closed(
+        self, *, revision_id: str, original_floor_page_1_based: int,
+        source_floor_rcp_correspondence: dict, original_rcp_ink: dict,
+        original_rcp_material: dict, material_authority,
+        definition_selector, occurrence_selector,
+        original_ceiling_finish_code: str, physical_room_id: str,
+    ) -> CrossViewCeilingFinishResult:
+        """Opt-in, fully reissued cross-native-block RCP material binding.
+
+        Unlike the legacy same-text-block path, this can bind separate native
+        room/GRID blocks ONLY after original ring, floor registration, W4 face,
+        in-ring text, material definition and exact occurrence are independently
+        issued. It publishes material evidence, never metric ceiling area.
+        """
+        blocked = (CROSS_VIEW_CEILING_FINISH_UNAVAILABLE,)
+        unresolved = (physical_room_id,) if type(physical_room_id) is str else ()
+        def abstain(reason=CROSS_VIEW_CEILING_FINISH_UNAVAILABLE):
+            return CrossViewCeilingFinishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(reason,), records=(),
+                unresolved_physical_room_ids=unresolved,
+            )
+
+        if (type(revision_id) is not str or not revision_id
+                or type(original_floor_page_1_based) is not int
+                or original_floor_page_1_based < 1
+                or type(physical_room_id) is not str or not physical_room_id
+                or physical_room_id != physical_room_id.strip()
+                or type(original_ceiling_finish_code) is not str
+                or not original_ceiling_finish_code
+                or original_ceiling_finish_code != original_ceiling_finish_code.strip()):
+            return abstain()
+        published = self._source.published_snapshot_for_revision(revision_id)
+        if published is None or published.revision.revision_id != revision_id:
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        rooms = tuple(self._rooms.rooms)
+        matched = tuple(r for r in rooms
+                        if type(r) is LiveCanonicalRoomObject
+                        and r.physical_room_id == physical_room_id)
+        if len(matched) != 1:
+            return abstain(CROSS_VIEW_CEILING_FINISH_CONFLICT)
+        room = matched[0]
+        # The room label and the wall face must be unique in the complete W4
+        # universe. A duplicate label may represent two different rooms.
+        if (not room.geometry_complete
+                or not room.source_room_face_record_id
+                or not room.room_label_binding_record_id
+                or not room.room_label_evidence_ids
+                or room.revision_id != revision_id
+                or room.snapshot_id != published.snapshot.snapshot_id
+                or room.source_sha256 != published.revision.source_sha256
+                or room.document_id != published.revision.document_id
+                or sum(_norm(r.room_label) == _norm(room.room_label)
+                       for r in rooms) != 1):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        from pb_gpt2_original_source_geometry_bridge import (
+            GPT2OriginalSourceGeometryBridge,
+        )
+        try:
+            bridge = GPT2OriginalSourceGeometryBridge.from_source_visibility_producer(
+                self._source
+            )
+            proof = bridge.original_rcp_ceiling_source_handoff_for_gpt1(
+                revision_id=revision_id,
+                original_floor_page_1_based=original_floor_page_1_based,
+                source_floor_rcp_correspondence=source_floor_rcp_correspondence,
+                original_rcp_ink=original_rcp_ink,
+                original_rcp_material=original_rcp_material,
+                source_material_authority=material_authority,
+                source_definition_selector=definition_selector,
+                source_occurrence_selector=occurrence_selector,
+                original_ceiling_finish_code=original_ceiling_finish_code,
+                canonical_rooms=self._rooms,
+                physical_room_id=physical_room_id,
+            )
+        except (ValueError, TypeError, KeyError, IndexError,
+                OverflowError, RuntimeError):
+            return abstain()
+        if (type(proof) is not dict
+                or proof.get("status") !=
+                    "source_W4_original_A120_ceiling_compilation_shadow_only"
+                or proof.get("new_firm_quantities") != 0
+                or proof.get("source_ceiling_area_m2") is not None):
+            return abstain()
+        bound = proof.get("source_original_rcp_ceiling_input_for_gpt1")
+        w4 = proof.get("source_w4_room_face_claim")
+        if (type(bound) is not dict or type(w4) is not dict
+                or bound.get("status") !=
+                    "original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+                or bound.get("ceiling_quantity_m2_issued") is not False
+                or bound.get("new_firm_quantities") != 0
+                or w4.get("status") != "source_original_floor_W4_face_candidate_only"
+                or w4.get("w4_room_face_source_identity_proven") is not True
+                or w4.get("source_w4_wall_ownership_authenticated") is not True
+                or w4.get("original_physical_room_id") != physical_room_id
+                or bound.get("original_physical_room_id") != physical_room_id
+                or bound.get("original_source_room_face_record_id") !=
+                    room.source_room_face_record_id
+                or bound.get("original_source_sha256") != room.source_sha256
+                or proof.get("source_original_revision_id") != revision_id
+                or proof.get("source_original_snapshot_id") != room.snapshot_id
+                or bound.get("original_rcp_code") != original_ceiling_finish_code):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        label_ids = proof.get("original_rcp_room_label_observation_ids")
+        label_receipts = proof.get("original_rcp_room_label_receipt_ids")
+        partition = proof.get("original_rcp_room_label_source_partition_id")
+        block = proof.get("original_rcp_room_label_native_block_no")
+        line_number = proof.get("original_rcp_room_label_native_line_no")
+        if (type(label_ids) is not tuple or not label_ids
+                or type(label_receipts) is not tuple
+                or len(label_receipts) != len(label_ids)
+                or len(set(label_ids)) != len(label_ids)
+                or len(set(label_receipts)) != len(label_receipts)
+                or any(type(v) is not str or not v or v != v.strip()
+                       for v in (*label_ids, *label_receipts))
+                or type(partition) is not str or not partition
+                or type(block) is not int or block < 0
+                or type(line_number) is not int or line_number < 0
+                or _norm(proof.get("original_rcp_room_label_text")) !=
+                    _norm(room.room_label)):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        # Re-resolve the exact producer-issued material rather than mint a
+        # semantic ceiling record from dict fields or a free-form code.
+        from pb_source_material_semantic_authority import (
+            SourceMaterialDefinitionSelector,
+            SourceMaterialOccurrenceSelector,
+        )
+        if (type(definition_selector) is not SourceMaterialDefinitionSelector
+                or type(occurrence_selector) is not SourceMaterialOccurrenceSelector
+                or definition_selector.document_id != room.document_id
+                or occurrence_selector.document_id != room.document_id
+                or definition_selector.revision_id != revision_id
+                or occurrence_selector.revision_id != revision_id
+                or definition_selector.source_sha256 != room.source_sha256
+                or occurrence_selector.source_sha256 != room.source_sha256
+                or definition_selector.snapshot_id != room.snapshot_id
+                or occurrence_selector.snapshot_id != room.snapshot_id
+                or _norm(definition_selector.code) != _norm(original_ceiling_finish_code)
+                or occurrence_selector.page_id != str(bound.get("original_rcp_page"))
+                or occurrence_selector.viewport_id != bound.get("original_rcp_viewport_id")):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        try:
+            d = material_authority.resolve_definition(definition_selector)
+            scope = material_authority.resolve_occurrences(occurrence_selector)
+        except (AttributeError, TypeError, ValueError, KeyError):
+            return abstain()
+        definition = d.record
+        if (d.status is not EvidenceResolutionStatus.CORROBORATED
+                or type(definition) is not SourceMaterialDefinitionRecord
+                or definition.record_id !=
+                    bound.get("original_ceiling_material_definition_record_id")
+                or definition.snapshot_id != room.snapshot_id
+                or not _definition_is_ceiling_finish(definition)
+                or scope.status is not EvidenceResolutionStatus.CORROBORATED
+                or scope.scope_complete is not True
+                or not scope.source_viewport_ownership_id
+                or scope.source_viewport_ownership_id !=
+                    original_rcp_material.get("original_rcp_scope_ownership_id")
+                or scope.unresolved_source_text_observation_ids):
+            return abstain()
+        mark_ids = bound.get("original_ceiling_source_mark_ids")
+        if type(mark_ids) is not tuple or len(mark_ids) != 1:
+            return abstain()
+        matches = tuple(o for o in scope.records
+                        if type(o) is SourceMaterialOccurrenceRecord
+                        and o.record_id == mark_ids[0])
+        if len(matches) != 1:
+            return abstain(CROSS_VIEW_CEILING_FINISH_CONFLICT)
+        occurrence = matches[0]
+        if (occurrence.definition_record_id != definition.record_id
+                or occurrence.source_sha256 != room.source_sha256
+                or occurrence.document_id != room.document_id
+                or occurrence.revision_id != revision_id
+                or occurrence.snapshot_id != room.snapshot_id
+                or occurrence.code != original_ceiling_finish_code
+                or occurrence.semantic_finish != definition.semantic_finish
+                or occurrence.page_id != occurrence_selector.page_id
+                or occurrence.viewport_id != occurrence_selector.viewport_id):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        line = _occurrence_line(
+            self._source, revision_id=revision_id, occurrence=occurrence,
+        )
+        if (line is None or line.page_id != occurrence.page_id
+                or line.source_partition_id != partition
+                or not set(label_ids).isdisjoint(line.observation_ids)
+                or not set(label_receipts).isdisjoint(line.receipt_ids)):
+            return abstain(CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT)
+        payload = {
+            "physical_room_id": room.physical_room_id,
+            "canonical_room_id": room.canonical_room_id,
+            "source_room_face_record_id": room.source_room_face_record_id,
+            "support_page_id": occurrence.page_id,
+            "support_viewport_id": occurrence.viewport_id,
+            "room_label_observations": label_ids,
+            "material_occurrence_id": occurrence.record_id,
+            "material_definition_id": definition.record_id,
+            "source_rcp_ring": bound.get("original_rcp_source_polygon_pdf_pts"),
+        }
+        record = CrossViewCeilingFinishRecord(
+            record_id=stable_contract_id(
+                "cross_view_ceiling_finish_original_zone", payload,
+                digest_chars=32,
+            ),
+            physical_room_id=room.physical_room_id,
+            canonical_room_id=room.canonical_room_id,
+            source_room_face_record_id=room.source_room_face_record_id,
+            room_label=room.room_label,
+            support_page_id=occurrence.page_id,
+            support_viewport_id=occurrence.viewport_id,
+            support_source_partition_id=line.source_partition_id,
+            support_block_no=line.block_no,
+            room_label_observation_ids=label_ids,
+            room_label_receipt_ids=label_receipts,
+            finish_code=occurrence.code,
+            semantic_finish=definition.semantic_finish,
+            definition_record_id=definition.record_id,
+            definition_evidence_ids=definition.source_definition_ids,
+            occurrence_record_id=occurrence.record_id,
+            occurrence_evidence_id=occurrence.source_evidence_id,
+            occurrence_observation_ids=line.observation_ids,
+            occurrence_receipt_ids=line.receipt_ids,
+            occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
+            support_snapshot_id=room.snapshot_id,
+            commercial_projection_allowed=False,
+            _seal=_RECORD_SEAL,
+        )
+        remaining = tuple(sorted(r.physical_room_id for r in rooms
+                                 if r.physical_room_id != physical_room_id))
+        return CrossViewCeilingFinishResult(
+            status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=(CROSS_VIEW_CEILING_FINISH_PARTIAL,),
+            records=(record,),
+            unresolved_physical_room_ids=remaining,
         )
 
 
