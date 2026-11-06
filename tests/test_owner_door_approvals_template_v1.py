@@ -230,7 +230,12 @@ def test_the_step_composes_with_no_approvals_and_the_claims_scope_and_options(tm
     assert seen["approvals"] == () and seen["pdf_bytes"] == b"source-bytes" and seen["source_sha256"] == sha
     assert (seen["decoded_page_ids"], seen["topology_page_ids"], seen["evidence_page_ids"]) == (decoded, topology, evidence)
     assert seen["native_text_kwargs"] == {"source_glyph_ledger_text_trust": True}
+    assert seen["single_width_uniform_page_door_height_shadow"] is False
     assert outcome.gate == lib.GATE_TEMPLATE_READY and outcome.door_count == 1
+    lib.run_owner_door_approvals_template_step(
+        pdf, claim=_claim(door), source_sha256=sha, page_count=5, pages=(1, 2), topology_pages=(1,),
+        room_area_support_pages=(3,), native_text_kwargs={}, single_width_uniform_page_door_height_shadow=True)
+    assert seen["single_width_uniform_page_door_height_shadow"] is True
 
 
 def test_the_step_and_the_review_step_compose_the_same_scope(tmp_path, monkeypatch):
@@ -247,7 +252,8 @@ def test_the_step_and_the_review_step_compose_the_same_scope(tmp_path, monkeypat
     approvals = lib.OwnerDoorHeightApprovals(records=(_approval(geometry_ref="door-a", page=2),), pages=(2,), file_sha256="d" * 64)
     lib.run_owner_door_review_step(pdf, approvals=approvals, claim=_claim(door), workspace_id=1, project_id="p",
                                    source_sha256=sha, **scope)
-    keys = ("decoded_page_ids", "topology_page_ids", "evidence_page_ids", "native_text_kwargs", "source_sha256")
+    keys = ("decoded_page_ids", "topology_page_ids", "evidence_page_ids", "native_text_kwargs", "source_sha256",
+            "single_width_uniform_page_door_height_shadow")
     assert {key: calls[0][key] for key in keys} == {key: calls[1][key] for key in keys}
 
 
@@ -399,7 +405,9 @@ def test_the_step_sees_exactly_the_scope_and_options_the_claim_collector_saw(tmp
     assert kwargs["room_area_support_pages"] is world.seen["room_area_support_pages"] is None
     assert kwargs["page_count"] == 3 and kwargs["source_sha256"] == world.sha
     assert kwargs["native_text_kwargs"] == {"source_glyph_ledger_text_trust": True}
-    assert set(kwargs) == {"claim", "source_sha256", "page_count", "pages", "topology_pages", "room_area_support_pages", "native_text_kwargs"}
+    assert kwargs["single_width_uniform_page_door_height_shadow"] is world.seen["single_width_uniform_page_door_height_shadow"] is True
+    assert set(kwargs) == {"claim", "source_sha256", "page_count", "pages", "topology_pages", "room_area_support_pages", "native_text_kwargs",
+                           "single_width_uniform_page_door_height_shadow"}
 
 
 def test_the_complete_handoff_forwards_the_same_support_pages_to_the_step_as_to_the_collector(tmp_path, monkeypatch):

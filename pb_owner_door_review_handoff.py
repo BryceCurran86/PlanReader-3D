@@ -298,8 +298,14 @@ def compose_owner_approved_opening_voids(
     evidence_page_ids: Sequence[str],
     approvals: Sequence[MeasurementRecord],
     native_text_kwargs: Mapping[str, bool],
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Re-derive the opening composition exactly as the claim collector does, with the owner approvals as an explicit extra input."""
+    """Re-derive the opening composition exactly as the claim collector does, with the owner approvals as an explicit extra input.
+
+    ``single_width_uniform_page_door_height_shadow`` must be the value the claim collector ran with: a door the claim already
+    measured from a source-printed uniform page door height must not look unmeasured here (and so must not be offered for, or
+    given, an owner-assumed height).
+    """
     from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
     from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
     from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -326,6 +332,7 @@ def compose_owner_approved_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
         owner_approved_second_axis=tuple(approvals),
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
 
 
@@ -350,6 +357,7 @@ def run_owner_door_review_step(
     topology_pages: Optional[Sequence[int]],
     room_area_support_pages: Optional[Sequence[int]],
     native_text_kwargs: Mapping[str, bool],
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> OwnerDoorReviewOutcome:
     """Compose for the approved topology pages only, then assess against the run's own standard claim."""
     if type(approvals) is not OwnerDoorHeightApprovals:
@@ -375,6 +383,7 @@ def run_owner_door_review_step(
         evidence_page_ids=evidence,
         approvals=in_scope,
         native_text_kwargs=text_kwargs,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
     outcome = assess_owner_door_review(
         composition, approvals=in_scope, claim=claim, workspace_id=workspace_id,
@@ -452,6 +461,7 @@ def run_owner_door_approvals_template_step(
     topology_pages: Optional[Sequence[int]],
     room_area_support_pages: Optional[Sequence[int]],
     native_text_kwargs: Mapping[str, bool],
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> OwnerDoorApprovalsTemplateOutcome:
     """Compose with the claim collector's page scope and options and no approvals, then list the possible door approvals."""
     text_kwargs = _validated_native_text_kwargs(native_text_kwargs)
@@ -467,6 +477,7 @@ def run_owner_door_approvals_template_step(
         evidence_page_ids=evidence,
         approvals=(),
         native_text_kwargs=text_kwargs,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
     return build_owner_door_approvals_template(composition, claim=claim, source_sha256=source_sha256)
 

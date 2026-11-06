@@ -483,6 +483,15 @@ def test_the_step_composes_with_the_claims_own_page_scope_and_text_options(tmp_p
     assert kwargs["decoded_page_ids"] == ("1", "2", "3") and kwargs["topology_page_ids"] == ("3",) and kwargs["evidence_page_ids"] == ("1",)
     assert kwargs["native_text_kwargs"] == {"source_glyph_ledger_text_trust": True}
     assert [r.geometry_ref for r in kwargs["approvals"]] == ["opening-1"]
+    assert kwargs["single_width_uniform_page_door_height_shadow"] is False
+
+
+def test_the_step_forwards_the_claims_uniform_page_door_height_option(tmp_path, monkeypatch):
+    """A door the claim measured from a printed uniform page door height must not look unmeasured to the review composition."""
+    calls = _stub_compose(monkeypatch)
+    pdf, arguments = _step_inputs(tmp_path, pages=(0, 2), topology=(2,), support=(1,), page_count=3, native_text_kwargs={})
+    handoff_lib.run_owner_door_review_step(pdf, single_width_uniform_page_door_height_shadow=True, **arguments)
+    assert calls[0][1]["single_width_uniform_page_door_height_shadow"] is True
 
 
 def test_only_approvals_on_topology_pages_reach_the_composition_and_the_rest_are_reported(tmp_path, monkeypatch):

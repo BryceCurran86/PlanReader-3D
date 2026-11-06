@@ -494,6 +494,9 @@ def _generate_project_handoff_locked(
 
     _write_json(output_dir / "production_summary.json", summary)
 
+    # One value for the claim collector AND the optional owner-door lanes, which re-derive the opening composition and must see
+    # the same source-printed uniform page door heights the claim saw.
+    single_width_uniform_page_door_height_shadow = True
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
@@ -505,6 +508,7 @@ def _generate_project_handoff_locked(
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
             **({"source_native_finish_text_shadow": True}
                if source_native_finish_text_shadow else {}),
             **({"source_glyph_ledger_text_trust": True}
@@ -1161,6 +1165,7 @@ def _generate_project_handoff_locked(
             pages=claim_execution_pages,
             topology_pages=(topology_pages if topology_restricted else None),
             room_area_support_pages=execution_room_support_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
             native_text_kwargs={
                 **({"source_native_finish_text_shadow": True}
                    if source_native_finish_text_shadow else {}),
@@ -1181,6 +1186,7 @@ def _generate_project_handoff_locked(
             pages=claim_execution_pages,
             topology_pages=(topology_pages if topology_restricted else None),
             room_area_support_pages=execution_room_support_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
             native_text_kwargs={
                 **({"source_native_finish_text_shadow": True}
                    if source_native_finish_text_shadow else {}),

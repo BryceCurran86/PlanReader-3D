@@ -848,7 +848,7 @@ class SourceObservationProducer:
         if page_number < 1 or page_number > int(pdf.page_count):
             return None
         page = pdf.load_page(page_number - 1)
-        rawdict = page.get_text("rawdict") or {}
+        rawdict = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS) or {}
         traces = tuple(page.get_texttrace() or ())
         matrix = page.rotation_matrix
         rotation = fitz.Matrix(

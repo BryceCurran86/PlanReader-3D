@@ -411,7 +411,16 @@ def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_a
                 )
         if (opening.document_id, opening.revision_id, opening.source_sha256) not in roots:
             raise SourceClosedRunConflictError("new opening belongs to a foreign source root")
-        if oid in old_objects and _physical_core(old_objects[oid]) != _physical_core(opening):
+        if (
+            oid in old_objects
+            and _physical_core(old_objects[oid]) != _physical_core(opening)
+            and (
+                physical_opening_authority is None
+                or not _source_representative_reissue_is_authenticated(
+                    physical_opening_authority, old_objects[oid], opening,
+                )
+            )
+        ):
             raise SourceClosedRunConflictError("new measurement changes an existing physical opening")
         if any(other.physical_opening_id != oid
                and other.source_observation_ids == opening.source_observation_ids
@@ -434,7 +443,7 @@ def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_a
     )
 
 
-def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version):
+def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version, single_width_uniform_page_door_height_shadow: bool = False):
     """Re-prove a single original topology page, then append only new areas."""
     digest = sha256(pdf_bytes).hexdigest()
     if not baseline.canonical_openings:
@@ -462,6 +471,7 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
     )
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=composition,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
     quantities = publish_live_opening_area_quantities(voids)
     published = source.published_snapshot_for_revision(published.revision.revision_id)

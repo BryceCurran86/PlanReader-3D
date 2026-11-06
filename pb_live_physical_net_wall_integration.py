@@ -416,6 +416,7 @@ def _collect_live_physical_net_wall_claim(
     surface_semantic_pages: Optional[Sequence[int]] = None,
     source_native_finish_text_shadow: bool = False,
     source_glyph_ledger_text_trust: bool = False,
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -433,6 +434,8 @@ def _collect_live_physical_net_wall_claim(
     The proof needs the optional fontTools dependency and abstains without it.
     """
 
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
@@ -1000,6 +1003,7 @@ def _collect_live_physical_net_wall_claim(
             )
 
     physical_void = compose_live_physical_opening_voids(
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
@@ -1181,6 +1185,7 @@ def collect_live_physical_net_wall_claim(
     recover_supported_opening_areas: bool = False,
     source_native_finish_text_shadow: bool = False,
     source_glyph_ledger_text_trust: bool = False,
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1195,6 +1200,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("supported opening area recovery must be an explicit boolean")
     if recover_additional_opening_areas and recover_supported_opening_areas:
         raise ValueError("choose one opening area recovery policy")
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
@@ -1222,6 +1229,7 @@ def collect_live_physical_net_wall_claim(
         pdf_path, pages=pages, topology_pages=topology_pages,
         room_area_support_pages=room_area_support_pages,
         surface_semantic_pages=surface_semantic_pages,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
         **({"source_glyph_ledger_text_trust": True}
@@ -1251,6 +1259,7 @@ def collect_live_physical_net_wall_claim(
     return recover_source_opening_areas(
         claim, Path(pdf_path).read_bytes(), page_id=recovery_page_id,
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
 
 
