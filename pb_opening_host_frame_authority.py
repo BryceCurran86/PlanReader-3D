@@ -23,7 +23,7 @@ import math
 from types import MappingProxyType
 from typing import Mapping, Optional
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus, stable_contract_id
 import pb_opening_host_binding_authority as host_geometry
 from pb_opening_host_binding_authority import (
     OPENING_HOST_BINDING_RESOLVED,
@@ -49,6 +49,8 @@ from pb_raster_source_wall_frame_projection import (
     SourceClosedPierFaceChain,
     source_closed_pier_face_chains,
     source_edge_axis_projection,
+    exact_raster_rectangle_holes,
+    source_equipment_border_support,
 )
 
 OPENING_HOST_FRAME_SCHEMA_VERSION = "1.3.0"
@@ -292,6 +294,7 @@ class _ScopeBinding:
     binding: object
     left_node: _BandNode
     right_node: _BandNode
+    opening_selector: ObservationSelector | None = None
 
 
 @dataclass(frozen=True)
@@ -307,6 +310,7 @@ class _WholeWallFrame:
     candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
     skipped_motif_wall_ids: tuple[str, ...] = ()
+    source_negative_evidence_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -381,6 +385,7 @@ class OpeningHostFrameProducer:
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
         g17_face_w2_owner_shadow: bool = False,
+        source_equipment_border_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -406,6 +411,10 @@ class OpeningHostFrameProducer:
             raise TypeError("g17_face_w2_owner_shadow must be a bool")
         if g17_face_w2_owner_shadow and not (raster_split_frame_shadow and source_fragment_roles_shadow):
             raise ValueError("g17 face W2 owner requires both original raster and fragment shadows")
+        if type(source_equipment_border_shadow) is not bool:
+            raise TypeError("source_equipment_border_shadow must be a bool")
+        if source_equipment_border_shadow and not g17_face_w2_owner_shadow:
+            raise ValueError("source equipment border requires original G17 W2 owner shadow")
         if source_fragment_roles_shadow and supplemental_wall_candidate_authority is None:
             raise ValueError("source fragment roles require a supplemental source authority")
         self._opening = physical_opening_authority
@@ -416,6 +425,8 @@ class OpeningHostFrameProducer:
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._source_fragment_roles_shadow = source_fragment_roles_shadow
         self._g17_face_w2_owner_shadow = g17_face_w2_owner_shadow
+        self._source_equipment_border_shadow = source_equipment_border_shadow
+        self._source_negative_atoms: dict[str, EvidenceAtom] = {}
         self._results: dict[_Key, OpeningHostFrameResult] = {}
         # Proven representative selectors for this exact canonical frame.
         # Keep witnesses separate: shared-wall source_observation_ids may
@@ -435,6 +446,7 @@ class OpeningHostFrameProducer:
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
         g17_face_w2_owner_shadow: bool = False,
+        source_equipment_border_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
@@ -444,6 +456,7 @@ class OpeningHostFrameProducer:
             raster_split_frame_shadow=raster_split_frame_shadow,
             source_fragment_roles_shadow=source_fragment_roles_shadow,
             g17_face_w2_owner_shadow=g17_face_w2_owner_shadow,
+            source_equipment_border_shadow=source_equipment_border_shadow,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -710,11 +723,11 @@ class OpeningHostFrameProducer:
                 and opening is not None
                 and opening.page_id == selected_binding.page_id
             ):
-                discovered.setdefault(opening.record_id, opening)
+                discovered.setdefault(opening.record_id, (opening, selector))
 
         contexts: list[_ScopeBinding] = []
         selected_seen = False
-        for opening in discovered.values():
+        for opening, opening_selector in discovered.values():
             geometry = host_geometry._opening_geometry(self._opening, opening)
             if geometry is None:
                 continue
@@ -781,6 +794,7 @@ class OpeningHostFrameProducer:
                     binding=candidate_binding,
                     left_node=left_node,
                     right_node=right_node,
+                    opening_selector=opening_selector,
                 )
             )
             if candidate_binding.record_id == selected_binding.record_id:
@@ -1221,6 +1235,7 @@ class OpeningHostFrameProducer:
         pair_lookup = _pair_lookup(wall_scope.equivalence)
         component_set = set(component_ids)
         unproven_pairs: set[tuple[str, str]] = set()
+        source_negatives: dict[str, EvidenceAtom] = {}
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -1251,6 +1266,35 @@ class OpeningHostFrameProducer:
                 excluded = min(abs(offset - face) for face in face_offsets) > face_tol
             if excluded:
                 continue
+            if (raster_component and self._source_equipment_border_shadow
+                    and not any(pair_lookup.get(tuple(sorted((wall_id, member))))
+                                is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                                for member in component_ids)):
+                negatives = []
+                for context in component_contexts:
+                    if context.opening_selector is None:
+                        continue
+                    atom = self.source_equipment_border_negative_shadow(
+                        opening_selector=context.opening_selector,
+                        host_binding_selector=OpeningHostBindingSelector(
+                            document_id=binding.document_id,
+                            revision_id=binding.revision_id,
+                            source_sha256=binding.source_sha256,
+                            snapshot_id=binding.snapshot_id,
+                            page_id=binding.page_id,
+                            decision_scope_id=binding.decision_scope_id,
+                            opening_identity_id=context.opening.record_id,
+                        ),
+                        wall_candidate_id=str(wall_id),
+                    )
+                    if atom is not None:
+                        negatives.append(atom)
+                # Repeated witnesses to the SAME equipment box are allowed;
+                # competing boxes and an explicit SAME wall remain unresolved.
+                boxes = {tuple(atom.metadata['equipment_box_pt']) for atom in negatives}
+                if negatives and len(boxes) == 1:
+                    source_negatives.update((a.evidence_id, a) for a in negatives)
+                    continue
             # This is an aligned candidate on one of the selected wall faces.
             # It may be excluded only by positive DISTINCT proof against every
             # authenticated component member.  Missing/SAME/AMBIGUOUS evidence
@@ -1272,6 +1316,10 @@ class OpeningHostFrameProducer:
 
         if unproven_pairs:
             if failure_reasons is not None:
+                failure_reasons.extend(
+                    'opening_host_frame_source_equipment_border_negative:'+key
+                    for key in sorted(source_negatives)
+                )
                 failure_reasons.extend(
                     f"opening_host_frame_unproven_wall_pair:{wall_id}:{member_id}"
                     for wall_id, member_id in sorted(unproven_pairs)
@@ -1319,6 +1367,11 @@ class OpeningHostFrameProducer:
                 }
             )
         )
+        if source_negatives:
+            source_observation_ids = tuple(sorted(set(source_observation_ids) | {
+                oid for atom in source_negatives.values()
+                for oid in atom.metadata['source_observation_ids']
+            }))
         # Skipped motif wall ids are decision provenance only. They must
         # not enter this payload: opening_host_whole_wall_frame_v1 and
         # opening_host_frame_v2 stay identical to the frame that would
@@ -1353,7 +1406,206 @@ class OpeningHostFrameProducer:
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
             skipped_motif_wall_ids=(),
+            source_negative_evidence_ids=tuple(sorted(source_negatives)),
         )
+
+    def source_equipment_border_negative_shadow(
+        self, *, opening_selector, host_binding_selector, wall_candidate_id: str,
+    ) -> EvidenceAtom | None:
+        """Reissue original symbol/nonparticipation evidence without deleting W4.
+
+        Selector-only and opt-in. A negative grants no SAME/DISTINCT relation,
+        terminal, complete wall frame or metric quantity on its own.
+        """
+        if (type(opening_selector) is not ObservationSelector
+                or type(host_binding_selector) is not OpeningHostBindingSelector
+                or type(wall_candidate_id) is not str):
+            raise TypeError('exact original selectors and wall candidate ID required')
+        if not self._source_equipment_border_shadow:
+            return None
+        owner = self.source_g17_right_flank_w2_owner_shadow(
+            opening_selector=opening_selector, host_binding_selector=host_binding_selector,
+        )
+        if owner is None:
+            return None
+        opening = self._opening.prove_existence(opening_selector).existence_record
+        binding = self._host.resolve(host_binding_selector).record
+        if opening is None or binding is None:
+            return None
+        scoped = PhysicalWallCandidateSelector(
+            document_id=binding.document_id, revision_id=binding.revision_id,
+            source_sha256=binding.source_sha256, snapshot_id=binding.snapshot_id,
+            page_id=binding.page_id, decision_scope_id=binding.decision_scope_id,
+        )
+        base = self._walls.resolve_scope(scoped)
+        supp = self._supplemental_walls.resolve_scope(scoped)
+        records = self._scope_records_by_id(base, binding)
+        record = records.get(wall_candidate_id)
+        if record is None or wall_candidate_id in binding.member_wall_candidate_ids:
+            return None
+        geometry = host_geometry._opening_geometry(self._opening, opening)
+        visibility = self._opening.source_visibility_authority()
+        support = []
+        for oid in opening.source_observation_ids:
+            result = visibility.resolve_raster_opening_primitive(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=oid,
+            ))
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                return None
+            support.append(result.observation)
+        flanks = host_geometry._raster_source_band_flanks(support, geometry)
+        if flanks is None:
+            return None
+        originals = tuple(sorted(set(base.source_observation_ids + supp.source_observation_ids)))
+        lines = host_geometry._authenticated_raster_source_lines(self._opening, opening, originals)
+        # Reject unowned/bent/in-band/nonlocal candidates before decoding the
+        # source again. No geometry-only result below can become an atom.
+        from pb_raster_source_wall_frame_projection import _source_edge_axis_projection
+        projected = _source_edge_axis_projection(record, geometry, lines, require_band=False)
+        if projected is None or not any(
+                projected[0] >= f[0]-_COORD_TOL and projected[1] <= f[1]+_COORD_TOL
+                and (projected[2] < f[2]-_COORD_TOL or projected[2] > f[3]+_COORD_TOL)
+                for f in flanks.values()):
+            return None
+        source = self._opening._source_visibility_producer
+        published = source.published_snapshot_for_revision(opening.revision_id)
+        if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
+            return None
+        import hashlib
+        import fitz
+        from pb_native_page_frame import native_page_frame
+        from pb_wall_room_topology_typed_negative_evidence import KIND_SYMBOL
+
+        original = source._producer._store.source_bytes_by_revision.get(opening.revision_id)
+        if type(original) is not bytes or hashlib.sha256(original).hexdigest() != opening.source_sha256:
+            return None
+        text = source.text_integrity_authority()
+        native_ids = text.observation_ids_with_receipt_page(
+            opening.snapshot_id, tuple(text.observation_ids_for_snapshot(opening.snapshot_id)),
+            opening.page_id,
+        )
+        by_address = {}
+        for oid in native_ids:
+            result = text.resolve_text(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=oid,
+            ))
+            receipt = result.receipt
+            if receipt is not None:
+                address = (receipt.block_no, receipt.line_no, receipt.word_no)
+                by_address.setdefault(address, []).append((oid, result))
+        words = []
+        try:
+            with fitz.open(stream=original, filetype='pdf') as pdf:
+                page = pdf.load_page(int(opening.page_id)-1)
+                # Reissue the COMPLETE original word universe: a missing
+                # integrity receipt must retain an untrusted interior rival.
+                if native_page_frame(page).rotation != 0:
+                    return None
+                for word in page.get_text('words'):
+                    bbox, raw = tuple(float(v) for v in word[:4]), str(word[4])
+                    if not all(math.isfinite(v) for v in bbox):
+                        return None
+                    address = tuple(int(v) for v in word[5:8])
+                    matches = by_address.get(address, ())
+                    oid, result = matches[0] if len(matches) == 1 else ('', None)
+                    receipt = None if result is None else result.receipt
+                    verified = bool(receipt is not None
+                        and result.status is EvidenceResolutionStatus.CORROBORATED
+                        and result.trusted_text == raw and tuple(receipt.geometry) == bbox)
+                    words.append(dict(id=oid, text=raw, bbox=bbox, trusted=verified,
+                        receipt='' if receipt is None else receipt.receipt_id,
+                        block=address[0], line=address[1], word=address[2]))
+            image, _parent, frame, dpi = source.render_raster_opening_source_page(
+                opening.revision_id, opening.page_id,
+            )
+            full, _full_parent, full_frame = source._producer.render_native_page_png(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                page_id=opening.page_id, dpi=dpi, include_native_frame=True,
+                images_only=False,
+            )
+            if frame != full_frame:
+                return None
+            rectangle = source_equipment_border_support(
+                record, geometry, lines, flanks,
+                rectangles=exact_raster_rectangle_holes(image, dpi=dpi), words=words,
+                image_png=image, full_png=full, dpi=dpi,
+                source_equality_tolerance=host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT,
+            )
+        except (ValueError, RuntimeError, TypeError, IndexError, OverflowError):
+            return None
+        if rectangle is None:
+            return None
+        box, word_ids, text_receipts = rectangle
+        primitive_ids = tuple(sorted(record.physical_identity.source_primitive_ids))
+        source_ids = set(word_ids) | set(opening.source_observation_ids)
+        found = set()
+        for oid in originals:
+            response = visibility.resolve_visible(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=oid,
+            ))
+            observation = response.observation
+            if response.status is not EvidenceResolutionStatus.CORROBORATED or observation is None:
+                return None
+            primitive = str(observation.source_primitive_ref).removeprefix('visible:')
+            if primitive in primitive_ids and host_geometry._line(observation) == lines.get(primitive):
+                found.add(primitive)
+                source_ids.add(oid)
+        if found != set(primitive_ids):
+            return None
+        if (source.published_snapshot_for_revision(opening.revision_id) != published
+                or source._producer._store.source_bytes_by_revision.get(opening.revision_id) != original
+                or self._opening.prove_existence(opening_selector).existence_record != opening
+                or self._host.resolve(host_binding_selector).record != binding):
+            return None
+        current_text_receipts = set()
+        for oid in word_ids:
+            current = text.resolve_text(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=oid,
+            ))
+            if (current.status is not EvidenceResolutionStatus.CORROBORATED
+                    or current.receipt is None or current.receipt.receipt_id not in text_receipts):
+                return None
+            current_text_receipts.add(current.receipt.receipt_id)
+        if current_text_receipts != set(text_receipts):
+            return None
+        payload = dict(
+            document_id=opening.document_id, revision_id=opening.revision_id,
+            source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+            page_id=opening.page_id, decision_scope_id=binding.decision_scope_id,
+            physical_opening_id=opening.record_id, wall_candidate_id=wall_candidate_id,
+            equipment_box_pt=box, native_text_receipt_ids=text_receipts,
+            source_primitive_ids=primitive_ids,
+            source_edge_ids=tuple(sorted(record.physical_identity.edge_ids)),
+            source_observation_ids=tuple(sorted(source_ids)),
+            source_render_sha256s=(hashlib.sha256(image).hexdigest(), hashlib.sha256(full).hexdigest()),
+            physical_wall_equivalence_granted=False, whole_wall_terminal_granted=False,
+            metric_quantity_granted=False,
+        )
+        atom = EvidenceAtom(
+            evidence_id=stable_contract_id('source_equipment_border_negative', payload, digest_chars=32),
+            document_id=opening.document_id, page_id=opening.page_id,
+            viewport_id=record.wall_candidate.viewport_id, kind=KIND_SYMBOL,
+            method='original_closed_equipment_border_and_trusted_native_label',
+            bbox=box, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=('source_equipment_border_outside_g17_solid_flank',),
+            metadata=MappingProxyType(dict(payload, polarity='opposing',
+                proposition='g17_solid_flank_nonparticipation')),
+        )
+        self._source_negative_atoms[atom.evidence_id] = atom
+        return atom
+
+    def source_negative_evidence(self) -> Mapping[str, EvidenceAtom]:
+        """Retained provenance; later consumption must reissue the source proof."""
+        return MappingProxyType(dict(self._source_negative_atoms))
 
     def source_g17_right_flank_w2_owner_shadow(
         self, *, opening_selector: ObservationSelector,
@@ -1867,6 +2119,11 @@ class OpeningHostFrameProducer:
                     f"{OPENING_HOST_FRAME_ALIGNED_MOTIF_FRAGMENTS_SKIPPED}:{wall_id}"
                     for wall_id in frame.skipped_motif_wall_ids
                 ),
+            )
+        if frame.source_negative_evidence_ids:
+            reason_codes += tuple(
+                'opening_host_frame_source_equipment_border_negative:'+key
+                for key in frame.source_negative_evidence_ids
             )
         result = OpeningHostFrameResult(
             status=EvidenceResolutionStatus.CORROBORATED,
