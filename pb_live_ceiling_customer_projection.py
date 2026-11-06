@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
@@ -28,14 +29,23 @@ def _clean(value: Any) -> str:
 
 def _figured_authority(quantity: QuantityEvidence) -> CommercialMeasurementAuthority | None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    raw = metadata.get("figured_dimension_ids") or ()
-    if isinstance(raw, (str, bytes)):
-        raw = (raw,)
-    if not isinstance(raw, (list, tuple)):
-        raw = ()
-    figured_ids = tuple(sorted({_clean(value) for value in raw if _clean(value)}))
-    if len(figured_ids) != 2:
+    raw = metadata.get("figured_dimension_ids")
+    if (
+        type(quantity.authority) is not str
+        or quantity.authority != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        or type(raw) not in (list, tuple)
+        or len(raw) != 2
+        or any(
+            type(value) is not str or not value or value != value.strip()
+            for value in raw
+        )
+        or len(set(raw)) != 2
+    ):
+        # Original figured-axis identity is not a set of normalized labels.
+        # Do not repair a third, repeated, padded or non-native source axis
+        # into an apparently independent two-axis commercial measurement.
         return None
+    figured_ids = tuple(sorted(raw))
     return CommercialMeasurementAuthority(
         method="figured_dimension",
         figured_dimension_ids=figured_ids,
