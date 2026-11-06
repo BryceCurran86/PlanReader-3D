@@ -443,7 +443,7 @@ def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_a
     )
 
 
-def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version):
+def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version, single_width_uniform_page_door_height_shadow: bool = False):
     """Re-prove a single original topology page, then append only new areas."""
     digest = sha256(pdf_bytes).hexdigest()
     if not baseline.canonical_openings:
@@ -471,6 +471,7 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
     )
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=composition,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
     quantities = publish_live_opening_area_quantities(voids)
     published = source.published_snapshot_for_revision(published.revision.revision_id)

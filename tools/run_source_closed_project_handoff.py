@@ -486,6 +486,7 @@ def _generate_project_handoff_locked(
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
+            single_width_uniform_page_door_height_shadow=True,
             **({"source_native_finish_text_shadow": True}
                if source_native_finish_text_shadow else {}),
         )

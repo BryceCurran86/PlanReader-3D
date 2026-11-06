@@ -488,7 +488,10 @@ def _producer_owned_ocr_target(
             return word_bbox, 0
         rawdict, traces, rotation_matrix = facts
         try:
-            line = rawdict["blocks"][int(block_no)]["lines"][int(line_no)]
+            blocks = rawdict.get("blocks", [])
+            text_blocks = [b for b in blocks if b.get("type", 0) == 0]
+            target_blocks = text_blocks if len(text_blocks) != len(blocks) else blocks
+            line = target_blocks[int(block_no)]["lines"][int(line_no)]
             native_direction = _point2(line.get("dir"))
             if native_direction is None:
                 return word_bbox, 0
@@ -1077,6 +1080,18 @@ class RasterTextCorroborationProducer:
             readable = [line for line in lines if normalize_reading(getattr(line, "text", ""))]
             if any(not _geometry_valid(line, (cropped.width, cropped.height)) for line in readable):
                 return _abstain(RASTER_TEXT_OCR_GEOMETRY_INVALID)
+            exact_matches = [
+                l for l in readable
+                if normalize_reading(getattr(l, "text", "")) == native_claim
+            ]
+            if len(exact_matches) == 1 and len(readable) > 1:
+                exact_line = exact_matches[0]
+                if all(
+                    other is exact_line
+                    or normalize_reading(getattr(other, "text", "")) in native_claim
+                    for other in readable
+                ):
+                    readable = exact_matches
             reading: Optional[str] = None
             confidence: Optional[float] = None
             if len(readable) == 1:

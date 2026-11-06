@@ -149,21 +149,21 @@
       "benchmark_item_id": "3laurel-1200-main-entry-hinged-01-area",
       "production_family": "opening_area",
       "production_object_identity_refs": [
-        "physical_opening_existence_86386bae1a5959e71d3cbacb9463cc43"
+        "physical_opening_existence_4539f06dc3e675c2a4295b2e22e7e155"
       ]
     },
     {
       "benchmark_item_id": "3laurel-0870-gf-entry-hinged-01-area",
       "production_family": "opening_area",
       "production_object_identity_refs": [
-        "physical_opening_existence_b5eabe759038ab5f9868db718d93b125"
+        "physical_opening_existence_7c0bc2fb623d4706e2fe43b1be1e67bf"
       ]
     },
     {
       "benchmark_item_id": "3laurel-0870-garage-personnel-hinged-01-area",
       "production_family": "opening_area",
       "production_object_identity_refs": [
-        "physical_opening_existence_774cc47b2bcdd17946cc1e98a0414678"
+        "physical_opening_existence_7220ac0bd0217f3dbd2508939d4dc1b3"
       ]
     }
   ]
