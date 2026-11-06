@@ -878,7 +878,10 @@ class PhysicalScaleProducer:
                 viewport
                 for viewport in usable
                 if viewport.view_id == selector.viewport_id
-                and viewport.status == ViewportSegmentationStatus.RESOLVED.value
+                and (
+                    viewport.status == ViewportSegmentationStatus.RESOLVED.value
+                    or is_authoritative_derived_viewport(viewport)
+                )
             )
             if len(matches) == 1:
                 return tuple(float(value) for value in matches[0].bounding_box), None

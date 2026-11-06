@@ -32,6 +32,15 @@ from pb_physical_opening_authority import (
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+    normalize_reading,
+)
 
 
 OPENING_LABEL_DIMENSION_SCHEMA_VERSION = "1.0.0"
@@ -816,14 +825,21 @@ def _trusted_text_lines(
                 observation_id=observation_id,
             )
         )
-        if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or resolved.trusted_text is None
-            or resolved.receipt is None
-            or str(resolved.receipt.page_id) != str(opening.page_id)
-        ):
-            continue
         receipt = resolved.receipt
+        if receipt is None or str(receipt.page_id) != str(opening.page_id):
+            continue
+        text_val = None
+        if resolved.status is EvidenceResolutionStatus.CORROBORATED and resolved.trusted_text:
+            text_val = str(resolved.trusted_text)
+        elif (
+            resolved.status is EvidenceResolutionStatus.ABSTAINED
+            and not receipt.trusted
+            and set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
+            and str(receipt.raw_text or "").strip()
+        ):
+            text_val = str(receipt.raw_text).strip()
+        if text_val is None:
+            continue
         if receipt.block_no is not None and receipt.line_no is not None:
             key = ("native-line", int(receipt.block_no), int(receipt.line_no))
             order = int(receipt.word_no or 0)
@@ -834,7 +850,7 @@ def _trusted_text_lines(
             (
                 order,
                 observation_id,
-                resolved.trusted_text,
+                text_val,
                 tuple(float(value) for value in receipt.geometry),
             )
         )
@@ -948,6 +964,78 @@ class OpeningLabelDimensionProducer:
         self._trusted_text_lines_by_scope: dict[
             tuple[str, str, str, str, str], tuple[_TrustedTextLine, ...]
         ] = {}
+        self._raster_producer: Optional[RasterTextCorroborationProducer] = None
+        self._word_authentication_cache: dict[tuple[str, str, str, str, str], bool] = {}
+
+    def _authenticate_word_observation(
+        self,
+        opening: PhysicalOpeningExistenceRecord,
+        observation_id: str,
+    ) -> bool:
+        cache_key = (
+            opening.document_id,
+            opening.revision_id,
+            opening.source_sha256,
+            opening.snapshot_id,
+            str(observation_id),
+        )
+        source_cache = getattr(self._source, "_raster_text_word_auth_cache", None)
+        if source_cache is None:
+            source_cache = {}
+            try:
+                self._source._raster_text_word_auth_cache = source_cache
+            except Exception:
+                pass
+        cached = source_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        resolved = self._source.text_integrity_authority().resolve_text(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if resolved.status is EvidenceResolutionStatus.CORROBORATED and resolved.trusted_text:
+            source_cache[cache_key] = True
+            return True
+        receipt = resolved.receipt
+        if receipt is None:
+            source_cache[cache_key] = False
+            return False
+        raw = str(receipt.raw_text or '').strip()
+        if raw in ('-', '–', '—', 'x', '×', 'X'):
+            ok = set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
+            source_cache[cache_key] = ok
+            return ok
+        if not set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED}):
+            source_cache[cache_key] = False
+            return False
+        raster_producer = getattr(self._source, "_raster_corroboration_producer", None)
+        if raster_producer is None:
+            raster_producer = RasterTextCorroborationProducer.for_physical_plan_view_shadow(self._source)
+            try:
+                self._source._raster_corroboration_producer = raster_producer
+            except Exception:
+                pass
+        raster_res = raster_producer.publish(
+            RasterTextCorroborationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        ok = (
+            raster_res.status is EvidenceResolutionStatus.CORROBORATED
+            and raster_res.corroborated_text is not None
+            and normalize_reading(raster_res.corroborated_text).lower() == normalize_reading(raw).lower()
+        )
+        source_cache[cache_key] = ok
+        return ok
 
     def _trusted_text_lines_for_opening(
         self,
@@ -966,11 +1054,18 @@ class OpeningLabelDimensionProducer:
             opening.snapshot_id,
             str(opening.page_id),
         )
-        cached = self._trusted_text_lines_by_scope.get(key)
+        cache = getattr(self._source, "_trusted_dimension_lines_by_scope", None)
+        if cache is None:
+            cache = {}
+            try:
+                self._source._trusted_dimension_lines_by_scope = cache
+            except Exception:
+                pass
+        cached = cache.get(key)
         if cached is not None:
             return cached
         lines = _trusted_text_lines(self._source, opening)
-        self._trusted_text_lines_by_scope[key] = lines
+        cache[key] = lines
         return lines
 
     @classmethod
@@ -1073,6 +1168,8 @@ class OpeningLabelDimensionProducer:
             parsed = parse_opening_label_dimensions(line.text)
             if parsed is None or not _label_matches_gap(line, gap):
                 continue
+            if not all(self._authenticate_word_observation(opening, oid) for oid in line.observation_ids):
+                continue
             suffix_kind, suffix_conflict = _semantic_kind_evidence(parsed.suffix_text)
             authenticated_kinds = tuple(
                 kind
@@ -1131,6 +1228,15 @@ class OpeningLabelDimensionProducer:
                     OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
                 ),
             )
+        if len(candidates) != 1:
+            filtered_candidates = {
+                sig: cand
+                for sig, cand in candidates.items()
+                if cand[1].suffix_text or len(cand[1].dimension_tokens) > 1
+            }
+            if len(filtered_candidates) == 1:
+                candidates = filtered_candidates
+
         if len(candidates) != 1:
             return self._store(
                 key,
@@ -1202,6 +1308,23 @@ class OpeningLabelDimensionProducer:
         kind, conflict = classify_compact_source_opening_text(evidence.raw_text)
         axes = None if match is None or conflict or kind != evidence.semantic_kind else (
             _compact_dimensions_mm(match.group("code"), kind))
+        if (
+            axes is None
+            and len(evidence.dimension_values_mm) == 2
+            and evidence.semantic_kind in {"door", "window"}
+        ):
+            h_val = float(evidence.dimension_values_mm[0])
+            w_val = float(evidence.dimension_values_mm[1])
+            if (
+                evidence.semantic_kind == "door"
+                and 1800.0 <= h_val <= 3600.0
+                and 600.0 <= w_val <= 10000.0
+            ) or (
+                evidence.semantic_kind == "window"
+                and 300.0 <= h_val <= 3000.0
+                and 300.0 <= w_val <= 6000.0
+            ):
+                axes = (w_val, h_val)
         if (axes is None or len(evidence.dimension_values_mm) != 2
                 or tuple(evidence.dimension_values_mm) != (axes[1], axes[0])):
             return _blocked(EvidenceResolutionStatus.ABSTAINED,

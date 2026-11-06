@@ -346,10 +346,13 @@ def compose_live_physical_opening_voids(
     source_visibility_producer: SourceVisibilityProducer,
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
     bifold_descriptor_shadow: bool = False,
+    single_width_uniform_page_door_height_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
     """Compose the exact sealed prerequisite chain for every proven opening."""
     if type(bifold_descriptor_shadow) is not bool:
         raise ValueError("bifold descriptor shadow must be explicit boolean")
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be explicit boolean")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -553,6 +556,55 @@ def compose_live_physical_opening_voids(
         opening_id: label_semantic_producer.publish_scope(opening_selector)
         for opening_id, opening_selector in opening_selectors.items()
     }
+    uniform_page_door_height_by_page: dict[str, tuple[float, tuple[str, ...]]] = {}
+    corroborated_single_width_door_mm_by_page: dict[str, set[tuple[float, ...]]] = {}
+    if single_width_uniform_page_door_height_shadow:
+        door_heights_by_page: dict[str, set[float]] = {}
+        door_height_obs_by_page: dict[str, set[str]] = {}
+        single_width_kinds_by_page: dict[tuple[str, tuple[float, ...]], set[str]] = {}
+        for opening_id, opening_selector in opening_selectors.items():
+            p_id = opening_pages[opening_id]
+            ordered_axes = label_dimension_producer.ordered_compact_axes_shadow(opening_selector)
+            ordered_ev = getattr(ordered_axes, "evidence", None)
+            if (
+                ordered_axes.status is EvidenceResolutionStatus.CORROBORATED
+                and ordered_ev is not None
+                and ordered_ev.semantic_kind == "door"
+                and ordered_ev.axis_order_resolved is True
+                and ordered_ev.height_mm is not None
+            ):
+                h_val = float(ordered_ev.height_mm)
+                if math.isfinite(h_val) and h_val > 0.0:
+                    door_heights_by_page.setdefault(p_id, set()).add(h_val)
+                    door_height_obs_by_page.setdefault(p_id, set()).update(
+                        str(v) for v in ordered_ev.source_text_observation_ids if str(v)
+                    )
+            fig_res = label_dimension_results.get(opening_id)
+            fig_ev = getattr(fig_res, "evidence", None)
+            ex_rec = existence_by_opening[opening_id].existence_record
+            if (
+                fig_res is not None
+                and fig_res.status is EvidenceResolutionStatus.CORROBORATED
+                and fig_ev is not None
+                and len(fig_ev.dimension_values_mm) == 1
+            ):
+                dims_key = tuple(float(v) for v in fig_ev.dimension_values_mm)
+                k_res = resolve_opening_kind(
+                    structural_pattern=ex_rec.structural_pattern if ex_rec is not None else None,
+                    schedule_trade_type=None,
+                    label_kind=getattr(fig_ev, "semantic_kind", None),
+                )
+                if k_res.opening_kind in {"door", "window"}:
+                    single_width_kinds_by_page.setdefault((p_id, dims_key), set()).add(k_res.opening_kind)
+        for p_id, heights in door_heights_by_page.items():
+            if len(heights) == 1:
+                uniform_page_door_height_by_page[p_id] = (
+                    next(iter(heights)),
+                    tuple(sorted(door_height_obs_by_page.get(p_id, ()))),
+                )
+        for (p_id, dims_key), kinds in single_width_kinds_by_page.items():
+            if kinds == {"door"}:
+                corroborated_single_width_door_mm_by_page.setdefault(p_id, set()).add(dims_key)
     elevation_frame_area_authority = (
         OpeningElevationFrameAreaProducer.from_source_visibility_producer(
             source_visibility_producer
@@ -748,6 +800,34 @@ def compose_live_physical_opening_voids(
             label_kind=combined_label_kind,
         )
         opening_kind = kind_resolution.opening_kind
+        if (
+            single_width_uniform_page_door_height_shadow
+            and opening_kind is None
+            and not label_kind_conflict
+            and OPENING_KIND_CONFLICT not in kind_resolution.reason_codes
+            and existence_record is not None
+            and existence_record.structural_pattern in {
+                "raster_framed_wall_band_interruption",
+                "jamb_bounded_two_face_interruption",
+            }
+            and figured_label_evidence is not None
+            and len(figured_label_evidence.dimension_values_mm) == 1
+            and (
+                tuple(float(v) for v in figured_label_evidence.dimension_values_mm)
+                in corroborated_single_width_door_mm_by_page.get(page_id, set())
+                or (
+                    page_id in uniform_page_door_height_by_page
+                    and float(figured_label_evidence.dimension_values_mm[0]) in {
+                        620.0, 720.0, 770.0, 820.0, 870.0, 920.0, 1020.0, 1200.0
+                    }
+                    and "window" not in single_width_kinds_by_page.get(
+                        (page_id, tuple(float(v) for v in figured_label_evidence.dimension_values_mm)),
+                        set(),
+                    )
+                )
+            )
+        ):
+            opening_kind = "door"
         elevation_frame_record = None
         if type_mark and opening_kind in {"door", "window"}:
             elevation_frame_result = elevation_frame_area_authority.resolve(
@@ -848,6 +928,22 @@ def compose_live_physical_opening_voids(
             schedule_record=schedule_record,
             geometry_complete=void_record is not None,
         )
+        uniform_door_height_obs_ids: tuple[str, ...] = ()
+        if (
+            single_width_uniform_page_door_height_shadow
+            and area_m2 is None
+            and opening_kind == "door"
+            and figured_label_evidence is not None
+            and len(figured_label_evidence.dimension_values_mm) == 1
+            and page_id in uniform_page_door_height_by_page
+        ):
+            single_w_mm = float(figured_label_evidence.dimension_values_mm[0])
+            u_h_mm, u_h_obs_ids = uniform_page_door_height_by_page[page_id]
+            if math.isfinite(single_w_mm) and single_w_mm > 0.0:
+                area_m2 = round((single_w_mm / 1000.0) * (u_h_mm / 1000.0), 6)
+                area_basis = str(getattr(figured_label_evidence, "basis", "figured_opening_label"))
+                figured_area_record_id = str(figured_label_evidence.evidence_id)
+                uniform_door_height_obs_ids = u_h_obs_ids
 
         if existence_record is not None:
             evidence_ids = _canonical_provenance_ids(
@@ -883,6 +979,7 @@ def compose_live_physical_opening_voids(
                         if figured_label_evidence is not None
                         else ()
                     ),
+                    *uniform_door_height_obs_ids,
                     *(
                         semantic_label_evidence.source_text_observation_ids
                         if semantic_label_evidence is not None
