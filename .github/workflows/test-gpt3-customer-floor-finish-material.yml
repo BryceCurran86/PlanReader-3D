@@ -1,0 +1,29 @@
+name: GPT3 Original Floor Finish Customer Material Parity
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_customer_output_verification.py
+      - tests/test_gpt3_customer_original_floor_finish_material_parity.py
+      - .github/workflows/test-gpt3-customer-floor-finish-material.yml
+permissions:
+  contents: read
+jobs:
+  original-tile-customer-display-lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Exact signed floor finish customer parity and original eight
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_customer_original_floor_finish_material_parity.py tests/test_live_floor_finish_area_source_closed_export.py tests/test_gpt3_floor_finish_family_handoff.py tests/test_customer_output_verification.py
+          ruff check --select F821,F823 pb_customer_output_verification.py tests/test_gpt3_customer_original_floor_finish_material_parity.py

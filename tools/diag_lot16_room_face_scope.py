@@ -561,7 +561,9 @@ def _ceiling_quantity_diagnostic(claim) -> dict:
     }
 
 
-def _opening_sealing_diagnostic(claim) -> dict:
+def _opening_sealing_diagnostic(
+    claim, *, source_reproved_append_only: bool = False,
+) -> dict:
     """Exercise existing source-closed sealing and draft customer verification.
 
     The synthetic workspace ID is diagnostic only; no persistence or scoring.
@@ -580,14 +582,16 @@ def _opening_sealing_diagnostic(claim) -> dict:
     }
     try:
         sealed = seal_live_opening_area_claim_run(
-            claim, workspace_id=1, project_id="source-diagnostic:lot16"
+            claim, workspace_id=1, project_id="source-diagnostic:lot16",
+            source_reproved_append_only=source_reproved_append_only,
         )
         sealed_ids = sorted(quantity.quantity_id for quantity in sealed.quantities)
         report["sealed_opening_area_quantity_count"] = len(sealed_ids)
         report["sealed_quantity_ids"] = sealed_ids
         report["unsealed_upstream_ids"] = sorted(set(upstream_ids) - set(sealed_ids))
         rows = project_live_opening_customer_rows(
-            claim, workspace_id=1, project_id="source-diagnostic:lot16"
+            claim, workspace_id=1, project_id="source-diagnostic:lot16",
+            source_reproved_append_only=source_reproved_append_only,
         )
         verified = verify_sealed_customer_output(sealed, rows)
         report["customer_draft_row_count"] = len(rows)
@@ -933,7 +937,9 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
             "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
             "opening_quantity_diagnostic": _opening_quantity_diagnostic(claim),
             "ceiling_quantity_diagnostic": _ceiling_quantity_diagnostic(claim),
-            "opening_sealing_diagnostic": _opening_sealing_diagnostic(claim),
+            "opening_sealing_diagnostic": _opening_sealing_diagnostic(
+                claim, source_reproved_append_only=recover_additional_opening_areas,
+            ),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
             "figured_dimension_scale_shadow": source_figured_scale_shadow(witness_audit),

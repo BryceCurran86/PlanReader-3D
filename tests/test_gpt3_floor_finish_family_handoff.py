@@ -66,6 +66,11 @@ def test_real_floor_finish_family_seal_has_distinct_verified_customer_receipt(
     assert rows[0]["quantity_id"] == run.quantities[0].quantity_id
     assert rows[0]["quantity_family"] == "floor_finish_area"
     assert rows[0]["quantity_status"] == "To review"
+    # Assert the real customer JSON (not just the in-memory projector)
+    # retains the exact source FT code and the unchanged signed material.
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["quantity"] == run.quantities[0].value
     assert verify_sealed_customer_output(run, rows).verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )

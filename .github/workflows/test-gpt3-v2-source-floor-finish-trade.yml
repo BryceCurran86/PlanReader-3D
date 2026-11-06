@@ -1,0 +1,30 @@
+name: GPT3 Original Floor Finish Material to Frozen V2 Trade
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/gpt3_signed_v2_family_trade_integrity.py
+      - tests/test_gpt3_signed_v2_family_unit_dimension_veto.py
+      - tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py
+      - .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+permissions:
+  contents: read
+jobs:
+  original-floor-finish-semantic-to-trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original signed floor finish semantics cannot be reassigned to FT2/FT3 tiling
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py tests/test_gpt3_signed_v2_family_unit_dimension_veto.py tests/test_gpt3_unique_eligible_trade_veto.py
+          ruff check --select F821,F823 tools/gpt3_signed_v2_family_trade_integrity.py tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py

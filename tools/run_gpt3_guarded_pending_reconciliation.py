@@ -17,10 +17,62 @@ import sys
 import tempfile
 from typing import Any, Mapping
 
+from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from tools.prepare_gpt3_pending_identity_activation import build_activation
+from tools.gpt3_atomic_pending_activation_pair import (
+    read_committed_active_identity_map,
+    ACTIVATION_COMMIT_MARKER_VERSION,
+    _fsync_directory,
+    _reject_duplicate_json_keys,
+)
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _read_json_without_duplicate_keys,
 )
+
+
+def read_committed_guarded_exact_report(
+    map_path: Path, receipt_path: Path, report_path: Path,
+) -> dict[str, Any]:
+    """Read a three-file exact report only behind the final receipt marker.
+
+    This checks durable release consistency, not original source ownership,
+    customer publication permission or independent benchmark scoring authority.
+    """
+    # Pin the receipt across BOTH the map and report reads. Without
+    # this pre-snapshot a writer could swap a new marker after map proof.
+    first_receipt = receipt_path.read_bytes()
+    read_committed_active_identity_map(
+        map_path, receipt_path=receipt_path,
+    )
+    if receipt_path.read_bytes() != first_receipt:
+        raise ValueError("guarded exact report receipt changed across map verification")
+    marker = json.loads(
+        first_receipt, object_pairs_hook=_reject_duplicate_json_keys,
+    )
+    if marker.get("activation_commit_marker_version") != ACTIVATION_COMMIT_MARKER_VERSION:
+        raise ValueError("guarded exact report has no committed activation receipt")
+    # The nested map reader verified its bytes earlier, but a concurrent
+    # writer can replace the map before we finish reading the exact report.
+    # Pin the map throughout this entire three-file committed read.
+    verified_map_bytes = map_path.read_bytes()
+    if marker.get("identity_map_sha256") != sha256(verified_map_bytes).hexdigest():
+        raise ValueError("guarded exact report map changed after initial verification")
+    report_bytes = report_path.read_bytes()
+    if marker.get("exact_report_sha256") != sha256(report_bytes).hexdigest():
+        raise ValueError("guarded exact report does not match activation commit digest")
+    report = json.loads(report_bytes, object_pairs_hook=_reject_duplicate_json_keys)
+    if type(report) is not dict:
+        raise ValueError("guarded exact report must contain a JSON object")
+    if (
+        receipt_path.read_bytes() != first_receipt
+        or report_path.read_bytes() != report_bytes
+        or map_path.read_bytes() != verified_map_bytes
+    ):
+        raise ValueError("guarded exact report/map/receipt changed during verification")
+    return report
 
 
 def _input_sha256(path: Path) -> str:
@@ -123,6 +175,19 @@ def build_guarded_exact_report(
     if activation_receipt.get("evaluator_invoked") is not False:
         raise ValueError("activation step unexpectedly invoked evaluator")
 
+    # Every newly active map must pass exactly the SAME physical-family,
+    # source-owned door/window, dimension and material/trade veto as the
+    # four-project reporter. The frozen per-project exact evaluator by design
+    # does not perform this GPT3 commercial-semantic check. Fail BEFORE
+    # importing or invoking that evaluator, even if an independent source
+    # activation handoff erroneously proposes an incompatible trade.
+    sealed = sealed_source_closed_run_from_dict(dict(sealed_run_payload))
+    require_signed_v2_family_trade_integrity(
+        verified_items=frozen_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=candidate_map["bindings"],
+    )
+
     exact = _exact_report_module()
     with tempfile.TemporaryDirectory(
         prefix="planreader-gpt3-guarded-reconcile-"
@@ -191,7 +256,23 @@ def _write_triplet(
     # only paths still pointing at OUR inode are safe to delete.
     created: list[tuple[Path, Path]] = []
     try:
-        for path, value in zip(outputs, payloads):
+        # Add the byte-identical map digest to the release receipt.
+        # It is the LAST published path, after map and exact report.
+        map_bytes = (
+            json.dumps(payloads[0], sort_keys=True, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        committed_receipt = {
+            **payloads[1],
+            "activation_commit_marker_version": ACTIVATION_COMMIT_MARKER_VERSION,
+            "identity_map_sha256": sha256(map_bytes).hexdigest(),
+            "exact_report_sha256": sha256((
+                json.dumps(payloads[2], sort_keys=True, indent=2, allow_nan=False)
+                + "\n"
+            ).encode("utf-8")).hexdigest(),
+            "identity_map_project_id": payloads[0].get("project_id"),
+            "identity_map_source_sha256s": payloads[0].get("source_sha256s"),
+        }
+        for path, value in zip(outputs, (payloads[0], committed_receipt, payloads[2])):
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 "w", dir=path.parent, encoding="utf-8", newline="",
@@ -208,9 +289,15 @@ def _write_triplet(
             _assert_inputs_stable(expected_input_hashes)
         # An atomic create-only hard link will fail if any external writer
         # creates the destination since preflight. Do not replace originals.
-        for path, temp in zip(outputs, staged):
+        for index in (0, 2, 1):
+            # A receipt is the final commit marker; neither an orphan map
+            # nor an orphan report can be consumed as a released result.
+            path, temp = outputs[index], staged[index]
             os.link(temp, path)
             created.append((path, temp))
+            _fsync_directory(path.parent)
+            if index != 1 and expected_input_hashes is not None:
+                _assert_inputs_stable(expected_input_hashes)
         # If an input changes while the three hard links are created, roll
         # them all back. Never retain a stale activation or scored receipt.
         if expected_input_hashes is not None:
@@ -234,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customer-rows", type=Path, required=True)
     parser.add_argument("--active-identity-map", type=Path, required=True)
+    parser.add_argument("--active-identity-receipt", type=Path)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--source-identity-proof", type=Path, required=True)
     parser.add_argument("--object-universe", type=Path, required=True)
@@ -251,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
         args.active_identity_map, args.manifest, args.source_identity_proof,
         args.object_universe,
     )
+    if args.active_identity_receipt is not None:
+        inputs += (args.active_identity_receipt,)
     outputs = (args.output_map, args.output_activation_receipt, args.output_report)
     _preflight_outputs(outputs, inputs)
     input_hashes = _snapshot_inputs(inputs)
@@ -259,7 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         pending_ledger=_object(args.pending_ledger),
         sealed_run_payload=_object(args.sealed_run),
         customer_rows=_rows(args.customer_rows),
-        active_identity_map_payload=_object(args.active_identity_map),
+        active_identity_map_payload=read_committed_active_identity_map(
+            args.active_identity_map, receipt_path=args.active_identity_receipt,
+        ),
         source_manifest=manifest,
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),

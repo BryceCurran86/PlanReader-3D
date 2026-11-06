@@ -681,11 +681,46 @@ def test_historical_unmeasured_rival_allows_new_snapshot_and_host_receipt_reissu
     assert result.opening_area_replay_source_inventory == tuple(
         sorted(reissued, key=lambda opening: opening.canonical_opening_id)
     )
+    # The prior signed source quantity retains its immutable old snapshot.
+    # A freshly reissued *positive* quantity on another snapshot for the same
+    # original document/revision must be refused by the V1 source sealer.
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="conflicting explicit source snapshot receipts in one signed run",
+    ):
+        seal_live_opening_area_claim_run(
+            result, workspace_id=1, project_id="source-project",
+        )
+
+    # Receipt freshness alone is valid when the positive quantities retain
+    # one independently producer-issued original snapshot. Reissue only the
+    # *unmeasured* historical rival's host receipt; do not re-key an old
+    # measurement or fabricate cross-snapshot authority.
+    old_snapshot = baseline.canonical_openings[0].snapshot_id
+    assert old_snapshot == previous.metadata["snapshot_id"]
+    compatible_roster = tuple(
+        replace(o, host_binding_record_id="fresh-host-receipt")
+        if o.canonical_opening_id == historical.canonical_opening_id else o
+        for o in full.canonical_openings + (historical,)
+    )
+    compatible_quantities = tuple(
+        q for o in compatible_roster
+        if (q := _opening_quantity(o)) is not None
+    )
+    compatible = _append_reproved_areas(
+        baseline, compatible_roster, compatible_quantities,
+    )
+    assert compatible.canonical_openings[:2] == baseline.canonical_openings
+    assert compatible.opening_quantity_evidence[0] is previous
+    assert len(compatible.opening_quantity_evidence) == 2
+    assert compatible.opening_area_replay_source_inventory == tuple(
+        sorted(compatible_roster, key=lambda opening: opening.canonical_opening_id)
+    )
     sealed = seal_live_opening_area_claim_run(
-        result, workspace_id=1, project_id="source-project",
+        compatible, workspace_id=1, project_id="source-project",
     )
     rows = project_live_opening_customer_rows(
-        result, workspace_id=1, project_id="source-project",
+        compatible, workspace_id=1, project_id="source-project",
     )
     assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
 
@@ -1030,3 +1065,176 @@ def test_application_recovery_needs_a_positive_original_floor_plan_role(
     assert collect_live_physical_net_wall_claim(
         path, pages=(0,), recover_supported_opening_areas=True,
     ) == baseline
+
+
+# GPT3 reproof/seal interaction with MAX's append-only source snapshots.
+# Synthetic typed openings stand in for source-proved candidates; real original
+# evidence remains mandatory for the owner-private production acceptance test.
+def _two_snapshot_area_claim(original_claim):
+    from dataclasses import replace as dc_replace
+    _, full = original_claim
+    old, fresh = full.opening_quantity_evidence
+    oid = fresh.input_entity_ids[0]
+    originals = tuple(full.canonical_openings)
+    opening = next(o for o in originals if o.canonical_opening_id == oid)
+    new_opening = dc_replace(opening, snapshot_id="independently-reproved-source-snapshot")
+    new_quantity = _opening_quantity(new_opening)
+    assert new_quantity is not None
+    amended = dc_replace(
+        full,
+        canonical_openings=tuple(new_opening if o.canonical_opening_id == oid else o for o in originals),
+        opening_quantity_evidence=(old, new_quantity),
+    )
+    return full, amended
+
+
+def test_strict_default_seal_still_rejects_two_original_producer_snapshots(original_claim):
+    _, amended = _two_snapshot_area_claim(original_claim)
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting explicit source snapshot"):
+        seal_live_opening_area_claim_run(
+            amended, workspace_id=1, project_id="source-project",
+        )
+
+
+def test_caller_only_cross_snapshot_opt_in_cannot_forge_source_replay(original_claim):
+    # A copied typed opening and caller bool are not an original-source replay.
+    _, forged = _two_snapshot_area_claim(original_claim)
+    assert forged.opening_area_replay_source_inventory == ()
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="complete original-source opening replay inventory required",
+    ):
+        seal_live_opening_area_claim_run(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="complete original-source opening replay inventory required",
+    ):
+        project_live_opening_customer_rows(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+
+
+def test_constructed_full_roster_cannot_grant_original_source_append_authority(
+    original_claim,
+):
+    from dataclasses import replace as dc_replace
+    _, full = original_claim
+    baseline = subset(full)
+    old = baseline.opening_quantity_evidence[0]
+    reissued = tuple(
+        dc_replace(opening, snapshot_id="independently-reproved-source-snapshot")
+        for opening in full.canonical_openings
+    )
+    quantities = tuple(_opening_quantity(opening) for opening in reissued)
+    assert all(quantity is not None for quantity in quantities)
+
+    # Even the real composition helper does not independently mint an
+    # original-PDF source authority capability when passed constructed typed
+    # objects. A complete, internally consistent fresh inventory is NECESSARY
+    # but not SUFFICIENT to seal across distinct producer snapshots.
+    amended = _append_reproved_areas(baseline, reissued, quantities)
+    assert len(amended.opening_quantity_evidence) == 2
+    assert amended.opening_quantity_evidence[0] is old
+    assert amended.opening_area_replay_source_inventory == tuple(
+        sorted(reissued, key=lambda opening: opening.canonical_opening_id)
+    )
+    for forged in (
+        amended,
+        dc_replace(amended, opening_area_replay_source_proof=object()),
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original-source opening replay authority proof required",
+        ):
+            seal_live_opening_area_claim_run(
+                forged, workspace_id=1, project_id="source-project",
+                source_reproved_append_only=True,
+            )
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original-source opening replay authority proof required",
+        ):
+            project_live_opening_customer_rows(
+                forged, workspace_id=1, project_id="source-project",
+                source_reproved_append_only=True,
+            )
+    assert baseline.opening_quantity_evidence[0] is old
+
+@pytest.mark.parametrize("flag", (None, 1, "true", [], {}))
+def test_untyped_cross_snapshot_seal_permit_fails(original_claim, flag):
+    _, amended = _two_snapshot_area_claim(original_claim)
+    with pytest.raises(ValueError, match="explicitly boolean"):
+        seal_live_opening_area_claim_run(
+            amended, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=flag,
+        )
+
+
+def test_source_reproved_append_rejects_foreign_original_root(original_claim):
+    from dataclasses import replace as dc_replace
+    _, amended = _two_snapshot_area_claim(original_claim)
+    opening = next(
+        o for o in amended.canonical_openings
+        if o.canonical_opening_id == amended.opening_quantity_evidence[1].input_entity_ids[0]
+    )
+    foreign = dc_replace(opening, revision_id="unrelated-source-revision")
+    forged = dc_replace(
+        amended,
+        canonical_openings=tuple(
+            foreign if o.canonical_opening_id == opening.canonical_opening_id else o
+            for o in amended.canonical_openings
+        ),
+        opening_quantity_evidence=(
+            amended.opening_quantity_evidence[0], _opening_quantity(foreign)
+        ),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="original source roots"):
+        seal_live_opening_area_claim_run(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
+
+
+def test_reproved_append_refuses_source_alias_and_stale_dependents(original_claim, counted_claim):
+    from dataclasses import replace as dc_replace
+    _, amended = _two_snapshot_area_claim(original_claim)
+    with pytest.raises(SourceClosedRunConflictError, match="stale opening count"):
+        seal_live_opening_area_claim_run(
+            dc_replace(amended, opening_count_quantity_evidence=counted_claim.opening_count_quantity_evidence),
+            workspace_id=1, project_id="source-project", source_reproved_append_only=True,
+        )
+    # Select the two ACTUALLY measured physical identities. Original source
+    # production may also carry unmeasured canonical opening candidates.
+    by_id = {o.canonical_opening_id: o for o in amended.canonical_openings}
+    old = by_id[amended.opening_quantity_evidence[0].input_entity_ids[0]]
+    fresh = by_id[amended.opening_quantity_evidence[1].input_entity_ids[0]]
+    copied = dc_replace(
+        fresh,
+        source_observation_ids=old.source_observation_ids,
+        source_lineage_root_ids=old.source_lineage_root_ids,
+        source_geometries=old.source_geometries,
+    )
+    # Keep matching typed issuer output so it reaches the cross-scope collision
+    # guard rather than failing a simple quantity-to-opening-dict comparison.
+    # Copying original source receipts invalidates the typed quantity producer.
+    # Retain the previously issued new quantity to test that copied physical
+    # source receipts cannot be projected as an authenticated append.
+    q = amended.opening_quantity_evidence[1]
+    assert _opening_quantity(copied) is None
+    forged = dc_replace(
+        amended,
+        canonical_openings=tuple(
+            copied if o.canonical_opening_id == fresh.canonical_opening_id else o
+            for o in amended.canonical_openings
+        ),
+        opening_quantity_evidence=(amended.opening_quantity_evidence[0], q),
+    )
+    with pytest.raises((SourceClosedRunConflictError, ValueError)):
+        seal_live_opening_area_claim_run(
+            forged, workspace_id=1, project_id="source-project",
+            source_reproved_append_only=True,
+        )
