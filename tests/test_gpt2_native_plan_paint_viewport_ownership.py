@@ -134,3 +134,68 @@ def test_foreign_original_text_or_changed_paint_cannot_be_admitted_as_mark():
         assert not complete and unresolved==(word.observation_id,)
     finally:
         doc.close()
+
+
+def test_long_native_text_paint_can_cross_f07_when_exact_word_glyphs_do_not():
+    """One source text-op can hold many words: validate the unique glyph run."""
+    doc=fitz.open()
+    try:
+        page=doc.new_page(width=640,height=280)
+        page.insert_text((90,145),"SOURCE LABEL SECOND NOTE",fontsize=14)
+        native=tuple(page.get_text("words",sort=False))
+        chosen=next(w for w in native if w[4]=="LABEL")
+        trace=page.get_texttrace()[0]
+        chars=trace["chars"]
+        raw="".join(chr(ch[0]) for ch in chars)
+        position=raw.index("LABEL")
+        target=chars[position:position+len("LABEL")]
+        box=(
+            min(c[3][0] for c in target)-0.02,
+            min(c[3][1] for c in target)-0.02,
+            max(c[3][2] for c in target)+0.02,
+            max(c[3][3] for c in target)+0.02,
+        )
+        assert not (
+            box[0]<=chosen[0] and box[1]<=chosen[1]
+            and box[2]>=chosen[2] and box[3]>=chosen[3]
+        )
+        assert not (
+            box[0]<=page.get_bboxlog()[trace["seqno"]][1][0]
+            and box[2]>=page.get_bboxlog()[trace["seqno"]][1][2]
+        )
+        word=_TrustedTextWord(
+            observation_id="unique-native-label",page_id="1",
+            source_partition_id="page:1",text="LABEL",
+            bbox=tuple(chosen[:4]),block_no=chosen[5],
+            line_no=chosen[6],word_no=chosen[7],
+            trusted=True,reason_codes=(),
+        )
+        receipt=SimpleNamespace(
+            trusted=True,raw_text="LABEL",page_id="1",
+            source_partition_id="page:1",geometry=tuple(chosen[:4]),
+            sequence_number=trace["seqno"],trace_sequence_numbers=(),
+        )
+        kwargs=dict(
+            native_words_by_address={tuple(chosen[5:8]):[chosen]},
+            trace_by_seq={trace["seqno"]:[trace]},
+            bboxlog=page.get_bboxlog(),parent_bbox=box,
+        )
+        assert _original_native_word_paint_within_parent(word,receipt,**kwargs)
+        # A different glyph now paints in the unique word's own source cell.
+        # The ambiguity cannot be resolved by selecting the first text run.
+        corrupted=list(trace["chars"])
+        original_char=corrupted[0]
+        changed=list(original_char)
+        changed[3]=tuple(target[0][3])
+        corrupted[0]=tuple(changed)
+        rival={**trace,"chars":tuple(corrupted)}
+        assert not _original_native_word_paint_within_parent(
+            word,receipt,{**kwargs,"trace_by_seq":{trace["seqno"]:[rival]}}
+        )
+        # The accepted glyph geometry must not be moved beyond the F07 edge.
+        bad_box=(box[0],box[1],box[2]-2.,box[3])
+        assert not _original_native_word_paint_within_parent(
+            word,receipt,{**kwargs,"parent_bbox":bad_box}
+        )
+    finally:
+        doc.close()

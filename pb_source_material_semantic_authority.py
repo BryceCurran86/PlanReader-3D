@@ -1701,8 +1701,8 @@ def _original_native_word_paint_within_parent(
         return False
     if len(seqnos) == 2 and seqnos[1] != seqnos[0] + 1:
         return False
-    seen_text = []
     kinds = []
+    owned_glyph_runs = []
     for seq in seqnos:
         spans = trace_by_seq.get(seq, ())
         if len(spans) != 1:
@@ -1711,7 +1711,7 @@ def _original_native_word_paint_within_parent(
         try:
             entry = bboxlog[seq]
             kind, paint = entry[0], entry[1]
-            codepoints = span["chars"]
+            codepoints = tuple(span["chars"])
             text = "".join(chr(int(c[0])) for c in codepoints)
             native_type = int(span["type"])
             paint_box = tuple(float(v) for v in paint)
@@ -1722,20 +1722,64 @@ def _original_native_word_paint_within_parent(
                 or not text or len(paint_box) != 4
                 or any(not math.isfinite(v) for v in paint_box)
                 or paint_box[2] <= paint_box[0]
-                or paint_box[3] <= paint_box[1]
-                or not _bbox_fully_inside(paint_box, parent_bbox, tolerance=1e-6)):
+                or paint_box[3] <= paint_box[1]):
             return False
+
+        # CAD exporters can paint an entire long text row in ONE operator,
+        # while get_text("words") exposes each native word separately.
+        # A full bboxlog text-op rectangle can therefore legitimately extend
+        # outside the F07 plan. Do not use a nearby/first substring: require
+        # EXACTLY ONE source-glyph run whose character bboxes belong wholly to
+        # the original native word AND the unchanged F07 parent rectangle.
+        matches = []
+        start = text.find(word.text)
+        while start >= 0:
+            part = codepoints[start:start + len(word.text)]
+            if len(part) == len(word.text):
+                try:
+                    glyph_boxes = tuple(
+                        tuple(float(v) for v in char[3])
+                        for char in part
+                    )
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    glyph_boxes = ()
+                if (len(glyph_boxes) == len(word.text)
+                        and all(
+                            len(rect) == 4
+                            and all(math.isfinite(v) for v in rect)
+                            and rect[2] > rect[0] and rect[3] > rect[1]
+                            and _bbox_fully_inside(rect, word.bbox, tolerance=1e-6)
+                            and _bbox_fully_inside(rect, parent_bbox, tolerance=1e-6)
+                            for rect in glyph_boxes
+                        )):
+                    matches.append((start, part))
+            start = text.find(word.text, start + 1)
+        if len(matches) != 1:
+            return False
+        start, part = matches[0]
+        # An unrelated source glyph painted substantially inside the *same*
+        # native word rectangle is a competing source text owner, not a clean
+        # text-run continuation. Reject rather than electing this candidate.
+        for offset, char in enumerate(codepoints):
+            if start <= offset < start + len(word.text):
+                continue
+            try:
+                foreign_box = tuple(float(v) for v in char[3])
+            except (TypeError, ValueError, IndexError, OverflowError):
+                return False
+            if (_bbox_fully_inside(foreign_box, word.bbox, tolerance=1e-6)
+                    and len(foreign_box) == 4):
+                return False
+
         kinds.append(kind)
-        seen_text.append(text)
-    # An original complementary overprint must be the identical source word
-    # in two independently checked fill/stroke operations. Split runs may be
-    # accepted only when their contiguous original text equals the full word.
-    if len(seqnos) == 2:
-        if (set(kinds) != {"fill-text", "stroke-text"}
-                or not (seen_text[0] == seen_text[1] == word.text
-                        or "".join(seen_text) == word.text)):
-            return False
-    elif word.text not in seen_text[0]:
+        owned_glyph_runs.append(tuple(part))
+    # A second span can only be the SAME original word overprinted with
+    # complementary fill/stroke source glyphs. Separate/different words or
+    # mismatched glyphs remain evidence conflicts.
+    if len(seqnos) == 2 and (
+        set(kinds) != {"fill-text", "stroke-text"}
+        or owned_glyph_runs[0] != owned_glyph_runs[1]
+    ):
         return False
     return True
 
