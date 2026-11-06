@@ -309,6 +309,26 @@ class _WholeWallFrame:
     skipped_motif_wall_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class SourceG17RightFlankW2Owner:
+    """Local original-ink face ownership by W2 *centreline*, not a wall frame.
+
+    This proves a G17 right-hand face/endcap independently and cross-links it
+    to original-source W2 parent edges owned by a unique existing host member.
+    No face is fabricated at the W2 centreline, and the receipt establishes
+    neither global W4 equivalence nor complete frame/quantity authority.
+    """
+
+    opening_identity_id: str
+    host_binding_record_id: str
+    right_wall_candidate_id: str
+    g17_face_observation_ids: tuple[str, str]
+    g17_end_observation_id: str
+    w2_edge_ids: tuple[str, ...]
+    w2_source_primitive_ids: tuple[str, ...]
+    w2_source_observation_ids: tuple[str, ...]
+
+
 def _blocked(
     status: EvidenceResolutionStatus,
     *reasons: str,
@@ -1327,6 +1347,209 @@ class OpeningHostFrameProducer:
             skipped_motif_wall_ids=(),
         )
 
+    def source_g17_right_flank_w2_owner_shadow(
+        self, *, opening_selector: ObservationSelector,
+        host_binding_selector: OpeningHostBindingSelector,
+    ) -> SourceG17RightFlankW2Owner | None:
+        """Reprove original G17 outer faces against the W2 local centreline.
+
+        Deliberately avoids the invalid premise that W2/W4 centreline edges
+        sit ON either outer wall face. The independent sealed G17 face strokes
+        and endcap remain the only source-face authority. The exact producer
+        host proof binds one W2 member to the right flank. A source-derived
+        centreline projection must then demonstrate the member's own original
+        W2 parent and local jamb ownership, with every source receipt retained.
+        Any missing, conflicting or competing owner abstains.
+        """
+        if (type(opening_selector) is not ObservationSelector
+                or type(host_binding_selector) is not OpeningHostBindingSelector):
+            raise TypeError("exact original opening/host selectors required")
+        if not (self._raster_split_frame_shadow
+                and self._source_fragment_roles_shadow
+                and self._supplemental_walls is not None):
+            return None
+        result=self._opening.prove_existence(opening_selector)
+        host=self._host.resolve(host_binding_selector)
+        opening=result.existence_record
+        binding=host.record
+        if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                or result.proposition != PHYSICAL_OPENING_EXISTS
+                or opening is None
+                or opening.structural_pattern not in host_geometry.RASTER_WALL_BAND_HOST_PATTERNS
+                or host.status is not EvidenceResolutionStatus.CORROBORATED
+                or OPENING_HOST_BINDING_RESOLVED not in host.reason_codes
+                or binding is None
+                or len(binding.member_wall_candidate_ids)!=2):
+            return None
+        root=("document_id","revision_id","source_sha256","snapshot_id","page_id")
+        if (any(getattr(opening,k)!=getattr(binding,k)
+                or getattr(binding,k)!=getattr(host_binding_selector,k)
+                for k in root)
+                or opening.record_id!=binding.opening_identity_id
+                or opening.record_id!=host_binding_selector.opening_identity_id
+                or binding.decision_scope_id!=host_binding_selector.decision_scope_id):
+            return None
+        geometry=host_geometry._opening_geometry(self._opening,opening)
+        if geometry is None or not _valid_aperture_geometry(geometry):
+            return None
+        selector=PhysicalWallCandidateSelector(
+            document_id=binding.document_id, revision_id=binding.revision_id,
+            source_sha256=binding.source_sha256, snapshot_id=binding.snapshot_id,
+            page_id=binding.page_id, decision_scope_id=binding.decision_scope_id,
+        )
+        base=self._walls.resolve_scope(selector)
+        supp=self._supplemental_walls.resolve_scope(selector)
+        if (base.status is not EvidenceResolutionStatus.CORROBORATED
+                or base.proposition!=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+                or not base.scope_complete or base.equivalence is None
+                or supp.status is not EvidenceResolutionStatus.CORROBORATED
+                or supp.proposition!=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+                or supp.scope_complete or supp.equivalence is None
+                or any(getattr(scope,k)!=getattr(binding,k)
+                    for scope in (base,supp) for k in (*root,"decision_scope_id"))):
+            return None
+        records=self._scope_records_by_id(base,binding)
+        if not records:
+            return None
+        visibility=self._opening.source_visibility_authority()
+        support=[]
+        for oid in opening.source_observation_ids:
+            response=visibility.resolve_raster_opening_primitive(ObservationSelector(
+                document_id=opening.document_id,revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,snapshot_id=opening.snapshot_id,
+                observation_id=oid,
+            ))
+            observed=response.observation
+            if (response.status is not EvidenceResolutionStatus.CORROBORATED
+                    or observed is None or observed.page_id!=opening.page_id):
+                return None
+            support.append((str(oid),observed))
+        flanks=host_geometry._raster_source_band_flanks(
+            tuple(obs for _oid,obs in support),geometry)
+        if flanks is None or set(flanks)!={"left","right"}:
+            return None
+        lo,hi,nlo,nhi,jamb=flanks["right"]
+        faces=[]
+        ends=[]
+        for oid,observed in support:
+            line=host_geometry._line(observed)
+            if line is None:
+                return None
+            if observed.observation_kind=="raster_wall_band_face":
+                data=host_geometry._source_line_axis_data(line,geometry)
+                if (data is not None
+                        and abs(data[0]-lo)<=_COORD_TOL
+                        and abs(data[1]-hi)<=_COORD_TOL
+                        and (abs(data[2]-nlo)<=_COORD_TOL
+                            or abs(data[2]-nhi)<=_COORD_TOL)):
+                    faces.append(oid)
+            elif observed.observation_kind=="raster_wall_band_end":
+                points=host_geometry._endpoints(line)
+                along=tuple(_dot((p[0]-geometry.origin[0],
+                                  p[1]-geometry.origin[1]),geometry.axis)
+                            for p in points)
+                normal=sorted(_dot((p[0]-geometry.origin[0],
+                                   p[1]-geometry.origin[1]),geometry.normal)
+                              for p in points)
+                if (all(abs(v-jamb)<=_COORD_TOL for v in along)
+                        and abs(normal[0]-nlo)<=_COORD_TOL
+                        and abs(normal[1]-nhi)<=_COORD_TOL):
+                    ends.append(oid)
+        if len(faces)!=2 or len(set(faces))!=2 or len(ends)!=1:
+            return None
+        merged_source_ids=tuple(sorted(set(
+            (*base.source_observation_ids,*supp.source_observation_ids)
+        )))
+        line_map=host_geometry._authenticated_raster_source_lines(
+            self._opening,opening,merged_source_ids)
+        if not line_map:
+            return None
+        # Recompute the full original source-owned mixed host; the caller's
+        # cached host record is never enough to grant this lineage receipt.
+        proof=host_geometry._resolve_opening_local_mixed_scope_source_band(
+            self._opening,opening,geometry,base.records,supp.records,
+            base.source_observation_ids,supp.source_observation_ids,
+            source_fragment_roles_shadow=True,
+        )
+        if (proof.status is not EvidenceResolutionStatus.CORROBORATED
+                or len(proof.bands)!=1
+                or tuple(sorted(binding.member_wall_candidate_ids))
+                    !=tuple(sorted(proof.bands[0].member_ids))):
+            return None
+
+        owner_ids=[]
+        snap=float(host_geometry.DEFAULT_GAP_SNAP_TOLERANCE_PT)+_COORD_TOL
+        pixel=float(host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT)+_COORD_TOL
+        for wall_id in binding.member_wall_candidate_ids:
+            record=records.get(str(wall_id))
+            if (record is None or not record.physical_identity.usable
+                    or not record.source_edge_fragments
+                    or not record.physical_identity.edge_ids):
+                return None
+            projection=source_edge_axis_projection(record,geometry,line_map)
+            if projection is None:
+                return None
+            parent_role=False
+            for parent_id in record.physical_identity.source_primitive_ids:
+                line=line_map.get(str(parent_id))
+                data=(None if line is None
+                      else host_geometry._source_line_axis_data(line,geometry))
+                if data is None:
+                    continue
+                parent_lo,parent_hi,offset=data
+                if (abs(parent_lo-jamb)<=snap
+                        and nlo-pixel<=offset<=nhi+pixel
+                        and min(parent_hi,hi)-max(parent_lo,lo)>pixel):
+                    for start,end in zip(record.wall_candidate.centerline_pts,
+                                         record.wall_candidate.centerline_pts[1:]):
+                        local=host_geometry._source_line_axis_data(
+                            (*start,*end),geometry)
+                        if local is not None and abs(local[0]-jamb)<=snap:
+                            if (nlo-snap<=local[2]<=nhi+snap
+                                    and min(local[1],parent_hi,hi)
+                                        -max(local[0],parent_lo,lo)>pixel):
+                                parent_role=True
+                                break
+                if parent_role:
+                    break
+            if parent_role:
+                owner_ids.append(str(wall_id))
+        if len(owner_ids)!=1:
+            return None
+        owner=records[owner_ids[0]]
+        primitive_ids=tuple(sorted(set(str(v) for v
+                              in owner.physical_identity.source_primitive_ids)))
+        found={}
+        for oid in merged_source_ids:
+            rec=visibility.resolve_visible(ObservationSelector(
+                document_id=opening.document_id,revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,snapshot_id=opening.snapshot_id,
+                observation_id=oid))
+            observed=rec.observation
+            if (rec.status is not EvidenceResolutionStatus.CORROBORATED
+                    or observed is None or observed.page_id!=opening.page_id):
+                continue
+            source_ref=str(observed.source_primitive_ref or "")
+            primitive=source_ref.removeprefix("visible:")
+            if (source_ref.startswith("visible:")
+                    and primitive in primitive_ids
+                    and host_geometry._line(observed)==line_map.get(primitive)):
+                found.setdefault(primitive,[]).append(str(oid))
+        if set(found)!=set(primitive_ids):
+            return None
+        return SourceG17RightFlankW2Owner(
+            opening_identity_id=opening.record_id,
+            host_binding_record_id=binding.record_id,
+            right_wall_candidate_id=owner_ids[0],
+            g17_face_observation_ids=tuple(sorted(faces)),
+            g17_end_observation_id=ends[0],
+            w2_edge_ids=tuple(sorted(set(str(edge) for edge
+                                 in owner.physical_identity.edge_ids))),
+            w2_source_primitive_ids=primitive_ids,
+            w2_source_observation_ids=tuple(sorted(set(
+                oid for values in found.values() for oid in values))),
+        )
+
     def source_closed_right_pier_shadow(
         self, *, opening_selector: ObservationSelector,
         host_binding_selector: OpeningHostBindingSelector,
@@ -1554,6 +1777,14 @@ class OpeningHostFrameProducer:
                 if local_pier is not None:
                     frame_failure_reasons.append(
                         "opening_host_frame_source_closed_pier_faces_candidate_only"
+                    )
+                source_owner=self.source_g17_right_flank_w2_owner_shadow(
+                    opening_selector=opening_selector,
+                    host_binding_selector=host_binding_selector,
+                )
+                if source_owner is not None:
+                    frame_failure_reasons.append(
+                        "opening_host_frame_source_g17_face_w2_centreline_owner_candidate_only"
                     )
             return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
