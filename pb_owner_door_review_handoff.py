@@ -51,6 +51,11 @@ GATE_NO_CANDIDATES = "NO_REVIEW_CANDIDATES"
 GATE_NOT_RUN = "OWNER_DOOR_REVIEW_NOT_RUN"
 REASON_NOT_IN_STANDARD_CLAIM = "opening_not_in_standard_claim"
 
+TEMPLATE_FILENAME = "owner_door_height_approvals_template.json"
+GATE_TEMPLATE_READY = "OWNER_DOOR_APPROVALS_TEMPLATE_READY"
+GATE_TEMPLATE_NO_DOORS = "NO_DOOR_OPENINGS_FOR_TEMPLATE"
+GATE_TEMPLATE_NOT_RUN = "OWNER_DOOR_APPROVALS_TEMPLATE_NOT_RUN"
+
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _TOP_KEYS = frozenset({"schema_version", "source_sha256", "approvals"})
 _ENTRY_KEYS = frozenset({"physical_opening_id", "page", "height_mm", "approved_by", "approved_at"})
@@ -78,6 +83,16 @@ class OwnerDoorReviewOutcome:
     withheld_counts: Mapping[str, int]
     unused_approval_count: int
     approval_pages_out_of_scope: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class OwnerDoorApprovalsTemplateOutcome:
+    """An approvals file with every owner field blank, or the typed reason there is nothing to list."""
+
+    gate: str
+    document: Optional[Mapping[str, Any]]
+    door_count: int
+    pages: tuple[int, ...]
 
 
 # ----------------------------------------------------------------------------------------------- approvals file
@@ -371,12 +386,101 @@ def run_owner_door_review_step(
     )
 
 
+# ----------------------------------------------------------------------------------------------- approvals template
+
+def build_owner_door_approvals_template(
+    composition: LivePhysicalOpeningVoidComposition,
+    *,
+    claim: object,
+    source_sha256: str,
+) -> OwnerDoorApprovalsTemplateOutcome:
+    """List the doors an owner could approve, in the approvals-file shape, with every owner field left ``null``.
+
+    A door is listed when it is a door, has no area of its own yet, and is also an opening of the same run's standard claim (the
+    review step would withhold it otherwise).  Nothing here says the door is eligible: whether it prints exactly one authenticated
+    figure is only decided when an approval is assessed, and an approval for an ineligible door is reported as unused.  No height,
+    approver or date is produced; the loader refuses the file until the owner has filled every entry they keep.
+    """
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    if not _is_sha256(source_sha256):
+        raise ValueError("source_sha256 must be a lowercase 64-hex digest")
+    claim_ids = _claim_opening_ids(claim)
+    pages_by_id: dict[str, int] = {}
+    for opening in composition.canonical_openings:
+        if opening.opening_kind != "door" or opening.area_m2 is not None:
+            continue
+        if opening.source_sha256 != source_sha256:
+            raise RuntimeError("composed opening belongs to a different document")
+        identity = opening.canonical_opening_id
+        if identity not in claim_ids:
+            continue
+        page_text = opening.page_id
+        if (
+            type(page_text) is not str
+            or not page_text.isascii()
+            or not page_text.isdigit()
+            or str(int(page_text)) != page_text
+            or int(page_text) <= 0
+        ):
+            raise RuntimeError("composed opening has a page id that is not a positive page number")
+        if identity in pages_by_id:
+            raise RuntimeError("composed openings repeat a canonical opening id")
+        pages_by_id[identity] = int(page_text)
+    if not pages_by_id:
+        return OwnerDoorApprovalsTemplateOutcome(GATE_TEMPLATE_NO_DOORS, None, 0, ())
+    entries = [
+        {"physical_opening_id": identity, "page": page, "height_mm": None, "approved_by": None, "approved_at": None}
+        for identity, page in sorted(pages_by_id.items(), key=lambda item: (item[1], item[0]))
+    ]
+    document = {
+        "schema_version": OWNER_DOOR_HEIGHT_APPROVALS_SCHEMA_VERSION,
+        "source_sha256": source_sha256,
+        "approvals": entries,
+    }
+    return OwnerDoorApprovalsTemplateOutcome(
+        GATE_TEMPLATE_READY, document, len(entries), tuple(sorted(set(pages_by_id.values()))))
+
+
+def run_owner_door_approvals_template_step(
+    pdf_path: object,
+    *,
+    claim: object,
+    source_sha256: str,
+    page_count: int,
+    pages: Optional[Sequence[int]],
+    topology_pages: Optional[Sequence[int]],
+    room_area_support_pages: Optional[Sequence[int]],
+    native_text_kwargs: Mapping[str, bool],
+) -> OwnerDoorApprovalsTemplateOutcome:
+    """Compose with the claim collector's page scope and options and no approvals, then list the possible door approvals."""
+    text_kwargs = _validated_native_text_kwargs(native_text_kwargs)
+    pdf_bytes = Path(pdf_path).read_bytes()  # type: ignore[arg-type]
+    if hashlib.sha256(pdf_bytes).hexdigest() != source_sha256:
+        raise RuntimeError("source PDF changed before the owner door approvals template step")
+    decoded, topology, evidence = claim_page_scope(page_count, pages, topology_pages, room_area_support_pages)
+    composition = compose_owner_approved_opening_voids(
+        pdf_bytes,
+        source_sha256=source_sha256,
+        decoded_page_ids=decoded,
+        topology_page_ids=topology,
+        evidence_page_ids=evidence,
+        approvals=(),
+        native_text_kwargs=text_kwargs,
+    )
+    return build_owner_door_approvals_template(composition, claim=claim, source_sha256=source_sha256)
+
+
 __all__ = [
     "GATE_NOT_RUN",
     "GATE_NO_CANDIDATES",
+    "GATE_TEMPLATE_NOT_RUN",
+    "GATE_TEMPLATE_NO_DOORS",
+    "GATE_TEMPLATE_READY",
     "GATE_VERIFIED",
     "MAX_APPROVALS_FILE_BYTES",
     "OWNER_DOOR_HEIGHT_APPROVALS_SCHEMA_VERSION",
+    "OwnerDoorApprovalsTemplateOutcome",
     "OwnerDoorHeightApprovals",
     "OwnerDoorHeightApprovalsError",
     "OwnerDoorReviewOutcome",
@@ -384,9 +488,12 @@ __all__ = [
     "REVIEW_DIRNAME",
     "REVIEW_ROWS_FILENAME",
     "REVIEW_RUN_FILENAME",
+    "TEMPLATE_FILENAME",
     "assess_owner_door_review",
+    "build_owner_door_approvals_template",
     "claim_page_scope",
     "compose_owner_approved_opening_voids",
     "load_owner_door_height_approvals",
+    "run_owner_door_approvals_template_step",
     "run_owner_door_review_step",
 ]

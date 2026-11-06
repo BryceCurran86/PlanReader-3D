@@ -321,3 +321,51 @@ Owner instruction (chat, 2026-11-06): "Wire it, default off". This section is th
 2. Whether a downstream reconciliation or scorer counts a `review_required` seal as a prediction is still not examined. The review files sit outside everything those consumers read, so none of them can see these rows today.
 3. Only Lot16 page 3 was run, with the core family group. The complete (`all`) handoff path is covered by the stubbed test of its scope forwarding, not by a real run. A raster-only page may compose different ids than the claim; the cross-check would then withhold everything with a typed reason rather than publish.
 4. The 2100 mm remains one owner assumption for these doors; the 4 rows are estimator-review rows, not certified quantities.
+
+## 22. Approvals-template export for the door review lane: architecture before code
+
+Owner instruction (chat, 2026-11-06): "Yes, add it" (answer to: add an approvals-template export so the approvals file can be authored without a code run). Trace and design, written before any code.
+
+**Observed repository behavior.**
+- `load_owner_door_height_approvals` accepts only `{schema_version, source_sha256, approvals[]}` with entries of exactly `physical_opening_id, page, height_mm, approved_by, approved_at`. A `null` height, approver or date is refused (`height_mm must be a finite positive number`, `must be a non-empty, trimmed string`).
+- A canonical opening id is source-derived (document, revision, page, observation lineage). The revision depends on the decoded page set, so an id is only reproducible under the same page scope the claim collector used. In the handoff tool that scope comes from `_source_page_scopes`, the classified floor-plan page and the family group, all computed inside `_generate_project_handoff_locked`.
+- Before an approval exists, a single-figure door has `area_m2 is None` and `area_basis is None` on its `LiveCanonicalOpeningObject`; the printed figure is not exposed on the object (it lives in the label result inside the composition loop). Whether a door prints exactly one authenticated figure is decided only in `assess_owner_approved_door_area_shadow`, which needs an approval record to reach that point.
+- The previous real-chain proof had to derive the ids with a throwaway script (`claim_page_scope` + `compose_owner_approved_opening_voids` with no approvals). 8 door-kind openings were found on Lot16 page 3; 4 became review rows, 2 were withheld (`owner_basis_quantity_not_published`), 2 approvals were unused.
+
+**Inference.**
+- The ids must be produced under the handoff's own scope. A standalone tool would have to re-derive the page classification and the family-group arithmetic, which is exactly the drift the previous section avoided. The template belongs in the handoff tool, as a sibling of the review lane.
+- A listed door cannot be promised to be eligible: exactly-one-printed-figure is unknowable without an approval, and reading it out of the composition would mean editing a shared composition module for a convenience feature. The template therefore lists every door that is a possible review candidate (door kind, no derived area, also in the standard claim) and says nothing about eligibility; ineligible approvals are already counted as `unused_approval_count` at review time.
+- Pre-filling any value would turn the template into an authority source. A bulk-fill helper ("approve every door at H") is an owner act and would be a new authority scope, as in the previous section; it is not added.
+
+**Proposed change (default off).**
+1. Library `pb_owner_door_review_handoff.py`: `build_owner_door_approvals_template(composition, *, claim, source_sha256)` (pure; keeps door-kind openings with no derived area whose canonical id the claim also holds; refuses duplicate ids, foreign source hashes, non-numeric page ids) and `run_owner_door_approvals_template_step(...)` (same page scope and producer options as the review step, composition with no approvals).
+2. The document is the approvals-file shape with `height_mm`, `approved_by`, `approved_at` all `null`: it is refused by the loader until the owner fills each entry, and the owner removes the entries they do not approve. No height, name or date is ever produced by code.
+3. Handoff tool: boolean `owner_door_approvals_template` (CLI `--write-owner-door-approvals-template`), default off, family group `all` or `core`, mutually exclusive with `--owner-door-height-approvals`. Output only `owner_door_review/owner_door_height_approvals_template.json` plus one conditional summary key `owner_door_approvals_template` (gate, door count, pages, file hash, `authority_granted: False`). Zero doors write no file. Failure is recorded as `OWNER_DOOR_APPROVALS_TEMPLATE_UNVERIFIED:<type>`, removes what it wrote and changes nothing else. A reused directory is refused by the existing guard.
+
+**Not changed.** The loader, the promotion and seal modules, the composition, the claim collector, every family run, the combined run, customer rows, the project status, benchmark-defining files and the `AGENTS.md` authority lists.
+
+**Benchmark observations that must not influence implementation.** The count of doors on any plan; the owner's 2100 mm; no project name, width, height or expected value is used by the module or tests.
+
+**Tests first.** Default-off byte identity and no import; template shape (exact loader keys, nulls, sorted, unique, one per door, schema and hash); the loader refuses the unfilled template and accepts it once filled (round trip); only door-kind, area-less, claim-held openings are listed; foreign hash, duplicate id, non-numeric page and empty composition handled; the flag excludes the approvals option; family-group refusal before any output; failure isolation; reuse refusal; determinism and input-order invariance; no mutation of the composition or claim; the template carries no authority fields.
+
+## 23. Approvals-template export: built and measured
+
+**What was built.**
+- `pb_owner_door_review_handoff.py`: `build_owner_door_approvals_template` (pure) and `run_owner_door_approvals_template_step` (same page scope and producer options as the review step, composition with no approvals).
+- `tools/run_source_closed_project_handoff.py`: optional `owner_door_approvals_template` / `--write-owner-door-approvals-template`, default off, family group `all` or `core`, mutually exclusive with `--owner-door-height-approvals`. One file below `owner_door_review/`, one conditional summary key, failure recorded as `OWNER_DOOR_APPROVALS_TEMPLATE_UNVERIFIED:<type>` with the written file removed.
+- Nothing else changed: the loader, promotion and seal modules, composition, claim collector, family runs, combined run, customer rows, project status.
+
+**Behaviour.** The file is the approvals-file shape with `height_mm`, `approved_by` and `approved_at` all `null`. The loader refuses it until each kept entry is filled (tested per field), and an entry the owner does not approve is deleted. The listed doors are: door kind, no derived area, and also an opening of the same run's standard claim. Eligibility (exactly one authenticated printed figure) is deliberately not claimed: that is decided only when an approval is assessed.
+
+**Real chain: Lot16 original, page 3 (SHA prefix 10109b4b), counts only.** Same command as before (`--family-group core --source-plan-page-index 2`) with and without the flag:
+- Added files: exactly `owner_door_review/owner_door_height_approvals_template.json`. Removed: none. **Every shared file byte-identical**; `production_summary.json` identical apart from the lane key. Status `sealed`, 9 combined quantities, 9 verified customer rows in both.
+- Lane: **7 doors listed** (the earlier throwaway script listed 8 door-kind openings; the eighth has its own area or is not in the claim), one page, **0 owner fields set**, `authority_granted` false, not in the combined run.
+- Filled with the owner's earlier decision (2100 mm, named approver and date, as file inputs) and run through the review lane with the same project id: **both review files byte-identical to the earlier code-authored run** (4 verified rows, 2 withheld `owner_basis_quantity_not_published`; 1 approval unused instead of 2, because the file no longer carries the door that was never a candidate).
+
+**Tests and mutation.** 64 new tests (builder, loader round trip including each blank field, listing filters, input-order invariance, no mutation, refusals, source step scope and option parity with the review step, handoff wiring, failure isolation including a write failure, reuse refusal, command line, repository scan). The 21 test files that touch the handoff tool or the library plus three door-height shadow files: 695 passed, 11 skipped (symlink and private-PDF tests). Mutation: 44 mutants over the builder, step and tool lane, **all killed**; one extra mutant exposed a failure-branch reset that could only matter because summary fields were assigned before the file hash was read, so the assignments were reordered and the dead reset deleted. CI-enforced ruff rules and the V2 truth-separation gate pass.
+
+**Not proven / for the reviewer.**
+1. Filling is manual by design: no bulk-fill helper ("approve every door at H") was added; it would be a new authority scope.
+2. The listing is a candidate list, not an eligibility proof (see Behaviour). Some approvals will still be reported as unused or withheld.
+3. Only Lot16 page 3 with the core family group was run for real; the `all` path is covered by the stubbed scope-forwarding test.
+4. A second full handoff run is needed to produce the template (the ids need the handoff's own scope and claim); a cheaper standalone path would have to duplicate the page classification and was not built.
