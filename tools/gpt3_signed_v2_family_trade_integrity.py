@@ -130,6 +130,24 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
                 )
+            if (
+                family == "floor_area"
+                and trade == "flooring"
+                and _field(quantity, "abstained") is False
+            ):
+                # The modern original floor-area issuer signs the physical
+                # floor in both the semantic suffix and identity refs. This
+                # negative mapping veto neither repairs legacy semantics nor
+                # authenticates an original producer.
+                source_key = _field(quantity, "semantic_key")
+                if (
+                    type(source_key) is str
+                    and source_key.startswith("floor_area:")
+                    and (len(refs) != 1 or source_key != f"floor_area:{refs[0]}")
+                ):
+                    raise ValueError(
+                        "mapped floor area semantic source physical identity mismatch"
+                    )
             # The higher-level V1 signed receipt verifier guarantees a unit
             # exists. A missing unit in source-neutral helper-only test data
             # is left to that gate; a PRESENT incompatible source-owned unit
