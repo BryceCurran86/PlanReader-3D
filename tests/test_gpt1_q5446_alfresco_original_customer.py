@@ -143,7 +143,55 @@ def test_original_sha_alfresco_has_independent_physical_owner_and_customer():
     assert result.quantity.metadata["source_schedule_commercial_permission"] is False
     assert result.quantity.metadata["tiled_floor_finish_authorized"] is False
     assert result.quantity.metadata["net_internal_finished_face_authorized"] is False
+    assert result.quantity.metadata["physical_boundary_model"] == "source_post_bounded_open_bay"
+    connector_ids = result.quantity.metadata["physical_connector_source_path_ids"]
+    assert type(connector_ids) is list and len(connector_ids) == 4
+    assert len(connector_ids) == len(set(connector_ids))
+    # The signed physical lineage must include independently witnessed native
+    # wall continuations and corner-post quads, NOT disconnected four ink edges.
+    assert all(
+        str(i) in " ".join(result.quantity.evidence_ids)
+        for i in connector_ids
+    )
     assert result.customer_rows[0]["quantity_status"] == "To review"
     assert result.customer_rows[0]["quantity_family"] == "floor_area"
     verification = verify_sealed_customer_output(result.sealed_run, result.customer_rows)
     assert verification.valid_quantity_count == verification.customer_row_count == 1
+
+
+def test_original_sha_open_bay_primitive_mutations_must_abstain():
+    private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
+    if not private:
+        pytest.skip("private original source unavailable; cannot claim source positivity")
+    from pb_source_native_rectangular_footprint_authority import (
+        corroborate_source_labeled_rectangular_footprint as binder,
+    )
+    from pathlib import Path
+    import hashlib
+    from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
+
+    assert hashlib.sha256(Path(private).read_bytes()).hexdigest() == SOURCE_SHA256
+    with fitz.open(private) as pdf:
+        drawings = pdf[0].get_drawings()
+    figure = original_alfresco_figure_witness(drawings)
+    assert figure is not None
+    def source_proof(rows):
+        return binder(
+            rows, source_label_path_ids=PLAN_ALFRESCO_LABEL_PATHS,
+            figured_width_mm=figure.horizontal_mm,
+            figured_depth_mm=figure.vertical_mm,
+            excluded_source_path_ids=figure.source_vector_path_ids,
+        )
+    original = source_proof(drawings)
+    assert original is not None
+    assert original.boundary_model == "source_post_bounded_open_bay"
+    assert len(original.connector_source_path_ids) == 4
+    for connector_id in original.connector_source_path_ids:
+        changed = drawings.copy()
+        changed[connector_id] = {}
+        assert source_proof(changed) is None
+    # Two visually identical post strokes must not silently select one.
+    duplicate = drawings.copy()
+    duplicate.append(drawings[original.connector_source_path_ids[2]])
+    assert len(duplicate) <= SOURCE_PRIMITIVE_CAP
+    assert source_proof(duplicate) is None
