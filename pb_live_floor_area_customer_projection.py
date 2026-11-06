@@ -7,9 +7,11 @@ measure rooms/floors, infer scale, create identity, or grant estimator approval.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
@@ -18,7 +20,8 @@ from pb_live_floor_area_source_closed_export import (
     build_live_floor_area_source_traces,
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import QuantityEvidence, canonical_contract_json, stable_contract_id
+from pb_room_area_quantity import _canonical_ring
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -37,18 +40,15 @@ def _measurement_authority(
     quantity: QuantityEvidence,
 ) -> CommercialMeasurementAuthority | None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    authority = (
-        _clean(quantity.authority)
-        .lower()
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
+    # This is the final commercial measurement-method authority boundary.
+    # The original room-area producer has only two permitted source methods;
+    # never turn a padded, imported, or substring-matching method token into
+    # a source-authenticated customer measurement.
+    authority = quantity.authority
+    if type(authority) is not str:
+        return None
 
-    if authority in {
-        "documented_dimension",
-        "figured_dimension",
-        "documented/figured",
-    } or "figured" in authority:
+    if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
         raw_ids = metadata.get("figured_dimension_ids")
         if (
             not isinstance(raw_ids, (tuple, list))
@@ -75,10 +75,19 @@ def _measurement_authority(
             },
         )
 
-    if "scale" in authority or "geometry" in authority:
+    if authority == MeasurementAuthorityType.PDF_SCALED.value:
         scale_id = metadata.get("resolved_scale_id")
         scale_status = metadata.get("scale_status")
         raw_conflicts = metadata.get("scale_conflicts", ())
+        # Optional original calibration lineage must remain literal; do not
+        # clean a padded/imported source fingerprint into customer metadata.
+        scale_fingerprint = metadata.get("scale_fingerprint")
+        if scale_fingerprint is not None and (
+            type(scale_fingerprint) is not str
+            or not scale_fingerprint
+            or scale_fingerprint != scale_fingerprint.strip()
+        ):
+            return None
         if (
             type(scale_id) is not str or not scale_id
             or scale_id != scale_id.strip()
@@ -100,11 +109,92 @@ def _measurement_authority(
             metadata={
                 "source": "live_floor_area_customer_projection",
                 "quantity_id": quantity.quantity_id,
-                "scale_fingerprint": _clean(metadata.get("scale_fingerprint")),
+                "scale_fingerprint": scale_fingerprint or "",
             },
         )
 
     return None
+
+
+
+def _require_original_scaled_room_area_identity(
+    quantity: QuantityEvidence,
+    *,
+    originals_by_id: Mapping[str, QuantityEvidence],
+    rooms_by_id: Mapping[str, tuple[object, ...]],
+) -> None:
+    """Negative-only source-ID reproof; never issues geometry or a scale.
+
+    The original PDF-scaled room-area producer binds its calibration
+    fingerprint AND canonical original PDF ring into the source quantity ID.
+    A floor publisher's copied metadata is not independent proof of either.
+    """
+    if quantity.authority != MeasurementAuthorityType.PDF_SCALED.value:
+        return
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    source_id = metadata.get("upstream_room_area_quantity_id")
+    room_id = metadata.get("room_entity_id")
+    source = originals_by_id.get(source_id) if type(source_id) is str else None
+    rooms = rooms_by_id.get(room_id, ()) if type(room_id) is str else ()
+    if (
+        type(source_id) is not str or not source_id
+        or source is None or len(rooms) != 1
+    ):
+        raise SourceClosedRunConflictError(
+            "scaled floor original source/room identity missing or ambiguous"
+        )
+    room = rooms[0]
+    original = source.metadata if isinstance(source.metadata, Mapping) else {}
+    fingerprint = original.get("scale_fingerprint")
+    source_sha = original.get("source_sha256")
+    revision = original.get("revision_id")
+    viewport = original.get("viewport_id")
+    if (
+        source.authority != MeasurementAuthorityType.PDF_SCALED.value
+        or type(fingerprint) is not str or not fingerprint
+        or fingerprint != fingerprint.strip()
+        or type(metadata.get("scale_fingerprint")) is not str
+        or metadata["scale_fingerprint"] != fingerprint
+        or type(source_sha) is not str or not source_sha
+        or type(revision) is not str or not revision
+        or type(viewport) is not str or not viewport
+        or type(source.value) not in (int, float)
+        or len(source.input_entity_ids) != 1
+        or type(source.input_entity_ids[0]) is not str
+        or not source.input_entity_ids[0]
+        or room.source_sha256 != source_sha
+        or room.revision_id != revision
+        or room.viewport_id != viewport
+    ):
+        raise SourceClosedRunConflictError(
+            "scaled floor original calibration/source metadata mismatch"
+        )
+
+    ring = _canonical_ring(room.polygon_pdf_pts)
+    ring_signature = hashlib.sha256(
+        canonical_contract_json(ring).encode("utf-8")
+    ).hexdigest()
+    if not ring or original.get("ring_signature") != ring_signature:
+        raise SourceClosedRunConflictError(
+            "scaled floor original room-ring receipt mismatch"
+        )
+    # Exactly the stable payload of pb_room_area_quantity.build_room_area_quantity
+    # for PDF_SCALED, using the ORIGINAL room receipt and independently
+    # source-owned canonical room polygon, never the customer's copied ID.
+    expected = stable_contract_id("qty", {
+        "family": "room_area",
+        "room_id": source.input_entity_ids[0],
+        "value_m2": source.value,
+        "scale_fingerprint": fingerprint,
+        "ring": ring,
+        "source_sha256": source_sha,
+        "revision_id": revision,
+        "viewport_id": viewport,
+    })
+    if source.quantity_id != expected:
+        raise SourceClosedRunConflictError(
+            "scaled floor original quantity ID does not bind calibration fingerprint"
+        )
 
 
 def project_live_floor_area_customer_rows(
@@ -125,6 +215,7 @@ def project_live_floor_area_customer_rows(
     # survived the FIRM floor filter. Mirror the source-closed exporter's
     # original family and exact-ID census before the empty-return path.
     original_room_area_ids: set[str] = set()
+    original_by_id: dict[str, QuantityEvidence] = {}
     for source in claim.room_area_quantity_evidence:
         if not isinstance(source, QuantityEvidence):
             raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
@@ -143,6 +234,7 @@ def project_live_floor_area_customer_rows(
                 f"duplicate or invalid original room-area source ID in customer projection: {source_id}"
             )
         original_room_area_ids.add(source_id)
+        original_by_id[source_id] = source
 
         # This customer boundary returns early when no FIRM floor survives.
         # Retain contradictory original numeric FIRM source blockers instead
@@ -177,6 +269,19 @@ def project_live_floor_area_customer_rows(
         workspace_id=workspace_id,
         project_id=project_id,
     )
+    # Index the complete original room universe ONCE; repeated scans of
+    # 20k original rooms for each floor would exceed the primitive budget.
+    rooms_by_id: dict[str, list[object]] = {}
+    for room in claim.canonical_rooms:
+        rooms_by_id.setdefault(room.canonical_room_id, []).append(room)
+    original_room_index = {key: tuple(value) for key, value in rooms_by_id.items()}
+    # Reprove the producer's original scaled quantity identity before any
+    # customer method can borrow the publisher's copied calibration label.
+    for quantity in quantities:
+        _require_original_scaled_room_area_identity(
+            quantity, originals_by_id=original_by_id,
+            rooms_by_id=original_room_index,
+        )
     authorities = {
         quantity.quantity_id: authority
         for quantity in quantities
