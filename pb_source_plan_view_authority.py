@@ -460,13 +460,16 @@ def _raster_physical_supports(source, published, page_id):
 
 
 def source_owned_plan_viewports(
-    source, *, revision_id, page_id, physical_plan_view_shadow=False
+    source, *, revision_id, page_id, physical_plan_view_shadow=False,
+    source_connected_table_cell_shadow=False,
 ):
     """Only actual source producers and their current immutable page are inputs."""
     if type(source) is not SourceVisibilityProducer:
         raise TypeError("actual SourceVisibilityProducer required")
     if type(physical_plan_view_shadow) is not bool:
         raise TypeError("physical_plan_view_shadow must be bool")
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     if (
         type(page_id) is not str
         or not page_id.isdecimal()
@@ -491,7 +494,13 @@ def source_owned_plan_viewports(
         raise RuntimeError("source_plan_view_immutable_bytes_unavailable")
     with fitz.open(stream=data, filetype="pdf") as pdf:
         page = pdf[int(page_id) - 1]
-        ordinary = f07.segment_page_viewports(page, page_number=int(page_id))
+        # Only the material producer explicitly opts in. Other source-plan
+        # callers retain their exact default F.07 view/rival universe.
+        ordinary = f07.segment_page_viewports(
+            page, page_number=int(page_id),
+            **({"source_connected_table_cell_shadow": True}
+               if source_connected_table_cell_shadow else {}),
+        )
         if not physical_plan_view_shadow or any(
             v.view_type in _PLAN_ROLES
             and v.bounding_box is not None

@@ -2997,6 +2997,7 @@ def _derived_partitions(
 def segment_source_page_viewports(
     source_visibility_producer, *, revision_id: str, page_id: str,
     physical_plan_view_shadow: bool = False,
+    source_connected_table_cell_shadow: bool = False,
 ) -> list[SegmentedViewport]:
     """Read original producer bytes; opt in to source-owned physical plan proof.
 
@@ -3005,9 +3006,13 @@ def segment_source_page_viewports(
     """
     from pb_source_plan_view_authority import source_owned_plan_viewports
 
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     return source_owned_plan_viewports(
         source_visibility_producer, revision_id=revision_id, page_id=page_id,
         physical_plan_view_shadow=physical_plan_view_shadow,
+        **({"source_connected_table_cell_shadow": True}
+           if source_connected_table_cell_shadow else {}),
     )
 
 

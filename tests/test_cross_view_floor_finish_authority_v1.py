@@ -132,7 +132,7 @@ def _viewport(
 def _patch_material_viewports(monkeypatch) -> None:
     types = {1: "floor_plan", 2: "floor_plan", 3: "schedule"}
 
-    def segment(_page, *, page_number):
+    def segment(_page, *, page_number, **kwargs):
         return tuple(
             _stamp_segment_page_viewports_product(
                 [
@@ -465,7 +465,7 @@ def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
 ) -> None:
     payload = _same_view_payload()
 
-    def segment(_page, *, page_number):
+    def segment(_page, *, page_number, **kwargs):
         view_type = "floor_plan" if page_number == 1 else "schedule"
         return tuple(
             _stamp_segment_page_viewports_product(
@@ -656,7 +656,7 @@ def _patch_cross_view_floor_finish_viewports(monkeypatch) -> None:
         4: "schedule",
     }
 
-    def segment(_page, *, page_number):
+    def segment(_page, *, page_number, **kwargs):
         return tuple(
             _stamp_segment_page_viewports_product(
                 [

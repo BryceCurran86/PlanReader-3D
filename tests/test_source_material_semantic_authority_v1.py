@@ -59,7 +59,8 @@ def _viewport(page_number: int, view_type: str, view_id: str) -> SegmentedViewpo
 
 
 def _patch_viewports(monkeypatch, page_types):
-    def _segment(_page, *, page_number):
+    def _segment(_page, *, page_number, **kwargs):
+        assert kwargs == {"source_connected_table_cell_shadow": True}
         view_type = page_types[page_number]
         return tuple(
             _stamp_segment_page_viewports_product(
@@ -158,7 +159,8 @@ def test_incomplete_door_schedule_does_not_poison_finish_definition_universe(
         3: "elevation",
     }
 
-    def _segment(_page, *, page_number):
+    def _segment(_page, *, page_number, **kwargs):
+        assert kwargs == {"source_connected_table_cell_shadow": True}
         viewport = _viewport(
             page_number,
             view_types[page_number],
@@ -280,7 +282,7 @@ def test_unstamped_viewport_output_cannot_publish_source_semantics(monkeypatch) 
     monkeypatch.setattr(
         semantic,
         "segment_page_viewports",
-        lambda _page, *, page_number: (
+        lambda _page, *, page_number, **kwargs: (
             _viewport(page_number, "schedule", f"vp-{page_number}"),
         ),
     )
@@ -369,7 +371,8 @@ def test_split_native_ceiling_schedule_rows_survive_misbound_outer_viewport(
     doc.close()
     source, published = _source(source_bytes)
 
-    def _segment(_page, *, page_number):
+    def _segment(_page, *, page_number, **kwargs):
+        assert kwargs == {"source_connected_table_cell_shadow": True}
         if page_number == 1:
             viewport = SegmentedViewport(
                 view_id="vp-1",
