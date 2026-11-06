@@ -280,3 +280,50 @@ def test_same_authenticated_rcp_material_view_page_and_document_stays_candidate(
     assert result["original_rcp_viewport_id"]=="source-a120-rcp"
     assert result["original_document_id"]=="source-document"
     assert result["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("wrong",[
+    (True,0.0), (False,0.0), ("78",0.0), ("0.1",0.0),
+    (78.0,None), (float("nan"),0.0), (float("inf"),0.0),
+])
+def test_rcp_translation_rejects_boolean_string_and_nonfinite_source_coordinates(
+    monkeypatch,wrong,
+):
+    registration={**_registration(),
+                  "source_cross_sheet_translation_pdf_pts":wrong}
+    result=_authenticated_upstream_result(monkeypatch,registration=registration)
+    assert result["first_failure"]=="original_floor_to_A120_registration_unavailable"
+    assert result["ceiling_quantity_m2_issued"] is False
+    assert result["new_firm_quantities"]==0
+
+
+def test_original_rcp_native_source_rounding_preserves_true_fractional_registration(
+    monkeypatch,
+):
+    # 20.12 + 0.1 is 20.220000000000002 in ordinary floating arithmetic.
+    # Source graph comparison uses native 0.001 pt point coordinates.
+    floor=((20.12,20.12),(120.12,20.12),
+           (120.12,120.12),(20.12,120.12))
+    rcp=tuple((round(x+0.1,3),round(y,3)) for x,y in floor)
+    registration={
+        **_registration(),
+        "source_floor_perimeter_polygon_pdf_pts":floor,
+        "source_finishes_perimeter_polygon_pdf_pts":rcp,
+        "source_cross_sheet_translation_pdf_pts":(0.1,0.0),
+    }
+    ink={**_rcp(),"source_ceiling_ink_polygon_pdf_pts":rcp}
+    material={**_material(),"source_ceiling_ink_polygon_pdf_pts":rcp}
+    w4={**_source_owned_w4(),"original_source_floor_polygon_pdf_pts":floor}
+    good=_authenticated_upstream_result(
+        monkeypatch,w4=w4,registration=registration,ink=ink,material=material)
+    assert good["status"]=="original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+    assert good["original_rcp_source_polygon_pdf_pts"]==rcp
+    assert good["ceiling_quantity_m2_issued"] is False
+    assert good["new_firm_quantities"]==0
+    # The unrelated 0.01pt shift is a genuine different registration.
+    rival=_authenticated_upstream_result(
+        monkeypatch,w4=w4,registration={
+            **registration,"source_cross_sheet_translation_pdf_pts":(0.11,0.0)
+        },ink=ink,material=material)
+    assert rival["first_failure"]=="original_floor_to_A120_registration_conflict"
+    assert rival["new_firm_quantities"]==0
