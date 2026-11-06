@@ -1,0 +1,16 @@
+{
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "schema_version": "1.0.0",
+  "source_sha256s": [
+    "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+  ],
+  "bindings": [
+    {
+      "benchmark_item_id": "q5446-alfresco-floor-area",
+      "production_family": "floor_area",
+      "production_object_identity_refs": [
+        "q5446_original_alfresco_architectural_footprint_dae8d987a7d005709221d4847e88bf26"
+      ]
+    }
+  ]
+}
