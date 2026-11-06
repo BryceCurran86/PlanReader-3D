@@ -1308,23 +1308,6 @@ class OpeningLabelDimensionProducer:
         kind, conflict = classify_compact_source_opening_text(evidence.raw_text)
         axes = None if match is None or conflict or kind != evidence.semantic_kind else (
             _compact_dimensions_mm(match.group("code"), kind))
-        if (
-            axes is None
-            and len(evidence.dimension_values_mm) == 2
-            and evidence.semantic_kind in {"door", "window"}
-        ):
-            h_val = float(evidence.dimension_values_mm[0])
-            w_val = float(evidence.dimension_values_mm[1])
-            if (
-                evidence.semantic_kind == "door"
-                and 1800.0 <= h_val <= 3600.0
-                and 600.0 <= w_val <= 10000.0
-            ) or (
-                evidence.semantic_kind == "window"
-                and 300.0 <= h_val <= 3000.0
-                and 300.0 <= w_val <= 6000.0
-            ):
-                axes = (w_val, h_val)
         if (axes is None or len(evidence.dimension_values_mm) != 2
                 or tuple(evidence.dimension_values_mm) != (axes[1], axes[0])):
             return _blocked(EvidenceResolutionStatus.ABSTAINED,

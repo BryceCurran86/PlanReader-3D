@@ -2343,11 +2343,9 @@ def _raster_whole_wall_axis_data_is_role(
         return False
     along_min, along_max, offset = data
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
-    cross_limit = (
-        opening.thickness / 2.0
-        + _RASTER_WHOLE_WALL_CENTER_TOL_PT
-        + _COORD_TOL
-    )
+    # This shortcut requires the W4 centerline to equal the G17 band center.
+    # A candidate elsewhere inside a thick wall band is a different claim.
+    cross_limit = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
     return (
         along_min < -edge_tol
         and along_max > opening.length + edge_tol
