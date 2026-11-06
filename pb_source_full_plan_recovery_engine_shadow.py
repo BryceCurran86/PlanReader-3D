@@ -15,9 +15,13 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pb_source_visibility_authority import SourceVisibilityProducer
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_floor_finish_occurrence_ownership_shadow import (
@@ -42,6 +46,9 @@ SOURCE_FULL_PLAN_PARTIAL_RECOVERY = "source_full_plan_partial_recovery"
 SOURCE_FULL_PLAN_ENGINE_ABSTAINED = "source_full_plan_engine_abstained"
 PAGE_COMPLEXITY_BLOCKED = "page_complexity_blocked"
 PAGE_QUARANTINED_SAFELY = "page_quarantined_safely"
+DUPLICATE_SOURCE_PAGE_ID = "duplicate_source_page_id"
+DUPLICATE_SOURCE_ROOM_ID = "duplicate_source_room_id"
+UNSUPPORTED_SOURCE_PAGE_TYPE = "unsupported_source_page_type"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 EMPTY_PAGE_PAYLOADS = "empty_page_payloads"
 
@@ -72,7 +79,9 @@ class SourceFullPlanEngineSelector:
 @dataclass(frozen=True)
 class SourcePageInputPayload:
     page_id: str
-    page_type: str = "floor_plan"
+    # No omitted type can silently nominate a floor-plan sheet. Source-backed
+    # page classification is a separate upstream authority not supplied here.
+    page_type: str = "unverified"
     room_polygon_candidates: tuple[tuple[str, tuple[tuple[float, float], ...]], ...] = ()
     wall_edges: tuple[SourceRoomWallEdge, ...] = ()
     opening_candidates: tuple[SourceRoomOpeningCandidate, ...] = ()
@@ -83,6 +92,8 @@ class SourcePageInputPayload:
     def __post_init__(self) -> None:
         if not isinstance(self.page_id, str) or not self.page_id.strip():
             raise ValueError("page_id must be non-empty string")
+        if not isinstance(self.page_type, str) or not self.page_type.strip():
+            raise ValueError("page_type must be non-empty string")
 
 
 @dataclass(frozen=True)
@@ -109,6 +120,12 @@ class SourceFullPlanEngineRecord:
     total_rooms_recovered: int
     total_finish_zones_recovered: int
     page_verdicts: tuple[SourcePageExecutionVerdict, ...]
+    # Only the SourceVisibilityProducer entry fills these original-page
+    # view-class receipt IDs; the caller-owned direct diagnostic leaves empty.
+    source_page_view_class_receipts: tuple[tuple[str, str], ...] = ()
+    # Hash of the complete caller-supplied candidate universe actually examined
+    # on source-classified, recovered pages; never physical source authority.
+    source_candidate_universe_digest: str = ""
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: tuple[str, ...] = (SOURCE_FULL_PLAN_ENGINE_CANDIDATE,)
     schema_version: str = SCHEMA_VERSION
@@ -155,17 +172,128 @@ def execute_source_full_plan_recovery_engine_shadow(
     total_finishes = 0
     successful_pages = 0
     quarantined_pages = 0
+    # The page universe itself must be typed before any partial recovery.
+    # Invalid objects cannot supply a trustworthy page identity or owner.
+    if any(not isinstance(page, SourcePageInputPayload) for page in pages):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector,
+        )
+
+    # A PDF page identity is one source scope, never two independent rooms or
+    # finish universes. Quarantine *every* colliding payload, regardless of
+    # order or whether one copy was already marked blocked.
+    page_id_counts = Counter(page.page_id for page in pages)
 
     for page in pages:
+        if page_id_counts[page.page_id] != 1:
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(DUPLICATE_SOURCE_PAGE_ID, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
         # Failure isolation check
         if page.is_blocked:
-            reason = page.block_reason.strip() or PAGE_COMPLEXITY_BLOCKED
+            reason = (page.block_reason.strip() if isinstance(page.block_reason, str) else "") or PAGE_COMPLEXITY_BLOCKED
             verdicts.append(
                 SourcePageExecutionVerdict(
                     page_id=page.page_id,
                     page_type=page.page_type,
                     status=EvidenceResolutionStatus.ABSTAINED,
                     reason_codes=(reason, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # A non-floor-plan sheet can contain room-like rectangles and FT marks,
+        # but those shapes are not an authenticated floor-plan room universe.
+        # This engine has no registered cross-sheet ownership receipt.
+        if page.page_type != "floor_plan":
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # Five source-universe integrity requirements: well-formed room IDs,
+        # finite room vertices, owned wall/opening candidates, and typed marks.
+        # Do not let malformed candidates erase a rival or crash downstream
+        # geometry during otherwise successful page recovery.
+        valid_rooms = (
+            isinstance(page.room_polygon_candidates, (tuple, list))
+            and all(
+                isinstance(entry, (tuple, list)) and len(entry) == 2
+                and isinstance(entry[0], str) and bool(entry[0].strip())
+                and isinstance(entry[1], (tuple, list))
+                and len(entry[1]) >= 3
+                and all(
+                    isinstance(pt, (tuple, list)) and len(pt) == 2
+                    and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                            and math.isfinite(v) for v in pt)
+                    for pt in entry[1]
+                )
+                for entry in page.room_polygon_candidates
+            )
+        )
+        valid_other_candidates = (
+            isinstance(page.wall_edges, (tuple, list))
+            and all(isinstance(edge, SourceRoomWallEdge) for edge in page.wall_edges)
+            and isinstance(page.opening_candidates, (tuple, list))
+            and all(isinstance(opening, SourceRoomOpeningCandidate)
+                    for opening in page.opening_candidates)
+            and isinstance(page.finish_mark_candidates, (tuple, list))
+            and all(isinstance(mark, SourceFloorFinishMark)
+                    for mark in page.finish_mark_candidates)
+        )
+        if not (valid_rooms and valid_other_candidates):
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(SOURCE_LINEAGE_MISMATCH, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # A repeated room identity on one source page cannot denote two
+        # independently owned physical room faces. Quarantine the entire
+        # page rather than choosing a polygon or attributing its finish marks
+        # to a surviving competing room. Other source pages remain usable.
+        room_id_counts = Counter(room_id for room_id, _ in page.room_polygon_candidates)
+        if any(count > 1 for count in room_id_counts.values()):
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY),
                     recovered_room_ids=(),
                     recovered_finish_ids=(),
                     is_quarantined=True,
@@ -195,13 +323,22 @@ def execute_source_full_plan_recovery_engine_shadow(
             if res.status == EvidenceResolutionStatus.CANDIDATE:
                 recovered_rooms.append(room_id)
 
-        # Evaluate floor finish occurrences on this page
+        # Evaluate each original finish occurrence against the *complete*
+        # room universe. A single mark cannot own two overlapping room faces,
+        # and two distinct source marks cannot reuse one occurrence identity.
+        # Neither ambiguity is a recovered diagnostic finish zone.
         recovered_finishes: list[str] = []
+        occurrence_counts = Counter(
+            mark.occurrence_id for mark in page.finish_mark_candidates
+        )
         for finish in page.finish_mark_candidates:
-            # Match against each recovered room polygon
+            if occurrence_counts[finish.occurrence_id] != 1:
+                continue
+            candidate_owners: list[str] = []
+            # Check *every* source room polygon, including a plausible rival
+            # whose doorway/wall closure abstained. An unclosed rival cannot
+            # disappear from the physical ownership ambiguity universe.
             for room_id, poly in page.room_polygon_candidates:
-                if room_id not in recovered_rooms:
-                    continue
                 finish_sel = SourceFloorFinishOwnershipSelector(
                     document_id=selector.document_id,
                     revision_id=selector.revision_id,
@@ -215,9 +352,17 @@ def execute_source_full_plan_recovery_engine_shadow(
                     finish_sel,
                     finish_mark=finish,
                     internal_face_polygon_pdf_pts=poly,
+                    # Preserve the complete page-local rival universe. The evaluator
+                    # must see all same-room FT2/FT3 and duplicate occurrences;
+                    # a missing rival list silently bypasses its ambiguity veto.
+                    other_finish_marks=page.finish_mark_candidates,
                 )
                 if f_res.status == EvidenceResolutionStatus.CANDIDATE:
-                    recovered_finishes.append(finish.occurrence_id)
+                    candidate_owners.append(room_id)
+            # One spatial owner is necessary, and that same owner must have
+            # independently passed room-boundary recovery. No tie-breaking.
+            if len(candidate_owners) == 1 and candidate_owners[0] in recovered_rooms:
+                recovered_finishes.append(finish.occurrence_id)
 
         page_rooms_tuple = tuple(sorted(recovered_rooms))
         page_finishes_tuple = tuple(sorted(recovered_finishes))
@@ -268,6 +413,20 @@ def execute_source_full_plan_recovery_engine_shadow(
             "quarantined_pages": quarantined_pages,
             "total_rooms": total_rooms,
             "total_finishes": total_finishes,
+            # Counts alone alias distinct original-page/room/finish receipts.
+            # Canonical sorting makes the identity invariant to page order.
+            "page_verdicts": tuple(sorted(
+                (
+                    v.page_id,
+                    v.page_type,
+                    v.status.value,
+                    v.reason_codes,
+                    v.recovered_room_ids,
+                    v.recovered_finish_ids,
+                    v.is_quarantined,
+                )
+                for v in verdicts
+            )),
         },
         digest_chars=32,
     )
@@ -299,3 +458,155 @@ def execute_source_full_plan_recovery_engine_shadow(
         record=record,
         selector=selector,
     )
+
+
+def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+    selector: SourceFullPlanEngineSelector,
+    *,
+    pages: Sequence[SourcePageInputPayload],
+    source_visibility_producer: "SourceVisibilityProducer",
+) -> SourceFullPlanEngineResult:
+    """Run recovery using *source-produced* page class rather than caller text.
+
+    Unlike the legacy direct diagnostic, this boundary refuses a forged
+    page_type='floor_plan' when original producer text cannot corroborate it.
+    The PDF's source revision and snapshot must be the selector's exact scope.
+    Room polygons, dimensions and finish occurrences remain shadow candidates
+    and this API never signs construction quantities.
+    """
+    from pb_page_view_class_source_adapter import (
+        build_source_page_view_class_authority,
+        page_viewport_id,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_viewport_view_class_authority import (
+        VIEW_KIND_FLOOR_PLAN,
+        ViewportViewClassSelector,
+    )
+
+    if (
+        type(selector) is not SourceFullPlanEngineSelector
+        or type(source_visibility_producer) is not SourceVisibilityProducer
+        or not isinstance(pages, (tuple, list))
+        or any(type(page) is not SourcePageInputPayload for page in pages)
+    ):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector if type(selector) is SourceFullPlanEngineSelector else None,
+        )
+    published = source_visibility_producer.published_snapshot_for_revision(
+        selector.revision_id
+    )
+    if (
+        published is None
+        or published.revision.document_id != selector.document_id
+        or published.revision.revision_id != selector.revision_id
+        or published.revision.source_sha256 != selector.source_sha256
+        or published.snapshot.snapshot_id != selector.snapshot_id
+    ):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector,
+        )
+
+    authority = build_source_page_view_class_authority(
+        source_visibility_producer=source_visibility_producer,
+        revision_id=selector.revision_id,
+        page_ids=tuple(page.page_id for page in pages),
+    )
+    classified_pages: list[SourcePageInputPayload] = []
+    source_view_receipts: list[tuple[str, str]] = []
+    for page in pages:
+        view = authority.resolve(
+            ViewportViewClassSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                viewport_id=page_viewport_id(page.page_id),
+            )
+        )
+        # A caller's claimed classification is never a fallback. A missing,
+        # conflicting, non-floor or foreign-page source receipt is quarantined.
+        authenticated = (
+            view.status is EvidenceResolutionStatus.CORROBORATED
+            and view.record is not None
+            and view.record.view_kind == VIEW_KIND_FLOOR_PLAN
+            and bool(view.record.evidence_observation_ids)
+        )
+        classified_pages.append(
+            replace(page, page_type="floor_plan" if authenticated else "unverified")
+        )
+        if authenticated:
+            source_view_receipts.append((page.page_id, view.record.record_id))
+
+    base_result = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=tuple(classified_pages)
+    )
+    # The same room/mark candidates can be passed directly to the unverified
+    # diagnostic API. Do not mint an indistinguishable result for the genuinely
+    # source-classified path. Bind every corroborated native view-class receipt
+    # to the diagnostic record's identity without granting FIRM/area authority.
+    if base_result.record is None or not source_view_receipts:
+        return base_result
+    receipts = tuple(sorted(source_view_receipts))
+    # A different wall/room/mark candidate universe can produce the same
+    # recovered IDs and counts. Hash the exact candidate inputs for each
+    # successfully recovered page so changed geometry cannot replay its
+    # source-classified diagnostic identity. Candidate coordinates remain
+    # caller-provided and this hash is NOT evidence of physical correctness.
+    recovered_ids = {
+        verdict.page_id for verdict in base_result.record.page_verdicts
+        if verdict.status is EvidenceResolutionStatus.CANDIDATE
+    }
+    candidate_universes = []
+    for page in classified_pages:
+        if page.page_id not in recovered_ids:
+            continue
+        candidate_universes.append((
+            page.page_id,
+            tuple(sorted(
+                (room_id, tuple(tuple(float(v) for v in p) for p in poly))
+                for room_id, poly in page.room_polygon_candidates
+            )),
+            tuple(sorted(
+                (edge.wall_id, tuple(float(v) for v in edge.start_pt),
+                 tuple(float(v) for v in edge.end_pt), str(edge.stroke_id))
+                for edge in page.wall_edges
+            )),
+            tuple(sorted(
+                (opening.opening_id, tuple(float(v) for v in opening.start_pt),
+                 tuple(float(v) for v in opening.end_pt),
+                 str(opening.opening_type))
+                for opening in page.opening_candidates
+            )),
+            tuple(sorted(
+                (mark.occurrence_id, mark.page_id, mark.material_code,
+                 tuple(float(v) for v in mark.mark_center_pt),
+                 mark.source_word_address)
+                for mark in page.finish_mark_candidates
+            )),
+        ))
+    universe_digest = stable_contract_id(
+        "source_full_plan_recovery_diagnostic_candidate_universe",
+        {"pages": tuple(sorted(candidate_universes))},
+        digest_chars=32,
+    )
+    trusted_identity = stable_contract_id(
+        "source_full_plan_recovery_native_page_class",
+        {
+            "base_record_id": base_result.record.record_id,
+            "source_page_view_class_receipts": receipts,
+            "diagnostic_candidate_universe_digest": universe_digest,
+        },
+        digest_chars=32,
+    )
+    record = replace(
+        base_result.record,
+        record_id=trusted_identity,
+        source_page_view_class_receipts=receipts,
+        source_candidate_universe_digest=universe_digest,
+    )
+    return replace(base_result, record=record)

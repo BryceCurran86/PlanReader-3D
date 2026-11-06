@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import SourceFloorFinishMark
 from pb_source_full_plan_recovery_engine_shadow import (
+    DUPLICATE_SOURCE_PAGE_ID,
+    DUPLICATE_SOURCE_ROOM_ID,
+    UNSUPPORTED_SOURCE_PAGE_TYPE,
     EMPTY_PAGE_PAYLOADS,
     PAGE_COMPLEXITY_BLOCKED,
     PAGE_QUARANTINED_SAFELY,
@@ -22,6 +26,7 @@ from pb_source_full_plan_recovery_engine_shadow import (
     SourcePageExecutionVerdict,
     SourcePageInputPayload,
     execute_source_full_plan_recovery_engine_shadow,
+    execute_source_full_plan_recovery_engine_from_source_visibility_shadow,
 )
 from pb_source_room_boundary_doorway_opening_shadow import (
     SourceRoomOpeningCandidate,
@@ -191,3 +196,847 @@ def test_input_no_mutation():
 
     execute_source_full_plan_recovery_engine_shadow(sel, pages=pages)
     assert pages == pages_copy
+
+def test_foreign_page_finish_not_recovered_by_full_plan_shadow_engine():
+    page = _healthy_page("page_07")
+    foreign = SourceFloorFinishMark(
+        "OCC_FOREIGN_FT3","page_11","FT3",(150.,150.)
+    )
+    blocked = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=[replace(page,finish_mark_candidates=(foreign,))],
+    )
+    control = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=[page],
+    )
+    assert blocked.record.total_rooms_recovered == 1
+    assert blocked.record.total_finish_zones_recovered == 0
+    assert blocked.record.page_verdicts[0].recovered_finish_ids == ()
+    assert control.record.total_finish_zones_recovered == 1
+    assert control.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    assert blocked.record.takeoff_eligible is False
+    assert blocked.record.commercial_projection_allowed is False
+
+
+def test_same_room_competing_finish_codes_abstain_through_real_engine():
+    """FT2/FT3 rivalry must not disappear at the recovery-engine call site."""
+    page = _healthy_page("page_11")
+    ft3 = SourceFloorFinishMark("OCC_FT3", "page_11", "FT3", (160., 160.))
+    original = page.finish_mark_candidates[0]
+    for marks in ((original, ft3), (ft3, original)):
+        source_page = replace(page, finish_mark_candidates=marks)
+        before = copy.deepcopy(source_page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert source_page == before
+
+
+def test_same_room_duplicate_finish_marks_abstain_through_real_engine():
+    """Two separately addressed FT2 marks are not one authenticated zone."""
+    page = _healthy_page("page_11")
+    duplicate = SourceFloorFinishMark("OCC_FT2_OTHER", "page_11", "FT2", (160., 160.))
+    for marks in (
+        page.finish_mark_candidates + (duplicate,),
+        (duplicate,) + page.finish_mark_candidates,
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(replace(page, finish_mark_candidates=marks),)
+        )
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.page_verdicts[0].recovered_finish_ids == ()
+
+
+def test_outside_room_rival_does_not_poison_local_finish():
+    """A same-page mark outside the room is not a same-room competitor."""
+    page = _healthy_page("page_11")
+    outside = SourceFloorFinishMark("OCC_OUTSIDE", "page_11", "FT3", (250., 250.))
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(),
+        pages=(replace(page, finish_mark_candidates=(outside,) + page.finish_mark_candidates),),
+    )
+    assert result.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    assert result.record.total_finish_zones_recovered == 1
+    assert result.record.takeoff_eligible is False
+    assert result.record.commercial_projection_allowed is False
+
+
+def test_one_finish_occurrence_cannot_own_two_overlapping_room_candidates():
+    """Ambiguous overlapping room ownership must not double-count a mark."""
+    page = _healthy_page("page_11")
+    _, polygon = page.room_polygon_candidates[0]
+    rooms = (("ROOM_A", polygon), ("ROOM_B", polygon))
+    for ordered_rooms in (rooms, rooms[::-1]):
+        source_page = replace(page, room_polygon_candidates=ordered_rooms)
+        before = copy.deepcopy(source_page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A", "ROOM_B")
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_rooms_recovered == 2
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert source_page == before
+
+
+def test_reused_finish_occurrence_id_cannot_create_multiple_zones():
+    """Two source marks with the same ID cannot evade the rival-mark veto."""
+    page = _healthy_page("page_11")
+    original = page.finish_mark_candidates[0]
+    repeated_id = replace(original, mark_center_pt=(160.0, 160.0))
+    for marks in ((original, repeated_id), (repeated_id, original)):
+        source_page = replace(page, finish_mark_candidates=marks)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        assert result.record.page_verdicts[0].recovered_room_ids == ("ROOM_A",)
+        assert result.record.page_verdicts[0].recovered_finish_ids == ()
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.commercial_projection_allowed is False
+
+
+def test_unrelated_room_candidate_preserves_single_finish_owner():
+    """A distant, nonrecovered room does not poison the valid local candidate."""
+    page = _healthy_page("page_11")
+    _, polygon = page.room_polygon_candidates[0]
+    distant = tuple((x + 400.0, y + 400.0) for x, y in polygon)
+    for rooms in (
+        (("ROOM_A", polygon), ("ROOM_DISTANT", distant)),
+        (("ROOM_DISTANT", distant), ("ROOM_A", polygon)),
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(page, room_polygon_candidates=rooms),),
+        )
+        assert result.record.page_verdicts[0].recovered_room_ids == ("ROOM_A",)
+        assert result.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+
+
+def test_duplicate_page_scope_quarantines_all_collisions_and_preserves_sibling():
+    """A repeated PDF page cannot multiply diagnostic rooms or finish zones."""
+    duplicate = _healthy_page("page_11")
+    sibling = _healthy_page("page_09")
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(sibling,)
+    )
+    ids = set()
+    for pages in (
+        (duplicate, sibling, duplicate),
+        (sibling, duplicate, duplicate),
+        (duplicate, duplicate, sibling),
+    ):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        record = result.record
+        ids.add(record.record_id)
+        assert record.total_pages_evaluated == 3
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 2
+        assert record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == 1
+        assert record.reason_codes == (
+            SOURCE_FULL_PLAN_ENGINE_RESOLVED,
+            SOURCE_FULL_PLAN_PARTIAL_RECOVERY,
+            SOURCE_FULL_PLAN_ENGINE_CANDIDATE,
+        )
+        duplicate_verdicts = [
+            v for v in record.page_verdicts if v.page_id == "page_11"
+        ]
+        assert len(duplicate_verdicts) == 2
+        assert all(v.status == EvidenceResolutionStatus.ABSTAINED for v in duplicate_verdicts)
+        assert all(v.reason_codes == (
+            DUPLICATE_SOURCE_PAGE_ID, PAGE_QUARANTINED_SAFELY
+        ) for v in duplicate_verdicts)
+        assert all(v.recovered_room_ids == () and v.recovered_finish_ids == ()
+                   for v in duplicate_verdicts)
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+        assert pages == before
+    assert len(ids) == 1
+    assert baseline.record.total_rooms_recovered == 1
+    assert baseline.record.total_finish_zones_recovered == 1
+
+
+def test_duplicate_page_scope_abstains_even_if_one_copy_is_blocked():
+    page = _healthy_page("page_11")
+    blocked = SourcePageInputPayload(
+        page_id="page_11", is_blocked=True, block_reason=PAGE_COMPLEXITY_BLOCKED
+    )
+    for pages in ((page, blocked), (blocked, page)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.record.successful_pages_count == 0
+        assert result.record.quarantined_pages_count == 2
+        assert result.record.total_rooms_recovered == 0
+        assert result.record.total_finish_zones_recovered == 0
+        assert all(DUPLICATE_SOURCE_PAGE_ID in v.reason_codes
+                   for v in result.record.page_verdicts)
+
+
+def test_shadow_receipt_id_binds_page_room_finish_membership_not_just_counts():
+    """Equal aggregate counts with different source scopes cannot share an ID."""
+    original = _healthy_page("page_11")
+    other_page = _healthy_page("page_09")
+    _, poly = original.room_polygon_candidates[0]
+    other_room = replace(
+        original, room_polygon_candidates=(("ROOM_B", poly),)
+    )
+    a = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original,)
+    ).record
+    b = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_page,)
+    ).record
+    c = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_room,)
+    ).record
+    assert (a.total_rooms_recovered, a.total_finish_zones_recovered) == (1, 1)
+    assert (b.total_rooms_recovered, b.total_finish_zones_recovered) == (1, 1)
+    assert (c.total_rooms_recovered, c.total_finish_zones_recovered) == (1, 1)
+    assert len({a.record_id, b.record_id, c.record_id}) == 3
+    first = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original, other_page)
+    ).record
+    reversed_order = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_page, original)
+    ).record
+    assert first.record_id == reversed_order.record_id
+    assert first.takeoff_eligible is False
+    assert first.commercial_projection_allowed is False
+
+
+def test_non_floor_plan_sheet_lookalikes_are_quarantined_before_recovery():
+    """A room-like shape on RCP/elevation/finish sheets is not a floor-plan room."""
+    floor = _healthy_page("page_07")
+    for page_type in ("elevation", "reflected_ceiling_plan", "floor_finish_plan"):
+        lookalike = replace(_healthy_page("page_09"), page_type=page_type)
+        receipt_ids = set()
+        for pages in ((floor, lookalike), (lookalike, floor)):
+            before = copy.deepcopy(pages)
+            result = execute_source_full_plan_recovery_engine_shadow(
+                _selector(), pages=pages
+            )
+            record = result.record
+            receipt_ids.add(record.record_id)
+            assert record.successful_pages_count == 1
+            assert record.quarantined_pages_count == 1
+            assert record.total_rooms_recovered == 1
+            assert record.total_finish_zones_recovered == 1
+            assert result.status == EvidenceResolutionStatus.CANDIDATE
+            assert SOURCE_FULL_PLAN_PARTIAL_RECOVERY in record.reason_codes
+            blocked = next(v for v in record.page_verdicts if v.page_id == "page_09")
+            assert blocked.page_type == page_type
+            assert blocked.status == EvidenceResolutionStatus.ABSTAINED
+            assert blocked.reason_codes == (
+                UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+            )
+            assert blocked.recovered_room_ids == ()
+            assert blocked.recovered_finish_ids == ()
+            assert blocked.is_quarantined is True
+            assert record.takeoff_eligible is False
+            assert record.commercial_projection_allowed is False
+            assert pages == before
+        assert len(receipt_ids) == 1
+
+
+def test_unblocked_non_floor_plan_alone_never_recovers_room_or_finish():
+    for page_type in ("elevation", "reflected_ceiling_plan", "floor_finish_plan"):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(_healthy_page("page_09"), page_type=page_type),),
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.record.total_rooms_recovered == 0
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.page_verdicts[0].reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+
+
+def test_source_page_type_must_be_explicit_nonempty_string():
+    for invalid in ("", "  ", None, 42):
+        with pytest.raises(ValueError, match="page_type"):
+            SourcePageInputPayload(page_id="page_09", page_type=invalid)
+
+
+def test_duplicate_room_id_quarantines_page_without_poisoning_healthy_sibling():
+    """Repeated physical room identity is not two diagnostic rooms or finish owners."""
+    duplicate = _healthy_page("page_11")
+    room = duplicate.room_polygon_candidates[0]
+    collision = replace(duplicate, room_polygon_candidates=(room, room))
+    healthy = _healthy_page("page_07")
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(healthy,)
+    )
+    ids = set()
+    for pages in ((collision, healthy), (healthy, collision)):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        record = result.record
+        ids.add(record.record_id)
+        assert record.status == EvidenceResolutionStatus.CANDIDATE
+        assert SOURCE_FULL_PLAN_PARTIAL_RECOVERY in record.reason_codes
+        assert record.total_pages_evaluated == 2
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == baseline.record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == baseline.record.total_finish_zones_recovered == 1
+        verdict = next(v for v in record.page_verdicts if v.page_id == "page_11")
+        assert verdict.status == EvidenceResolutionStatus.ABSTAINED
+        assert verdict.reason_codes == (DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY)
+        assert verdict.recovered_room_ids == ()
+        assert verdict.recovered_finish_ids == ()
+        assert verdict.is_quarantined is True
+        assert record.commercial_projection_allowed is False
+        assert record.takeoff_eligible is False
+        assert record.diagnostic_only is True
+        assert pages == before
+    assert len(ids) == 1
+
+
+def test_conflicting_duplicate_room_polygons_also_quarantine_source_page():
+    """Distinct geometries cannot silently reuse one physical room ID."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    displaced = tuple((x + 400.0, y + 400.0) for x, y in polygon)
+    for rooms in (
+        ((room_id, polygon), (room_id, displaced)),
+        ((room_id, displaced), (room_id, polygon)),
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(replace(original, room_polygon_candidates=rooms),)
+        )
+        record = result.record
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == 0
+        assert record.total_finish_zones_recovered == 0
+        assert record.page_verdicts[0].reason_codes == (
+            DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY
+        )
+        assert record.takeoff_eligible is False
+
+
+def test_room_identity_is_scoped_to_source_page_not_entire_document():
+    """Identical room IDs on independently identified pages are not a collision."""
+    first = _healthy_page("page_07")
+    second = _healthy_page("page_11")
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(first, second)
+    )
+    assert result.status == EvidenceResolutionStatus.CANDIDATE
+    assert result.record.quarantined_pages_count == 0
+    assert result.record.total_rooms_recovered == 2
+    assert result.record.total_finish_zones_recovered == 2
+    assert result.record.takeoff_eligible is False
+
+
+def test_blocked_page_reason_precedes_duplicate_room_diagnostic():
+    """Existing explicit source block cannot be overwritten by downstream room logic."""
+    original = _healthy_page("page_11")
+    room = original.room_polygon_candidates[0]
+    page = replace(
+        original, room_polygon_candidates=(room, room),
+        is_blocked=True, block_reason="source_complexity_exceeded"
+    )
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(page,)
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.record.page_verdicts[0].reason_codes == (
+        "source_complexity_exceeded", PAGE_QUARANTINED_SAFELY
+    )
+    assert result.record.total_rooms_recovered == 0
+    assert result.record.total_finish_zones_recovered == 0
+
+
+def test_unclosed_overlapping_room_still_vetoes_finish_owner():
+    """A failed wall closure is not evidence that a competing room does not exist."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    rival_polygon = tuple((x + 20.0, y + 20.0) for x, y in polygon)
+    rival = ("ROOM_UNCLOSED", rival_polygon)
+    # Rival geometry contains the FT2 mark, but its shifted edges do not
+    # match the original source walls/opening; boundary closure must abstain.
+    rival_only = execute_source_full_plan_recovery_engine_shadow(
+        _selector(),
+        pages=(replace(original, room_polygon_candidates=(rival,)),),
+    )
+    assert rival_only.record.total_rooms_recovered == 0
+    assert rival_only.record.total_finish_zones_recovered == 0
+
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original,)
+    )
+    assert baseline.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    ids = set()
+    for rooms in (
+        ((room_id, polygon), rival),
+        (rival, (room_id, polygon)),
+    ):
+        page = replace(original, room_polygon_candidates=rooms)
+        before = copy.deepcopy(page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        ids.add(result.record.record_id)
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.diagnostic_only is True
+        assert page == before
+    assert len(ids) == 1
+
+
+def test_unclosed_distant_room_does_not_veto_unique_finish_owner():
+    """Only a spatially plausible rival can withhold a diagnostic finish."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    distant = ("ROOM_UNCLOSED", tuple((x + 400.0, y + 400.0) for x, y in polygon))
+    for rooms in (((room_id, polygon), distant), (distant, (room_id, polygon))):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(original, room_polygon_candidates=rooms),),
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ("OCC_FT2",)
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.commercial_projection_allowed is False
+
+
+@pytest.mark.parametrize(
+    "bad_field,bad_value",
+    [
+        ("room_polygon_candidates", (("", ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))),)),
+        ("room_polygon_candidates", (("ROOM_BAD", ((0.0, 0.0), (float("nan"), 0.0), (0.0, 1.0))),)),
+        ("wall_edges", ("not-a-wall-edge",)),
+        ("opening_candidates", ("not-an-opening",)),
+        ("finish_mark_candidates", ("not-a-mark",)),
+    ],
+)
+def test_malformed_source_candidates_quarantine_only_their_page(bad_field, bad_value):
+    """Five malformed original candidate universes never mint partial recovery."""
+    malformed = replace(_healthy_page("bad_page"), **{bad_field: bad_value})
+    good = _healthy_page("good_page")
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(malformed, good)
+    )
+    assert result.record is not None
+    assert result.record.quarantined_pages_count == 1
+    assert result.record.successful_pages_count == 1
+    assert result.record.total_rooms_recovered == 1
+    assert result.record.total_finish_zones_recovered == 1
+    assert result.record.page_verdicts[0].reason_codes == (
+        SOURCE_LINEAGE_MISMATCH, PAGE_QUARANTINED_SAFELY
+    )
+    assert result.record.page_verdicts[0].recovered_finish_ids == ()
+    assert result.record.page_verdicts[1].recovered_finish_ids == ("OCC_FT2",)
+    assert result.record.takeoff_eligible is False
+    assert result.record.commercial_projection_allowed is False
+
+
+def test_untyped_page_input_abstains_without_partial_source_recovery():
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(_healthy_page("good_page"), object())
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert result.record is None
+
+
+@pytest.mark.parametrize("invalid_reason", (None, 123, object()))
+def test_blocked_page_invalid_reason_preserves_healthy_sibling(invalid_reason):
+    """Bad caller-owned reason cannot crash or poison a distinct source page."""
+    blocked = replace(
+        _healthy_page("blocked_source_page"),
+        is_blocked=True,
+        block_reason=invalid_reason,
+    )
+    healthy = _healthy_page("healthy_source_page")
+    for pages in ((blocked, healthy), (healthy, blocked)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages,
+        )
+        assert result.record is not None
+        assert result.record.successful_pages_count == 1
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.total_finish_zones_recovered == 1
+        quarantined = [v for v in result.record.page_verdicts if v.is_quarantined]
+        assert len(quarantined) == 1
+        assert quarantined[0].reason_codes == (
+            PAGE_COMPLEXITY_BLOCKED, PAGE_QUARANTINED_SAFELY
+        )
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+
+
+def test_omitted_source_page_type_never_claims_floor_plan_authority():
+    """A source sheet with look-alike rooms/marks must not default to floor plan."""
+    healthy = _healthy_page("actual_floor")
+    lookalike = replace(
+        _healthy_page("unverified_sheet"),
+        page_type=SourcePageInputPayload(page_id="placeholder").page_type,
+    )
+    assert lookalike.page_type == "unverified"
+    ids = set()
+    for pages in ((lookalike, healthy), (healthy, lookalike)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages,
+        )
+        assert result.record is not None
+        ids.add(result.record.record_id)
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.successful_pages_count == 1
+        assert result.record.quarantined_pages_count == 1
+        quarantined = next(v for v in result.record.page_verdicts if v.page_id == "unverified_sheet")
+        assert quarantined.reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+        assert quarantined.recovered_room_ids == ()
+        assert quarantined.recovered_finish_ids == ()
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+    assert len(ids) == 1
+
+
+def test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned():
+    """SHA-verified A140 native FT3 word must not own a same-coordinate A110 room.
+
+    This is an adversarial source-to-shadow negative, NOT a physical p7 room
+    reconstruction or an authenticated p11-to-p7 registration. It never issues
+    a floor area, a finish quantity, or customer authority. Owner/main-only
+    offline replay supplies the original; public PR CI skips without it.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+
+    source = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not source:
+        pytest.skip("owner-private original not provisioned")
+    import fitz
+
+    expected_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert os.environ.get("PLANREADER_MARYBOROUGH_SOURCE_SHA256") == expected_sha
+    original = Path(source)
+    assert original.is_file()
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == expected_sha
+
+    with fitz.open(original) as pdf:
+        assert len(pdf) >= 11
+        p11_words = pdf[10].get_text("words", sort=False)
+        p7_words = pdf[6].get_text("words", sort=False)
+        # A140 source mark exists; A110 has no native FT3 drawing word.
+        # This asserts a source lexical fact, not an expected BOQ value.
+        ft3_words = [w for w in p11_words if w[4].strip().upper() == "FT3"]
+        assert ft3_words
+        assert not any(w[4].strip().upper() == "FT3" for w in p7_words)
+        w = ft3_words[0]
+        center = ((w[0] + w[2]) / 2.0, (w[1] + w[3]) / 2.0)
+        address = tuple(int(v) for v in w[5:8])
+
+    # Adversarial geometric coordinate collision: this is deliberately a
+    # synthetic A110 polygon centred on the actual A140 word position.
+    # It must never be interpreted as a source-authenticated physical room.
+    x, y = center
+    corners = ((x - 50, y - 50), (x + 50, y - 50),
+               (x + 50, y + 50), (x - 50, y + 50))
+    edges = (
+        SourceRoomWallEdge("W_TOP", corners[0], corners[1]),
+        SourceRoomWallEdge("W_RIGHT", corners[1], corners[2]),
+        SourceRoomWallEdge("W_LEFT", corners[3], corners[0]),
+    )
+    opening = (SourceRoomOpeningCandidate("OPEN", corners[2], corners[3]),)
+    mark = SourceFloorFinishMark(
+        "ORIGINAL_A140_FT3", "mary-p11", "FT3", center,
+        source_word_address=address,
+    )
+    source_page = SourcePageInputPayload(
+        page_id="mary-p07",
+        page_type="floor_plan",
+        room_polygon_candidates=(("ADVERSARIAL_NOT_PHYSICAL_ROOM", corners),),
+        wall_edges=edges,
+        opening_candidates=opening,
+        finish_mark_candidates=(mark,),
+    )
+    selector = SourceFullPlanEngineSelector(
+        document_id="mary-original", revision_id="source-verified",
+        source_sha256=expected_sha, snapshot_id="original-native-word-negative",
+    )
+    negative = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(source_page,),
+    )
+    assert negative.record.total_rooms_recovered == 1
+    assert negative.record.total_finish_zones_recovered == 0
+    assert negative.record.page_verdicts[0].recovered_finish_ids == ()
+    assert negative.record.takeoff_eligible is False
+    assert negative.record.commercial_projection_allowed is False
+
+    # Geometry-only synthetic control: without the page-identity veto the
+    # very same coordinate would be misattributed to the A110 polygon.
+    forged = replace(mark, page_id="mary-p07")
+    control = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(replace(source_page, finish_mark_candidates=(forged,)),),
+    )
+    assert control.record.total_finish_zones_recovered == 1
+    assert control.record.takeoff_eligible is False
+    assert control.record.commercial_projection_allowed is False
+
+
+@pytest.fixture(scope="module")
+def _native_page_classification_producer():
+    """Two actual native PDF pages; room geometry is intentionally synthetic."""
+    import fitz
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    pdf = fitz.open()
+    pdf.new_page(width=400, height=300).insert_text(
+        (20, 30), "GROUND FLOOR PLAN", fontsize=12
+    )
+    pdf.new_page(width=400, height=300).insert_text(
+        (20, 30), "EXTERNAL ELEVATIONS", fontsize=12
+    )
+    source_bytes = pdf.tobytes()
+    pdf.close()
+    producer = SourceVisibilityProducer(
+        producer_method="gpt2-source-page-visibility-test",
+        producer_version="1",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="gpt2-sheet-scope",
+        source_bytes=source_bytes,
+        source_locator="memory://native-test",
+    )
+    selector = SourceFullPlanEngineSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+    return producer, selector
+
+
+def test_source_verified_full_plan_classifies_from_native_pdf_and_ignores_forged_caller_type(
+    _native_page_classification_producer,
+):
+    """Real producer text, not the caller's floor_plan string, controls recovery."""
+    producer, selector = _native_page_classification_producer
+    # The caller *inverts* the actual source page roles.
+    real_floor = replace(_healthy_page("1"), page_type="elevation")
+    fake_floor = replace(_healthy_page("2"), page_type="floor_plan")
+    pages = (real_floor, fake_floor)
+    original = copy.deepcopy(pages)
+    seen_ids = set()
+    for permutation in (pages, tuple(reversed(pages))):
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector,
+            pages=permutation,
+            source_visibility_producer=producer,
+        )
+        assert result.status == EvidenceResolutionStatus.CANDIDATE
+        assert result.record is not None
+        record = result.record
+        seen_ids.add(record.record_id)
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == 1
+        floor = next(v for v in record.page_verdicts if v.page_id == "1")
+        other = next(v for v in record.page_verdicts if v.page_id == "2")
+        assert floor.recovered_finish_ids == ("OCC_FT2",)
+        assert floor.is_quarantined is False
+        assert other.recovered_finish_ids == ()
+        assert other.recovered_room_ids == ()
+        assert other.reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert pages == original
+    assert len(seen_ids) == 1
+
+
+def test_source_verified_full_plan_rejects_forged_page_identity_and_stale_source(
+    _native_page_classification_producer,
+):
+    from dataclasses import replace as replace_selector
+
+    producer, selector = _native_page_classification_producer
+    miss = replace(_healthy_page("unknown-page"), page_type="floor_plan")
+    source_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(miss,), source_visibility_producer=producer,
+    )
+    assert source_result.status == EvidenceResolutionStatus.ABSTAINED
+    assert source_result.record is not None
+    assert source_result.record.quarantined_pages_count == 1
+    assert source_result.record.total_finish_zones_recovered == 0
+
+    forged = replace_selector(selector, snapshot_id="another-snapshot")
+    invalid_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        forged, pages=(_healthy_page("1"),), source_visibility_producer=producer,
+    )
+    assert invalid_result.status == EvidenceResolutionStatus.ABSTAINED
+    assert invalid_result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert invalid_result.record is None
+
+    unowned = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(_healthy_page("1"),), source_visibility_producer=None,
+    )
+    assert unowned.status == EvidenceResolutionStatus.ABSTAINED
+    assert unowned.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert unowned.record is None
+
+
+def test_native_page_classification_receipt_changes_source_verified_record_identity(
+    _native_page_classification_producer,
+):
+    """Caller-only diagnostic and original-page-class source result cannot alias."""
+    producer, selector = _native_page_classification_producer
+    caller_floor = _healthy_page("1")
+    native_floor = replace(caller_floor, page_type="elevation")
+    caller_result = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(caller_floor,),
+    )
+    verified_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(native_floor,), source_visibility_producer=producer,
+    )
+    replay = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(native_floor,), source_visibility_producer=producer,
+    )
+    assert caller_result.record is not None
+    assert verified_result.record is not None
+    assert replay.record is not None
+    assert caller_result.record.source_page_view_class_receipts == ()
+    receipts = verified_result.record.source_page_view_class_receipts
+    assert len(receipts) == 1
+    assert receipts[0][0] == "1"
+    assert type(receipts[0][1]) is str and receipts[0][1]
+    assert verified_result.record.record_id != caller_result.record.record_id
+    assert verified_result.record.record_id == replay.record.record_id
+    assert verified_result.record.source_page_view_class_receipts == replay.record.source_page_view_class_receipts
+    assert verified_result.record.total_finish_zones_recovered == 1
+    assert verified_result.record.takeoff_eligible is False
+    assert verified_result.record.commercial_projection_allowed is False
+    assert verified_result.record.diagnostic_only is True
+
+
+def test_source_classification_receipt_is_bound_across_page_order_and_quarantine(
+    _native_page_classification_producer,
+):
+    producer, selector = _native_page_classification_producer
+    floor = replace(_healthy_page("1"), page_type="elevation")
+    elevation = replace(_healthy_page("2"), page_type="floor_plan")
+    ids = set()
+    receipt_sets = set()
+    for pages in ((floor, elevation), (elevation, floor)):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector, pages=pages, source_visibility_producer=producer,
+        )
+        assert result.record is not None
+        ids.add(result.record.record_id)
+        receipt_sets.add(result.record.source_page_view_class_receipts)
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.source_page_view_class_receipts[0][0] == "1"
+        assert len(result.record.source_page_view_class_receipts) == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert pages == before
+    assert len(ids) == 1
+    assert len(receipt_sets) == 1
+
+
+def test_source_classified_candidate_geometry_and_native_address_are_in_record_identity(
+    _native_page_classification_producer,
+):
+    """Equal room/finish IDs cannot hide a changed diagnostic geometry universe."""
+    producer, selector = _native_page_classification_producer
+    original = replace(_healthy_page("1"), page_type="elevation")
+
+    def shift(pt, dx):
+        return (pt[0] + dx, pt[1] + dx)
+
+    moved = replace(
+        original,
+        room_polygon_candidates=tuple(
+            (name, tuple(shift(point, 20.0) for point in poly))
+            for name, poly in original.room_polygon_candidates
+        ),
+        wall_edges=tuple(
+            replace(edge, start_pt=shift(edge.start_pt, 20.0),
+                    end_pt=shift(edge.end_pt, 20.0))
+            for edge in original.wall_edges
+        ),
+        opening_candidates=tuple(
+            replace(opening, start_pt=shift(opening.start_pt, 20.0),
+                    end_pt=shift(opening.end_pt, 20.0))
+            for opening in original.opening_candidates
+        ),
+        finish_mark_candidates=tuple(
+            replace(mark, mark_center_pt=shift(mark.mark_center_pt, 20.0))
+            for mark in original.finish_mark_candidates
+        ),
+    )
+    address_changed = replace(
+        original,
+        finish_mark_candidates=tuple(
+            replace(mark, source_word_address=(99, 1, 2))
+            for mark in original.finish_mark_candidates
+        ),
+    )
+
+    def resolve(page):
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector, pages=(page,), source_visibility_producer=producer,
+        )
+        assert result.record is not None
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.takeoff_eligible is False
+        return result.record
+
+    original_copy = copy.deepcopy(original)
+    baseline = resolve(original)
+    replay = resolve(original)
+    shifted = resolve(moved)
+    readdressed = resolve(address_changed)
+    assert baseline.record_id == replay.record_id
+    assert baseline.source_candidate_universe_digest == replay.source_candidate_universe_digest
+    assert len({
+        baseline.record_id, shifted.record_id, readdressed.record_id,
+    }) == 3
+    assert len({
+        baseline.source_candidate_universe_digest,
+        shifted.source_candidate_universe_digest,
+        readdressed.source_candidate_universe_digest,
+    }) == 3
+    assert baseline.source_page_view_class_receipts == shifted.source_page_view_class_receipts
+    assert baseline.source_page_view_class_receipts == readdressed.source_page_view_class_receipts
+    assert original == original_copy
