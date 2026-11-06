@@ -3774,6 +3774,8 @@ class SourceVisibilityAuthority:
                 or cached_raster is not raster
                 or cached_parent is not parent
                 or cached_page_parent is not page_parent
+                or (native is not None and item[1].origin_kind !=
+                    self._visible_origin_kinds.get(key))
             ):
                 return None
         for (observation_id, bound), item in zip(rows, identity):
@@ -3799,13 +3801,20 @@ class SourceVisibilityAuthority:
         if observations is None or fingerprints is None:
             store.visible_page_index.pop(snapshot_id, None)
             return
+        # These are disposable flat-map read indices, not source history.
+        # Keeping an older index would pin its entire flattened snapshot
+        # after the observation store deliberately releases that read cache.
+        store.visible_page_index.clear()
+        store.visible_page_bound_rows = None
         store.visible_page_index[snapshot_id] = (
             published,
             snapshot,
             observations,
             fingerprints,
             {page_id: tuple(ids) for page_id, ids in page_ids.items()},
-            tuple(receipts),
+            tuple((observation_id, native, raster,
+                   self._visible_origin_kinds.get((snapshot_id, observation_id)))
+                  for observation_id, native, raster in receipts),
         )
 
     def _reusable_page_rows(
@@ -3837,7 +3846,7 @@ class SourceVisibilityAuthority:
             or fingerprint_snap.flat is not fingerprints
         ):
             return None
-        for observation_id, parent, raster in receipts:
+        for observation_id, parent, raster, origin in receipts:
             if (
                 self._visibility_receipts.get((snapshot_id, observation_id))
                 is not parent
@@ -3845,24 +3854,69 @@ class SourceVisibilityAuthority:
                     (snapshot_id, observation_id)
                 )
                 is not raster
+                or self._visible_origin_kinds.get((snapshot_id, observation_id))
+                != origin
             ):
                 return None
+        prior = store.visible_page_bound_rows
+        if (prior is not None and prior[0] == snapshot_id
+                and prior[1] == bind_page_id
+                and prior[2] is observations and prior[3] is fingerprints):
+            prior_rows, witnesses = prior[4:]
+            valid = len(prior_rows) == len(witnesses)
+            for (observation_id, bound), witness in zip(prior_rows, witnesses):
+                (saved_id, saved_record, saved_native, saved_origin,
+                 saved_parent, saved_page_parent, private_view) = witness
+                key = (snapshot_id, observation_id)
+                native = self._visibility_receipts.get(key)
+                raster = self._raster_visibility_receipts.get(key)
+                parent_id = native if native is not None else (
+                    None if raster is None else raster.parent_observation_id
+                )
+                page_parent_id = None if raster is None else raster.page_parent_observation_id
+                if (observation_id != saved_id
+                        or observations.get(observation_id) is not saved_record
+                        or native != saved_native
+                        or self._visible_origin_kinds.get(key) != saved_origin
+                        or observations.get(parent_id) is not saved_parent
+                        or observations.get(page_parent_id) is not saved_page_parent
+                        or not _bound_clone_matches(bound, private_view, snapshot)):
+                    valid = False
+                    break
+            if valid:
+                return (*prior_rows,)
+            return None
         rows: list[tuple[str, object]] = []
+        witnesses: list[tuple] = []
         for observation_id in ids_by_page.get(bind_page_id, ()):
             record = observations.get(observation_id)
+            key = (snapshot_id, observation_id)
+            native = self._visibility_receipts.get(key)
+            raster = self._raster_visibility_receipts.get(key)
+            origin_kind = self._visible_origin_kinds.get(key)
+            parent_id = native if native is not None else (
+                None if raster is None else raster.parent_observation_id
+            )
+            parent = observations.get(parent_id)
+            page_parent = None if raster is None else observations.get(
+                raster.page_parent_observation_id
+            )
+            stored_record = record
             if record is None:
-                parent_id = self._visibility_receipts.get((snapshot_id, observation_id))
-                origin_kind = self._visible_origin_kinds.get(
-                    (snapshot_id, observation_id)
-                )
-                parent = None if parent_id is None else observations.get(parent_id)
                 if parent is None or origin_kind is None:
                     return None
                 record = _native_visible_alias(
                     parent, snapshot, observation_id, origin_kind
                 )
             rows.append((observation_id, _bind_record_to_snapshot(record, snapshot)))
-        return tuple(rows)
+            witnesses.append((observation_id, stored_record, native, origin_kind,
+                              parent, page_parent, record))
+        result = tuple(rows)
+        store.visible_page_bound_rows = (
+            snapshot_id, bind_page_id, observations, fingerprints,
+            result, tuple(witnesses),
+        )
+        return result
 
     def authenticated_visible_observations(
         self,
@@ -3910,13 +3964,16 @@ class SourceVisibilityAuthority:
         # successful check, a later page keeps a bound copy of that page only
         # while the snapshot's records and receipts are still the same objects.
         if bind_page_id is not None:
-            store.visible_authentication_cache.pop(snapshot_id, None)
+            # A prior whole-source clone hint may belong to an older snapshot.
+            # Page proofs retain only their bounded page representation.
+            store.visible_authentication_cache.clear()
             reused_page = self._reusable_page_rows(
                 store, snapshot_id, snapshot, published, str(bind_page_id)
             )
             if reused_page is not None:
                 return reused_page
         else:
+            store.visible_page_bound_rows = None
             reused = self._reusable_visible_rows(
                 store, snapshot_id, snapshot, published
             )
@@ -4097,6 +4154,23 @@ class SourceVisibilityAuthority:
             store, snapshot_id, snapshot, published, page_ids, receipts
         )
         if bind_page_id is not None:
+            # The first full proof already built private aliases. Retain only
+            # its requested page, with distinct returned clones for mutation
+            # detection on the next entry/exit proof.
+            page_index = store.visible_page_index.get(snapshot_id)
+            if page_index is not None:
+                observations, fingerprints = page_index[2:4]
+                witnesses = tuple(
+                    (observation_id, observations.get(observation_id), native,
+                     self._visible_origin_kinds.get((snapshot_id, observation_id)),
+                     parent, page_parent, observation)
+                    for (observation_id, observation, native, _raster,
+                         parent, page_parent) in identity
+                )
+                store.visible_page_bound_rows = (
+                    snapshot_id, str(bind_page_id), observations, fingerprints,
+                    tuple(rows), witnesses,
+                )
             return tuple(rows)
         store.visible_authentication_cache.clear()
         store.visible_authentication_cache[snapshot_id] = (

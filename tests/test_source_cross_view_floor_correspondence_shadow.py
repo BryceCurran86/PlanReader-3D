@@ -23,6 +23,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     OVERLAPPING_MEASURED_BOXES,
     REGISTRATION_NOT_UNIQUE,
     STANDING_AUTHORITY_BLOCKERS,
+    SOURCE_FINISH_MARK_IDENTITY_INVALID,
     build_lines,
     rank_registrations,
     box_correspondence,
@@ -436,3 +437,270 @@ def test_selector_validation():
             target_page_id="7",
             material_code="",
         )
+
+
+# Fresh-main GPT2 source-mark integrity: no source evidence is manufactured.
+def _source_complete_correspondence():
+    return {
+        "wall_bounded_on_both_sheets": True,
+        "wall_evidence_identical_on_both_sheets": True,
+    }
+
+
+def _source_complete_mark():
+    return {"code": "FT3", "margin_pt": 8.0, "registered_region": True}
+
+
+def test_one_explicit_source_registered_ft3_remains_candidate_only():
+    result = classify_floor(
+        _source_complete_correspondence(),
+        registration_unique=True, marks_inside=[_source_complete_mark()],
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert result["status"] is EvidenceResolutionStatus.CANDIDATE
+    assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+@pytest.mark.parametrize("marks", [
+    [_source_complete_mark(), _source_complete_mark()],
+    [{**_source_complete_mark(), "registered_region": None}],
+    [{k: v for k, v in _source_complete_mark().items()
+      if k != "registered_region"}],
+    [{**_source_complete_mark(), "registered_region": "True"}],
+    [{**_source_complete_mark(), "margin_pt": float("nan")}],
+    [{**_source_complete_mark(), "margin_pt": float("inf")}],
+    [{**_source_complete_mark(), "margin_pt": None}],
+    [{**_source_complete_mark(), "margin_pt": True}],
+    [{**_source_complete_mark(), "code": " FT3 "}],
+    [{"code": "FT3", "margin_pt": 8., "registered_region": True},
+     {"code": "FT2", "margin_pt": 8., "registered_region": True}],
+])
+def test_ambiguous_duplicate_or_unregistered_source_ft_mark_cannot_be_candidate(marks):
+    result = classify_floor(
+        _source_complete_correspondence(),
+        registration_unique=True, marks_inside=marks,
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert result["status"] in (
+        EvidenceResolutionStatus.ABSTAINED, EvidenceResolutionStatus.CONFLICT,
+    )
+    assert result["authority_blockers"] == ()
+    assert not result["authenticated_physical_wall_face_equivalence"]
+
+
+@pytest.mark.parametrize(("kwargs", "reason"), [
+    ({"identity_ambiguous": True}, "duplicate_physical_floor_identity"),
+    ({"identity_missing": True}, "missing_physical_floor_identity"),
+    ({"registration_unique": 1}, REGISTRATION_NOT_UNIQUE),
+    ({"min_margin_pt": float("nan")}, MARK_TOO_CLOSE_TO_BOX_SIDE),
+    ({"min_margin_pt": -1.0}, MARK_TOO_CLOSE_TO_BOX_SIDE),
+])
+def test_original_finish_source_identity_and_threshold_inputs_fail_closed(kwargs, reason):
+    args = {
+        "registration_unique": True,
+        "marks_inside": [_source_complete_mark()],
+        "other_labelled_boxes_overlapping": 0,
+        "material_code": "FT3",
+    }
+    args.update(kwargs)
+    result = classify_floor(_source_complete_correspondence(), **args)
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert reason in result["reason_codes"]
+
+
+def test_duplicated_ft3_marks_abstain_through_real_source_shadow_producer():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3",
+         "registered_region": True},
+        {"x": 350.0, "y": 1450.0, "code": "FT3",
+         "registered_region": True},
+    ]
+    result = prod.evaluate_synthetic(
+        selector=selector, support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=marks,
+    )
+    assert result.records
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert "multiple_same_code_finish_marks_in_box" in result.records[0].reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert not any(rec.takeoff_eligible for rec in result.records)
+
+
+def test_missing_registered_region_propagates_abstain_to_source_shadow_collection():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(), target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3"}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
+
+
+
+def test_original_physical_room_identity_collision_abstains_both_floor_boxes():
+    measured = [{
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-office",
+        "source_room_face_record_id": "face-office",
+    }]
+    # Disjoint boxes cannot both claim ONE underlying original physical room.
+    second = dict(measured[0])
+    second["dimension_box_pdf_pts"] = (418.5, 1390., 638.2, 1600.)
+    second["canonical_floor_id"] = "second-canonical-floor"
+    second["source_room_face_record_id"] = "second-face"
+    measured.append(second)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=measured,
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert len(result.records) == 2
+    assert all(r.status is EvidenceResolutionStatus.ABSTAINED for r in result.records)
+    assert all("duplicate_physical_floor_identity" in r.reason_codes for r in result.records)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert all(r.commercial_projection_allowed is False for r in result.records)
+
+
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("canonical_floor_id", None),
+    ("physical_room_id", 1234),
+    ("source_room_face_record_id", ""),
+    ("physical_room_id", " physical-office "),
+    ("source_room_face_record_id", True),
+])
+def test_missing_or_coerced_original_physical_source_identity_abstains(
+    field, invalid,
+):
+    box = {
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-office",
+        "source_room_face_record_id": "face-office",
+    }
+    box[field] = invalid
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=[box],
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert "missing_physical_floor_identity" in result.records[0].reason_codes
+
+
+
+@pytest.mark.parametrize("bad_mark", [
+    {"x": float("nan"), "y": 100., "code": "FT2"},
+    {"x": float("inf"), "y": 100., "code": "FT2"},
+    {"x": True, "y": 100., "code": "FT2"},
+    {"x": "500", "y": 100., "code": "FT2"},
+    {"x": 2**54, "y": 100., "code": "FT2"},
+    {"x": 500., "y": 100., "code": " FT2 "},
+    {"x": 500., "y": 100., "code": None},
+    {"y": 100., "code": "FT2"},
+    "malformed-original-observation",
+])
+def test_foreign_invalid_source_mark_cannot_leave_ft3_uniquely_registered(
+    bad_mark,
+):
+    # Invalid competing source evidence is not silently omitted merely
+    # because a second original FT3 glyph remains inside the target box.
+    valid = {"x": 327.8, "y": 1437.5,
+             "code": "FT3", "registered_region": True}
+    producer = SourceCrossViewFloorCorrespondenceProducer()
+    result = producer.evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "floor-office",
+            "physical_room_id": "physical-office",
+            "source_room_face_record_id": "w4-office",
+        }],
+        marks=[valid, bad_mark],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert result.records == ()
+
+
+
+def test_overlap_of_independent_original_floor_boxes_vetoes_both_source_owners():
+    # Identical PDF box geometry cannot become two differently rekeyed
+    # source-authenticated rooms via a false caller overlap=0 hint.
+    box=(251.04,1382.72,394.80,1585.04)
+    rows=[
+        {
+            "dimension_box_pdf_pts":box, "canonical_floor_id":"floor-one",
+            "physical_room_id":"room-one", "source_room_face_record_id":"face-one",
+            "other_labelled_boxes_overlapping":0,
+        },
+        {
+            "dimension_box_pdf_pts":box, "canonical_floor_id":"floor-two",
+            "physical_room_id":"room-two", "source_room_face_record_id":"face-two",
+            "other_labelled_boxes_overlapping":0,
+        },
+    ]
+    mark={"x":327.8,"y":1437.5,"code":"FT3","registered_region":True}
+    result=SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=rows, marks=[mark],
+    )
+    assert len(result.records)==2
+    assert all(r.status is EvidenceResolutionStatus.ABSTAINED for r in result.records)
+    assert all(OVERLAPPING_MEASURED_BOXES in r.reason_codes for r in result.records)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+
+
+@pytest.mark.parametrize("bad_box", [
+    None, (2.,2.,2.,30.), (20.,30.,10.,40.),
+    (float("nan"),0.,10.,10.), (True,0.,10.,10.),
+    ("0",0.,10.,10.), (2**54,0.,10.,10.),
+])
+def test_invalid_competing_measured_box_does_not_disappear_before_ft3_selection(
+    bad_box,
+):
+    valid={
+        "dimension_box_pdf_pts":(251.04,1382.72,394.80,1585.04),
+        "canonical_floor_id":"original-office-floor",
+        "physical_room_id":"original-office",
+        "source_room_face_record_id":"original-office-face",
+    }
+    invalid={
+        **valid, "dimension_box_pdf_pts":bad_box,
+        "canonical_floor_id":"competing-floor",
+        "physical_room_id":"competing-room",
+        "source_room_face_record_id":"competing-face",
+    }
+    result=SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=[valid,invalid],
+        marks=[{"x":327.8,"y":1437.5,"code":"FT3","registered_region":True}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OVERLAPPING_MEASURED_BOXES in result.reason_codes
+    assert result.records==()

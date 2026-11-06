@@ -9,6 +9,7 @@ import pytest
 from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
 from pb_migration_contracts import stable_contract_id
 from pb_source_observation_authority import (
+    _decode_native_page_for_cache,
     SNAPSHOT_MISMATCH,
     ObservationSelector,
     SourceObservationProducer,
@@ -261,3 +262,56 @@ def test_live_ceiling_forwards_exact_selected_pages_to_source_ingest(
     collect_live_ceiling_lining_claims(path, pages=(1,))
 
     assert seen == [("2",)]
+
+
+def test_native_tuple_ingestion_preserves_exact_observation_identity_and_replay() -> None:
+    """Every decoded native primitive retains its independently recomputed ID."""
+    payload = _three_page_pdf()
+    producer = SourceObservationProducer(
+        producer_method="tuple-ingest-parity",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="tuple-parity-doc",
+        source_bytes=payload,
+        source_locator="memory://tuple-parity-doc.pdf",
+        page_ids=("3", "1"),
+    )
+    expected = []
+    pdf = fitz.open(stream=payload, filetype="pdf")
+    try:
+        for number in (1, 3):
+            entry = _decode_native_page_for_cache(pdf, number)
+            assert not entry.failed
+            for page_id, partition_id, kind, primitive_ref, raw_text, geometry in entry.pending_items:
+                expected.append(
+                    stable_contract_id(
+                        "source_observation",
+                        {
+                            "document_id": published.revision.document_id,
+                            "revision_id": published.revision.revision_id,
+                            "partition_id": partition_id,
+                            "page_id": page_id,
+                            "kind": kind,
+                            "primitive_ref": primitive_ref,
+                            "raw_text": raw_text,
+                            "geometry": geometry,
+                        },
+                        digest_chars=32,
+                    )
+                )
+    finally:
+        pdf.close()
+    assert expected
+    assert published.coverage.decoded_pages == (1, 3)
+    assert published.coverage.failed_pages == ()
+    assert published.revision.source_sha256 == hashlib.sha256(payload).hexdigest()
+    assert published.snapshot.observation_ids == tuple(sorted(expected))
+    assert _resolved_pages(producer, published) == {"1", "3"}
+    replay = producer.ingest_native_pdf_bytes(
+        document_id="tuple-parity-doc",
+        source_bytes=payload,
+        source_locator="memory://tuple-parity-doc.pdf",
+        page_ids=("1", "3", "3"),
+    )
+    assert replay == published

@@ -8,6 +8,11 @@ on:
       - "pb_*.py"
       - "tools/diag_pdf_symbol_byte_glyph_shadow.py"
       - "tools/diag_original_pdf_active_clip_operator_authority.py"
+      # GPT2 source interpretation now belongs to the production/sealed
+      # import closure. Changes to any of these source readers must retrigger
+      # both original signed-output replay checks, not only ordinary CI.
+      - "tools/diag_gpt2_*.py"
+      - "tools/diag_original_room_four_edge_source_ink_shadow.py"
       - "tools/run_source_closed_project_handoff.py"
       - "tools/diag_gptmax_raster_unhosted_flank_source.py"
       - "tools/diag_gptmax_source_authority_stages.py"
