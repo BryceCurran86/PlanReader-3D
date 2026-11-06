@@ -30,6 +30,12 @@ def _two_independent_floors(*, share_original_observation: bool = False):
         physical_floor_surface_id="floor-2",
         room_entity_id="room-2",
         source_room_face_record_id="face-2",
+        # A distinct original observation is only a positive floor fixture
+        # when its physical PDF face is also distinct. Keep the same area
+        # and an adjacent (not overlapping) original polygon.
+        polygon_pdf_pts=tuple(
+            (x + 10.0, y) for x, y in floor1.polygon_pdf_pts
+        ),
         metric_area_quantity_id="room-area-2",
         evidence_ids=("ev-room-2", "ev-area-2", "ev-occ-2", "ev-def-2"),
     )
