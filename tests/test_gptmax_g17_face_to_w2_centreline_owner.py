@@ -15,6 +15,7 @@ from test_gptmax_source_face_frame import _fixture
 def _source():
     source,composition,producer,bound=_fixture()
     producer._raster_split_frame_shadow=True
+    producer._g17_face_w2_owner_shadow=True
     return source,composition,producer,bound
 
 
@@ -56,6 +57,9 @@ def test_source_g17_to_w2_owner_requires_exact_original_shadow_and_selectors():
     producer._raster_split_frame_shadow=False
     assert _evidence(producer,b) is None
     producer._raster_split_frame_shadow=True
+    producer._g17_face_w2_owner_shadow=False
+    assert _evidence(producer,b) is None
+    producer._g17_face_w2_owner_shadow=True
     assert producer.source_g17_right_flank_w2_owner_shadow(
         opening_selector=b[0],
         host_binding_selector=replace(b[2],source_sha256="0"*64),
@@ -106,3 +110,28 @@ def test_source_face_or_w2_ownership_tamper_cannot_grant_local_pier(monkeypatch,
             return result
         monkeypatch.setattr(visibility,"resolve_raster_opening_primitive",missing)
     assert _evidence(producer,b) is None
+
+
+def test_new_shadow_requires_explicit_boolean_and_sealed_original_source_roles():
+    from pb_opening_host_frame_authority import OpeningHostFrameProducer
+    _source_visibility,comp,_producer,_bound=_source()
+    base=dict(
+        physical_opening_authority=comp.physical_opening_authority,
+        host_binding_authority=comp.opening_host_binding_authority,
+        physical_wall_candidate_authority=comp.physical_wall_candidate_authority,
+        supplemental_wall_candidate_authority=comp.supplemental_physical_wall_candidate_authority,
+    )
+    for invalid in (None,0,1,"true",{},()):
+        with pytest.raises(TypeError,match="g17_face_w2_owner_shadow must be a bool"):
+            OpeningHostFrameProducer.from_authorities(
+                **base,g17_face_w2_owner_shadow=invalid)
+    with pytest.raises(ValueError,match="requires both original raster"):
+        OpeningHostFrameProducer.from_authorities(
+            **base,g17_face_w2_owner_shadow=True)
+    selected=OpeningHostFrameProducer.from_authorities(
+        **base,raster_split_frame_shadow=True,
+        source_fragment_roles_shadow=True,g17_face_w2_owner_shadow=True)
+    assert selected._g17_face_w2_owner_shadow is True
+    original=OpeningHostFrameProducer.from_authorities(
+        **base,raster_split_frame_shadow=True,source_fragment_roles_shadow=True)
+    assert original._g17_face_w2_owner_shadow is False
