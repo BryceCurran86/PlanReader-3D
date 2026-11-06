@@ -18,8 +18,9 @@ No benchmark ID, expected quantity, filename, project name or BOQ mapping is use
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
+import math
 import re
 from pathlib import Path
 from typing import Optional, Sequence
@@ -51,6 +52,28 @@ LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED = (
 LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT = "live_ceiling_lining_tag_family_conflict"
 LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT = (
     "live_ceiling_canonical_identity_conflict"
+)
+LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT = "live_ceiling_quantity_identity_conflict"
+LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE = (
+    "live_ceiling_lining_metric_aggregate_nonfinite"
+)
+LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE = (
+    "live_ceiling_lining_source_viewport_failure"
+)
+LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE = (
+    "live_ceiling_lining_source_snapshot_unavailable"
+)
+LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH = (
+    "live_ceiling_lining_source_context_mismatch"
+)
+LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE = (
+    "live_ceiling_lining_source_quantity_confidence_failure"
+)
+LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE = (
+    "live_ceiling_lining_source_quantity_id_failure"
+)
+LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS = (
+    "live_ceiling_lining_upstream_area_scope_alias"
 )
 
 
@@ -147,6 +170,276 @@ def _norm(value: object) -> str:
     return _clean(value).lower().replace("-", "_").replace(" ", "_")
 
 
+def _source_positive_area_m2(value: object) -> Optional[float]:
+    """Validate producer-owned native metric area without coercing source aliases."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        area = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(area) or area <= 0.0:
+        return None
+    return area
+
+
+def _upstream_room_area_scope(
+    area: object,
+    *,
+    source_sha256: str,
+    revision_id: str,
+    viewport_id: str,
+    page_no: int,
+) -> str:
+    """Classify caller-owned original area scope without repairing receipts.
+
+    Foreign source areas remain outside this viewport. A normalized-match
+    alias is negative evidence for the *complete* selected ceiling run; it
+    cannot be silently discarded while a valid sibling is published.
+    """
+    meta = getattr(area, "metadata", None)
+    if not isinstance(meta, dict):
+        return "foreign"
+    raw_sha = meta.get("source_sha256")
+    raw_revision = meta.get("revision_id")
+    raw_viewport = meta.get("viewport_id")
+    raw_page = meta.get("page_no")
+    try:
+        root_matches = (
+            _clean(raw_sha).lower() == source_sha256.lower()
+            and _clean(raw_revision) == revision_id
+            and _clean(raw_viewport) == viewport_id
+        )
+        page_matches = (
+            _clean(raw_page) == str(page_no)
+            or (
+                type(raw_page) in (bool, int, float)
+                and raw_page == page_no
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        return "alias"
+    if not root_matches or not page_matches:
+        return "foreign"
+    if (
+        type(raw_sha) is not str
+        or raw_sha != raw_sha.strip()
+        or raw_sha.lower() != source_sha256.lower()
+        or type(raw_revision) is not str
+        or raw_revision != revision_id
+        or type(raw_viewport) is not str
+        or raw_viewport != viewport_id
+        or not (
+            (type(raw_page) is int and raw_page == page_no)
+            or (type(raw_page) is str and raw_page == str(page_no))
+        )
+    ):
+        return "alias"
+    return "exact"
+
+
+def _source_viewport_bbox(value: object) -> Optional[tuple[float, float, float, float]]:
+    """Validate the exact source-owned F.07 region without repairing coordinates.
+
+    The F.07 producer normally supplies a native four-tuple. A malformed
+    returned authoritative sibling must not be dropped or converted into an
+    apparently authenticated ceiling viewport. No scale or room is inferred.
+    """
+    if type(value) not in (tuple, list) or len(value) != 4:
+        return None
+    max_exact_native_coordinate = 1 << 53
+    if any(
+        type(item) not in (int, float)
+        or abs(item) > max_exact_native_coordinate
+        for item in value
+    ):
+        return None
+    try:
+        bbox = tuple(float(item) for item in value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(item) for item in bbox):
+        return None
+    if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+        return None
+    return bbox
+
+
+def _source_viewport_confidence(value: object) -> Optional[float]:
+    """Require native, finite F.07 confidence before accepting a source viewport.
+
+    Confidence is not measurement authority. A foreign source receipt cannot
+    be silently repaired by float coercion or crash the selected ceiling run.
+    """
+    if type(value) not in (int, float):
+        return None
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        return None
+    return confidence
+
+
+def _source_ceiling_quantity_confidence(value: object) -> Optional[float]:
+    """Check producer-owned quantity confidence without repairing typed receipts.
+
+    The shared native confidence contract applies to both the F.07 viewport
+    and the ceiling quantity. Confidence never grants metric or FIRM authority.
+    """
+    return _source_viewport_confidence(value)
+
+
+def _exact_source_ceiling_quantity_id(value: object) -> bool:
+    """Source quantity IDs are immutable receipts, not display strings."""
+    return type(value) is str and bool(value) and value == value.strip()
+
+
+def _source_room_polygon_pdf_pts(
+    points: object,
+) -> Optional[tuple[tuple[float, float], ...]]:
+    """Require a finite, nondegenerate source room ring before canonicalizing.
+
+    The room-area measurement is independently source-owned; this gate only
+    prevents malformed physical geometry from being marked complete. Do not
+    repair, snap, reorder, or infer missing original source vertices.
+    """
+    if type(points) not in (tuple, list) or len(points) < 3:
+        return None
+    polygon: list[tuple[float, float]] = []
+    # Native source vertices are physical identities. Integers above 2**53
+    # can round to a different float point (2**53 + 1 aliases 2**53).
+    # Reject both integer and floating-point oversized coordinates before
+    # conversion; never publish a silently altered room boundary.
+    max_exact_native_coordinate = 1 << 53
+    for point in points:
+        if (
+            type(point) not in (tuple, list)
+            or len(point) != 2
+            or type(point[0]) not in (int, float)
+            or type(point[1]) not in (int, float)
+        ):
+            return None
+        if (
+            abs(point[0]) > max_exact_native_coordinate
+            or abs(point[1]) > max_exact_native_coordinate
+        ):
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y):
+            return None
+        polygon.append((x, y))
+
+    # Origin-relative triangle fan avoids avoidable cancellation for ordinary
+    # translated PDF polygons. A collinear/zero-area ring is not a physical
+    # room face; a nonfinite intermediate is not a valid source measurement.
+    origin_x, origin_y = polygon[0]
+    double_area_terms: list[float] = []
+    for index in range(1, len(polygon) - 1):
+        ax = polygon[index][0] - origin_x
+        ay = polygon[index][1] - origin_y
+        bx = polygon[index + 1][0] - origin_x
+        by = polygon[index + 1][1] - origin_y
+        term = ax * by - ay * bx
+        if not math.isfinite(term):
+            return None
+        double_area_terms.append(term)
+    try:
+        double_area = math.fsum(double_area_terms)
+    except (ValueError, OverflowError):
+        return None
+    if not math.isfinite(double_area) or double_area == 0.0:
+        return None
+
+    # Nonzero signed area does not prove a simple physical room boundary:
+    # crossed edges can cancel only partially. Preserve the source vertices
+    # verbatim; a repeated *closing* vertex is the sole allowed duplicate.
+    ring = polygon[:-1] if polygon[0] == polygon[-1] else polygon
+    count = len(ring)
+    if count < 3:
+        return None
+    for index in range(count):
+        before, vertex, after = (
+            ring[index - 1], ring[index], ring[(index + 1) % count]
+        )
+        if vertex == after:
+            return None
+        # Adjacent collinear edges may continue in the same direction, but
+        # reversing along the same physical segment is an overlapping ring.
+        ax, ay = before[0] - vertex[0], before[1] - vertex[1]
+        bx, by = after[0] - vertex[0], after[1] - vertex[1]
+        turn = ax * by - ay * bx
+        dot = ax * bx + ay * by
+        if not math.isfinite(turn) or not math.isfinite(dot):
+            return None
+        if turn == 0.0 and dot > 0.0:
+            return None
+
+    def orientation(a, b, c):
+        ax, ay = b[0] - a[0], b[1] - a[1]
+        bx, by = c[0] - a[0], c[1] - a[1]
+        return ax * by - ay * bx
+
+    def on_segment(a, b, c):
+        return (
+            min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+            and min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
+        )
+
+    # Sort by horizontal interval to skip disjoint edges. Cap *actual*
+    # overlapping-x pair visits: a malicious complex source ring must abstain
+    # rather than consume unbounded quadratic work. No geometry is simplified.
+    edges = sorted(
+        (
+            min(ring[i][0], ring[(i + 1) % count][0]),
+            max(ring[i][0], ring[(i + 1) % count][0]),
+            min(ring[i][1], ring[(i + 1) % count][1]),
+            max(ring[i][1], ring[(i + 1) % count][1]),
+            i,
+            ring[i],
+            ring[(i + 1) % count],
+        )
+        for i in range(count)
+    )
+    examined = 0
+    for position, (xmin, xmax, ymin, ymax, i, a, b) in enumerate(edges):
+        for next_position in range(position + 1, len(edges)):
+            oxmin, _oxmax, oymin, oymax, j, c, d = edges[next_position]
+            if oxmin > xmax:
+                break
+            examined += 1
+            if examined > 500_000:
+                return None
+            if oymin > ymax or oymax < ymin:
+                continue
+            # Consecutive edges share one permitted endpoint. Their possible
+            # overlapping backtrack was already rejected above.
+            if abs(i - j) == 1 or {i, j} == {0, count - 1}:
+                continue
+            turns = (
+                orientation(a, b, c), orientation(a, b, d),
+                orientation(c, d, a), orientation(c, d, b),
+            )
+            if not all(math.isfinite(turn) for turn in turns):
+                return None
+            t1, t2, t3, t4 = turns
+            if (
+                (t1 == 0.0 and on_segment(a, b, c))
+                or (t2 == 0.0 and on_segment(a, b, d))
+                or (t3 == 0.0 and on_segment(c, d, a))
+                or (t4 == 0.0 and on_segment(c, d, b))
+                or (t1 != 0.0 and t2 != 0.0 and t3 != 0.0 and t4 != 0.0
+                    and (t1 > 0.0) != (t2 > 0.0)
+                    and (t3 > 0.0) != (t4 > 0.0))
+            ):
+                return None
+    return tuple(polygon)
+
+
 def _tag_for_descriptor(descriptor: str) -> str:
     """Return a generic material-family tag derived only from source finish text."""
     text = _norm(descriptor)
@@ -167,17 +460,22 @@ def _tag_for_descriptor(descriptor: str) -> str:
 
 
 def _selected_page_indices(page_count: int, pages: Optional[Sequence[int]]) -> tuple[int, ...]:
+    """Preserve the complete explicitly requested original PDF page universe.
+
+    Never coerce a foreign page token or silently discard an invalid sibling:
+    the source producer must see the exact selected pages or fail before ingest.
+    """
     if pages is None:
         return tuple(range(page_count))
-    return tuple(
-        sorted(
-            {
-                int(index)
-                for index in pages
-                if not isinstance(index, bool) and 0 <= int(index) < page_count
-            }
-        )
-    )
+    if isinstance(pages, (str, bytes, bytearray)) or not isinstance(pages, Sequence):
+        raise ValueError("original ceiling page selection requires an integer sequence")
+    indices = tuple(pages)
+    if any(
+        type(index) is not int or index < 0 or index >= page_count
+        for index in indices
+    ):
+        raise ValueError("original ceiling page selection contains an invalid page index")
+    return tuple(sorted(set(indices)))
 
 
 def _claim_from_quantity(
@@ -201,36 +499,82 @@ def _claim_from_quantity(
 ]:
     if (
         quantity.family != "ceiling_lining"
+        or type(quantity.unit) is not str
+        or quantity.unit != "m2"
         or quantity.abstained
         or quantity.value is None
         or quantity.status != AuthorityStatus.PROVISIONAL.value
         or quantity.authority != MeasurementAuthorityType.MODEL_DERIVED.value
         or quantity.blocking_reasons
         or len(quantity.input_entity_ids) != 1
+        # A source-owned ceiling quantity ID is an exact evidence receipt.
+        # Do not accept padded or foreign-string aliases as a live identity.
+        or not _exact_source_ceiling_quantity_id(quantity.quantity_id)
     ):
+        return None
+
+    metric_value = _source_positive_area_m2(quantity.value)
+    if metric_value is None:
         return None
 
     meta = quantity.metadata if isinstance(quantity.metadata, dict) else {}
     if (
         meta.get("shadow_only") is not True
         or meta.get("commercial_projection_allowed") is not False
-        or _clean(meta.get("viewport_id")) != viewport_id
-        or int(meta.get("page_no", -1)) != int(page_no)
+        # Viewport identity is a producer-owned source receipt, not display
+        # text. Never strip or stringify a foreign viewport into this scope.
+        or type(meta.get("viewport_id")) is not str
+        or not meta["viewport_id"]
+        or meta["viewport_id"] != viewport_id
+        # Page identity is producer-owned. Never coerce a bool, float or
+        # numeric-text alias into an authenticated original PDF page.
+        or type(meta.get("page_no")) is not int
+        or meta["page_no"] != page_no
     ):
         return None
 
-    finish_descriptor = _clean(meta.get("finish_descriptor"))
-    finish_methods = tuple(_clean(value) for value in (meta.get("finish_source_methods") or ()))
-    finish_ids = tuple(_clean(value) for value in (meta.get("finish_evidence_ids") or ()))
+    # Original finish text-integrity methods and evidence IDs are typed
+    # producer receipts. Stringifying/trimming a foreign object, or iterating
+    # a bare string as individual IDs, cannot authenticate ceiling material.
+    finish_descriptor = meta.get("finish_descriptor")
+    finish_methods = meta.get("finish_source_methods")
+    finish_ids = meta.get("finish_evidence_ids")
+    source_evidence_ids = quantity.evidence_ids
     if (
-        not finish_descriptor
-        or SOURCE_CEILING_FINISH_METHOD not in finish_methods
+        type(finish_descriptor) is not str
+        or not finish_descriptor
+        or finish_descriptor != finish_descriptor.strip()
+        or type(finish_methods) not in (tuple, list)
+        or not finish_methods
+        or type(finish_ids) not in (tuple, list)
         or not finish_ids
-        or not set(finish_ids).issubset(set(quantity.evidence_ids))
+        or type(source_evidence_ids) not in (tuple, list)
+        or not source_evidence_ids
+    ):
+        return None
+    for receipts in (finish_methods, finish_ids, source_evidence_ids):
+        if (
+            any(type(item) is not str or not item or item != item.strip()
+                for item in receipts)
+            or len(set(receipts)) != len(receipts)
+        ):
+            return None
+    if (
+        SOURCE_CEILING_FINISH_METHOD not in finish_methods
+        or not set(finish_ids).issubset(set(source_evidence_ids))
     ):
         return None
 
-    upstream_id = _clean(meta.get("upstream_area_quantity_id"))
+    # A producer-owned room-area receipt is an exact identity, not display
+    # text. Coercion/whitespace repair could bind an unrelated FIRM area and
+    # leave a provisional claim that the final canonical issuer rejects.
+    upstream_id = meta.get("upstream_area_quantity_id")
+    if (
+        type(upstream_id) is not str
+        or not upstream_id
+        or upstream_id != upstream_id.strip()
+    ):
+        return None
     # Quantity identity is cryptographic source lineage, never last-writer-wins.
     # A modified record replay with the SAME upstream source quantity ID
     # revokes the entire ID instead of choosing the last candidate. Exact
@@ -238,8 +582,13 @@ def _claim_from_quantity(
     area_by_id = {}
     conflicting_area_ids = set()
     for item in source_result.room_area_quantities:
-        item_id = _clean(item.quantity_id)
-        if not item_id or item_id in conflicting_area_ids:
+        item_id = item.quantity_id
+        if (
+            type(item_id) is not str
+            or not item_id
+            or item_id != item_id.strip()
+            or item_id in conflicting_area_ids
+        ):
             continue
         previous = area_by_id.get(item_id)
         if previous is not None and previous != item:
@@ -251,6 +600,10 @@ def _claim_from_quantity(
     scope = quantity.input_entity_ids[0]
     if (
         area is None
+        or type(area.family) is not str
+        or area.family != "room_area"
+        or type(area.unit) is not str
+        or area.unit != "m2"
         or area.abstained
         or area.value is None
         or area.status != AuthorityStatus.FIRM.value
@@ -260,7 +613,7 @@ def _claim_from_quantity(
             MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
         }
         or tuple(area.input_entity_ids) != (scope,)
-        or float(area.value) != float(quantity.value)
+        or _source_positive_area_m2(area.value) != metric_value
         or area.blocking_reasons
     ):
         return None
@@ -287,12 +640,20 @@ def _claim_from_quantity(
         # Source IDs are producer-owned tokens, not freeform human text.
         # Treating a bare string as an iterable would turn "dim-h" into
         # several single-character IDs and falsely satisfy a two-axis gate.
-        if (not isinstance(raw_figured_ids, (tuple, list))
-                or not all(isinstance(value, str) for value in raw_figured_ids)):
+        # Original figured-axis IDs are exact source receipts. Trimming a
+        # padded token or discarding a blank one would silently repair an
+        # untrusted identity into apparently authenticated two-axis evidence.
+        if (
+            type(raw_figured_ids) not in (tuple, list)
+            or any(
+                type(value) is not str
+                or not value
+                or value != value.strip()
+                for value in raw_figured_ids
+            )
+        ):
             return None
-        figured_dimension_ids = tuple(
-            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
-        )
+        figured_dimension_ids = tuple(sorted(set(raw_figured_ids)))
         # The ceiling must carry both independently source-owned axes of
         # the documented room-area proof. One dimension ID, or repetitions of
         # the same ID, cannot establish a metric plane and must not enter the
@@ -303,7 +664,7 @@ def _claim_from_quantity(
     return (
         _tag_for_descriptor(finish_descriptor),
         finish_descriptor,
-        float(quantity.value),
+        metric_value,
         (quantity.quantity_id,),
         tuple(quantity.input_entity_ids),
         tuple(quantity.evidence_ids),
@@ -353,16 +714,21 @@ def canonical_ceiling_from_shadow_quantity(
         return None
     room_id = room_ids[0]
     room = room_index.room(room_id)
-    if room is None or len(room.polygon_pdf_pts) < 3:
+    if room is None:
+        return None
+    source_polygon = _source_room_polygon_pdf_pts(room.polygon_pdf_pts)
+    if source_polygon is None:
         return None
 
     quantity_meta = (
         quantity.metadata if isinstance(quantity.metadata, dict) else {}
     )
-    upstream_area_id = _clean(
-        quantity_meta.get("upstream_area_quantity_id")
-    )
-    if not upstream_area_id:
+    upstream_area_id = quantity_meta.get("upstream_area_quantity_id")
+    if (
+        type(upstream_area_id) is not str
+        or not upstream_area_id
+        or upstream_area_id != upstream_area_id.strip()
+    ):
         return None
 
     context = source_result.effective_context
@@ -392,10 +758,7 @@ def canonical_ceiling_from_shadow_quantity(
         viewport_id=viewport_id,
         source_sha256=source_sha256,
         revision_id=revision_id,
-        polygon_pdf_pts=tuple(
-            (float(point[0]), float(point[1]))
-            for point in room.polygon_pdf_pts
-        ),
+        polygon_pdf_pts=source_polygon,
         area_m2=float(value),
         finish_descriptor=descriptor,
         room_area_quantity_id=upstream_area_id,
@@ -405,6 +768,23 @@ def canonical_ceiling_from_shadow_quantity(
         physical_scale_record_id=scale_record_id,
         measurement_authority=measurement_authority,
         figured_dimension_ids=figured_dimension_ids,
+    )
+
+
+def _source_result_context_matches(*, result, expected: ProviderContext) -> bool:
+    """Verify the source producer did not substitute a different page/run root.
+
+    The trusted wall build may advance ONLY the source snapshot receipt. Every
+    other document/revision/page/viewport/owner field must remain identical.
+    """
+    actual = getattr(result, "effective_context", None)
+    return (
+        type(actual) is ProviderContext
+        and type(actual.evidence_snapshot_id) is str
+        and bool(actual.evidence_snapshot_id)
+        and actual == replace(
+            expected, evidence_snapshot_id=actual.evidence_snapshot_id
+        )
     )
 
 
@@ -463,8 +843,22 @@ def collect_live_ceiling_lining_claims(
             str, LiveCanonicalCeilingSurfaceObject
         ] = {}
         canonical_conflicts: set[str] = set()
+        # All source quantity IDs for one disputed physical canonical ceiling
+        # must abstain together, even if their own IDs are distinct.
+        canonical_quantity_ids_by_id: dict[str, set[str]] = {}
         validated_quantities: dict[str, QuantityEvidence] = {}
+        # One source quantity ID can identify only one physical ceiling in one
+        # original page/viewport. Equal replays are idempotent; changed or
+        # cross-scope reuses revoke every occurrence, never first/last wins.
+        seen_ceiling_quantity_ids: dict[
+            str, tuple[QuantityEvidence, tuple[int, str]]
+        ] = {}
+        conflicting_ceiling_quantity_ids: set[str] = set()
         upstream_room_areas = tuple(authoritative_room_area_quantities or ())
+        # An F.07 page/viewport pair names one original source region.
+        # Repeated source identities are not independent physical ceilings,
+        # even when their returned bounding boxes or room IDs differ.
+        seen_source_viewport_keys: set[tuple[int, str]] = set()
 
         for page_index in topology_selected:
             page_no = page_index + 1
@@ -472,12 +866,45 @@ def collect_live_ceiling_lining_claims(
             for segmented in authoritative_floor_plan_viewports(
                 page, page_number=page_no
             ):
-                if segmented.bounding_box is None:
-                    continue
-                viewport_id = _clean(segmented.view_id)
-                if not viewport_id:
-                    continue
-                bbox = tuple(float(value) for value in segmented.bounding_box)
+                # F.07 viewport IDs and bounds are original source receipts.
+                # Never skip a malformed authoritative sibling or coerce its
+                # geometry: earlier ceilings require the complete source view.
+                viewport_id = getattr(segmented, "view_id", None)
+                bbox = _source_viewport_bbox(
+                    getattr(segmented, "bounding_box", None)
+                )
+                confidence = _source_viewport_confidence(
+                    getattr(segmented, "confidence", None)
+                )
+                if (
+                    confidence is None
+                    or type(viewport_id) is not str
+                    or not viewport_id
+                    or viewport_id != viewport_id.strip()
+                    or bbox is None
+                ):
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
+                source_viewport_key = (page_no, viewport_id)
+                if source_viewport_key in seen_source_viewport_keys:
+                    # A duplicate source region revokes all earlier siblings.
+                    # Neither the first nor last duplicate can be selected as
+                    # the uniquely authenticated original physical viewport.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
+                seen_source_viewport_keys.add(source_viewport_key)
                 viewport = ViewportEvidence(
                     viewport_id=viewport_id,
                     document_id=published.revision.document_id,
@@ -486,13 +913,24 @@ def collect_live_ceiling_lining_claims(
                     view_type="floor_plan",
                     status=ViewportResolutionStatus.RESOLVED,
                     evidence_ids=(),
-                    confidence=float(segmented.confidence),
+                    confidence=confidence,
                 )
                 current = source.published_snapshot_for_revision(
                     published.revision.revision_id
                 )
                 if current is None:
-                    continue
+                    # A missing revision snapshot is a failure of the complete
+                    # selected original viewport universe, not a skippable view.
+                    # A prior sibling cannot remain publishable on a partial
+                    # source receipt. Do not infer or replace missing evidence.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE,
+                        ),
+                        claims=(),
+                    )
                 context = ProviderContext(
                     run_id=f"live-ceiling:{current.snapshot.snapshot_id}:{viewport_id}",
                     workspace_id="live-extractor",
@@ -508,19 +946,29 @@ def collect_live_ceiling_lining_claims(
                     viewport_page_ownership=((viewport_id, page_no),),
                 )
 
-                scoped_room_areas = tuple(
-                    area
-                    for area in upstream_room_areas
-                    if (
-                        isinstance(area.metadata, dict)
-                        and _clean(area.metadata.get("source_sha256")).lower()
-                        == current.revision.source_sha256.lower()
-                        and _clean(area.metadata.get("revision_id"))
-                        == current.revision.revision_id
-                        and _clean(area.metadata.get("viewport_id")) == viewport_id
-                        and _clean(area.metadata.get("page_no")) == str(page_no)
+                scoped_room_areas = []
+                for area in upstream_room_areas:
+                    area_scope = _upstream_room_area_scope(
+                        area,
+                        source_sha256=current.revision.source_sha256,
+                        revision_id=current.revision.revision_id,
+                        viewport_id=viewport_id,
+                        page_no=page_no,
                     )
-                )
+                    if area_scope == "alias":
+                        # A caller-supplied FIRM area with a repaired source
+                        # scope is not original authority. Keep its negative
+                        # evidence by revoking every earlier sibling too.
+                        return LiveCeilingLiningResult(
+                            status=EvidenceResolutionStatus.ABSTAINED,
+                            reason_codes=(
+                                LIVE_CEILING_LINING_UNAVAILABLE,
+                                LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS,
+                            ),
+                            claims=(),
+                        )
+                    if area_scope == "exact":
+                        scoped_room_areas.append(area)
 
                 try:
                     result = run_source_owned_ceiling_lining_shadow(
@@ -529,13 +977,92 @@ def collect_live_ceiling_lining_claims(
                         viewport=viewport,
                         page_no=page_no,
                         authoritative_area_quantities=(
-                            scoped_room_areas if scoped_room_areas else None
+                            tuple(scoped_room_areas) if scoped_room_areas else None
                         ),
                     )
                 except Exception:
-                    continue
+                    # An unavailable original source viewport is negative
+                    # evidence against the COMPLETE selected viewport universe.
+                    # Never publish an earlier sibling's ceiling as though all
+                    # physical views were inspected successfully. Do not leak
+                    # exception details or mint a fallback area.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
+
+                if not _source_result_context_matches(
+                    result=result, expected=context,
+                ):
+                    # A source-owned ceiling result may advance its snapshot
+                    # during wall derivation, but must never switch the source
+                    # root, revision, selected page or physical viewport.
+                    # Reject the whole selected universe so a valid earlier
+                    # sibling cannot survive a substituted later result.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH,
+                        ),
+                        claims=(),
+                    )
 
                 for quantity in result.ceiling_quantities:
+                    source_quantity_confidence = None
+                    if quantity.family == "ceiling_lining":
+                        source_quantity_confidence = (
+                            _source_ceiling_quantity_confidence(
+                                getattr(quantity, "confidence", None)
+                            )
+                        )
+                        if source_quantity_confidence is None:
+                            # A malformed source-owned quantity confidence is
+                            # negative evidence for the complete selected
+                            # source run. Do not let a valid earlier sibling
+                            # survive, or coerce the foreign receipt to float.
+                            return LiveCeilingLiningResult(
+                                status=EvidenceResolutionStatus.ABSTAINED,
+                                reason_codes=(
+                                    LIVE_CEILING_LINING_UNAVAILABLE,
+                                    LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE,
+                                ),
+                                claims=(),
+                            )
+                    quantity_id = quantity.quantity_id
+                    if not _exact_source_ceiling_quantity_id(quantity_id):
+                        # An unidentifiable positive source ceiling is not an
+                        # unrelated diagnostic.  Skipping it would publish a
+                        # valid sibling from a partial original quantity
+                        # universe. Revoke the entire selected source run.
+                        if (
+                            quantity.family == "ceiling_lining"
+                            and quantity.abstained is False
+                            and _source_positive_area_m2(quantity.value) is not None
+                        ):
+                            return LiveCeilingLiningResult(
+                                status=EvidenceResolutionStatus.ABSTAINED,
+                                reason_codes=(
+                                    LIVE_CEILING_LINING_UNAVAILABLE,
+                                    LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE,
+                                ),
+                                claims=(),
+                            )
+                        # Existing abstained/nonpositive diagnostic treatment
+                        # remains unchanged; no source ID is manufactured.
+                        continue
+                    source_scope = (page_no, viewport_id)
+                    prior = seen_ceiling_quantity_ids.get(quantity_id)
+                    if prior is not None:
+                        if prior != (quantity, source_scope):
+                            conflicting_ceiling_quantity_ids.add(quantity_id)
+                        # Do not add the same source-owned quantity twice.
+                        continue
+                    seen_ceiling_quantity_ids[quantity_id] = (quantity, source_scope)
                     resolved = _claim_from_quantity(
                         quantity=quantity,
                         source_result=result,
@@ -555,6 +1082,19 @@ def collect_live_ceiling_lining_claims(
                         measurement_authority,
                         figured_dimension_ids,
                     ) = resolved
+                    # A source metric without its producer-owned physical room
+                    # polygon is not a live ceiling claim. The real issuer may
+                    # already reject the absent canonical object, but the
+                    # earlier provisional claim must fail closed as well.
+                    ceiling_object = canonical_ceiling_from_shadow_quantity(
+                        quantity=quantity,
+                        source_result=result,
+                        page_no=page_no,
+                        viewport_id=viewport_id,
+                    )
+                    if ceiling_object is None:
+                        continue
+
                     validated_quantities[quantity.quantity_id] = quantity
                     by_descriptor.setdefault(descriptor, []).append(
                         (
@@ -568,29 +1108,58 @@ def collect_live_ceiling_lining_claims(
                             scale_record_id,
                             measurement_authority,
                             figured_dimension_ids,
-                            float(quantity.confidence),
+                            source_quantity_confidence,
                         )
                     )
 
-                    ceiling_object = canonical_ceiling_from_shadow_quantity(
-                        quantity=quantity,
-                        source_result=result,
-                        page_no=page_no,
-                        viewport_id=viewport_id,
-                    )
-                    if ceiling_object is not None:
-                        canonical_id = ceiling_object.canonical_ceiling_id
-                        prior = canonical_ceilings_by_id.get(canonical_id)
-                        if prior is not None and prior != ceiling_object:
-                            canonical_conflicts.add(canonical_id)
-                        else:
-                            canonical_ceilings_by_id[canonical_id] = ceiling_object
+                    canonical_id = ceiling_object.canonical_ceiling_id
+                    canonical_quantity_ids_by_id.setdefault(
+                        canonical_id, set()
+                    ).add(quantity.quantity_id)
+                    prior = canonical_ceilings_by_id.get(canonical_id)
+                    if prior is not None and prior != ceiling_object:
+                        canonical_conflicts.add(canonical_id)
+                    else:
+                        canonical_ceilings_by_id[canonical_id] = ceiling_object
 
+        canonical_conflict_quantity_ids = {
+            quantity_id
+            for canonical_id in canonical_conflicts
+            for quantity_id in canonical_quantity_ids_by_id.get(canonical_id, ())
+        }
         for canonical_id in canonical_conflicts:
             canonical_ceilings_by_id.pop(canonical_id, None)
 
+        revoked_quantity_ids = (
+            conflicting_ceiling_quantity_ids | canonical_conflict_quantity_ids
+        )
+        if revoked_quantity_ids:
+            # A disputed source ID OR physical canonical ceiling revokes every
+            # associated claim row, canonical object and issuer evidence.
+            # A source claim cannot survive its canonical identity failure.
+            for descriptor, rows in tuple(by_descriptor.items()):
+                retained = [
+                    row for row in rows
+                    if not any(
+                        quantity_id in revoked_quantity_ids
+                        for quantity_id in row[4]
+                    )
+                ]
+                if retained:
+                    by_descriptor[descriptor] = retained
+                else:
+                    by_descriptor.pop(descriptor, None)
+            canonical_ceilings_by_id = {
+                canonical_id: ceiling
+                for canonical_id, ceiling in canonical_ceilings_by_id.items()
+                if ceiling.ceiling_quantity_id not in revoked_quantity_ids
+            }
+            for quantity_id in revoked_quantity_ids:
+                validated_quantities.pop(quantity_id, None)
+
         claims: list[LiveCeilingLiningClaim] = []
         multi_viewport_blocked = False
+        metric_aggregate_nonfinite = False
         for descriptor in sorted(by_descriptor):
             rows = by_descriptor[descriptor]
             viewport_keys = {(row[0], row[1]) for row in rows}
@@ -605,7 +1174,13 @@ def collect_live_ceiling_lining_claims(
             if len(tag_values) != 1 or len(scale_ids) != 1:
                 continue
 
+            # Every row is source-validated finite m², but their sum can
+            # overflow to infinity. Keep the existing finite summation/IDs
+            # byte-for-byte; never issue a nonphysical aggregate quantity.
             quantity_m2 = sum(row[3] for row in rows)
+            if not math.isfinite(quantity_m2) or quantity_m2 <= 0.0:
+                metric_aggregate_nonfinite = True
+                continue
             room_quantity_ids = tuple(
                 sorted({qid for row in rows for qid in row[4]})
             )
@@ -706,6 +1281,10 @@ def collect_live_ceiling_lining_claims(
                 reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
             if canonical_conflicts:
                 reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
+            if conflicting_ceiling_quantity_ids:
+                reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
+            if metric_aggregate_nonfinite:
+                reasons.append(LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE)
             return LiveCeilingLiningResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=tuple(reasons),
@@ -721,6 +1300,10 @@ def collect_live_ceiling_lining_claims(
             reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
         if canonical_conflicts:
             reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
+        if conflicting_ceiling_quantity_ids:
+            reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
+        if metric_aggregate_nonfinite:
+            reasons.append(LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE)
         return LiveCeilingLiningResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(reasons),
@@ -734,6 +1317,14 @@ def collect_live_ceiling_lining_claims(
 
 __all__ = [
     "LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT",
+    "LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT",
+    "LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE",
+    "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
+    "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
+    "LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH",
+    "LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE",
+    "LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE",
+    "LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
