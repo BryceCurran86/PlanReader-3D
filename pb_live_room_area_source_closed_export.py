@@ -284,6 +284,9 @@ def build_live_room_area_source_traces(
             floors_by_quantity_id.setdefault(quantity_id, []).append(floor)
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # The original ROOM_AREA family has its own final seal: distinct source
+    # IDs must not double-publish one original physical whole-room PDF face.
+    claimed_source_faces: dict[tuple[object, ...], list[tuple[str, object]]] = {}
     for quantity in quantities:
         quantity_id = _clean(quantity.quantity_id)
         floors = floors_by_quantity_id.get(quantity_id, ())
@@ -411,6 +414,41 @@ def build_live_room_area_source_traces(
                 if _clean(value)
             )
         )
+        # All ordinary source, canonical room/floor, numerical and original
+        # figured-axis authority checks above must pass BEFORE this negative
+        # physical ownership test. Do not infer metric area from PDF points.
+        original_bbox = _source_bbox(floor)
+        physical_face_scope = (
+            floor.document_id,
+            floor.source_sha256.lower(),
+            floor.revision_id,
+            floor.page_id,
+            viewport_id,
+            original_bbox,
+        )
+        try:
+            from shapely.geometry import Polygon
+
+            original_face = Polygon(tuple(floor.polygon_pdf_pts))
+            for other_quantity_id, prior_face in claimed_source_faces.get(
+                physical_face_scope, ()
+            ):
+                if original_face.equals(prior_face):
+                    raise SourceClosedRunConflictError(
+                        "competing original ROOM_AREA quantities claim the same "
+                        "physical PDF room face: "
+                        f"{other_quantity_id}, {quantity_id}"
+                    )
+        except SourceClosedRunConflictError:
+            raise
+        except Exception as exc:
+            raise SourceClosedRunConflictError(
+                f"original room-area source-face comparison failed closed: {quantity_id}"
+            ) from exc
+        claimed_source_faces.setdefault(physical_face_scope, []).append(
+            (quantity_id, original_face)
+        )
+
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
             project_id=project_id,
@@ -422,7 +460,7 @@ def build_live_room_area_source_traces(
             current_revision_id=floor.revision_id,
             evidence_ids=evidence_ids,
             canonical_entity_ids=canonical_entity_ids,
-            source_bbox=_source_bbox(floor),
+            source_bbox=original_bbox,
             metadata={
                 "family": quantity.family,
                 "canonical_floor_id": floor.canonical_floor_id,
