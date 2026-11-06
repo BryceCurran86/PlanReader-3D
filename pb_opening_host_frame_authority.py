@@ -41,7 +41,6 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateRecord,
     PhysicalWallCandidateSelector,
-    repeated_raster_drafting_motif_wall_ids,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
@@ -1189,10 +1188,6 @@ class OpeningHostFrameProducer:
 
         pair_lookup = _pair_lookup(wall_scope.equivalence)
         component_set = set(component_ids)
-        motif_ids = frozenset()
-        if self._raster_split_frame_shadow and raster_component:
-            motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
-        skipped_motif_wall_ids: list[str] = []
         unproven_pairs: set[tuple[str, str]] = set()
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
@@ -1203,9 +1198,14 @@ class OpeningHostFrameProducer:
                 # every local aligned segment in the sealed solid band, even
                 # if the rest of a bent/curved candidate averages far away.
                 allowance = host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+                # The source offset is measured from the aperture centerline.
+                # Rival W4 centerlines anywhere inside the physical wall band
+                # still require producer-owned DISTINCT proof, not just those
+                # within the much narrower raster render tolerance.
+                physical_band_limit = wall_thickness / 2.0 + allowance
                 points = record.wall_candidate.centerline_pts
                 excluded = not any(
-                    data is not None and abs(data[2]) <= wall_thickness / 2.0 + allowance
+                    data is not None and abs(data[2]) <= physical_band_limit
                     for data in (
                         host_geometry._source_line_axis_data((*start, *end), geometry)
                         for start, end in zip(points, points[1:])
@@ -1227,19 +1227,10 @@ class OpeningHostFrameProducer:
                 classification = pair_lookup.get(tuple(sorted((wall_id, member_id))))
                 if classification is PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
                     continue
-                # Opt-in shadow only. Raster-visible dimension ticks share no
-                # path_index, so they survive W2 as W4 walls. The existing
-                # drafting-motif census positively identifies a repeated
-                # orthogonal family; identity has already refused SAME-wall
-                # candidacy (no stored relation). A unique aligned fragment
-                # still fails closed.
-                if (
-                    wall_id in motif_ids
-                    and member_id not in motif_ids
-                    and classification is None
-                ):
-                    skipped_motif_wall_ids.append(wall_id)
-                    continue
+                # A repeated drafting motif is not a source-owned physical
+                # DISTINCT relation. Preserve every unproved aligned rival,
+                # including ticks and solid piers, until the source wall
+                # equivalence authority explicitly partitions it.
                 if self._source_fragment_roles_shadow:
                     # Keep all unresolved source competitors reviewable. This
                     # is diagnostic addressing, never DISTINCT or exclusion.
@@ -1329,7 +1320,7 @@ class OpeningHostFrameProducer:
             frame_id=frame_id,
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
-            skipped_motif_wall_ids=tuple(sorted(dict.fromkeys(skipped_motif_wall_ids))),
+            skipped_motif_wall_ids=(),
         )
 
     def publish(
