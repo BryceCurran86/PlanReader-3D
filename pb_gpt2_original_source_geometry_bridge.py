@@ -858,6 +858,178 @@ class GPT2OriginalSourceGeometryBridge:
                 or source_floor_rcp_correspondence.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_floor_to_RCP_original_root_mismatch")
+        # A copied RCP polygon and a matching SHA are not proof of printed
+        # A120 boundary ink. Reissue the EXACT named native edges through the
+        # immutable SourceVisibilityProducer, BEFORE allowing any material
+        # occurrence or W4 issuer to examine caller-owned geometry.
+        blocked_ink = {
+            "status": "source_RCP_ink_issuer_not_replayable",
+            "first_failure": "original_A120_source_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        if type(original_rcp_ink) is not dict:
+            return blocked_ink
+        ink_page = original_rcp_ink.get("original_rcp_page")
+        ink_view = original_rcp_ink.get("original_rcp_viewport_id")
+        graph = original_rcp_ink.get("source_boundary_graph")
+        borders = graph.get("original_native_edge_ids") if type(graph) is dict else None
+        original_grid = original_rcp_ink.get("original_grid_source_ink_candidates")
+        if (
+            type(ink_page) is not int or ink_page == original_floor_page_1_based
+            or ink_page < 1
+            or type(ink_view) is not str or not ink_view or ink_view != ink_view.strip()
+            or type(borders) is not tuple or not 3 <= len(borders) <= 20000
+            or any(type(v) is not str or not v or v != v.strip() for v in borders)
+            or len(set(borders)) != len(borders)
+            or type(original_grid) is not tuple or len(original_grid) > 20000
+        ):
+            return blocked_ink
+        grid_ids = tuple(
+            row.get("native_source_id") if type(row) is dict else None
+            for row in original_grid
+        )
+        if (
+            any(type(v) is not str or not v or v != v.strip() for v in grid_ids)
+            or len(set(grid_ids)) != len(grid_ids)
+            or set(grid_ids).intersection(borders)
+            or original_rcp_ink.get("original_source_sha256") !=
+                published.revision.source_sha256
+            or original_rcp_ink.get("original_document_id") !=
+                published.revision.document_id
+            or original_rcp_ink.get("original_revision_id") != revision_id
+            or original_rcp_ink.get("original_snapshot_id") !=
+                published.snapshot.snapshot_id
+        ):
+            return blocked_ink
+        try:
+            # The source producer itself checks F07's authentic RCP viewport,
+            # complete selected native ink, source root, and metric-free ring.
+            actual_ink = self.original_rcp_ink_graph(
+                revision_id=revision_id, page_1_based=ink_page,
+                viewport_id=ink_view, source_boundary_edge_ids=borders,
+                original_source_grid_edge_ids=grid_ids,
+            )
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError, RuntimeError):
+            return blocked_ink
+        if (
+            type(actual_ink) is not dict
+            or actual_ink.get("status") !=
+                "original_rcp_source_ink_ceiling_polygon_candidate"
+            or actual_ink != original_rcp_ink
+        ):
+            return blocked_ink
+
+        # The RCP ink is reissued above, but a caller-supplied floor→RCP
+        # correspondence remains untrusted until its FLOOR ink is also
+        # independently reissued from the same sealed original PDF. Without
+        # this, a forged floor polygon/translation could bind a genuine GRID
+        # source polygon to an unrelated W4 room.
+        blocked_registration = {
+            "status": "source_floor_RCP_registration_issuer_not_replayable",
+            "first_failure": "original_floor_to_A120_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        correspondence = source_floor_rcp_correspondence
+        if (
+            correspondence.get("status") !=
+                "original_source_ink_ring_translation_candidate"
+            or correspondence.get("geometric_ink_correspondence_only") is not True
+            or type(correspondence.get("original_floor_page")) is not int
+            or correspondence["original_floor_page"] != original_floor_page_1_based
+            or type(correspondence.get("original_finish_page")) is not int
+            or correspondence["original_finish_page"] != ink_page
+            or correspondence.get("original_source_sha256") !=
+                published.revision.source_sha256
+        ):
+            return blocked_registration
+        floor_ids = correspondence.get("original_floor_source_ids")
+        rcp_ids = correspondence.get("original_finish_source_ids")
+        shift = correspondence.get("source_cross_sheet_translation_pdf_pts")
+        if (
+            type(floor_ids) is not tuple or not 3 <= len(floor_ids) <= 20000
+            or type(rcp_ids) is not tuple
+            or len(rcp_ids) != len(borders)
+            or len(set(rcp_ids)) != len(rcp_ids)
+            or set(rcp_ids) != set(borders)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in rcp_ids)
+            or len(set(floor_ids)) != len(floor_ids)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in floor_ids)
+            or type(shift) not in (list, tuple) or len(shift) != 2
+            or any(type(x) not in (int, float) for x in shift)
+        ):
+            return blocked_registration
+        import math
+        from shapely.geometry import Polygon
+        try:
+            dx, dy = (float(x) for x in shift)
+            if not (math.isfinite(dx) and math.isfinite(dy)):
+                return blocked_registration
+            floor_source = self.original_room_ink_graph(
+                revision_id=revision_id,
+                page_1_based=original_floor_page_1_based,
+                original_source_edge_ids=floor_ids,
+            )
+            components = floor_source.get("native_components")
+            issued_floor_ids = floor_source.get("original_native_edge_ids")
+            if (
+                type(issued_floor_ids) is not tuple
+                or len(issued_floor_ids) != len(floor_ids)
+                or len(set(issued_floor_ids)) != len(issued_floor_ids)
+                or set(issued_floor_ids) != set(floor_ids)
+                or floor_source.get("status") !=
+                    "original_closed_ink_ring_candidates_only"
+                or floor_source.get("source_sha256") !=
+                    published.revision.source_sha256
+                or floor_source.get("page_1_based") != original_floor_page_1_based
+                or floor_source.get("native_candidate_ring_count") != 1
+                or floor_source.get("interior_stroke_intersections_and_overlaps")
+                or type(components) not in (tuple, list)
+                or len(components) != 1
+            ):
+                return blocked_registration
+            source_ring = components[0].get("source_simple_ring_candidate")
+            source_edges = components[0].get("source_edge_ids")
+            ring_edges = (
+                source_ring.get("source_edge_ids")
+                if type(source_ring) is dict else None
+            )
+            if (
+                type(source_edges) is not tuple
+                or type(ring_edges) is not tuple
+                or len(source_edges) != len(floor_ids)
+                or len(ring_edges) != len(floor_ids)
+                or set(source_edges) != set(floor_ids)
+                or set(ring_edges) != set(floor_ids)
+            ):
+                return blocked_registration
+            if type(source_ring) is not dict:
+                return blocked_registration
+            floor = Polygon(source_ring["vertices_pdf_pts"])
+            claimed_floor = Polygon(
+                correspondence["source_floor_perimeter_polygon_pdf_pts"])
+            claimed_rcp = Polygon(
+                correspondence["source_finishes_perimeter_polygon_pdf_pts"])
+            ceiling = Polygon(
+                actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if (not all(p.is_valid and p.area > 0 for p in (
+                        floor, claimed_floor, claimed_rcp, ceiling))
+                    or not floor.equals(claimed_floor)
+                    or not claimed_rcp.equals(ceiling)):
+                return blocked_registration
+            shifted_floor = Polygon([
+                (round(float(x) + dx, 3), round(float(y) + dy, 3))
+                for x, y in floor.exterior.coords[:-1]
+            ])
+            if not shifted_floor.is_valid or not shifted_floor.equals(ceiling):
+                return blocked_registration
+        except (KeyError, ValueError, TypeError, IndexError,
+                OverflowError, RuntimeError):
+            return blocked_registration
+
         # Source issue is independently repeated from the original,
         # producer-sealed A120 RCP mark and material definition. A copied
         # dict cannot supply source-verified ceiling material ownership.
@@ -880,6 +1052,20 @@ class GPT2OriginalSourceGeometryBridge:
         w4=audit_gpt2_w4_bound_original_floor(
             source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
+        if (type(w4) is not dict
+                or w4.get("status")!="source_original_floor_W4_face_candidate_only"
+                or w4.get("w4_room_face_source_identity_proven") is not True
+                or w4.get("source_w4_wall_ownership_authenticated") is not True):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    w4.get("first_failure", "source_W4_original_face_unverified")
+                    if type(w4) is dict else "source_W4_original_face_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
         result=audit_gpt2_w4_original_rcp_ceiling_handoff(
             independently_registered_rcp=source_floor_rcp_correspondence,
             original_rcp_ink=original_rcp_ink,
@@ -887,8 +1073,113 @@ class GPT2OriginalSourceGeometryBridge:
             canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id,
         )
+        if (type(result) is not dict
+                or result.get("status") !=
+                    "original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+                or result.get("ceiling_quantity_m2_issued") is not False
+                or result.get("new_firm_quantities") != 0):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    result.get("first_failure", "A120_W4_ceiling_material_unverified")
+                    if type(result) is dict else "A120_W4_ceiling_material_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_original_rcp_ceiling_input_for_gpt1":result,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
+        # The original RCP room label and its GRID occurrence need not be in
+        # the same PDF native text block. They may join ONLY when both have
+        # independent original text receipts INSIDE the SAME reissued ink
+        # ring and the label belongs to exactly one sealed W4 room. This
+        # makes no physical ceiling scale, area or commercial claim.
+        blocked_label = {
+            "status": "source_RCP_room_label_region_not_authenticated",
+            "first_failure": "original_A120_room_label_not_uniquely_source_owned",
+            "source_w4_room_face_claim": w4,
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        try:
+            from pb_cross_view_ceiling_finish_authority import (
+                _trusted_room_labels_for_pages,
+            )
+            from shapely.geometry import box as native_box
+            candidate_rooms = tuple(canonical_rooms.rooms)
+            owned_rooms = [
+                r for r in candidate_rooms
+                if r.physical_room_id == physical_room_id
+            ]
+            if len(owned_rooms) != 1:
+                return blocked_label
+            room_label = owned_rooms[0].room_label
+            if (type(room_label) is not str or not room_label
+                    or room_label != room_label.strip()):
+                return blocked_label
+            all_labels = tuple(
+                r.room_label for r in candidate_rooms
+                if type(r.room_label) is str and r.room_label.strip()
+            )
+            # A duplicated named room in the sealed W4 source universe
+            # cannot become one material owner merely by text overlap.
+            normalized = tuple(" ".join(v.casefold().split()) for v in all_labels)
+            if (not all_labels or len(set(normalized)) != len(normalized)
+                    or " ".join(room_label.casefold().split()) not in normalized):
+                return blocked_label
+            trusted = _trusted_room_labels_for_pages(
+                self._source, revision_id=revision_id,
+                page_ids=(str(ink_page),), candidate_labels=all_labels,
+            )
+            rows = trusted.get(str(ink_page), ())
+            zone = Polygon(actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if not zone.is_valid or zone.area <= 0:
+                return blocked_label
+            inside = []
+            for line in rows:
+                raw_box = line.bbox
+                if (type(raw_box) not in (tuple, list)
+                        or len(raw_box) != 4
+                        or any(type(v) not in (float, int) for v in raw_box)
+                        or not all(math.isfinite(v) for v in raw_box)
+                        or raw_box[0] >= raw_box[2]
+                        or raw_box[1] >= raw_box[3]):
+                    return blocked_label
+                if not zone.contains(native_box(*raw_box)):
+                    continue
+                if (
+                    type(line.source_partition_id) is not str
+                    or not line.source_partition_id
+                    or type(line.block_no) is not int
+                    or type(line.line_no) is not int
+                    or type(line.observation_ids) is not tuple
+                    or not line.observation_ids
+                    or type(line.receipt_ids) is not tuple
+                    or len(line.receipt_ids) != len(line.observation_ids)
+                    or len(set(line.observation_ids)) != len(line.observation_ids)
+                    or len(set(line.receipt_ids)) != len(line.receipt_ids)
+                    or any(type(v) is not str or not v or v != v.strip()
+                           for v in (*line.observation_ids, *line.receipt_ids))
+                ):
+                    return blocked_label
+                inside.append(line)
+            if (len(inside) != 1
+                    or " ".join(inside[0].text.casefold().split())
+                    != " ".join(room_label.casefold().split())):
+                return blocked_label
+        except (AttributeError, KeyError, TypeError, ValueError,
+                OverflowError, RuntimeError):
+            return blocked_label
+
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
+            "original_rcp_room_label_text":inside[0].text,
+            "original_rcp_room_label_source_partition_id":inside[0].source_partition_id,
+            "original_rcp_room_label_native_block_no":inside[0].block_no,
+            "original_rcp_room_label_native_line_no":inside[0].line_no,
+            "original_rcp_room_label_observation_ids":inside[0].observation_ids,
+            "original_rcp_room_label_receipt_ids":inside[0].receipt_ids,
+            "original_rcp_label_material_join_authority":"source_closed_zone_independent_text",
             "source_w4_room_face_claim":w4,
             "source_original_rcp_ceiling_input_for_gpt1":result,
             "source_original_document_id":published.revision.document_id,
