@@ -153,18 +153,17 @@ def _selected_page_indices(
 ) -> tuple[int, ...]:
     if pages is None:
         return tuple(range(page_count))
-    selected = tuple(
-        sorted(
-            {
-                int(page)
-                for page in pages
-                if isinstance(page, int) and 0 <= int(page) < page_count
-            }
-        )
-    )
-    if not selected:
-        raise ValueError("pages must select at least one valid PDF page")
-    return selected
+    # Preserve the complete original requested page universe: never silently
+    # drop invalid/foreign sheets before floor, ceiling or opening issuance.
+    # One-shot iterators and bool-as-int pages are not typed source selectors.
+    if type(pages) not in (tuple, list) or not pages:
+        raise ValueError("pages must be a nonempty native PDF page sequence")
+    if any(
+        type(page) is not int or page < 0 or page >= page_count
+        for page in pages
+    ):
+        raise ValueError("pages must contain only in-range native PDF indices")
+    return tuple(sorted(set(pages)))
 
 
 def _unique_authenticated_containing_floor_plan_viewport(
