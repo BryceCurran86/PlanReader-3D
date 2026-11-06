@@ -46,7 +46,25 @@ def _segments_from_source(page, source_ids: tuple[str, ...], *, max_paths: int):
         a,b=record["ends"]
         if a==b or (a[0]!=b[0] and a[1]!=b[1]):
             raise ValueError("original_graph_nonorthogonal_or_zero_source_edge")
+        # _line deliberately quantizes for the existing 0.001pt topology.
+        # Preserve SHA-verified literal PyMuPDF endpoints separately.
+        path_index,item_index=map(int,_NATIVE_ID.fullmatch(name).groups())
+        item=drawings[path_index]["items"][item_index]
+        try:
+            literal=tuple(sorted(tuple(float(v) for v in point)
+                                 for point in item[1:3]))
+        except (TypeError,ValueError,OverflowError):
+            raise ValueError("original_graph_literal_endpoint_invalid") from None
+        if (len(literal)!=2 or any(not math.isfinite(v)
+                                   for point in literal for v in point)
+                or literal[0]==literal[1]
+                or (literal[0][0]!=literal[1][0]
+                    and literal[0][1]!=literal[1][1])
+                or tuple(sorted(tuple(round(v,3) for v in point)
+                                    for point in literal))!=(tuple(a),tuple(b))):
+            raise ValueError("original_graph_literal_endpoint_conflict")
         edges[name]={"ends":(tuple(a),tuple(b)),
+                     "literal_ends":literal,
                      "source":record,
                      "length_pdf_pt":abs(b[0]-a[0])+abs(b[1]-a[1])}
     return edges
@@ -216,6 +234,13 @@ def audit_original_room_edge_graph(
                 {"source_id":ident,
                  "endpoints_pdf_pts":edges[ident]["ends"],
                  "source_ink_length_pdf_pt":edges[ident]["length_pdf_pt"]}
+                for ident in sorted(edges)
+            ),
+            # Original ink precision is retained without changing the
+            # existing quantized source graph, joins or metric boundaries.
+            "original_literal_native_edges":tuple(
+                {"source_id":ident,
+                 "endpoints_pdf_pts":edges[ident]["literal_ends"]}
                 for ident in sorted(edges)
             ),
             "native_components":tuple(details),
