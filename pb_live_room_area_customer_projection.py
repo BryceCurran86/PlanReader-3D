@@ -15,15 +15,18 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from pb_live_canonical_room_composition import LiveCanonicalRoomObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_room_area_source_closed_export import (
     build_live_room_area_source_traces,
     _firm_room_area_quantities as _source_firm_room_area_quantities,
 )
 from pb_migration_contracts import QuantityEvidence
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     CommercialTakeoffConflictError,
+    CommercialTakeoffSourceTrace,
     quantity_evidence_to_takeoff_output_row,
 )
 
@@ -168,6 +171,83 @@ def _measurement_authority(
     return _scaled_measurement_authority(quantity)
 
 
+
+def _require_exact_original_customer_labels(
+    quantity: QuantityEvidence,
+    *,
+    claim: LivePhysicalNetWallClaim,
+    trace: CommercialTakeoffSourceTrace,
+) -> None:
+    """Bind commercial labels to the *independent* source-owned room label.
+
+    The trace's room_label is copied from quantity metadata and is NOT an
+    independent oracle. The canonical room label is issued separately by the
+    original room-label authority for the exact room face. Without that bound
+    source receipt, supplied customer labels cannot be authenticated.
+    """
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    supplied: dict[str, str] = {}
+    for field in ("room_label", "location"):
+        if field not in metadata:
+            continue
+        value = metadata[field]
+        if type(value) is not str or not value or value != value.strip():
+            raise SourceClosedRunConflictError(
+                f"room-area customer original {field} is not exact native source text: "
+                f"{quantity.quantity_id}"
+            )
+        supplied[field] = value
+
+    # Missing optional labels remain absent. Do not invent customer semantics.
+    if not supplied:
+        return
+
+    trace_metadata = trace.metadata if isinstance(trace.metadata, Mapping) else {}
+    room_id = trace_metadata.get("room_entity_id")
+    if type(room_id) is not str or not room_id or room_id != room_id.strip():
+        raise SourceClosedRunConflictError(
+            f"room-area customer original room identity is unavailable: {quantity.quantity_id}"
+        )
+    owned = tuple(
+        room for room in claim.canonical_rooms
+        if type(room) is LiveCanonicalRoomObject
+        and room.canonical_room_id == room_id
+    )
+    if len(owned) != 1:
+        raise SourceClosedRunConflictError(
+            f"room-area customer original room identity is ambiguous: {quantity.quantity_id}"
+        )
+    room = owned[0]
+    label = room.room_label
+    binding = room.room_label_binding_record_id
+    evidence = room.room_label_evidence_ids
+    if (
+        type(label) is not str or not label or label != label.strip()
+        or type(binding) is not str or not binding or binding != binding.strip()
+        or type(evidence) is not tuple or not evidence
+        or any(
+            type(value) is not str or not value or value != value.strip()
+            for value in evidence
+        )
+        or len(set(evidence)) != len(evidence)
+    ):
+        raise SourceClosedRunConflictError(
+            f"room-area customer original room label authority unavailable: {quantity.quantity_id}"
+        )
+
+    # Original room text may differ in case/word spacing across authenticated
+    # plan and support views; the cross-view producer binds the same semantic
+    # line, never a different room. Do not compare to quantity-derived trace
+    # labels or permit a clean but different room name to borrow the area.
+    source_semantic = " ".join(label.casefold().split())
+    for field, value in supplied.items():
+        if " ".join(value.casefold().split()) != source_semantic:
+            raise SourceClosedRunConflictError(
+                f"room-area customer original {field} conflicts with source-bound room label: "
+                f"{quantity.quantity_id}"
+            )
+
+
 def project_live_room_area_customer_rows(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -209,6 +289,7 @@ def project_live_room_area_customer_rows(
             raise ValueError(
                 f"missing live room-area source trace: {quantity.quantity_id}"
             )
+        _require_exact_original_customer_labels(quantity, claim=claim, trace=trace)
         authority = _measurement_authority(quantity)
         if authority is None:
             continue
