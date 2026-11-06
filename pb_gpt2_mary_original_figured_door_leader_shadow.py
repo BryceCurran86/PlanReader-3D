@@ -4,10 +4,9 @@ A source-authenticated figure/leader pair is not a physical W4 doorway, a
 measurement scale, a floor threshold or a FIRM construction quantity.
 """
 from __future__ import annotations
-from collections import Counter
 from dataclasses import dataclass, asdict
 from hashlib import sha256
-from math import isfinite
+from math import isfinite, hypot
 import fitz
 from pb_native_text_render_authority import (
     PROVEN_RENDERED, extract_native_text_render_evidence,
@@ -107,6 +106,7 @@ def _require_visible_original_figure_word(page, word, expected: str) -> None:
             # its exact native trace bounds too; never elect one by order.
             render_by_trace.setdefault((seq,receipt.bbox),[]).append(receipt)
     selected = []
+    selected_directions = []
     for trace in traces:
         seq = trace.get('seqno')
         for glyph in trace.get('chars') or ():
@@ -139,9 +139,33 @@ def _require_visible_original_figure_word(page, word, expected: str) -> None:
             if (type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff
                     or type(glyph_id) is not int or glyph_id < 0):
                 raise ValueError('figured text glyph identity unresolved')
+            direction = trace.get('dir')
+            if (not isinstance(direction, (tuple, list)) or len(direction) != 2
+                    or any(type(v) not in (int, float) or not isfinite(v)
+                           for v in direction)):
+                raise ValueError('figured text original glyph direction unavailable')
+            dx, dy = (float(v) for v in direction)
+            if abs(hypot(dx, dy) - 1.0) > .001:
+                raise ValueError('figured text original glyph direction not unit')
             selected.append((chr(codepoint), glyph_box))
-    if len(selected) != len(expected) or Counter(char for char, _ in selected) != Counter(expected):
-        raise ValueError('figured text exact source glyph coverage unavailable')
+            selected_directions.append((dx, dy))
+    # The source word's actual order matters: "0100" has exactly the same
+    # character inventory as "1000", but is NOT the same figured dimension.
+    # Never authenticate a print by a character multiset or word-centroid.
+    if len(selected) != len(expected) or ''.join(char for char, _ in selected) != expected:
+        raise ValueError('figured text exact source glyph order unavailable')
+    dx, dy = selected_directions[0]
+    if any(abs(x - dx) > .001 or abs(y - dy) > .001
+           for x, y in selected_directions[1:]):
+        raise ValueError('figured text source glyph paint direction conflict')
+    projected_centres = [
+        ((glyph_box[0] + glyph_box[2]) * dx
+         + (glyph_box[1] + glyph_box[3]) * dy) / 2.0
+        for _, glyph_box in selected
+    ]
+    if any(right - left <= .001
+           for left, right in zip(projected_centres, projected_centres[1:])):
+        raise ValueError('figured text source glyph positions not in paint order')
     if (abs(min(b[0] for _, b in selected) - box[0]) > .5
             or abs(max(b[2] for _, b in selected) - box[2]) > .5):
         raise ValueError('figured text native glyph geometry disagrees with source word')

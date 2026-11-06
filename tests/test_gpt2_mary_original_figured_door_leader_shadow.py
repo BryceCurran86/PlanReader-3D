@@ -308,3 +308,67 @@ def test_original_cap_receipt_is_order_invariant_and_never_mutates_source():
     second = audit(source, cap_path_pairs=((1, 1), (0, 0)), **data)
     assert first["all_tested_hypotheses"] == second["all_tested_hypotheses"]
     assert sha256(source).hexdigest() == data["source_sha256"]
+
+
+@pytest.mark.parametrize("mutation", (
+    "same_letters_wrong_order",
+    "same_letters_wrong_positions",
+    "reversed_native_direction",
+    "nonunit_native_direction",
+))
+def test_figured_word_cannot_be_authenticated_by_an_unordered_glyph_bag(
+    monkeypatch, mutation,
+):
+    """The extracted native word still says 1000; altered source ink must veto."""
+    original, scope = _fixture()
+    digest = sha256(original).hexdigest()
+    get_texttrace = fitz.Page.get_texttrace
+    witnessed = []
+
+    def altered_trace(page):
+        traces = list(get_texttrace(page))
+        for idx, trace in enumerate(traces):
+            chars = list(trace.get("chars") or ())
+            if "".join(chr(char[0]) for char in chars) != "1000":
+                continue
+            witnessed.append(idx)
+            if mutation == "same_letters_wrong_order":
+                chars[0], chars[1] = chars[1], chars[0]
+            elif mutation == "same_letters_wrong_positions":
+                first, second = chars[0], chars[1]
+                chars[0] = (first[0], first[1], second[2], second[3])
+                chars[1] = (second[0], second[1], first[2], first[3])
+            else:
+                # A valid trace's direction must match the actual spatial
+                # progression; a reversed/zero vector cannot prove the word.
+                trace = {
+                    **trace,
+                    "dir": (-1.0, 0.0)
+                    if mutation == "reversed_native_direction"
+                    else (0.0, 0.0),
+                }
+            traces[idx] = {**trace, "chars": tuple(chars)}
+        return traces
+
+    monkeypatch.setattr(fitz.Page, "get_texttrace", altered_trace)
+    with pytest.raises(ValueError, match="figured text.*(order|direction|positions)"):
+        _run(original, scope)
+    assert witnessed
+    assert sha256(original).hexdigest() == digest
+
+
+def test_genuine_horizontal_figured_word_remains_source_only_not_a_door():
+    source, scope = _fixture()
+    result = _run(source, scope)
+    assert result.status == "SOURCE_FIGURE_LEADER_CANDIDATE"
+    assert result.original_figured_text == "1000"
+    assert result.shadow_only
+    assert not any((
+        result.actual_door_identity_proven,
+        result.original_w4_wall_issued,
+        result.opening_jamb_identity_granted,
+        result.physical_doorway_threshold_issued,
+        result.figure_width_mm_authorized_for_physical_opening,
+        result.floor_finish_area_issued,
+        result.customer_projection_allowed,
+    ))
