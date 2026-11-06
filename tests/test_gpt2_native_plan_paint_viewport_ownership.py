@@ -235,8 +235,8 @@ def test_one_text_operation_may_have_multiple_disjoint_native_trace_spans():
         # A different printed glyph in the same source word cell is a
         # competing text identity even when the correct span is also present.
         origin=(word.bbox[0]+1,word.bbox[1]+1)
-        bad=((*[ord("X"),ord("X"),origin,
-               (origin[0],origin[1],origin[0]+2,origin[1]+3)]),)
+        bad=((ord("X"),ord("X"),origin,
+              (origin[0],origin[1],origin[0]+2,origin[1]+3)),)
         badspan={**disjoint,"chars":bad}
         assert not _original_native_word_paint_within_parent(
             word,receipt,native_words_by_address=native,
