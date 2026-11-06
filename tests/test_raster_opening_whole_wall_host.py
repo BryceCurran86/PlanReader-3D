@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -108,6 +110,36 @@ def test_cross_render_pixel_equality_is_allowed_but_not_general_proximity() -> N
     )
     assert outside_result.status is EvidenceResolutionStatus.CORROBORATED
     assert outside_result.bands == ()
+
+
+@pytest.mark.parametrize("thickness", [2.0, 10.0, 40.0])
+@pytest.mark.parametrize("angle", [0.0, 37.0, -90.0])
+@pytest.mark.parametrize("side", [-1.0, 1.0])
+def test_thick_or_rotated_wall_cannot_replace_centerline_equality(
+    thickness, angle, side,
+) -> None:
+    radians = math.radians(angle)
+    axis = (math.cos(radians), math.sin(radians))
+    normal = (-axis[1], axis[0])
+
+    def transform(point):
+        x, y = point
+        return (13.0 + x * axis[0] + y * normal[0],
+                -21.0 + x * axis[1] + y * normal[1])
+
+    opening = replace(OPENING, origin=transform(OPENING.origin),
+                      axis=axis, normal=normal, thickness=thickness)
+    record = _record("wall:outside", offset=side * (
+        host._RASTER_WHOLE_WALL_CENTER_TOL_PT + 0.01))
+    record.wall_candidate.centerline_pts = tuple(
+        transform(point) for point in record.wall_candidate.centerline_pts)
+    before = record.wall_candidate.centerline_pts
+    result = host._resolve_raster_whole_wall_host(
+        (record,), opening, _equivalence((record,)))
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.bands == ()
+    assert record.wall_candidate.centerline_pts == before
 
 
 def test_wall_must_extend_beyond_both_opening_edges() -> None:
