@@ -66,6 +66,31 @@ def test_false_or_unsupported_seam_abstains(kwargs):
     assert failure["elevation_plan_identity_granted"] is False
 
 
+@pytest.mark.parametrize("gap", [0.0005, 0.01])
+def test_subpixel_horizontal_source_gap_is_not_painted_in_by_raster(gap):
+    """Dark endpoint pixels and a dark render cannot close a real source gap."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    payload = _pdf(gap=gap)
+    digest = sha256(payload).hexdigest()
+    common = dict(
+        expected_sha256=digest, page_no=1, source_x=50,
+        seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    for report in (
+        prove_horizontal_tile_seam_source_pixels(payload, **common),
+        prove_contiguous_source_ink_across_horizontal_tile_seam(payload, **common),
+    ):
+        assert report["status"] == ABSTAIN
+        assert "source_tile_boundary_gap_unproven" in report["reason_codes"]
+        assert all(report[key] is False for key in (
+            "structural_host_granted", "whole_wall_frame_granted",
+            "opening_count_granted", "quantity_granted",
+            "elevation_plan_identity_granted", "opening_kind_granted",
+        ))
+
+
 def test_sha_bound_and_explicit_finite_parameters():
     src = _pdf()
     with pytest.raises(ValueError, match="SHA-256"):
@@ -144,3 +169,118 @@ def test_original_elevation_panel_rail_is_continuous_across_horizontal_source_ti
     assert report["source_painted_pixel_rows"] == 33
     assert report["source_pixel_rows_per_image_root"] == [17, 16]
     assert report["elevation_plan_identity_granted"] is False
+
+
+@pytest.mark.parametrize("rect,reuse_existing_xref", [
+    ((40, 96, 60, 98), False),
+    ((40, 99.9999, 60, 100.0001), False),
+    ((40, 102, 60, 104), False),
+    ((40, 97, 60, 99), True),
+])
+def test_third_original_image_placement_inside_scan_must_abstain(
+    rect, reuse_existing_xref,
+):
+    """Two dark flank roots do not exclude an extra original interior painter."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    page = document[0]
+    if reuse_existing_xref:
+        # Same image payload/xref at a DISTINCT placement still adds a root.
+        xref = int(page.get_images(full=True)[0][0])
+        page.insert_image(fitz.Rect(*rect), xref=xref)
+    else:
+        extra_image = Image.new("RGB", (40, 20), "black")
+        content = BytesIO()
+        extra_image.save(content, format="PNG")
+        page.insert_image(fitz.Rect(*rect), stream=content.getvalue())
+    payload = document.tobytes()
+    document.close()
+
+    args = dict(expected_sha256=sha256(payload).hexdigest(), page_no=1,
+                source_x=50, seam_y=100, flank_offset_pt=7, dpi=300)
+    # The added painter deliberately avoids the two original flank samples.
+    assert prove_horizontal_tile_seam_source_pixels(payload, **args)["status"] == SOURCE_ONLY
+    result = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, **args,
+    )
+    assert result["status"] == ABSTAIN
+    assert "source_pixel_row_membership_ambiguous" in result["reason_codes"]
+    assert not any(result[key] for key in (
+        "structural_host_granted", "whole_wall_frame_granted",
+        "opening_count_granted", "quantity_granted",
+        "elevation_plan_identity_granted", "opening_kind_granted",
+    ))
+
+
+def test_unrelated_original_image_outside_scanline_is_invariant():
+    """An unrelated source image away from the scan must not veto two roots."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    content = BytesIO()
+    Image.new("RGB", (40, 20), "black").save(content, format="PNG")
+    document[0].insert_image(
+        fitz.Rect(150, 96, 170, 98), stream=content.getvalue(),
+    )
+    payload = document.tobytes()
+    document.close()
+    result = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, expected_sha256=sha256(payload).hexdigest(),
+        page_no=1, source_x=50, seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    assert result["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert result["source_painted_pixel_rows"] >= 50
+    assert not result["opening_kind_granted"]
+
+
+@pytest.mark.parametrize("inline_x,should_abstain", [(40, True), (150, False)])
+def test_inline_pdf_raster_painter_cannot_bypass_complete_source_root_census(
+    inline_x, should_abstain,
+):
+    """BI/ID/EI images have xref=0 and are invisible to page.get_images."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    page = document[0]
+    stream_xref = page.get_contents()[-1]
+    # Append a genuine 1x1 black inline raster, 0.2pt high across the seam.
+    # PDF stream coordinates are bottom-up; page coordinates are top-down.
+    inline = (
+        f"\nq\n20 0 0 0.2 {inline_x} 149.9 cm\n"
+        "BI /W 1 /H 1 /CS /RGB /BPC 8 ID\n"
+    ).encode("ascii") + b"\x00\x00\x00\nEI\nQ\n"
+    document.update_stream(
+        stream_xref, document.xref_stream(stream_xref) + inline,
+    )
+    payload = document.tobytes()
+    document.close()
+    with fitz.open(stream=payload, filetype="pdf") as observed:
+        assert any(
+            int(info["xref"]) == 0
+            for info in observed[0].get_image_info(xrefs=True)
+        )
+        assert all(int(item[0]) != 0 for item in observed[0].get_images(full=True))
+    common = dict(
+        expected_sha256=sha256(payload).hexdigest(), page_no=1,
+        source_x=50, seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    paired = prove_horizontal_tile_seam_source_pixels(payload, **common)
+    strict = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, **common,
+    )
+    if should_abstain:
+        for result in (paired, strict):
+            assert result["status"] == ABSTAIN
+            assert "inline_source_image_painter_ambiguous" in result["reason_codes"]
+            assert not any(result[key] for key in (
+                "structural_host_granted", "whole_wall_frame_granted",
+                "opening_count_granted", "quantity_granted",
+                "elevation_plan_identity_granted", "opening_kind_granted",
+            ))
+    else:
+        assert paired["status"] == SOURCE_ONLY
+        assert strict["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
