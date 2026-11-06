@@ -380,6 +380,7 @@ class OpeningHostFrameProducer:
         ] = None,
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
+        g17_face_w2_owner_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -401,6 +402,10 @@ class OpeningHostFrameProducer:
             raise TypeError("raster_split_frame_shadow must be a bool")
         if type(source_fragment_roles_shadow) is not bool:
             raise TypeError("source_fragment_roles_shadow must be a bool")
+        if type(g17_face_w2_owner_shadow) is not bool:
+            raise TypeError("g17_face_w2_owner_shadow must be a bool")
+        if g17_face_w2_owner_shadow and not (raster_split_frame_shadow and source_fragment_roles_shadow):
+            raise ValueError("g17 face W2 owner requires both original raster and fragment shadows")
         if source_fragment_roles_shadow and supplemental_wall_candidate_authority is None:
             raise ValueError("source fragment roles require a supplemental source authority")
         self._opening = physical_opening_authority
@@ -410,6 +415,7 @@ class OpeningHostFrameProducer:
         # Opt-in diagnostic ONLY: never enabled in the default composition.
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._source_fragment_roles_shadow = source_fragment_roles_shadow
+        self._g17_face_w2_owner_shadow = g17_face_w2_owner_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
         # Proven representative selectors for this exact canonical frame.
         # Keep witnesses separate: shared-wall source_observation_ids may
@@ -428,6 +434,7 @@ class OpeningHostFrameProducer:
         ] = None,
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
+        g17_face_w2_owner_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
@@ -436,6 +443,7 @@ class OpeningHostFrameProducer:
             supplemental_wall_candidate_authority=supplemental_wall_candidate_authority,
             raster_split_frame_shadow=raster_split_frame_shadow,
             source_fragment_roles_shadow=source_fragment_roles_shadow,
+            g17_face_w2_owner_shadow=g17_face_w2_owner_shadow,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -1364,7 +1372,8 @@ class OpeningHostFrameProducer:
         if (type(opening_selector) is not ObservationSelector
                 or type(host_binding_selector) is not OpeningHostBindingSelector):
             raise TypeError("exact original opening/host selectors required")
-        if not (self._raster_split_frame_shadow
+        if not (self._g17_face_w2_owner_shadow
+                and self._raster_split_frame_shadow
                 and self._source_fragment_roles_shadow
                 and self._supplemental_walls is not None):
             return None
@@ -1432,6 +1441,9 @@ class OpeningHostFrameProducer:
         faces=[]
         ends=[]
         for oid,observed in support:
+            if observed.observation_kind not in ("raster_wall_band_face",
+                                                 "raster_wall_band_end"):
+                continue
             line=host_geometry._line(observed)
             if line is None:
                 return None
@@ -1482,13 +1494,15 @@ class OpeningHostFrameProducer:
         pixel=float(host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT)+_COORD_TOL
         for wall_id in binding.member_wall_candidate_ids:
             record=records.get(str(wall_id))
-            if (record is None or not record.physical_identity.usable
+            if record is None:
+                return None
+            if (not record.physical_identity.usable
                     or not record.source_edge_fragments
                     or not record.physical_identity.edge_ids):
-                return None
+                continue
             projection=source_edge_axis_projection(record,geometry,line_map)
             if projection is None:
-                return None
+                continue
             parent_role=False
             for parent_id in record.physical_identity.source_primitive_ids:
                 line=line_map.get(str(parent_id))
@@ -1778,14 +1792,15 @@ class OpeningHostFrameProducer:
                     frame_failure_reasons.append(
                         "opening_host_frame_source_closed_pier_faces_candidate_only"
                     )
-                source_owner=self.source_g17_right_flank_w2_owner_shadow(
-                    opening_selector=opening_selector,
-                    host_binding_selector=host_binding_selector,
-                )
-                if source_owner is not None:
-                    frame_failure_reasons.append(
-                        "opening_host_frame_source_g17_face_w2_centreline_owner_candidate_only"
+                if self._g17_face_w2_owner_shadow:
+                    source_owner=self.source_g17_right_flank_w2_owner_shadow(
+                        opening_selector=opening_selector,
+                        host_binding_selector=host_binding_selector,
                     )
+                    if source_owner is not None:
+                        frame_failure_reasons.append(
+                            "opening_host_frame_source_g17_face_w2_centreline_owner_candidate_only"
+                        )
             return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
