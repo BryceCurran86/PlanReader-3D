@@ -188,6 +188,22 @@ def project_live_ceiling_area_customer_rows(
         ceiling = ceilings.get(_clean(quantity.input_entity_ids[0]))
         if ceiling is None:
             continue
+        # The original room and finish receipts are not display-only aliases.
+        # A FIRM area cannot grant permission to trim or stringify a foreign
+        # source identity/material into a plausible commercial label.
+        for receipt_name, receipt in (
+            ("room identity", ceiling.room_entity_id),
+            ("finish descriptor", ceiling.finish_descriptor),
+        ):
+            if (
+                type(receipt) is not str
+                or not receipt
+                or receipt != receipt.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "legacy ceiling customer cannot repair original "
+                    f"{receipt_name}: {quantity.quantity_id}"
+                )
         customer_quantity = _customer_quantity(
             quantity,
             room_entity_id=_clean(ceiling.room_entity_id),
