@@ -607,6 +607,10 @@ def _bar_candidates(
     segments: Sequence[_VisibleSegment],
     words: Sequence[_TrustedWord],
 ) -> tuple[_BarCandidate, ...]:
+    # Every accepted bar needs authenticated endpoint labels. With no words
+    # the geometric search can only return the same empty candidate universe.
+    if not words:
+        return ()
     candidates: list[_BarCandidate] = []
     tick_index = _TickEndpointIndex(segments)
     for baseline in segments:

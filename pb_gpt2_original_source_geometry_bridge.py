@@ -39,12 +39,400 @@ from pb_gpt2_w4_original_floor_handoff import (
     audit_gpt2_w4_bound_original_floor,
     audit_gpt2_w4_material_to_gpt1,
 )
+from pb_gpt2_source_open_floor_rcp_geometry import (
+    audit_source_open_floor_native_ink_virtual_gap,
+)
 from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
     audit_gpt2_original_cross_sheet_ring_correspondence,
     audit_gpt2_original_doorway_bound_floor_finish_correspondence,
     audit_gpt2_source_material_floor_handoff,
 )
 
+
+
+def _original_doorway_gap_native_ink_inventory_complete(
+    original_pdf_bytes: bytes, *, page_1_based: int, original_room_graph: dict,
+    rival_receipt: dict | None = None,
+) -> bool:
+    """Veto omitted real painted strokes occupying a caller's claimed door gap.
+
+    Re-scan ALL original native paths, not just the selected W2 source IDs.
+    Same-source ink completeness is only a negative candidate gate: it never
+    issues physical wall, finished face, metric threshold or quantity.
+    """
+    import fitz
+    import math
+    import re
+
+    def record(first_failure, rivals=(), *, complete=False):
+        # Internal source-only receipt; never a commercial quantity claim.
+        if type(rival_receipt) is dict:
+            rival_receipt.clear()
+            rival_receipt.update({
+                "page_1_based": page_1_based,
+                "first_failure": first_failure,
+                "original_native_rival_ids": tuple(sorted(set(rivals))),
+                "inventory_complete": complete,
+            })
+
+    record("original_doorway_gap_inventory_not_replayed")
+    if (type(original_pdf_bytes) is not bytes or not original_pdf_bytes
+            or type(page_1_based) is not int or page_1_based < 1
+            or type(original_room_graph) is not dict
+            or original_room_graph.get("page_1_based") != page_1_based):
+        return False
+    ids=original_room_graph.get("original_native_edge_ids")
+    components=original_room_graph.get("native_components")
+    if (type(ids) is not tuple or not 2 <= len(ids) <= 120000
+            or type(components) is not tuple or len(components)!=1
+            or any(type(s) is not str or re.fullmatch(r"d\d+i\d+",s) is None
+                   for s in ids)):
+        return False
+    degrees=components[0].get("native_endpoint_degrees")
+    if type(degrees) not in (tuple,list):
+        return False
+    try:
+        ends=[tuple(float(v) for v in row["point_pdf_pt"])
+              for row in degrees if row["degree"]==1]
+    except (TypeError,KeyError,ValueError,OverflowError):
+        return False
+    if (len(ends)!=2 or any(len(p)!=2 or not all(math.isfinite(v) for v in p)
+                            for p in ends)):
+        return False
+    # Existing source diagnostic 0.001pt identity; NEVER construction 2.5pt.
+    a,b=(tuple(round(v,3) for v in p) for p in ends)
+    horizontal=a[1]==b[1] and a[0]!=b[0]
+    vertical=a[0]==b[0] and a[1]!=b[1]
+    if horizontal==vertical:
+        return False
+    low,high=sorted((a[0],b[0]) if horizontal else (a[1],b[1]))
+    fixed=a[1] if horizontal else a[0]
+    tolerance=0.001
+    try:
+        with fitz.open(stream=original_pdf_bytes,filetype="pdf") as doc:
+            if page_1_based>doc.page_count:
+                return False
+            drawings=doc[page_1_based-1].get_drawings()
+    except (ValueError,RuntimeError,TypeError,OverflowError):
+        return False
+    if len(drawings)>120000:
+        return False
+
+    def stroke_paint(row):
+        # Stroked original paths are rival ink regardless of colour, width,
+        # dash, or selected-source membership. A fill-only path is NOT a
+        # selected wall boundary, even when it has a native rectangle edge.
+        color=row.get("color")
+        width=row.get("width")
+        opacity=row.get("stroke_opacity")
+        return (
+            "s" in str(row.get("type",""))
+            and type(width) in (int,float)
+            and math.isfinite(width) and width>=0
+            and type(opacity) in (int,float)
+            and math.isfinite(opacity) and opacity>0
+            and type(color) in (tuple,list) and len(color)==3
+            and all(type(c) in (int,float) and math.isfinite(c)
+                    for c in color)
+        )
+
+    def unresolved_stroke_paint(row):
+        # Unknown metadata is not proof of invisible source ink. Reject the
+        # complete source-gap claim rather than silently discard a rival.
+        if "s" not in str(row.get("type","")):
+            return False
+        opacity=row.get("stroke_opacity")
+        if (type(opacity) in (int,float) and math.isfinite(opacity)
+                and opacity==0):
+            return False
+        return not stroke_paint(row)
+
+    def fill_paint(row):
+        # PDF fill-only ('f') and fill+stroke ('fs') paths can occupy the
+        # doorway without ANY stroked edge crossing its axis. Missing or
+        # malformed fill-opacity evidence cannot certify invisibility.
+        if "f" not in str(row.get("type","")):
+            return False
+        opacity=row.get("fill_opacity")
+        if type(opacity) not in (int,float) or not math.isfinite(opacity):
+            return True
+        return opacity>0
+
+    def filled_gap(row):
+        if not fill_paint(row):
+            return False
+        # Native get_drawings() rect bounds the complete painted fill,
+        # including closed paths and Beziers. An intersecting bound is only
+        # a conservative veto: it never asserts that the ink is a wall.
+        # We cannot elect a physical role from a fill's shape or colour.
+        rect=row.get("rect")
+        try:
+            x0,y0,x1,y1=(
+                float(rect.x0),float(rect.y0),
+                float(rect.x1),float(rect.y1),
+            )
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return True
+        if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+                or x0>x1 or y0>y1):
+            return True
+        if horizontal:
+            return (x0<high-tolerance and x1>low+tolerance
+                    and y0<=fixed+tolerance and y1>=fixed-tolerance)
+        return (y0<high-tolerance and y1>low+tolerance
+                and x0<=fixed+tolerance and x1>=fixed-tolerance)
+
+    def same_runs(item):
+        # Native PyMuPDF path items are not all 'l': 're' and 'qu' encode
+        # multiple painted edges; 'c' can encode a collinear Bezier run.
+        # Inspect EVERY edge, not merely the first edge or a caller's IDs.
+        if type(item) is not tuple or not item:
+            return ()
+        try:
+            kind=item[0]
+            if kind=="l" and len(item)==3:
+                edges=((item[1],item[2]),)
+            elif kind=="re" and len(item)==3:
+                rect=item[1]
+                corners=(rect.tl,rect.tr,rect.br,rect.bl)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="qu" and len(item)==2:
+                quad=item[1]
+                corners=(quad.ul,quad.ur,quad.lr,quad.ll)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="c" and len(item)==5:
+                points=tuple(
+                    (round(float(p.x),3),round(float(p.y),3))
+                    for p in item[1:]
+                )
+                if horizontal and all(p[1]==fixed for p in points):
+                    bounds=sorted(p[0] for p in points)
+                elif vertical and all(p[0]==fixed for p in points):
+                    bounds=sorted(p[1] for p in points)
+                else:
+                    return ()
+                return ((bounds[0],bounds[-1]),) if bounds[0]!=bounds[-1] else ()
+            else:
+                return ()
+            spans=[]
+            for p,q in edges:
+                x0,y0=(round(float(p.x),3),round(float(p.y),3))
+                x1,y1=(round(float(q.x),3),round(float(q.y),3))
+                if horizontal and y0==fixed and y1==fixed and x0!=x1:
+                    spans.append(tuple(sorted((x0,x1))))
+                if vertical and x0==fixed and x1==fixed and y0!=y1:
+                    spans.append(tuple(sorted((y0,y1))))
+            return tuple(spans)
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return ()
+
+
+    def crosses_gap(item, stroke_width_pt):
+        """Conservatively veto any painted native path crossing the open gap.
+
+        A perpendicular, diagonal or curved source stroke can invalidate a
+        claimed empty doorway just as a collinear wall run can. The native
+        stroke inventory is a negative gate, not a physical-role classifier.
+        """
+        if type(item) is not tuple or not item:
+            return False
+        # get_drawings() rect bounds stroke centre-lines, not painted width.
+        # This negative-only gap census must include the half-width envelope.
+        if (type(stroke_width_pt) not in (int,float)
+                or not math.isfinite(stroke_width_pt) or stroke_width_pt<0):
+            return True
+        half_width=stroke_width_pt/2
+
+        def axis_point(point):
+            x,y=round(float(point.x),3),round(float(point.y),3)
+            if not (math.isfinite(x) and math.isfinite(y)):
+                raise ValueError("nonfinite_original_point")
+            return (x,y) if horizontal else (y,x)
+
+        def edge_crosses(p,q):
+            a0,o0=axis_point(p)
+            a1,o1=axis_point(q)
+            # Clip the centre-line to the OPEN longitudinal gap first, so
+            # selected wall flanks ending at a jamb are not false rivals.
+            # Then test the actual stroked transverse envelope, including
+            # parallel near-axis ink that never crosses the centre axis.
+            lo,hi=low+tolerance,high-tolerance
+            if max(a0,a1)<=lo or min(a0,a1)>=hi:
+                return False
+            if a0==a1:
+                if not lo<a0<hi:
+                    return False
+                o_min,o_max=sorted((o0,o1))
+            else:
+                ta=(lo-a0)/(a1-a0)
+                tb=(hi-a0)/(a1-a0)
+                t0=max(0.0,min(ta,tb))
+                t1=min(1.0,max(ta,tb))
+                if t0>t1:
+                    return False
+                o_min,o_max=sorted((
+                    o0+t0*(o1-o0),o0+t1*(o1-o0),
+                ))
+            return (o_min<=fixed+half_width+tolerance
+                    and o_max>=fixed-half_width-tolerance)
+
+        def curve_crosses(points,depth=0):
+            # Bezier curves stay within the convex hull of their controls.
+            # Subdivide that hull until excluded, or conservatively veto
+            # unresolved source ink rather than claim an empty doorway.
+            axes=[p[0] for p in points]
+            orth=[p[1] for p in points]
+            if (max(axes)<=low+tolerance or min(axes)>=high-tolerance
+                    or min(orth)>fixed+half_width+tolerance
+                    or max(orth)<fixed-half_width-tolerance):
+                return False
+            if depth==16:
+                return True
+            a,b,c,d=points
+            ab=tuple((u+v)/2 for u,v in zip(a,b))
+            bc=tuple((u+v)/2 for u,v in zip(b,c))
+            cd=tuple((u+v)/2 for u,v in zip(c,d))
+            abc=tuple((u+v)/2 for u,v in zip(ab,bc))
+            bcd=tuple((u+v)/2 for u,v in zip(bc,cd))
+            mid=tuple((u+v)/2 for u,v in zip(abc,bcd))
+            return (curve_crosses((a,ab,abc,mid),depth+1)
+                    or curve_crosses((mid,bcd,cd,d),depth+1))
+
+        try:
+            kind=item[0]
+            if kind=="l" and len(item)==3:
+                edges=((item[1],item[2]),)
+            elif kind=="re" and len(item)==3:
+                rect=item[1]
+                corners=(rect.tl,rect.tr,rect.br,rect.bl)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="qu" and len(item)==2:
+                quad=item[1]
+                corners=(quad.ul,quad.ur,quad.lr,quad.ll)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="c" and len(item)==5:
+                return curve_crosses(tuple(axis_point(p) for p in item[1:]))
+            else:
+                return False
+            return any(edge_crosses(p,q) for p,q in edges)
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            # Invalid source geometry cannot certify a complete gap.
+            return True
+
+    # A malformed visible/possibly-visible stroke anywhere on this source
+    # page cannot certify a complete native-ink inventory.
+    unresolved_rows = [
+        (ix, row) for ix, row in enumerate(drawings)
+        if unresolved_stroke_paint(row)
+    ]
+    if unresolved_rows:
+        record(
+            "original_doorway_unknown_visible_stroke",
+            (f"d{ix}i{j}" for ix, row in unresolved_rows
+             for j, _ in enumerate(row.get("items") or ())),
+        )
+        return False
+
+    # Independently confirm that selected strokes actually border the
+    # claimed door gap. These prove the bounds, NOT a style whitelist for
+    # other original ink, which may carry a competing physical source role.
+    has_selected_left_ink_at_gap=False
+    has_selected_right_ink_at_gap=False
+    selected_flank_paint_orders=[]
+    selected_gap_rivals=[]
+    selected=set(ids)
+    for name in selected:
+        match=re.fullmatch(r"d(\d+)i(\d+)",name)
+        if match is None:
+            return False
+        ix,j=(int(x) for x in match.groups())
+        if ix>=len(drawings) or j>=len(drawings[ix].get("items",())):
+            return False
+        row=drawings[ix]
+        selected_spans=(
+            same_runs(row["items"][j]) if stroke_paint(row) else ()
+        )
+        # The caller's selected source IDs are NOT a physical-role
+        # whitelist. Original ink inside an allegedly empty doorway gap
+        # conflicts even if the caller included its ID in the wall roster.
+        if filled_gap(row) or (stroke_paint(row) and crosses_gap(row["items"][j],row["width"])):
+            selected_gap_rivals.append(name)
+        if (any(abs(span[1]-low)<=tolerance for span in selected_spans)
+                or any(abs(span[0]-high)<=tolerance for span in selected_spans)):
+            seqno=row.get("seqno")
+            if type(seqno) is not int or seqno<0:
+                return False
+            selected_flank_paint_orders.append(seqno)
+        if any(abs(span[1]-low)<=tolerance for span in selected_spans):
+            has_selected_left_ink_at_gap=True
+        if any(abs(span[0]-high)<=tolerance for span in selected_spans):
+            has_selected_right_ink_at_gap=True
+    # Both source-ink wall fragments are necessary to establish a bounded
+    # native doorway gap. One side plus a caller-nominated endpoint on the
+    # other side cannot prove the missing physical wall fragment. This
+    # is source completeness only, not an independently authenticated W4.
+    if not (has_selected_left_ink_at_gap and has_selected_right_ink_at_gap):
+        record("original_doorway_selected_flank_missing", selected_gap_rivals)
+        return False
+
+    first_flank_paint_order=min(selected_flank_paint_orders)
+
+    def earlier_white_rect_underlay(row):
+        # A WHITE, fully opaque, native RECTANGLE painted before BOTH selected
+        # wall flanks and covering the WHOLE door interval is a page/canvas
+        # underlay, not evidence of a later painted structural closure.
+        # Merely white-looking ink, a partial gap patch, a later D15 callout
+        # whiteout, a curved fill or an unknown paint order must still veto.
+        # This only removes a false source-ink veto; W4/threshold/quantity
+        # authority is neither inferred nor released.
+        seqno=row.get("seqno")
+        fill=row.get("fill")
+        items=row.get("items")
+        if (row.get("type")!="f" or type(seqno) is not int or seqno<0
+                or seqno>=first_flank_paint_order
+                or type(row.get("fill_opacity")) not in (int,float)
+                or row["fill_opacity"]!=1
+                or type(fill) not in (tuple,list) or len(fill)!=3
+                or any(type(c) not in (int,float) or c!=1 for c in fill)
+                or type(items) not in (tuple,list) or len(items)!=1
+                or type(items[0]) is not tuple or len(items[0])!=3
+                or items[0][0]!="re"):
+            return False
+        native_rect=items[0][1]
+        try:
+            x0,y0,x1,y1=(
+                float(native_rect.x0),float(native_rect.y0),
+                float(native_rect.x1),float(native_rect.y1),
+            )
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return False
+        if not all(math.isfinite(v) for v in (x0,y0,x1,y1)):
+            return False
+        if horizontal:
+            return (x0<=low+tolerance and x1>=high-tolerance
+                    and y0<=fixed+tolerance and y1>=fixed-tolerance)
+        return (y0<=low+tolerance and y1>=high-tolerance
+                and x0<=fixed+tolerance and x1>=fixed-tolerance)
+
+    rival_ids=set(selected_gap_rivals)
+    for ix,row in enumerate(drawings):
+        if not (stroke_paint(row) or fill_paint(row)):
+            continue
+        items=row.get("items",())
+        if type(items) not in (tuple,list) or not items:
+            record("original_doorway_painted_path_items_unresolved", rival_ids)
+            return False
+        for j,item in enumerate(items):
+            if f"d{ix}i{j}" in selected:
+                continue
+            if (filled_gap(row) and not earlier_white_rect_underlay(row)
+                    or stroke_paint(row) and crosses_gap(item,row["width"])):
+                rival_ids.add(f"d{ix}i{j}")
+    if rival_ids:
+        record("original_doorway_gap_painted_ink_inventory_incomplete", rival_ids)
+        return False
+    record(None, complete=True)
+    return True
 
 
 def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict) -> bool:
@@ -764,30 +1152,142 @@ class GPT2OriginalSourceGeometryBridge:
         No caller-provided area, copied wall ID, screenshot, or label can
         mint room ownership or floor-finish quantity authority.
         """
-        published,_=self._source_revision(
+        published,original_source_bytes=self._source_revision(
             revision_id,page_1_based=original_floor_page_1_based)
         if (type(source_cross_sheet_receipt) is not dict or
                 source_cross_sheet_receipt.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_cross_sheet_root_does_not_match_active_revision")
+        # This entry point is only for an explicitly source-replayed OPEN
+        # doorway. A caller-controlled False, None or absent field must not
+        # bypass the original ancestry and full-page painted-ink census.
+        # Genuine closed rings use original_floor_finish_ink_handoff with a
+        # separately reissued original closed source graph, not this flag.
+        if source_cross_sheet_receipt.get(
+                "source_real_door_ink_gap_virtual_closure_only") is not True:
+            return {
+                "status":"source_original_doorway_ancestry_conflict",
+                "first_failure":"original_doorway_open_gap_scope_unverified",
+                "original_doorway_reissue_attempted":False,
+                "floor_finish_quantity_granted":False,
+                "new_firm_quantities":0,
+            }
         if source_cross_sheet_receipt.get(
                 "source_real_door_ink_gap_virtual_closure_only") is True:
             rival=original_doorway_source_ancestry
-            if (type(rival) is not dict
-                    or rival.get("status")!=
-                        "original_doorway_all_printed_wall_strokes_match_candidate"
-                    or rival.get("original_source_sha256")!=
-                        published.revision.source_sha256
-                    or rival.get("source_revision_id")!=revision_id
-                    or rival.get("source_snapshot_id")!=
-                        published.snapshot.snapshot_id
-                    or rival.get("original_floor_page")!=original_floor_page_1_based
-                    or rival.get("original_other_plan_page")!=
-                        source_cross_sheet_receipt.get("original_finish_page")):
+            # Status and lineage fields are caller data. Reissue BOTH native
+            # doorway stroke inventories from the sealed original PDF before
+            # any material/W4 handoff. Exact original ink is never repaired by
+            # wall snap or a majority vote across alternate source sheets.
+            floor_ids=source_cross_sheet_receipt.get("original_floor_source_ids")
+            finish_ids=source_cross_sheet_receipt.get("original_finish_source_ids")
+            translation=source_cross_sheet_receipt.get(
+                "source_cross_sheet_translation_pdf_pts")
+            finish_page=source_cross_sheet_receipt.get("original_finish_page")
+            valid_scope=(
+                type(source_cross_sheet_receipt.get("original_floor_page")) is int
+                and source_cross_sheet_receipt["original_floor_page"]==original_floor_page_1_based
+                and type(finish_page) is int and finish_page!=original_floor_page_1_based
+                and type(floor_ids) is tuple and type(finish_ids) is tuple
+                and all(2<=len(ids)<=120000
+                        and all(type(item) is str and item for item in ids)
+                        and len(set(ids))==len(ids)
+                        for ids in (floor_ids,finish_ids))
+                and type(translation) in (tuple,list) and len(translation)==2
+                and all(type(v) in (int,float) and abs(v)<=2**53
+                        and v==v and v not in (float("inf"),float("-inf"))
+                        for v in translation)
+                and type(rival) is dict
+                and rival.get("original_source_sha256")==
+                    published.revision.source_sha256
+                and rival.get("source_document_id")==published.revision.document_id
+                and rival.get("source_revision_id")==revision_id
+                and rival.get("source_snapshot_id")==published.snapshot.snapshot_id
+                and rival.get("original_floor_page")==original_floor_page_1_based
+                and rival.get("original_other_plan_page")==finish_page
+                and type(rival.get("floor_source_graph")) is dict
+                and type(rival.get("second_plan_source_graph")) is dict
+                and rival["floor_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(floor_ids))
+                and rival["second_plan_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(finish_ids))
+                and rival.get("original_translation_pdf_pts")==list(translation)
+            )
+            reissued=None
+            reissue_attempted=False
+            reissue_failed=False
+            if valid_scope:
+                reissue_attempted=True
+                try:
+                    reissued=self.original_room_doorway_source_ancestry(
+                        revision_id=revision_id,
+                        original_floor_page_1_based=original_floor_page_1_based,
+                        original_second_page_1_based=finish_page,
+                        original_floor_source_edge_ids=floor_ids,
+                        original_second_source_edge_ids=finish_ids,
+                        original_translation_pdf_pts=tuple(translation),
+                    )
+                except (ValueError,TypeError,KeyError,IndexError,
+                        OverflowError,AttributeError,RuntimeError):
+                    reissue_failed=True
+            # A negative caller receipt is still replayable; only the
+            # independently reissued original may establish the first source
+            # gate. None of these paths authorizes material, W4 or quantity.
+            if not valid_scope:
+                first_failure="original_doorway_caller_scope_invalid"
+            elif reissue_failed or type(reissued) is not dict:
+                first_failure="original_doorway_original_reissue_failed"
+            elif reissued!=rival:
+                first_failure="original_doorway_caller_receipt_mismatch"
+            elif reissued.get("status")!=(
+                    "original_doorway_all_printed_wall_strokes_match_candidate"):
+                producer_gate=reissued.get("first_unclosed_gate")
+                first_failure=(producer_gate
+                               if type(producer_gate) is str and producer_gate
+                               else "original_doorway_reissued_source_conflict")
+            else:
+                first_failure=None
+            if first_failure is not None:
                 return {
                     "status":"source_original_doorway_ancestry_conflict",
-                    "first_failure":"real_original_doorway_stub_disagrees_across_sheets",
+                    "first_failure":first_failure,
                     "original_doorway_source_ancestry":rival,
+                    "original_doorway_reissue_attempted":reissue_attempted,
+                    "original_doorway_reissued_status":(
+                        reissued.get("status") if type(reissued) is dict else None),
+                    "original_doorway_reissued_first_unclosed_gate":(
+                        reissued.get("first_unclosed_gate")
+                        if type(reissued) is dict else None),
+                    "floor_finish_quantity_granted":False,
+                    "new_firm_quantities":0,
+                }
+            # The selected path IDs themselves are caller-provided. Reissuing
+            # only that subset is NOT original-source scope completeness: a caller
+            # can hide the disagreeing left-hand wall stub and produce a false
+            # positive open-room ancestry. Reinspect both full original source
+            # pages for same-ink strokes actually occupying the alleged door gap.
+            floor_ink_rivals={}
+            finish_ink_rivals={}
+            floor_gap_complete=_original_doorway_gap_native_ink_inventory_complete(
+                original_source_bytes,
+                page_1_based=original_floor_page_1_based,
+                original_room_graph=reissued["floor_source_graph"],
+                rival_receipt=floor_ink_rivals,
+            )
+            # Inspect both source pages even if the first page already vetoes.
+            finish_gap_complete=_original_doorway_gap_native_ink_inventory_complete(
+                original_source_bytes,
+                page_1_based=finish_page,
+                original_room_graph=reissued["second_plan_source_graph"],
+                rival_receipt=finish_ink_rivals,
+            )
+            if not (floor_gap_complete and finish_gap_complete):
+                return {
+                    "status":"source_original_doorway_ancestry_conflict",
+                    "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
+                    "source_original_doorway_gap_rival_receipts":(
+                        floor_ink_rivals, finish_ink_rivals,
+                    ),
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }
@@ -815,16 +1315,46 @@ class GPT2OriginalSourceGeometryBridge:
         w4=audit_gpt2_w4_bound_original_floor(
             source_cross_sheet_receipt,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
+        if (type(w4) is not dict
+                or w4.get("status")!="source_original_floor_W4_face_candidate_only"
+                or w4.get("w4_room_face_source_identity_proven") is not True
+                or w4.get("source_w4_wall_ownership_authenticated") is not True):
+            return {
+                "status":"source_W4_FT_handoff_abstained",
+                "first_failure":(
+                    w4.get("first_failure","sealed_W4_physical_room_unverified")
+                    if type(w4) is dict else "sealed_W4_physical_room_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "floor_finish_quantity_granted":False,
+                "new_firm_quantities":0,
+            }
         if (w4.get("original_revision_id") and
                 w4["original_revision_id"]!=revision_id):
             return {"status":"source_W4_revision_mismatch",
                     "source_w4_room_face_claim":w4,
                     "new_firm_quantities":0}
+        actual_gpt1=audit_gpt2_w4_material_to_gpt1(w4,actual_material)
+        if (type(actual_gpt1) is not dict
+                or actual_gpt1.get("status")!=
+                    "gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+                or actual_gpt1.get("new_firm_quantities")!=0):
+            return {
+                "status":"source_W4_FT_handoff_abstained",
+                "first_failure":(
+                    actual_gpt1.get("first_failure","W4_material_GPT1_handoff_unverified")
+                    if type(actual_gpt1) is dict
+                    else "W4_material_GPT1_handoff_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_gpt1_floor_finish_input":actual_gpt1,
+                "floor_finish_quantity_granted":False,
+                "new_firm_quantities":0,
+            }
         return {
             "status":"source_W4_FT_handoff_shadow_only",
             "source_w4_room_face_claim":w4,
-            "source_gpt1_floor_finish_input":
-                audit_gpt2_w4_material_to_gpt1(w4,actual_material),
+            "source_gpt1_floor_finish_input":actual_gpt1,
             "source_original_document_id":published.revision.document_id,
             "source_original_revision_id":revision_id,
             "source_original_snapshot_id":published.snapshot.snapshot_id,
@@ -845,6 +1375,7 @@ class GPT2OriginalSourceGeometryBridge:
         original_ceiling_finish_code: str,
         canonical_rooms,
         physical_room_id: str,
+        original_floor_open_doorway_source: dict | None = None,
     ) -> dict:
         """Bind original A120-only ceiling geometry to one sealed W4 room.
 
@@ -858,6 +1389,309 @@ class GPT2OriginalSourceGeometryBridge:
                 or source_floor_rcp_correspondence.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_floor_to_RCP_original_root_mismatch")
+        # A copied RCP polygon and a matching SHA are not proof of printed
+        # A120 boundary ink. Reissue the EXACT named native edges through the
+        # immutable SourceVisibilityProducer, BEFORE allowing any material
+        # occurrence or W4 issuer to examine caller-owned geometry.
+        blocked_ink = {
+            "status": "source_RCP_ink_issuer_not_replayable",
+            "first_failure": "original_A120_source_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        if type(original_rcp_ink) is not dict:
+            return blocked_ink
+        ink_page = original_rcp_ink.get("original_rcp_page")
+        ink_view = original_rcp_ink.get("original_rcp_viewport_id")
+        graph = original_rcp_ink.get("source_boundary_graph")
+        borders = graph.get("original_native_edge_ids") if type(graph) is dict else None
+        original_grid = original_rcp_ink.get("original_grid_source_ink_candidates")
+        if (
+            type(ink_page) is not int or ink_page == original_floor_page_1_based
+            or ink_page < 1
+            or type(ink_view) is not str or not ink_view or ink_view != ink_view.strip()
+            or type(borders) is not tuple or not 3 <= len(borders) <= 20000
+            or any(type(v) is not str or not v or v != v.strip() for v in borders)
+            or len(set(borders)) != len(borders)
+            or type(original_grid) is not tuple or len(original_grid) > 20000
+        ):
+            return blocked_ink
+        grid_ids = tuple(
+            row.get("native_source_id") if type(row) is dict else None
+            for row in original_grid
+        )
+        if (
+            any(type(v) is not str or not v or v != v.strip() for v in grid_ids)
+            or len(set(grid_ids)) != len(grid_ids)
+            or set(grid_ids).intersection(borders)
+            or original_rcp_ink.get("original_source_sha256") !=
+                published.revision.source_sha256
+            or original_rcp_ink.get("original_document_id") !=
+                published.revision.document_id
+            or original_rcp_ink.get("original_revision_id") != revision_id
+            or original_rcp_ink.get("original_snapshot_id") !=
+                published.snapshot.snapshot_id
+        ):
+            return blocked_ink
+        try:
+            # The source producer itself checks F07's authentic RCP viewport,
+            # complete selected native ink, source root, and metric-free ring.
+            actual_ink = self.original_rcp_ink_graph(
+                revision_id=revision_id, page_1_based=ink_page,
+                viewport_id=ink_view, source_boundary_edge_ids=borders,
+                original_source_grid_edge_ids=grid_ids,
+            )
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError, RuntimeError):
+            return blocked_ink
+        if (
+            type(actual_ink) is not dict
+            or actual_ink.get("status") !=
+                "original_rcp_source_ink_ceiling_polygon_candidate"
+            or actual_ink != original_rcp_ink
+        ):
+            return blocked_ink
+
+        # The RCP ink is reissued above, but a caller-supplied floor→RCP
+        # correspondence remains untrusted until its FLOOR ink is also
+        # independently reissued from the same sealed original PDF. Without
+        # this, a forged floor polygon/translation could bind a genuine GRID
+        # source polygon to an unrelated W4 room.
+        blocked_registration = {
+            "status": "source_floor_RCP_registration_issuer_not_replayable",
+            "first_failure": "original_floor_to_A120_ink_not_reauthenticated",
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        correspondence = source_floor_rcp_correspondence
+        if (
+            correspondence.get("status") !=
+                "original_source_ink_ring_translation_candidate"
+            or correspondence.get("geometric_ink_correspondence_only") is not True
+            or type(correspondence.get("original_floor_page")) is not int
+            or correspondence["original_floor_page"] != original_floor_page_1_based
+            or type(correspondence.get("original_finish_page")) is not int
+            or correspondence["original_finish_page"] != ink_page
+            or correspondence.get("original_source_sha256") !=
+                published.revision.source_sha256
+        ):
+            return blocked_registration
+        floor_ids = correspondence.get("original_floor_source_ids")
+        rcp_ids = correspondence.get("original_finish_source_ids")
+        shift = correspondence.get("source_cross_sheet_translation_pdf_pts")
+        if (
+            type(floor_ids) is not tuple or not 3 <= len(floor_ids) <= 20000
+            or type(rcp_ids) is not tuple
+            or len(rcp_ids) != len(borders)
+            or len(set(rcp_ids)) != len(rcp_ids)
+            or set(rcp_ids) != set(borders)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in rcp_ids)
+            or len(set(floor_ids)) != len(floor_ids)
+            or any(type(x) is not str or not x or x != x.strip()
+                   for x in floor_ids)
+            or type(shift) not in (list, tuple) or len(shift) != 2
+            or any(type(x) not in (int, float) for x in shift)
+        ):
+            return blocked_registration
+        import math
+        from shapely.geometry import Polygon
+        try:
+            dx, dy = (float(x) for x in shift)
+            if not (math.isfinite(dx) and math.isfinite(dy)):
+                return blocked_registration
+            floor_source = self.original_room_ink_graph(
+                revision_id=revision_id,
+                page_1_based=original_floor_page_1_based,
+                original_source_edge_ids=floor_ids,
+            )
+            components = floor_source.get("native_components")
+            issued_floor_ids = floor_source.get("original_native_edge_ids")
+            if (
+                type(issued_floor_ids) is not tuple
+                or len(issued_floor_ids) != len(floor_ids)
+                or len(set(issued_floor_ids)) != len(issued_floor_ids)
+                or set(issued_floor_ids) != set(floor_ids)
+                or floor_source.get("source_sha256") !=
+                    published.revision.source_sha256
+                or floor_source.get("page_1_based") != original_floor_page_1_based
+                or floor_source.get("interior_stroke_intersections_and_overlaps")
+                or type(components) not in (tuple, list)
+                or len(components) != 1
+            ):
+                return blocked_registration
+            source_ring = components[0].get("source_simple_ring_candidate")
+            source_edges = components[0].get("source_edge_ids")
+            ring_edges = (
+                source_ring.get("source_edge_ids")
+                if type(source_ring) is dict else None
+            )
+            if (
+                type(source_edges) is not tuple
+                or len(source_edges) != len(floor_ids)
+                or set(source_edges) != set(floor_ids)
+            ):
+                return blocked_registration
+            claimed_floor = Polygon(
+                correspondence["source_floor_perimeter_polygon_pdf_pts"])
+            if original_floor_open_doorway_source is None:
+                # Original CLOSED floor ink is still the only default route.
+                if (floor_source.get("status") !=
+                        "original_closed_ink_ring_candidates_only"
+                        or floor_source.get("native_candidate_ring_count") != 1
+                        or type(source_ring) is not dict
+                        or type(ring_edges) is not tuple
+                        or len(ring_edges) != len(floor_ids)
+                        or set(ring_edges) != set(floor_ids)):
+                    return blocked_registration
+                floor = Polygon(source_ring["vertices_pdf_pts"])
+            else:
+                # Explicit authentic OPEN p7 floor -> closed A120 ceiling.
+                # The missing doorway ink is a VIRTUAL REGISTRATION CHORD,
+                # never structural wall or customer threshold evidence.
+                opt=original_floor_open_doorway_source
+                if type(opt) is not dict or source_ring is not None:
+                    return blocked_registration
+                gap_check=audit_source_open_floor_native_ink_virtual_gap(
+                    floor_source, original_source_edge_ids=floor_ids,
+                    virtual_floor_vertices_pdf_pts=tuple(
+                        correspondence["source_floor_perimeter_polygon_pdf_pts"]
+                    ),
+                )
+                if gap_check.get("status") != (
+                    "source_open_floor_one_original_door_gap_candidate_only"
+                ):
+                    return blocked_registration
+                second=opt.get("original_second_page_1_based")
+                second_ids=opt.get("original_second_source_edge_ids")
+                second_shift=opt.get("source_floor_to_second_translation_pdf_pts")
+                expected=opt.get("claimed_reissued_ancestry")
+                if (type(second) is not int
+                        or second in (original_floor_page_1_based,ink_page)
+                        or second<1
+                        or type(second_ids) is not tuple
+                        or not 3<=len(second_ids)<=20000
+                        or len(set(second_ids))!=len(second_ids)
+                        or any(type(v) is not str or not v or v!=v.strip()
+                               for v in second_ids)
+                        or type(second_shift) not in (tuple,list)
+                        or len(second_shift)!=2
+                        or any(type(v) not in (int,float) or not math.isfinite(v)
+                               for v in second_shift)
+                        or type(expected) is not dict):
+                    return blocked_registration
+                reissued=self.original_room_doorway_source_ancestry(
+                    revision_id=revision_id,
+                    original_floor_page_1_based=original_floor_page_1_based,
+                    original_second_page_1_based=second,
+                    original_floor_source_edge_ids=floor_ids,
+                    original_second_source_edge_ids=second_ids,
+                    original_translation_pdf_pts=tuple(second_shift),
+                )
+                if (type(reissued) is not dict
+                        or reissued.get("source_document_id") !=
+                            published.revision.document_id
+                        or reissued.get("source_revision_id") != revision_id
+                        or reissued.get("source_snapshot_id") !=
+                            published.snapshot.snapshot_id
+                        or reissued.get("original_source_sha256") !=
+                            published.revision.source_sha256):
+                    return blocked_registration
+                a=reissued.get("floor_source_graph")
+                b=reissued.get("second_plan_source_graph")
+                if (type(a) is not dict or type(b) is not dict
+                        or a.get("original_native_edge_ids") !=
+                           tuple(sorted(floor_ids))
+                        or b.get("original_native_edge_ids") !=
+                           tuple(sorted(second_ids))):
+                    return blocked_registration
+                # Preserve only the independently reissued source object,
+                # including a real negative and its exact source rivals.
+                # Caller receipt agreement is checked separately below.
+                blocked_registration = {
+                    **blocked_registration,
+                    "original_doorway_source_ancestry": reissued,
+                    "original_doorway_reissued_status": reissued.get("status"),
+                    "original_doorway_reissued_first_unclosed_gate": (
+                        reissued.get("first_unclosed_gate")
+                    ),
+                }
+                _,original_bytes=self._source_revision(
+                    revision_id,page_1_based=original_floor_page_1_based)
+                floor_ink_rivals = {}
+                second_ink_rivals = {}
+                # Each source page owns an independent negative inventory.
+                # A veto or replay failure on one must not suppress the other.
+                inventories_complete = []
+                for page, graph, receipt in (
+                    (original_floor_page_1_based, a, floor_ink_rivals),
+                    (second, b, second_ink_rivals),
+                ):
+                    try:
+                        complete = _original_doorway_gap_native_ink_inventory_complete(
+                            original_bytes, page_1_based=page,
+                            original_room_graph=graph, rival_receipt=receipt,
+                        )
+                    except (KeyError, ValueError, TypeError, IndexError,
+                            OverflowError, RuntimeError):
+                        # Retain already observed rivals if a replay stops.
+                        receipt.update({
+                            "page_1_based": page,
+                            "first_failure": "original_doorway_gap_inventory_reissue_failed",
+                            "original_native_rival_ids": receipt.get(
+                                "original_native_rival_ids", (),
+                            ),
+                            "inventory_complete": False,
+                        })
+                        complete = False
+                    inventories_complete.append(complete is True)
+                blocked_registration = {
+                    **blocked_registration,
+                    "source_original_doorway_gap_rival_receipts": (
+                        floor_ink_rivals, second_ink_rivals,
+                    ),
+                }
+                if reissued != expected:
+                    return {
+                        **blocked_registration,
+                        "first_failure": "original_doorway_caller_receipt_mismatch",
+                    }
+                if reissued.get("status") != (
+                    "original_doorway_all_printed_wall_strokes_match_candidate"
+                ):
+                    producer_gate = reissued.get("first_unclosed_gate")
+                    return {
+                        **blocked_registration,
+                        "first_failure": (
+                            producer_gate if type(producer_gate) is str and producer_gate
+                            else "original_doorway_reissued_source_conflict"
+                        ),
+                    }
+                if not all(inventories_complete):
+                    return {
+                        **blocked_registration,
+                        "first_failure": "original_doorway_gap_painted_ink_inventory_incomplete",
+                    }
+                floor=claimed_floor
+            
+            claimed_rcp = Polygon(
+                correspondence["source_finishes_perimeter_polygon_pdf_pts"])
+            ceiling = Polygon(
+                actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if (not all(p.is_valid and p.area > 0 for p in (
+                        floor, claimed_floor, claimed_rcp, ceiling))
+                    or not floor.equals(claimed_floor)
+                    or not claimed_rcp.equals(ceiling)):
+                return blocked_registration
+            shifted_floor = Polygon([
+                (round(float(x) + dx, 3), round(float(y) + dy, 3))
+                for x, y in floor.exterior.coords[:-1]
+            ])
+            if not shifted_floor.is_valid or not shifted_floor.equals(ceiling):
+                return blocked_registration
+        except (KeyError, ValueError, TypeError, IndexError,
+                OverflowError, RuntimeError):
+            return blocked_registration
+
         # Source issue is independently repeated from the original,
         # producer-sealed A120 RCP mark and material definition. A copied
         # dict cannot supply source-verified ceiling material ownership.
@@ -880,6 +1714,20 @@ class GPT2OriginalSourceGeometryBridge:
         w4=audit_gpt2_w4_bound_original_floor(
             source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
+        if (type(w4) is not dict
+                or w4.get("status")!="source_original_floor_W4_face_candidate_only"
+                or w4.get("w4_room_face_source_identity_proven") is not True
+                or w4.get("source_w4_wall_ownership_authenticated") is not True):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    w4.get("first_failure", "source_W4_original_face_unverified")
+                    if type(w4) is dict else "source_W4_original_face_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
         result=audit_gpt2_w4_original_rcp_ceiling_handoff(
             independently_registered_rcp=source_floor_rcp_correspondence,
             original_rcp_ink=original_rcp_ink,
@@ -887,8 +1735,120 @@ class GPT2OriginalSourceGeometryBridge:
             canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id,
         )
+        if (type(result) is not dict
+                or result.get("status") !=
+                    "original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+                or result.get("ceiling_quantity_m2_issued") is not False
+                or result.get("new_firm_quantities") != 0):
+            return {
+                "status":"source_W4_original_A120_ceiling_binding_unverified",
+                "first_failure": (
+                    result.get("first_failure", "A120_W4_ceiling_material_unverified")
+                    if type(result) is dict else "A120_W4_ceiling_material_unverified"
+                ),
+                "source_w4_room_face_claim":w4,
+                "source_original_rcp_ceiling_input_for_gpt1":result,
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
+        # The original RCP room label and its GRID occurrence need not be in
+        # the same PDF native text block. They may join ONLY when both have
+        # independent original text receipts INSIDE the SAME reissued ink
+        # ring and the label belongs to exactly one sealed W4 room. This
+        # makes no physical ceiling scale, area or commercial claim.
+        blocked_label = {
+            "status": "source_RCP_room_label_region_not_authenticated",
+            "first_failure": "original_A120_room_label_not_uniquely_source_owned",
+            "source_w4_room_face_claim": w4,
+            "source_ceiling_area_m2": None,
+            "new_firm_quantities": 0,
+        }
+        try:
+            from pb_cross_view_ceiling_finish_authority import (
+                _trusted_room_labels_for_pages,
+            )
+            from shapely.geometry import box as native_box
+            candidate_rooms = tuple(canonical_rooms.rooms)
+            owned_rooms = [
+                r for r in candidate_rooms
+                if r.physical_room_id == physical_room_id
+            ]
+            if len(owned_rooms) != 1:
+                return blocked_label
+            room_label = owned_rooms[0].room_label
+            if (type(room_label) is not str or not room_label
+                    or room_label != room_label.strip()):
+                return blocked_label
+            all_labels = tuple(
+                r.room_label for r in candidate_rooms
+                if type(r.room_label) is str and r.room_label.strip()
+            )
+            # A duplicated named room in the sealed W4 source universe
+            # cannot become one material owner merely by text overlap.
+            normalized = tuple(" ".join(v.casefold().split()) for v in all_labels)
+            if (not all_labels or len(set(normalized)) != len(normalized)
+                    or " ".join(room_label.casefold().split()) not in normalized):
+                return blocked_label
+            trusted = _trusted_room_labels_for_pages(
+                self._source, revision_id=revision_id,
+                page_ids=(str(ink_page),), candidate_labels=all_labels,
+            )
+            rows = trusted.get(str(ink_page), ())
+            zone = Polygon(actual_ink["source_ceiling_ink_polygon_pdf_pts"])
+            if not zone.is_valid or zone.area <= 0:
+                return blocked_label
+            inside = []
+            for line in rows:
+                # A word such as OFFICE can occur inside a service note as
+                # well as in the actual room label. Count only independently
+                # issued COMPLETE room-label lines, never word-token hits.
+                # All alternative canonical room labels remain competitors.
+                if (type(line.text) is not str
+                        or " ".join(line.text.casefold().split()) not in normalized):
+                    continue
+                raw_box = line.bbox
+                if (type(raw_box) not in (tuple, list)
+                        or len(raw_box) != 4
+                        or any(type(v) not in (float, int) for v in raw_box)
+                        or not all(math.isfinite(v) for v in raw_box)
+                        or raw_box[0] >= raw_box[2]
+                        or raw_box[1] >= raw_box[3]):
+                    return blocked_label
+                if not zone.contains(native_box(*raw_box)):
+                    continue
+                if (
+                    type(line.source_partition_id) is not str
+                    or not line.source_partition_id
+                    or type(line.block_no) is not int
+                    or type(line.line_no) is not int
+                    or type(line.observation_ids) is not tuple
+                    or not line.observation_ids
+                    or type(line.receipt_ids) is not tuple
+                    or len(line.receipt_ids) != len(line.observation_ids)
+                    or len(set(line.observation_ids)) != len(line.observation_ids)
+                    or len(set(line.receipt_ids)) != len(line.receipt_ids)
+                    or any(type(v) is not str or not v or v != v.strip()
+                           for v in (*line.observation_ids, *line.receipt_ids))
+                ):
+                    return blocked_label
+                inside.append(line)
+            if (len(inside) != 1
+                    or " ".join(inside[0].text.casefold().split())
+                    != " ".join(room_label.casefold().split())):
+                return blocked_label
+        except (AttributeError, KeyError, TypeError, ValueError,
+                OverflowError, RuntimeError):
+            return blocked_label
+
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
+            "original_rcp_room_label_text":inside[0].text,
+            "original_rcp_room_label_source_partition_id":inside[0].source_partition_id,
+            "original_rcp_room_label_native_block_no":inside[0].block_no,
+            "original_rcp_room_label_native_line_no":inside[0].line_no,
+            "original_rcp_room_label_observation_ids":inside[0].observation_ids,
+            "original_rcp_room_label_receipt_ids":inside[0].receipt_ids,
+            "original_rcp_label_material_join_authority":"source_closed_zone_independent_text",
             "source_w4_room_face_claim":w4,
             "source_original_rcp_ceiling_input_for_gpt1":result,
             "source_original_document_id":published.revision.document_id,

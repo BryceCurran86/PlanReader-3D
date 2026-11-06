@@ -46,6 +46,10 @@ SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_CONFLICT = (
     "source_cross_view_floor_correspondence_conflict"
 )
 REGISTRATION_NOT_UNIQUE = "registration_not_unique"
+SOURCE_FINISH_MARK_IDENTITY_INVALID = "source_finish_mark_identity_invalid"
+MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX = "multiple_same_code_finish_marks_in_box"
+DUPLICATE_PHYSICAL_FLOOR_IDENTITY = "duplicate_physical_floor_identity"
+MISSING_PHYSICAL_FLOOR_IDENTITY = "missing_physical_floor_identity"
 BOX_NOT_WALL_BOUNDED = "box_not_wall_bounded_on_both_sheets"
 WALL_EVIDENCE_DIFFERS = "wall_evidence_differs_between_sheets"
 OVERLAPPING_MEASURED_BOXES = "overlapping_measured_boxes"
@@ -378,22 +382,79 @@ def classify_floor(
     marks_inside: Sequence[Mapping[str, Any]],
     other_labelled_boxes_overlapping: int,
     material_code: str,
+    identity_ambiguous: bool = False,
+    identity_missing: bool = False,
     min_margin_pt: float = 5.0,
     authority_blockers: Sequence[str] = STANDING_AUTHORITY_BLOCKERS,
 ) -> dict[str, Any]:
+    # A caller's glyph/mark receipt is not a typed source identity merely
+    # because a matching finish code can be read from another mark.  Reject
+    # malformed or unbounded mark universes before counting any candidates.
+    if type(marks_inside) not in (tuple, list) or len(marks_inside) > 20000:
+        return {
+            "status": EvidenceResolutionStatus.ABSTAINED,
+            "reason_codes": (SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+            "finish_codes_in_box": {},
+            "authority_blockers": (),
+            "authenticated_physical_wall_face_equivalence": False,
+        }
     reasons: list[str] = []
-    codes = collections.Counter(m["code"] for m in marks_inside)
-    if not registration_unique:
+    codes: collections.Counter[str] = collections.Counter()
+    invalid_mark_identity = False
+    for mark in marks_inside:
+        if not isinstance(mark, Mapping):
+            invalid_mark_identity = True
+            continue
+        code = mark.get("code")
+        if type(code) is not str or not code or code != code.strip():
+            invalid_mark_identity = True
+            continue
+        codes[code] += 1
+    if invalid_mark_identity:
+        reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+    if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
-    if not correspondence["wall_bounded_on_both_sheets"]:
+    if correspondence["wall_bounded_on_both_sheets"] is not True:
         reasons.append(BOX_NOT_WALL_BOUNDED)
-    elif not correspondence["wall_evidence_identical_on_both_sheets"]:
+    elif correspondence["wall_evidence_identical_on_both_sheets"] is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
     if other_labelled_boxes_overlapping:
         reasons.append(OVERLAPPING_MEASURED_BOXES)
-    if any(m.get("margin_pt", 0.0) < min_margin_pt for m in marks_inside):
+    # Source-face / physical-room / canonical-floor identifiers are a
+    # one-to-one claim for this shadow correspondence. Repeating an identity
+    # across distinct measured boxes cannot authenticate either owner.
+    if identity_ambiguous is not False:
+        reasons.append(DUPLICATE_PHYSICAL_FLOOR_IDENTITY)
+    if identity_missing is not False:
+        reasons.append(MISSING_PHYSICAL_FLOOR_IDENTITY)
+    # A missing, malformed, overflowing or non-finite mark margin is not a
+    # positive source containment receipt. Never let NaN bypass comparison.
+    try:
+        minimum = float(min_margin_pt) if type(min_margin_pt) in (int, float) else math.nan
+    except (ValueError, OverflowError):
+        minimum = math.nan
+
+    def valid_margin(mark: Mapping[str, Any]) -> bool:
+        if not isinstance(mark, Mapping):
+            return False
+        raw = mark.get("margin_pt")
+        if type(raw) not in (int, float):
+            return False
+        try:
+            margin = float(raw)
+        except (ValueError, OverflowError):
+            return False
+        return math.isfinite(margin) and margin >= minimum
+
+    if (
+        not math.isfinite(minimum)
+        or minimum < 0
+        or any(not valid_margin(mark) for mark in marks_inside)
+    ):
         reasons.append(MARK_TOO_CLOSE_TO_BOX_SIDE)
-    if any(not m.get("registered_region", True) for m in marks_inside):
+    # Registration is an explicit source fact, not a truthy caller hint.
+    if any(not isinstance(mark, Mapping)
+           or mark.get("registered_region") is not True for mark in marks_inside):
         reasons.append(MARK_IN_UNREGISTERED_REGION)
 
     if len(codes) > 1:
@@ -402,9 +463,14 @@ def classify_floor(
     elif not codes:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons.append(NO_FINISH_MARK_IN_BOX)
-    elif material_code not in codes:
+    elif type(material_code) is not str or material_code not in codes:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons.append(BOX_OWNED_BY_OTHER_FINISH_CODE)
+    elif sum(codes.values()) != 1:
+        # Repeated same-code marks can belong to different physical finish
+        # regions. One dimension box cannot choose an owner by code alone.
+        status = EvidenceResolutionStatus.ABSTAINED
+        reasons.append(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX)
     elif reasons:
         status = EvidenceResolutionStatus.ABSTAINED
     else:
@@ -507,6 +573,34 @@ class SourceCrossViewFloorCorrespondenceProducer:
         trials: int = 60,
     ) -> SourceCrossViewFloorCorrespondenceResult:
         """Pure geometric evaluation using in-memory segments and boxes."""
+        # The entire native mark set is authority input, including rivals
+        # outside the first measured box. Do not silently omit an unreadable,
+        # nonfinite or aliased competing source mark while retaining the
+        # apparently unique FT3 mark. This is source-only fail-closed.
+        def source_mark_is_finite_native(mark):
+            if not isinstance(mark, Mapping):
+                return False
+            if (type(mark.get("code")) is not str
+                    or not mark["code"]
+                    or mark["code"] != mark["code"].strip()):
+                return False
+            for name in ("x", "y"):
+                v = mark.get(name)
+                if (type(v) not in (int, float) or abs(v)>2**53):
+                    return False
+                try:
+                    if not math.isfinite(float(v)):
+                        return False
+                except (ValueError, OverflowError):
+                    return False
+            return True
+        if (type(marks) not in (tuple,list) or len(marks)>20000
+                or any(not source_mark_is_finite_native(mark) for mark in marks)):
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+                records=(),
+            )
         lines_sup = build_lines(support_segments)
         lines_tgt = build_lines(target_segments)
 
@@ -538,11 +632,88 @@ class SourceCrossViewFloorCorrespondenceProducer:
         )
         overall_reasons = [] if is_unique else [REGISTRATION_NOT_UNIQUE]
 
+        # Original measured-box geometry, not a caller "overlap" hint,
+        # owns box competition. Validate the COMPLETE set before electing a
+        # source region and sweep source-native x intervals with bounded
+        # active comparisons (never publish from a partial search).
+        if type(measured_boxes) not in (list, tuple) or len(measured_boxes)>20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+            )
+        validated_boxes=[]
         for item in measured_boxes:
-            box_sup = tuple(float(v) for v in item["dimension_box_pdf_pts"])
-            canonical_floor_id = _clean(item.get("canonical_floor_id"))
-            physical_room_id = _clean(item.get("physical_room_id"))
-            source_room_face_record_id = _clean(item.get("source_room_face_record_id"))
+            raw=item.get("dimension_box_pdf_pts") if isinstance(item,Mapping) else None
+            if (type(raw) not in (tuple,list) or len(raw)!=4
+                    or any(type(value) not in (int,float)
+                           or abs(value)>2**53 for value in raw)):
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            coords=tuple(float(v) for v in raw)
+            if (any(not math.isfinite(v) for v in coords)
+                    or coords[0]>=coords[2] or coords[1]>=coords[3]):
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            validated_boxes.append(coords)
+        overlap_flags=[False]*len(validated_boxes)
+        active=[]
+        inspected=0
+        for i in sorted(range(len(validated_boxes)),
+                        key=lambda k:(validated_boxes[k][0],k)):
+            x0,y0,x1,y1=validated_boxes[i]
+            active=[j for j in active if validated_boxes[j][2]>x0]
+            inspected+=len(active)
+            if inspected>500_000:
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(OVERLAPPING_MEASURED_BOXES,), records=(),
+                )
+            for j in active:
+                a=validated_boxes[j]
+                if a[1]<y1 and y0<a[3]:
+                    overlap_flags[i]=True
+                    overlap_flags[j]=True
+            active.append(i)
+
+        # One original physical room, canonical floor and W4 face cannot
+        # be claimed by two measured boxes, even if their ink boxes do not
+        # overlap. Census the COMPLETE source identity universe before
+        # evaluating any geometry; caller overlap hints are not authority.
+        source_id_fields = (
+            "canonical_floor_id", "physical_room_id",
+            "source_room_face_record_id",
+        )
+        if type(measured_boxes) not in (list, tuple) or len(measured_boxes)>20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(MISSING_PHYSICAL_FLOOR_IDENTITY,), records=(),
+            )
+        def source_id(row, field):
+            value = row.get(field) if isinstance(row, Mapping) else None
+            return value if (type(value) is str and value
+                             and value==value.strip() and value.isprintable()) else ""
+        identity_counts = collections.Counter(
+            (field, source_id(item, field))
+            for item in measured_boxes
+            for field in source_id_fields
+            if source_id(item, field)
+        )
+        for box_index,item in enumerate(measured_boxes):
+            box_sup = validated_boxes[box_index]
+            canonical_floor_id = source_id(item, "canonical_floor_id")
+            physical_room_id = source_id(item, "physical_room_id")
+            source_room_face_record_id = source_id(item, "source_room_face_record_id")
+            identity_missing = not all((
+                canonical_floor_id, physical_room_id, source_room_face_record_id,
+            ))
+            identity_ambiguous = any(
+                identity_counts[(field, source_id(item, field))] > 1
+                for field in source_id_fields if source_id(item, field)
+            )
 
             corr = box_correspondence(
                 box_sup,
@@ -561,15 +732,20 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     inside_marks.append({
                         "code": mark["code"],
                         "margin_pt": margin,
-                        "registered_region": mark.get("registered_region", True),
+                        "registered_region": mark.get("registered_region"),
                     })
 
             classified = classify_floor(
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=item.get("other_labelled_boxes_overlapping", 0),
+                other_labelled_boxes_overlapping=(
+                    bool(item.get("other_labelled_boxes_overlapping", 0))
+                    or overlap_flags[box_index]
+                ),
                 material_code=selector.material_code,
+                identity_missing=identity_missing,
+                identity_ambiguous=identity_ambiguous,
             )
 
             record_id = stable_contract_id(
@@ -615,6 +791,21 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 takeoff_eligible=False,
             )
             records.append(rec)
+
+        # A rigid registration alone is not finish ownership. Preserve each
+        # candidate/abstention and never advertise a successful collection
+        # when every measured floor failed its own source mark/face gate.
+        if any(row.status is EvidenceResolutionStatus.CONFLICT for row in records):
+            overall_status = EvidenceResolutionStatus.CONFLICT
+        elif not any(row.status is EvidenceResolutionStatus.CANDIDATE for row in records):
+            overall_status = EvidenceResolutionStatus.ABSTAINED
+        if overall_status is not EvidenceResolutionStatus.CANDIDATE:
+            overall_reasons = list(dict.fromkeys((
+                *overall_reasons,
+                *(reason for row in records for reason in row.reason_codes),
+            )))
+            if not overall_reasons:
+                overall_reasons = [SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_UNAVAILABLE]
 
         return SourceCrossViewFloorCorrespondenceResult(
             status=overall_status,

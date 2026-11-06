@@ -136,3 +136,66 @@ def test_trusted_source_schedule_scopes_carry_immutable_revision_page_and_view()
         assert revision==pub.revision.revision_id
         assert page=="1"
         assert viewport.view_id
+
+
+
+def test_explicit_original_rcp_plan_scope_optin_only_on_selected_source_pages(monkeypatch):
+    src,pub=_source_two_pages()
+    normal=materials.SourceMaterialSemanticProducer.from_source_visibility_producer(src)
+    rcp=materials.SourceMaterialSemanticProducer.for_source_connected_original_rcp_plan_shadow(
+        src,page_ids=("2",),
+    )
+    assert normal._source_connected_rcp_plan_page_ids == frozenset()
+    assert rcp._source_connected_rcp_plan_page_ids == frozenset({"2"})
+    assert rcp._source_native_schedule_page_ids == frozenset({"2"})
+    seen=[]
+    def observe(_page,*,page_number,**kwargs):
+        seen.append((page_number,dict(kwargs)))
+        return ()
+    monkeypatch.setattr(materials,"segment_page_viewports",observe)
+    normal.publish(pub.revision.revision_id)
+    assert seen == [(1,{}),(2,{})]
+    seen.clear()
+    rcp.publish(pub.revision.revision_id)
+    assert seen == [
+        (1,{}),
+        (2,{
+            "source_connected_table_cell_shadow":True,
+            "source_native_multipath_semantic_frame_shadow":True,
+            "source_connected_text_cell_plan_frame_shadow":True,
+        }),
+    ]
+    assert rcp.published_plan_viewports() == ()
+    assert rcp.published_source_schedule_viewports() == ()
+
+
+@pytest.mark.parametrize("invalid",[
+    (),("0",),("01",),("two",),("2","1.5"),"2",["2",2],
+])
+def test_original_rcp_source_scope_rejects_noncanonical_or_missing_page_ids(
+    invalid,
+):
+    src,_=_source_two_pages()
+    with pytest.raises(ValueError):
+        materials.SourceMaterialSemanticProducer.for_source_connected_original_rcp_plan_shadow(
+            src,page_ids=invalid,
+        )
+
+
+def test_original_rcp_source_scope_rejects_page_outside_published_coverage():
+    src,pub=_source_two_pages()
+    rcp=materials.SourceMaterialSemanticProducer.for_source_connected_original_rcp_plan_shadow(
+        src,page_ids=("3",),
+    )
+    with pytest.raises(ValueError,match="outside_published_source_coverage"):
+        rcp.publish(pub.revision.revision_id)
+    assert rcp.published_plan_viewports() == ()
+
+
+def test_original_rcp_source_scope_rejects_unpublished_original_revision():
+    src,_=_source_two_pages()
+    rcp=materials.SourceMaterialSemanticProducer.for_source_connected_original_rcp_plan_shadow(
+        src,page_ids=("2",),
+    )
+    with pytest.raises(ValueError,match="original_schedule_source_revision_unavailable"):
+        rcp.publish("unpublished-revision")

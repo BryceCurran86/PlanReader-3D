@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -168,10 +169,27 @@ def sample_memory_kb(pid: int) -> tuple[int, int, int | None]:
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
+    """Reap a source worker and, on POSIX, its *isolated* process group.
+
+    A producer can spawn OCR/PDF children. Killing just its parent leaves
+    descendants running after a MEMORY_LIMIT/TIMEOUT decision and can make
+    the next immutable-source role consume memory from a previous attempt.
+    Never signal the caller's group or an externally supplied ungrouped pid.
+    """
     if os.name == "nt":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                       capture_output=True, check=False)
     else:
-        proc.kill()
+        try:
+            group_id = os.getpgid(proc.pid)
+            if group_id == proc.pid and group_id != os.getpgrp():
+                os.killpg(group_id, signal.SIGKILL)
+            else:
+                # Fail closed for a Popen that was not launched in our own
+                # session: killing a shared group could kill the caller.
+                proc.kill()
+        except ProcessLookupError:
+            pass  # The worker exited between polling and termination.
     proc.wait()
 
 
@@ -192,7 +210,10 @@ def run_logged(
     with log.open("w", encoding="utf-8", errors="replace") as fh:
         fh.write("COMMAND: " + " ".join(map(str, args)) + "\n")
         fh.flush()
-        proc = subprocess.Popen(args, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(
+            args, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT,
+            start_new_session=(os.name != "nt"),
+        )
         started = time.monotonic()
         while True:
             try:
