@@ -32,6 +32,26 @@ No FT2/FT3 occurrence, material scope, area, ceiling zone or customer row is pro
 
 The expected Maryborough items, the signed room areas, the provisional 9/120 count and the private run's counts are observations of a failure mode only. No threshold, tolerance or rule is derived from any expected value; the proposed rule is an exact identity test.
 
+## MAX original validation correction
+
+Protected private run 42227311488 stopped in the new original fixture before
+testing paint ownership: `original_p11` constructed the default-off native-text
+producer and found zero source-owned F07 views. Independent local reproduction
+gave 61 passing tests and this one setup error. The actual material supplier
+explicitly uses `source_native_finish_text_shadow=True`; its unchanged original
+consumer gate on this same source head completes one CORROBORATED scope with
+52 records and no unresolved words. Lot16's historical eight signed/customer
+records remain byte-identical. These are different scopes and neither is a
+floor-finish quantity.
+
+The validation fix configures the original fixture with the same explicit
+source-native text opt-in as the real supplier and adds an original test through
+`SourceMaterialSemanticProducer.for_physical_plan_view_shadow` and its complete
+occurrence scope. Production character/paint matching, default-off behavior,
+viewport, source bytes, snap and cap are unchanged. Missing private source still
+skips visibly; a provisioned but incomplete source still fails. Final fixed-head
+dual Python and protected original replay remain required before release.
+
 ## Required tests (all synthetic except the last)
 
 Positive: a word whose glyph rectangle exceeds its cell by float noise but whose origins match is owned. Look-alike negatives: the same text elsewhere in the span with different origins, a glyph run whose character or origin differs, a rectangle truly outside the parent, a paint box straddling with a glyph outside, a foreign overprint, two independent traces of the same word. Ambiguity: duplicate native words at one address, missing or irregular native characters. Invariance: translation of page content, input order of spans, extra unrelated text. No mutation, determinism, and the producer still publishes no quantity. Original-positive (skips without the private PDF): the three p11 words are all owned; the text scope for the F07 viewport has no `text_crosses_viewport_boundary`.

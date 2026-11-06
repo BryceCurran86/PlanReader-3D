@@ -423,7 +423,10 @@ def original_p11():
     from pb_source_visibility_authority import SourceVisibilityProducer
     from pb_viewport_segmentation import segment_source_page_viewports
 
-    source = SourceVisibilityProducer(producer_method="claude-f07-paint-binding-test", producer_version="1")
+    source = SourceVisibilityProducer(
+        producer_method="claude-f07-paint-binding-test", producer_version="1",
+        source_native_finish_text_shadow=True,
+    )
     published = source.ingest_native_pdf_bytes(
         document_id="private-source-test-only", source_bytes=data, source_locator="memory:original-p11", page_ids=("11",))
     views = [v for v in segment_source_page_viewports(
@@ -431,12 +434,12 @@ def original_p11():
         if v.provenance.get("source_owned_plan_view_proven") is True and v.bounding_box]
     assert len(views) == 1
     doc = fitz.open(stream=data, filetype="pdf")
-    yield doc[10], tuple(float(v) for v in views[0].bounding_box)
+    yield doc[10], tuple(float(v) for v in views[0].bounding_box), source, published
     doc.close()
 
 
 def test_original_p11_every_word_crossing_the_f07_cell_edge_has_its_paint_inside_the_viewport(original_p11):
-    page, parent = original_p11
+    page, parent, _source, _published = original_p11
     native = _native(page)
     traces = {}
     for span in page.get_texttrace():
@@ -470,3 +473,25 @@ def test_original_p11_every_word_crossing_the_f07_cell_edge_has_its_paint_inside
             owned += 1
     # The words whose glyph paint is inside the viewport are all admitted; none is excluded by float noise.
     assert owned == len(crossing)
+
+
+def test_original_p11_complete_material_supplier_consumes_the_native_paint_binding(original_p11):
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+
+    _page, _parent, source, published = original_p11
+    material = SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+        source, page_ids=("11",),
+    )
+    material.publish(published.revision.revision_id)
+    scopes = material.published_occurrence_results()
+    assert len(material.published_plan_viewports()) == 1
+    assert len(scopes) == 1
+    scope = scopes[0]
+    assert scope.status is Status.CORROBORATED
+    assert scope.scope_complete is True
+    assert not scope.unresolved_source_text_observation_ids
+    assert len(scope.records) == 52
+    assert all(record.source_sha256 == ORIGINAL_SHA and record.page_id == "11"
+               for record in scope.records)
+    assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest() == ORIGINAL_SHA
