@@ -118,6 +118,12 @@ class CanonicalOpeningVoidGeometry:
     u1: float
     z0: float
     z1: float
+    # Retain the remaining original physical-void producer hash inputs.
+    # Defaults keep older diagnostic constructors readable, but the real
+    # source-closed issuer refuses an unprovable physical-void receipt.
+    viewport_id: str | None = None
+    host_wall_id: str | None = None
+    unit_mapping_record_id: str | None = None
 
     @property
     def width_m(self) -> float:
@@ -131,6 +137,9 @@ class CanonicalOpeningVoidGeometry:
         return {
             "opening_identity_id": self.opening_identity_id,
             "physical_void_record_id": self.physical_void_record_id,
+            "viewport_id": self.viewport_id,
+            "host_wall_id": self.host_wall_id,
+            "unit_mapping_record_id": self.unit_mapping_record_id,
             "host_binding_record_id": self.host_binding_record_id,
             "opening_universe_record_id": self.opening_universe_record_id,
             "width_record_id": self.width_record_id,
@@ -792,6 +801,11 @@ def compose_live_external_physical_net_wall_publication(
                 width_record_id=_clean(void.width_record_id),
                 height_record_id=_clean(void.height_record_id),
                 vertical_placement_record_id=_clean(void.vertical_placement_record_id),
+                viewport_id=(
+                    _clean(void.viewport_id) if void.viewport_id is not None else None
+                ),
+                host_wall_id=_clean(void.host_wall_id),
+                unit_mapping_record_id=_clean(void.unit_mapping_record_id),
                 wall_local_frame_id=_clean(void.wall_local_frame_id),
                 profile_kind=_clean(void.profile_kind),
                 coordinate_unit=_clean(void.coordinate_unit),

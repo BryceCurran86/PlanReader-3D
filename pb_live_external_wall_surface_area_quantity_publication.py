@@ -11,6 +11,10 @@ from __future__ import annotations
 import math
 
 from shapely import wkb
+from shapely.geometry import box
+
+from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_polygon
+from pb_physical_opening_void_authority import PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
 from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
@@ -41,6 +45,74 @@ def _positive(value: object) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) and number > 0.0 else None
+
+
+def _original_void_receipt_matches(wall: LiveCanonicalWallObject, opening: object) -> bool:
+    """Replay the ORIGINAL physical-void producer's source-bound record ID.
+
+    The aggregate seals physical_void_record_id, but not its canonical copy's
+    constituent host/universe/dimension/placement receipts. Recompute the
+    producer's existing v2 contract using retained original record fields,
+    rather than accepting arbitrary nonempty IDs or a mutable canonical seal.
+    No new authority or ID vocabulary is introduced here.
+    """
+    try:
+        if (
+            type(opening.host_wall_id) is not str or not opening.host_wall_id
+            or type(opening.unit_mapping_record_id) is not str
+            or not opening.unit_mapping_record_id
+            or opening.viewport_id is not None
+            and (type(opening.viewport_id) is not str or not opening.viewport_id)
+            or opening.opening_universe_record_id is None
+            or any(
+                type(value) is not str or not value or value != value.strip()
+                for value in (
+                    opening.opening_identity_id,
+                    opening.physical_void_record_id,
+                    opening.host_binding_record_id,
+                    opening.opening_universe_record_id,
+                    opening.width_record_id,
+                    opening.height_record_id,
+                    opening.vertical_placement_record_id,
+                    opening.wall_local_frame_id,
+                )
+            )
+            or any(
+                type(value) not in (int, float) or not math.isfinite(float(value))
+                for value in (opening.u0, opening.u1, opening.z0, opening.z1)
+            )
+        ):
+            return False
+        payload = {
+            "document_id": wall.document_id,
+            "revision_id": wall.revision_id,
+            "source_sha256": wall.source_sha256,
+            "snapshot_id": wall.snapshot_id,
+            "page_id": wall.page_id,
+            "viewport_id": opening.viewport_id,
+            "decision_scope_id": wall.decision_scope_id,
+            "opening_identity_id": opening.opening_identity_id,
+            "host_binding_record_id": opening.host_binding_record_id,
+            "host_wall_id": opening.host_wall_id,
+            "opening_universe_record_id": opening.opening_universe_record_id,
+            "width_record_id": opening.width_record_id,
+            "height_record_id": opening.height_record_id,
+            "wall_local_frame_id": opening.wall_local_frame_id,
+            "unit_mapping_record_id": opening.unit_mapping_record_id,
+            "vertical_placement_record_id": opening.vertical_placement_record_id,
+            "profile_kind": opening.profile_kind,
+            "coordinate_unit": opening.coordinate_unit,
+            "u0": round(opening.u0, 12),
+            "u1": round(opening.u1, 12),
+            "z0": round(opening.z0, 12),
+            "z1": round(opening.z1, 12),
+            "schema_version": PHYSICAL_OPENING_VOID_SCHEMA_VERSION,
+        }
+        return opening.physical_void_record_id == stable_contract_id(
+            "physical_opening_void_v2", payload, digest_chars=32,
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def publish_live_per_wall_surface_area_quantities(
@@ -163,6 +235,34 @@ def publish_live_per_wall_surface_area_quantities(
             return ()
         if (
             wall.physical_wall_id != wall.canonical_wall_id
+            # Recheck original producer-owned opening identity and metric frame
+            # before commercial source-closed reissue. Geometry and area can
+            # remain unchanged while these source identities are substituted.
+            or type(wall.wall_local_frame_id) is not str
+            or not wall.wall_local_frame_id
+            or wall.wall_local_frame_id != wall.wall_local_frame_id.strip()
+            # Opening-bearing walls are addressed by their whole-wall frame
+            # when joining physical voids. Zero-opening walls instead have
+            # an independently sealed stable zero-opening frame ID, which is
+            # not required to equal the physical wall candidate ID.
+            or (
+                bool(wall.opening_voids)
+                and wall.wall_local_frame_id != wall.physical_wall_id
+            )
+            or wall.coordinate_unit != "metre"
+            or _exact_ids(wall.opening_identity_ids) is None
+            or wall.opening_identity_ids != tuple(
+                opening.opening_identity_id for opening in wall.opening_voids
+            )
+            or any(
+                opening.wall_local_frame_id != wall.wall_local_frame_id
+                or opening.coordinate_unit != "metre"
+                or opening.profile_kind != "rectangular_rough_opening"
+                or opening.opening_universe_record_id
+                    not in publication.opening_universe_record_ids
+                or not _original_void_receipt_matches(wall, opening)
+                for opening in wall.opening_voids
+            )
             or wall.canonical_wall_id not in ids
             or wall.canonical_wall_id in seen
             or wall.role != "external"
@@ -190,17 +290,60 @@ def publish_live_per_wall_surface_area_quantities(
         elif scope != source_scope:
             return ()
         gross_m2, net_m2 = _positive(wall.gross_area_m2), _positive(wall.net_area_m2)
-        if gross_m2 is None or net_m2 is None or net_m2 > gross_m2 + 0.000001:
+        length_m, height_m = _positive(wall.length_m), _positive(wall.height_m)
+        if (
+            gross_m2 is None or net_m2 is None
+            or length_m is None or height_m is None
+            or net_m2 > gross_m2 + 0.000001
+        ):
             return ()
+        # The original producer computes net = gross - union(ALL physical
+        # opening voids). The aggregate ID binds the receipt roster and total
+        # area, not the individual net polygon's physical position. Replay
+        # that exact existing boolean operation before source-closed reissue:
+        # a different same-area WKB must never inherit original wall evidence.
         try:
+            gross_polygon = wkb.loads(bytes.fromhex(wall.gross_polygon_wkb_hex))
             polygon = wkb.loads(bytes.fromhex(wall.net_polygon_wkb_hex))
+            if any(
+                not all(math.isfinite(float(v)) for v in (
+                    opening.u0, opening.u1, opening.z0, opening.z1,
+                ))
+                or not (opening.u0 < opening.u1 and opening.z0 < opening.z1)
+                for opening in wall.opening_voids
+            ):
+                return ()
+            # The trusted gross-wall producer owns a wall-local rectangle
+            # anchored at (0, 0), not an arbitrary same-area face. Replaying
+            # only gross-minus-voids would accept a coordinated displacement
+            # of gross, net and void geometry under unchanged source receipts.
+            expected_gross = box(0.0, 0.0, length_m, height_m)
+            gross_domain_matches = gross_polygon.equals(expected_gross)
+            replayed_net = subtract_void_union_from_wall_polygon(
+                gross_polygon,
+                tuple(
+                    box(opening.u0, opening.z0, opening.u1, opening.z1)
+                    for opening in wall.opening_voids
+                ),
+            )
             actual_area = float(polygon.area)
-        except (TypeError, ValueError, OverflowError, Exception):
+            gross_polygon_area = float(gross_polygon.area)
+            geometry_matches = polygon.equals(replayed_net)
+        except Exception:
+            # Malformed WKB, invalid void geometry and GEOS failures cannot
+            # inherit the original producer's physical wall seal.
             return ()
         if (
-            not polygon.is_valid or polygon.is_empty
+            not gross_polygon.is_valid or gross_polygon.is_empty
+            or not gross_domain_matches
+            or not math.isfinite(gross_polygon_area)
+            or not math.isclose(
+                gross_polygon_area, gross_m2, rel_tol=0.0, abs_tol=0.000002
+            )
+            or not polygon.is_valid or polygon.is_empty
             or not math.isfinite(actual_area)
             or not math.isclose(actual_area, net_m2, rel_tol=0.0, abs_tol=0.000002)
+            or not geometry_matches
         ):
             return ()
         seen.add(wall.canonical_wall_id)

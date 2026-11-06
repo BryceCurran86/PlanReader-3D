@@ -4,6 +4,7 @@ import inspect
 from dataclasses import replace
 
 import pytest
+from shapely.geometry import box
 from types import MappingProxyType
 
 from pb_gross_wall_geometry_authority import (
@@ -111,7 +112,9 @@ def _chain():
         length_m=length_m,
         height_m=height_m,
         gross_area_m2=length_m * height_m,
-        polygon_wkb_hex="01030000",
+        # Match the genuine gross-wall producer wall-local rectangle.
+        # Invalid placeholder WKB is not an authenticated positive.
+        polygon_wkb_hex=box(0.0, 0.0, length_m, height_m).wkb_hex,
         member_wall_candidate_ids=member_wall_candidate_ids,
     )
     gross_authority = GrossWallGeometryAuthority(
