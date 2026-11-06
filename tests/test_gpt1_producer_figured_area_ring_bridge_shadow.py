@@ -44,6 +44,7 @@ def original_producer_area():
             "source_dimension_page_id":"7",
             "source_sha256":SHA,
             "room_revision_id":"rev",
+            "room_snapshot_id":"snapshot",
             "figured_dimension_ids":("original-figured-h","original-figured-v"),
         }
     )

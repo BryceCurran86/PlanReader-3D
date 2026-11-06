@@ -283,6 +283,159 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert set(quantity.evidence_ids).issubset(enriched.floors[0].evidence_ids)
 
 
+@pytest.mark.parametrize("axes", (
+    None, (), ("dim-h",), ("dim-h", "dim-h"),
+    ("dim-h", "dim-v", "dim-h"), ("dim-h", "dim-v", "dim-w"),
+    (" dim-h", "dim-v"), ("dim-h", "dim-v "),
+    ("dim-h", ""), (True, "dim-v"), (7, "dim-v"),
+    "dim-h", {"horizontal": "dim-h", "vertical": "dim-v"},
+))
+def test_original_figured_axis_inventory_cannot_be_repaired_into_firm_finish(
+    monkeypatch, axes,
+) -> None:
+    """Malformed original axis evidence must abstain at the true producer.
+
+    The customer projector and final source sealer are downstream gates.
+    Neither can undo an invented FIRM producer receipt after normalization.
+    """
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    source_metadata = dict(original.area_evidence.metadata)
+    source_metadata["figured_dimension_ids"] = axes
+    disputed_area = replace(
+        original.area_evidence, metadata=source_metadata,
+    )
+    disputed_record = replace(original, area_evidence=disputed_area)
+    disputed_result = replace(room_areas, records=(disputed_record,))
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=disputed_result, floors=floors,
+    ).publish()
+
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+    assert room_areas.records[0].area_evidence.metadata == (
+        original.area_evidence.metadata
+    )
+
+
+def test_exact_original_figured_axes_remain_replayable_without_mutation(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    evidence_before = repr(original.area_evidence)
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    assert len(result.quantities) == 1
+    original_axes = original.area_evidence.metadata["figured_dimension_ids"]
+    assert result.quantities[0].metadata["figured_dimension_ids"] == sorted(
+        original_axes
+    )
+    assert repr(original.area_evidence) == evidence_before
+
+
+@pytest.mark.parametrize("foreign_axis_mutation", ("metadata_both", "metadata_one", "producer_horizontal", "producer_vertical"))
+def test_source_figured_pair_must_match_original_room_area_producer_ids(
+    monkeypatch, foreign_axis_mutation,
+) -> None:
+    """Well-formed but foreign axis strings cannot grant a FIRM finish."""
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    real_ids = list(original.area_evidence.metadata["figured_dimension_ids"])
+    if foreign_axis_mutation.startswith("metadata"):
+        metadata = dict(original.area_evidence.metadata)
+        metadata["figured_dimension_ids"] = (
+            ["unowned-horizontal", "unowned-vertical"]
+            if foreign_axis_mutation == "metadata_both"
+            else [real_ids[0], "unowned-vertical"]
+        )
+        updated = replace(
+            original, area_evidence=replace(
+                original.area_evidence, metadata=metadata,
+            ),
+        )
+    elif foreign_axis_mutation == "producer_horizontal":
+        updated = replace(original, horizontal_dimension_id="unowned-horizontal")
+    else:
+        updated = replace(original, vertical_dimension_id="unowned-vertical")
+    changed = replace(room_areas, records=(updated,))
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=changed, floors=floors,
+    ).publish()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
+def test_reversed_but_exact_source_axis_pair_preserves_positive_floor_finish(
+    monkeypatch,
+) -> None:
+    """Source order is arbitrary; only signed producer identity is binding."""
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = room_areas.records[0]
+    metadata = dict(original.area_evidence.metadata)
+    original_ids = tuple(metadata["figured_dimension_ids"])
+    metadata["figured_dimension_ids"] = list(reversed(original_ids))
+    changed = replace(
+        room_areas, records=(replace(
+            original, area_evidence=replace(
+                original.area_evidence, metadata=metadata,
+            ),
+        ),),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=changed, floors=floors,
+    ).publish()
+    assert len(result.quantities) == 1
+    assert result.quantities[0].value == 8.64
+    assert result.quantities[0].metadata["figured_dimension_ids"] == sorted(
+        original_ids
+    )
+
+
+@pytest.mark.parametrize("changed_room_snapshot", (
+    None, "", "foreign-geometry-snapshot", " padded-snapshot ",
+    True, 42,
+))
+def test_room_area_source_snapshot_cannot_be_rebound_to_other_floor(
+    monkeypatch, changed_room_snapshot,
+) -> None:
+    """Original room-area snapshot and physical-floor snapshot are one owner.
+
+    Separate finish-plan/material snapshots remain independently permitted.
+    """
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    area = room_areas.records[0]
+    modified = dict(area.area_evidence.metadata)
+    if changed_room_snapshot is None:
+        modified.pop("room_snapshot_id")
+    else:
+        modified["room_snapshot_id"] = changed_room_snapshot
+    swapped_area = replace(
+        area, area_evidence=replace(area.area_evidence, metadata=modified),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=replace(room_areas, records=(swapped_area,)),
+        floors=floors,
+    ).publish()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
 def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
     monkeypatch,
 ) -> None:
@@ -1332,3 +1485,39 @@ def test_source_owned_original_finish_mark_cannot_cross_physical_floor_page_with
         _source_owned_mark_eligible_for_existing_physical_floor(
             floor=floor, occurrence=mark, source_owned_shadow="true",
         )
+
+
+@pytest.mark.parametrize(
+    ("description", "semantic", "eligible"),
+    (
+        ("Polyurethane floor coating", "polyurethane", True),
+        ("Polyurethane floor finish system", "polyurethane", True),
+        ("Polyurethane wall coating", "polyurethane", False),
+        ("Polyurethane coating", "polyurethane", False),
+        ("Polyurethane underfloor insulation", "polyurethane", False),
+        ("Polyurethane floor drain protection", "polyurethane", False),
+        ("Polyurethane floor coating over wall tile", "polyurethane", False),
+        ("Polyurethane floor coating", "", False),
+        ("EPX", "polyurethane", False),
+    ),
+)
+def test_producer_accepts_only_explicit_source_polyurethane_floor_coating(
+    description, semantic, eligible,
+):
+    """No code-only EPX meaning or polyurethane wall finish can mint floor m²."""
+    definition = material_semantic.SourceMaterialDefinitionRecord(
+        record_id="source-definition-epx",
+        document_id="source-document",
+        revision_id="source-revision",
+        source_sha256="a" * 64,
+        snapshot_id="source-snapshot",
+        code="EPX",
+        description=description,
+        substrate="",
+        finish="",
+        semantic_finish=semantic,
+        source_definition_ids=("native-definition-witness",),
+        source_page_ids=("3",),
+        source_viewport_ids=("source-schedule-vp",),
+    )
+    assert floor_finish_authority._definition_is_floor_finish(definition) is eligible

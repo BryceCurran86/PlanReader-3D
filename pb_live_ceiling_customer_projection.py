@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
@@ -26,16 +27,89 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _original_ceiling_room_location(
+    claim: LivePhysicalNetWallClaim,
+    ceiling: Any,
+    metadata: Mapping[str, Any],
+) -> str:
+    """Show one original RCP room label, never a guessed cross-room name.
+
+    The ceiling quantity/source sealer independently checks room geometry
+    and original room-face lineage. This helper only selects a customer
+    presentation label from that same exact corroborated canonical room.
+    """
+    fallback = _clean(
+        metadata.get("physical_room_id")
+        or metadata.get("canonical_room_id")
+        or ceiling.room_entity_id
+    )
+    rooms = [
+        room for room in claim.canonical_rooms
+        if getattr(room, "canonical_room_id", None) == ceiling.room_entity_id
+    ]
+    if len(rooms) != 1:
+        return fallback
+    room = rooms[0]
+    label = getattr(room, "room_label", None)
+    receipt = getattr(room, "room_label_binding_record_id", None)
+    evidence = getattr(room, "room_label_evidence_ids", None)
+    if (
+        type(label) is not str or not label or label != label.strip()
+        or type(receipt) is not str or not receipt
+        or receipt != receipt.strip()
+        or type(evidence) not in (tuple, list) or not evidence
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in evidence)
+        or len(set(evidence)) != len(evidence)
+        or room.document_id != ceiling.document_id
+        or room.revision_id != ceiling.revision_id
+        or room.source_sha256.lower() != ceiling.source_sha256.lower()
+        or room.snapshot_id != ceiling.snapshot_id
+        or room.canonical_room_id != ceiling.room_entity_id
+        or metadata.get("source_room_face_record_id")
+        != room.source_room_face_record_id
+    ):
+        return fallback
+    norm = " ".join(label.casefold().split())
+    if any(
+        other is not room
+        and type(getattr(other, "room_label", None)) is str
+        and " ".join(other.room_label.casefold().split()) == norm
+        for other in claim.canonical_rooms
+    ):
+        return fallback
+    observed_label = metadata.get("room_label")
+    if observed_label is not None and (
+        type(observed_label) is not str
+        or " ".join(observed_label.casefold().split()) != norm
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling source material room label contradicts canonical original room"
+        )
+    return label
+
+
 def _figured_authority(quantity: QuantityEvidence) -> CommercialMeasurementAuthority | None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    raw = metadata.get("figured_dimension_ids") or ()
-    if isinstance(raw, (str, bytes)):
-        raw = (raw,)
-    if not isinstance(raw, (list, tuple)):
-        raw = ()
-    figured_ids = tuple(sorted({_clean(value) for value in raw if _clean(value)}))
-    if len(figured_ids) != 2:
+    # The original producer must supply exactly two distinct native figured
+    # axes. Never trim, cast, drop or set()-deduplicate a malformed source
+    # inventory into a valid-looking commercial measurement. This final
+    # customer boundary must agree with the stricter source-closed sealer.
+    raw = metadata.get("figured_dimension_ids")
+    if (
+        quantity.authority != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        or type(raw) not in (list, tuple)
+        or len(raw) != 2
+        or any(
+            type(source_id) is not str
+            or not source_id
+            or source_id != source_id.strip()
+            for source_id in raw
+        )
+        or raw[0] == raw[1]
+    ):
         return None
+    figured_ids = tuple(sorted(raw))
     return CommercialMeasurementAuthority(
         method="figured_dimension",
         figured_dimension_ids=figured_ids,
@@ -92,6 +166,26 @@ def project_live_ceiling_customer_rows(
                 f"{source_id}"
             )
 
+    # GPT2's source-issued original RCP GRID/IPF1 MATERIAL witness can
+    # precede independently measured ceiling m². A downstream adapter
+    # must never change an explicit producer denial to True while creating
+    # a customer-facing square metre estimate. Do not reject legacy source
+    # quantities that carry no such optional commercial marker.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        source_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in source_metadata
+            and source_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original material-only receipt forbids customer "
+                f"area projection: {original.quantity_id}"
+            )
+
     quantities = tuple(
         quantity
         for quantity in claim.ceiling_lining_quantity_evidence
@@ -129,15 +223,27 @@ def project_live_ceiling_customer_rows(
             if isinstance(quantity.metadata, Mapping)
             else {}
         )
+        # The complete source-closed trace has already authenticated the
+        # exact original RCP occurrence and schedule definition. Preserve
+        # that SOURCE code in the commercial element rather than presenting
+        # different original ceiling systems under one generic label. Never
+        # trim/cast an invalid code into a customer-facing material identity.
+        source_finish_code = metadata.get("finish_code")
+        if (
+            type(source_finish_code) is not str
+            or not source_finish_code
+            or source_finish_code != source_finish_code.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling customer source finish code is not exact"
+            )
         metadata.update(
             {
                 "commercial_projection_allowed": True,
                 "section": "Internal",
-                "element": "Ceiling lining area",
-                "location": _clean(
-                    metadata.get("physical_room_id")
-                    or metadata.get("canonical_room_id")
-                    or ceiling.room_entity_id
+                "element": f"Ceiling lining area ({source_finish_code})",
+                "location": _original_ceiling_room_location(
+                    claim, ceiling, metadata,
                 ),
                 "substrate": "Other",
                 "finish_system": _clean(

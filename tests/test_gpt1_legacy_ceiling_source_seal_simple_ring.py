@@ -43,10 +43,14 @@ def test_non_simple_source_ring_cannot_reach_ceiling_seal_or_customer(bad_ring):
     for issuer in (
         build_live_ceiling_area_source_traces,
         seal_live_ceiling_area_run,
-        project_live_ceiling_area_customer_rows,
     ):
         with pytest.raises(SourceClosedRunConflictError, match="source polygon is invalid"):
             issuer(original, workspace_id=7, project_id="source-project")
+    # Even an apparently healthy legacy source cannot cross the later
+    # independent-RCP customer metric gate.
+    assert project_live_ceiling_area_customer_rows(
+        original, workspace_id=7, project_id="source-project",
+    ) == ()
 
     # Neither abstention nor failed sealing mutates the original producer fact.
     assert original.canonical_ceilings[0].polygon_pdf_pts == bad_ring
@@ -74,9 +78,9 @@ def test_authentic_simple_ceiling_ring_preserves_sealed_and_customer_bodies(clos
     candidate_rows = project_live_ceiling_area_customer_rows(
         candidate, workspace_id=7, project_id="source-project",
     )
-    assert len(candidate_run.quantities) == len(candidate_rows) == 1
+    assert len(candidate_run.quantities) == 1
     assert candidate_run.to_json() == base_run.to_json()
-    assert candidate_rows == base_rows
+    assert candidate_rows == base_rows == ()
     assert candidate_run.fingerprint == seal_live_ceiling_area_run(
         candidate, workspace_id=7, project_id="source-project",
     ).fingerprint

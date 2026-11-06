@@ -365,7 +365,16 @@ def publish_live_floor_area_quantities(
                     "physical_floor_surface_id": floor.physical_floor_surface_id,
                     "room_entity_id": floor.room_entity_id,
                     "source_room_face_record_id": floor.source_room_face_record_id,
-                    "commercial_projection_allowed": True,
+                    # Reissuing an original room-area number onto the
+                    # canonical floor/room must never override the original
+                    # producer's explicit NON-commercial permission. This
+                    # remains a FIRM source receipt internally, but the
+                    # customer adapter may not turn it into a saleable m².
+                    # Older source receipts without this optional flag keep
+                    # the pre-existing commercial-positive behavior.
+                    "commercial_projection_allowed": metadata.get(
+                        "commercial_projection_allowed", True
+                    ),
                     "row_role": "floor_area",
                 },
             )
@@ -531,7 +540,16 @@ def publish_live_canonical_room_area_quantities(
                     "canonical_room_id": room.canonical_room_id,
                     "physical_room_id": room.physical_room_id,
                     "source_room_face_record_id": room.source_room_face_record_id,
-                    "commercial_projection_allowed": True,
+                    # Reissuing an original room-area number onto the
+                    # canonical floor/room must never override the original
+                    # producer's explicit NON-commercial permission. This
+                    # remains a FIRM source receipt internally, but the
+                    # customer adapter may not turn it into a saleable m².
+                    # Older source receipts without this optional flag keep
+                    # the pre-existing commercial-positive behavior.
+                    "commercial_projection_allowed": metadata.get(
+                        "commercial_projection_allowed", True
+                    ),
                     "row_role": "floor_area",
                 },
             )

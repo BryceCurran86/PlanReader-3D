@@ -6,7 +6,10 @@ from dataclasses import replace
 import pytest
 
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
-from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_customer_projection import (
+    _figured_authority,
+    project_live_ceiling_customer_rows,
+)
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
     seal_live_ceiling_lining_run,
@@ -236,7 +239,7 @@ def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
             **dict(base.metadata),
             "commercial_projection_allowed": True,
             "section": "Internal",
-            "element": "Ceiling lining area",
+            "element": "Ceiling lining area (GRID)",
             "location": "OFFICE",
             "substrate": "Other",
             "finish_system": "ceiling_grid",
@@ -268,6 +271,7 @@ def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
     assert row is not None
     assert row["quantity_id"] == quantity.quantity_id
     assert row["quantity"] == 9.05352
+    assert row["element"] == "Ceiling lining area (GRID)"
     assert row["source_sha256"] == SOURCE_SHA
     assert row["revision_id"] == "rev-1"
     assert row["canonical_entity_ids"] == list(trace.canonical_entity_ids)
@@ -403,6 +407,54 @@ def test_scaled_quantity_is_not_admitted_to_documented_rcp_export() -> None:
         )
 
 
+@pytest.mark.parametrize("figured_ids", (
+    ("dim-h", "dim-v", "dim-h"),
+    ("dim-h", "dim-h"),
+    ("dim-h", " dim-v"),
+    ("dim-h", "dim-v "),
+    ("dim-h", ""),
+    ("dim-h", True),
+    ("dim-h", 2),
+    ("dim-h", None),
+    ("dim-h", ("dim-v",)),
+    "dim-h,dim-v",
+    None,
+    {"dim-h": 1, "dim-v": 2},
+))
+def test_live_ceiling_customer_cannot_repair_original_figured_axes(figured_ids) -> None:
+    # The source sealer already fails closed. The customer boundary must not
+    # independently cast/trim/deduplicate an invalid source into two axes.
+    quantity = _quantity()
+    malformed = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), "figured_dimension_ids": figured_ids},
+    )
+    assert _figured_authority(malformed) is None
+
+
+def test_live_ceiling_customer_retains_exact_original_figured_axes() -> None:
+    quantity = _quantity()
+    assert _figured_authority(quantity).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+    reversed_source = replace(
+        quantity,
+        metadata={
+            **dict(quantity.metadata),
+            "figured_dimension_ids": ("dim-v", "dim-h"),
+        },
+    )
+    assert _figured_authority(reversed_source).figured_dimension_ids == (
+        "dim-h", "dim-v",
+    )
+
+
+def test_live_ceiling_customer_cannot_retype_scaled_source_as_figured() -> None:
+    quantity = _quantity()
+    changed = replace(quantity, authority="pdf_scaled")
+    assert _figured_authority(changed) is None
+
+
 def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     quantity = _quantity()
     claim = _claim(quantity)
@@ -424,6 +476,7 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert row["quantity_status"] == "To review"
     assert row["origin"] == "AI"
     assert row["row_role"] == "ceiling_area"
+    assert row["element"] == "Ceiling lining area (GRID)"
     assert row["finish_system"] == "ceiling_grid"
 
     report = verify_sealed_customer_output(run, rows)
@@ -452,6 +505,139 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+@pytest.mark.parametrize("unowned_code", (
+    None, "", " GRID", "GRID ", "IPF1", True, 23,
+))
+def test_ceiling_customer_cannot_relabel_original_firm_finish(
+    unowned_code,
+) -> None:
+    """Commercial RCP material code must be the original signed code."""
+    signed = _quantity()
+    metadata = {**dict(signed.metadata), "finish_code": unowned_code}
+    tampered = replace(signed, metadata=metadata)
+    original_claim = _claim(signed)
+    claim = replace(
+        original_claim,
+        ceiling_lining_quantity_evidence=(tampered,),
+    )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_ceiling_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    # An invalid imported source must not alter the valid signed customer
+    # output, even when the source decoder is replayed in the same process.
+    rows = project_live_ceiling_customer_rows(
+        original_claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == signed.value
+
+
+@pytest.mark.parametrize("customer_field,bad", (
+    ("element", "Ceiling lining area"),
+    ("element", "Ceiling lining area (IPF1)"),
+    ("element", "Ceiling lining area (GRID) "),
+    ("element", None),
+    ("element", True),
+    ("finish_system", "plasterboard"),
+    ("finish_system", "ceiling_grid "),
+    ("finish_system", None),
+))
+def test_signed_rcp_finish_code_and_material_cannot_be_relabelled_for_customer(
+    customer_field, bad,
+):
+    from copy import deepcopy
+    from pb_customer_output_verification import CustomerOutputVerificationError
+
+    quantity = _quantity()
+    claim = _claim(quantity)
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    source = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    forged = deepcopy(source[0])
+    forged[customer_field] = bad
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, (forged,))
+    assert verify_sealed_customer_output(
+        sealed, source,
+    ).verified_quantity_ids == ("qty-ceiling-1",)
+
+
+@pytest.mark.parametrize("metadata_field,wrong", (
+    ("canonical_ceiling_id", "other-original-ceiling"),
+    ("finish_code", "IPF1"),
+    ("semantic_finish", "plasterboard"),
+    ("finish_code", None),
+))
+def test_forged_machine_rcp_material_does_not_override_signed_ceiling_source(
+    metadata_field, wrong,
+):
+    from copy import deepcopy
+    from pb_customer_output_verification import CustomerOutputVerificationError
+
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    row = deepcopy(project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )[0])
+    row["commercial_projection_provenance"]["quantity"]["metadata"][
+        metadata_field
+    ] = wrong
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, (row,))
+
+
+@pytest.mark.parametrize("notes_only", (False, True))
+def test_recomputed_customer_fingerprint_cannot_resign_foreign_rcp_code(
+    notes_only,
+):
+    from copy import deepcopy
+    import json
+    from pb_customer_output_verification import CustomerOutputVerificationError
+    from pb_quantity_takeoff_adapter import (
+        CommercialTakeoffSourceTrace,
+        CommercialMeasurementAuthority,
+        compute_commercial_projection_fingerprint,
+    )
+
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    original = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    forged = deepcopy(original[0])
+    element = "Ceiling lining area (IPF1)"
+    forged["element"] = element
+    receipt = forged["commercial_projection_provenance"]
+    receipt["quantity"]["metadata"]["element"] = element
+    forged["notes"] = json.dumps(receipt)
+    forged["commercial_projection_fingerprint"] = (
+        compute_commercial_projection_fingerprint(
+            QuantityEvidence(**dict(receipt["quantity"])),
+            trace=CommercialTakeoffSourceTrace(**dict(receipt["source_trace"])),
+            authority=CommercialMeasurementAuthority(
+                **dict(receipt["measurement_authority"])
+            ),
+        )
+    )
+    if notes_only:
+        forged.pop("commercial_projection_provenance")
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="element differs from signed original RCP code",
+    ):
+        verify_sealed_customer_output(sealed, (forged,))
+    assert original[0]["element"] == "Ceiling lining area (GRID)"
 
 
 @pytest.mark.parametrize("stolen", (
@@ -727,3 +913,291 @@ def test_consistently_forged_second_ceiling_source_root_still_fails_closed(bad_r
             claim, workspace_id=1, project_id="project-1"
         )
 
+
+
+@pytest.mark.parametrize("not_permitted", (
+    False, 0, 1, "true", "False", "", None,
+))
+@pytest.mark.parametrize("handoff_only", (False, True))
+def test_original_rcp_material_only_receipt_cannot_create_firm_ceiling_customer_area(
+    not_permitted, handoff_only,
+):
+    """A source-owned GRID material witness is not a ceiling m² measurement.
+
+    Synthetic 9.05352 m² remains a test fixture; real OFFICE p9 RCP material
+    alone does NOT authenticate or issue an independent ceiling quantity.
+    """
+    original = _quantity()
+    not_area = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": not_permitted,
+            "quantity_handoff_only": handoff_only,
+        },
+    )
+    claim = _claim(not_area)
+    for adapter in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="material-only receipt forbids",
+        ):
+            adapter(claim, workspace_id=1, project_id="project-1")
+    assert claim.ceiling_lining_quantity_evidence[0].value == 9.05352
+
+
+def test_explicit_source_owned_ceiling_customer_permission_preserves_signed_quantity():
+    """Explicit original source-positive permission is not an added gate."""
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": True,
+        },
+    )
+    claim = _claim(permitted)
+    seal = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(seal.quantities) == len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        seal, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
+
+
+def test_original_ceiling_customer_row_uses_unique_source_owned_room_label():
+    claim = _claim(_quantity())
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("failure", (
+    "no_label",
+    "no_label_binding",
+    "no_label_evidence",
+    "competing_same_label",
+))
+def test_ceiling_customer_does_not_guess_ambiguous_or_unbound_original_room_name(
+    failure,
+):
+    room = _room()
+    other = ()
+    if failure == "no_label":
+        room = replace(room, room_label=None)
+    elif failure == "no_label_binding":
+        room = replace(room, room_label_binding_record_id=None)
+    elif failure == "no_label_evidence":
+        room = replace(room, room_label_evidence_ids=())
+    else:
+        other = (replace(
+            room,
+            canonical_room_id="other-canonical-room",
+            physical_room_id="other-physical-room",
+            source_room_face_record_id="other-face-record",
+            room_label="office",
+            room_label_binding_record_id="other-binding",
+        ),)
+    claim = replace(_claim(_quantity()), canonical_rooms=(room, *other))
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "physical-room-1"
+
+
+def test_ceiling_material_cannot_relabel_another_original_room_in_customer_row():
+    original = _quantity()
+    changed = replace(
+        original, metadata={**original.metadata, "room_label": "FREEZER"},
+    )
+    claim = _claim(changed)
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical source room",
+    ):
+        project_live_ceiling_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    # The direct signed source path now refuses the same foreign material
+    # name; bypassing customer presentation cannot turn this into FIRM.
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical source room",
+    ):
+        seal_live_ceiling_lining_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize("bad_label", (
+    "FREEZER", "OFFICE ", "", 123, True,
+))
+def test_direct_ceiling_source_seal_denies_foreign_or_untyped_material_room_label(
+    bad_label,
+):
+    quantity = _quantity()
+    claim = _claim(replace(
+        quantity, metadata={**quantity.metadata, "room_label": bad_label},
+    ))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material room label contradicts canonical source room",
+    ):
+        seal_live_ceiling_lining_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_direct_ceiling_seal_accepts_original_room_label_casefold_without_relabeling():
+    original = _quantity()
+    quantity = replace(
+        original,
+        metadata={**original.metadata, "room_label": "office"},
+    )
+    claim = _claim(quantity)
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
+
+
+@pytest.mark.parametrize("revoked", (
+    None, False, 1, "", "EXCLUSION", "PROVISIONAL", "INCLUSION ",
+))
+def test_revoked_original_rcp_inclusion_cannot_be_revived_as_firm_customer_m2(
+    revoked,
+):
+    original = _quantity()
+    denied = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": revoked},
+    )
+    claim = _claim(denied)
+    for consumer in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original inclusion revoked",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+def test_exact_original_rcp_inclusion_keeps_independently_signed_customer_area():
+    original = _quantity()
+    approved = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "INCLUSION"},
+    )
+    claim = _claim(approved)
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert rows[0]["quantity"] == 9.05352
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": None},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": "false"},
+    {"shadow_only": True},
+    {"shadow_only": None},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_rcp_handoff_or_shadow_denial_blocks_firm_seal_and_customer(
+    source_denial,
+):
+    """Original material-only source flags survive both quantity boundaries."""
+    source = _quantity()
+    denied = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            **source_denial,
+        },
+    )
+    claim = _claim(denied)
+    flag = next(iter(source_denial))
+    for consumer in (
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match=f"ceiling original source is {flag}",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.ceiling_lining_quantity_evidence == (denied,)
+    assert denied.quantity_id == source.quantity_id
+    assert denied.value == source.value == 9.05352
+
+
+def test_original_ceiling_explicit_false_restrictions_preserve_legacy_seal_contract():
+    """Typed False is not a revocation; actual RCP metric release is separate."""
+    source = _quantity()
+    permitted = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = _claim(permitted)
+    signed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["element"] == "Ceiling lining area (GRID)"
+    assert rows[0]["quantity"] == permitted.value == 9.05352
+    assert rows[0]["finish_system"] == "ceiling_grid"
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (permitted.quantity_id,)

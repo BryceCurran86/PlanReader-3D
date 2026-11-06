@@ -209,6 +209,60 @@ def build_live_ceiling_lining_source_traces(
                 "numeric ceiling-lining source quantity retains unresolved blockers: "
                 f"{original.quantity_id}"
             )
+    # The RCP producer can revoke a material quantity by explicitly
+    # changing its source inclusion state. A direct sealer must honor
+    # that revocation even if a downstream adapter would unconditionally
+    # rewrite inclusion_status to INCLUSION for customer display.
+    # Optional omission preserves earlier independently sourced FIRM runs.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "inclusion_status" in original_metadata
+            and original_metadata["inclusion_status"] != "INCLUSION"
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original inclusion revoked before commercial "
+                f"seal: {original.quantity_id}"
+            )
+
+    # An original RCP material mark may be source-authenticated before an
+    # independent ceiling AREA exists. The source-owned material-only issuer
+    # explicitly forbids commercial projection. A caller cannot present
+    # a fabricated FIRM area with that denial and use the generic sealing
+    # path (including quantity_handoff_only) to bypass the material stage.
+    # Legacy true FIRM receipts without this optional marker are unchanged.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in original_metadata
+            and original_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original material-only receipt forbids commercial "
+                f"area publication: {original.quantity_id}"
+            )
+        # Authenticated material and a numeric ceiling candidate can still
+        # be producer-designated handoff-only or shadow-only. Customer display
+        # cannot grant saleable RCP m² by erasing either source restriction.
+        # Older signed FIRM receipts with absent optional flags are unchanged.
+        for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+            if (
+                restricted_flag in original_metadata
+                and original_metadata[restricted_flag] is not False
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling original source is "
+                    f"{restricted_flag}: {original.quantity_id}"
+                )
+
     source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
@@ -336,6 +390,30 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity original room-face receipt mismatch: "
                 f"{quantity.quantity_id}"
             )
+
+        # Native RCP material observations can be borrowed from a same-name
+        # adjacent room. A direct source sealer must reject an explicitly
+        # contradictory material-room name, not leave that veto solely to
+        # the optional customer display path. Absence of a native room label
+        # is not permission to synthesize one.
+        source_room_label = getattr(room, "room_label", None)
+        issued_room_label = metadata.get("room_label")
+        if issued_room_label is not None:
+            if (
+                type(issued_room_label) is not str
+                or not issued_room_label
+                or issued_room_label != issued_room_label.strip()
+                or (
+                    type(source_room_label) is str
+                    and source_room_label
+                    and " ".join(issued_room_label.casefold().split())
+                    != " ".join(source_room_label.casefold().split())
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling original material room label contradicts "
+                    f"canonical source room: {quantity.quantity_id}"
+                )
 
         if type(quantity.value) not in (int, float) or type(ceiling.area_m2) not in (int, float):
             raise SourceClosedRunConflictError(

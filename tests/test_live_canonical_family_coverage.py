@@ -701,3 +701,196 @@ def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path)
         for reasons in coverage["family_gaps"].values()
         for reason in reasons
     )
+
+def test_runtime_source_closed_floor_finish_writes_coded_customer_takeoff_row(tmp_path):
+    """Real app row conversion must retain the signed source FT code.
+
+    This uses an explicitly synthetic source-neutral fixture; an OFFICE FT3
+    original-source quantity still requires GPT2 physical and D15 authority.
+    """
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _claim as _floor_finish_claim,
+    )
+
+    claim = _floor_finish_claim()
+    source = tmp_path / "synthetic-floor-finish-source.pdf"
+    source.write_bytes(b"source-neutral-test-fixture-not-an-original-PDF")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    rows = app._live_floor_finish_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1
+    customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    original = claim.floor_finish_quantity_evidence[0]
+    assert customer["element"] == "Floor finish area (FT1)"
+    assert customer["finish_system"] == "tile"
+    assert customer["quantity"] == original.value == 8.64
+    assert customer["unit"] == "m²"
+    assert customer["quantity_status"] == "To review"
+    assert customer["inclusion_status"] == "INCLUSION"
+    assert customer["row_role"] == "floor_area"
+    assert original.quantity_id in customer["notes"]
+    assert not any(
+        "live_floor_finish_customer_projection_failed" in reason
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "floor_finish", ()
+        )
+    )
+
+
+
+def test_source_closed_floor_and_ceiling_inclusion_does_not_reclassify_wall_rows():
+    """Real core writer accepts both source-closed customer surface families."""
+    kwargs = dict(
+        workspace_id=1, section="Internal", element="Source surface",
+        location="source-room", substrate="Floor", quantity=8.64,
+        status="To review", source_page="p1", source_reference="source:test",
+        confidence="Documented", notes="synthetic contract only",
+    )
+    for row_role in ("floor_area", "ceiling_area"):
+        row = dict(zip(auto.TAKEOFF_ROW_FIELDS, auto._takeoff_row(
+            **kwargs, row_role=row_role, inclusion_status="INCLUSION",
+            finish_system="tile", preserve_quantity=True,
+        )))
+        assert row["inclusion_status"] == "INCLUSION"
+        assert row["finish_system"] == "tile"
+        assert row["quantity"] == 8.64
+
+    wall_legacy = dict(zip(auto.TAKEOFF_ROW_FIELDS, auto._takeoff_row(
+        **kwargs, row_role="external_wall",
+    )))
+    assert wall_legacy["inclusion_status"] == "PROVISIONAL"
+    assert wall_legacy["finish_system"] == "To be confirmed"
+
+
+@pytest.mark.parametrize("role,value", [
+    ("external_wall", "INCLUSION"),
+    ("ceiling_area", "PROVISIONAL"),
+    ("floor_area", ""),
+    ("floor_area", "INCLUSION "),
+    ("floor_area", True),
+])
+def test_core_writer_cannot_infer_source_inclusion_from_invalid_override(role, value):
+    with pytest.raises(auto.takeoff_contract.TakeoffRowContractError,
+                       match="explicit takeoff inclusion"):
+        auto._takeoff_row(
+            workspace_id=1, section="Internal", element="Source surface",
+            location="source-room", substrate="Floor", quantity=8.64,
+            status="To review", source_page="p1", source_reference="source:test",
+            confidence="Documented", notes="source-neutral contract",
+            row_role=role, inclusion_status=value,
+        )
+
+
+
+def test_runtime_source_closed_ceiling_writes_customer_takeoff_row(tmp_path):
+    """Test the REAL app ceiling conversion with a synthetic signed claim.
+
+    The independent original A120 physical ceiling authority is not bypassed
+    or claimed: only the already-issued QuantityEvidence handoff is mocked.
+    """
+    from tests.test_live_ceiling_lining_source_closed_export import (
+        _claim as _ceiling_claim,
+        _quantity as _ceiling_quantity,
+    )
+    from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
+
+    claim = _ceiling_claim(_ceiling_quantity())
+    # Independently verify the already-issued synthetic source claim.
+    from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+
+    projected = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="customer-workspace:1",
+    )
+    assert len(projected) == 1, "source-closed ceiling projector rejected test claim"
+    assert projected[0]["element"] == "Ceiling lining area (GRID)"
+    source = tmp_path / "synthetic-ceiling-source.pdf"
+    source.write_bytes(b"source-neutral-ceiling-not-an-original-PDF")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    # The production application suppresses legacy ceilings via dataclasses.replace.
+    # A SimpleNamespace is NOT a valid LiveCeilingLiningResult and creates a
+    # swallowed TypeError masquerading as a missing source-closed customer row.
+    legacy = LiveCeilingLiningResult(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("source-neutral-no-legacy-ceiling",),
+        claims=(),
+    )
+    with (
+        patch(
+            "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+            return_value=claim,
+        ),
+        patch(
+            "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
+            return_value=legacy,
+        ),
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    rows = app._live_ceiling_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1, (
+        "workspace ceiling source-closed row dropout: "
+        + repr(app._ag09_family_coverage_by_workspace[1]["family_gaps"])
+    )
+    customer = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    original = claim.ceiling_lining_quantity_evidence[0]
+    # Verify that the real workspace takeoff conversion never strips the
+    # original RCP code from the independently sealed ceiling customer row.
+    assert customer["element"] == projected[0]["element"] == "Ceiling lining area (GRID)"
+    assert customer["finish_system"] == "ceiling_grid"
+    assert customer["quantity"] == original.value == 9.05352
+    assert customer["unit"] == "m²"
+    assert customer["quantity_status"] == "To review"
+    assert customer["inclusion_status"] == "INCLUSION"
+    assert customer["row_role"] == "ceiling_area"
+    assert original.quantity_id in customer["notes"]
+    assert not any(
+        "live_ceiling_customer_projection_failed" in reason
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "ceiling", ()
+        )
+    )
+
+
+def test_runtime_floor_finish_bad_source_code_does_not_write_customer_row(tmp_path):
+    """A forged FT caption cannot be converted into a saleable app row."""
+    from tests.test_live_floor_finish_area_source_closed_export import (
+        _claim as _floor_finish_claim,
+    )
+
+    claim = _floor_finish_claim()
+    original = claim.floor_finish_quantity_evidence[0]
+    invalid = replace(
+        original,
+        metadata={**dict(original.metadata), "finish_code": "FT9"},
+    )
+    claim = replace(claim, floor_finish_quantity_evidence=(invalid,))
+    source = tmp_path / "synthetic-bad-finish-source.pdf"
+    source.write_bytes(b"source-neutral-bad-FT-code-test")
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(source)}])
+
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app, 1, [{"document_id": 1, "page_no": 1}], [],
+        )
+
+    assert app._live_floor_finish_takeoff_rows_by_workspace[1] == []
+    assert any(
+        reason.startswith("live_floor_finish_customer_projection_failed:")
+        for reason in app._ag09_family_coverage_by_workspace[1]["family_gaps"].get(
+            "floor_finish", ()
+        )
+    )

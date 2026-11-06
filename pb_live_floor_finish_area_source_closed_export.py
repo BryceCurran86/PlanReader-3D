@@ -10,8 +10,11 @@ import math
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from pb_geometry_takeoff_model import AuthorityStatus
-from pb_live_floor_area_quantity_publication import _valid_original_source_sha
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+from pb_live_floor_area_quantity_publication import (
+    _valid_original_source_sha,
+    publish_live_floor_area_quantities,
+)
 from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
@@ -159,6 +162,52 @@ def build_live_floor_finish_area_source_traces(
                 f"duplicate original floor-finish quantity id: {original_id}"
             )
         seen_original_quantity_ids.add(original_id)
+    # A live claim that supplies original room-area QuantityEvidence must
+    # reprove it through the INDEPENDENT canonical-floor area issuer before
+    # the same room can receive a commercially FIRM material finish. Without
+    # this, a valid-looking floor.metric_area_quantity_id can be replayed
+    # against a different/blocked original room-area record. The explicit
+    # source-area inventory and signed floor-area producer are the authority;
+    # numeric equality and matching room labels alone are not.
+    #
+    # An older figured-only claim may legitimately carry no separate
+    # room_area QuantityEvidence family; its existing source-figured proof
+    # remains intact, not silently converted to a new source-area claim.
+    # The complete source ROOM-area inventory is part of a final floor-finish
+    # claim, not just the subset conveniently retained by the independent
+    # floor-area publisher. An original duplicate ID (including an abstained
+    # conflicting replay), malformed source identity or foreign family must
+    # not disappear from the material seal through FIRM-only selection.
+    seen_original_room_area_ids: set[str] = set()
+    for original_area in claim.room_area_quantity_evidence:
+        if not isinstance(original_area, QuantityEvidence):
+            raise TypeError(
+                "room_area_quantity_evidence must contain QuantityEvidence"
+            )
+        if original_area.family != "room_area":
+            raise SourceClosedRunConflictError(
+                "floor-finish original room-area inventory contains "
+                f"foreign family: {original_area.quantity_id}"
+            )
+        original_area_id = original_area.quantity_id
+        if (
+            type(original_area_id) is not str
+            or not original_area_id
+            or original_area_id != original_area_id.strip()
+            or original_area_id in seen_original_room_area_ids
+        ):
+            raise SourceClosedRunConflictError(
+                "duplicate or invalid original room-area quantity ID "
+                "at floor-finish seal"
+            )
+        seen_original_room_area_ids.add(original_area_id)
+
+    independently_published_room_areas = ()
+    if claim.room_area_quantity_evidence:
+        independently_published_room_areas = (
+            publish_live_floor_area_quantities(claim)
+        )
+
     # The customer boundary already rejects a non-abstained numeric source
     # that retains producer blockers. Apply the same veto at the independent
     # source-seal boundary: a caller must not bypass customer projection and
@@ -175,6 +224,59 @@ def build_live_floor_finish_area_source_traces(
                 "numeric floor-finish source quantity retains unresolved blockers: "
                 f"{original.quantity_id}"
             )
+
+    # Original producer inclusion revocation is source authority, not a
+    # mutable customer display flag. A caller cannot revive an FT2/FT3
+    # FIRM area by replacing EXCLUSION/PROVISIONAL/None with INCLUSION in
+    # the later customer projector. Older original receipts without the
+    # optional field retain their existing source-seal contract.
+    for original in claim.floor_finish_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "inclusion_status" in original_metadata
+            and original_metadata["inclusion_status"] != "INCLUSION"
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original inclusion revoked before commercial "
+                f"seal: {original.quantity_id}"
+            )
+
+    # A source-authenticated FT2/FT3 material occurrence can precede W4
+    # finished wall-face and original doorway-threshold measurement. Such
+    # material-only source witnesses must NOT acquire FIRM floor area via
+    # generic handoff-only sealing or a mutable customer projection flag.
+    # Optional absent field remains valid for older original figured issuers.
+    for original in claim.floor_finish_quantity_evidence:
+        if original.abstained or original.value is None:
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        if (
+            "commercial_projection_allowed" in original_metadata
+            and original_metadata["commercial_projection_allowed"] is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original material-only receipt forbids "
+                f"commercial area publication: {original.quantity_id}"
+            )
+        # An original finish may be numerically FIRM for a source handoff
+        # yet explicitly restricted from customer sale. Preserve the source
+        # producer's present handoff/shadow denial; no final row projector may
+        # replace either flag with a commercial permission.
+        for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+            if (
+                restricted_flag in original_metadata
+                and original_metadata[restricted_flag] is not False
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original source is "
+                    f"{restricted_flag}: {original.quantity_id}"
+                )
 
     # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
     # Original material records can remain attached to an ABSTAINED quantity
@@ -237,7 +339,19 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish quantity references unknown canonical floor: {floor_id}"
             )
-        if _clean(quantity.authority) != _clean(floor.metric_area_authority):
+        # Both receipts must preserve the exact producer measurement method.
+        # Normalizing two padded/imported aliases into agreement can otherwise
+        # seal a FIRM floor finish that the later customer issuer would refuse.
+        original_method = quantity.authority
+        if (
+            type(original_method) is not str
+            or original_method not in (
+                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
+            )
+            or type(floor.metric_area_authority) is not str
+            or floor.metric_area_authority != original_method
+        ):
             raise SourceClosedRunConflictError(
                 "floor-finish metric authority disagrees with canonical floor: "
                 f"{quantity.quantity_id}"
@@ -261,6 +375,73 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source metric area receipt is missing: {floor_id}"
             )
+
+        if claim.room_area_quantity_evidence:
+            published_original_owners = [
+                source_quantity
+                for source_quantity in independently_published_room_areas
+                if (
+                    isinstance(source_quantity.metadata, Mapping)
+                    and source_quantity.metadata.get("canonical_floor_id")
+                    == floor.canonical_floor_id
+                    and source_quantity.metadata.get(
+                        "upstream_room_area_quantity_id"
+                    ) == area_receipt_id
+                    and source_quantity.input_entity_ids
+                    == (floor.physical_floor_surface_id,)
+                    and source_quantity.value == floor.metric_area_m2
+                    and source_quantity.authority == floor.metric_area_authority
+                )
+            ]
+            if len(published_original_owners) != 1:
+                raise SourceClosedRunConflictError(
+                    "floor-finish original room-area quantity is not "
+                    "independently published on the same canonical floor: "
+                    f"{quantity.quantity_id}"
+                )
+            original_area_metadata = published_original_owners[0].metadata
+            original_area_inclusion = (
+                original_area_metadata.get("inclusion_status")
+                if isinstance(original_area_metadata, Mapping)
+                else None
+            )
+            # An FT finish cannot inherit a numeric room area whose ORIGINAL
+            # source explicitly excluded or revoked customer inclusion. The
+            # floor-area projector preserves that non-inclusion, while the
+            # final workspace floor-row adapter refuses to rewrite it. Apply
+            # the same original decision to the material family; otherwise
+            # a revoked floor could still become an included saleable FT m².
+            if (
+                isinstance(original_area_metadata, Mapping)
+                and "inclusion_status" in original_area_metadata
+                and original_area_inclusion != "INCLUSION"
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish upstream original room-area inclusion revoked: "
+                    f"{quantity.quantity_id}"
+                )
+            # The floor issuer must preserve source ownership and explicit
+            # commercial denial. A valid original room-area m² can still be
+            # internally FIRM but non-commercial; it cannot become INCLUDED
+            # FT2/FT3 just because material occurrence was authenticated.
+            if (
+                "commercial_projection_allowed" in original_area_metadata
+                and original_area_metadata["commercial_projection_allowed"]
+                is not True
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish upstream original room-area commercial "
+                    f"permission revoked: {quantity.quantity_id}"
+                )
+            for restricted_flag in ("quantity_handoff_only", "shadow_only"):
+                if (
+                    restricted_flag in original_area_metadata
+                    and original_area_metadata[restricted_flag] is not False
+                ):
+                    raise SourceClosedRunConflictError(
+                        "floor-finish upstream original room-area source is "
+                        f"{restricted_flag}: {quantity.quantity_id}"
+                    )
 
         if (
             type(quantity.value) not in (int, float)
@@ -301,6 +482,74 @@ def build_live_floor_finish_area_source_traces(
         metadata = (
             quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
         )
+        # A direct source-closed seal is an independent public boundary; it
+        # must not rely on the later customer projection to discover that
+        # the original measurement axes or physical scale are missing.
+        if original_method == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+            figured_ids = metadata.get("figured_dimension_ids")
+            if (
+                type(figured_ids) not in (tuple, list)
+                or len(figured_ids) != 2
+                or any(
+                    type(value) is not str or not value
+                    or value != value.strip()
+                    for value in figured_ids
+                )
+                or len(set(figured_ids)) != 2
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original measurement lacks exact figured "
+                    f"dimension pair: {quantity.quantity_id}"
+                )
+        else:
+            scale_id = metadata.get("resolved_scale_id")
+            scale_status = metadata.get("scale_status")
+            # Missing source census is not proof of zero competing scales.
+            scale_conflicts = metadata.get("scale_conflicts")
+            if (
+                type(scale_id) is not str or not scale_id
+                or scale_id != scale_id.strip()
+                or type(scale_status) is not str
+                or scale_status not in ("resolved", "verified")
+                or type(scale_conflicts) not in (tuple, list)
+                or bool(scale_conflicts)
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original measurement lacks exact resolved "
+                    f"physical scale without conflicts: {quantity.quantity_id}"
+                )
+        if (
+            claim.room_area_quantity_evidence
+            and original_method
+            == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        ):
+            # It is not enough for each family to cite *some* two valid
+            # original axis IDs. The finish must reuse the exact horizontal
+            # and vertical source axes from the already-published ORIGINAL
+            # room area that owns this canonical floor. Otherwise a foreign
+            # dimension pair may be spliced into a copied FIRM finish.
+            original_area_metadata = published_original_owners[0].metadata
+            original_area_axes = (
+                original_area_metadata.get("figured_dimension_ids")
+                if isinstance(original_area_metadata, Mapping)
+                else None
+            )
+            if (
+                type(original_area_axes) not in (tuple, list)
+                or len(original_area_axes) != 2
+                or any(
+                    type(axis) is not str or not axis
+                    or axis != axis.strip()
+                    for axis in original_area_axes
+                )
+                or original_area_axes[0] == original_area_axes[1]
+                or tuple(sorted(figured_ids))
+                != tuple(sorted(original_area_axes))
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish figured axes do not match the independent "
+                    f"original room-area producer: {quantity.quantity_id}"
+                )
         if _clean(metadata.get("canonical_floor_id")) != floor_id:
             raise SourceClosedRunConflictError(
                 "floor-finish canonical identity metadata mismatch: "
@@ -665,6 +914,28 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish original canonical room geometry/source mismatch: "
                     f"{quantity.quantity_id}"
                 )
+            # Room labels are presentation, not measurement authority, but a
+            # source-issued material/room label that contradicts the exact
+            # authenticated canonical room must never be FIRM-sealed through a
+            # direct source-only adapter bypassing the customer projector.
+            source_room_label = getattr(room, "room_label", None)
+            issued_room_label = metadata.get("room_label")
+            if issued_room_label is not None:
+                if (
+                    type(issued_room_label) is not str
+                    or not issued_room_label
+                    or issued_room_label != issued_room_label.strip()
+                    or (
+                        type(source_room_label) is str
+                        and source_room_label
+                        and " ".join(issued_room_label.casefold().split())
+                        != " ".join(source_room_label.casefold().split())
+                    )
+                ):
+                    raise SourceClosedRunConflictError(
+                        "floor-finish original room label contradicts canonical "
+                        f"room: {quantity.quantity_id}"
+                    )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,

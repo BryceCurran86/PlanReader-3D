@@ -13,6 +13,7 @@ from pb_live_external_physical_net_wall_publication import (
 )
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_customer_projection import (
+    _measurement_authority,
     project_live_floor_finish_customer_rows,
 )
 from pb_live_floor_finish_area_source_closed_export import (
@@ -22,6 +23,7 @@ from pb_live_floor_finish_area_source_closed_export import (
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_source_closed_run_export import SourceClosedRunConflictError
+from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
 
 
 def _floor() -> LiveCanonicalFloorSurfaceObject:
@@ -199,6 +201,39 @@ def test_floor_finish_export_rejects_semantic_drift_from_canonical_floor() -> No
         )
 
 
+def test_floor_finish_customer_distinguishes_source_codes_with_same_material_family() -> None:
+    """FT1 and FT2 may both be tile but are different scheduled finishes."""
+    original = _quantity()
+    alternate = replace(
+        original,
+        quantity_id="floor-finish-ft2-q1",
+        semantic_key="floor_finish_area:floor-1:FT2:tile",
+        metadata={**dict(original.metadata), "finish_code": "FT2"},
+    )
+    for source_quantity, expected_element in (
+        (original, "Floor finish area (FT1)"),
+        (alternate, "Floor finish area (FT2)"),
+    ):
+        claim = replace(
+            _claim(),
+            floor_finish_quantity_evidence=(source_quantity,),
+        )
+        sealed = seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+        rows = project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+        assert len(rows) == len(sealed.quantities) == 1
+        assert rows[0]["quantity_family"] == "floor_finish_area"
+        assert rows[0]["quantity"] == 8.64
+        assert rows[0]["finish_system"] == "tile"
+        assert rows[0]["element"] == expected_element
+        assert verify_sealed_customer_output(
+            sealed, rows
+        ).verified_quantity_ids == (source_quantity.quantity_id,)
+
+
 def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     claim = _claim()
     run = seal_live_floor_finish_area_run(
@@ -220,6 +255,7 @@ def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     assert row["origin"] == "AI"
     assert row["row_role"] == "floor_area"
     assert row["finish_system"] == "tile"
+    assert row["element"] == "Floor finish area (FT1)"
 
     report = verify_sealed_customer_output(run, rows)
     assert report.valid_quantity_count == 1
@@ -533,6 +569,7 @@ def test_floor_finish_customer_projection_uses_canonical_not_physical_floor_join
     assert rows[0]["quantity_id"] == corrected.quantity_id
     assert rows[0]["location"] == floor.room_entity_id
     assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
     assert verify_sealed_customer_output(sealed, rows).verified_quantity_ids == (
         corrected.quantity_id,
     )
@@ -543,14 +580,13 @@ def test_floor_finish_customer_projection_uses_canonical_not_physical_floor_join
     ("dim-h-source", ""), "dim-h-source", None,
 ))
 def test_floor_finish_customer_rejects_unowned_figured_measurement(dimensions):
-    from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
     claim = _claim()
     original = claim.floor_finish_quantity_evidence[0]
     forged = replace(
         original,
         metadata={**dict(original.metadata), "figured_dimension_ids": dimensions},
     )
-    with pytest.raises(MissingCommercialAuthorityError):
+    with pytest.raises(SourceClosedRunConflictError, match="exact figured dimension pair"):
         project_live_floor_finish_customer_rows(
             replace(claim, floor_finish_quantity_evidence=(forged,)),
             workspace_id=1, project_id="project-1",
@@ -966,3 +1002,886 @@ def test_same_document_cannot_mix_source_revisions_even_when_mark_roots_differ(
             match="conflicting sealed source revisions or snapshots",
         ):
             output(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("figured_ids", (
+    None, (), ("dim-h-source",), ("dim-h-source", "dim-h-source"),
+    (" dim-h-source", "dim-v-source"),
+    ("dim-h-source", "dim-v-source "),
+    (True, "dim-v-source"),
+    "dim-h-source",
+    ("dim-h-source", "dim-v-source", "third-axis"),
+))
+def test_original_floor_finish_source_seal_requires_exact_figured_axes(figured_ids):
+    """Direct signing cannot bypass the customer-only figured-axis check."""
+    source = _claim()
+    original = source.floor_finish_quantity_evidence[0]
+    altered = replace(
+        original, metadata={**dict(original.metadata), "figured_dimension_ids": figured_ids},
+    )
+    forged = replace(source, floor_finish_quantity_evidence=(altered,))
+    before_floor = source.canonical_floors[0].to_dict()
+    before_quantity = original.to_dict()
+    for publisher in (build_live_floor_finish_area_source_traces, seal_live_floor_finish_area_run):
+        with pytest.raises(SourceClosedRunConflictError, match="exact figured dimension pair"):
+            publisher(forged, workspace_id=1, project_id="project-1")
+    assert source.canonical_floors[0].to_dict() == before_floor
+    assert original.to_dict() == before_quantity
+    assert len(seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+@pytest.mark.parametrize("method", (
+    " documented_dimension ", "documented_dimension ", " DOCUMENTED_DIMENSION",
+    "pdf_scaled ", "model_derived", "user_corrected",
+))
+def test_floor_finish_source_seal_rejects_matching_forged_authority_aliases(method):
+    """Matching aliases on both original receipts do not prove a measurement."""
+    original = _claim()
+    floor = replace(original.canonical_floors[0], metric_area_authority=method)
+    quantity = replace(original.floor_finish_quantity_evidence[0], authority=method)
+    forged = replace(original, canonical_floors=(floor,),
+                     floor_finish_quantity_evidence=(quantity,))
+    with pytest.raises(SourceClosedRunConflictError, match="metric authority disagrees"):
+        seal_live_floor_finish_area_run(
+            forged, workspace_id=1, project_id="project-1",
+        )
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+def _scaled_floor_finish_claim():
+    source = _claim()
+    floor = replace(
+        source.canonical_floors[0],
+        metric_area_authority=MeasurementAuthorityType.PDF_SCALED.value,
+    )
+    quantity = source.floor_finish_quantity_evidence[0]
+    scaled = replace(
+        quantity,
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        metadata={
+            **dict(quantity.metadata),
+            "resolved_scale_id": "original-physical-scale-1",
+            "scale_status": "resolved",
+            "scale_conflicts": (),
+        },
+    )
+    return replace(source, canonical_floors=(floor,),
+                   floor_finish_quantity_evidence=(scaled,))
+
+
+def test_original_floor_finish_source_seal_keeps_exact_resolved_scale_positive():
+    source = _scaled_floor_finish_claim()
+    first = seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    )
+    second = seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    )
+    assert len(first.quantities) == 1
+    assert first.to_dict() == second.to_dict()
+    rows = project_live_floor_finish_customer_rows(
+        source, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["measurement_method"] == "scaled_geometry"
+    assert verify_sealed_customer_output(first, rows).verified_quantity_ids == (
+        source.floor_finish_quantity_evidence[0].quantity_id,
+    )
+
+
+@pytest.mark.parametrize("overrides", (
+    {"resolved_scale_id": True},
+    {"resolved_scale_id": " scale-1 "},
+    {"resolved_scale_id": ""},
+    {"scale_status": "provisional"},
+    {"scale_status": True},
+    {"scale_conflicts": ("independent-scale-rival",)},
+    {"scale_conflicts": "not-a-typed-census"},
+    {"scale_conflicts": None},
+))
+def test_original_floor_finish_source_seal_rejects_unproved_scale(overrides):
+    original = _scaled_floor_finish_claim()
+    quantity = original.floor_finish_quantity_evidence[0]
+    forged = replace(
+        original,
+        floor_finish_quantity_evidence=(replace(
+            quantity, metadata={**dict(quantity.metadata), **overrides},
+        ),),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+        seal_live_floor_finish_area_run(
+            forged, workspace_id=1, project_id="project-1",
+        )
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+
+def test_original_floor_finish_requires_present_empty_source_scale_conflict_census():
+    """Missing original conflict inventory is not a proven empty inventory."""
+    original = _scaled_floor_finish_claim()
+    quantity = original.floor_finish_quantity_evidence[0]
+    metadata = dict(quantity.metadata)
+    assert metadata.pop("scale_conflicts") == ()
+    missing_quantity = replace(quantity, metadata=metadata)
+    missing = replace(original, floor_finish_quantity_evidence=(missing_quantity,))
+    before_floor = original.canonical_floors[0].to_dict()
+    before_quantity = quantity.to_dict()
+    before_missing = missing_quantity.to_dict()
+
+    for publisher in (build_live_floor_finish_area_source_traces, seal_live_floor_finish_area_run):
+        with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+            publisher(missing, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+        project_live_floor_finish_customer_rows(
+            missing, workspace_id=1, project_id="project-1",
+        )
+    # Independent customer measurement boundary must also reject the receipt
+    # even when called without the direct source-seal boundary.
+    with pytest.raises(MissingCommercialAuthorityError, match="original resolved physical scale"):
+        _measurement_authority(missing_quantity)
+
+    assert original.canonical_floors[0].to_dict() == before_floor
+    assert quantity.to_dict() == before_quantity
+    assert missing_quantity.to_dict() == before_missing
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+def _independent_source_room_area() -> QuantityEvidence:
+    """A source-neutral existing FIRM room-area owner, not a new measurement."""
+    original = _quantity()
+    return replace(
+        original,
+        quantity_id="room-area-1",
+        family="room_area",
+        semantic_key="room_area:room-1",
+        input_entity_ids=("room-1",),
+        evidence_ids=("ev-room", "ev-area"),
+        metadata={
+            "source_sha256": "a" * 64,
+            "revision_id": "rev-1",
+            "page_no": "1",
+            "viewport_id": "vp-1",
+            "source_room_face_record_id": "face-1",
+            "room_snapshot_id": "snap-1",
+            # The original figured room-area producer, not the material
+            # code, owns these two independently issued source axes. The
+            # commercial floor-area projection must see the same exact IDs.
+            "figured_dimension_ids": ("dim-h-source", "dim-v-source"),
+        },
+    )
+
+
+def test_firm_finish_consumes_exact_independently_published_room_area():
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    claim = replace(
+        _claim(),
+        room_area_quantity_evidence=(_independent_source_room_area(),),
+    )
+    floor_quantities = publish_live_floor_area_quantities(claim)
+    assert len(floor_quantities) == 1
+    assert floor_quantities[0].metadata[
+        "upstream_room_area_quantity_id"
+    ] == "room-area-1"
+    signed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == floor_quantities[0].value == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        signed, rows,
+    ).verified_quantity_ids == (signed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("mutation", (
+    "other_source_id",
+    "different_value",
+    "blocked_original",
+    "different_source_sha",
+    "different_room_face",
+    "different_page",
+    "different_room_owner",
+    "different_source_semantic",
+    "different_measurement_authority",
+))
+def test_floor_finish_cannot_borrow_foreign_unpublished_original_room_area(
+    mutation,
+):
+    original = _independent_source_room_area()
+    floor_claim = _claim()
+    if mutation == "other_source_id":
+        original = replace(original, quantity_id="source-room-not-on-floor")
+    elif mutation == "different_value":
+        original = replace(original, value=7.25)
+    elif mutation == "blocked_original":
+        original = replace(
+            original, blocking_reasons=("original_room_boundary_conflicted",),
+        )
+    elif mutation == "different_source_sha":
+        original = replace(
+            original, metadata={**original.metadata, "source_sha256": "b" * 64},
+        )
+    elif mutation == "different_room_face":
+        original = replace(
+            original, metadata={
+                **original.metadata,
+                "source_room_face_record_id": "foreign-room-face",
+            },
+        )
+    elif mutation == "different_page":
+        original = replace(
+            original, metadata={**original.metadata, "page_no": "2"},
+        )
+    elif mutation == "different_room_owner":
+        original = replace(
+            original, input_entity_ids=("other-original-room",),
+        )
+    elif mutation == "different_source_semantic":
+        original = replace(
+            original, semantic_key="room_area:other-original-room",
+        )
+    else:
+        original = replace(original, authority="pdf_scaled")
+    claim = replace(
+        floor_claim, room_area_quantity_evidence=(original,),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="original room-area quantity is not independently published",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    with pytest.raises(SourceClosedRunConflictError):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def _original_labeled_room(
+    *,
+    label="OFFICE",
+    binding_id="source-label-binding-1",
+    receipts=("ev-room",),
+):
+    from pb_live_canonical_room_composition import LiveCanonicalRoomObject
+
+    floor = _floor()
+    return LiveCanonicalRoomObject(
+        canonical_room_id=floor.room_entity_id,
+        physical_room_id=floor.room_entity_id,
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        viewport_id=floor.viewport_id,
+        decision_scope_id="room-face-source:vp-1",
+        polygon_pdf_pts=floor.polygon_pdf_pts,
+        bounding_wall_ids=floor.bounding_wall_ids,
+        canonical_bounding_wall_ids=floor.canonical_bounding_wall_ids,
+        wall_relationships_complete=False,
+        area_page_pts2=floor.area_page_pts2,
+        source_room_face_record_id=floor.source_room_face_record_id,
+        evidence_ids=floor.evidence_ids,
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label=label,
+        room_label_binding_record_id=binding_id,
+        room_label_evidence_ids=receipts,
+        room_label_reason_codes=("source_room_label_resolved",),
+    )
+
+
+def test_source_labeled_floor_finish_displays_actual_room_name_in_customer_output():
+    room = _original_labeled_room()
+    original = _quantity()
+    quantity = replace(
+        original,
+        metadata={**original.metadata, "room_label": "OFFICE"},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(room,),
+        floor_finish_quantity_evidence=(quantity,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (quantity.quantity_id,)
+
+
+@pytest.mark.parametrize("mutation", (
+    "missing_label",
+    "missing_label_binding",
+    "missing_label_evidence",
+    "duplicate_room_label",
+))
+def test_unproven_or_duplicate_original_room_label_retains_canonical_customer_id(
+    mutation,
+):
+    room = _original_labeled_room()
+    additional = ()
+    if mutation == "missing_label":
+        room = replace(room, room_label=None)
+    elif mutation == "missing_label_binding":
+        room = replace(room, room_label_binding_record_id=None)
+    elif mutation == "missing_label_evidence":
+        room = replace(room, room_label_evidence_ids=())
+    else:
+        additional = (
+            replace(
+                room,
+                canonical_room_id="room-2",
+                physical_room_id="room-2",
+                source_room_face_record_id="face-2",
+                room_label_binding_record_id="binding-other",
+                room_label="office",
+            ),
+        )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(room, *additional),
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "room-1"
+    assert rows[0]["quantity"] == 8.64
+
+
+def test_original_finish_room_label_mismatch_rejected_without_changing_quantity():
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(
+            replace(
+                _quantity(),
+                metadata={**_quantity().metadata, "room_label": "FREEZER"},
+            ),
+        ),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError, match="room label contradicts",
+    ):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+@pytest.mark.parametrize("not_permitted", (
+    False, 0, 1, "false", "True", "", None,
+))
+@pytest.mark.parametrize("handoff_only", (False, True))
+def test_original_material_only_ft_cannot_be_promoted_to_customer_floor_area(
+    not_permitted, handoff_only,
+):
+    """A material code without its source-owned finished floor is not m²."""
+    original = _quantity()
+    unmeasured = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": not_permitted,
+            "quantity_handoff_only": handoff_only,
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(unmeasured,),
+    )
+    for adapter in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="material-only receipt forbids",
+        ):
+            adapter(claim, workspace_id=1, project_id="project-1")
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+def test_explicit_original_ft_customer_permission_retains_signed_area_and_code():
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **dict(original.metadata),
+            "commercial_projection_allowed": True,
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(permitted,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
+
+
+@pytest.mark.parametrize("kind", (
+    "source_other_two_axes",
+    "source_missing_axes",
+    "source_duplicate_axes",
+    "source_extra_axis",
+    "source_string_axes",
+    "source_integer_axis",
+    "finish_other_two_axes",
+))
+def test_finish_figured_axes_must_equal_independent_original_room_area_axes(
+    kind,
+):
+    """An independently valid but foreign dimension pair is not room lineage."""
+    source = _independent_source_room_area()
+    finish = _quantity()
+    if kind.startswith("source_"):
+        axes = {
+            "source_other_two_axes": ("foreign-h", "foreign-v"),
+            "source_missing_axes": None,
+            "source_duplicate_axes": ("dim-h-source", "dim-h-source"),
+            "source_extra_axis": ("dim-h-source", "dim-v-source", "foreign"),
+            "source_string_axes": "dim-h-source dim-v-source",
+            "source_integer_axis": ("dim-h-source", 12345),
+        }[kind]
+        mutated_source = replace(
+            source, metadata={
+                **source.metadata, "figured_dimension_ids": axes,
+            },
+        )
+        claim = replace(
+            _claim(), room_area_quantity_evidence=(mutated_source,),
+        )
+    else:
+        mutated_finish = replace(
+            finish, metadata={
+                **finish.metadata,
+                "figured_dimension_ids": ("foreign-h", "foreign-v"),
+            },
+        )
+        claim = replace(
+            _claim(), room_area_quantity_evidence=(source,),
+            floor_finish_quantity_evidence=(mutated_finish,),
+        )
+    for projector in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="figured axes do not match the independent original room-area",
+        ):
+            projector(claim, workspace_id=1, project_id="project-1")
+
+
+def test_authentic_room_axes_can_arrive_in_opposite_order_to_finish_axes():
+    source = _independent_source_room_area()
+    reversed_axes = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "figured_dimension_ids": ("dim-v-source", "dim-h-source"),
+        },
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(reversed_axes,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("bad_source", (
+    "duplicate_identical_original",
+    "duplicate_conflicted_original",
+    "duplicate_abstained_original",
+    "foreign_family_original",
+    "invalid_original_id",
+))
+def test_original_room_area_inventory_cannot_hide_disputed_source_before_finish_seal(
+    bad_source,
+):
+    """Complete room FIRM/CANDIDATE universe is checked before filter."""
+    source = _independent_source_room_area()
+    if bad_source == "duplicate_identical_original":
+        inventory = (source, source)
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "duplicate_conflicted_original":
+        inventory = (source, replace(source, value=8.63))
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "duplicate_abstained_original":
+        inventory = (
+            source,
+            replace(
+                source, abstained=True, value=None, status="blocked",
+                blocking_reasons=("original_source_identity_contested",),
+            ),
+        )
+        expected = "duplicate or invalid original room-area quantity ID"
+    elif bad_source == "foreign_family_original":
+        inventory = (source, replace(
+            source, quantity_id="non-room-original", family="floor_area",
+        ))
+        expected = "original room-area inventory contains foreign family"
+    else:
+        inventory = (source, replace(source, quantity_id=" pad "))
+        expected = "duplicate or invalid original room-area quantity ID"
+    claim = replace(
+        _claim(), room_area_quantity_evidence=inventory,
+    )
+    with pytest.raises(SourceClosedRunConflictError, match=expected):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    with pytest.raises(SourceClosedRunConflictError, match=expected):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+@pytest.mark.parametrize("bad_label", ("FREEZER", "OFFICE ", "", 123, True))
+def test_direct_floor_finish_source_seal_denies_foreign_original_material_room_label(
+    bad_label,
+):
+    """A direct signed source export may not borrow another room's label."""
+    original = _quantity()
+    forged = replace(
+        original,
+        metadata={**original.metadata, "room_label": bad_label},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(forged,),
+    )
+    for sealer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original room label contradicts canonical room",
+        ):
+            sealer(claim, workspace_id=1, project_id="project-1")
+
+
+def test_direct_floor_finish_seal_accepts_original_office_label_casefold():
+    original = _quantity()
+    lowercase = replace(
+        original, metadata={**original.metadata, "room_label": "office"},
+    )
+    claim = replace(
+        _claim(),
+        canonical_rooms=(_original_labeled_room(),),
+        floor_finish_quantity_evidence=(lowercase,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["location"] == "OFFICE"
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (original.quantity_id,)
+
+
+@pytest.mark.parametrize("revoked", (
+    None, False, 1, "", "EXCLUSION", "PROVISIONAL", "INCLUSION ",
+))
+def test_revoked_original_ft_inclusion_cannot_be_restored_at_final_seal_or_customer(
+    revoked,
+):
+    """A source-mark revocation cannot be overwritten by output defaults."""
+    original = _quantity()
+    revoked_quantity = replace(
+        original, metadata={
+            **original.metadata, "inclusion_status": revoked,
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(revoked_quantity,),
+    )
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original inclusion revoked",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+def test_exact_source_inclusion_keeps_legitimate_floor_finish_firm_and_customer():
+    original = _quantity()
+    approved = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "INCLUSION"},
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(approved,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert rows[0]["quantity"] == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_inclusion", (
+    "EXCLUSION", "PROVISIONAL", "", None, False, 0, "INCLUSION ",
+))
+def test_original_excluded_room_area_cannot_authorize_saleable_ft_finish(
+    source_inclusion,
+):
+    """A physically measured but revoked room is not an INCLUDED FT takeoff."""
+    original = _independent_source_room_area()
+    revoked = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "inclusion_status": source_inclusion,
+        },
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(revoked,),
+    )
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="upstream original room-area inclusion revoked",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert original.value == revoked.value == 8.64
+    assert claim.floor_finish_quantity_evidence[0].metadata["finish_code"] == "FT1"
+
+
+def test_original_included_room_area_still_supports_exact_signed_ft_finish():
+    original = _independent_source_room_area()
+    included = replace(
+        original,
+        metadata={**original.metadata, "inclusion_status": "INCLUSION"},
+    )
+    claim = replace(
+        _claim(), room_area_quantity_evidence=(included,),
+    )
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity"] == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"commercial_projection_allowed": False},
+    {"commercial_projection_allowed": None},
+    {"commercial_projection_allowed": 0},
+    {"commercial_projection_allowed": "true"},
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": None},
+    {"shadow_only": True},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_room_area_denial_is_preserved_by_floor_issuer_and_blocks_ft(
+    source_denial,
+):
+    """A denied ROOM-area receipt may not reappear as included FT finish m²."""
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    original = _independent_source_room_area()
+    denied = replace(
+        original,
+        metadata={**original.metadata, **source_denial},
+    )
+    claim = replace(_claim(), room_area_quantity_evidence=(denied,))
+    reissued = publish_live_floor_area_quantities(claim)
+    assert len(reissued) == 1
+    assert reissued[0].value == 8.64
+    assert reissued[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
+    for field, flag in source_denial.items():
+        assert reissued[0].metadata[field] == flag
+    if "commercial_projection_allowed" in source_denial:
+        expected = "upstream original room-area commercial permission revoked"
+    elif "quantity_handoff_only" in source_denial:
+        expected = "upstream original room-area source is quantity_handoff_only"
+    else:
+        expected = "upstream original room-area source is shadow_only"
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match=expected):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.room_area_quantity_evidence == (denied,)
+    assert denied.value == 8.64
+
+
+def test_original_room_area_explicit_true_permission_supports_real_ft_seal():
+    from pb_live_floor_area_quantity_publication import (
+        publish_live_floor_area_quantities,
+    )
+
+    source = _independent_source_room_area()
+    affirmative = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "commercial_projection_allowed": True,
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = replace(_claim(), room_area_quantity_evidence=(affirmative,))
+    reissued = publish_live_floor_area_quantities(claim)
+    assert len(reissued) == 1
+    assert reissued[0].metadata["commercial_projection_allowed"] is True
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == len(sealed.quantities) == 1
+    assert rows[0]["quantity"] == reissued[0].value == 8.64
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (sealed.quantities[0].quantity_id,)
+
+
+@pytest.mark.parametrize("source_denial", (
+    {"quantity_handoff_only": True},
+    {"quantity_handoff_only": None},
+    {"quantity_handoff_only": 1},
+    {"quantity_handoff_only": "false"},
+    {"shadow_only": True},
+    {"shadow_only": None},
+    {"shadow_only": 1},
+    {"shadow_only": "false"},
+))
+def test_original_finish_handoff_or_shadow_denial_cannot_mint_saleable_ft_area(
+    source_denial,
+):
+    """Even a FIRM numeric FT receipt cannot revoke its own noncommercial veto."""
+    original = _quantity()
+    denied = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            **source_denial,
+        },
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(denied,))
+    flagged = next(iter(source_denial))
+    for consumer in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match=f"floor-finish original source is {flagged}",
+        ):
+            consumer(claim, workspace_id=1, project_id="project-1")
+    assert claim.floor_finish_quantity_evidence == (denied,)
+    assert denied.value == original.value == 8.64
+    assert denied.quantity_id == original.quantity_id
+
+
+def test_original_finish_explicitly_non_shadow_source_still_reaches_customer():
+    """Opted-in original FT quantity preserves signed ID and full numeric area."""
+    original = _quantity()
+    permitted = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "commercial_projection_allowed": True,
+            "inclusion_status": "INCLUSION",
+            "quantity_handoff_only": False,
+            "shadow_only": False,
+        },
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(permitted,))
+    sealed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities) == len(rows) == 1
+    assert sealed.quantities[0].quantity_id == permitted.quantity_id
+    assert rows[0]["quantity"] == permitted.value == 8.64
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["inclusion_status"] == "INCLUSION"
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (permitted.quantity_id,)

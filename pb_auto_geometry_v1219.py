@@ -650,17 +650,33 @@ def _cross_calibrate_elevations(app: Any, pages: Sequence[Dict[str, Any]], footp
 def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str, substrate: str,
                  quantity: float, status: str, source_page: str, source_reference: str,
                  confidence: str, notes: str, row_role: str = "", unit: str = "m²",
-                 preserve_quantity: bool = False) -> Tuple[Any, ...]:
+                 preserve_quantity: bool = False,
+                 finish_system: str = "To be confirmed",
+                 inclusion_status: str | None = None) -> Tuple[Any, ...]:
     # Checked before rounding, which would turn NaN into a plausible 0.0 m².
     if not _is_finite_number(quantity):
         raise takeoff_contract.TakeoffRowContractError(
             f"auto-geometry take-off quantity {quantity!r} for {source_reference!r} is not a finite number."
         )
+    # Source-closed floor-finish AND ceiling app projections pass this flag.
+    # Preserve every other caller's existing role-derived inclusion status.
+    if inclusion_status is not None and (
+        type(inclusion_status) is not str
+        or inclusion_status != "INCLUSION"
+        or row_role not in ("floor_area", "ceiling_area")
+    ):
+        raise takeoff_contract.TakeoffRowContractError(
+            "explicit takeoff inclusion requires a source-closed floor or ceiling row"
+        )
+    effective_inclusion = (
+        inclusion_status if inclusion_status is not None
+        else ("INCLUSION" if row_role == "floor_area" else "PROVISIONAL")
+    )
     stamp = ""  # replaced by caller
     return (
-        workspace_id, section, element, location, substrate, "To be confirmed",
+        workspace_id, section, element, location, substrate, finish_system,
         max(0.0, quantity) if preserve_quantity else round(max(0.0, quantity), 2), unit,
-        status, source_page, source_reference, "INCLUSION" if row_role == "floor_area" else "PROVISIONAL",
+        status, source_page, source_reference, effective_inclusion,
         0, 0, 0, 0, confidence, notes, row_role, stamp, stamp,
     )
 
@@ -1247,6 +1263,17 @@ def _try_physical_net_wall_rows(
             quantity_id = str(item.get("quantity_id") or "").strip()
             if not quantity_id:
                 raise ValueError("floor-area projection is missing quantity identity")
+            # _takeoff_row() and _auto_row_problem() authorize INCLUSION on
+            # floor_area rows by default. Never turn an original EXCLUSION
+            # into a saleable included quantity. Quarantine only this source
+            # quantity: another independently signed room on the same plan
+            # must not disappear because its neighbour was excluded.
+            if item.get("inclusion_status") != "INCLUSION":
+                current_coverage["family_gaps"].setdefault("floor", []).append(
+                    "live_room_area_original_inclusion_excluded:"
+                    f"{quantity_id}"
+                )
+                continue
             unit = str(item.get("unit") or "").strip().lower()
             if unit == "m2":
                 unit = "m²"
@@ -1382,6 +1409,9 @@ def _try_physical_net_wall_rows(
         from pb_live_ceiling_area_quantity_publication import (
             publish_live_ceiling_area_quantities,
         )
+        from pb_ceiling_independent_customer_metric_gate import (
+            independently_sourced_ceiling_customer_metric,
+        )
         from pb_live_ceiling_customer_projection import (
             project_live_ceiling_customer_rows,
         )
@@ -1461,7 +1491,26 @@ def _try_physical_net_wall_rows(
                 ),
             )
 
-        legacy_quantities = publish_live_ceiling_area_quantities(legacy_result)
+        original_legacy_quantities = publish_live_ceiling_area_quantities(
+            legacy_result
+        )
+        # Legacy source area was copied from a floor-room measurement.
+        # Its original publisher correctly says material-only/hand-off-only,
+        # but the former customer projector rewrote that source denial.
+        # Keep this per-source failure visible and do not let a legacy
+        # fallback silently undo the independent-RCP gate above.
+        legacy_quantities = tuple(
+            quantity for quantity in original_legacy_quantities
+            if independently_sourced_ceiling_customer_metric(quantity)
+        )
+        for denied in original_legacy_quantities:
+            if not independently_sourced_ceiling_customer_metric(denied):
+                current_coverage["family_gaps"].setdefault(
+                    "ceiling", []
+                ).append(
+                    "legacy_ceiling_independent_rcp_metric_unproven:"
+                    f"{denied.quantity_id}"
+                )
         if legacy_quantities:
             projected.extend(
                 project_live_ceiling_area_customer_rows(

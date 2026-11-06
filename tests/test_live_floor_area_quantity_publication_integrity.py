@@ -722,3 +722,41 @@ def test_unmapped_source_alternative_cannot_poison_one_authentic_floor_owner():
     published = publish_live_floor_area_quantities(claim)
     assert len(published) == 1
     assert published[0].metadata["upstream_room_area_quantity_id"] == source.quantity_id
+
+
+def test_canonical_room_and_floor_reissues_do_not_erase_original_commercial_denial():
+    """Both issuers retain the exact original typed permission, not a bool cast."""
+    for original_permission in (False, None, "true", 0, True):
+        source = _source_area()
+        denied = replace(
+            source,
+            metadata={
+                **source.metadata,
+                "commercial_projection_allowed": original_permission,
+            },
+        )
+        claim = _claim_with_canonical_room(denied)
+        floor_rows = publish_live_floor_area_quantities(claim)
+        room_rows = publish_live_canonical_room_area_quantities(claim)
+        assert len(floor_rows) == len(room_rows) == 1
+        for issued in (*floor_rows, *room_rows):
+            assert issued.value == source.value == 8.64
+            assert issued.metadata["upstream_room_area_quantity_id"] == source.quantity_id
+            actual_permission = issued.metadata["commercial_projection_allowed"]
+            assert type(actual_permission) is type(original_permission)
+            assert actual_permission == original_permission
+        assert claim.room_area_quantity_evidence == (denied,)
+        assert denied.metadata["commercial_projection_allowed"] == original_permission
+
+
+def test_original_firm_room_reissue_without_optional_commercial_flag_is_unchanged():
+    """The historical FIRM source contract without a marker stays issuable."""
+    original = _source_area()
+    assert "commercial_projection_allowed" not in original.metadata
+    claim = _claim_with_canonical_room(original)
+    floor_rows = publish_live_floor_area_quantities(claim)
+    room_rows = publish_live_canonical_room_area_quantities(claim)
+    assert len(floor_rows) == len(room_rows) == 1
+    assert floor_rows[0].metadata["commercial_projection_allowed"] is True
+    assert room_rows[0].metadata["commercial_projection_allowed"] is True
+    assert claim.room_area_quantity_evidence == (original,)

@@ -30,14 +30,33 @@ def _firm_quantity(quantity_id: str, ceiling_id: str) -> QuantityEvidence:
         value=9.05352,
         unit="m2",
         input_entity_ids=(ceiling_id,),
-        formula="test",
+        # This source-neutral test explicitly models a *separately* issued
+        # RCP ceiling-zone metric, NOT a ceiling m² borrowed from the floor
+        # room. Generic formula='test' no longer qualifies for customer
+        # publication without the independent original-area receipts.
+        formula="authenticated_independent_rcp_ceiling_area_from_original_figures",
         formula_version="1",
-        evidence_ids=(f"ev-{quantity_id}",),
+        evidence_ids=(
+            f"ev-{quantity_id}",
+            f"rcp-independent-area-evidence-{quantity_id}",
+        ),
         authority="documented_dimension",
         status="firm",
         confidence=1.0,
         abstained=False,
-        metadata={"row_role": "ceiling_area"},
+        metadata={
+            "row_role": "ceiling_area",
+            "commercial_projection_allowed": True,
+            "quantity_handoff_only": False,
+            "upstream_room_area_quantity_id": f"floor-area-{ceiling_id}",
+            "independent_rcp_ceiling_area_quantity_id": f"rcp-area-{ceiling_id}",
+            "independent_rcp_ceiling_area_evidence_id":
+                f"rcp-independent-area-evidence-{quantity_id}",
+            "independent_rcp_ceiling_area_page_id": "9",
+            "independent_rcp_ceiling_area_viewport_id": "rcp-vp",
+            "support_page_id": "9",
+            "support_viewport_id": "rcp-vp",
+        },
     )
 
 

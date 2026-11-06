@@ -12,6 +12,9 @@ from dataclasses import replace
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_ceiling_independent_customer_metric_gate import (
+    independently_sourced_ceiling_customer_metric,
+)
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_live_ceiling_area_quantity_publication import (
@@ -171,6 +174,17 @@ def project_live_ceiling_area_customer_rows(
             and quantity.value is not None
             and not quantity.blocking_reasons
         )
+    )
+    # The canonical ceiling reissue is intentionally handoff-only when its
+    # metric is a reuse of original FLOOR-room area. The original publisher
+    # marks this commercial_projection_allowed=False. Never rewrite that
+    # source denial to True in _customer_quantity and mint ceiling m2.
+    # Independently source-issued RCP metric receipts, when introduced by a
+    # separate producer, are selected per quantity rather than allowing one
+    # denied legacy sibling to suppress independently proven ceilings.
+    original = tuple(
+        quantity for quantity in original
+        if independently_sourced_ceiling_customer_metric(quantity)
     )
     if not original:
         return ()
