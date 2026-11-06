@@ -507,6 +507,9 @@ class _SourceObservationStore:
         # the records themselves; a write clears them. This does not retain a
         # bound copy of every page.
         self.visible_page_index: dict[str, tuple] = {}
+        # One page's private read views and validated returned clones. This
+        # replaces its predecessor; source observations are never evicted.
+        self.visible_page_bound_rows: tuple | None = None
 
     def source_bytes_match_revision(
         self,

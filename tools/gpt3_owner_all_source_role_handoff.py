@@ -170,18 +170,24 @@ def produce_all_source_roles(
             "--pdf", str(role["path"]), "--project-id", project_id,
             "--family-group", family_group, "--output-dir", str(role_dir),
         ]
-        rc, status, _usage = run_logged(
+        rc, status, usage = run_logged(
             command, Path(__file__).resolve().parents[1],
             output_dir / ("source_role_%02d.log" % (index + 1)),
             timeout_s=timeout_min * 60, track_memory=True,
             max_private_mb=int(max_private_gb * 1024),
             min_free_commit_mb=int(min_free_commit_gb * 1024),
         )
+        measured = usage if type(usage) is dict else {}
+        safe_usage = {}
+        for key in ("peak_working_set_kb", "peak_private_kb", "min_system_free_commit_kb"):
+            value = measured.get(key)
+            safe_usage[key] = value if type(value) is int and value >= 0 else None
         row = {
             "role": role["role"], "sha256": role["sha256"],
             "process_status": status, "process_exit_code": rc,
             "sealed": False,
             "first_failure": None,
+            "resource_usage": safe_usage,
         }
         if rc == 0 and status == "COMPLETED":
             summary_file = role_dir / "production_summary.json"
