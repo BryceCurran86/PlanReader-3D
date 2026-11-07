@@ -10,6 +10,7 @@ import pytest
 
 from pb_layered_wall_doorway_room_ring_shadow import (
     KIND_STROKE,
+    KIND_SLIDING_LEAF,
     KIND_SWING,
     LayeredRoomRingRecord,
     REASON_OPEN_EXTERIOR,
@@ -366,3 +367,114 @@ def test_ring_polygons_are_simple_rings_for_downstream_room_area_code(seed):
     assert all(points[i] != points[(i + 1) % len(points)] for i in range(len(points)))
     assert len(set(points)) == len(points)
     assert _original_pdf_ring(points) is not None
+
+
+def white_box(x0, y0, x1, y1, tf=identity, layer=WALL, fill=(1.0, 1.0, 1.0)):
+    c = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    items = [("l", _pt(tf, *c[i]), _pt(tf, *c[(i + 1) % 4])) for i in range(4)]
+    return {"layer": layer, "fill": fill, "items": items}
+
+
+def robe_room(tf=identity, *, frame_lo=True, frame_hi=True, leaves=2, leaf_layer=WALL, leaf2_start=70.0,
+              leaf1_end=71.0, leaf_perp=30.2, extra=(), occlude=False, leaf1_start=45.5, leaf2_end=92.9,
+              frame_fill=(1.0, 1.0, 1.0), duplicate_frame=False, second_frame_source=False):
+    """The 100 x 100 room plus a wall return (stub) hanging from the top wall and a wardrobe front: two end
+    blocks on a band y 28..30 with a 49.6 wide opening (x 44.4..94) holding a frame box at each end and two
+    overlapping sliding leaves between them."""
+    rows = room(tf) + strip(40, 2, 42, 30, tf) + strip(40, 28, 44.4, 30, tf) + strip(94, 28, 98, 30, tf)
+    if frame_lo:
+        rows.append(white_box(44.4, 27.72, 45.5, 30.28, tf, fill=frame_fill))
+    if frame_hi:
+        rows.append(white_box(92.9, 27.72, 94.0, 30.28, tf, fill=frame_fill))
+    if duplicate_frame:
+        rows.append(white_box(92.9, 27.72, 94.0, 30.28, tf, fill=frame_fill))
+    if second_frame_source:
+        # a second, narrower frame box ending at the same jamb: two sources for one end, and it hides nothing
+        rows.append(white_box(93.8, 27.72, 94.0, 30.28, tf, fill=frame_fill))
+    if leaves >= 1:
+        rows.append(line((leaf1_start, 28.0), (leaf1_end, 28.0), tf, leaf_layer))
+    if leaves >= 2:
+        rows.append(line((leaf2_start, leaf_perp), (leaf2_end, leaf_perp), tf, leaf_layer))
+    if leaves >= 3:
+        rows.append(line((60.0, 28.1), (80.0, 28.1), tf, leaf_layer))  # a third stroke: not the sliding pair
+    rows += list(extra)
+    if occlude:
+        rows.append(white_box(55.0, 27.0, 60.0, 31.0, tf, "Finish_Floor"))  # painted later, hides leaf one
+    return rows
+
+
+def sliding(rows, **kw):
+    return build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0, sliding_leaf_frame_closure=True, **kw)
+
+
+def test_two_frames_and_two_overlapping_leaves_close_the_opening_only_under_their_own_control_and_split_the_alcove():
+    on = sliding(robe_room())
+    assert sorted(c.kind for c in on.closures) == sorted([KIND_SWING, KIND_SLIDING_LEAF])
+    assert sorted(r.bbox_pdf_pts for r in candidates(on)) == [(2.0, 2.0, 98.0, 98.0), (42.0, 2.0, 98.0, 28.0)]
+    assert on.unresolved_gap_count == 0
+    off = build_layered_wall_doorway_room_rings(robe_room(), source_sha256=SHA, page_index=0)
+    assert KIND_SLIDING_LEAF not in {c.kind for c in off.closures} and candidates(off) == []
+    with pytest.raises(ValueError):
+        build_layered_wall_doorway_room_rings(robe_room(), source_sha256=SHA, page_index=0, sliding_leaf_frame_closure=1)
+
+
+@pytest.mark.parametrize("defect", [
+    {"frame_lo": False},               # a frame is missing
+    {"frame_hi": False},
+    {"leaves": 1},                     # a leaf is missing
+    {"leaves": 3},                     # an extra stroke: one-to-many, not the pair
+    {"leaf2_start": 71.5},             # a hole between the leaves (shifted leaf)
+    {"leaf1_end": 70.0},               # the leaves touch but do not overlap
+    {"leaf_layer": "Interior_Joinery"},  # wrong layer
+    {"leaf_perp": 33.0},               # farther than one wall thickness from the band
+    {"occlude": True},                 # painted over by a later opaque fill
+    {"leaf1_start": 47.0},             # the first leaf stops short of its frame
+    {"leaf2_end": 90.0},               # the second leaf stops short of its frame
+    {"duplicate_frame": True},         # a frame drawn twice: not one frame source
+    {"second_frame_source": True},     # two frame sources at one end, neither hiding the other
+    {"frame_fill": (0.5, 0.5, 0.5)},   # not a white frame box
+])
+def test_every_defect_in_the_sliding_leaf_evidence_abstains(defect):
+    result = sliding(robe_room(**defect))
+    assert KIND_SLIDING_LEAF not in {c.kind for c in result.closures}
+    assert candidates(result) == []  # the interruption stays open, so no ring closes
+
+
+def test_a_duplicated_leaf_or_a_competing_doorway_in_the_same_interruption_abstains():
+    duplicate_leaf = robe_room(extra=[line((70.0, 30.2), (92.9, 30.2))])  # the second leaf drawn twice
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(duplicate_leaf).closures}
+    # a swing doorway whose closed-door segment lies in the same interruption: two doorway claims, none chosen
+    competing = robe_room(extra=swing((46.0, 29.0), (46.0, 5.0), (70.0, 29.0)))
+    result = sliding(competing)
+    assert KIND_SLIDING_LEAF not in {c.kind for c in result.closures}
+    assert [c.kind for c in result.closures] == [KIND_SWING]  # only the room's own door stays closed
+    assert candidates(result) == []
+
+
+def test_one_stroke_cannot_evidence_two_openings():
+    def wall_and_frames(shared):
+        rows = strip(40, 28, 44.4, 30) + strip(74, 28, 78, 30) + strip(108, 28, 112, 30)
+        rows += [white_box(44.4, 27.72, 45.5, 30.28), white_box(72.9, 27.72, 74.0, 30.28),
+                 white_box(78.0, 27.72, 79.1, 30.28), white_box(106.9, 27.72, 108.0, 30.28)]
+        rows += [line((45.5, 28.0), (60.5, 28.0)), line((99.0, 28.0), (106.9, 28.0))]
+        if shared:
+            rows.append(line((59.5, 30.2), (100.0, 30.2)))  # one long stroke across both openings
+        else:
+            rows += [line((59.5, 30.2), (72.9, 30.2)), line((79.1, 30.2), (100.0, 30.2))]
+        return rows
+
+    separate = sliding(wall_and_frames(False))
+    assert [c.kind for c in separate.closures] == [KIND_SLIDING_LEAF, KIND_SLIDING_LEAF]
+    assert sliding(wall_and_frames(True)).closures == ()
+
+
+def test_sliding_closure_is_invariant_to_rigid_motion_and_never_a_wall():
+    base = sliding(robe_room())
+    rotated = sliding(robe_room(lambda x, y: (-y + 500.0, x + 40.0)))
+    moved = sliding(robe_room(lambda x, y: (x + 317.25, y - 88.5)))
+    for other in (rotated, moved):
+        assert sorted(c.kind for c in other.closures) == sorted(c.kind for c in base.closures)
+        assert sorted(round(r.area_pt2, 2) for r in candidates(other)) == sorted(round(r.area_pt2, 2) for r in candidates(base))
+    chord_owners = {o for r in candidates(base) for owners in r.edge_owner_ids for o in owners if "closure" in o}
+    assert chord_owners  # the chord exists as a typed owner of ring edges, never as a wall strip id
+    assert not any(o.startswith("layered_wall_") for o in chord_owners)

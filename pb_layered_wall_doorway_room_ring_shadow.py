@@ -14,6 +14,11 @@ What counts as evidence (all of it is original native ink on an explicit wall la
 * a source stroke closure: an unfilled axis-aligned stroke that lies on a wall face line and
   spans an interruption of that wall exactly end to end (a glazed or fixed opening drawn
   by the source). It closes the gap by the source's own ink.
+* a sliding-leaf opening (its OWN default-off control, ``sliding_leaf_frame_closure``): a white frame
+  box at EACH end of the interruption and exactly two overlapping leaf strokes between them, none of
+  it painted over by a later opaque fill. A missing, duplicated, shifted or non-overlapping frame or
+  leaf, ink on another layer, one stroke shared by two openings, or a second doorway claim in the same
+  interruption all abstain;
 * a swing doorway: a single circular quarter-arc (``c``) with a leaf stroke from its centre
   to one arc end; the other arc end is the closed-door tip. The doorway is the MAXIMAL
   interruption of the wall line (between two wall strips of one band) that contains the
@@ -32,6 +37,7 @@ quantity is issued. Imported by no live path.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import math
@@ -59,6 +65,7 @@ REASON_SOURCE_HASH = "source_sha256_mismatch"
 
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
+KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
 
 _RECORD_SEAL = object()
 
@@ -459,11 +466,11 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
-def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[int]:
-    """Index of an unfilled wall-layer stroke parallel to the gap and spanning it end to end.
+def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[tuple[int, ...]]:
+    """Native path index of one unfilled wall-layer stroke parallel to the gap and spanning it end to end.
 
-    The stroke may sit on a face line or on the wall's own lining line just outside the band
-    (never farther than one wall thickness): CAD exports draw glazing and lining on either.
+    The stroke may sit on a face line or on the wall's own lining line just outside the band (never
+    farther than one wall thickness): CAD exports draw glazing and lining on either.
     """
     thickness = gap.band[1] - gap.band[0]
     for index, row in _wall_rows(drawings):
@@ -485,8 +492,131 @@ def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional
                 lo, hi = sorted((ay, by))
             near_band = gap.band[0] - thickness <= perp <= gap.band[1] + thickness
             if near_band and _close(lo, gap.lo) and _close(hi, gap.hi):
-                return index
+                return (index,)
     return None
+
+
+def _row_bounds(row: Mapping[str, Any]) -> tuple[float, float, float, float]:
+    """Bounding box of one native drawing: its own ``rect`` when present, else of its items' points."""
+    rect = row.get("rect")
+    if rect is not None:
+        return float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)
+    xs: list[float] = []
+    ys: list[float] = []
+    for item in row.get("items", ()):
+        if item[0] == "re":
+            xs += [item[1].x0, item[1].x1]
+            ys += [item[1].y0, item[1].y1]
+        elif item[0] == "qu":
+            for point in (item[1].ul, item[1].ur, item[1].lr, item[1].ll):
+                xs.append(point.x)
+                ys.append(point.y)
+        else:
+            for point in item[1:]:
+                if hasattr(point, "x"):
+                    xs.append(point.x)
+                    ys.append(point.y)
+    if not xs:
+        return (math.inf, math.inf, -math.inf, -math.inf)
+    return float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
+
+
+def _is_white(color: Any) -> bool:
+    return (
+        isinstance(color, (tuple, list)) and len(color) == 3
+        and all(type(v) in (int, float) and math.isfinite(v) and v >= 1.0 - _BLACK_MAX for v in color)
+    )
+
+
+def _opaque(row: Mapping[str, Any]) -> bool:
+    opacity = row.get("fill_opacity")
+    return opacity is None or (type(opacity) in (int, float) and opacity >= 1.0 - 1e-9)
+
+
+def _sliding_leaf_evidence(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[tuple[int, ...]]:
+    """A sliding-door opening: a frame box at EACH end of the interruption and exactly two overlapping
+    leaf strokes between them, all native wall-layer ink on this page, none hidden by a later opaque fill.
+
+    Returns the native path indices (frames then leaves) or None. Every defect abstains: a missing or
+    duplicated frame, a missing, extra, duplicated, shifted or non-overlapping leaf, ink on another layer,
+    a leaf or frame painted over by a later fill.
+    """
+    thickness = gap.band[1] - gap.band[0]
+    horizontal = gap.horizontal
+    frames: list[tuple[float, float, int]] = []
+    for index, row in _wall_rows(drawings):
+        fill = row.get("fill")
+        if fill is None or not _is_white(fill) or not _opaque(row):
+            continue
+        items = list(row.get("items", ()))
+        rects = [r for r in (_rect_of_item(it) for it in items) if r is not None]
+        if not rects:
+            whole = _rect_of_closed_line_path(items)
+            rects = [whole] if whole is not None else []
+        for x0, y0, x1, y1 in rects:
+            lo, hi = (x0, x1) if horizontal else (y0, y1)
+            p0, p1 = (y0, y1) if horizontal else (x0, x1)
+            if p1 < gap.band[0] - thickness or p0 > gap.band[1] + thickness:
+                continue
+            inside = gap.lo - NOISE_PT <= lo and hi <= gap.hi + NOISE_PT
+            if hi - lo > NOISE_PT and inside and (_close(lo, gap.lo) or _close(hi, gap.hi)):
+                frames.append((lo, hi, index))
+    low = [f for f in frames if _close(f[0], gap.lo)]
+    high = [f for f in frames if _close(f[1], gap.hi)]
+    if len(low) != 1 or len(high) != 1 or low[0][2] == high[0][2]:
+        return None
+    inner_lo, inner_hi = low[0][1], high[0][0]
+    if inner_hi - inner_lo <= NOISE_PT:
+        return None
+    leaves: list[tuple[float, float, float, int]] = []
+    for index, row in _wall_rows(drawings):
+        if row.get("fill") is not None:
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if horizontal:
+                if not _close(ay, by, 1e-3):
+                    continue
+                perp = ay
+                lo, hi = sorted((ax, bx))
+            else:
+                if not _close(ax, bx, 1e-3):
+                    continue
+                perp = ax
+                lo, hi = sorted((ay, by))
+            if not (gap.band[0] - thickness <= perp <= gap.band[1] + thickness):
+                continue
+            lo, hi = max(lo, inner_lo), min(hi, inner_hi)
+            if hi - lo > NOISE_PT:
+                leaves.append((lo, hi, perp, index))
+    if len(leaves) != 2:
+        return None  # one leaf, three leaves or a duplicate leaf: not exactly the sliding pair
+    leaves.sort()
+    first, second = leaves
+    if not (_close(first[0], inner_lo) and _close(second[1], inner_hi)):
+        return None  # a leaf is missing, shifted or short of its frame
+    if not (second[0] < first[1] - NOISE_PT):
+        return None  # a sliding pair overlaps; leaves that merely touch or leave a hole are not one
+    # none of the evidence may be painted over by a LATER opaque fill (paint order is the source's own)
+    band_mid = (gap.band[0] + gap.band[1]) / 2.0
+    evidence = [
+        (low[0][2], (low[0][0] + low[0][1]) / 2.0, band_mid),
+        (high[0][2], (high[0][0] + high[0][1]) / 2.0, band_mid),
+        (first[3], (first[0] + first[1]) / 2.0, first[2]),
+        (second[3], (second[0] + second[1]) / 2.0, second[2]),
+    ]
+    for index, along, perp in evidence:
+        x, y = (along, perp) if horizontal else (perp, along)
+        for later in range(index + 1, len(drawings)):
+            row = drawings[later]
+            if row.get("fill") is None or not _opaque(row):
+                continue
+            x0, y0, x1, y1 = _row_bounds(row)
+            if x0 - 1e-6 <= x <= x1 + 1e-6 and y0 - 1e-6 <= y <= y1 + 1e-6:
+                return None
+    return tuple(sorted({low[0][2], high[0][2], first[3], second[3]}))
 
 
 def _closed_union(polygons: Iterable[Polygon]) -> Any:
@@ -551,8 +681,15 @@ def build_layered_wall_doorway_room_rings(
     *,
     source_sha256: str,
     page_index: int,
+    sliding_leaf_frame_closure: bool = False,
 ) -> LayeredRoomRingResult:
-    """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``."""
+    """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
+
+    ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
+    that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    """
+    if type(sliding_leaf_frame_closure) is not bool:
+        raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -571,14 +708,31 @@ def build_layered_wall_doorway_room_rings(
     closures: list[LayeredDoorwayClosure] = []
     unresolved: list[_Gap] = []
     closure_rects: list[tuple[str, Polygon]] = []
+    sliding_by_gap: dict[int, tuple[int, ...]] = {}
+    if sliding_leaf_frame_closure:
+        for gap_index, gap in enumerate(gaps):
+            evidence = _sliding_leaf_evidence(drawings, gap)
+            if evidence is not None:
+                sliding_by_gap[gap_index] = evidence
+        # one native stroke or box may evidence only ONE interruption; a shared one is a one-to-many span
+        uses = Counter(index for evidence in sliding_by_gap.values() for index in evidence)
+        sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
         stroke = None if swing is not None else _stroke_closed(drawings, gap)
-        if swing is None and stroke is None:
+        sliding = sliding_by_gap.get(gap_index)
+        if sliding is not None and (swing is not None or stroke is not None):
+            unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
+            continue
+        if swing is None and stroke is None and sliding is None:
             unresolved.append(gap)
             continue
-        kind = KIND_SWING if swing is not None else KIND_STROKE
-        native = (swing["arc"], swing["leaf"]) if swing is not None else (stroke,)
+        if swing is not None:
+            kind, native = KIND_SWING, (swing["arc"], swing["leaf"])
+        elif stroke is not None:
+            kind, native = KIND_STROKE, tuple(stroke)
+        else:
+            kind, native = KIND_SLIDING_LEAF, tuple(sliding)
         closure_id = stable_contract_id(
             "layered_doorway_closure",
             {
@@ -682,7 +836,9 @@ def build_layered_wall_doorway_room_rings(
     )
 
 
-def build_from_pdf_bytes(source_bytes: bytes, *, source_sha256: str, page_index: int) -> LayeredRoomRingResult:
+def build_from_pdf_bytes(
+    source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
+) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_SOURCE_HASH,), (), (), 0, 0, 0, 0, 0, 0)
@@ -693,11 +849,15 @@ def build_from_pdf_bytes(source_bytes: bytes, *, source_sha256: str, page_index:
         drawings = document[page_index].get_drawings()
     finally:
         document.close()
-    return build_layered_wall_doorway_room_rings(drawings, source_sha256=source_sha256, page_index=page_index)
+    return build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=source_sha256, page_index=page_index,
+        sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+    )
 
 
 __all__ = [
     "KIND_STROKE",
+    "KIND_SLIDING_LEAF",
     "KIND_SWING",
     "LAYERED_ROOM_RING_SCHEMA_VERSION",
     "LayeredDoorwayClosure",

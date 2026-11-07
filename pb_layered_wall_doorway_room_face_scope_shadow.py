@@ -27,24 +27,31 @@ from __future__ import annotations
 from typing import Mapping, Optional, Sequence
 
 from pb_layered_wall_doorway_room_ring_shadow import (
+    NOISE_PT,
     LayeredRoomRingRecord,
     LayeredRoomRingResult,
     build_from_pdf_bytes,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_room_face_authority import (
+    SCOPE_OVERRIDE_SEAL,
     SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,
     SourceRoomFaceAbstention,
     SourceRoomFaceRecord,
+    SourceRoomFaceScopeOverride,
     SourceRoomFaceScopeResult,
     _canonical_polygon,
     _edge,
     _polygon_area,
+    scope_override_digest,
 )
 
 LAYERED_RING_SCOPE_REASON = "layered_wall_doorway_room_ring_scope"
+# Per-record token: the face is not its own bounding rectangle (a wall return, an alcove split off by a
+# closure). A bounding box may corroborate the topology; it can never set such a face's metric area.
+RING_NOT_A_RECTANGLE_PREFIX = "layered_ring_not_a_rectangle:"
 # Witness line to drawn face: representation noise, far below the 2.5 pt production snap, a hard bound.
 RING_FIGURED_BOX_TOLERANCE_PT = 0.5
 # The decision scope the live room composition resolves per page (``wall-source:page-N``).
@@ -95,6 +102,14 @@ def figured_box_pair_count(
     return len(horizontal) * len(vertical)
 
 
+def _fills_its_bounding_rectangle(polygon: Sequence[Sequence[float]], area: float) -> bool:
+    """True when the face equals its bounding rectangle to within a noise-wide band along its boundary."""
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    width, height = max(xs) - min(xs), max(ys) - min(ys)
+    return (width * height - area) <= NOISE_PT * 2.0 * (width + height)
+
+
 def layered_ring_room_face_scope(
     ring_result: LayeredRoomRingResult,
     *,
@@ -118,6 +133,7 @@ def layered_ring_room_face_scope(
     scope = (document_id, revision_id, source_sha256, snapshot_id, page_id, decision_scope_id)
     records: list[SourceRoomFaceRecord] = []
     abstained: list[SourceRoomFaceAbstention] = []
+    not_rectangle_tokens: list[str] = []
     for ring in ring_result.rings:
         polygon = _canonical_polygon(ring.polygon_pdf_pts)
         if not polygon:
@@ -147,6 +163,8 @@ def layered_ring_room_face_scope(
                 digest_chars=32,
             )
             records.append(SourceRoomFaceRecord(record_id=record_id, **common))
+            if not _fills_its_bounding_rectangle(polygon, area):
+                not_rectangle_tokens.append(f"{RING_NOT_A_RECTANGLE_PREFIX}{record_id}")
         else:
             abstained.append(SourceRoomFaceAbstention(reason=SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED, **common))
     if not records:
@@ -157,7 +175,10 @@ def layered_ring_room_face_scope(
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=True,
         records=tuple(records),
-        reason_codes=(SOURCE_ROOM_FACE_SCOPE_RESOLVED, SOURCE_ROOM_FACE_UNIVERSE_PARTIAL, LAYERED_RING_SCOPE_REASON),
+        reason_codes=(
+            SOURCE_ROOM_FACE_SCOPE_RESOLVED, SOURCE_ROOM_FACE_UNIVERSE_PARTIAL, LAYERED_RING_SCOPE_REASON,
+            *sorted(not_rectangle_tokens),
+        ),
         document_id=document_id, revision_id=revision_id, source_sha256=source_sha256,
         snapshot_id=snapshot_id, page_id=page_id, decision_scope_id=decision_scope_id,
         abstained_faces=tuple(abstained),
@@ -170,8 +191,9 @@ def layered_ring_scope_overrides(
     revision_id: str,
     page_ids: Sequence[str],
     require_figured_box: bool = True,
-) -> Mapping[tuple[str, str, str, str, str, str], SourceRoomFaceScopeResult]:
-    """Ring scopes keyed like the room-face authority, read from the SHA-pinned native bytes.
+    sliding_leaf_frame_closure: bool = False,
+) -> Mapping[tuple[str, str, str, str, str, str], SourceRoomFaceScopeOverride]:
+    """Issued ring scopes keyed like the room-face authority, read from the SHA-pinned native bytes.
 
     With ``require_figured_box`` (the live default) only rings corroborated by exactly one
     authenticated figured pair become records; the rest are abstentions.
@@ -191,6 +213,7 @@ def layered_ring_scope_overrides(
             continue
         ring_result = build_from_pdf_bytes(
             payload, source_sha256=published.revision.source_sha256, page_index=int(page) - 1,
+            sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         )
         decision_scope_id = _PAGE_DECISION_SCOPE.format(page_id=page)
         dimensions = None
@@ -210,7 +233,9 @@ def layered_ring_scope_overrides(
                 published.revision.document_id, published.revision.revision_id,
                 published.revision.source_sha256, published.snapshot.snapshot_id, page, decision_scope_id,
             )
-            overrides[key] = scope
+            overrides[key] = SourceRoomFaceScopeOverride(
+                scope=scope, receipt_digest=scope_override_digest(scope), _seal=SCOPE_OVERRIDE_SEAL,
+            )
     return overrides
 
 
@@ -223,6 +248,7 @@ def ring_face_bounding_box(record: SourceRoomFaceRecord) -> tuple[float, float, 
 __all__ = [
     "LAYERED_RING_SCOPE_REASON",
     "RING_FIGURED_BOX_TOLERANCE_PT",
+    "RING_NOT_A_RECTANGLE_PREFIX",
     "figured_box_pair_count",
     "layered_ring_room_face_scope",
     "layered_ring_scope_overrides",

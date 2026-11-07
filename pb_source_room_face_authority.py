@@ -1694,17 +1694,60 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     return replace(result, ownership_evaluation=_shadow_ownership_evaluation(scope))
 
 
+SCOPE_OVERRIDE_SEAL = object()
+
+
+def scope_override_digest(scope: "SourceRoomFaceScopeResult") -> str:
+    """Content digest of a room-face scope: lineage, every record (identity, polygon, wall owners)
+    and every abstention. A scope whose content is edited after it was issued no longer matches."""
+    return stable_contract_id(
+        "source_room_face_scope_override",
+        {
+            "lineage": [
+                _clean(scope.document_id), _clean(scope.revision_id), _clean(scope.source_sha256),
+                _clean(scope.snapshot_id), _clean(scope.page_id), _clean(scope.decision_scope_id),
+            ],
+            "status": scope.status.value,
+            "scope_complete": bool(scope.scope_complete),
+            "reason_codes": list(scope.reason_codes),
+            "records": [
+                [r.record_id, r.face_id, [list(p) for p in r.polygon_pdf_pts], list(r.bounding_wall_ids),
+                 [[owner, [list(e[0]), list(e[1])]] for owner, e in r.boundary_wall_edges]]
+                for r in scope.records
+            ],
+            "abstained": sorted(a.face_id for a in scope.abstained_faces),
+        },
+        digest_chars=32,
+    )
+
+
+@dataclass(frozen=True)
+class SourceRoomFaceScopeOverride:
+    """A producer-issued replacement room-face scope. It is not a plain scope: it must carry the
+    issuer seal and a digest of its own content, so a copied or edited scope with matching
+    lineage strings is refused by ``build_source_room_face_authority``."""
+
+    scope: "SourceRoomFaceScopeResult"
+    receipt_digest: str
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._seal is not SCOPE_OVERRIDE_SEAL:
+            raise TypeError("SourceRoomFaceScopeOverride is producer-issued")
+
+
 def build_source_room_face_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
     *,
-    scope_overrides: Optional[Mapping[_ScopeKey, SourceRoomFaceScopeResult]] = None,
+    scope_overrides: Optional[Mapping[_ScopeKey, SourceRoomFaceScopeOverride]] = None,
 ) -> SourceRoomFaceAuthority:
     """Build sealed room-face results from all producer-owned wall scopes.
 
     ``scope_overrides`` (default None: nothing changes) replaces the derived result of exactly
-    the named scopes with a producer-built ``SourceRoomFaceScopeResult`` whose edges are owned
-    by typed non-W4 owners (for example doorway-closed rings from native wall ink). Each key
-    must equal the six lineage ids of its own result; anything else is refused.
+    the named scopes with a producer-issued ``SourceRoomFaceScopeOverride`` whose edges are owned
+    by typed non-W4 owners (for example doorway-closed rings from native wall ink). Each override
+    must be sealed, match the digest of its own content, name the six lineage ids of its own
+    scope, and replace a scope this authority itself derived; anything else is refused.
     """
 
     if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
@@ -1725,9 +1768,14 @@ def build_source_room_face_authority(
             _clean(scope.decision_scope_id),
         )
         results[key] = result
-    for key, override in (scope_overrides or {}).items():
+    for key, issued in (scope_overrides or {}).items():
+        if type(issued) is not SourceRoomFaceScopeOverride or issued._seal is not SCOPE_OVERRIDE_SEAL:
+            raise TypeError("scope override must be a producer-issued SourceRoomFaceScopeOverride")
+        override = issued.scope
         if type(override) is not SourceRoomFaceScopeResult:
-            raise TypeError("scope override must be a SourceRoomFaceScopeResult")
+            raise TypeError("scope override must carry a SourceRoomFaceScopeResult")
+        if issued.receipt_digest != scope_override_digest(override):
+            raise ValueError("scope override content does not match its issued digest")
         if tuple(key) != (
             _clean(override.document_id),
             _clean(override.revision_id),
@@ -1737,11 +1785,16 @@ def build_source_room_face_authority(
             _clean(override.decision_scope_id),
         ):
             raise ValueError("scope override key must equal its result's lineage ids")
+        if key not in results:
+            raise ValueError("scope override must replace a scope this authority derived")
         results[key] = override
     return SourceRoomFaceAuthority(results, _seal=_AUTHORITY_SEAL)
 
 
 __all__ = [
+    "SCOPE_OVERRIDE_SEAL",
+    "SourceRoomFaceScopeOverride",
+    "scope_override_digest",
     "EDGE_OWNERSHIP_COMPETING",
     "EDGE_OWNERSHIP_NONE",
     "OWNERSHIP_EVALUATION_EVALUATED",

@@ -13,6 +13,7 @@ import pb_same_view_room_area_authority as same_view_module
 from pb_layered_wall_doorway_room_face_scope_shadow import (
     LAYERED_RING_SCOPE_REASON,
     RING_FIGURED_BOX_TOLERANCE_PT,
+    RING_NOT_A_RECTANGLE_PREFIX,
     figured_box_pair_count,
     layered_ring_room_face_scope,
     layered_ring_scope_overrides,
@@ -39,7 +40,7 @@ K = 0.5522847498
 
 
 def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_layer: str = "Enclosure_WallInternal",
-                     swing: bool = True, label: str = "BED 2") -> bytes:
+                     swing: bool = True, label: str = "BED 2", stub: bool = False, robe: bool = False) -> bytes:
     """Room inner box (100, 80)-(250, 180) on a 400 x 300 page; figured 3600 x 2400 (24 mm per pt).
 
     vertical_pairs: "both" adds a second, independent figured pair 3600 x 1440 whose box is smaller
@@ -55,11 +56,25 @@ def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_la
     rect(96, 76, 254, 80)
     rect(96, 180, 254, 184)
     rect(96, 80, 100, 180)
+    if stub:
+        rect(120, 80, 122, 108)  # a wall return hanging into the room from the top wall
+    if robe:
+        # a wardrobe: a wall return from the top wall plus a front on the band y 108..110 whose opening
+        # (x 144.4..246) is closed only by two frame boxes and two overlapping sliding leaves
+        rect(140, 80, 142, 110)
+        rect(140, 108, 144.4, 110)
+        rect(246, 108, 250, 110)
+        for fx0, fx1 in ((144.4, 145.5), (244.9, 246.0)):
+            page.draw_rect(fitz.Rect(fx0, 107.72, fx1, 110.28), color=None, fill=(1, 1, 1), oc=oc)
+        page.draw_line(fitz.Point(145.5, 108.0), fitz.Point(195.0, 108.0), color=(0, 0, 0), width=0.34, oc=oc)
+        page.draw_line(fitz.Point(190.0, 110.2), fitz.Point(244.9, 110.2), color=(0, 0, 0), width=0.34, oc=oc)
+        page.insert_text((180.0, 98.0), "ROBE", fontsize=9.0)
+    door_top = 130 if robe else 110  # keep the door's leaf line off the wardrobe front's line
     if door:
-        rect(250, 80, 254, 110)
-        rect(250, 134, 254, 180)
+        rect(250, 80, 254, door_top)
+        rect(250, door_top + 24, 254, 180)
         if swing:
-            c, o, t = (250, 110), (226, 110), (250, 134)
+            c, o, t = (250, door_top), (226, door_top), (250, door_top + 24)
             p2 = (o[0] + K * (t[0] - c[0]), o[1] + K * (t[1] - c[1]))
             p3 = (t[0] + K * (o[0] - c[0]), t[1] + K * (o[1] - c[1]))
             page.draw_bezier(fitz.Point(*o), fitz.Point(*p2), fitz.Point(*p3), fitz.Point(*t),
@@ -270,22 +285,48 @@ def test_without_source_evidence_the_option_changes_nothing(kwargs):
     assert [r.polygon_pdf_pts for r in on.rooms] == [r.polygon_pdf_pts for r in off.rooms]
 
 
-def test_override_keys_must_match_their_own_lineage_and_type():
+def test_override_must_be_producer_issued_untampered_and_replace_a_derived_scope():
+    from dataclasses import replace
+
+    from pb_source_room_face_authority import (
+        SCOPE_OVERRIDE_SEAL,
+        SourceRoomFaceScopeOverride,
+        scope_override_digest,
+    )
+
     data = layered_room_pdf()
     source, published, wall_opening, _rooms = _chain(data, rings=False)
     overrides = layered_ring_scope_overrides(source, revision_id=published.revision.revision_id, page_ids=("1",))
-    (key, scope), = overrides.items()
-    authority = build_source_room_face_authority(wall_opening.physical_wall_candidate_authority, scope_overrides=overrides)
+    (key, issued), = overrides.items()
+    scope = issued.scope
+    authority_of = wall_opening.physical_wall_candidate_authority
+    authority = build_source_room_face_authority(authority_of, scope_overrides=overrides)
     selector = SourceRoomFaceSelector(
         document_id=key[0], revision_id=key[1], source_sha256=key[2], snapshot_id=key[3], page_id=key[4], decision_scope_id=key[5])
     assert authority.resolve_scope(selector) is scope
-    baseline = build_source_room_face_authority(wall_opening.physical_wall_candidate_authority)
-    assert baseline.resolve_scope(selector) != scope  # the override, not the derived scope, is what was returned
-    with pytest.raises(ValueError):
-        build_source_room_face_authority(wall_opening.physical_wall_candidate_authority,
-                                         scope_overrides={(*key[:5], "wall-source:page-9"): scope})
+    assert build_source_room_face_authority(authority_of).resolve_scope(selector) != scope
+    # a plain scope with matching lineage strings is not an issued override
     with pytest.raises(TypeError):
-        build_source_room_face_authority(wall_opening.physical_wall_candidate_authority, scope_overrides={key: object()})  # type: ignore[dict-item]
+        build_source_room_face_authority(authority_of, scope_overrides={key: scope})  # type: ignore[dict-item]
+    # an issued-looking object without the issuer seal cannot even be constructed
+    with pytest.raises(TypeError):
+        SourceRoomFaceScopeOverride(scope=scope, receipt_digest=scope_override_digest(scope))
+    with pytest.raises(TypeError):
+        SourceRoomFaceScopeOverride(scope=scope, receipt_digest=scope_override_digest(scope), _seal=object())
+    # edited content no longer matches the issued digest
+    tampered = replace(scope, records=(replace(scope.records[0], polygon_pdf_pts=((0.0, 0.0), (9.0, 0.0), (9.0, 9.0), (0.0, 9.0))),))
+    with pytest.raises(ValueError):
+        build_source_room_face_authority(authority_of, scope_overrides={key: replace(issued, scope=tampered)})
+    # a digest-consistent scope for a lineage this authority never derived is refused (foreign document)
+    foreign = replace(scope, document_id="some-other-document")
+    foreign_issued = SourceRoomFaceScopeOverride(
+        scope=foreign, receipt_digest=scope_override_digest(foreign), _seal=SCOPE_OVERRIDE_SEAL)
+    foreign_key = (foreign.document_id, *key[1:])
+    with pytest.raises(ValueError):
+        build_source_room_face_authority(authority_of, scope_overrides={foreign_key: foreign_issued})
+    # the key must equal the scope's own lineage
+    with pytest.raises(ValueError):
+        build_source_room_face_authority(authority_of, scope_overrides={(*key[:5], "wall-source:page-9"): issued})
 
 
 def test_converter_is_deterministic_and_keeps_abstained_rings_as_abstentions():
@@ -345,3 +386,78 @@ def test_a_region_left_open_by_an_unevidenced_wall_cut_is_an_abstention_and_neve
     assert scope.abstained_faces[0].reason == SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
     assert {a.face_id for a in scope.abstained_faces}.isdisjoint({r.face_id for r in scope.records})
     assert ring_face_bounding_box(scope.records[0]) == (4.0, 4.0, 96.0, 96.0)
+
+
+def test_a_face_that_is_not_its_rectangle_loses_the_documented_route_but_a_true_rectangle_keeps_it():
+    # rectangle: no token, documented 3.6 x 2.4 area stands
+    source, _p, _w, rooms = _chain(layered_room_pdf(vertical_pairs="both"), rings=True)
+    room = rooms.rooms[0]
+    scope = rooms.room_face_authority_binding_for(room).authority.resolve_scope(SourceRoomFaceSelector(
+        document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
+        snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
+    assert not any(code.startswith(RING_NOT_A_RECTANGLE_PREFIX) for code in scope.reason_codes)
+    assert _area(source, rooms, selection=True).records[0].area_evidence.normalized_value == pytest.approx(8.64)
+    # the same room with a wall return inside it: the ring still matches its figured box, but the box is not its area
+    source, _p, _w, rooms = _chain(layered_room_pdf(vertical_pairs="both", stub=True), rings=True)
+    room = rooms.rooms[0]
+    scope = rooms.room_face_authority_binding_for(room).authority.resolve_scope(SourceRoomFaceSelector(
+        document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
+        snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
+    assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
+    refused = _area(source, rooms, selection=True)
+    assert refused.records == ()
+    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+
+
+def test_sliding_leaf_control_needs_the_ring_control_and_explicit_booleans(tmp_path):
+    source = SourceVisibilityProducer(producer_method="t", producer_version="1")
+    with pytest.raises(ValueError):
+        compose_live_canonical_rooms(source_visibility_producer=source, wall_opening_composition=None,  # type: ignore[arg-type]
+                                     layered_sliding_leaf_closure=True)
+    with pytest.raises(ValueError):
+        compose_live_canonical_rooms(source_visibility_producer=source, wall_opening_composition=None,  # type: ignore[arg-type]
+                                     layered_doorway_room_rings=True, layered_sliding_leaf_closure=1)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        collect_live_physical_net_wall_claim("unused.pdf", layered_sliding_leaf_closure=True)
+    with pytest.raises(ValueError):
+        collect_live_physical_net_wall_claim("unused.pdf", layered_doorway_room_rings=True, layered_sliding_leaf_closure="yes")  # type: ignore[arg-type]
+
+
+def _chain_with(data: bytes, *, sliding: bool):
+    source = SourceVisibilityProducer(producer_method="layered-ring-wiring-test", producer_version="1")
+    published = source.ingest_native_pdf_bytes(
+        document_id="layered-ring-wiring-doc", source_bytes=data,
+        source_locator="memory://layered-ring-wiring.pdf", page_ids=("1",),
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source, revision_id=published.revision.revision_id,
+        page_ids=("1",), evidence_page_ids=(),
+    )
+    walls = compose_live_canonical_walls(source_visibility_producer=source, wall_opening_composition=wall_opening)
+    rooms = compose_live_canonical_rooms(
+        source_visibility_producer=source, wall_opening_composition=wall_opening,
+        canonical_wall_ids_by_candidate=walls.candidate_to_canonical_wall_id,
+        unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
+        layered_doorway_room_rings=True,
+        **({"layered_sliding_leaf_closure": True} if sliding else {}),
+    )
+    return source, rooms
+
+
+def test_wardrobe_front_splits_the_alcove_frees_the_label_and_withdraws_the_documented_area():
+    data = layered_room_pdf(vertical_pairs="both", robe=True)
+    # without its own control the wardrobe opening stays open: the ring is not closed, nothing replaces the scope
+    _source, closed_off = _chain_with(data, sliding=False)
+    assert not any(LAYERED_RING_SCOPE_REASON in "".join(r.room_label_reason_codes) for r in closed_off.rooms)
+    assert not any(r.bounding_wall_ids and r.bounding_wall_ids[0].startswith("layered_") for r in closed_off.rooms)
+    source, rooms = _chain_with(data, sliding=True)
+    assert len(rooms.rooms) == 1
+    room = rooms.rooms[0]
+    # the bedroom's own label, not the wardrobe word that used to sit inside the same ring
+    assert room.room_label == "BED 2"
+    xs = [p[0] for p in room.polygon_pdf_pts]
+    ys = [p[1] for p in room.polygon_pdf_pts]
+    assert (min(xs), min(ys), max(xs), max(ys)) == (100.0, 80.0, 250.0, 180.0)
+    area = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish(layered_ring_box_selection_shadow=True)
+    assert area.records == ()
+    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in area.unresolved_first_failure_codes}
