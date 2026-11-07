@@ -3463,9 +3463,15 @@ def _authenticated_raster_source_lines(
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
         return {}
+    raster_ids = visibility.raster_visible_observation_ids_for_page(
+        opening.snapshot_id, str(opening.page_id))
+    if not raster_ids:
+        return {}
     lines: dict[str, tuple[float, float, float, float]] = {}
     conflicted: set[str] = set()
     for observation_id in source_observation_ids:
+        if str(observation_id) not in raster_ids:
+            continue
         result = visibility.resolve_visible(
             ObservationSelector(
                 document_id=opening.document_id,

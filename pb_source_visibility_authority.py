@@ -3517,6 +3517,26 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def raster_visible_observation_ids_for_page(
+        self, snapshot_id: str, page_id: str
+    ) -> frozenset[str]:
+        """Address raster-segment receipts without authenticating their claims.
+
+        ``resolve_visible`` takes its native branch whenever a native receipt
+        exists; that branch cannot yield RASTER_PDF_VISIBLE_SEGMENT. Other
+        missing/foreign-page raster receipts cannot yield such a line on this
+        page either. Every retained ID still requires full resolve_visible.
+        """
+        snapshot_id, page_id = str(snapshot_id), str(page_id)
+        return frozenset(
+            observation_id
+            for (receipt_snapshot_id, observation_id), receipt
+            in self._raster_visibility_receipts.items()
+            if receipt_snapshot_id == snapshot_id
+            and self._visibility_receipts.get((snapshot_id, observation_id)) is None
+            and str(receipt.page_id) == page_id
+        )
+
     def raster_opening_primitive_observation_ids_for_snapshot(
         self, snapshot_id: str
     ) -> frozenset[str]:
