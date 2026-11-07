@@ -60,6 +60,10 @@ RING_NOT_A_RECTANGLE_PREFIX = "layered_ring_not_a_rectangle:"
 # universe, and a part is corroborated only by its group's union envelope, never by its own box.
 LAYERED_RING_PARTITION_REASON = "layered_wall_doorway_room_ring_partition_witness"
 RING_PARTITION_PART_PREFIX = "layered_ring_partition_part:"
+# Opt-in finished-face gate: a ring follows the DRAWN wall face. Unless the original establishes that this is the
+# exposed finished face, the face is a noncommercial candidate: no documented area, no room-area quantity.
+LAYERED_RING_FINISHED_FACE_GATE_REASON = "layered_wall_doorway_room_ring_finished_face_gate"
+RING_FINISHED_FACE_REQUIRED_PREFIX = "layered_ring_finished_face_required:"
 # Witness line to drawn face: representation noise, far below the 2.5 pt production snap, a hard bound.
 RING_FIGURED_BOX_TOLERANCE_PT = 0.5
 # The decision scope the live room composition resolves per page (``wall-source:page-N``).
@@ -136,6 +140,7 @@ def layered_ring_room_face_scope(
     decision_scope_id: str,
     corroborating_dimensions: Optional[Sequence[object]] = None,
     partition_witness: bool = False,
+    finished_face_gate: bool = False,
 ) -> Optional[SourceRoomFaceScopeResult]:
     """The ring scope for one page, or None when no ring closed (nothing is overridden).
 
@@ -153,6 +158,8 @@ def layered_ring_room_face_scope(
     """
     if type(partition_witness) is not bool:
         raise ValueError("partition_witness must be an explicit boolean")
+    if type(finished_face_gate) is not bool:
+        raise ValueError("finished_face_gate must be an explicit boolean")
     if not any(r.status is EvidenceResolutionStatus.CANDIDATE for r in ring_result.rings):
         return None
     scope = (document_id, revision_id, source_sha256, snapshot_id, page_id, decision_scope_id)
@@ -160,6 +167,7 @@ def layered_ring_room_face_scope(
     abstained: list[SourceRoomFaceAbstention] = []
     not_rectangle_tokens: list[str] = []
     partition_tokens: list[str] = []
+    finished_face_tokens: list[str] = []
     # ring record id -> (group ring ids, whole group corroborated)
     partition_of: dict[str, tuple[tuple[str, ...], bool]] = {}
     if partition_witness:
@@ -208,6 +216,8 @@ def layered_ring_room_face_scope(
             records.append(SourceRoomFaceRecord(record_id=record_id, **common))
             if group_of is not None:
                 partition_tokens.append(f"{RING_PARTITION_PART_PREFIX}{record_id}")
+            if finished_face_gate:
+                finished_face_tokens.append(f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record_id}")
             if not _fills_its_bounding_rectangle(polygon):
                 not_rectangle_tokens.append(f"{RING_NOT_A_RECTANGLE_PREFIX}{record_id}")
         else:
@@ -223,8 +233,10 @@ def layered_ring_room_face_scope(
         reason_codes=(
             SOURCE_ROOM_FACE_SCOPE_RESOLVED, SOURCE_ROOM_FACE_UNIVERSE_PARTIAL, LAYERED_RING_SCOPE_REASON,
             *((LAYERED_RING_PARTITION_REASON,) if partition_tokens else ()),
+            *((LAYERED_RING_FINISHED_FACE_GATE_REASON,) if finished_face_tokens else ()),
             *sorted(not_rectangle_tokens),
             *sorted(partition_tokens),
+            *sorted(finished_face_tokens),
         ),
         document_id=document_id, revision_id=revision_id, source_sha256=source_sha256,
         snapshot_id=snapshot_id, page_id=page_id, decision_scope_id=decision_scope_id,
@@ -240,6 +252,7 @@ def layered_ring_scope_overrides(
     require_figured_box: bool = True,
     sliding_leaf_frame_closure: bool = False,
     partition_witness: bool = False,
+    finished_face_gate: bool = False,
 ) -> Mapping[tuple[str, str, str, str, str, str], SourceRoomFaceScopeOverride]:
     """Issued ring scopes keyed like the room-face authority, read from the SHA-pinned native bytes.
 
@@ -251,6 +264,8 @@ def layered_ring_scope_overrides(
     """
     if type(partition_witness) is not bool:
         raise ValueError("partition_witness must be an explicit boolean")
+    if type(finished_face_gate) is not bool:
+        raise ValueError("finished_face_gate must be an explicit boolean")
     if partition_witness and not (sliding_leaf_frame_closure and require_figured_box):
         raise ValueError("partition_witness requires sliding_leaf_frame_closure and require_figured_box")
     from pb_cross_view_ceiling_finish_authority import _source_bytes
@@ -282,7 +297,7 @@ def layered_ring_scope_overrides(
             document_id=published.revision.document_id, revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
             page_id=page, decision_scope_id=decision_scope_id, corroborating_dimensions=dimensions,
-            partition_witness=partition_witness,
+            partition_witness=partition_witness, finished_face_gate=finished_face_gate,
         )
         if scope is not None:
             key = (
@@ -302,9 +317,11 @@ def ring_face_bounding_box(record: SourceRoomFaceRecord) -> tuple[float, float, 
 
 
 __all__ = [
+    "LAYERED_RING_FINISHED_FACE_GATE_REASON",
     "LAYERED_RING_PARTITION_REASON",
     "LAYERED_RING_SCOPE_REASON",
     "RING_FIGURED_BOX_TOLERANCE_PT",
+    "RING_FINISHED_FACE_REQUIRED_PREFIX",
     "RING_NOT_A_RECTANGLE_PREFIX",
     "RING_PARTITION_PART_PREFIX",
     "figured_box_pair_count",
