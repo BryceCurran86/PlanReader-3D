@@ -20,6 +20,7 @@ from pb_layered_wall_doorway_partition_witness_shadow import (
     REASON_CHORD,
     REASON_FOREIGN,
     REASON_HOLE,
+    REASON_ID_COLLISION,
     REASON_MEMBERSHIP,
     REASON_MIXED,
     REASON_OPEN_MEMBER,
@@ -319,6 +320,43 @@ def test_copied_foreign_sha_or_page_refuses_the_group():
     assert _refused(_with(result, rings=[bedroom, foreign_sha]), sha, [H_FULL, V_FULL])
     # a ring set built for another source cannot be corroborated under this source's identity either
     assert partition_groups(result, source_sha256="cd" * 32, page_index=0)[0].reason == REASON_FOREIGN
+
+
+def test_conflicting_same_id_rings_are_quarantined_and_input_order_never_picks_provenance():
+    _data, sha, result, bedroom, alcove, _closure = _base()
+    foreign = replace(alcove, source_sha256="cd" * 32)  # the SAME record_id, a foreign source
+    assert foreign.record_id == alcove.record_id
+    for order in ([bedroom, foreign, alcove], [bedroom, alcove, foreign], [foreign, bedroom, alcove],
+                  [alcove, foreign, bedroom], [foreign, alcove, bedroom], [alcove, bedroom, foreign]):
+        variant = _with(result, rings=order)
+        assert _reason(variant, sha) == REASON_ID_COLLISION
+        assert _refused(variant, sha, [H_FULL, V_FULL])
+    # even an exact copy is refused: no order decides which of two same-id records is the source's
+    assert _reason(_with(result, rings=[bedroom, alcove, alcove]), sha) == REASON_ID_COLLISION
+    # a record that is not duplicated stays admitted
+    assert not _refused(result, sha, [H_FULL, V_FULL])
+
+
+def test_competing_same_id_chords_are_quarantined_in_both_orders():
+    _data, sha, result, _bedroom, _alcove, closure = _base()
+    lo, hi = closure.gap_interval
+    shifted = replace(closure, gap_interval=(lo + 3.0, hi))
+    swing_copy = replace(closure, kind=KIND_SWING)
+    for competing in (shifted, swing_copy, closure):
+        for order in ([competing, closure], [closure, competing]):
+            variant = _with(result, closures=order)
+            assert _reason(variant, sha) == REASON_ID_COLLISION
+            assert _refused(variant, sha, [H_FULL, V_FULL])
+
+
+def test_a_duplicated_swing_chord_bordering_a_member_is_quarantined_too():
+    _data, sha, result, bedroom, alcove, closure = _base()
+    swing = replace(closure, closure_id="s" * 24, kind=KIND_SWING)
+    touching = replace(bedroom, bounding_closure_ids=tuple(sorted((*bedroom.bounding_closure_ids, swing.closure_id))))
+    for order in ([closure, swing, swing], [swing, closure, swing], [swing, swing, closure]):
+        variant = _with(result, rings=[touching, alcove], closures=order)
+        assert _reason(variant, sha) == REASON_ID_COLLISION
+        assert _refused(variant, sha, [H_FULL, V_FULL])
 
 
 def test_shared_chord_missing_on_one_side_moved_or_on_the_same_face_line_refuses():

@@ -44,6 +44,7 @@ REASON_OVERLAP = "partition_members_overlap"
 REASON_HOLE = "partition_region_has_unexplained_void"
 REASON_MIXED = "partition_joined_by_a_non_sliding_chord"
 REASON_OPEN_MEMBER = "partition_member_not_a_closed_face"
+REASON_ID_COLLISION = "partition_source_record_id_collision"
 
 
 @dataclass(frozen=True)
@@ -105,15 +106,18 @@ def partition_groups(
     ring_result: LayeredRoomRingResult, *, source_sha256: str, page_index: int,
 ) -> tuple[PartitionGroup, ...]:
     """Every group of rings joined by sliding-leaf chords, each validated or refused with a reason."""
-    sliding = {c.closure_id: c for c in ring_result.closures if c.kind == KIND_SLIDING_LEAF}
-    if not sliding:
+    sliding_ids = {c.closure_id for c in ring_result.closures if c.kind == KIND_SLIDING_LEAF}
+    if not sliding_ids:
         return ()
-    rings = {r.record_id: r for r in ring_result.rings}
-    bordering: dict[str, list[str]] = {cid: [] for cid in sliding}
-    for ring_id, ring in rings.items():
+    # An id that appears twice is quarantined, never resolved by input order: whichever copy came last (or
+    # first) would otherwise decide the provenance of a ring or a chord.
+    rings, duplicate_rings = _by_id(ring_result.rings, lambda r: r.record_id)
+    closures, duplicate_closures = _by_id(ring_result.closures, lambda c: c.closure_id)
+    bordering: dict[str, list[str]] = {cid: [] for cid in sliding_ids}
+    for ring in ring_result.rings:  # every copy, so a quarantined ring still joins (and refuses) its group
         for cid in ring.bounding_closure_ids:
-            if cid in bordering:
-                bordering[cid].append(ring_id)
+            if cid in bordering and ring.record_id not in bordering[cid]:
+                bordering[cid].append(ring.record_id)
 
     parent: dict[str, str] = {}
 
@@ -136,17 +140,39 @@ def partition_groups(
     for members in components.values():
         member_ids = tuple(sorted(members))
         closure_ids = tuple(sorted(cid for cid, ids in bordering.items() if set(ids) & members))
-        groups.append(_validate(member_ids, closure_ids, rings, sliding, ring_result, source_sha256, page_index, bordering))
+        groups.append(_validate(
+            member_ids, closure_ids, rings, closures, (duplicate_rings, duplicate_closures),
+            source_sha256, page_index, bordering,
+        ))
     groups.sort(key=lambda g: g.ring_record_ids)
     return tuple(groups)
+
+
+def _by_id(items, key):
+    """(items whose id is unique by id, the ids that occur more than once)."""
+    seen: dict[str, object] = {}
+    duplicated: set[str] = set()
+    for item in items:
+        item_id = key(item)
+        if item_id in seen:
+            duplicated.add(item_id)
+        else:
+            seen[item_id] = item
+    return {i: v for i, v in seen.items() if i not in duplicated}, duplicated
 
 
 def _refuse(member_ids, closure_ids, reason) -> PartitionGroup:
     return PartitionGroup(member_ids, closure_ids, False, reason, (0.0, 0.0, 0.0, 0.0))
 
 
-def _validate(member_ids, closure_ids, rings, sliding, ring_result, source_sha256, page_index, bordering) -> PartitionGroup:
+def _validate(member_ids, closure_ids, rings, closures, collisions, source_sha256, page_index, bordering) -> PartitionGroup:
+    duplicate_rings, duplicate_closures = collisions
+    if set(member_ids) & duplicate_rings:
+        return _refuse(member_ids, closure_ids, REASON_ID_COLLISION)
     members = [rings[i] for i in member_ids]
+    # every chord of the group, sliding or not, is bordered by a member, so this covers all of them
+    if duplicate_closures & {cid for r in members for cid in r.bounding_closure_ids}:
+        return _refuse(member_ids, closure_ids, REASON_ID_COLLISION)
     if any(r.source_sha256 != source_sha256 or r.page_index != page_index for r in members):
         return _refuse(member_ids, closure_ids, REASON_FOREIGN)
     if any(r.status is not EvidenceResolutionStatus.CANDIDATE for r in members):
@@ -160,14 +186,14 @@ def _validate(member_ids, closure_ids, rings, sliding, ring_result, source_sha25
         if len(bordering[cid]) != 2:
             return _refuse(member_ids, closure_ids, REASON_MEMBERSHIP)
     # no other kind of chord may join two members (a swing, a stroke): that would mix partition edges
-    other_closures = [c for c in ring_result.closures if c.kind != KIND_SLIDING_LEAF]
+    other_closures = [c for c in closures.values() if c.kind != KIND_SLIDING_LEAF]
     for closure in other_closures:
         touching = [r.record_id for r in members if closure.closure_id in r.bounding_closure_ids]
         if len(touching) >= 2:
             return _refuse(member_ids, closure_ids, REASON_MIXED)
     # the same chord, matched on both sides: one member on each face line of the wall band
     for cid in closure_ids:
-        closure = sliding[cid]
+        closure = closures[cid]
         sides = [_chord_side(rings[i], closure) for i in bordering[cid]]
         if any(side is None for side in sides):
             return _refuse(member_ids, closure_ids, REASON_CHORD)
@@ -185,7 +211,7 @@ def _validate(member_ids, closure_ids, rings, sliding, ring_result, source_sha25
             if polygons[i].intersection(polygons[j]).area > NOISE_PT * NOISE_PT:
                 return _refuse(member_ids, closure_ids, REASON_OVERLAP)
     closing = 0.03
-    region = unary_union([p.buffer(closing, join_style=2) for p in polygons + [_closure_rect(sliding[c]) for c in closure_ids]])
+    region = unary_union([p.buffer(closing, join_style=2) for p in polygons + [_closure_rect(closures[c]) for c in closure_ids]])
     region = region.buffer(-closing, join_style=2)
     if region.geom_type != "Polygon" or len(region.interiors) != 0:
         return _refuse(member_ids, closure_ids, REASON_HOLE)

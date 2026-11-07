@@ -26,6 +26,9 @@ from __future__ import annotations
 
 from typing import Mapping, Optional, Sequence
 
+from shapely.geometry import Polygon
+from shapely.geometry import box as shapely_box
+
 from pb_layered_wall_doorway_partition_witness_shadow import partition_groups
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
@@ -107,12 +110,19 @@ def figured_box_pair_count(
     return len(horizontal) * len(vertical)
 
 
-def _fills_its_bounding_rectangle(polygon: Sequence[Sequence[float]], area: float) -> bool:
-    """True when the face equals its bounding rectangle to within a noise-wide band along its boundary."""
-    xs = [p[0] for p in polygon]
-    ys = [p[1] for p in polygon]
-    width, height = max(xs) - min(xs), max(ys) - min(ys)
-    return (width * height - area) <= NOISE_PT * 2.0 * (width + height)
+def _fills_its_bounding_rectangle(polygon: Sequence[Sequence[float]]) -> bool:
+    """True only when the face IS its bounding rectangle, tested in space and not by an aggregate area.
+
+    Every point of the box must lie within the representation noise (``NOISE_PT``) of the face. A wall return,
+    a recess or a jamb offset is spatial content: however small its area against the box, a notch wider than
+    twice the noise bound leaves box points farther than that from the face, so it is never absorbed. Extra
+    collinear vertices change nothing.
+    """
+    face = Polygon([(float(p[0]), float(p[1])) for p in polygon])
+    if not face.is_valid or face.is_empty:
+        return False
+    rectangle = shapely_box(*face.bounds)
+    return rectangle.difference(face.buffer(NOISE_PT, join_style=2)).area <= 1e-9
 
 
 def layered_ring_room_face_scope(
@@ -198,7 +208,7 @@ def layered_ring_room_face_scope(
             records.append(SourceRoomFaceRecord(record_id=record_id, **common))
             if group_of is not None:
                 partition_tokens.append(f"{RING_PARTITION_PART_PREFIX}{record_id}")
-            if not _fills_its_bounding_rectangle(polygon, area):
+            if not _fills_its_bounding_rectangle(polygon):
                 not_rectangle_tokens.append(f"{RING_NOT_A_RECTANGLE_PREFIX}{record_id}")
         else:
             abstained.append(SourceRoomFaceAbstention(reason=SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED, **common))

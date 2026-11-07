@@ -5,6 +5,7 @@ import hashlib
 
 import fitz
 import pytest
+from shapely.geometry import Polygon
 
 from types import SimpleNamespace
 
@@ -40,7 +41,8 @@ K = 0.5522847498
 
 
 def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_layer: str = "Enclosure_WallInternal",
-                     swing: bool = True, label: str = "BED 2", stub: bool = False, robe: bool = False) -> bytes:
+                     swing: bool = True, label: str = "BED 2", stub: bool = False, robe: bool = False,
+                     stub_depth: float = 28.0) -> bytes:
     """Room inner box (100, 80)-(250, 180) on a 400 x 300 page; figured 3600 x 2400 (24 mm per pt).
 
     vertical_pairs: "both" adds a second, independent figured pair 3600 x 1440 whose box is smaller
@@ -57,7 +59,7 @@ def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_la
     rect(96, 180, 254, 184)
     rect(96, 80, 100, 180)
     if stub:
-        rect(120, 80, 122, 108)  # a wall return hanging into the room from the top wall
+        rect(120, 80, 122, 80 + stub_depth)  # a wall return hanging into the room from the top wall
     if robe:
         # a wardrobe: a wall return from the top wall plus a front on the band y 108..110 whose opening
         # (x 144.4..246) is closed only by two frame boxes and two overlapping sliding leaves
@@ -407,6 +409,45 @@ def test_a_face_that_is_not_its_rectangle_loses_the_documented_route_but_a_true_
     refused = _area(source, rooms, selection=True)
     assert refused.records == ()
     assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+
+
+@pytest.mark.parametrize("depth", [10.0, 1.0])
+def test_a_shallow_wall_return_is_spatial_content_and_withdraws_the_documented_area(depth):
+    # the return's area (2 x depth) is far below the perimeter-scaled allowance the first rectangle test used
+    # (25 pt2 on this 150 x 100 room), yet it is real wall ink inside the room: the box is not the face
+    source, _p, _w, rooms = _chain(layered_room_pdf(vertical_pairs="both", stub=True, stub_depth=depth), rings=True)
+    room = rooms.rooms[0]
+    scope = rooms.room_face_authority_binding_for(room).authority.resolve_scope(SourceRoomFaceSelector(
+        document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
+        snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
+    assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
+    refused = _area(source, rooms, selection=True)
+    assert refused.records == ()
+    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+
+
+def _notched(width, depth):
+    return [(0.0, 0.0), (20.0, 0.0), (20.0, depth), (20.0 + width, depth), (20.0 + width, 0.0),
+            (150.0, 0.0), (150.0, 100.0), (0.0, 100.0)]
+
+
+def test_rectangle_predicate_is_spatial_not_an_area_deficit():
+    fills = scope_module._fills_its_bounding_rectangle
+    assert fills([(0.0, 0.0), (150.0, 0.0), (150.0, 100.0), (0.0, 100.0)])
+    # extra collinear vertices (a split edge) change nothing, in either orientation
+    assert fills([(0.0, 0.0), (75.0, 0.0), (150.0, 0.0), (150.0, 50.0), (150.0, 100.0), (0.0, 100.0)])
+    assert fills([(0.0, 100.0), (0.0, 50.0), (0.0, 0.0), (150.0, 0.0), (150.0, 100.0)])
+    # a return of any real width is content however small its area; one under twice the noise bound is noise
+    assert not fills(_notched(2.0, 10.0)) and not fills(_notched(2.0, 1.0))
+    assert not fills(_notched(0.2, 50.0)) and not fills(_notched(0.12, 50.0))
+    assert fills(_notched(0.08, 50.0))
+    # an L-shaped face and a degenerate polygon are not rectangles
+    assert not fills([(0.0, 0.0), (150.0, 0.0), (150.0, 40.0), (60.0, 40.0), (60.0, 100.0), (0.0, 100.0)])
+    assert not fills([(0.0, 0.0), (150.0, 100.0), (150.0, 0.0), (0.0, 100.0)])  # self-crossing
+    # a spike that doubles back on itself covers the whole box but is not a valid face
+    spiked = [(0.0, 0.0), (150.0, 0.0), (150.0, 100.0), (0.0, 100.0), (0.0, 50.0), (10.0, 50.0), (0.0, 50.0)]
+    assert not Polygon(spiked).is_valid
+    assert not fills(spiked)
 
 
 def test_sliding_leaf_control_needs_the_ring_control_and_explicit_booleans(tmp_path):
