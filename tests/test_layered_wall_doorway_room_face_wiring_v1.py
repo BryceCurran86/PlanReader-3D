@@ -157,8 +157,10 @@ def test_ring_scope_replaces_the_page_room_scope_with_one_labelled_room_owned_by
     xs = [p[0] for p in room.polygon_pdf_pts]
     ys = [p[1] for p in room.polygon_pdf_pts]
     assert (min(xs), min(ys), max(xs), max(ys)) == (100.0, 80.0, 250.0, 180.0)
-    assert any(owner.startswith("layered_doorway_closure:") for owner in room.bounding_wall_ids)
     assert any(owner.startswith("layered_wall_strip:") for owner in room.bounding_wall_ids)
+    # a doorway chord is a planarization barrier only: never a wall owner of any kind
+    assert not any("closure" in owner for owner in room.bounding_wall_ids)
+    assert room.canonical_bounding_wall_ids == ()
     binding = rooms.room_face_authority_binding_for(room)
     assert binding is not None
     scope = binding.authority.resolve_scope(SourceRoomFaceSelector(
@@ -167,7 +169,14 @@ def test_ring_scope_replaces_the_page_room_scope_with_one_labelled_room_owned_by
     ))
     assert LAYERED_RING_SCOPE_REASON in scope.reason_codes and SOURCE_ROOM_FACE_UNIVERSE_PARTIAL in scope.reason_codes
     assert scope.face_universe_complete is False  # a ring scope never claims the face universe
-    assert ring_face_bounding_box(scope.records[0]) == (100.0, 80.0, 250.0, 180.0)
+    record = scope.records[0]
+    assert ring_face_bounding_box(record) == (100.0, 80.0, 250.0, 180.0)
+    assert not any("closure" in owner for owner, _edge in record.boundary_wall_edges)
+    # the chord is exactly the polygon edge with no wall owner: the doorway between its two jambs
+    owned = {edge for _owner, edge in record.boundary_wall_edges}
+    points = record.polygon_pdf_pts
+    polygon_edges = {tuple(sorted((points[i], points[(i + 1) % len(points)]))) for i in range(len(points))}
+    assert polygon_edges - owned == {((250.0, 110.0), (250.0, 134.0))}
 
 
 def test_two_figured_pairs_conflict_by_default_and_the_ring_selects_only_the_pair_equal_to_its_box():
@@ -289,6 +298,7 @@ def test_converter_is_deterministic_and_keeps_abstained_rings_as_abstentions():
     assert first == second and len(first.records) == 1 and first.abstained_faces == ()
     owners = {owner for owner, _edge in first.records[0].boundary_wall_edges}
     assert owners == set(first.records[0].bounding_wall_ids) and len(owners) >= 2
+    assert all(owner.startswith("layered_wall_") for owner in owners)
     no_ring = build_from_pdf_bytes(layered_room_pdf(swing=False), source_sha256=hashlib.sha256(layered_room_pdf(swing=False)).hexdigest(), page_index=0)
     assert layered_ring_room_face_scope(no_ring, **kwargs) is None
 

@@ -5,8 +5,11 @@ plus source-attested doorway closures. This module only re-expresses those rings
 EXISTING room-face vocabulary so the unchanged downstream chain (room labels, canonical
 rooms and floors, the area bridge) can consume them:
 
-* a CANDIDATE ring becomes a ``SourceRoomFaceRecord`` whose edges are owned by wall strips
-  (native path index) or by a typed doorway closure, never by an invented wall. In the live
+* a CANDIDATE ring becomes a ``SourceRoomFaceRecord`` whose wall edges are owned by wall strips
+  (native path index). A doorway closure is a planarization chord only: it is NEVER listed as a
+  wall owner (not in ``bounding_wall_ids``, not in ``boundary_wall_edges``), so it cannot become
+  wall length, a host or an opening deduction. A chord edge is exactly a polygon edge that has no
+  wall owner; its identity is bound into the record id. In the live
   path a ring is a record only if EXACTLY ONE authenticated figured (horizontal, vertical)
   pair has the ring's bounding box as its witness box: a closed ring that no printed figure
   corroborates (for example a region that leaks through openings with no closure evidence)
@@ -46,6 +49,7 @@ LAYERED_RING_SCOPE_REASON = "layered_wall_doorway_room_ring_scope"
 RING_FIGURED_BOX_TOLERANCE_PT = 0.5
 # The decision scope the live room composition resolves per page (``wall-source:page-N``).
 _PAGE_DECISION_SCOPE = "wall-source:page-{page_id}"
+_CLOSURE_OWNER_PREFIX = "layered_doorway_closure:"
 
 
 def _face_ids(ring: LayeredRoomRingRecord, polygon: tuple, *, scope: Sequence[str]) -> tuple[str, dict]:
@@ -64,6 +68,8 @@ def _boundary_edges(ring: LayeredRoomRingRecord) -> tuple[tuple[str, tuple], ...
     pairs: list[tuple[str, tuple]] = []
     for (first, second), edge_owners in zip(edges, owners):
         for owner in edge_owners:
+            if owner.startswith(_CLOSURE_OWNER_PREFIX):
+                continue  # a doorway chord is not a wall: no wall owner is ever recorded for it
             pairs.append((owner, _edge(first, second)))
     return tuple(pairs)
 
@@ -117,7 +123,10 @@ def layered_ring_room_face_scope(
         if not polygon:
             continue
         face_id, payload = _face_ids(ring, polygon, scope=scope)
-        owner_ids = tuple(sorted({owner for owners in ring.edge_owner_ids for owner in owners}))
+        owner_ids = tuple(sorted({
+            owner for owners in ring.edge_owner_ids for owner in owners
+            if not owner.startswith(_CLOSURE_OWNER_PREFIX)
+        }))
         boundary = _boundary_edges(ring)
         area = _polygon_area(polygon)
         common = dict(
@@ -133,7 +142,8 @@ def layered_ring_room_face_scope(
         if ring.status is EvidenceResolutionStatus.CANDIDATE and corroborated:
             record_id = stable_contract_id(
                 "layered_ring_source_room_face_record",
-                {**payload, "owners": owner_ids, "ring_record_id": ring.record_id},
+                {**payload, "owners": owner_ids, "ring_record_id": ring.record_id,
+                 "closure_ids": list(ring.bounding_closure_ids)},
                 digest_chars=32,
             )
             records.append(SourceRoomFaceRecord(record_id=record_id, **common))
