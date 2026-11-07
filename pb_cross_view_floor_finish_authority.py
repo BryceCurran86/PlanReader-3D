@@ -391,12 +391,33 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
         for cr in correspondence_records:
             st = getattr(cr, "status", None)
             st_name = getattr(st, "name", str(st)) if st is not None else ""
-            if st_name == "CORROBORATED" and getattr(cr, "commercial_projection_allowed", False):
-                if not getattr(cr, "authority_blockers", None):
-                    if _clean(getattr(cr, "canonical_floor_id", "")) == _clean(floor.canonical_floor_id):
-                        cr_code = getattr(cr, "material_code", None)
-                        if cr_code is None or _clean(cr_code) == _clean(occurrence.code):
-                            return True
+            if st_name != "CORROBORATED":
+                continue
+            if not getattr(cr, "commercial_projection_allowed", False):
+                continue
+            if getattr(cr, "authority_blockers", None):
+                continue
+            if not getattr(cr, "wall_bounded_on_both_sheets", False):
+                continue
+            if not getattr(cr, "wall_evidence_identical_on_both_sheets", False):
+                continue
+            if _clean(getattr(cr, "canonical_floor_id", "")) != _clean(floor.canonical_floor_id):
+                continue
+            cr_code = getattr(cr, "material_code", None)
+            if cr_code is not None and _clean(cr_code) != _clean(occurrence.code):
+                continue
+            supp_box = getattr(cr, "support_dimension_box_pdf_pts", None)
+            if supp_box and not _bbox_fully_inside(occurrence.bbox_pdf_pts, supp_box):
+                continue
+            wall_eqs = getattr(cr, "cross_sheet_wall_equivalences", ())
+            if len(wall_eqs) < 4:
+                continue
+            if any(getattr(w, "status", None) != EvidenceResolutionStatus.CORROBORATED for w in wall_eqs):
+                continue
+            doorways = getattr(cr, "doorway_transitions", ())
+            if not doorways or any(getattr(d, "status", None) != EvidenceResolutionStatus.CORROBORATED for d in doorways):
+                continue
+            return True
     return False
 
 

@@ -1052,11 +1052,26 @@ def _collect_live_physical_net_wall_claim(
         (same_view_area is not None and same_view_area.records)
         or (cross_view_area is not None and cross_view_area.records)
     ):
+        correspondence_records = ()
+        if cross_view_area is not None and cross_view_area.records:
+            try:
+                from pb_source_cross_view_floor_correspondence_shadow import (
+                    resolve_cross_sheet_floor_correspondence_for_claim,
+                )
+                correspondence_records = resolve_cross_sheet_floor_correspondence_for_claim(
+                    source=surface_semantic_source,
+                    cross_view_area=cross_view_area,
+                    canonical_floors=canonical_floors,
+                )
+            except Exception:
+                correspondence_records = ()
+
         floor_finishes = CrossViewFloorFinishProducer.from_source(
             source=surface_semantic_source,
             room_areas=cross_view_area,
             same_view_room_areas=same_view_area,
             floors=canonical_floors,
+            correspondence_records=correspondence_records,
         ).publish()
         canonical_floors = enrich_live_canonical_floor_finishes(
             canonical_floors,

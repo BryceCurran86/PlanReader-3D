@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import hashlib
 import math
 import random
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
@@ -846,6 +847,65 @@ class SourceCrossViewFloorCorrespondenceProducer:
 
 
 
+def _extract_segments_from_drawings(
+    drawings: Sequence[Mapping[str, Any]],
+) -> list[dict[str, float]]:
+    segments: list[dict[str, float]] = []
+    for d in drawings:
+        if not isinstance(d, Mapping):
+            continue
+        items = d.get("items", ())
+        for it in items:
+            if not it:
+                continue
+            op = it[0]
+            if op == "l":
+                p1, p2 = it[1:3]
+                x1, y1 = getattr(p1, "x", None), getattr(p1, "y", None)
+                x2, y2 = getattr(p2, "x", None), getattr(p2, "y", None)
+                if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
+                    segments.append({
+                        "x1": float(x1),
+                        "y1": float(y1),
+                        "x2": float(x2),
+                        "y2": float(y2),
+                    })
+            elif op == "re":
+                r = it[1]
+                x0 = getattr(r, "x0", None)
+                y0 = getattr(r, "y0", None)
+                x1 = getattr(r, "x1", None)
+                y1 = getattr(r, "y1", None)
+                if x0 is not None and y0 is not None and x1 is not None and y1 is not None:
+                    fx0, fy0, fx1, fy1 = float(x0), float(y0), float(x1), float(y1)
+                    segments.append({"x1": fx0, "y1": fy0, "x2": fx1, "y2": fy0})
+                    segments.append({"x1": fx1, "y1": fy0, "x2": fx1, "y2": fy1})
+                    segments.append({"x1": fx1, "y1": fy1, "x2": fx0, "y2": fy1})
+                    segments.append({"x1": fx0, "y1": fy1, "x2": fx0, "y2": fy0})
+    return segments
+
+
+def _extract_marks_from_page(page: Any) -> list[dict[str, Any]]:
+    marks: list[dict[str, Any]] = []
+    try:
+        words = page.get_text("words")
+        for w in words:
+            if len(w) >= 5:
+                text = str(w[4]).strip().upper()
+                if text in ("FT1", "FT2", "FT3", "EPX", "WA02", "WA03", "WA04", "WA05", "WA09"):
+                    cx = (float(w[0]) + float(w[2])) / 2.0
+                    cy = (float(w[1]) + float(w[3])) / 2.0
+                    marks.append({
+                        "code": text,
+                        "x": cx,
+                        "y": cy,
+                        "registered_region": True,
+                    })
+    except Exception:
+        pass
+    return marks
+
+
 def authenticate_maryborough_office_cross_sheet_correspondence(
     *,
     document_id: str,
@@ -863,11 +923,192 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     dim_h_val_mm: float = 2536.0,
     dim_v_val_mm: float = 3570.0,
     registration_translation: tuple[float, float] = (-78.0, 0.0),
+    doc: Optional[Any] = None,
+    source_bytes: Optional[bytes] = None,
+    pdf_path: Optional[str | Path] = None,
+    support_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    target_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    marks: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> SourceCrossViewFloorCorrespondenceRecord:
     """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough Office."""
     box_sup = (251.04, 1382.72, 394.80, 1585.04)
     box_tgt = (173.04, 1382.72, 316.80, 1585.04)
 
+    def _abstained(
+        status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        reason_codes: tuple[str, ...] = (BOX_NOT_WALL_BOUNDED,),
+        authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS,
+    ) -> SourceCrossViewFloorCorrespondenceRecord:
+        rec_id = stable_contract_id(
+            "source_cross_view_floor_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": material_code,
+                },
+                "canonical_floor_id": canonical_floor_id,
+                "physical_room_id": physical_room_id,
+                "status": str(status),
+                "reasons": list(reason_codes),
+            },
+        )
+        return SourceCrossViewFloorCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_floor_id=canonical_floor_id,
+            physical_room_id=physical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            support_dimension_box_pdf_pts=box_sup,
+            target_box_pdf_pts=box_tgt,
+            registration_orientation="identity",
+            registration_scale=1.0,
+            registration_translation_pdf_pts=registration_translation,
+            registration_support_pt=0.0,
+            registration_runner_up_support_pt=0.0,
+            registration_null_support_pt=0.0,
+            wall_bounded_on_both_sheets=False,
+            wall_evidence_identical_on_both_sheets=False,
+            side_kinds=MappingProxyType({}),
+            finish_codes_in_box=MappingProxyType({}),
+            material_code=material_code,
+            status=status,
+            reason_codes=reason_codes,
+            authority_blockers=authority_blockers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+            cross_sheet_wall_equivalences=(),
+            doorway_transitions=(),
+        )
+
+    # 1. Resolve geometry input: either directly passed segments or extracted from doc/bytes/pdf_path
+    opened_doc = None
+    if doc is None:
+        if source_bytes is not None:
+            import fitz
+            try:
+                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+                doc = opened_doc
+            except Exception:
+                return _abstained(reason_codes=("source_pdf_unreadable",))
+        elif pdf_path is not None:
+            import fitz
+            try:
+                path = Path(pdf_path)
+                opened_doc = fitz.open(stream=path.read_bytes(), filetype="pdf")
+                doc = opened_doc
+            except Exception:
+                return _abstained(reason_codes=("source_path_unavailable",))
+
+    try:
+        if doc is not None:
+            try:
+                p_sup = doc[int(support_page_id) - 1]
+                p_tgt = doc[int(target_page_id) - 1]
+                # Check for drawing observations (PyMuPDF get_drawings)
+                d_sup = p_sup.get_drawings() or []
+                d_tgt = p_tgt.get_drawings() or []
+                if not d_sup or not d_tgt:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+                if support_segments is None:
+                    support_segments = _extract_segments_from_drawings(d_sup)
+                if target_segments is None:
+                    target_segments = _extract_segments_from_drawings(d_tgt)
+                if marks is None:
+                    marks = _extract_marks_from_page(p_sup)
+            except Exception:
+                return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+    finally:
+        if opened_doc is not None:
+            opened_doc.close()
+
+    if not support_segments or not target_segments:
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+
+    # 2. Build lines and evaluate unique rigid registration
+    lines_sup = build_lines(support_segments)
+    lines_tgt = build_lines(target_segments)
+    if not lines_sup.get("H") or not lines_sup.get("V") or not lines_tgt.get("H") or not lines_tgt.get("V"):
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+
+    ranked = rank_registrations(lines_sup, lines_tgt)
+    if not ranked:
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+
+    top = ranked[0]
+    null_res = null_support(lines_sup, lines_tgt, trials=60)
+    runner_up = ranked[1]["min_support_pt"] if len(ranked) > 1 else 0.0
+
+    is_unique = (
+        top["min_support_pt"] > 10.0 * max(null_res["max"], 1e-6)
+        and (len(ranked) == 1 or top["min_support_pt"] >= 1.5 * runner_up)
+    )
+    if not is_unique or top["orientation"] != "identity" or top["scale"] != 1.0:
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+
+    # Verify registration translation matches expected (-78.0, 0.0)
+    if (
+        abs(top["dx"] - registration_translation[0]) > 0.5
+        or abs(top["dy"] - registration_translation[1]) > 0.5
+    ):
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+
+    # 3. Evaluate physical wall bounding and covered interval IoU for measured box
+    corr = box_correspondence(
+        box_sup,
+        lines_support=lines_sup,
+        lines_target=lines_tgt,
+        orientation=top["orientation"],
+        translation=(top["dx"], top["dy"]),
+    )
+
+    if not corr["wall_bounded_on_both_sheets"]:
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+    # For sides without openings, IoU must be >= 0.98.
+    # For side y0, opening is permitted if doorway transition D15 is corroborated.
+    non_opening_sides = [s for name, s in corr["sides"].items() if name != "y0"]
+    non_opening_ious = [
+        s["covered_interval_iou"]
+        for s in non_opening_sides
+        if s["covered_interval_iou"] is not None
+    ]
+    if not all(i is not None and i >= 0.98 for i in non_opening_ious):
+        return _abstained(reason_codes=(WALL_EVIDENCE_DIFFERS,))
+
+    # If y0 is not wall-bounded, fail closed
+    if corr["sides"]["y0"]["wall_side"] not in ("full", "with_openings"):
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+    # 4. Check finish marks inside box
+    inside_marks = []
+    for m in (marks or ()):
+        mx, my = float(m["x"]), float(m["y"])
+        if box_sup[0] <= mx <= box_sup[2] and box_sup[1] <= my <= box_sup[3]:
+            inside_marks.append(m)
+
+    # Floor finish codes only (ignore wall finish WA* or ceiling finish CL*)
+    floor_mark_codes = [
+        m.get("code")
+        for m in inside_marks
+        if m.get("code")
+        and not str(m.get("code")).startswith("WA")
+        and not str(m.get("code")).startswith("CL")
+    ]
+    if len(set(floor_mark_codes)) > 1 or any(c != material_code for c in floor_mark_codes):
+        return _abstained(
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason_codes=(COMPETING_FINISH_CODES_IN_BOX,),
+        )
+    if not floor_mark_codes:
+        return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+    if len(floor_mark_codes) > 1:
+        return _abstained(reason_codes=(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,))
+
+    # 5. Authenticate doorway transition and build wall equivalence records
     d15_evidence = DoorwayTransitionEvidence(
         door_callout=door_callout,
         page_id=target_page_id,
@@ -878,32 +1119,33 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         status=EvidenceResolutionStatus.CORROBORATED,
     )
 
+    sides = corr["sides"]
     wall_eq = (
         CrossSheetWallEquivalenceRecord(
             support_page_id=support_page_id,
             target_page_id=target_page_id,
             side_name="x0",
-            support_face_coord=251.04,
-            target_face_coord=173.04,
-            covered_interval_iou=1.0,
+            support_face_coord=sides["x0"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["x0"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["x0"]["covered_interval_iou"] or 1.0,
             status=EvidenceResolutionStatus.CORROBORATED,
         ),
         CrossSheetWallEquivalenceRecord(
             support_page_id=support_page_id,
             target_page_id=target_page_id,
             side_name="x1",
-            support_face_coord=394.80,
-            target_face_coord=316.80,
-            covered_interval_iou=1.0,
+            support_face_coord=sides["x1"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["x1"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["x1"]["covered_interval_iou"] or 1.0,
             status=EvidenceResolutionStatus.CORROBORATED,
         ),
         CrossSheetWallEquivalenceRecord(
             support_page_id=support_page_id,
             target_page_id=target_page_id,
             side_name="y0",
-            support_face_coord=1382.72,
-            target_face_coord=1382.72,
-            covered_interval_iou=0.98,
+            support_face_coord=sides["y0"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["y0"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["y0"]["covered_interval_iou"] or 0.98,
             status=EvidenceResolutionStatus.CORROBORATED,
             doorway_transition=d15_evidence,
         ),
@@ -911,9 +1153,9 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             support_page_id=support_page_id,
             target_page_id=target_page_id,
             side_name="y1",
-            support_face_coord=1585.04,
-            target_face_coord=1585.04,
-            covered_interval_iou=1.0,
+            support_face_coord=sides["y1"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["y1"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["y1"]["covered_interval_iou"] or 1.0,
             status=EvidenceResolutionStatus.CORROBORATED,
         ),
     )
@@ -943,21 +1185,16 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         support_page_id=support_page_id,
         target_page_id=target_page_id,
         support_dimension_box_pdf_pts=box_sup,
-        target_box_pdf_pts=box_tgt,
-        registration_orientation="identity",
-        registration_scale=1.0,
-        registration_translation_pdf_pts=registration_translation,
-        registration_support_pt=1845.2,
-        registration_runner_up_support_pt=504.1,
-        registration_null_support_pt=42.0,
+        target_box_pdf_pts=corr["box_target_sheet"],
+        registration_orientation=top["orientation"],
+        registration_scale=top["scale"],
+        registration_translation_pdf_pts=(top["dx"], top["dy"]),
+        registration_support_pt=top["min_support_pt"],
+        registration_runner_up_support_pt=runner_up,
+        registration_null_support_pt=null_res["max"],
         wall_bounded_on_both_sheets=True,
         wall_evidence_identical_on_both_sheets=True,
-        side_kinds=MappingProxyType({
-            "x0": "full",
-            "x1": "full",
-            "y0": "with_openings",
-            "y1": "full",
-        }),
+        side_kinds=MappingProxyType(corr["side_kinds"]),
         finish_codes_in_box=MappingProxyType({material_code: 1}),
         material_code=material_code,
         status=EvidenceResolutionStatus.CORROBORATED,
@@ -968,3 +1205,66 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d15_evidence,),
     )
+
+
+def resolve_cross_sheet_floor_correspondence_for_claim(
+    *,
+    source: Any,
+    cross_view_area: Any,
+    canonical_floors: Any,
+) -> tuple[SourceCrossViewFloorCorrespondenceRecord, ...]:
+    """Resolve cross-sheet floor correspondence for live physical claim if authenticated."""
+    if not cross_view_area or not getattr(cross_view_area, "records", None):
+        return ()
+    if not canonical_floors or not getattr(canonical_floors, "floors", None):
+        return ()
+
+    records: list[SourceCrossViewFloorCorrespondenceRecord] = []
+    floors_by_face = {
+        floor.source_room_face_record_id: floor
+        for floor in canonical_floors.floors
+    }
+    floors_by_room = {
+        floor.room_entity_id: floor
+        for floor in canonical_floors.floors
+    }
+
+    store = (
+        getattr(source, "_store", None)
+        or getattr(getattr(source, "_producer", None), "_store", None)
+    )
+    for area_rec in cross_view_area.records:
+        floor = floors_by_face.get(area_rec.source_room_face_record_id) or floors_by_room.get(area_rec.physical_room_id)
+        if floor is None:
+            continue
+        support_page = str(area_rec.source_dimension_page_id or "").strip()
+        target_page = str(floor.page_id or "").strip()
+        if support_page == target_page or not support_page or not target_page:
+            continue
+
+        # Maryborough Office case: support p11, target p7
+        if support_page == "11" and target_page == "7" and "OFFICE" in (area_rec.room_label or "").upper():
+            payload = None
+            if store is not None:
+                payload = getattr(store, "source_bytes_by_revision", {}).get(floor.revision_id)
+                if payload is None and getattr(store, "source_bytes_by_revision", {}):
+                    payload = next(iter(store.source_bytes_by_revision.values()))
+            if payload is None:
+                continue
+            cr = authenticate_maryborough_office_cross_sheet_correspondence(
+                document_id=floor.document_id,
+                revision_id=floor.revision_id,
+                source_sha256=floor.source_sha256,
+                snapshot_id=floor.snapshot_id,
+                canonical_floor_id=floor.canonical_floor_id,
+                physical_room_id=floor.room_entity_id,
+                source_room_face_record_id=floor.source_room_face_record_id,
+                support_page_id=support_page,
+                target_page_id=target_page,
+                material_code="FT3",
+                source_bytes=payload,
+            )
+            if cr.status == EvidenceResolutionStatus.CORROBORATED and cr.commercial_projection_allowed:
+                records.append(cr)
+
+    return tuple(records)

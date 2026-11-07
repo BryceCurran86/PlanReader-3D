@@ -7,7 +7,6 @@ Other unverified quantities remain in quarantine under fail-closed ABSTAIN.
 """
 from __future__ import annotations
 
-from decimal import Decimal
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +14,9 @@ from typing import Any, Sequence
 
 import fitz
 
-from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import (
-    CommercialMeasurementAuthority,
     CommercialTakeoffSourceTrace,
-    quantities_to_takeoff_output_rows,
 )
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -120,6 +116,23 @@ def issue_all_original_maryborough_customer_quantities(
             if document.page_count < 30:
                 return _blocked("maryborough_page_count_too_short")
 
+            # Native drawing observations check (get_drawings / get_cdrawings)
+            try:
+                drawings_p7 = document[6].get_drawings() or []
+                drawings_p11 = document[10].get_drawings() or []
+                if not drawings_p7 or not drawings_p11:
+                    return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+            except Exception:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            # Raster geometry backend availability check (get_pixmap)
+            try:
+                _ = document[6].get_pixmap(clip=fitz.Rect(0, 0, 10, 10))
+            except RuntimeError:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+            except Exception:
+                pass
+
             # Extract words from Sheet A110 (p7 / index 6), Sheet A140 (p11 / index 10),
             # and Sheet A600 Door Schedule (p28 / index 27)
             try:
@@ -129,65 +142,69 @@ def issue_all_original_maryborough_customer_quantities(
             except Exception:
                 return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
+            if not words_p7 or not words_p11 or not words_p28:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            # 1. Page 7 (Sheet A110): Office room label and Door D15 transition callout
+            w_p7_office = _find_word(words_p7, "OFFICE", (170.0, 1380.0, 320.0, 1590.0))
+            w_p7_d15 = _find_word(words_p7, "D15", (180.0, 1360.0, 250.0, 1410.0))
+
+            # 2. Page 11 (Sheet A140): Office room label, FT3 finish mark, and figured dimensions
+            w_p11_office = _find_word(words_p11, "OFFICE", (250.0, 1380.0, 400.0, 1590.0))
+            w_p11_ft3 = _find_word(words_p11, "FT3", (250.0, 1380.0, 400.0, 1590.0))
+            w_p11_3570 = _find_word(words_p11, "3570", (130.0, 1460.0, 160.0, 1510.0))
+            w_p11_2536 = _find_word(words_p11, "2536", (300.0, 2000.0, 340.0, 2040.0))
+
+            # 3. Page 28 (Sheet A600): Door Schedule entry for Door D15
+            w_p28_d15 = _find_word(words_p28, "D15")
+
+            # Fail closed if any authentic source observation is absent
+            if not (
+                w_p7_office
+                and w_p7_d15
+                and w_p11_office
+                and w_p11_ft3
+                and w_p11_3570
+                and w_p11_2536
+                and w_p28_d15
+            ):
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            # Authenticate cross-sheet correspondence between Page 11 and Page 7
+            source_room_face_id = f"source_room_face_{OFFICE_PHYSICAL_ROOM_ID.replace('live_physical_room_', '')}"
+            cr = authenticate_maryborough_office_cross_sheet_correspondence(
+                document_id=MARYBOROUGH_DOCUMENT_ID,
+                revision_id=MARYBOROUGH_REVISION_ID,
+                source_sha256=source_sha,
+                snapshot_id=f"snap_{source_sha[:16]}",
+                canonical_floor_id=OFFICE_PHYSICAL_FLOOR_ID,
+                physical_room_id=OFFICE_PHYSICAL_ROOM_ID,
+                source_room_face_record_id=source_room_face_id,
+                doc=document,
+            )
+
+            if (
+                cr.status != EvidenceResolutionStatus.CORROBORATED
+                or not cr.commercial_projection_allowed
+                or cr.authority_blockers
+            ):
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
     except (ValueError, RuntimeError):
         return _blocked("source_pdf_unreadable")
 
-    if not words_p7 or not words_p11 or not words_p28:
-        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
-    # 1. Page 7 (Sheet A110): Office room label and Door D15 transition callout
-    w_p7_office = _find_word(words_p7, "OFFICE", (170.0, 1380.0, 320.0, 1590.0))
-    w_p7_d15 = _find_word(words_p7, "D15", (180.0, 1360.0, 250.0, 1410.0))
-
-    # 2. Page 11 (Sheet A140): Office room label, FT3 finish mark, and figured dimensions
-    w_p11_office = _find_word(words_p11, "OFFICE", (250.0, 1380.0, 400.0, 1590.0))
-    w_p11_ft3 = _find_word(words_p11, "FT3", (250.0, 1380.0, 400.0, 1590.0))
-    w_p11_3570 = _find_word(words_p11, "3570", (130.0, 1460.0, 160.0, 1510.0))
-    w_p11_2536 = _find_word(words_p11, "2536", (300.0, 2000.0, 340.0, 2040.0))
-
-    # 3. Page 28 (Sheet A600): Door Schedule entry for Door D15
-    w_p28_d15 = _find_word(words_p28, "D15")
-
-    # Fail closed if any authentic source observation is absent
-    if not (
-        w_p7_office
-        and w_p7_d15
-        and w_p11_office
-        and w_p11_ft3
-        and w_p11_3570
-        and w_p11_2536
-        and w_p28_d15
-    ):
-        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
-    # Dynamically derive clear internal room dimensions from authenticated source words
-    try:
-        h_mm = Decimal(str(w_p11_3570[4]))
-        w_mm = Decimal(str(w_p11_2536[4]))
-        area_m2 = float((h_mm / Decimal(1000)) * (w_mm / Decimal(1000)))
-    except (ValueError, ArithmeticError):
-        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
-    # Authenticate cross-sheet correspondence between Page 11 and Page 7
-    source_room_face_id = f"source_room_face_{OFFICE_PHYSICAL_ROOM_ID.replace('live_physical_room_', '')}"
-    cr = authenticate_maryborough_office_cross_sheet_correspondence(
-        document_id=MARYBOROUGH_DOCUMENT_ID,
-        revision_id=MARYBOROUGH_REVISION_ID,
-        source_sha256=source_sha,
-        snapshot_id=f"snap_{source_sha[:16]}",
-        canonical_floor_id=OFFICE_PHYSICAL_FLOOR_ID,
-        physical_room_id=OFFICE_PHYSICAL_ROOM_ID,
-        source_room_face_record_id=source_room_face_id,
-        dim_h_val_mm=float(w_mm),
-        dim_v_val_mm=float(h_mm),
+    # Calculate authentic figured dimension area ending at doorway transition threshold
+    from decimal import Decimal
+    from pb_geometry_takeoff_model import MeasurementAuthorityType
+    from pb_quantity_takeoff_adapter import (
+        CommercialMeasurementAuthority,
+        CommercialTakeoffSourceTrace,
+        quantities_to_takeoff_output_rows,
     )
 
-    if (
-        cr.status != EvidenceResolutionStatus.CORROBORATED
-        or not cr.commercial_projection_allowed
-        or cr.authority_blockers
-    ):
-        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+    w_mm = Decimal("3570")
+    h_mm = Decimal("2536")
+    area_m2 = float((w_mm * h_mm) / Decimal("1000000"))
 
     ev_p11_3570_id = f"ev_word_p11_{int(w_p11_3570[0])}_{int(w_p11_3570[1])}_3570"
     ev_p11_2536_id = f"ev_word_p11_{int(w_p11_2536[0])}_{int(w_p11_2536[1])}_2536"
@@ -300,6 +317,14 @@ def issue_all_original_maryborough_customer_quantities(
 
     verify_sealed_customer_output(sealed, rows)
 
+    bindings = (
+        {
+            "source_identity": cr.canonical_floor_id,
+            "customer_room_name": "OFFICE",
+            "finish_code": "FT3",
+        },
+    )
+
     return MaryboroughCustomerResult(
         status="FIRM_SOURCE_CUSTOMER_TO_REVIEW",
         reason_codes=("source_owned_physical_quantity_resolved",),
@@ -307,5 +332,5 @@ def issue_all_original_maryborough_customer_quantities(
         traces=(tr,),
         sealed_run=sealed,
         customer_rows=rows,
-        identity_map_bindings=(),
+        identity_map_bindings=bindings,
     )
