@@ -11,6 +11,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_build_up_statement_shadow import (
     SCOPE_INTERNAL_WALLS,
     collect_wall_build_up_statements,
+    collect_wall_build_up_statements_with_diagnostics,
     parse_wall_build_up_statement,
 )
 
@@ -155,7 +156,7 @@ def _words(positions=None, native_ok=True):
     return receipts
 
 
-def _raster(monkeypatch, *, status, text):
+def _raster(monkeypatch, *, status, text, reason_codes=("stub_raster_refusal",)):
     import pb_raster_text_corroboration_authority as raster_module
 
     class _Raster:
@@ -163,7 +164,7 @@ def _raster(monkeypatch, *, status, text):
         def from_source_visibility_producer(_source):
             return SimpleNamespace(publish=lambda selector: SimpleNamespace(
                 status=status, record=object() if status is EvidenceResolutionStatus.CORROBORATED else None,
-                corroborated_text=text(selector)))
+                corroborated_text=text(selector), reason_codes=reason_codes))
 
     monkeypatch.setattr(raster_module, "RasterTextCorroborationProducer", _Raster)
 
@@ -193,3 +194,68 @@ def test_a_word_only_the_raster_authority_proves_counts_only_when_that_proof_is_
     # a reading that is present but not corroborated is not proof, however parseable the claimed word is
     _raster(monkeypatch, status=EvidenceResolutionStatus.ABSTAINED, text=lambda s: texts[s.observation_id])
     assert collect_wall_build_up_statements(_StubSource(observations), revision_id="revision-1", page_ids=("1",)) == ()
+
+
+# ---- counts-only diagnostics: why a page produced no statement (never any text)
+
+
+def _diagnose(source, published, page_ids=("1",)):
+    return collect_wall_build_up_statements_with_diagnostics(
+        source, revision_id=published.revision.revision_id, page_ids=page_ids)
+
+
+def test_diagnostics_of_a_fully_authenticated_note_count_every_word_as_natively_proved():
+    source, published = _source(_pdf())
+    statements, (page,) = _diagnose(source, published)
+    assert len(statements) == 1
+    words = len(NOTE.split())
+    assert (page.page_id, page.native_word_count, page.block_count) == ("1", words, 1)
+    block, = page.candidate_blocks
+    assert (block.word_count, block.natively_proved_words, block.raster_proved_words, block.unproved_words) == (words, words, 0, 0)
+    assert block.parsed and block.unproved_reason_codes == () and block.diagnostic_only and page.diagnostic_only
+
+
+def test_diagnostics_separate_a_page_without_text_from_a_page_with_no_candidate_block():
+    source, published = _source(_pdf(note="SOME UNRELATED NOTE ABOUT THE ROOF"))
+    statements, diagnostics = _diagnose(source, published, page_ids=("1", "2"))
+    assert statements == ()
+    unrelated, absent = diagnostics
+    assert (unrelated.page_id, unrelated.native_word_count > 0, unrelated.block_count, unrelated.candidate_blocks) == ("1", True, 1, ())
+    # a page that was never ingested (for example a wrong page index) has no words at all: that is not "no note"
+    assert (absent.page_id, absent.native_word_count, absent.block_count, absent.candidate_blocks) == ("2", 0, 0, ())
+    assert collect_wall_build_up_statements_with_diagnostics(source, revision_id="no-such-revision", page_ids=("1",)) == ((), ())
+
+
+def test_diagnostics_report_a_candidate_block_that_was_read_but_is_not_a_statement():
+    source, published = _source(_pdf(note="THE INTERNAL WALLS ARE LINED WITH SOMETHING"))
+    statements, (page,) = _diagnose(source, published)
+    block, = page.candidate_blocks
+    assert statements == () and block.parsed is False
+    assert block.unproved_words == 0 and block.natively_proved_words == block.word_count
+
+
+def test_diagnostics_count_the_raster_refusals_of_a_block_that_cannot_be_proved(monkeypatch):
+    _raster(monkeypatch, status=EvidenceResolutionStatus.ABSTAINED, text=lambda _s: None,
+            reason_codes=("raster_text_backend_unavailable",))
+    statements, (page,) = collect_wall_build_up_statements_with_diagnostics(
+        _StubSource(_words(native_ok=False)), revision_id="revision-1", page_ids=("1",))
+    words = len(NOTE.split())
+    block, = page.candidate_blocks
+    assert statements == () and block.parsed is False
+    assert (block.word_count, block.natively_proved_words, block.raster_proved_words, block.unproved_words) == (words, 0, 0, words)
+    assert block.unproved_reason_codes == (("raster_text_backend_unavailable", words),)
+
+
+def test_diagnostics_show_how_close_a_partly_proved_block_came_without_publishing_it(monkeypatch):
+    texts = {f"obs-{i}": word for i, word in enumerate(NOTE.split())}
+    observations = _words(native_ok=False)
+    proved = {oid for index, oid in enumerate(observations) if index != 7}  # exactly one word cannot be read back
+    _raster(monkeypatch, status=EvidenceResolutionStatus.CORROBORATED,
+            text=lambda s: texts[s.observation_id] if s.observation_id in proved else None)
+    statements, (page,) = collect_wall_build_up_statements_with_diagnostics(
+        _StubSource(observations), revision_id="revision-1", page_ids=("1",))
+    block, = page.candidate_blocks
+    words = len(NOTE.split())
+    assert statements == () and block.parsed is False
+    assert (block.natively_proved_words, block.raster_proved_words, block.unproved_words) == (0, words - 1, 1)
+    assert block.natively_proved_words + block.raster_proved_words + block.unproved_words == block.word_count

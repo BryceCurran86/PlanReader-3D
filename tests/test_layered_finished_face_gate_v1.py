@@ -273,6 +273,7 @@ def test_whole_claim_with_the_gate_publishes_no_quantity_and_says_why(tmp_path):
     assert receipt.verdict == VERDICT_UNRESOLVED
     # no statement page was named and this page has no scale bar: both facts are reported, nothing is guessed
     assert {REASON_STATEMENT_UNAVAILABLE, REASON_SCALE_UNAVAILABLE} <= set(receipt.reason_codes)
+    assert claim.layered_finished_face_statement_diagnostics == ()  # no page was named, so nothing was read
     assert (receipt.takeoff_eligible, receipt.commercial_projection_allowed, receipt.metric_area_issued) == (False, False, False)
     assert {c for _r, c in claim.same_view_room_area_first_failure_codes} == {"same_view_layered_ring_finished_face_not_established"}
 
@@ -282,7 +283,22 @@ def test_whole_claim_reads_an_authenticated_statement_but_still_issues_nothing(t
     receipt, = claim.layered_finished_face_receipts
     assert REASON_STATEMENT_UNAVAILABLE not in receipt.reason_codes  # the statement was authenticated and read
     assert len(receipt.statement_text_sha256) == 1 and receipt.statement_text_sha256[0]
+    page, = claim.layered_finished_face_statement_diagnostics
+    block, = page.candidate_blocks
+    assert page.page_id == "1" and block.parsed and block.unproved_words == 0 and block.word_count == len(NOTE.split())
     # a statement is not a scale, an area or authority: the face is still noncommercial
+    assert claim.room_area_quantity_evidence == () and publish_live_floor_area_quantities(claim) == ()
+
+
+def test_a_receipt_without_a_statement_says_whether_the_page_was_read_and_why_nothing_parsed(tmp_path):
+    # the named page is read and has a candidate note, but it is not a statement: the receipt carries no hash,
+    # and the claim says the words were all proved (so the cause is the note, not the text authorities)
+    claim = _claim(tmp_path, gate=True, statement_pages=(0,), note="THE INTERNAL WALLS ARE LINED WITH SOMETHING")
+    receipt, = claim.layered_finished_face_receipts
+    assert REASON_STATEMENT_UNAVAILABLE in receipt.reason_codes and receipt.statement_text_sha256 == ()
+    page, = claim.layered_finished_face_statement_diagnostics
+    block, = page.candidate_blocks
+    assert page.native_word_count > 0 and block.parsed is False and block.unproved_words == 0
     assert claim.room_area_quantity_evidence == () and publish_live_floor_area_quantities(claim) == ()
 
 

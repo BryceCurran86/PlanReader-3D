@@ -109,6 +109,39 @@ def _cheap_block_filter(raw_words: Sequence[str]) -> bool:
     return "INTERNAL" in joined and "WALL" in joined and "LINED" in joined
 
 
+@dataclass(frozen=True)
+class WallBuildUpBlockDiagnostic:
+    """Counts for one candidate statement block: how many of its words each authority proved. No text.
+
+    A block is a candidate when its raw words mention internal walls and lining; that is only a way to decide
+    which blocks are worth proving, never trust. ``unproved_reason_codes`` are the raster authority's own
+    refusal codes (for example an unavailable OCR backend or a reading that disagrees with the native word).
+    """
+
+    page_id: str
+    block_no: int
+    word_count: int
+    natively_proved_words: int
+    raster_proved_words: int
+    unproved_words: int
+    unproved_reason_codes: tuple[tuple[str, int], ...]
+    parsed: bool
+    schema_version: str = WALL_BUILD_UP_STATEMENT_SCHEMA_VERSION
+    diagnostic_only: bool = True
+
+
+@dataclass(frozen=True)
+class WallBuildUpPageDiagnostic:
+    """What was read from one named page: ``native_word_count`` 0 means the page has no text to prove at all."""
+
+    page_id: str
+    native_word_count: int
+    block_count: int
+    candidate_blocks: tuple[WallBuildUpBlockDiagnostic, ...]
+    schema_version: str = WALL_BUILD_UP_STATEMENT_SCHEMA_VERSION
+    diagnostic_only: bool = True
+
+
 def collect_wall_build_up_statements(
     source: object, *, revision_id: str, page_ids: Sequence[str],
 ) -> tuple[WallBuildUpStatement, ...]:
@@ -117,6 +150,15 @@ def collect_wall_build_up_statements(
     Reads only the pages named. A block with any word that neither the text-integrity authority nor the
     raster corroboration authority proves produces nothing; so does a block that does not parse exactly.
     """
+    return collect_wall_build_up_statements_with_diagnostics(
+        source, revision_id=revision_id, page_ids=page_ids,
+    )[0]
+
+
+def collect_wall_build_up_statements_with_diagnostics(
+    source: object, *, revision_id: str, page_ids: Sequence[str],
+) -> tuple[tuple[WallBuildUpStatement, ...], tuple[WallBuildUpPageDiagnostic, ...]]:
+    """The statements of ``collect_wall_build_up_statements`` plus counts-only diagnostics of what was read."""
     from pb_raster_text_corroboration_authority import (
         RasterTextCorroborationProducer,
         RasterTextCorroborationSelector,
@@ -124,13 +166,15 @@ def collect_wall_build_up_statements(
 
     published = source.published_snapshot_for_revision(revision_id)  # type: ignore[attr-defined]
     if published is None:
-        return ()
+        return (), ()
     text_authority = source.text_integrity_authority()  # type: ignore[attr-defined]
     raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)  # type: ignore[arg-type]
     found: list[WallBuildUpStatement] = []
+    page_diagnostics: list[WallBuildUpPageDiagnostic] = []
     for raw_page in page_ids:
         page_id = str(raw_page)
         grouped: dict[tuple[str, int], list[tuple[str, object, object]]] = {}
+        native_word_count = 0
         for observation_id in text_authority.observation_ids_with_receipt_page(
             published.snapshot.snapshot_id, published.text_observation_ids, page_id,
         ):
@@ -145,9 +189,11 @@ def collect_wall_build_up_statements(
                 or receipt.line_no is None or receipt.word_no is None
             ):
                 continue
+            native_word_count += 1
             grouped.setdefault((str(receipt.source_partition_id), int(receipt.block_no)), []).append(
                 (str(observation_id), result, receipt)
             )
+        block_diagnostics: list[WallBuildUpBlockDiagnostic] = []
         for (partition_id, block_no), items in sorted(grouped.items()):
             ordered = sorted(items, key=lambda item: (int(item[2].line_no), int(item[2].word_no)))
             if len({(int(item[2].line_no), int(item[2].word_no)) for item in ordered}) != len(ordered):
@@ -155,8 +201,11 @@ def collect_wall_build_up_statements(
             if not _cheap_block_filter([str(item[2].raw_text or "") for item in ordered]):
                 continue
             words: list[str] = []
+            natively_proved = raster_proved = 0
+            refusals: dict[str, int] = {}
             for observation_id, native, _receipt in ordered:
                 trusted: Optional[str] = None
+                by_raster = False
                 if native.status is EvidenceResolutionStatus.CORROBORATED and native.trusted_text:
                     trusted = str(native.trusted_text)
                 else:
@@ -170,16 +219,27 @@ def collect_wall_build_up_statements(
                         and corroborated.record is not None and corroborated.corroborated_text
                     ):
                         trusted = str(corroborated.corroborated_text)
-                if not trusted or not trusted.strip():
-                    words = []
-                    break
+                        by_raster = True
+                    else:
+                        for code in corroborated.reason_codes:
+                            refusals[str(code)] = refusals.get(str(code), 0) + 1
+                if trusted is None or not trusted.strip():
+                    continue  # unproved; every word is still counted so the diagnostic says how close the block came
                 words.append(trusted.strip())
-            if not words:
-                continue
-            text = " ".join(words)
-            parsed = parse_wall_build_up_statement(text)
+                if by_raster:
+                    raster_proved += 1
+                else:
+                    natively_proved += 1
+            parsed = parse_wall_build_up_statement(" ".join(words)) if len(words) == len(ordered) else None
+            block_diagnostics.append(WallBuildUpBlockDiagnostic(
+                page_id=page_id, block_no=block_no, word_count=len(ordered),
+                natively_proved_words=natively_proved, raster_proved_words=raster_proved,
+                unproved_words=len(ordered) - len(words),
+                unproved_reason_codes=tuple(sorted(refusals.items())), parsed=parsed is not None,
+            ))
             if parsed is None:
                 continue
+            text = " ".join(words)
             found.append(WallBuildUpStatement(
                 page_id=page_id, scope=parsed.scope, frame_mm=parsed.frame_mm, lining_mm=parsed.lining_mm,
                 lining_material=parsed.lining_material, wet_area_lining_mm=parsed.wet_area_lining_mm,
@@ -190,14 +250,21 @@ def collect_wall_build_up_statements(
                 document_id=published.revision.document_id, revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
             ))
+        page_diagnostics.append(WallBuildUpPageDiagnostic(
+            page_id=page_id, native_word_count=native_word_count, block_count=len(grouped),
+            candidate_blocks=tuple(block_diagnostics),
+        ))
     found.sort(key=lambda s: (s.page_id, s.block_no, s.source_partition_id))
-    return tuple(found)
+    return tuple(found), tuple(page_diagnostics)
 
 
 __all__ = [
     "SCOPE_INTERNAL_WALLS",
     "ParsedWallBuildUp",
+    "WallBuildUpBlockDiagnostic",
+    "WallBuildUpPageDiagnostic",
     "WallBuildUpStatement",
     "collect_wall_build_up_statements",
+    "collect_wall_build_up_statements_with_diagnostics",
     "parse_wall_build_up_statement",
 ]

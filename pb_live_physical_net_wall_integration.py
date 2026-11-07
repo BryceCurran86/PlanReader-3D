@@ -139,6 +139,9 @@ class LivePhysicalNetWallClaim:
     # Diagnostic only (the opt-in finished-face gate): per ring face, which source fact the original does or
     # does not state about the wall face the ring follows. Never a quantity, scale or authority.
     layered_finished_face_receipts: tuple[Any, ...] = ()
+    # Diagnostic only: per statement page, how many words each text authority proved (counts and refusal
+    # codes, never text), so a receipt without a statement says why.
+    layered_finished_face_statement_diagnostics: tuple[Any, ...] = ()
     # Source-authenticated same-view measurement first-gate receipts; a separate
     # cross-view or scaled authority may independently resolve the room area.
     same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
@@ -625,6 +628,7 @@ def _collect_live_physical_net_wall_claim(
     room_area_bridges = []
     finished_face_receipts: list[Any] = []
     finished_face_statements: Optional[tuple[Any, ...]] = None
+    finished_face_statement_diagnostics: tuple[Any, ...] = ()
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
     same_view_area = None
     cross_view_area = None
@@ -962,7 +966,7 @@ def _collect_live_physical_net_wall_claim(
 
             if gated_record_ids:
                 if finished_face_statements is None:
-                    finished_face_statements = _collect_finished_face_statements(
+                    finished_face_statements, finished_face_statement_diagnostics = _collect_finished_face_statements(
                         native_text_kwargs=native_text_kwargs,
                         payload=payload,
                         document_id=document_id,
@@ -1194,6 +1198,7 @@ def _collect_live_physical_net_wall_claim(
                 physical_scale_failures_by_room.items()
             )),
             layered_finished_face_receipts=tuple(finished_face_receipts),
+            layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
         )
 
     return LivePhysicalNetWallClaim(
@@ -1249,16 +1254,17 @@ def _collect_live_physical_net_wall_claim(
             physical_scale_failures_by_room.items()
         )),
         layered_finished_face_receipts=tuple(finished_face_receipts),
+        layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
     )
 
 
 def _collect_finished_face_statements(
     *, native_text_kwargs, payload, document_id, published, statement_pages,
-) -> tuple[Any, ...]:
-    """Authenticated internal-wall build-up statements of the pages named; none when no page is named."""
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """(authenticated internal-wall build-up statements, counts-only diagnostics) of the pages named."""
     if not statement_pages:
-        return ()
-    from pb_wall_build_up_statement_shadow import collect_wall_build_up_statements
+        return (), ()
+    from pb_wall_build_up_statement_shadow import collect_wall_build_up_statements_with_diagnostics
 
     page_ids = tuple(str(int(index) + 1) for index in statement_pages)
     statement_source = SourceVisibilityProducer(
@@ -1277,8 +1283,8 @@ def _collect_finished_face_statements(
         or statement_published.revision.revision_id != published.revision.revision_id
         or statement_published.revision.source_sha256 != published.revision.source_sha256
     ):
-        return ()
-    return collect_wall_build_up_statements(
+        return (), ()
+    return collect_wall_build_up_statements_with_diagnostics(
         statement_source, revision_id=statement_published.revision.revision_id, page_ids=page_ids,
     )
 
