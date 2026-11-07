@@ -625,7 +625,15 @@ def _header_table_specs(
         mapping = detect_header(table_cells)
         if "mark" not in mapping:
             continue
-        if not any(key in mapping for key in ("dims", "width", "height", "count", "desc")):
+        # A notes/description heading is NOT a schedule-dimension table.
+        # The physical opening binding must never accept a row from
+        # "DOOR | NOTES" merely because the first cell denotes a mark.
+        # Only complete printed dimension columns may establish a header;
+        # unknown basis remains unknown and is never rough-opening authority.
+        if not (
+            "dims" in mapping
+            or ("width" in mapping and "height" in mapping)
+        ):
             continue
 
         if position == 0:
