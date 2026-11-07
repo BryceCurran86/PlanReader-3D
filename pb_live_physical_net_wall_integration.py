@@ -947,7 +947,13 @@ def _collect_live_physical_net_wall_claim(
                         if source_quantity.quantity_id != floor.metric_area_quantity_id:
                             continue
                         receipt = source_owned_floor_scale_receipt(
-                            floor=floor, quantity=source_quantity, bridge=scale_bridge
+                            floor=floor,
+                            quantity=source_quantity,
+                            bridge=scale_bridge,
+                            # Only the actual source producer can grant this.
+                            # The native PhysicalScaleEvidence dataclass alone
+                            # is not a customer measurement authority.
+                            scale_authority=scale_producer.authority(),
                         )
                         if receipt is not None:
                             source_owned_floor_scale_receipts.append(receipt)
