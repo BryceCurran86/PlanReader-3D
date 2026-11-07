@@ -149,10 +149,29 @@ def _lineage_reasons(
         and not quantity.blocking_reasons
         and not any("conflict" in _clean(code).lower() for code in quantity.reason_codes)
     )
+    # Owner-approved door review promotion: same contract, different family. The dedicated promotion module proves the shadow area, the named
+    # owner approval and the closed commercial gates before it mints this receipt; here only a COMPLETE receipt keeps the review lineage valid.
+    # The height is an owner assumption, so this never makes the quantity publishable, and every incomplete receipt stays refused.
+    door_review_receipt = (
+        quantity.family == "opening_area"
+        and _clean(quantity.status).lower() == "review_required"
+        and metadata.get("owner_approved_door_review_promotion") is True
+        and metadata.get("area_basis") == "owner_approved_second_axis"
+        and metadata.get("opening_kind") == "door"
+        and metadata.get("second_axis_basis") == "user_approved"
+        and metadata.get("shadow_only") is False
+        and metadata.get("commercial_projection_allowed") is True
+        and metadata.get("commercial_review_required") is True
+        and bool(_clean(metadata.get("owner_approved_second_axis_record_id")))
+        and _clean(metadata.get("owner_approved_second_axis_record_id")) in set(quantity.evidence_ids)
+        and not quantity.blocking_reasons
+        and not any("conflict" in _clean(code).lower() for code in quantity.reason_codes)
+    )
     if (
         not quantity.abstained
         and quantity_status_not_publishable(quantity.status)
         and not review_promotion_receipt
+        and not door_review_receipt
     ):
         reasons.append("quantity_status_not_publishable")
     if any("conflict" in _clean(reason).lower() for reason in quantity.reason_codes):

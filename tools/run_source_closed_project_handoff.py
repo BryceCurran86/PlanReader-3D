@@ -250,6 +250,13 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
         raise FileExistsError(
             f"unsafe family run directory symlink: {family_run_dir}; use a clean output directory"
         )
+    # The optional owner door review lane writes only into its own directory.
+    # An old review run must not mix with a new source attempt either.
+    review_dir = output_dir / "owner_door_review"
+    if review_dir.is_symlink():
+        raise FileExistsError(
+            f"unsafe owner door review directory symlink: {review_dir}; use a clean output directory"
+        )
     # A combined seal for another project is just as unsafe as a seal for the
     # requested project. Only the two diagnostic-only JSONs may be rewritten
     # after an unsealed attempt; all other JSON artifacts demand a new folder.
@@ -258,6 +265,7 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
         *(path for path in output_dir.glob("*.json")
           if path.name not in diagnostic_only),
         *(output_dir / "family_runs").glob("*.sealed.json"),
+        *(review_dir.iterdir() if review_dir.is_dir() else ()),
     )
     for path in possible_seals:
         if path.exists() or path.is_symlink():
@@ -297,6 +305,9 @@ def _generate_project_handoff_locked(
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
+    owner_door_height_approvals: Optional[Any] = None,
+    owner_door_approvals_template: bool = False,
 ) -> dict[str, Any]:
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
@@ -455,6 +466,14 @@ def _generate_project_handoff_locked(
     }
     if source_native_finish_text_shadow:
         summary["source_native_finish_text_shadow"] = True
+    if source_glyph_ledger_text_trust:
+        summary["source_glyph_ledger_text_trust"] = True
+    if owner_door_height_approvals is not None:
+        summary["owner_door_review"] = _owner_door_review_pending_summary(
+            owner_door_height_approvals
+        )
+    if owner_door_approvals_template:
+        summary["owner_door_approvals_template"] = _owner_door_template_pending_summary()
 
     output_dir.mkdir(parents=True, exist_ok=True)
     # The extractor may be terminated by an external memory/time limit rather
@@ -475,6 +494,9 @@ def _generate_project_handoff_locked(
 
     _write_json(output_dir / "production_summary.json", summary)
 
+    # Keep the claim and both optional owner-review lanes on the same source
+    # policy. Another door's page height cannot supply a target's second axis.
+    single_width_uniform_page_door_height_shadow = False
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
@@ -486,8 +508,11 @@ def _generate_project_handoff_locked(
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
             **({"source_native_finish_text_shadow": True}
                if source_native_finish_text_shadow else {}),
+            **({"source_glyph_ledger_text_trust": True}
+               if source_glyph_ledger_text_trust else {}),
         )
         _gc_stage_boundary()
     except Exception as exc:
@@ -1123,8 +1148,192 @@ def _generate_project_handoff_locked(
         summary["verified_customer_row_count"] = len(verified_partial_customer_rows)
         summary["customer_rows_verified"] = True
         summary["customer_rows_file"] = str(customer_path)
+    if owner_door_height_approvals is not None:
+        # Additive estimator-review lane: runs only after every other output is
+        # final, writes only below owner_door_review/, and cannot change any
+        # family run, the combined run, customer rows, claim or project status.
+        _run_owner_door_review_lane(
+            summary,
+            output_dir,
+            owner_door_height_approvals,
+            pdf_path=pdf_path,
+            claim=claim,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            source_sha256=source_sha256,
+            page_count=page_count,
+            pages=claim_execution_pages,
+            topology_pages=(topology_pages if topology_restricted else None),
+            room_area_support_pages=execution_room_support_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
+            native_text_kwargs={
+                **({"source_native_finish_text_shadow": True}
+                   if source_native_finish_text_shadow else {}),
+                **({"source_glyph_ledger_text_trust": True}
+                   if source_glyph_ledger_text_trust else {}),
+            },
+        )
+    if owner_door_approvals_template:
+        # Same isolation as the review lane: after every other output is final,
+        # one file below owner_door_review/, no effect on any other output.
+        _run_owner_door_approvals_template_lane(
+            summary,
+            output_dir,
+            pdf_path=pdf_path,
+            claim=claim,
+            source_sha256=source_sha256,
+            page_count=page_count,
+            pages=claim_execution_pages,
+            topology_pages=(topology_pages if topology_restricted else None),
+            room_area_support_pages=execution_room_support_pages,
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
+            native_text_kwargs={
+                **({"source_native_finish_text_shadow": True}
+                   if source_native_finish_text_shadow else {}),
+                **({"source_glyph_ledger_text_trust": True}
+                   if source_glyph_ledger_text_trust else {}),
+            },
+        )
     _write_json(output_dir / "production_summary.json", summary)
     return summary
+
+
+def _owner_door_review_pending_summary(approvals: Any) -> dict[str, Any]:
+    """Summary block of the optional owner door review lane before it has run."""
+    from pb_owner_door_review_handoff import GATE_NOT_RUN
+
+    return {
+        "enabled": True,
+        "approvals_file_sha256": approvals.file_sha256,
+        "approval_count": len(approvals.records),
+        "approval_pages": list(approvals.pages),
+        "first_gate": GATE_NOT_RUN,
+        "candidate_count": 0,
+        "withheld_counts": {},
+        "unused_approval_count": 0,
+        "approval_pages_out_of_scope": [],
+        "review_run_id": None,
+        "review_run_file": None,
+        "review_rows_file": None,
+        "review_row_count": 0,
+        "included_in_combined_run": False,
+        "benchmark_score_granted": False,
+    }
+
+
+def _run_owner_door_review_lane(
+    summary: dict[str, Any],
+    output_dir: Path,
+    approvals: Any,
+    *,
+    pdf_path: Path,
+    **step_kwargs: Any,
+) -> None:
+    """Optional estimator-review rows for owner-approved doors (origin AI, "To review", all commercial gates closed).
+
+    A failure here is recorded as a gate and never changes another output or the project status; rows are reported only
+    when the sealed review run verified against them.
+    """
+    from pb_owner_door_review_handoff import (
+        GATE_VERIFIED,
+        REVIEW_DIRNAME,
+        REVIEW_ROWS_FILENAME,
+        REVIEW_RUN_FILENAME,
+        run_owner_door_review_step,
+    )
+
+    lane = summary["owner_door_review"]
+    review_dir = output_dir / REVIEW_DIRNAME
+    written: list[Path] = []
+    try:
+        outcome = run_owner_door_review_step(pdf_path, approvals=approvals, **step_kwargs)
+        lane["candidate_count"] = int(outcome.candidate_count)
+        lane["withheld_counts"] = dict(outcome.withheld_counts)
+        lane["unused_approval_count"] = int(outcome.unused_approval_count)
+        lane["approval_pages_out_of_scope"] = list(outcome.approval_pages_out_of_scope)
+        if outcome.gate == GATE_VERIFIED:
+            run_text = outcome.run.to_json()
+            rows = list(outcome.rows)
+            run_path = review_dir / REVIEW_RUN_FILENAME
+            rows_path = review_dir / REVIEW_ROWS_FILENAME
+            written.append(run_path)
+            _write_text_atomic(run_path, run_text)
+            written.append(rows_path)
+            _write_json(rows_path, rows)
+            lane["review_run_id"] = outcome.run.run_id
+            lane["review_run_file"] = str(run_path)
+            lane["review_rows_file"] = str(rows_path)
+            lane["review_row_count"] = len(rows)
+        lane["first_gate"] = outcome.gate
+    except Exception as exc:
+        for stale in written:
+            stale.unlink(missing_ok=True)
+        try:
+            review_dir.rmdir()
+        except OSError:
+            pass
+        lane["first_gate"] = f"OWNER_DOOR_REVIEW_UNVERIFIED:{type(exc).__name__}"
+
+
+def _owner_door_template_pending_summary() -> dict[str, Any]:
+    """Summary block of the optional approvals-template export before it has run."""
+    from pb_owner_door_review_handoff import GATE_TEMPLATE_NOT_RUN
+
+    return {
+        "enabled": True,
+        "first_gate": GATE_TEMPLATE_NOT_RUN,
+        "door_count": 0,
+        "pages": [],
+        "template_file": None,
+        "template_file_sha256": None,
+        "authority_granted": False,
+        "included_in_combined_run": False,
+        "benchmark_score_granted": False,
+    }
+
+
+def _run_owner_door_approvals_template_lane(
+    summary: dict[str, Any],
+    output_dir: Path,
+    *,
+    pdf_path: Path,
+    **step_kwargs: Any,
+) -> None:
+    """Write an approvals file with every owner field blank, for the owner to fill in (no value is produced here).
+
+    The loader refuses the file until each kept entry has a height, a named approver and a dated approval. A failure is
+    recorded as a gate and never changes another output or the project status.
+    """
+    from pb_owner_door_review_handoff import (
+        GATE_TEMPLATE_READY,
+        REVIEW_DIRNAME,
+        TEMPLATE_FILENAME,
+        run_owner_door_approvals_template_step,
+    )
+
+    lane = summary["owner_door_approvals_template"]
+    review_dir = output_dir / REVIEW_DIRNAME
+    written: list[Path] = []
+    try:
+        outcome = run_owner_door_approvals_template_step(pdf_path, **step_kwargs)
+        if outcome.gate == GATE_TEMPLATE_READY:
+            path = review_dir / TEMPLATE_FILENAME
+            written.append(path)
+            _write_text_atomic(path, json.dumps(outcome.document, indent=2, sort_keys=True) + "\n")
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            lane["template_file"] = str(path)
+            lane["template_file_sha256"] = digest
+            lane["door_count"] = int(outcome.door_count)
+            lane["pages"] = list(outcome.pages)
+        lane["first_gate"] = outcome.gate
+    except Exception as exc:
+        for stale in written:
+            stale.unlink(missing_ok=True)
+        try:
+            review_dir.rmdir()
+        except OSError:
+            pass
+        lane["first_gate"] = f"OWNER_DOOR_APPROVALS_TEMPLATE_UNVERIFIED:{type(exc).__name__}"
 
 
 
@@ -1185,6 +1394,9 @@ def generate_project_handoff(
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
+    owner_door_height_approvals_file: Optional[Path] = None,
+    owner_door_approvals_template: bool = False,
 ) -> dict[str, Any]:
     """Serialize one source run per output directory without trusting stale seals.
 
@@ -1193,9 +1405,32 @@ def generate_project_handoff(
     rather than pretending a possibly partial run was completed.
     """
     # Bad source inputs never create directories or lock files.
-    _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
+    clean_family_group = _validate_source_handoff_inputs(
+        pdf_path, project_id, workspace_id, family_group,
+    )
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("source_native_finish_text_shadow must be an explicit boolean")
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("source_glyph_ledger_text_trust must be an explicit boolean")
+    if type(owner_door_approvals_template) is not bool:
+        raise ValueError("owner_door_approvals_template must be an explicit boolean")
+    if owner_door_approvals_template:
+        # Optional, default off: a blank approvals file for the owner to fill in.
+        if clean_family_group not in {"all", "core"}:
+            raise ValueError("owner door approvals template requires family_group all or core")
+        if owner_door_height_approvals_file is not None:
+            raise ValueError("owner door approvals template and owner door height approvals are mutually exclusive")
+    owner_door_height_approvals = None
+    if owner_door_height_approvals_file is not None:
+        # Optional, default off. Opening families only; the file is bound to this
+        # exact document and validated before any directory or lock exists.
+        if clean_family_group not in {"all", "core"}:
+            raise ValueError("owner door height approvals require family_group all or core")
+        from pb_owner_door_review_handoff import load_owner_door_height_approvals
+
+        owner_door_height_approvals = load_owner_door_height_approvals(
+            owner_door_height_approvals_file, source_sha256=_sha256(pdf_path),
+        )
     if output_dir.is_symlink():
         raise FileExistsError("output directory cannot be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1215,6 +1450,12 @@ def generate_project_handoff(
                 source_plan_page_index=source_plan_page_index,
                 **({"source_native_finish_text_shadow": True}
                    if source_native_finish_text_shadow else {}),
+                **({"source_glyph_ledger_text_trust": True}
+                   if source_glyph_ledger_text_trust else {}),
+                **({"owner_door_height_approvals": owner_door_height_approvals}
+                   if owner_door_height_approvals is not None else {}),
+                **({"owner_door_approvals_template": True}
+                   if owner_door_approvals_template else {}),
             )
     finally:
         os.close(descriptor)
@@ -1247,6 +1488,30 @@ def _parser() -> argparse.ArgumentParser:
             "text proof (needs fontTools; default off, grants no quantity)"
         ),
     )
+    parser.add_argument(
+        "--source-glyph-ledger-text-trust", action="store_true",
+        help=(
+            "Opt in to trusting words blocked only by the glyph proof, through sealed "
+            "raster corroboration plus verified glyph mappings (needs an OCR backend; "
+            "default off, grants no quantity)"
+        ),
+    )
+    parser.add_argument(
+        "--owner-door-height-approvals", type=Path, default=None,
+        help=(
+            "Opt in to estimator-review rows for owner-approved door heights from an explicit approvals "
+            "file bound to this PDF (family group all or core; default off). Writes only below "
+            "owner_door_review/; never changes a family run, the combined run, customer rows or the status"
+        ),
+    )
+    parser.add_argument(
+        "--write-owner-door-approvals-template", action="store_true",
+        help=(
+            "Opt in to writing owner_door_review/owner_door_height_approvals_template.json: every door opening that "
+            "could be approved, with height, approver and date left blank for the owner to fill in (family group all "
+            "or core; default off; excludes --owner-door-height-approvals; produces no value and grants no authority)"
+        ),
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -1262,6 +1527,12 @@ def main() -> int:
         source_plan_page_index=args.source_plan_page_index,
         **({"source_native_finish_text_shadow": True}
            if args.source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if args.source_glyph_ledger_text_trust else {}),
+        **({"owner_door_height_approvals_file": args.owner_door_height_approvals}
+           if args.owner_door_height_approvals is not None else {}),
+        **({"owner_door_approvals_template": True}
+           if args.write_owner_door_approvals_template else {}),
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
