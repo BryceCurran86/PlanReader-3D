@@ -13,7 +13,7 @@ from typing import Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
-from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence, stable_contract_id
 from pb_page_scale_calibration_authority import (
     ScaleCalibrationStatus,
     ScaleSourceType,
@@ -68,6 +68,28 @@ def _trusted_observations(values: object) -> bool:
         and bool(values)
         and all(type(value) is str and value and value == value.strip() for value in values)
         and len(set(values)) == len(values)
+    )
+
+
+def _source_physical_scale_record_id(physical: PhysicalScaleEvidence) -> str:
+    """Replay the ORIGINAL physical-scale producer's sealed ID payload.
+
+    The origin record was minted from authenticated bar ink and text. A copied
+    label or a newly invented identifier cannot replace those exact members.
+    """
+    selector = physical.selector
+    return stable_contract_id(
+        "physical_scale_v1",
+        {
+            "selector": selector.key,
+            "source_kind": physical.source_kind,
+            "source_span_pt": round(physical.source_span_pt, 12),
+            "physical_span_mm": round(physical.physical_span_mm, 9),
+            "points_per_mm": round(physical.points_per_mm, 15),
+            "source_segment_observation_ids": physical.source_segment_observation_ids,
+            "source_text_observation_ids": physical.source_text_observation_ids,
+        },
+        digest_chars=32,
     )
 
 
@@ -151,6 +173,8 @@ def _same_original_owners(
             <= max(1e-9, physical.points_per_mm * 1e-12)
             and abs(calibration.px_per_m - physical.points_per_mm * 1000.0)
             <= max(1e-9, calibration.px_per_m * 1e-12)
+            and abs(physical.mm_per_point * physical.points_per_mm - 1.0) <= 1e-12
+            and physical.record_id == _source_physical_scale_record_id(physical)
         )
     except (ValueError, TypeError, OverflowError, ZeroDivisionError):
         return False
