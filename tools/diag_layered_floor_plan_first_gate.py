@@ -121,12 +121,40 @@ def figured_dimension_face_ties(
     return {"figured_dimensions": len(dimensions), "both_extents_on_wall_layer_face": tied}
 
 
+def ring_figured_box_ties(rings: Sequence[Any], dimensions: Sequence[Any], *, tolerance_pt: float) -> dict[str, int]:
+    """For each ring: how many authenticated (horizontal, vertical) figured pairs have exactly the
+    ring's bounding box as their witness box. Counts only; corroboration, never a measurement."""
+    horizontals = []
+    verticals = []
+    for dimension in dimensions:
+        (ax, ay), (bx, by) = dimension.endpoints_pt
+        if dimension.orientation == "horizontal":
+            horizontals.append(tuple(sorted((ax, bx))))
+        elif dimension.orientation == "vertical":
+            verticals.append(tuple(sorted((ay, by))))
+    unique = competing = none = 0
+    for ring in rings:
+        x0, y0, x1, y1 = ring.bbox_pdf_pts
+        h = {span for span in horizontals if abs(span[0] - x0) <= tolerance_pt and abs(span[1] - x1) <= tolerance_pt}
+        v = {span for span in verticals if abs(span[0] - y0) <= tolerance_pt and abs(span[1] - y1) <= tolerance_pt}
+        pairs = len(h) * len(v)
+        if pairs == 1:
+            unique += 1
+        elif pairs > 1:
+            competing += 1
+        else:
+            none += 1
+    return {"rings": len(rings), "unique_figured_box_pair": unique, "competing_figured_box_pairs": competing, "no_figured_box_pair": none}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", required=True, type=Path)
     parser.add_argument("--page-index", required=True, type=int, help="0-based original page")
     parser.add_argument("--with-dimensions", action="store_true",
                         help="also ingest the page and tie authenticated figured dimensions to wall faces")
+    parser.add_argument("--rings", action="store_true",
+                        help="also build the doorway-closed room rings (shadow) and, with --with-dimensions, tie them to figured boxes")
     args = parser.parse_args()
     payload = args.pdf.read_bytes()
     sha = hashlib.sha256(payload).hexdigest()
@@ -145,6 +173,23 @@ def main() -> int:
         "wall_layer_vertical_faces": len(vertical),
         "wall_layer_horizontal_faces": len(horizontal),
     }
+    rings_result = None
+    if args.rings:
+        from collections import Counter as _Counter
+        from pb_layered_wall_doorway_room_ring_shadow import build_layered_wall_doorway_room_rings
+
+        rings_result = build_layered_wall_doorway_room_rings(drawings, source_sha256=sha, page_index=args.page_index)
+        result["doorway_closed_rings"] = {
+            "result_status": rings_result.status.value,
+            "wall_strips": rings_result.wall_strip_count,
+            "wall_gaps": rings_result.wall_gap_count,
+            "collinear_unresolved_gaps": rings_result.unresolved_gap_count,
+            "closures_by_kind": dict(_Counter(c.kind for c in rings_result.closures)),
+            "swing_unplaced": rings_result.unplaced_swing_count,
+            "swing_ambiguous": rings_result.ambiguous_swing_count,
+            "sliver_regions": rings_result.sliver_region_count,
+            "rings_by_status": dict(_Counter(r.status.value for r in rings_result.rings)),
+        }
     if args.with_dimensions:
         from pb_cross_view_room_area_authority import _trusted_native_dimensions_for_page
         from pb_drawing_evidence_binding import DrawingViewType
@@ -160,6 +205,11 @@ def main() -> int:
             source, revision_id=published.revision.revision_id, page_id=page_id,
             candidate_lines=(), view_type=DrawingViewType.FLOOR_PLAN.value,
         )
+        if rings_result is not None:
+            result["doorway_closed_rings"]["figured_box_ties_candidate_rings"] = ring_figured_box_ties(
+                [r for r in rings_result.rings if r.status.value == "candidate"], dimensions, tolerance_pt=0.5)
+            result["doorway_closed_rings"]["figured_box_ties_all_rings"] = ring_figured_box_ties(
+                list(rings_result.rings), dimensions, tolerance_pt=0.5)
         result["figured_dimension_face_ties"] = {
             f"tolerance_{tolerance}pt": figured_dimension_face_ties(
                 dimensions, vertical, horizontal, tolerance_pt=tolerance)

@@ -8,6 +8,7 @@ import fitz
 from tools.diag_layered_floor_plan_first_gate import (
     figured_dimension_face_ties,
     is_wall_layer,
+    ring_figured_box_ties,
     layer_census,
     wall_layer_axis_faces,
 )
@@ -120,3 +121,23 @@ def test_inputs_are_not_mutated():
     layer_census(drawings)
     wall_layer_axis_faces(drawings)
     assert drawings == before
+
+
+def _ring(x0, y0, x1, y1):
+    return SimpleNamespace(bbox_pdf_pts=(x0, y0, x1, y1))
+
+
+def test_ring_figured_box_ties_counts_unique_competing_and_absent_pairs():
+    dims = [
+        _dim("horizontal", (100.0, 500.0), (185.0, 500.0)),
+        _dim("vertical", (900.0, 40.0), (900.0, 142.0)),
+        _dim("vertical", (880.0, 40.0), (880.0, 160.0)),
+        _dim("horizontal", (300.0, 500.0), (340.0, 500.0)),
+    ]
+    unique = _ring(100.0, 40.0, 185.0, 142.0)
+    competing_dims = dims + [_dim("vertical", (910.0, 40.2), (910.0, 142.2))]
+    assert ring_figured_box_ties([unique], dims, tolerance_pt=0.5)["unique_figured_box_pair"] == 1
+    assert ring_figured_box_ties([unique], competing_dims, tolerance_pt=0.5)["competing_figured_box_pairs"] == 1
+    assert ring_figured_box_ties([_ring(0.0, 0.0, 50.0, 50.0)], dims, tolerance_pt=0.5)["no_figured_box_pair"] == 1
+    # tolerance is a hard bound
+    assert ring_figured_box_ties([_ring(100.0, 40.0, 186.0, 142.0)], dims, tolerance_pt=0.5)["no_figured_box_pair"] == 1
