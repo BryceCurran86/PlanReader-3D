@@ -20,7 +20,12 @@ from pb_page_scale_calibration_authority import (
     measurement_authority_for_page_scale,
     scale_calibration_fingerprint,
 )
-from pb_physical_scale_authority import PhysicalScaleEvidence, PhysicalScaleSelector
+from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_RESOLVED,
+    PhysicalScaleAuthority,
+    PhysicalScaleEvidence,
+    PhysicalScaleSelector,
+)
 from pb_physical_scale_calibration_bridge import (
     PHYSICAL_SCALE_CALIBRATION_RESOLVED,
     PhysicalScaleCalibrationBridgeResult,
@@ -47,6 +52,9 @@ class LiveFloorScaleSourceReceipt:
     scale_fingerprint: str
     physical_scale_evidence: PhysicalScaleEvidence
     calibration: ScaleCalibration
+    # Retain the immutable SEALED producer lookup, not only an ordinary
+    # PhysicalScaleEvidence dataclass with copyable fields and IDs.
+    physical_scale_authority: PhysicalScaleAuthority = field(repr=False, compare=False)
     _seal: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -180,14 +188,40 @@ def _same_original_owners(
         return False
 
 
+def _authority_owns_original_scale(
+    authority: PhysicalScaleAuthority,
+    evidence: PhysicalScaleEvidence,
+) -> bool:
+    """Anchor the source dataclass in its SEALED original producer result.
+
+    Identical-looking selector strings, line IDs and a rehashed record ID
+    cannot substitute for a published authenticated source authority.
+    """
+    if type(authority) is not PhysicalScaleAuthority or type(evidence) is not PhysicalScaleEvidence:
+        return False
+    if type(evidence.selector) is not PhysicalScaleSelector:
+        return False
+    try:
+        resolved = authority.resolve(evidence.selector)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return (
+        resolved.status is EvidenceResolutionStatus.CORROBORATED
+        and resolved.reason_codes == (PHYSICAL_SCALE_RESOLVED,)
+        and resolved.evidence == evidence
+    )
+
+
 def source_owned_floor_scale_receipt(
     *,
     floor: LiveCanonicalFloorSurfaceObject,
     quantity: QuantityEvidence,
     bridge: PhysicalScaleCalibrationBridgeResult,
+    scale_authority: PhysicalScaleAuthority,
 ) -> Optional[LiveFloorScaleSourceReceipt]:
     """Issue only from the existing real physical-scale bridge and exact floor."""
-    if type(bridge) is not PhysicalScaleCalibrationBridgeResult:
+    if (type(bridge) is not PhysicalScaleCalibrationBridgeResult
+            or type(scale_authority) is not PhysicalScaleAuthority):
         return None
     if (
         bridge.status is not EvidenceResolutionStatus.CORROBORATED
@@ -195,6 +229,9 @@ def source_owned_floor_scale_receipt(
         or bridge.physical_scale_evidence is None
         or bridge.calibration is None
         or not _same_original_owners(floor, quantity, bridge.physical_scale_evidence, bridge.calibration)
+        or not _authority_owns_original_scale(
+            scale_authority, bridge.physical_scale_evidence
+        )
     ):
         return None
     return LiveFloorScaleSourceReceipt(
@@ -212,6 +249,7 @@ def source_owned_floor_scale_receipt(
         scale_fingerprint=scale_calibration_fingerprint(bridge.calibration),
         physical_scale_evidence=bridge.physical_scale_evidence,
         calibration=bridge.calibration,
+        physical_scale_authority=scale_authority,
         _seal=_SOURCE_SEAL,
     )
 
@@ -237,6 +275,9 @@ def validated_floor_scale_metadata(
             source.metadata.get("viewport_id"))
         or receipt.scale_fingerprint != scale_calibration_fingerprint(receipt.calibration)
         or not _same_original_owners(floor, source, receipt.physical_scale_evidence, receipt.calibration)
+        or not _authority_owns_original_scale(
+            receipt.physical_scale_authority, receipt.physical_scale_evidence
+        )
     ):
         return None
     return {
