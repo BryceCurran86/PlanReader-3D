@@ -22,11 +22,18 @@ from pb_viewport_segmentation import segment_source_page_viewports
 from tools.diag_source_owned_physical_plan_view import _signature
 
 
-def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
+def replay(
+    data: bytes, *, page_number: int, raster_supports: bool = False,
+    source_native_finish_text_shadow: bool = False,
+):
     """All prediction inputs are original bytes and an explicit source page."""
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("source native finish text shadow requires an explicit bool")
     sha = hashlib.sha256(data).hexdigest()
     source = SourceVisibilityProducer(
-        producer_method="live-source-plan-material-shadow", producer_version="1"
+        producer_method="live-source-plan-material-shadow", producer_version="1",
+        **({"source_native_finish_text_shadow": True}
+           if source_native_finish_text_shadow else {}),
     )
     published = source.ingest_native_pdf_bytes(
         document_id=f"live-source:{sha[:32]}",
@@ -146,6 +153,8 @@ def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
         assert raw["provenance"]["whole_sheet_plan_universe_proven"] is False
         serialized_views.append(raw)
     return {
+        **({"source_native_finish_text_shadow": True}
+           if source_native_finish_text_shadow else {}),
         "source_sha256": sha,
         "page_number": page_number,
         "revision_id": revision,
@@ -179,11 +188,13 @@ def main():
     parser.add_argument("--page", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--raster-supports", action="store_true")
+    parser.add_argument("--source-native-finish-text-shadow", action="store_true")
     args = parser.parse_args()
     result = replay(
         args.pdf.read_bytes(),
         page_number=args.page,
         raster_supports=args.raster_supports,
+        source_native_finish_text_shadow=args.source_native_finish_text_shadow,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2))
