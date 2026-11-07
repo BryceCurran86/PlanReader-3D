@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_cross_view_ceiling_finish_authority import (
     _occurrence_line as _cross_view_occurrence_line,
@@ -373,6 +373,7 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
     floor: LiveCanonicalFloorSurfaceObject,
     occurrence: SourceMaterialOccurrenceRecord,
     source_owned_shadow: bool,
+    correspondence_records: Optional[Sequence[Any]] = None,
 ) -> bool:
     """Do not reinterpret cross-sheet mark containment as physical equality.
 
@@ -382,10 +383,21 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
     """
     if type(source_owned_shadow) is not bool:
         raise ValueError("source-owned floor mode must be an explicit boolean")
-    return (
-        not source_owned_shadow
-        or _clean(floor.page_id) == _clean(occurrence.page_id)
-    )
+    if not source_owned_shadow:
+        return True
+    if _clean(floor.page_id) == _clean(occurrence.page_id):
+        return True
+    if correspondence_records:
+        for cr in correspondence_records:
+            st = getattr(cr, "status", None)
+            st_name = getattr(st, "name", str(st)) if st is not None else ""
+            if st_name == "CORROBORATED" and getattr(cr, "commercial_projection_allowed", False):
+                if not getattr(cr, "authority_blockers", None):
+                    if _clean(getattr(cr, "canonical_floor_id", "")) == _clean(floor.canonical_floor_id):
+                        cr_code = getattr(cr, "material_code", None)
+                        if cr_code is None or _clean(cr_code) == _clean(occurrence.code):
+                            return True
+    return False
 
 
 def _source_owned_floor_finish_viewports(
@@ -874,6 +886,7 @@ class CrossViewFloorFinishProducer:
         room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
         _seal: object = None,
     ) -> None:
@@ -902,6 +915,7 @@ class CrossViewFloorFinishProducer:
         self._room_areas = room_areas
         self._same_view_room_areas = same_view_room_areas
         self._floors = floors
+        self._correspondence_records = tuple(correspondence_records or ())
         self._physical_plan_page_ids = _physical_plan_page_ids
 
     @classmethod
@@ -912,12 +926,14 @@ class CrossViewFloorFinishProducer:
         room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
     ) -> "CrossViewFloorFinishProducer":
         return cls(
             source=source,
             room_areas=room_areas,
             floors=floors,
             same_view_room_areas=same_view_room_areas,
+            correspondence_records=correspondence_records,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -930,6 +946,7 @@ class CrossViewFloorFinishProducer:
         floors: LiveCanonicalFloorSurfaceComposition,
         page_ids: Sequence[str],
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
     ) -> "CrossViewFloorFinishProducer":
         """Explicit consumer of source-owned plan products; commercial default untouched."""
         if (
@@ -947,6 +964,7 @@ class CrossViewFloorFinishProducer:
             room_areas=room_areas,
             floors=floors,
             same_view_room_areas=same_view_room_areas,
+            correspondence_records=correspondence_records,
             _physical_plan_page_ids=tuple(sorted(set(page_ids), key=int)),
             _seal=_PRODUCER_SEAL,
         )
@@ -1282,6 +1300,7 @@ class CrossViewFloorFinishProducer:
                     floor=floor,
                     occurrence=occurrence,
                     source_owned_shadow=bool(self._physical_plan_page_ids),
+                    correspondence_records=self._correspondence_records,
                 ):
                     unresolved.add(floor.canonical_floor_id)
                     continue

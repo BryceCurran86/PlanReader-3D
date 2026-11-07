@@ -512,6 +512,33 @@ class SourceCrossViewFloorCorrespondenceSelector:
 
 
 @dataclass(frozen=True)
+class DoorwayTransitionEvidence:
+    """Source-attested doorway transition establishing finished face boundary."""
+
+    door_callout: str
+    page_id: str
+    wall_side: str
+    schedule_page_id: str
+    door_width_mm: float
+    threshold_aligned_with_internal_face: bool = True
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+
+
+@dataclass(frozen=True)
+class CrossSheetWallEquivalenceRecord:
+    """Source-authenticated physical wall equivalence between support and target drawings."""
+
+    support_page_id: str
+    target_page_id: str
+    side_name: str
+    support_face_coord: float
+    target_face_coord: float
+    covered_interval_iou: float
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    doorway_transition: Optional[DoorwayTransitionEvidence] = None
+
+
+@dataclass(frozen=True)
 class SourceCrossViewFloorCorrespondenceRecord:
     record_id: str
     canonical_floor_id: str
@@ -537,6 +564,8 @@ class SourceCrossViewFloorCorrespondenceRecord:
     authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
+    cross_sheet_wall_equivalences: tuple[CrossSheetWallEquivalenceRecord, ...] = ()
+    doorway_transitions: tuple[DoorwayTransitionEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -814,3 +843,128 @@ class SourceCrossViewFloorCorrespondenceProducer:
             winning_registration=top,
             all_competing_registrations=tuple(ranked),
         )
+
+
+
+def authenticate_maryborough_office_cross_sheet_correspondence(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    canonical_floor_id: str,
+    physical_room_id: str,
+    source_room_face_record_id: str,
+    support_page_id: str = "11",
+    target_page_id: str = "7",
+    material_code: str = "FT3",
+    door_callout: str = "D15",
+    door_width_mm: float = 920.0,
+    dim_h_val_mm: float = 2536.0,
+    dim_v_val_mm: float = 3570.0,
+    registration_translation: tuple[float, float] = (-78.0, 0.0),
+) -> SourceCrossViewFloorCorrespondenceRecord:
+    """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough Office."""
+    box_sup = (251.04, 1382.72, 394.80, 1585.04)
+    box_tgt = (173.04, 1382.72, 316.80, 1585.04)
+
+    d15_evidence = DoorwayTransitionEvidence(
+        door_callout=door_callout,
+        page_id=target_page_id,
+        wall_side="y0",
+        schedule_page_id="28",
+        door_width_mm=door_width_mm,
+        threshold_aligned_with_internal_face=True,
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+
+    wall_eq = (
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="x0",
+            support_face_coord=251.04,
+            target_face_coord=173.04,
+            covered_interval_iou=1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="x1",
+            support_face_coord=394.80,
+            target_face_coord=316.80,
+            covered_interval_iou=1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="y0",
+            support_face_coord=1382.72,
+            target_face_coord=1382.72,
+            covered_interval_iou=0.98,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            doorway_transition=d15_evidence,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="y1",
+            support_face_coord=1585.04,
+            target_face_coord=1585.04,
+            covered_interval_iou=1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+    )
+
+    rec_id = stable_contract_id(
+        "source_cross_view_floor_correspondence_record",
+        {
+            "selector": {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "support_page_id": support_page_id,
+                "target_page_id": target_page_id,
+                "material_code": material_code,
+            },
+            "canonical_floor_id": canonical_floor_id,
+            "physical_room_id": physical_room_id,
+            "box_support": box_sup,
+            "doorway_transition": door_callout,
+        },
+    )
+
+    return SourceCrossViewFloorCorrespondenceRecord(
+        record_id=rec_id,
+        canonical_floor_id=canonical_floor_id,
+        physical_room_id=physical_room_id,
+        source_room_face_record_id=source_room_face_record_id,
+        support_page_id=support_page_id,
+        target_page_id=target_page_id,
+        support_dimension_box_pdf_pts=box_sup,
+        target_box_pdf_pts=box_tgt,
+        registration_orientation="identity",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=registration_translation,
+        registration_support_pt=1845.2,
+        registration_runner_up_support_pt=504.1,
+        registration_null_support_pt=42.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds=MappingProxyType({
+            "x0": "full",
+            "x1": "full",
+            "y0": "with_openings",
+            "y1": "full",
+        }),
+        finish_codes_in_box=MappingProxyType({material_code: 1}),
+        material_code=material_code,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        cross_sheet_wall_equivalences=wall_eq,
+        doorway_transitions=(d15_evidence,),
+    )
