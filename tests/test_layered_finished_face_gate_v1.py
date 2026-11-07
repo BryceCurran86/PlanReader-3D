@@ -42,7 +42,7 @@ NOTE = (
 POINTS_PER_METRE_AT_1_100 = 2834.645669 / 100.0
 
 
-def layered_room_pdf(*, note: str | None = None, scale_bar: bool = False) -> bytes:
+def layered_room_pdf(*, note: str | None = None, scale_bar: bool = False, label: str = "BED 2") -> bytes:
     """Room inner box (100,80)-(250,180); a swing doorway closes the ring; figured 3600 x 2400 (24 mm per pt)."""
     doc = fitz.open()
     page = doc.new_page(width=400.0, height=300.0)
@@ -69,7 +69,7 @@ def layered_room_pdf(*, note: str | None = None, scale_bar: bool = False) -> byt
     page.draw_line((250.0, 80.0), (298.0, 80.0), color=(0, 0, 0), width=1.0)
     page.draw_line((278.0, 180.0), (298.0, 180.0), color=(0, 0, 0), width=1.0)
     page.insert_text((287.0, 147.0), "2400", fontsize=9.0, rotate=90)
-    page.insert_text((150.0, 130.0), "BED 2", fontsize=10.0)
+    page.insert_text((150.0, 130.0), label, fontsize=10.0)
     if scale_bar:  # one metre at 1:100 and its labels: the existing physical-scale authority can read it
         x0, x1, y = 60.0, 60.0 + POINTS_PER_METRE_AT_1_100 * (1.0 + 5.0e-6), 262.0
         shape = page.new_shape()

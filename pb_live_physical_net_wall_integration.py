@@ -142,6 +142,10 @@ class LivePhysicalNetWallClaim:
     # Diagnostic only: per statement page, how many words each text authority proved (counts and refusal
     # codes, never text), so a receipt without a statement says why.
     layered_finished_face_statement_diagnostics: tuple[Any, ...] = ()
+    # Diagnostic only (the opt-in room wet/dry classification): per canonical room in a gated scope, the
+    # wet/dry class its authenticated label gets from the explicit rule table, or the abstention reason.
+    # Never a quantity, finish or metric authority.
+    room_wet_dry_classifications: tuple[Any, ...] = ()
     # Source-authenticated same-view measurement first-gate receipts; a separate
     # cross-view or scaled authority may independently resolve the room area.
     same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
@@ -428,6 +432,7 @@ def _collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    room_wet_dry_classification: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -467,6 +472,10 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(room_wet_dry_classification) is not bool:
+        raise ValueError("room wet dry classification must be an explicit boolean")
+    if room_wet_dry_classification and not layered_finished_face_gate:
+        raise ValueError("room wet dry classification needs the finished face gate")
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -627,6 +636,7 @@ def _collect_live_physical_net_wall_claim(
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
     finished_face_receipts: list[Any] = []
+    wet_dry_classifications: list[Any] = []
     finished_face_statements: Optional[tuple[Any, ...]] = None
     finished_face_statement_diagnostics: tuple[Any, ...] = ()
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
@@ -973,16 +983,33 @@ def _collect_live_physical_net_wall_claim(
                         published=published,
                         statement_pages=layered_finished_face_statement_pages,
                     )
+                gated_records = tuple(
+                    record for record in room_scope.records
+                    if record.record_id in gated_record_ids
+                )
+                wet_area_by_record = None
+                if room_wet_dry_classification:
+                    from pb_room_wet_dry_classification_shadow import (
+                        classify_room_wet_dry,
+                        wet_area_status_by_face_record,
+                    )
+
+                    # Only the rooms of this exact scope; a record applies only to the face it was
+                    # derived for (every scope field must match). Diagnostic; no gate is relaxed.
+                    scope_classifications = classify_room_wet_dry(scope_rooms)
+                    wet_dry_classifications.extend(scope_classifications)
+                    wet_area_by_record = wet_area_status_by_face_record(
+                        scope_classifications, gated_records,
+                    )
                 finished_face_receipts.extend(
                     _finished_face_receipts(
-                        records=tuple(
-                            record for record in room_scope.records
-                            if record.record_id in gated_record_ids
-                        ),
+                        records=gated_records,
                         payload=payload,
                         page_no=page_no,
                         statements=finished_face_statements,
                         scale_calibration=scale_calibration,
+                        **({"room_is_wet_area_by_record": wet_area_by_record}
+                           if wet_area_by_record is not None else {}),
                     )
                 )
 
@@ -1199,6 +1226,7 @@ def _collect_live_physical_net_wall_claim(
             )),
             layered_finished_face_receipts=tuple(finished_face_receipts),
             layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
+            room_wet_dry_classifications=tuple(wet_dry_classifications),
         )
 
     return LivePhysicalNetWallClaim(
@@ -1255,6 +1283,7 @@ def _collect_live_physical_net_wall_claim(
         )),
         layered_finished_face_receipts=tuple(finished_face_receipts),
         layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
+        room_wet_dry_classifications=tuple(wet_dry_classifications),
     )
 
 
@@ -1290,14 +1319,22 @@ def _collect_finished_face_statements(
 
 
 def _finished_face_receipts(
-    *, records, payload, page_no, statements, scale_calibration,
+    *, records, payload, page_no, statements, scale_calibration, room_is_wet_area_by_record=None,
 ) -> tuple[Any, ...]:
-    """Diagnostic face identity of each gated ring face; the page scale comes only from the existing authority."""
+    """Diagnostic face identity of each gated ring face; the page scale comes only from the existing authority.
+
+    ``room_is_wet_area_by_record`` (opt-in) maps a face record id to the wet/dry status a room classification
+    established for that exact face; a missing entry or None leaves the status unestablished, as before.
+    """
     from pb_layered_wall_face_identity_shadow import (
         classify_record_face_identity,
         wall_strip_facts,
     )
+    from pb_room_wet_dry_classification_shadow import wet_area_status_mapping_is_valid
 
+    if not wet_area_status_mapping_is_valid(room_is_wet_area_by_record):
+        raise TypeError("room_is_wet_area_by_record must map record ids to True, False or None")
+    wet_by_record = dict(room_is_wet_area_by_record or {})
     mm_per_pt = None
     if scale_calibration is not None and scale_calibration.is_usable_for_firm_measurement():
         mm_per_pt = 1000.0 / float(scale_calibration.px_per_m)
@@ -1306,6 +1343,8 @@ def _finished_face_receipts(
     return tuple(
         classify_record_face_identity(
             record, strip_facts=facts, statements=statements, mm_per_pt=mm_per_pt,
+            **({"room_is_wet_area": wet_by_record[record.record_id]}
+               if wet_by_record.get(record.record_id) is not None else {}),
         )
         for record in sorted(records, key=lambda item: item.record_id)
     )
@@ -1328,6 +1367,7 @@ def collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    room_wet_dry_classification: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1364,6 +1404,10 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(room_wet_dry_classification) is not bool:
+        raise ValueError("room wet dry classification must be an explicit boolean")
+    if room_wet_dry_classification and not layered_finished_face_gate:
+        raise ValueError("room wet dry classification needs the finished face gate")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1402,6 +1446,8 @@ def collect_live_physical_net_wall_claim(
            if layered_finished_face_gate else {}),
         **({"layered_finished_face_statement_pages": layered_finished_face_statement_pages}
            if layered_finished_face_statement_pages is not None else {}),
+        **({"room_wet_dry_classification": True}
+           if room_wet_dry_classification else {}),
     )
     if recovery_page_id is None:
         return claim
