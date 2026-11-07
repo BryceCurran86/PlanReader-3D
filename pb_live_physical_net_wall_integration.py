@@ -940,6 +940,10 @@ def _collect_live_physical_net_wall_claim(
             # in scope. No metadata-derived string grants scale authority.
             if scale_bridge is not None:
                 scope_face_ids = {record.record_id for record in room_scope.records}
+                # Preserve one immutable source publisher snapshot per scope,
+                # not one copied lookup map per physical floor. Large plans
+                # may have hundreds of rooms sharing one native scale bar.
+                original_scale_authority = scale_producer.authority()
                 for floor in canonical_floors.floors:
                     if floor.source_room_face_record_id not in scope_face_ids:
                         continue
@@ -953,7 +957,7 @@ def _collect_live_physical_net_wall_claim(
                             # Only the actual source producer can grant this.
                             # The native PhysicalScaleEvidence dataclass alone
                             # is not a customer measurement authority.
-                            scale_authority=scale_producer.authority(),
+                            scale_authority=original_scale_authority,
                         )
                         if receipt is not None:
                             source_owned_floor_scale_receipts.append(receipt)
