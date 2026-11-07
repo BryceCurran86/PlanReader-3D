@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Mapping, Optional, Sequence
 
+from pb_layered_wall_doorway_partition_witness_shadow import partition_groups
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
     LayeredRoomRingRecord,
@@ -52,6 +53,10 @@ LAYERED_RING_SCOPE_REASON = "layered_wall_doorway_room_ring_scope"
 # Per-record token: the face is not its own bounding rectangle (a wall return, an alcove split off by a
 # closure). A bounding box may corroborate the topology; it can never set such a face's metric area.
 RING_NOT_A_RECTANGLE_PREFIX = "layered_ring_not_a_rectangle:"
+# Distinct provenance for the opt-in sliding-leaf partition witness: the scope still never claims the face
+# universe, and a part is corroborated only by its group's union envelope, never by its own box.
+LAYERED_RING_PARTITION_REASON = "layered_wall_doorway_room_ring_partition_witness"
+RING_PARTITION_PART_PREFIX = "layered_ring_partition_part:"
 # Witness line to drawn face: representation noise, far below the 2.5 pt production snap, a hard bound.
 RING_FIGURED_BOX_TOLERANCE_PT = 0.5
 # The decision scope the live room composition resolves per page (``wall-source:page-N``).
@@ -120,6 +125,7 @@ def layered_ring_room_face_scope(
     page_id: str,
     decision_scope_id: str,
     corroborating_dimensions: Optional[Sequence[object]] = None,
+    partition_witness: bool = False,
 ) -> Optional[SourceRoomFaceScopeResult]:
     """The ring scope for one page, or None when no ring closed (nothing is overridden).
 
@@ -127,13 +133,35 @@ def layered_ring_room_face_scope(
     given, a CANDIDATE ring becomes a record only if exactly one figured pair has its bounding
     box as witness box; otherwise it is kept as an abstention. When None every CANDIDATE ring
     is a record (direct converter use and tests).
+
+    ``partition_witness`` (default False, its own control): rings joined by real sliding-leaf chords form
+    a partition group (see ``pb_layered_wall_doorway_partition_witness_shadow``). Every ring of such a group
+    is judged ONLY by the group: the whole group becomes records when its membership is exact and the
+    union's outer envelope is the witness box of exactly one authenticated figured pair; otherwise every
+    member is an abstention. The shared pair is topology corroboration of the union; it is never a part's
+    area. Without ``corroborating_dimensions`` a partition group cannot be corroborated and abstains.
     """
+    if type(partition_witness) is not bool:
+        raise ValueError("partition_witness must be an explicit boolean")
     if not any(r.status is EvidenceResolutionStatus.CANDIDATE for r in ring_result.rings):
         return None
     scope = (document_id, revision_id, source_sha256, snapshot_id, page_id, decision_scope_id)
     records: list[SourceRoomFaceRecord] = []
     abstained: list[SourceRoomFaceAbstention] = []
     not_rectangle_tokens: list[str] = []
+    partition_tokens: list[str] = []
+    # ring record id -> (group ring ids, whole group corroborated)
+    partition_of: dict[str, tuple[tuple[str, ...], bool]] = {}
+    if partition_witness:
+        page_index = int(page_id) - 1 if page_id.isascii() and page_id.isdecimal() else -1
+        for group in partition_groups(ring_result, source_sha256=source_sha256, page_index=page_index):
+            corroborated_group = (
+                group.valid
+                and corroborating_dimensions is not None
+                and figured_box_pair_count(group.envelope, corroborating_dimensions) == 1
+            )
+            for ring_record_id in group.ring_record_ids:
+                partition_of[ring_record_id] = (group.ring_record_ids, corroborated_group)
     for ring in ring_result.rings:
         polygon = _canonical_polygon(ring.polygon_pdf_pts)
         if not polygon:
@@ -151,18 +179,25 @@ def layered_ring_room_face_scope(
             polygon_pdf_pts=polygon, bounding_wall_ids=owner_ids, area_page_pts2=area,
             boundary_wall_edges=boundary,
         )
-        corroborated = (
-            corroborating_dimensions is None
-            or figured_box_pair_count(ring.bbox_pdf_pts, corroborating_dimensions) == 1
-        )
-        if ring.status is EvidenceResolutionStatus.CANDIDATE and corroborated:
-            record_id = stable_contract_id(
-                "layered_ring_source_room_face_record",
-                {**payload, "owners": owner_ids, "ring_record_id": ring.record_id,
-                 "closure_ids": list(ring.bounding_closure_ids)},
-                digest_chars=32,
+        group_of = partition_of.get(ring.record_id)
+        if group_of is not None:
+            corroborated = group_of[1]  # a group member is judged by its group's union envelope only
+        else:
+            corroborated = (
+                corroborating_dimensions is None
+                or figured_box_pair_count(ring.bbox_pdf_pts, corroborating_dimensions) == 1
             )
+        if ring.status is EvidenceResolutionStatus.CANDIDATE and corroborated:
+            record_payload = {
+                **payload, "owners": owner_ids, "ring_record_id": ring.record_id,
+                "closure_ids": list(ring.bounding_closure_ids),
+            }
+            if group_of is not None:
+                record_payload["partition_group"] = list(group_of[0])
+            record_id = stable_contract_id("layered_ring_source_room_face_record", record_payload, digest_chars=32)
             records.append(SourceRoomFaceRecord(record_id=record_id, **common))
+            if group_of is not None:
+                partition_tokens.append(f"{RING_PARTITION_PART_PREFIX}{record_id}")
             if not _fills_its_bounding_rectangle(polygon, area):
                 not_rectangle_tokens.append(f"{RING_NOT_A_RECTANGLE_PREFIX}{record_id}")
         else:
@@ -177,7 +212,9 @@ def layered_ring_room_face_scope(
         records=tuple(records),
         reason_codes=(
             SOURCE_ROOM_FACE_SCOPE_RESOLVED, SOURCE_ROOM_FACE_UNIVERSE_PARTIAL, LAYERED_RING_SCOPE_REASON,
+            *((LAYERED_RING_PARTITION_REASON,) if partition_tokens else ()),
             *sorted(not_rectangle_tokens),
+            *sorted(partition_tokens),
         ),
         document_id=document_id, revision_id=revision_id, source_sha256=source_sha256,
         snapshot_id=snapshot_id, page_id=page_id, decision_scope_id=decision_scope_id,
@@ -192,12 +229,20 @@ def layered_ring_scope_overrides(
     page_ids: Sequence[str],
     require_figured_box: bool = True,
     sliding_leaf_frame_closure: bool = False,
+    partition_witness: bool = False,
 ) -> Mapping[tuple[str, str, str, str, str, str], SourceRoomFaceScopeOverride]:
     """Issued ring scopes keyed like the room-face authority, read from the SHA-pinned native bytes.
 
     With ``require_figured_box`` (the live default) only rings corroborated by exactly one
     authenticated figured pair become records; the rest are abstentions.
+
+    ``partition_witness`` (default False; requires ``sliding_leaf_frame_closure`` and ``require_figured_box``)
+    additionally judges sliding-leaf partition groups by their union envelope (see the converter).
     """
+    if type(partition_witness) is not bool:
+        raise ValueError("partition_witness must be an explicit boolean")
+    if partition_witness and not (sliding_leaf_frame_closure and require_figured_box):
+        raise ValueError("partition_witness requires sliding_leaf_frame_closure and require_figured_box")
     from pb_cross_view_ceiling_finish_authority import _source_bytes
     from pb_cross_view_room_area_authority import _trusted_native_dimensions_for_page
     from pb_drawing_evidence_binding import DrawingViewType
@@ -227,6 +272,7 @@ def layered_ring_scope_overrides(
             document_id=published.revision.document_id, revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
             page_id=page, decision_scope_id=decision_scope_id, corroborating_dimensions=dimensions,
+            partition_witness=partition_witness,
         )
         if scope is not None:
             key = (
@@ -246,9 +292,11 @@ def ring_face_bounding_box(record: SourceRoomFaceRecord) -> tuple[float, float, 
 
 
 __all__ = [
+    "LAYERED_RING_PARTITION_REASON",
     "LAYERED_RING_SCOPE_REASON",
     "RING_FIGURED_BOX_TOLERANCE_PT",
     "RING_NOT_A_RECTANGLE_PREFIX",
+    "RING_PARTITION_PART_PREFIX",
     "figured_box_pair_count",
     "layered_ring_room_face_scope",
     "layered_ring_scope_overrides",

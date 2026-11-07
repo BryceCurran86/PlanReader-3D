@@ -124,13 +124,14 @@ class SameViewRoomAreaProducer:
         return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
 
     def _layered_ring_bounding_box(self, room: LiveCanonicalRoomObject):
-        """(bounding box, face_is_its_rectangle) of a doorway-closed ring face, else None."""
+        """(bounding box, face_is_its_rectangle, is_partition_part) of a doorway-closed ring face, else None."""
         binding = self._rooms.room_face_authority_binding_for(room)
         if binding is None:
             return None
         from pb_layered_wall_doorway_room_face_scope_shadow import (
             LAYERED_RING_SCOPE_REASON,
             RING_NOT_A_RECTANGLE_PREFIX,
+            RING_PARTITION_PART_PREFIX,
             ring_face_bounding_box,
         )
 
@@ -149,6 +150,7 @@ class SameViewRoomAreaProducer:
         return (
             ring_face_bounding_box(record),
             f"{RING_NOT_A_RECTANGLE_PREFIX}{record.record_id}" not in scope.reason_codes,
+            f"{RING_PARTITION_PART_PREFIX}{record.record_id}" in scope.reason_codes,
         )
 
     def publish(
@@ -422,11 +424,13 @@ class SameViewRoomAreaProducer:
             )
             ring_box = None if ring_face is None else ring_face[0]
             ring_not_rectangle = ring_face is not None and not ring_face[1]
+            ring_partition_part = ring_face is not None and ring_face[2]
             ring_box_rejected = False
-            if ring_not_rectangle and deduped:
+            if (ring_not_rectangle or ring_partition_part) and deduped:
                 # A figured width x depth is the area of its rectangle, not of a face with a wall
                 # return or a recess split off inside it: the documented route is withdrawn and the
-                # face's own polygon at a verified scale is the only measure left.
+                # face's own polygon at a verified scale is the only measure left. A part of a
+                # sliding-leaf partition is corroborated by the UNION's pair, which is never a part's area.
                 deduped = {}
                 ring_box_rejected = True
             elif ring_box is not None and deduped:
@@ -447,7 +451,9 @@ class SameViewRoomAreaProducer:
             if len(deduped) != 1:
                 room_id = str(room.physical_room_id)
                 unresolved.add(room_id)
-                if ring_not_rectangle:
+                if ring_partition_part:
+                    first_failures[room_id] = "same_view_layered_ring_partition_part"
+                elif ring_not_rectangle:
                     first_failures[room_id] = "same_view_layered_ring_not_a_rectangle"
                 elif ring_box_rejected:
                     first_failures[room_id] = "same_view_figured_box_differs_from_layered_ring"
