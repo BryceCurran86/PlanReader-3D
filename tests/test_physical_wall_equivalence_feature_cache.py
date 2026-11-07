@@ -140,6 +140,17 @@ def _legacy_classify(left, right):
     left_iv = module._axis_interval(left.path_fingerprint or ())
     right_iv = module._axis_interval(right.path_fingerprint or ())
 
+    # Keep the independent uncached oracle aligned with the fail-closed
+    # axis-comparability rule. A horizontal interval is not disjoint from
+    # a vertical interval: they measure different coordinates.
+    if (
+        left_iv is not None
+        and right_iv is not None
+        and left_iv[0] != right_iv[0]
+        and (equal_ancestry or shared)
+    ):
+        return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
     if equal_ancestry and left_iv is not None and right_iv is not None:
         if module._intervals_disjoint(left_iv, right_iv):
             return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
