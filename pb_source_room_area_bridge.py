@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 from pb_ceiling_lining_scope_binder import (
     OwnedTopologyRoomIndex,
@@ -166,6 +166,7 @@ def build_source_room_area_bridge(
     page_no: int,
     scale_calibration: Optional[ScaleCalibration] = None,
     explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
+    withheld_room_refs: Sequence[str] = (),
 ) -> SourceRoomAreaBridgeResult:
     """Compose sealed room faces into existing room-area QuantityEvidence.
 
@@ -176,8 +177,19 @@ def build_source_room_area_bridge(
     scale_calibration is passed unchanged to the existing room-area authority,
     which independently enforces freshness, viewport binding, and FIRM
     measurement authority. This bridge never promotes it.
+
+    A face the authenticated scope marks as lacking an established finished
+    face (its finished-face token) is withheld here, whatever the caller passes.
+    withheld_room_refs can only ADD removals to that set; omitting it never
+    reactivates a gated face. Neither carries geometry, value or authority, and
+    neither adds or changes a room. Documented-area evidence for a withheld
+    face is dropped before it can reach the document or the quantity issuer.
     """
 
+    if isinstance(withheld_room_refs, (str, bytes)) or not all(
+        isinstance(ref, str) for ref in withheld_room_refs
+    ):
+        raise TypeError("withheld_room_refs must be a sequence of room refs")
     room_index = build_owned_source_room_face_index(
         room_face_authority=room_face_authority,
         selector=selector,
@@ -221,7 +233,18 @@ def build_source_room_area_bridge(
             quantities=(),
         )
 
-    explicit_area_evidence = dict(explicit_area_evidence_by_room_id or {})
+    from pb_layered_wall_doorway_room_face_scope_shadow import RING_FINISHED_FACE_REQUIRED_PREFIX
+
+    gated_scope = room_face_authority.resolve_scope(selector)
+    withheld = frozenset(withheld_room_refs) | frozenset(
+        record.face_id for record in gated_scope.records
+        if f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}" in gated_scope.reason_codes
+    )
+    explicit_area_evidence = {
+        room_ref: evidence
+        for room_ref, evidence in dict(explicit_area_evidence_by_room_id or {}).items()
+        if room_ref not in withheld
+    }
     owned_document = _derived_document(
         document,
         room_index=room_index,
@@ -270,17 +293,21 @@ def build_source_room_area_bridge(
         entity.candidate_entity_id: entity for entity in entities
     }
 
-    quantities = build_room_area_quantities(
-        rooms=rooms,
-        entities_by_room_id=entities_by_room_id,
-        context=context,
-        document=owned_document,
-        viewport=viewport,
-        page_no=page_no,
-        scale_calibration=scale_calibration,
-        explicit_area_evidence_by_room_id=(
-            None if not explicit_area_evidence else explicit_area_evidence
-        ),
+    measured_rooms = tuple(room for room in rooms if room.room_ref not in withheld)
+    quantities = (
+        build_room_area_quantities(
+            rooms=measured_rooms,
+            entities_by_room_id=entities_by_room_id,
+            context=context,
+            document=owned_document,
+            viewport=viewport,
+            page_no=page_no,
+            scale_calibration=scale_calibration,
+            explicit_area_evidence_by_room_id=(
+                None if not explicit_area_evidence else explicit_area_evidence
+            ),
+        )
+        if measured_rooms else ()
     )
 
     return SourceRoomAreaBridgeResult(
