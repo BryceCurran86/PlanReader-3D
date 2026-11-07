@@ -17,6 +17,7 @@ import io
 import math
 import re
 import struct
+from threading import RLock
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -2163,6 +2164,58 @@ class SourceMaterialSemanticAuthority:
         )
 
 
+# Ordinary word raster proof is owned by the authenticated source producer,
+# NOT by a temporary floor/ceiling material publisher. Floor publishers may be
+# released before ceiling construction; weak values would discard the memo and
+# repeat Tesseract. This source-scoped reference lives exactly as long as the
+# source producer and has no cross-source global cache.
+_ORDINARY_WORD_RASTER_LOCK = RLock()
+_ORDINARY_WORD_RASTER_CACHE_ATTR = "_ordinary_material_word_raster_producer_cache"
+_ORDINARY_WORD_RASTER_UNSET = object()
+# Existing unit tests replace the module factory with lightweight probes.
+# Preserve that uncached synthetic seam without weakening the real class.
+_PRODUCTION_ORDINARY_RASTER_CLASS = RasterTextCorroborationProducer
+
+
+def _ordinary_source_word_raster(
+    source_visibility_producer: SourceVisibilityProducer,
+) -> RasterTextCorroborationProducer:
+    """Reuse producer-owned exact-source ordinary OCR between material stages.
+
+    The real raster publisher still reauthenticates cached selectors against
+    immutable source SHA and bytes on every publish(). No material or physical
+    authority is cached; clip-only physical-plan raster remains independent.
+    """
+    if RasterTextCorroborationProducer is not _PRODUCTION_ORDINARY_RASTER_CLASS:
+        # Source-neutral tests use minimal fake word/line OCR publishers.
+        # They cannot enter the original-source cache.
+        return RasterTextCorroborationProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
+    with _ORDINARY_WORD_RASTER_LOCK:
+        raster = getattr(
+            source_visibility_producer,
+            _ORDINARY_WORD_RASTER_CACHE_ATTR,
+            _ORDINARY_WORD_RASTER_UNSET,
+        )
+        if raster is _ORDINARY_WORD_RASTER_UNSET:
+            raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+                source_visibility_producer
+            )
+        if (
+            type(raster) is not _PRODUCTION_ORDINARY_RASTER_CLASS
+            or raster._source is not source_visibility_producer
+            or raster._source_producer is not source_visibility_producer._producer
+            or raster._allow_clip_only_shadow is not False
+        ):
+            raise ValueError("ordinary_material_word_raster_source_policy_conflict")
+        # A source -> raster -> source cycle is GC-managed and intentionally
+        # retained while the source producer is live. It does not escape to
+        # another source document, revision or process-wide global cache.
+        setattr(source_visibility_producer, _ORDINARY_WORD_RASTER_CACHE_ATTR, raster)
+        return raster
+
+
 class SourceMaterialSemanticProducer:
     def __init__(
         self,
@@ -2182,9 +2235,7 @@ class SourceMaterialSemanticProducer:
             raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
         self._source_native_multirow_material_shadow = _source_native_multirow_material_shadow
         self._source = source_visibility_producer
-        self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-            source_visibility_producer
-        )
+        self._raster = _ordinary_source_word_raster(source_visibility_producer)
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._source_connected_rcp_plan_page_ids = frozenset(
