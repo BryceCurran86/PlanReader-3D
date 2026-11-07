@@ -17,8 +17,10 @@ import io
 import math
 import re
 import struct
+from threading import RLock
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
+from weakref import WeakKeyDictionary, ref
 
 import fitz
 from PIL import Image, ImageOps
@@ -2163,6 +2165,50 @@ class SourceMaterialSemanticAuthority:
         )
 
 
+# A source word's *already evaluated* ordinary raster corroboration is common
+# to floor and ceiling material publishers reading the SAME producer-owned source.
+# Both keys and values are weak: an ordinary raster owns its source strongly,
+# so a strong value in WeakKeyDictionary would accidentally pin the source for
+# the process lifetime. A material publisher retains the raster while active.
+_ORDINARY_WORD_RASTER_LOCK = RLock()
+_ORDINARY_WORD_RASTER_BY_SOURCE: WeakKeyDictionary = WeakKeyDictionary()
+
+
+def _ordinary_source_word_raster(
+    source_visibility_producer: SourceVisibilityProducer,
+) -> RasterTextCorroborationProducer:
+    """One fixed-backend, exact-source ordinary word OCR memo per live source.
+
+    Never reuse the clip-only physical-plan shadow, a foreign source or a
+    different observation producer. The existing raster publish() rechecks
+    selector source SHA and immutable bytes on every cached hit; no memo
+    outcome is promoted into material/geometry/quantity authority here.
+    """
+    with _ORDINARY_WORD_RASTER_LOCK:
+        handle = _ORDINARY_WORD_RASTER_BY_SOURCE.get(source_visibility_producer)
+        raster = handle() if handle is not None else None
+        if raster is None:
+            raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+                source_visibility_producer
+            )
+            if (
+                type(raster) is not RasterTextCorroborationProducer
+                or raster._source is not source_visibility_producer
+                or raster._source_producer is not source_visibility_producer._producer
+                or raster._allow_clip_only_shadow is not False
+            ):
+                raise ValueError("ordinary_material_word_raster_source_policy_conflict")
+            _ORDINARY_WORD_RASTER_BY_SOURCE[source_visibility_producer] = ref(raster)
+        elif (
+            type(raster) is not RasterTextCorroborationProducer
+            or raster._source is not source_visibility_producer
+            or raster._source_producer is not source_visibility_producer._producer
+            or raster._allow_clip_only_shadow is not False
+        ):
+            raise ValueError("ordinary_material_word_raster_source_policy_conflict")
+        return raster
+
+
 class SourceMaterialSemanticProducer:
     def __init__(
         self,
@@ -2182,9 +2228,7 @@ class SourceMaterialSemanticProducer:
             raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
         self._source_native_multirow_material_shadow = _source_native_multirow_material_shadow
         self._source = source_visibility_producer
-        self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-            source_visibility_producer
-        )
+        self._raster = _ordinary_source_word_raster(source_visibility_producer)
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._source_connected_rcp_plan_page_ids = frozenset(
