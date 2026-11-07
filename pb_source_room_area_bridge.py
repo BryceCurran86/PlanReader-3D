@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 from pb_ceiling_lining_scope_binder import (
     OwnedTopologyRoomIndex,
@@ -166,6 +166,7 @@ def build_source_room_area_bridge(
     page_no: int,
     scale_calibration: Optional[ScaleCalibration] = None,
     explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
+    withheld_room_refs: Sequence[str] = (),
 ) -> SourceRoomAreaBridgeResult:
     """Compose sealed room faces into existing room-area QuantityEvidence.
 
@@ -176,8 +177,16 @@ def build_source_room_area_bridge(
     scale_calibration is passed unchanged to the existing room-area authority,
     which independently enforces freshness, viewport binding, and FIRM
     measurement authority. This bridge never promotes it.
+
+    withheld_room_refs can only REMOVE rooms from measurement (a face whose
+    exposed finished face the original has not established). It carries no
+    geometry, value or authority and never adds or changes a room.
     """
 
+    if isinstance(withheld_room_refs, (str, bytes)) or not all(
+        isinstance(ref, str) for ref in withheld_room_refs
+    ):
+        raise TypeError("withheld_room_refs must be a sequence of room refs")
     room_index = build_owned_source_room_face_index(
         room_face_authority=room_face_authority,
         selector=selector,
@@ -270,17 +279,22 @@ def build_source_room_area_bridge(
         entity.candidate_entity_id: entity for entity in entities
     }
 
-    quantities = build_room_area_quantities(
-        rooms=rooms,
-        entities_by_room_id=entities_by_room_id,
-        context=context,
-        document=owned_document,
-        viewport=viewport,
-        page_no=page_no,
-        scale_calibration=scale_calibration,
-        explicit_area_evidence_by_room_id=(
-            None if not explicit_area_evidence else explicit_area_evidence
-        ),
+    withheld = frozenset(withheld_room_refs)
+    measured_rooms = tuple(room for room in rooms if room.room_ref not in withheld)
+    quantities = (
+        build_room_area_quantities(
+            rooms=measured_rooms,
+            entities_by_room_id=entities_by_room_id,
+            context=context,
+            document=owned_document,
+            viewport=viewport,
+            page_no=page_no,
+            scale_calibration=scale_calibration,
+            explicit_area_evidence_by_room_id=(
+                None if not explicit_area_evidence else explicit_area_evidence
+            ),
+        )
+        if measured_rooms else ()
     )
 
     return SourceRoomAreaBridgeResult(
