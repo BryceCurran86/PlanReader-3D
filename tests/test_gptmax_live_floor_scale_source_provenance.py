@@ -12,7 +12,7 @@ from pb_live_floor_area_scale_provenance import (
     validated_floor_scale_metadata,
 )
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_page_scale_calibration_authority import (
     ScaleSourceReading, ScaleSourceType,
     resolve_page_scale_calibration,
@@ -55,6 +55,22 @@ def _typed_inputs():
         source_segment_observation_ids=("original-scale-ink",),
         source_text_observation_ids=("original-scale-text",),
         viewport_id=floor.viewport_id,
+    )
+    physical = replace(
+        physical,
+        record_id=stable_contract_id(
+            "physical_scale_v1",
+            {
+                "selector": physical.selector.key,
+                "source_kind": physical.source_kind,
+                "source_span_pt": round(physical.source_span_pt, 12),
+                "physical_span_mm": round(physical.physical_span_mm, 9),
+                "points_per_mm": round(physical.points_per_mm, 15),
+                "source_segment_observation_ids": physical.source_segment_observation_ids,
+                "source_text_observation_ids": physical.source_text_observation_ids,
+            },
+            digest_chars=32,
+        ),
     )
     source = replace(
         _source_area(),
@@ -105,6 +121,19 @@ def test_exact_original_source_scale_reaches_floor_quantity_and_only_after_sourc
     assert actual[0].metadata["scale_status"] == "resolved"
     assert actual[0].metadata["scale_conflicts"] == ()
     assert actual[0].metadata["scale_fingerprint"] == scale_calibration_fingerprint(bridge.calibration)
+
+
+def test_copied_physical_scale_id_is_not_original_producer_record():
+    floor, source, bridge, receipt = _binding()
+    forged = replace(receipt.physical_scale_evidence, record_id="user-supplied-scale-identifier")
+    assert source_owned_floor_scale_receipt(
+        floor=floor, quantity=source,
+        bridge=replace(bridge, physical_scale_evidence=forged)
+    ) is None
+    assert validated_floor_scale_metadata(
+        replace(receipt, physical_scale_evidence=forged),
+        floor=floor, source=source,
+    ) is None
 
 
 def test_no_borrowed_metadata_can_grant_commercial_scale_without_original_receipt():
