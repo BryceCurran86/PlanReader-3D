@@ -178,9 +178,12 @@ def build_source_room_area_bridge(
     which independently enforces freshness, viewport binding, and FIRM
     measurement authority. This bridge never promotes it.
 
-    withheld_room_refs can only REMOVE rooms from measurement (a face whose
-    exposed finished face the original has not established). It carries no
-    geometry, value or authority and never adds or changes a room.
+    A face the authenticated scope marks as lacking an established finished
+    face (its finished-face token) is withheld here, whatever the caller passes.
+    withheld_room_refs can only ADD removals to that set; omitting it never
+    reactivates a gated face. Neither carries geometry, value or authority, and
+    neither adds or changes a room. Documented-area evidence for a withheld
+    face is dropped before it can reach the document or the quantity issuer.
     """
 
     if isinstance(withheld_room_refs, (str, bytes)) or not all(
@@ -230,7 +233,18 @@ def build_source_room_area_bridge(
             quantities=(),
         )
 
-    explicit_area_evidence = dict(explicit_area_evidence_by_room_id or {})
+    from pb_layered_wall_doorway_room_face_scope_shadow import RING_FINISHED_FACE_REQUIRED_PREFIX
+
+    gated_scope = room_face_authority.resolve_scope(selector)
+    withheld = frozenset(withheld_room_refs) | frozenset(
+        record.face_id for record in gated_scope.records
+        if f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}" in gated_scope.reason_codes
+    )
+    explicit_area_evidence = {
+        room_ref: evidence
+        for room_ref, evidence in dict(explicit_area_evidence_by_room_id or {}).items()
+        if room_ref not in withheld
+    }
     owned_document = _derived_document(
         document,
         room_index=room_index,
@@ -279,7 +293,6 @@ def build_source_room_area_bridge(
         entity.candidate_entity_id: entity for entity in entities
     }
 
-    withheld = frozenset(withheld_room_refs)
     measured_rooms = tuple(room for room in rooms if room.room_ref not in withheld)
     quantities = (
         build_room_area_quantities(

@@ -344,3 +344,85 @@ def test_documented_evidence_for_a_gated_face_never_reaches_the_issuers(tmp_path
     seen.clear()
     collect_live_physical_net_wall_claim(path, layered_finished_face_gate=True, **kwargs)
     assert seen[-1]["evidence"] == {}  # with the gate it is dropped before any issuer sees it
+
+
+# ---- the veto must hold at each DIRECT consumer, not only through the collector (review of dcd6957)
+
+
+def test_same_view_honors_the_gate_whether_box_selection_is_omitted_false_or_true():
+    source, rooms = _chain(layered_room_pdf(), gate=True)
+    producer = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms)
+    for kwargs in ({}, {"layered_ring_box_selection_shadow": False}, {"layered_ring_box_selection_shadow": True}):
+        area = producer.publish(**kwargs)
+        assert area.records == (), kwargs
+        assert {c for _r, c in area.unresolved_first_failure_codes} == {"same_view_layered_ring_finished_face_not_established"}
+    # an ordinary ungated room keeps its default behavior under every setting
+    ungated_source, ungated_rooms = _chain(layered_room_pdf(), gate=False)
+    ungated = SameViewRoomAreaProducer.from_source(source=ungated_source, rooms=ungated_rooms)
+    for kwargs in ({}, {"layered_ring_box_selection_shadow": True}):
+        areas = [r.area_evidence.normalized_value for r in ungated.publish(**kwargs).records]
+        assert areas == [pytest.approx(8.64)], kwargs
+
+
+def _ring_bridge_inputs(data: bytes, *, gate: bool):
+    from pb_migration_contracts import DocumentEvidence, ViewportEvidence, ViewportResolutionStatus
+    from pb_migration_provider_envelope import ProviderContext
+    from pb_page_scale_calibration_authority import ScaleSourceReading, ScaleSourceType, resolve_page_scale_calibration
+    from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+    from pb_source_room_face_authority import build_source_room_face_authority
+
+    source = SourceVisibilityProducer(producer_method="ring-bridge-test", producer_version="1.0")
+    published = source.ingest_native_pdf_bytes(
+        document_id="ring-bridge-doc", source_bytes=data, source_locator="memory://ring-bridge.pdf", page_ids=("1",))
+    walls = PhysicalWallCandidateProducer.from_source_visibility_producer(source, page_ids=("1",)).authority()
+    overrides = layered_ring_scope_overrides(
+        source, revision_id=published.revision.revision_id, page_ids=("1",), finished_face_gate=gate)
+    assert len(overrides) == 1
+    faces = build_source_room_face_authority(walls, scope_overrides=overrides)
+    selector = SourceRoomFaceSelector(
+        document_id=published.revision.document_id, revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
+        page_id="1", decision_scope_id="wall-source:page-1")
+    return dict(
+        room_face_authority=faces, selector=selector,
+        context=ProviderContext(
+            run_id="run-ring-bridge", workspace_id="w", project_id="p", document_id=published.revision.document_id,
+            source_sha256=published.revision.source_sha256, revision_id=published.revision.revision_id,
+            current_revision_id=published.revision.revision_id, selected_pages=(0,), owned_viewport_ids=("vp",),
+            evidence_snapshot_id=published.snapshot.snapshot_id, owned_page_numbers=(1,),
+            viewport_page_ownership=(("vp", 1),)),
+        document=DocumentEvidence(
+            document_id=published.revision.document_id, source_sha256=published.revision.source_sha256, page_count=1,
+            page_ids=("1",), evidence_ids=(), producer="ring-bridge-test", producer_version="1.0"),
+        viewport=ViewportEvidence(
+            viewport_id="vp", document_id=published.revision.document_id, page_id="1", bbox=(0.0, 0.0, 400.0, 300.0),
+            view_type="floor_plan", status=ViewportResolutionStatus.RESOLVED, evidence_ids=(), confidence=1.0),
+        page_no=1,
+        scale_calibration=resolve_page_scale_calibration(
+            page_no=1, sheet_label="synthetic-plan", revision_id=published.revision.revision_id,
+            readings=[ScaleSourceReading(source_type=ScaleSourceType.SCALE_BAR.value, scale_text="1:100", ratio=100.0, confidence=1.0)]),
+    )
+
+
+def test_the_bridge_withholds_a_gated_face_by_itself_without_any_caller_list():
+    data = layered_room_pdf()
+    open_inputs = _ring_bridge_inputs(data, gate=False)
+    open_result = build_source_room_area_bridge(**open_inputs)
+    assert [(q.status, q.abstained) for q in open_result.quantities] == [("firm", False)]  # the ungated default
+    gated_inputs = _ring_bridge_inputs(data, gate=True)
+    gated = build_source_room_area_bridge(**gated_inputs)  # no withheld_room_refs passed
+    assert gated.quantities == () and len(gated.entities) == 1
+    # a caller-supplied documented area for the gated face is dropped before it reaches the document or issuer
+    face_id = gated_inputs["room_face_authority"].resolve_scope(gated_inputs["selector"]).records[0].face_id
+    from pb_migration_contracts import EvidenceAtom
+
+    documented = EvidenceAtom(
+        evidence_id="documented-area-for-a-gated-face", document_id=gated_inputs["document"].document_id, page_id="1",
+        kind="explicit_room_area", method="test", normalized_value=8.64, unit="m2")
+    with_explicit = build_source_room_area_bridge(**gated_inputs, explicit_area_evidence_by_room_id={face_id: documented})
+    assert with_explicit.quantities == ()
+    assert "documented-area-for-a-gated-face" not in with_explicit.document.evidence_ids
+    assert with_explicit.document.evidence_ids == gated.document.evidence_ids
+    # caller-requested removals still apply on top of the scope's own veto and never undo it
+    assert build_source_room_area_bridge(**gated_inputs, withheld_room_refs=(face_id,)).quantities == ()
+    assert build_source_room_area_bridge(**gated_inputs, withheld_room_refs=("no-such-room",)).quantities == ()

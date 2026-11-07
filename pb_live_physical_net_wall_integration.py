@@ -731,10 +731,6 @@ def _collect_live_physical_net_wall_claim(
                     } if gated_record_ids else evidence_by_record
                 ),
             )
-            withheld_room_refs = tuple(
-                record.face_id for record in room_scope.records
-                if record.record_id in gated_record_ids
-            )
 
             containing_viewport = None
             if (
@@ -1000,8 +996,6 @@ def _collect_live_physical_net_wall_claim(
                 explicit_area_evidence_by_room_id=(
                     explicit_by_face_id if explicit_by_face_id else None
                 ),
-                **({"withheld_room_refs": withheld_room_refs}
-                   if withheld_room_refs else {}),
             )
             room_area_bridges.append(bridge)
             canonical_floors = enrich_live_canonical_floor_metric_areas(

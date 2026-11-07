@@ -124,13 +124,12 @@ class SameViewRoomAreaProducer:
         return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
 
     def _layered_ring_bounding_box(self, room: LiveCanonicalRoomObject):
-        """(bounding box, face_is_its_rectangle, is_partition_part, finished_face_required) of a ring face, else None."""
+        """(bounding box, face_is_its_rectangle, is_partition_part) of a doorway-closed ring face, else None."""
         binding = self._rooms.room_face_authority_binding_for(room)
         if binding is None:
             return None
         from pb_layered_wall_doorway_room_face_scope_shadow import (
             LAYERED_RING_SCOPE_REASON,
-            RING_FINISHED_FACE_REQUIRED_PREFIX,
             RING_NOT_A_RECTANGLE_PREFIX,
             RING_PARTITION_PART_PREFIX,
             ring_face_bounding_box,
@@ -152,8 +151,25 @@ class SameViewRoomAreaProducer:
             ring_face_bounding_box(record),
             f"{RING_NOT_A_RECTANGLE_PREFIX}{record.record_id}" not in scope.reason_codes,
             f"{RING_PARTITION_PART_PREFIX}{record.record_id}" in scope.reason_codes,
-            f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}" in scope.reason_codes,
         )
+
+    def _finished_face_required(self, room: LiveCanonicalRoomObject) -> bool:
+        """True when the authenticated room-face scope marks this face as lacking an established finished face.
+
+        Read from the producer-owned binding for every call, never from an optional argument: a consumer that
+        omits layered_ring_box_selection_shadow must not be able to publish a gated frame-face width x depth.
+        """
+        binding = self._rooms.room_face_authority_binding_for(room)
+        if binding is None:
+            return False
+        from pb_layered_wall_doorway_room_face_scope_shadow import RING_FINISHED_FACE_REQUIRED_PREFIX
+
+        scope = binding.authority.resolve_scope(SourceRoomFaceSelector(
+            document_id=room.document_id, revision_id=room.revision_id,
+            source_sha256=room.source_sha256, snapshot_id=room.snapshot_id,
+            page_id=room.page_id, decision_scope_id=room.decision_scope_id,
+        ))
+        return f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
 
     def publish(
         self, *, repeated_label_source_ownership_shadow: bool = False,
@@ -427,7 +443,7 @@ class SameViewRoomAreaProducer:
             ring_box = None if ring_face is None else ring_face[0]
             ring_not_rectangle = ring_face is not None and not ring_face[1]
             ring_partition_part = ring_face is not None and ring_face[2]
-            ring_finished_face_required = ring_face is not None and ring_face[3]
+            ring_finished_face_required = self._finished_face_required(room)
             ring_box_rejected = False
             if (ring_not_rectangle or ring_partition_part or ring_finished_face_required) and deduped:
                 # A figured width x depth is the area of its rectangle, not of a face with a wall
