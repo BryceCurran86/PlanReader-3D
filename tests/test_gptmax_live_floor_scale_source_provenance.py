@@ -29,6 +29,25 @@ from tests.test_live_floor_area_quantity_publication_integrity import (
 from tests.test_live_floor_finish_area_source_closed_export import _floor
 
 
+def _signed_native_record(physical: PhysicalScaleEvidence) -> PhysicalScaleEvidence:
+    return replace(
+        physical,
+        record_id=stable_contract_id(
+            "physical_scale_v1",
+            {
+                "selector": physical.selector.key,
+                "source_kind": physical.source_kind,
+                "source_span_pt": round(physical.source_span_pt, 12),
+                "physical_span_mm": round(physical.physical_span_mm, 9),
+                "points_per_mm": round(physical.points_per_mm, 15),
+                "source_segment_observation_ids": physical.source_segment_observation_ids,
+                "source_text_observation_ids": physical.source_text_observation_ids,
+            },
+            digest_chars=32,
+        ),
+    )
+
+
 def _typed_inputs():
     floor = replace(_floor(), metric_area_authority=MeasurementAuthorityType.PDF_SCALED.value)
     calibration = resolve_page_scale_calibration(
@@ -56,22 +75,7 @@ def _typed_inputs():
         source_text_observation_ids=("original-scale-text",),
         viewport_id=floor.viewport_id,
     )
-    physical = replace(
-        physical,
-        record_id=stable_contract_id(
-            "physical_scale_v1",
-            {
-                "selector": physical.selector.key,
-                "source_kind": physical.source_kind,
-                "source_span_pt": round(physical.source_span_pt, 12),
-                "physical_span_mm": round(physical.physical_span_mm, 9),
-                "points_per_mm": round(physical.points_per_mm, 15),
-                "source_segment_observation_ids": physical.source_segment_observation_ids,
-                "source_text_observation_ids": physical.source_text_observation_ids,
-            },
-            digest_chars=32,
-        ),
-    )
+    physical = _signed_native_record(physical)
     source = replace(
         _source_area(),
         authority=MeasurementAuthorityType.PDF_SCALED.value,
@@ -257,11 +261,11 @@ def test_bounded_original_page_scale_can_bind_derived_room_viewport_but_not_othe
     floor = replace(floor, viewport_id=None)
     phys = bridge.physical_scale_evidence
     source_owned_page = replace(
-        bridge, physical_scale_evidence=replace(
+        bridge, physical_scale_evidence=_signed_native_record(replace(
             phys,
             selector=replace(phys.selector, viewport_id=None),
             viewport_id=None,
-        ),
+        )),
     )
     receipt = source_owned_floor_scale_receipt(floor=floor, quantity=source, bridge=source_owned_page)
     assert receipt is not None
