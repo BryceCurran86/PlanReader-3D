@@ -1089,8 +1089,18 @@ class SourceObservationProducer:
                 )
             png_bytes = pix.tobytes("png")
         finally:
+            if "pix" in locals() and pix is not None:
+                del pix
+            if "page" in locals() and page is not None:
+                del page
+            if "render_page" in locals() and render_page is not None:
+                del render_page
             if "scratch" in locals() and scratch is not None:
                 scratch.close()
+            try:
+                fitz.TOOLS.store_shrink(100)
+            except Exception:
+                pass
 
         if include_native_frame:
             assert native_frame is not None
