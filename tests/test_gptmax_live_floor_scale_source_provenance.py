@@ -18,7 +18,16 @@ from pb_page_scale_calibration_authority import (
     resolve_page_scale_calibration,
     scale_calibration_fingerprint,
 )
-from pb_physical_scale_authority import PhysicalScaleEvidence, PhysicalScaleSelector
+from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_RESOLVED,
+    PhysicalScaleAuthority,
+    PhysicalScaleEvidence,
+    PhysicalScaleResult,
+    PhysicalScaleSelector,
+)
+# A test-only sealed lookup mirrors the *output* of the genuine original
+# producer; customer authority still accepts only the exact sealed class.
+from pb_physical_scale_authority import _AUTHORITY_SEAL
 from pb_physical_scale_calibration_bridge import (
     PHYSICAL_SCALE_CALIBRATION_RESOLVED,
     PhysicalScaleCalibrationBridgeResult,
@@ -45,6 +54,19 @@ def _signed_native_record(physical: PhysicalScaleEvidence) -> PhysicalScaleEvide
             },
             digest_chars=32,
         ),
+    )
+
+
+def _source_authority(bridge: PhysicalScaleCalibrationBridgeResult) -> PhysicalScaleAuthority:
+    physical = bridge.physical_scale_evidence
+    assert physical is not None
+    return PhysicalScaleAuthority(
+        {physical.selector.key: PhysicalScaleResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(PHYSICAL_SCALE_RESOLVED,),
+            evidence=physical,
+        )},
+        _seal=_AUTHORITY_SEAL,
     )
 
 
@@ -97,7 +119,7 @@ def _typed_inputs():
 
 def _binding():
     floor, source, bridge = _typed_inputs()
-    receipt = source_owned_floor_scale_receipt(floor=floor, quantity=source, bridge=bridge)
+    receipt = source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), floor=floor, quantity=source, bridge=bridge)
     assert receipt is not None
     return floor, source, bridge, receipt
 
@@ -130,7 +152,7 @@ def test_exact_original_source_scale_reaches_floor_quantity_and_only_after_sourc
 def test_copied_physical_scale_id_is_not_original_producer_record():
     floor, source, bridge, receipt = _binding()
     forged = replace(receipt.physical_scale_evidence, record_id="user-supplied-scale-identifier")
-    assert source_owned_floor_scale_receipt(
+    assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
         floor=floor, quantity=source,
         bridge=replace(bridge, physical_scale_evidence=forged)
     ) is None
@@ -162,7 +184,7 @@ def test_documented_dimension_floor_publication_unchanged():
 
 def test_source_scale_receipt_not_manually_constructible():
     floor, source, bridge = _typed_inputs()
-    legit = source_owned_floor_scale_receipt(floor=floor, quantity=source, bridge=bridge)
+    legit = source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), floor=floor, quantity=source, bridge=bridge)
     assert legit is not None
     with pytest.raises(TypeError, match="producer-owned bridge"):
         LiveFloorScaleSourceReceipt(
@@ -212,7 +234,7 @@ def test_unverified_or_conflicted_calibration_cannot_become_floor_scale():
         replace(bridge, physical_scale_evidence=None),
     )
     for altered in invalid:
-        assert source_owned_floor_scale_receipt(
+        assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
             floor=floor, quantity=source, bridge=altered
         ) is None
 
@@ -230,7 +252,7 @@ def test_missing_or_drifting_native_scale_ink_and_text_proof_is_rejected():
         replace(physical, source_span_pt=physical.source_span_pt * 2.0),
     )
     for altered in invalid:
-        assert source_owned_floor_scale_receipt(
+        assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
             floor=floor, quantity=source,
             bridge=replace(bridge, physical_scale_evidence=altered),
         ) is None
@@ -248,7 +270,7 @@ def test_replayed_source_area_calibration_or_page_identity_is_not_authority():
         replace(source, quantity_id="other-area"),
     )
     for wrong in mismatches:
-        assert source_owned_floor_scale_receipt(
+        assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
             floor=floor, quantity=wrong, bridge=bridge
         ) is None
 
@@ -267,16 +289,18 @@ def test_bounded_original_page_scale_can_bind_derived_room_viewport_but_not_othe
             viewport_id=None,
         )),
     )
-    receipt = source_owned_floor_scale_receipt(floor=floor, quantity=source, bridge=source_owned_page)
+    receipt = source_owned_floor_scale_receipt(scale_authority=_source_authority(source_owned_page), floor=floor, quantity=source, bridge=source_owned_page)
     assert receipt is not None
     assert receipt.viewport_id == source.metadata["viewport_id"]
     assert validated_floor_scale_metadata(receipt, floor=floor, source=source) is not None
     bad = replace(source_owned_page.physical_scale_evidence,
                   selector=replace(phys.selector, viewport_id="unrelated-viewport"),
                   viewport_id="unrelated-viewport")
-    assert source_owned_floor_scale_receipt(
+    assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
         floor=floor, quantity=source,
-        bridge=replace(source_owned_page, physical_scale_evidence=bad)
+        bridge=replace(source_owned_page, physical_scale_evidence=bad),
+        # This original authority is still pinned to the *different* pagewide
+        # source record; a wrong viewport cannot steal it.
     ) is None
 
 
@@ -315,8 +339,50 @@ def test_non_native_manual_or_unverified_scale_cannot_borrow_original_bar_identi
         changed = replace(source, metadata={
             **source.metadata, "scale_fingerprint": scale_calibration_fingerprint(other)
         })
-        assert source_owned_floor_scale_receipt(
+        assert source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), 
             floor=floor,
             quantity=changed,
             bridge=replace(bridge, calibration=other),
         ) is None
+
+
+def test_synthetic_or_foreign_original_scale_authority_never_grants_customer_metadata():
+    floor, source, bridge, receipt = _binding()
+    actual = _source_authority(bridge)
+    assert actual.resolve(bridge.physical_scale_evidence.selector).evidence == bridge.physical_scale_evidence
+    foreign = replace(
+        bridge.physical_scale_evidence,
+        source_text_observation_ids=("another-original-text-owner",),
+    )
+    foreign = _signed_native_record(foreign)
+    wrong_authority = PhysicalScaleAuthority(
+        {foreign.selector.key: PhysicalScaleResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(PHYSICAL_SCALE_RESOLVED,),
+            evidence=foreign,
+        )},
+        _seal=_AUTHORITY_SEAL,
+    )
+    assert source_owned_floor_scale_receipt(
+        scale_authority=wrong_authority, floor=floor,
+        quantity=source, bridge=bridge,
+    ) is None
+    # A copy of a syntactically valid receipt cannot replace the original
+    # sealed publisher. Both issuance and later customer metadata fail closed.
+    wrong_receipt = replace(receipt, physical_scale_authority=wrong_authority)
+    assert validated_floor_scale_metadata(
+        wrong_receipt, floor=floor, source=source,
+    ) is None
+
+
+def test_unpublished_native_scale_record_is_not_measurement_authority():
+    floor, source, bridge, receipt = _binding()
+    empty = PhysicalScaleAuthority({}, _seal=_AUTHORITY_SEAL)
+    assert source_owned_floor_scale_receipt(
+        scale_authority=empty, floor=floor,
+        quantity=source, bridge=bridge,
+    ) is None
+    assert validated_floor_scale_metadata(
+        replace(receipt, physical_scale_authority=empty),
+        floor=floor, source=source,
+    ) is None
