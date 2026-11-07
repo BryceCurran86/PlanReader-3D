@@ -84,7 +84,7 @@ def test_duplicate_source_door_code_and_unrelated_note_never_issue_unique_row():
                and not x.new_customer_quantity_authority for x in result)
 
 
-def test_original_a600_full_producer_receipt_census_keeps_all_28_source_rows():
+def test_original_a600_code_census_preserves_unparsed_native_rows():
     data=ORIGINAL.read_bytes()
     assert hashlib.sha256(data).hexdigest()==SHA
     source=SourceVisibilityProducer(producer_method="original-a600-source-audit",
@@ -99,7 +99,12 @@ def test_original_a600_full_producer_receipt_census_keeps_all_28_source_rows():
     )
     expected={f"D{i:02d}" for i in range(1,29)}
     assert set(result.all_original_source_codes)==expected
-    assert len(result.rows)==28
+    # The lexical code roster is complete; source row membership is not.
+    # Trusted-main and candidate original replay both retain these 27
+    # recognised groups and report the unparsed native blocks separately.
+    assert len(result.rows)==27
+    assert result.unparsed_original_door_codes
+    assert not result.complete_source_word_universe
     assert result.source_sha256==SHA
     assert result.snapshot_id==pub.snapshot.snapshot_id
     door={x.code:x for x in result.rows}
