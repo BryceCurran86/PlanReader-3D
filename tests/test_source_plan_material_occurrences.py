@@ -12,6 +12,44 @@ from pb_viewport_segmentation import segment_source_page_viewports
 from test_source_owned_physical_plan_view import _sheet, _source
 
 
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_replay_native_finish_mode_requires_an_explicit_bool(value):
+    from tools.diag_source_plan_material_occurrences import replay
+    with pytest.raises(ValueError, match="explicit bool"):
+        replay(b"not-a-source", page_number=1, source_native_finish_text_shadow=value)
+
+
+def test_replay_native_finish_mode_is_explicit_and_keeps_quantity_gates(monkeypatch):
+    from tools import diag_source_plan_material_occurrences as diagnostic
+
+    seen = []
+    original = diagnostic.SourceVisibilityProducer.__init__
+
+    def observe(self, **kwargs):
+        seen.append(kwargs.get("source_native_finish_text_shadow", False))
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(diagnostic.SourceVisibilityProducer, "__init__", observe)
+    data = _drawing()
+    default = diagnostic.replay(data, page_number=1)
+    enabled = diagnostic.replay(data, page_number=1, source_native_finish_text_shadow=True)
+    assert seen == [False, True]
+    assert "source_native_finish_text_shadow" not in default
+    assert enabled["source_native_finish_text_shadow"] is True
+    assert default["bounded_plan_view_count"] == enabled["bounded_plan_view_count"] == 1
+    assert default["material_occurrence_scopes"] == enabled["material_occurrence_scopes"]
+    for report in (default, enabled):
+        assert report["published_snapshot_unchanged"]
+        assert report["default_segmentation_unchanged"]
+        assert report["default_occurrence_results_unchanged"]
+        assert report["incomplete_scopes_rejected_by_existing_floor_consumer"]
+        assert not report["physical_floor_identity_granted"]
+        assert not report["metric_authority_granted"]
+        assert not report["whole_sheet_plan_universe_proven"]
+        assert not report["commercial_projection_allowed"]
+        assert report["published_quantities"] == []
+
+
 def _drawing(
     *,
     hidden=False,
