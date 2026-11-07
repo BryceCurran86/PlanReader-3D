@@ -343,3 +343,26 @@ def test_a_wall_piece_bridging_part_of_the_band_keeps_the_wall_continuous():
     rows += strip(0, 2, 2, 98) + strip(98, 2, 100, 98) + strip(0, 98, 100, 100)
     result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
     assert len(candidates(result)) == 1 and result.unresolved_gap_count == 0
+
+
+@pytest.mark.parametrize("seed", [0, 5])
+def test_ring_polygons_are_simple_rings_for_downstream_room_area_code(seed):
+    # CAD float noise (3e-5 pt) where wall returns and caps meet used to leave repeated vertices
+    # (one across the closing edge, one inside the walk), which makes pb_room_area_quantity treat the
+    # ring as unusable and every such ring a "duplicate face"
+    import random
+
+    from pb_room_area_quantity import _original_pdf_ring
+
+    rnd = random.Random(seed)
+
+    def j():
+        return rnd.uniform(-3e-5, 3e-5)
+
+    extra = (strip(40 + j(), 2 + j(), 42 + j(), 30 + j()) + strip(40 + j(), 28 + j(), 44.4 + j(), 30 + j())
+             + strip(42 + j(), 10 + j(), 43 + j(), 12 + j()) + strip(41 + j(), 20 + j(), 46 + j(), 22 + j()))
+    ring = candidates(build_layered_wall_doorway_room_rings(room() + extra, source_sha256=SHA, page_index=0))[0]
+    points = ring.polygon_pdf_pts
+    assert all(points[i] != points[(i + 1) % len(points)] for i in range(len(points)))
+    assert len(set(points)) == len(points)
+    assert _original_pdf_ring(points) is not None

@@ -1696,8 +1696,16 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
 
 def build_source_room_face_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    *,
+    scope_overrides: Optional[Mapping[_ScopeKey, SourceRoomFaceScopeResult]] = None,
 ) -> SourceRoomFaceAuthority:
-    """Build sealed room-face results from all producer-owned wall scopes."""
+    """Build sealed room-face results from all producer-owned wall scopes.
+
+    ``scope_overrides`` (default None: nothing changes) replaces the derived result of exactly
+    the named scopes with a producer-built ``SourceRoomFaceScopeResult`` whose edges are owned
+    by typed non-W4 owners (for example doorway-closed rings from native wall ink). Each key
+    must equal the six lineage ids of its own result; anything else is refused.
+    """
 
     if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
         raise TypeError(
@@ -1717,6 +1725,19 @@ def build_source_room_face_authority(
             _clean(scope.decision_scope_id),
         )
         results[key] = result
+    for key, override in (scope_overrides or {}).items():
+        if type(override) is not SourceRoomFaceScopeResult:
+            raise TypeError("scope override must be a SourceRoomFaceScopeResult")
+        if tuple(key) != (
+            _clean(override.document_id),
+            _clean(override.revision_id),
+            _clean(override.source_sha256),
+            _clean(override.snapshot_id),
+            _clean(override.page_id),
+            _clean(override.decision_scope_id),
+        ):
+            raise ValueError("scope override key must equal its result's lineage ids")
+        results[key] = override
     return SourceRoomFaceAuthority(results, _seal=_AUTHORITY_SEAL)
 
 

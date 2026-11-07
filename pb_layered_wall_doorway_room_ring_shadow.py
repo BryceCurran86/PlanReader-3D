@@ -54,6 +54,7 @@ REASON_RING_CLOSED = "layered_wall_ring_closed_by_source_ink"
 REASON_OPEN_GAP = "open_wall_gap_unresolved"
 REASON_OPEN_EXTERIOR = "open_to_exterior"
 REASON_NO_WALL_INK = "no_wall_layer_strips"
+REASON_UNOWNED_EDGE = "ring_edge_without_source_owner"
 REASON_SOURCE_HASH = "source_sha256_mismatch"
 
 KIND_SWING = "swing_doorway"
@@ -183,6 +184,8 @@ class LayeredRoomRingRecord:
     bounding_wall_path_indices: tuple[int, ...]
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    # One tuple of owner ids per polygon edge: wall strips/fills by native path index, or a doorway closure.
+    edge_owner_ids: tuple[tuple[str, ...], ...] = ()
     schema_version: str = LAYERED_ROOM_RING_SCHEMA_VERSION
     takeoff_eligible: bool = False
     commercial_projection_allowed: bool = False
@@ -235,12 +238,12 @@ def _polygon_of_closed_line_path(items: Sequence[Sequence[Any]]) -> Optional[Pol
     return polygon if polygon.is_valid and polygon.area > 0.0 else None
 
 
-def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip], list[Polygon]]:
+def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip], list[tuple[int, Polygon]]]:
     """Filled opaque-black wall-layer paths. Near-rectangular ones (rectangles and mitred strips whose
     outline fills at least 85% of its bounding box) are strips for run/gap analysis; every other
     filled shape is kept as a plain barrier polygon and counted, never dropped."""
     strips: list[_Strip] = []
-    other: list[Polygon] = []
+    other: list[tuple[int, Polygon]] = []
     for index, row in _wall_rows(drawings):
         fill = row.get("fill")
         if fill is None or not _is_black(fill):
@@ -261,7 +264,7 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
             if bbox_area > 0.0 and polygon.area >= 0.85 * bbox_area:
                 strips.append(_Strip(index, x0, y0, x1, y1, polygon))
             else:
-                other.append(polygon)
+                other.append((index, polygon))
     return _attach_caps(strips), other
 
 
@@ -499,6 +502,19 @@ def _polygon_parts(geom: Any) -> list[Polygon]:
     return [g for g in getattr(geom, "geoms", ()) if g.geom_type == "Polygon"]
 
 
+def _dedupe_ring(coords: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
+    """Drop consecutive repeated vertices (and a repeat across the closing edge). Planarization and
+    the 0.03 pt closing leave sub-rounding jogs; a ring with a repeated vertex is not a simple ring
+    to downstream room-area code, and no distinct vertex is removed."""
+    out: list[tuple[float, float]] = []
+    for point in coords:
+        if not out or point != out[-1]:
+            out.append(point)
+    while len(out) > 1 and out[0] == out[-1]:
+        out.pop()
+    return tuple(out)
+
+
 def _split_at_closures(
     coords: Sequence[tuple[float, float]], closures: Sequence[tuple[bool, tuple[float, float], float, float]],
 ) -> tuple[tuple[float, float], ...]:
@@ -545,7 +561,7 @@ def build_layered_wall_doorway_room_rings(
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
-    polygons = [s.polygon for s in strips] + list(other_fills)
+    polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
     union = _closed_union(polygons)
     domain = union.envelope.buffer(1.0, join_style=2)
     gaps = _gaps(strips, union, domain)
@@ -608,19 +624,32 @@ def build_layered_wall_doorway_room_rings(
         adjacent_open = any(gap.collinear and part.buffer(NOISE_PT).intersects(gap.rect()) for gap in unresolved)
         if adjacent_open:
             reasons.append(REASON_OPEN_GAP)
-        base = tuple((round(x, 4), round(y, 4)) for x, y in list(part.exterior.coords)[:-1])
-        coords = _split_at_closures(base, [(c.horizontal, c.band, c.gap_interval[0], c.gap_interval[1]) for c in closures])
+        base = _dedupe_ring(tuple((round(x, 4), round(y, 4)) for x, y in list(part.exterior.coords)[:-1]))
+        coords = _dedupe_ring(_split_at_closures(base, [(c.horizontal, c.band, c.gap_interval[0], c.gap_interval[1]) for c in closures]))
         closure_edges = 0
         wall_edges = 0
+        unowned_edges = 0
         bounding_closures: set[str] = set()
+        edge_owners: list[tuple[str, ...]] = []
         for a, b in zip(coords, coords[1:] + coords[:1]):
-            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
-            owner = next((cid for cid, rect in closure_rects if rect.buffer(NOISE_PT).contains(Point(mid))), None)
+            mid = Point((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            owner = next((cid for cid, rect in closure_rects if rect.buffer(NOISE_PT).contains(mid)), None)
             if owner is not None:
                 closure_edges += 1
                 bounding_closures.add(owner)
-            else:
+                edge_owners.append((f"layered_doorway_closure:{owner}",))
+                continue
+            owners = tuple(sorted(
+                [f"layered_wall_strip:{s.path_index}" for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2]
+                + [f"layered_wall_fill:{index}" for index, polygon in other_fills if polygon.distance(mid) <= NOISE_PT * 2]
+            ))
+            if owners:
                 wall_edges += 1
+            else:
+                unowned_edges += 1
+            edge_owners.append(owners)
+        if unowned_edges:
+            reasons.append(REASON_UNOWNED_EDGE)
         wall_paths = tuple(sorted({s.path_index for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon)}))
         status = EvidenceResolutionStatus.ABSTAINED if reasons else EvidenceResolutionStatus.CANDIDATE
         if not reasons:
@@ -629,7 +658,7 @@ def build_layered_wall_doorway_room_rings(
         record_id = stable_contract_id(
             "layered_wall_doorway_room_ring",
             {"source_sha256": source_sha256, "page_index": page_index, "polygon": coords,
-             "closures": sorted(bounding_closures), "reasons": reasons},
+             "closures": sorted(bounding_closures), "reasons": reasons, "owners": [list(o) for o in edge_owners]},
             digest_chars=32,
         )
         rings.append(LayeredRoomRingRecord(
@@ -638,7 +667,7 @@ def build_layered_wall_doorway_room_rings(
             bbox_pdf_pts=(round(minx, 4), round(miny, 4), round(maxx, 4), round(maxy, 4)),
             wall_edge_count=wall_edges, closure_edge_count=closure_edges,
             bounding_closure_ids=tuple(sorted(bounding_closures)), bounding_wall_path_indices=wall_paths,
-            status=status, reason_codes=tuple(reasons), _seal=_RECORD_SEAL,
+            status=status, reason_codes=tuple(reasons), edge_owner_ids=tuple(edge_owners), _seal=_RECORD_SEAL,
         ))
     rings.sort(key=lambda r: r.record_id)
     closures.sort(key=lambda c: c.closure_id)
