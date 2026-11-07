@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_cross_view_ceiling_finish_authority import (
     _occurrence_line as _cross_view_occurrence_line,

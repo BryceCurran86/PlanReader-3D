@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
 import fitz
 import pytest
 
@@ -159,8 +160,8 @@ def test_missing_ft3_finish_mark_abstains(maryborough_pdf_path, monkeypatch):
 def test_conflicting_correspondence_abstains(maryborough_pdf_path, monkeypatch):
     import pb_maryborough_customer_authority as auth_mod
     from pb_source_cross_view_floor_correspondence_shadow import (
-        SourceCrossViewFloorCorrespondenceRecord,
         EvidenceResolutionStatus,
+        SourceCrossViewFloorCorrespondenceRecord,
     )
 
     def blocked_correspondence(*args, **kwargs):
