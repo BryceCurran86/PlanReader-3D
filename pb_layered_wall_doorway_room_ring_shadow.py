@@ -533,6 +533,83 @@ def _opaque(row: Mapping[str, Any]) -> bool:
     return opacity is None or (type(opacity) in (int, float) and opacity >= 1.0 - 1e-9)
 
 
+def _white_frame_boxes(drawings: Sequence[Mapping[str, Any]]) -> list[tuple[float, float, float, float, int]]:
+    """Opaque white rectangles on a wall layer: (x0, y0, x1, y1, native path index)."""
+    boxes: list[tuple[float, float, float, float, int]] = []
+    for index, row in _wall_rows(drawings):
+        fill = row.get("fill")
+        if fill is None or not _is_white(fill) or not _opaque(row):
+            continue
+        items = list(row.get("items", ()))
+        rects = [r for r in (_rect_of_item(it) for it in items) if r is not None]
+        if not rects:
+            whole = _rect_of_closed_line_path(items)
+            rects = [whole] if whole is not None else []
+        for x0, y0, x1, y1 in rects:
+            if x1 - x0 > NOISE_PT and y1 - y0 > NOISE_PT:
+                boxes.append((x0, y0, x1, y1, index))
+    return boxes
+
+
+def _frame_anchored_gaps(drawings: Sequence[Mapping[str, Any]], union: Any, known: Sequence[_Gap]) -> list[_Gap]:
+    """Openings anchored on two collinear white frame boxes that each abut black wall ink.
+
+    A wall run seeds an interruption only when its end piece is a recognised strip; a wardrobe or
+    sliding door often ends in a chamfered or narrow block that is not. Here the interruption is the
+    interval between two ADJACENT frame boxes of one band (no other frame box between them), bounded
+    at both ends by black wall ink of one and the same band thickness, free of black ink between, and
+    open on both sides of the band at its middle. Intervals already found from wall runs are not added.
+    """
+    boxes = _white_frame_boxes(drawings)
+    found: list[_Gap] = []
+    for horizontal in (True, False):
+        groups: dict[tuple[int, int], list[tuple[float, float, int]]] = {}
+        for x0, y0, x1, y1, index in boxes:
+            lo, hi = (x0, x1) if horizontal else (y0, y1)
+            p0, p1 = (y0, y1) if horizontal else (x0, x1)
+            groups.setdefault((round(p0 / 0.02), round(p1 / 0.02)), []).append((lo, hi, index))
+        for (k0, k1), members in groups.items():
+            p0, p1 = k0 * 0.02, k1 * 0.02
+            members.sort()
+            for (lo1, hi1, _i1), (lo2, hi2, _i2) in zip(members, members[1:]):
+                if lo2 - hi1 <= NOISE_PT:
+                    continue
+                bands = []
+                for edge, direction in ((lo1, -1), (hi2, 1)):
+                    a, b = (edge - 0.1, edge) if direction < 0 else (edge, edge + 0.1)
+                    slab = box(a, p0, b, p1) if horizontal else box(p0, a, p1, b)
+                    inter = union.intersection(slab)
+                    if inter.is_empty or inter.area < 0.5 * slab.area:
+                        bands = []
+                        break
+                    bx0, by0, bx1, by1 = inter.bounds
+                    bands.append((by0, by1) if horizontal else (bx0, bx1))
+                if len(bands) != 2 or not (_close(bands[0][0], bands[1][0], 0.02) and _close(bands[0][1], bands[1][1], 0.02)):
+                    continue
+                band = bands[0]
+                if band[1] - band[0] <= NOISE_PT:
+                    continue
+                gap = _Gap(horizontal, band, lo1, hi2, (), (), True)
+                rect = gap.rect()
+                # the opening is ONE interruption: no black ink inside it beyond noise at its two end faces
+                if rect.intersection(union).area > NOISE_PT * 2.0 * (band[1] - band[0]):
+                    continue
+                mid = (lo1 + hi2) / 2.0
+                probes = (
+                    (Point(mid, band[0] - 2 * NOISE_PT), Point(mid, band[1] + 2 * NOISE_PT)) if horizontal
+                    else (Point(band[0] - 2 * NOISE_PT, mid), Point(band[1] + 2 * NOISE_PT, mid))
+                )
+                if any(union.contains(probe) for probe in probes):
+                    continue
+                if any(
+                    g.horizontal == horizontal and _close(g.band[0], band[0], 0.02) and _close(g.band[1], band[1], 0.02)
+                    and _close(g.lo, lo1) and _close(g.hi, hi2) for g in known
+                ):
+                    continue
+                found.append(gap)
+    return found
+
+
 def _sliding_leaf_evidence(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[tuple[int, ...]]:
     """A sliding-door opening: a frame box at EACH end of the interruption and exactly two overlapping
     leaf strokes between them, all native wall-layer ink on this page, none hidden by a later opaque fill.
@@ -544,23 +621,14 @@ def _sliding_leaf_evidence(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> 
     thickness = gap.band[1] - gap.band[0]
     horizontal = gap.horizontal
     frames: list[tuple[float, float, int]] = []
-    for index, row in _wall_rows(drawings):
-        fill = row.get("fill")
-        if fill is None or not _is_white(fill) or not _opaque(row):
+    for x0, y0, x1, y1, index in _white_frame_boxes(drawings):
+        lo, hi = (x0, x1) if horizontal else (y0, y1)
+        p0, p1 = (y0, y1) if horizontal else (x0, x1)
+        if p1 < gap.band[0] - thickness or p0 > gap.band[1] + thickness:
             continue
-        items = list(row.get("items", ()))
-        rects = [r for r in (_rect_of_item(it) for it in items) if r is not None]
-        if not rects:
-            whole = _rect_of_closed_line_path(items)
-            rects = [whole] if whole is not None else []
-        for x0, y0, x1, y1 in rects:
-            lo, hi = (x0, x1) if horizontal else (y0, y1)
-            p0, p1 = (y0, y1) if horizontal else (x0, x1)
-            if p1 < gap.band[0] - thickness or p0 > gap.band[1] + thickness:
-                continue
-            inside = gap.lo - NOISE_PT <= lo and hi <= gap.hi + NOISE_PT
-            if hi - lo > NOISE_PT and inside and (_close(lo, gap.lo) or _close(hi, gap.hi)):
-                frames.append((lo, hi, index))
+        inside = gap.lo - NOISE_PT <= lo and hi <= gap.hi + NOISE_PT
+        if hi - lo > NOISE_PT and inside and (_close(lo, gap.lo) or _close(hi, gap.hi)):
+            frames.append((lo, hi, index))
     low = [f for f in frames if _close(f[0], gap.lo)]
     high = [f for f in frames if _close(f[1], gap.hi)]
     if len(low) != 1 or len(high) != 1 or low[0][2] == high[0][2]:
@@ -702,6 +770,8 @@ def build_layered_wall_doorway_room_rings(
     union = _closed_union(polygons)
     domain = union.envelope.buffer(1.0, join_style=2)
     gaps = _gaps(strips, union, domain)
+    if sliding_leaf_frame_closure:
+        gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
     arcs, _rejected_arcs = _swing_arcs(drawings)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 

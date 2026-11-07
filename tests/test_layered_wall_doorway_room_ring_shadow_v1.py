@@ -478,3 +478,54 @@ def test_sliding_closure_is_invariant_to_rigid_motion_and_never_a_wall():
     chord_owners = {o for r in candidates(base) for owners in r.edge_owner_ids for o in owners if "closure" in o}
     assert chord_owners  # the chord exists as a typed owner of ring edges, never as a wall strip id
     assert not any(o.startswith("layered_wall_") for o in chord_owners)
+
+
+def polygon_row(points, tf=identity, layer=WALL):
+    items = [("l", _pt(tf, *points[i]), _pt(tf, *points[(i + 1) % len(points)])) for i in range(len(points))]
+    return {"layer": layer, "fill": (0.0, 0.0, 0.0), "items": items}
+
+
+def real_like_robe_room(tf=identity, *, right_block=True, right_thickness=2.0, middle_ink=False, middle_frame=False,
+                        left_thickness=2.0, side_wall=False, frame_fill=(1.0, 1.0, 1.0), leaf2_y=30.2):
+    """A wardrobe whose end pieces are NOT recognised wall strips: a chamfered black block on the stub side
+    and a narrow vertical-shaped block at the wall side. The opening runs x 44.4..96.86 on the band y 28..30."""
+    rows = room(tf) + strip(40, 2, 42, 30, tf)
+    rows.append(polygon_row([(40, 28 + left_thickness), (42, 28), (44.4, 28), (44.4, 28 + left_thickness)], tf))  # ~77% of its bbox: not a strip
+    if right_block:
+        # a chamfered block against the right wall (fills ~77% of its bbox: not a strip either)
+        rows.append(polygon_row([(96.86, 28), (98, 28), (99, 28 + right_thickness), (96.86, 28 + right_thickness)], tf))
+    rows += [white_box(44.4, 27.72, 45.5, 30.28, tf, fill=frame_fill), white_box(95.76, 27.72, 96.86, 30.28, tf, fill=frame_fill)]
+    rows += [line((45.5, 28.0), (71.0, 28.0), tf), line((70.0, leaf2_y), (95.76, leaf2_y), tf)]
+    if middle_ink:
+        rows += strip(60, 28, 62, 30, tf)
+    if middle_frame:
+        rows.append(white_box(60.0, 27.72, 61.1, 30.28, tf))
+    if side_wall:
+        rows += strip(46, 26, 96, 27.95, tf)  # a wall continuing along the band's alcove side across the opening
+    return rows
+
+
+def test_a_wardrobe_with_chamfered_and_narrow_end_blocks_is_found_from_its_frames():
+    on = sliding(real_like_robe_room())
+    assert KIND_SLIDING_LEAF in {c.kind for c in on.closures}
+    assert sorted(r.bbox_pdf_pts for r in candidates(on))[0] == (2.0, 2.0, 98.0, 98.0) or len(candidates(on)) == 2
+    off = build_layered_wall_doorway_room_rings(real_like_robe_room(), source_sha256=SHA, page_index=0)
+    assert KIND_SLIDING_LEAF not in {c.kind for c in off.closures}
+    rotated = sliding(real_like_robe_room(lambda x, y: (-y + 500.0, x + 40.0)))
+    assert sorted(c.kind for c in rotated.closures) == sorted(c.kind for c in on.closures)
+    assert sorted(round(r.area_pt2, 2) for r in candidates(rotated)) == sorted(round(r.area_pt2, 2) for r in candidates(on))
+
+
+def test_frame_anchored_opening_needs_black_ink_of_one_thickness_at_both_ends_and_a_free_interval():
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(right_block=False)).closures}  # no ink at one end
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(right_thickness=2.4)).closures}  # unequal band thickness
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(middle_ink=True)).closures}  # ink inside the opening
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(middle_frame=True)).closures}  # a frame between: not one opening
+
+
+def test_frame_anchored_opening_abstains_for_thin_end_ink_a_continuing_wall_and_non_white_frames():
+    assert KIND_SLIDING_LEAF in {c.kind for c in sliding(real_like_robe_room()).closures}
+    thin = real_like_robe_room(left_thickness=0.4, right_thickness=0.4, leaf2_y=28.3)  # ink at both ends, but a sliver, not the wall
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(thin).closures}
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(side_wall=True)).closures}
+    assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(frame_fill=(0.5, 0.5, 0.5))).closures}
