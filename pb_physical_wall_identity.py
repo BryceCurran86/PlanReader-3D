@@ -1008,6 +1008,18 @@ def _classify_physical_wall_pair_with_features(
     left_iv = left_features.axis_interval
     right_iv = right_features.axis_interval
 
+    # A dominant-axis disagreement compares x-span with y-span, not two
+    # longitudinal intervals.  It cannot prove distinct physical walls,
+    # even when the native ancestry is equal or partly shared.  Demote
+    # this unresolved pair; never promote it to SAME from axis geometry.
+    if (
+        left_iv is not None
+        and right_iv is not None
+        and left_iv[0] != right_iv[0]
+        and (equal_ancestry or shared)
+    ):
+        return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
     if equal_ancestry and left_iv is not None and right_iv is not None:
         if _intervals_disjoint(left_iv, right_iv):
             return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
