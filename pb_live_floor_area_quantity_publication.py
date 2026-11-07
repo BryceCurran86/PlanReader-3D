@@ -348,7 +348,12 @@ def publish_live_floor_area_quantities(
                 receipt
                 for receipt in claim.source_owned_floor_scale_receipts
                 if type(receipt) is LiveFloorScaleSourceReceipt
-                and receipt.canonical_floor_id == floor.canonical_floor_id
+                and (
+                    receipt.canonical_floor_id == floor.canonical_floor_id
+                    or receipt.physical_floor_surface_id == floor.physical_floor_surface_id
+                    or receipt.source_room_face_record_id == floor.source_room_face_record_id
+                    or receipt.room_area_quantity_id == source_id
+                )
             )
             if len(matching_scale_receipts) == 1:
                 original_scale_metadata = validated_floor_scale_metadata(
