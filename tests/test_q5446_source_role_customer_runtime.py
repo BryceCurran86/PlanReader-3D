@@ -199,9 +199,13 @@ def test_role_outputs_cannot_overwrite_or_write_into_sources(tmp_path, monkeypat
         runtime.produce_q5446_source_role(
             pdf_path=source, project_id=project, output_dir=role,
         )
+    # The output folder is empty and nested inside the source directory:
+    # exercise the containment veto, not the independent non-empty veto.
+    inside_source = source.parent / "nested-output"
+    inside_source.mkdir()
     with pytest.raises(ValueError, match="inside source"):
         runtime.produce_q5446_source_role(
-            pdf_path=source, project_id=project, output_dir=tmp_path,
+            pdf_path=source, project_id=project, output_dir=inside_source,
         )
 
 
