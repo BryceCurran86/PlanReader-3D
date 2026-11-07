@@ -36,6 +36,7 @@ from pb_layered_wall_doorway_room_face_scope_shadow import (
 )
 from pb_layered_wall_doorway_room_ring_shadow import (
     KIND_SLIDING_LEAF,
+    KIND_STROKE,
     KIND_SWING,
     LayeredDoorwayClosure,
     build_from_pdf_bytes,
@@ -43,7 +44,10 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
 from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
-from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+from pb_live_physical_net_wall_integration import (
+    _collect_live_physical_net_wall_claim,
+    collect_live_physical_net_wall_claim,
+)
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_same_view_room_area_authority import SameViewRoomAreaProducer
@@ -64,6 +68,8 @@ def partition_pdf(
     vertical_spans: tuple[tuple[float, float, float], ...] = ((290.0, 80.0, 180.0),),
     labels: tuple[tuple[str, float, float], ...] = (("BED 2", 150.0, 130.0), ("ROBE", 180.0, 98.0)),
     vertical_text: dict | None = None,
+    left_vertical_spans: tuple[tuple[float, float], ...] = (),
+    horizontal_tick_end: float = 92.0,
 ) -> bytes:
     """A room (100,80)-(250,180) whose whole width is split by a wardrobe front (y 108..110).
 
@@ -108,8 +114,8 @@ def partition_pdf(
         page.insert_text(pt(x, y), text, fontsize=10.0)
     h0, h1 = horizontal_span
     line((h0, 70.0), (h1, 70.0), width=1.0)
-    line((h0, 62.0), (h0, 92.0), width=1.0)
-    line((h1, 62.0), (h1, 92.0), width=1.0)
+    line((h0, 62.0), (h0, horizontal_tick_end), width=1.0)
+    line((h1, 62.0), (h1, horizontal_tick_end), width=1.0)
     page.insert_text(pt((h0 + h1) / 2.0 - 11.0, 67.0), str(round((h1 - h0) * 24)), fontsize=9.0)
     for x, y0, y1 in vertical_spans:
         line((x, y0), (x, y1), width=1.0)
@@ -117,6 +123,11 @@ def partition_pdf(
         line((x - 12.0, y1), (x + 8.0, y1), width=1.0)
         value = (vertical_text or {}).get((x, y0, y1), str(round((y1 - y0) * 24)))
         page.insert_text(pt(x - 3.0, (y0 + y1) / 2.0 + 17.0), value, fontsize=9.0, rotate=90)
+    for y0, y1 in left_vertical_spans:  # a figure on the room's left, its ticks landing on the left wall
+        line((60.0, y0), (60.0, y1), width=1.0)
+        line((48.0, y0), (100.0, y0), width=1.0)
+        line((48.0, y1), (100.0, y1), width=1.0)
+        page.insert_text(pt(57.0, (y0 + y1) / 2.0 + 17.0), str(round((y1 - y0) * 24)), fontsize=9.0, rotate=90)
     return doc.tobytes()
 
 
@@ -368,6 +379,51 @@ def test_chord_edges_must_cover_the_interval_on_one_face_line_within_representat
     assert _reason(_with(result, closures=[off]), sha) == REASON_CHORD
     off_interval = replace(closure, gap_interval=(closure.gap_interval[0] + 0.2, closure.gap_interval[1]))
     assert _reason(_with(result, closures=[off_interval]), sha) == REASON_CHORD
+
+
+def test_chord_edges_a_little_over_the_noise_bound_apart_are_not_one_face_line():
+    _data, sha, result, bedroom, alcove, closure = _base()
+    chord, wall = (_chord_owner(closure),), ("layered_wall_strip:9",)
+    # 0.08 pt apart: their mean sits inside the noise bound of the face, so only the one-line rule can refuse it
+    jogged = _alcove_with_chord_pieces(
+        alcove, closure, [(170.0, 108.0), (170.0, 108.08), (246.0, 108.08)], [chord, wall, chord, wall])
+    assert _reason(_with(result, rings=[bedroom, jogged]), sha) == REASON_CHORD
+
+
+@pytest.mark.parametrize("kind", [KIND_SWING, KIND_STROKE])
+def test_a_swing_or_stroke_doorway_never_defines_a_partition_group(kind):
+    _data, sha, result, _bedroom, _alcove, closure = _base()
+    ordinary_doorway = _with(result, closures=[replace(closure, kind=kind)])
+    assert partition_groups(ordinary_doorway, source_sha256=sha, page_index=0) == ()
+    # two rooms joined by an ordinary doorway are each judged by their own box, and neither is the printed room
+    assert _scope(ordinary_doorway, sha, [H_FULL, V_FULL]) is None
+
+
+def test_an_invalid_group_is_never_corroborated_even_by_a_degenerate_figure_pair():
+    _data, sha, result, bedroom, alcove, _closure = _base()
+    refused = _with(result, rings=[bedroom, replace(alcove, source_sha256="cd" * 32)])
+    zero_pair = [_dim("h0", "horizontal", (0.0, 0.0), (0.0, 0.0)), _dim("v0", "vertical", (0.0, 0.0), (0.0, 0.0))]
+    assert _refused(refused, sha, zero_pair)
+
+
+def test_live_chain_a_part_whose_own_box_equals_another_printed_pair_still_has_no_documented_area():
+    # a second printed figure runs exactly over the bedroom part: the union pair is still unique, but the
+    # part's own box now equals a pair, the hazard of reading a width x depth as a part's area
+    data = partition_pdf(alcove_stub=False, bedroom_stub=False, left_vertical_spans=((110.0, 180.0),),
+                         horizontal_tick_end=190.0)
+    source, _published, rooms = _compose(data, partition=True)
+    assert len(rooms.rooms) == 2
+    area = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish(layered_ring_box_selection_shadow=True)
+    assert area.records == ()
+    assert "same_view_layered_ring_partition_part" in {c for _r, c in area.unresolved_first_failure_codes}
+
+
+def test_the_partition_control_is_refused_without_sliding_before_any_source_is_opened():
+    with pytest.raises(ValueError, match="partition witness"):
+        collect_live_physical_net_wall_claim(
+            "does-not-exist.pdf", recover_additional_opening_areas=True, layered_partition_witness=True)
+    with pytest.raises(ValueError, match="partition witness"):
+        _collect_live_physical_net_wall_claim("does-not-exist.pdf", layered_partition_witness=True)
 
 
 def test_overlapping_rings_refuse():
