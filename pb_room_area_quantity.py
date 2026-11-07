@@ -109,10 +109,32 @@ def _canonical_ring(points: Sequence[tuple[float, float]]) -> tuple[tuple[float,
         pts = pts[:-1]
     if not pts:
         return ()
-    rotations = [pts[i:] + pts[:i] for i in range(len(pts))]
-    rev = tuple(reversed(pts))
-    rotations.extend(rev[i:] + rev[:i] for i in range(len(rev)))
-    return min(rotations)
+    # The original PDF-scaled quantity ID binds this exact canonical ring.
+    # Enumerating all 2N rotations builds O(N^2) coordinate tuples and can
+    # exhaust memory for a legitimate large source polygon. Booth's cyclic
+    # minimum returns the SAME lexicographic tuple in O(N) work and memory.
+    def least_rotation(sequence: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float], ...]:
+        n = len(sequence)
+        doubled = sequence + sequence
+        left, right, offset = 0, 1, 0
+        while left < n and right < n and offset < n:
+            a, b = doubled[left + offset], doubled[right + offset]
+            if a == b:
+                offset += 1
+                continue
+            if a > b:
+                left += offset + 1
+                if left <= right:
+                    left = right + 1
+            else:
+                right += offset + 1
+                if right <= left:
+                    right = left + 1
+            offset = 0
+        start = min(left, right)
+        return sequence[start:] + sequence[:start]
+
+    return min(least_rotation(pts), least_rotation(tuple(reversed(pts))))
 
 
 def _evidence_fingerprint(evidence: EvidenceAtom) -> str:
