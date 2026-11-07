@@ -956,7 +956,8 @@ class SourceVisibilityProducer:
                  raster_paired_outer_faces_shadow: bool = False,
                  exact_g17_nomination_shadow: bool = False,
                  source_native_finish_text_shadow: bool = False,
-                 raster_double_face_negative_shadow: bool = False) -> None:
+                 raster_double_face_negative_shadow: bool = False,
+                 source_glyph_ledger_text_trust: bool = False) -> None:
         if type(raster_double_face_negative_shadow) is not bool:
             raise ValueError("double-face negative shadow requires an explicit boolean")
         self._raster_double_face_negative_shadow = raster_double_face_negative_shadow
@@ -969,6 +970,13 @@ class SourceVisibilityProducer:
         if type(source_native_finish_text_shadow) is not bool:
             raise ValueError("source_finish_text_shadow_requires_explicit_bool")
         self._source_native_finish_text_shadow = source_native_finish_text_shadow
+        # Default-off: words whose ONLY text-integrity blocker is the glyph proof may be
+        # trusted through sealed raster corroboration plus verified glyph mappings.
+        if type(source_glyph_ledger_text_trust) is not bool:
+            raise ValueError("source_glyph_ledger_text_trust_requires_explicit_bool")
+        self._source_glyph_ledger_text_trust = source_glyph_ledger_text_trust
+        self._glyph_ledger_raster_producer = None
+        self._glyph_ledger_pass_policy: dict[str, tuple] = {}
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
@@ -1796,6 +1804,139 @@ class SourceVisibilityProducer:
             _seal=_PDF_TEXT_AUTHORITY_SEAL,
         )
 
+    def upgrade_glyph_only_text(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+        min_words: int = 2,
+        max_attempts: Optional[int] = None,
+    ):
+        """Trust words whose ONLY blocker is the glyph proof, through sealed raster corroboration.
+
+        Requires the explicit construction option. Outcomes come from this producer's own
+        RasterTextCorroborationProducer (a sealed CORROBORATED record), never from a caller.
+        A word is upgraded when it was corroborated itself or every glyph in it is verified by
+        at least ``min_words`` corroborated words and none contradicts it. A new receipt is
+        minted; any word with another blocker (clip, paint, trace, font binding, Unicode) is
+        never touched. ``page_ids=None`` considers every ingested page, which can be slow.
+        One pass fixes the proof policy for the immutable revision. Repeating
+        it is a no-op; a different policy requires a fresh producer, so a new
+        ledger cannot forget votes behind words already upgraded here.
+        """
+        if not self._source_glyph_ledger_text_trust:
+            raise RuntimeError("glyph_ledger_text_trust_not_enabled")
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise KeyError(f"revision {revision_id!r} is not published by this producer")
+        from pb_font_glyph_mapping_corroboration_shadow import word_glyphs
+        from pb_pdf_text_integrity_authority import _texttrace_spans
+        from pb_raster_text_corroboration_authority import (
+            RasterTextCorroborationProducer,
+            RasterTextCorroborationSelector,
+        )
+        from pb_source_glyph_ledger_text_trust import (
+            GlyphTextCandidate,
+            decide_glyph_text_trust,
+            is_glyph_only_untrusted,
+            upgraded_text_integrity_receipt,
+        )
+
+        snapshot_id = published.snapshot.snapshot_id
+        wanted = None if page_ids is None else {str(item) for item in page_ids}
+        policy = (
+            frozenset(str(page) for page in published.coverage.decoded_pages)
+            if wanted is None else frozenset(wanted),
+            min_words, max_attempts,
+        )
+        if str(revision_id) in self._glyph_ledger_pass_policy:
+            if self._glyph_ledger_pass_policy[str(revision_id)] != policy:
+                raise ValueError("glyph_ledger_proof_policy_already_fixed_for_revision")
+            return decide_glyph_text_trust(
+                (), lambda _observation_id: False,
+                min_words=min_words, max_attempts=max_attempts)
+        base = {
+            observation_id: receipt
+            for (receipt_snapshot_id, observation_id), receipt
+            in self._text_integrity_receipts.items()
+            if receipt_snapshot_id == snapshot_id
+            and is_glyph_only_untrusted(receipt)
+            and (wanted is None or str(receipt.page_id) in wanted)
+        }
+        candidates = []
+        if base:
+            store = self._producer._store
+            source_bytes = store.source_bytes_by_revision.get(published.revision.revision_id)
+            if (
+                not isinstance(source_bytes, bytes)
+                or not store.source_bytes_match_revision(
+                    published.revision.revision_id, source_bytes,
+                    published.revision.source_sha256)
+            ):
+                raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: source bytes unavailable")
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            try:
+                program_keys: dict[int, Optional[str]] = {}
+                spans_by_page: dict[str, Any] = {}
+                for observation_id in sorted(base):
+                    receipt = base[observation_id]
+                    page_key = str(receipt.page_id)
+                    if page_key not in spans_by_page:
+                        try:
+                            spans_by_page[page_key] = _texttrace_spans(
+                                pdf.load_page(int(page_key) - 1))
+                        except Exception:
+                            spans_by_page[page_key] = None
+                    spans = spans_by_page[page_key]
+                    program_key = None
+                    if receipt.font_xref is not None:
+                        xref = int(receipt.font_xref)
+                        if xref not in program_keys:
+                            try:
+                                program = pdf.extract_font(xref)[3]
+                            except Exception:
+                                program = b""
+                            program_keys[xref] = (
+                                hashlib.sha256(program).hexdigest() if program else None)
+                        program_key = program_keys[xref]
+                    word = None
+                    if spans and program_key is not None:
+                        word = word_glyphs(
+                            observation_id, receipt.raw_text, program_key,
+                            receipt.geometry, spans)
+                    candidates.append(GlyphTextCandidate(observation_id, word))
+            finally:
+                pdf.close()
+
+        def corroborate(observation_id: str) -> bool:
+            if self._glyph_ledger_raster_producer is None:
+                self._glyph_ledger_raster_producer = (
+                    RasterTextCorroborationProducer.from_source_visibility_producer(self))
+            outcome = self._glyph_ledger_raster_producer.publish(
+                RasterTextCorroborationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=snapshot_id,
+                    observation_id=observation_id,
+                ))
+            return (
+                outcome.status is EvidenceResolutionStatus.CORROBORATED
+                and outcome.record is not None
+            )
+
+        result = decide_glyph_text_trust(
+            candidates, corroborate, min_words=min_words, max_attempts=max_attempts)
+        upgrades = {
+            (snapshot_id, observation_id): upgraded_text_integrity_receipt(
+                base[observation_id], decision)
+            for observation_id, decision in result.decisions.items()
+            if decision.status is EvidenceResolutionStatus.CORROBORATED
+        }
+        self._glyph_ledger_pass_policy[str(revision_id)] = policy
+        self._text_integrity_receipts.update(upgrades)
+        return result
+
     def published_snapshot_for_revision(
         self, revision_id: str
     ) -> Optional[PublishedVisibleSourceSnapshot]:
@@ -2348,6 +2489,9 @@ class SourceVisibilityProducer:
             self._visibility_page_cache.pop(cache_key, None)
 
         self._published_by_revision[published.revision.revision_id] = published
+        if self._source_glyph_ledger_text_trust:
+            self.upgrade_glyph_only_text(
+                published.revision.revision_id, page_ids=page_ids)
         return published
 
 
@@ -3517,6 +3661,26 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def raster_visible_observation_ids_for_page(
+        self, snapshot_id: str, page_id: str
+    ) -> frozenset[str]:
+        """Address raster-segment receipts without authenticating their claims.
+
+        ``resolve_visible`` takes its native branch whenever a native receipt
+        exists; that branch cannot yield RASTER_PDF_VISIBLE_SEGMENT. Other
+        missing/foreign-page raster receipts cannot yield such a line on this
+        page either. Every retained ID still requires full resolve_visible.
+        """
+        snapshot_id, page_id = str(snapshot_id), str(page_id)
+        return frozenset(
+            observation_id
+            for (receipt_snapshot_id, observation_id), receipt
+            in self._raster_visibility_receipts.items()
+            if receipt_snapshot_id == snapshot_id
+            and self._visibility_receipts.get((snapshot_id, observation_id)) is None
+            and str(receipt.page_id) == page_id
+        )
+
     def raster_opening_primitive_observation_ids_for_snapshot(
         self, snapshot_id: str
     ) -> frozenset[str]:
@@ -3649,6 +3813,8 @@ class SourceVisibilityAuthority:
                 or cached_raster is not raster
                 or cached_parent is not parent
                 or cached_page_parent is not page_parent
+                or (native is not None and item[1].origin_kind !=
+                    self._visible_origin_kinds.get(key))
             ):
                 return None
         for (observation_id, bound), item in zip(rows, identity):
@@ -3674,13 +3840,20 @@ class SourceVisibilityAuthority:
         if observations is None or fingerprints is None:
             store.visible_page_index.pop(snapshot_id, None)
             return
+        # These are disposable flat-map read indices, not source history.
+        # Keeping an older index would pin its entire flattened snapshot
+        # after the observation store deliberately releases that read cache.
+        store.visible_page_index.clear()
+        store.visible_page_bound_rows = None
         store.visible_page_index[snapshot_id] = (
             published,
             snapshot,
             observations,
             fingerprints,
             {page_id: tuple(ids) for page_id, ids in page_ids.items()},
-            tuple(receipts),
+            tuple((observation_id, native, raster,
+                   self._visible_origin_kinds.get((snapshot_id, observation_id)))
+                  for observation_id, native, raster in receipts),
         )
 
     def _reusable_page_rows(
@@ -3712,7 +3885,7 @@ class SourceVisibilityAuthority:
             or fingerprint_snap.flat is not fingerprints
         ):
             return None
-        for observation_id, parent, raster in receipts:
+        for observation_id, parent, raster, origin in receipts:
             if (
                 self._visibility_receipts.get((snapshot_id, observation_id))
                 is not parent
@@ -3720,24 +3893,69 @@ class SourceVisibilityAuthority:
                     (snapshot_id, observation_id)
                 )
                 is not raster
+                or self._visible_origin_kinds.get((snapshot_id, observation_id))
+                != origin
             ):
                 return None
+        prior = store.visible_page_bound_rows
+        if (prior is not None and prior[0] == snapshot_id
+                and prior[1] == bind_page_id
+                and prior[2] is observations and prior[3] is fingerprints):
+            prior_rows, witnesses = prior[4:]
+            valid = len(prior_rows) == len(witnesses)
+            for (observation_id, bound), witness in zip(prior_rows, witnesses):
+                (saved_id, saved_record, saved_native, saved_origin,
+                 saved_parent, saved_page_parent, private_view) = witness
+                key = (snapshot_id, observation_id)
+                native = self._visibility_receipts.get(key)
+                raster = self._raster_visibility_receipts.get(key)
+                parent_id = native if native is not None else (
+                    None if raster is None else raster.parent_observation_id
+                )
+                page_parent_id = None if raster is None else raster.page_parent_observation_id
+                if (observation_id != saved_id
+                        or observations.get(observation_id) is not saved_record
+                        or native != saved_native
+                        or self._visible_origin_kinds.get(key) != saved_origin
+                        or observations.get(parent_id) is not saved_parent
+                        or observations.get(page_parent_id) is not saved_page_parent
+                        or not _bound_clone_matches(bound, private_view, snapshot)):
+                    valid = False
+                    break
+            if valid:
+                return (*prior_rows,)
+            return None
         rows: list[tuple[str, object]] = []
+        witnesses: list[tuple] = []
         for observation_id in ids_by_page.get(bind_page_id, ()):
             record = observations.get(observation_id)
+            key = (snapshot_id, observation_id)
+            native = self._visibility_receipts.get(key)
+            raster = self._raster_visibility_receipts.get(key)
+            origin_kind = self._visible_origin_kinds.get(key)
+            parent_id = native if native is not None else (
+                None if raster is None else raster.parent_observation_id
+            )
+            parent = observations.get(parent_id)
+            page_parent = None if raster is None else observations.get(
+                raster.page_parent_observation_id
+            )
+            stored_record = record
             if record is None:
-                parent_id = self._visibility_receipts.get((snapshot_id, observation_id))
-                origin_kind = self._visible_origin_kinds.get(
-                    (snapshot_id, observation_id)
-                )
-                parent = None if parent_id is None else observations.get(parent_id)
                 if parent is None or origin_kind is None:
                     return None
                 record = _native_visible_alias(
                     parent, snapshot, observation_id, origin_kind
                 )
             rows.append((observation_id, _bind_record_to_snapshot(record, snapshot)))
-        return tuple(rows)
+            witnesses.append((observation_id, stored_record, native, origin_kind,
+                              parent, page_parent, record))
+        result = tuple(rows)
+        store.visible_page_bound_rows = (
+            snapshot_id, bind_page_id, observations, fingerprints,
+            result, tuple(witnesses),
+        )
+        return result
 
     def authenticated_visible_observations(
         self,
@@ -3785,13 +4003,16 @@ class SourceVisibilityAuthority:
         # successful check, a later page keeps a bound copy of that page only
         # while the snapshot's records and receipts are still the same objects.
         if bind_page_id is not None:
-            store.visible_authentication_cache.pop(snapshot_id, None)
+            # A prior whole-source clone hint may belong to an older snapshot.
+            # Page proofs retain only their bounded page representation.
+            store.visible_authentication_cache.clear()
             reused_page = self._reusable_page_rows(
                 store, snapshot_id, snapshot, published, str(bind_page_id)
             )
             if reused_page is not None:
                 return reused_page
         else:
+            store.visible_page_bound_rows = None
             reused = self._reusable_visible_rows(
                 store, snapshot_id, snapshot, published
             )
@@ -3972,6 +4193,23 @@ class SourceVisibilityAuthority:
             store, snapshot_id, snapshot, published, page_ids, receipts
         )
         if bind_page_id is not None:
+            # The first full proof already built private aliases. Retain only
+            # its requested page, with distinct returned clones for mutation
+            # detection on the next entry/exit proof.
+            page_index = store.visible_page_index.get(snapshot_id)
+            if page_index is not None:
+                observations, fingerprints = page_index[2:4]
+                witnesses = tuple(
+                    (observation_id, observations.get(observation_id), native,
+                     self._visible_origin_kinds.get((snapshot_id, observation_id)),
+                     parent, page_parent, observation)
+                    for (observation_id, observation, native, _raster,
+                         parent, page_parent) in identity
+                )
+                store.visible_page_bound_rows = (
+                    snapshot_id, str(bind_page_id), observations, fingerprints,
+                    tuple(rows), witnesses,
+                )
             return tuple(rows)
         store.visible_authentication_cache.clear()
         store.visible_authentication_cache[snapshot_id] = (

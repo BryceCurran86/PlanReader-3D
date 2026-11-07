@@ -30,6 +30,19 @@ from pb_source_closed_run_export import (
 )
 
 
+def _is_owner_approved_shadow(quantity: QuantityEvidence) -> bool:
+    """The layer-A owner-approved door area is a review SHADOW: it is never sealed in the standard run.
+
+    It reaches a sealed run only through ``pb_owner_approved_door_review_promotion`` (a separate, promoted review quantity).
+    Without owner approvals no such quantity exists, so every existing run is unchanged.
+    """
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    return (
+        metadata.get("area_basis") == "owner_approved_second_axis"
+        and metadata.get("shadow_only") is True
+    )
+
+
 def _opening_map(
     canonical_openings: Sequence[LiveCanonicalOpeningObject],
 ) -> Mapping[str, LiveCanonicalOpeningObject]:
@@ -99,6 +112,7 @@ def _build_opening_area_source_traces(
         seen_original_quantity_ids.add(source_quantity_id)
         if quantity.abstained:
             continue
+        authentic_shadow = _is_owner_approved_shadow(quantity)
         if len(quantity.input_entity_ids) != 1:
             raise SourceClosedRunConflictError(
                 "opening area quantity must reference exactly one canonical opening"
@@ -174,6 +188,9 @@ def _build_opening_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"duplicate opening quantity id: {quantity.quantity_id}"
             )
+        if authentic_shadow:
+            # Verified above to equal the producer's own shadow; it is simply not part of the standard sealed run.
+            continue
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
@@ -234,7 +251,7 @@ def seal_live_opening_area_claim_run(
     quantities = tuple(
         quantity
         for quantity in claim.opening_quantity_evidence
-        if not quantity.abstained
+        if not quantity.abstained and not _is_owner_approved_shadow(quantity)
     )
     traces = build_live_opening_area_claim_source_traces(
         claim,
@@ -260,7 +277,11 @@ def seal_live_opening_area_run(
     reconciliation happen only after this function has returned the sealed run.
     """
 
-    quantities = publish_live_opening_area_quantities(composition)
+    quantities = tuple(
+        quantity
+        for quantity in publish_live_opening_area_quantities(composition)
+        if not _is_owner_approved_shadow(quantity)
+    )
     traces = build_live_opening_area_source_traces(
         composition,
         workspace_id=workspace_id,

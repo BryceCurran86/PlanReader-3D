@@ -12,6 +12,7 @@ Authority is fail-closed:
 from __future__ import annotations
 
 import math
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -517,14 +518,152 @@ def _source_owned_description(
     return " ".join(value[0] for _observation_id, value in line)
 
 
+def _source_owned_page_rotation_matrices(
+    producer: SourceVisibilityProducer,
+    published,
+    page_ids: Sequence[str],
+) -> dict[str, tuple[float, ...]] | None:
+    """Derive page display transforms from the *same* SHA-proven PDF source.
+
+    A caller may request rotated schedule grouping but cannot supply a
+    guessed orientation, editable page metadata or a test-only input matrix.
+    Failure to reauthenticate the original bytes aborts the entire opt-in.
+    """
+    import fitz
+
+    store = getattr(getattr(producer, "_producer", None), "_store", None)
+    source_by_revision = getattr(store, "source_bytes_by_revision", None) or {}
+    payload = source_by_revision.get(published.revision.revision_id)
+    if (type(payload) is not bytes
+            or hashlib.sha256(payload).hexdigest()
+                != published.revision.source_sha256):
+        return None
+    wanted: dict[str, int] = {}
+    decoded = {int(value) for value in published.coverage.decoded_pages}
+    for page_id in page_ids:
+        if (type(page_id) is not str or not page_id.isdecimal()
+                or int(page_id) < 1 or str(int(page_id)) != page_id
+                or int(page_id) not in decoded):
+            return None
+        wanted[page_id] = int(page_id)
+    transforms: dict[str, tuple[float, ...]] = {}
+    try:
+        with fitz.open(stream=payload, filetype="pdf") as document:
+            for page_id, page_no in wanted.items():
+                if page_no > len(document):
+                    return None
+                page = document[page_no-1]
+                if page.rotation not in (0, 90, 180, 270):
+                    return None
+                rotation = page.rotation_matrix
+                transforms[page_id] = tuple(
+                    float(getattr(rotation, attr))
+                    for attr in ("a", "b", "c", "d", "e", "f")
+                )
+    except (ValueError, RuntimeError, IndexError):
+        return None
+    return transforms
+
+
+def _source_owned_schedule_native_text_orientation(
+    producer: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    native_words: Mapping[str, tuple[str, str, int, int, int]],
+) -> tuple[float, ...] | None:
+    """Reprove CAD text-line writing direction from the immutable native PDF.
+
+    PDF page rotation is often zero even when a CAD schedule's text is
+    drawn sideways *inside* the page. Distinct trustworthy printed MARK,
+    WIDTH and HEIGHT headers must have one consistent native line axis;
+    competing/partial headers abstain. Direction is a coordinate transform,
+    not authorization of row text, physical instances or units.
+    """
+    import fitz
+
+    header_values: dict[str, list[tuple[int, int]]] = {
+        "MARK": [], "WIDTH": [], "HEIGHT": [],
+    }
+    for text, origin_page, block_no, line_no, word_no in native_words.values():
+        label = str(text).strip().upper()
+        key = "MARK" if label in ("MARK", "NO.") else label
+        if origin_page != page_id or key not in header_values:
+            continue
+        if (
+            type(block_no) is not int or type(line_no) is not int
+            or type(word_no) is not int
+            or min(block_no,line_no,word_no) < 0
+        ):
+            return None
+        header_values[key].append((block_no,line_no))
+    if any(len(values)!=1 for values in header_values.values()):
+        return None
+    store = getattr(getattr(producer,"_producer",None),"_store",None)
+    payload = getattr(store,"source_bytes_by_revision",{}).get(
+        published.revision.revision_id)
+    if (type(payload) is not bytes
+            or hashlib.sha256(payload).hexdigest()
+                != published.revision.source_sha256):
+        return None
+    try:
+        with fitz.open(stream=payload,filetype="pdf") as document:
+            page_number=int(page_id)
+            if page_number<1 or page_number>len(document):
+                return None
+            blocks = document[page_number-1].get_text(
+                "rawdict",flags=fitz.TEXTFLAGS_WORDS)["blocks"]
+            orientations=[]
+            for entries in header_values.values():
+                block_no,line_no=entries[0]
+                block=blocks[block_no]
+                if block.get("type")!=0:
+                    return None
+                direction=block["lines"][line_no]["dir"]
+                dx,dy=float(direction[0]),float(direction[1])
+                if not all(math.isfinite(n) for n in (dx,dy)):
+                    return None
+                # Preserve the source's discrete orthogonal CAD direction
+                # without inventing an angle or allowing near-axis bending.
+                if abs(dx-1.0)<=1e-5 and abs(dy)<=1e-5:
+                    axis=(1.0,0.0)
+                elif abs(dx+1.0)<=1e-5 and abs(dy)<=1e-5:
+                    axis=(-1.0,0.0)
+                elif abs(dy-1.0)<=1e-5 and abs(dx)<=1e-5:
+                    axis=(0.0,1.0)
+                elif abs(dy+1.0)<=1e-5 and abs(dx)<=1e-5:
+                    axis=(0.0,-1.0)
+                else:
+                    return None
+                orientations.append(axis)
+    except (ValueError,RuntimeError,IndexError,KeyError,TypeError):
+        return None
+    if len(set(orientations))!=1:
+        return None
+    dx,dy=orientations[0]
+    return (dx,-dy,dy,dx,0.0,0.0)
+
+
 def _row_groups_for_page(
     words: Sequence[tuple[str, str, Sequence[float]]],
     *,
     tol: float = _ROW_Y_TOLERANCE,
+    rotation_matrix: tuple[float, ...] | None = None,
 ) -> list[tuple[dict[str, Any], tuple[str, ...]]]:
+    if rotation_matrix is not None:
+        if (type(rotation_matrix) is not tuple
+                or len(rotation_matrix) != 6
+                or any(type(n) not in (int, float) or not math.isfinite(n)
+                       for n in rotation_matrix)):
+            raise TypeError("verified six-value original page rotation required")
+        a, b, c, d, e, f = rotation_matrix
     usable: list[tuple[float, float, float, float, str, str]] = []
     for observation_id, text, geometry in words:
-        bbox = _bbox_of_points(_geometry_points(geometry))
+        points = _geometry_points(geometry)
+        if rotation_matrix is not None:
+            points = tuple(
+                (a*x + c*y + e, b*x + d*y + f) for x, y in points
+            )
+        bbox = _bbox_of_points(points)
         if bbox is None:
             continue
         x0, y0, x1, y1 = bbox
@@ -805,6 +944,7 @@ class ScheduleOpeningInstanceBindingProducer:
         self,
         source_visibility_producer: SourceVisibilityProducer,
         *,
+        rotated_native_schedule_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _BINDING_PRODUCER_SEAL:
@@ -814,15 +954,24 @@ class ScheduleOpeningInstanceBindingProducer:
             )
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
+        if type(rotated_native_schedule_shadow) is not bool:
+            raise TypeError("rotated_native_schedule_shadow must be bool")
         self._source_visibility_producer = source_visibility_producer
+        self._rotated_native_schedule_shadow = rotated_native_schedule_shadow
         self._results: dict[_RecordKey, ScheduleOpeningInstanceBindingResult] = {}
 
     @classmethod
     def from_source_visibility_producer(
         cls,
         source_visibility_producer: SourceVisibilityProducer,
+        *,
+        rotated_native_schedule_shadow: bool = False,
     ) -> ScheduleOpeningInstanceBindingProducer:
-        return cls(source_visibility_producer, _seal=_BINDING_PRODUCER_SEAL)
+        return cls(
+            source_visibility_producer,
+            rotated_native_schedule_shadow=rotated_native_schedule_shadow,
+            _seal=_BINDING_PRODUCER_SEAL,
+        )
 
     def publish_scope(
         self,
@@ -1027,8 +1176,35 @@ class ScheduleOpeningInstanceBindingProducer:
             tuple[str, tuple[str, ...]],
             tuple[ScheduleEntry, tuple[str, ...], str],
         ] = {}
+        source_rotations = None
+        if self._rotated_native_schedule_shadow:
+            source_rotations = _source_owned_page_rotation_matrices(
+                self._source_visibility_producer,
+                published, tuple(trusted_by_page),
+            )
+            if source_rotations is None:
+                return self._store(
+                    key,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        BINDING_SOURCE_SCOPE_UNAVAILABLE,
+                    ),
+                )
         for page_id, words in trusted_by_page.items():
-            page_rows = _row_groups_for_page(words)
+            matrix = source_rotations[page_id] if source_rotations is not None else None
+            if self._rotated_native_schedule_shadow:
+                # Source-ink text direction wins over a PDF rotation flag only
+                # if one unambiguous, trusted header triplet proves it.
+                native_matrix = _source_owned_schedule_native_text_orientation(
+                    self._source_visibility_producer,
+                    published, page_id, native_words,
+                )
+                if native_matrix is not None:
+                    matrix = native_matrix
+            page_rows = _row_groups_for_page(
+                words,
+                rotation_matrix=matrix,
+            )
             if not page_rows:
                 continue
             try:

@@ -135,11 +135,17 @@ def test_original_office_a110_d15_gap_and_a120_ceiling_wall_difference():
         original_d15=[word for word in doc[6].get_text("words")
                       if word[4]=="D15" and 179.28 < (word[0]+word[2])/2 < 231.36]
         assert len(original_d15)==1
-        assert tuple(original_d15[0][5:8]) == (183,0,0)
+        assert len([word for word in doc[6].get_text("words")
+                    if word[5:8] == original_d15[0][5:8]]) == 1
         # Independently printed A600 OFFICE door row; not a physical
         # installation/count/width measurement without a structural host.
-        schedule_words = [word for word in doc[27].get_text("words")
-                          if word[5] == 112]
+        schedule_page_words = doc[27].get_text("words")
+        schedule_d15 = [word for word in schedule_page_words if word[4] == "D15"]
+        assert len(schedule_d15) == 1
+        # The source row is identified by its exact original door mark;
+        # text-block indices change with the installed PyMuPDF version.
+        schedule_words = [word for word in schedule_page_words
+                          if word[5] == schedule_d15[0][5]]
         schedule_terms = {word[4] for word in schedule_words}
         assert {"D15", "OFFICE", "SINGLE", "SWING", "920", "2040"}.issubset(
             schedule_terms

@@ -6,6 +6,17 @@ from dataclasses import replace
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_quantity_takeoff_adapter import (
+    CommercialMeasurementAuthority,
+    CommercialTakeoffSourceTrace,
+    MissingCommercialAuthorityError,
+    quantity_evidence_to_takeoff_output_row,
+)
+from pb_source_closed_run_export import seal_source_closed_run
+from pb_customer_output_verification import (
+    CustomerOutputVerificationError,
+    verify_sealed_customer_output,
+)
 from pb_source_elevation_frame_type_quantity import publish_nominal_elevation_frame_type_area
 from test_opening_elevation_frame_area_authority import _authority, _elevation_pdf, _selector
 
@@ -29,6 +40,7 @@ def test_original_source_neutral_figured_frame_reissues_type_only_evidence():
     assert evidence.input_entity_ids == (record.record_id,)
     assert evidence.metadata["source_frame_area_record_id"] == record.record_id
     assert evidence.metadata["quantity_scope"] == "single_nominal_frame_type"
+    assert evidence.metadata["commercial_projection_allowed"] is False
     assert evidence.metadata["installed_opening_count_granted"] is False
     assert evidence.metadata["physical_opening_identity_granted"] is False
     assert evidence.metadata["host_wall_binding_granted"] is False
@@ -91,3 +103,42 @@ def test_source_authority_must_resolve_exact_unmodified_receipt():
         assert publish_nominal_elevation_frame_type_area(
             changed, authority=authority,
         ) is None
+
+
+@pytest.mark.parametrize("status", (
+    "corroborated_type_only", "firm", "corroborated", "review_required",
+))
+def test_type_reference_veto_survives_status_coercion_at_real_customer_consumers(status):
+    record, authority = _record()
+    original = publish_nominal_elevation_frame_type_area(record, authority=authority)
+    assert original is not None
+    candidate = replace(original, status=status)
+    trace = CommercialTakeoffSourceTrace(
+        workspace_id=7,
+        project_id="source-frame-reference",
+        document_id=record.document_id,
+        source_sha256=record.source_sha256,
+        source_page=record.page_id,
+        viewport_id="source-frame-reference-view",
+        revision_id=record.revision_id,
+        current_revision_id=record.revision_id,
+        evidence_ids=candidate.evidence_ids,
+        canonical_entity_ids=candidate.input_entity_ids,
+        source_bbox=record.frame_bbox,
+    )
+    measurement = CommercialMeasurementAuthority(
+        method="figured_dimension",
+        figured_dimension_ids=record.dimension_observation_ids,
+    )
+    with pytest.raises(MissingCommercialAuthorityError, match="explicitly blocks"):
+        quantity_evidence_to_takeoff_output_row(candidate, trace=trace, authority=measurement)
+    sealed = seal_source_closed_run(
+        (candidate,), project_id=trace.project_id,
+        traces_by_quantity_id={candidate.quantity_id:trace},
+    )
+    assert not sealed.quantities[0].lineage_ok
+    assert "commercial_projection_forbidden" in sealed.quantities[0].lineage_reason_codes
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, ())
+    assert original.status == "corroborated_type_only"
+    assert original.metadata["commercial_projection_allowed"] is False

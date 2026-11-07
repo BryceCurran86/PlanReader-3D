@@ -1152,6 +1152,33 @@ class OpeningHostFrameProducer:
                         projection = (data[0] + _dot(geometry.origin, axis),
                                       data[1] + _dot(geometry.origin, axis),
                                       data[2] + _dot(geometry.origin, normal))
+                    elif host_geometry._candidate_axis_data(records_by_id[wall_id], geometry) is not None:
+                        unrelaxed = self._record_projection(records_by_id[wall_id], axis, normal,
+                            strict_collinearity_shadow=False)
+                        if unrelaxed is not None:
+                            lines = host_geometry._authenticated_raster_source_lines(
+                                self._opening, opening, wall_scope.source_observation_ids)
+                            req = set(records_by_id[wall_id].physical_identity.source_primitive_ids)
+                            if req and all(p in lines for p in req):
+                                ownership: dict[str, set[str]] = {p: set() for p in req}
+                                visibility = self._opening.source_visibility_authority()
+                                for observation_id in wall_scope.source_observation_ids:
+                                    result = visibility.resolve_visible(ObservationSelector(
+                                        document_id=opening.document_id, revision_id=opening.revision_id,
+                                        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                                        observation_id=observation_id))
+                                    obs = result.observation
+                                    if result.status is not EvidenceResolutionStatus.CORROBORATED or obs is None:
+                                        continue
+                                    primitive_id = str(obs.source_primitive_ref or "").removeprefix("visible:")
+                                    if (primitive_id in req and obs.page_id == opening.page_id
+                                            and host_geometry._line(obs) == lines[primitive_id]):
+                                        ownership[primitive_id].add(observation_id)
+                                if all(ids for ids in ownership.values()):
+                                    projection = unrelaxed
+                                    projection_observation_ids.update(
+                                        oid for ids in ownership.values() for oid in ids
+                                    )
             if projection is None:
                 return None
             u_min, u_max, offset = projection
@@ -1205,7 +1232,7 @@ class OpeningHostFrameProducer:
                 allowance = host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
                 points = record.wall_candidate.centerline_pts
                 excluded = not any(
-                    data is not None and abs(data[2]) <= wall_thickness / 2.0 + allowance
+                    data is not None and abs(data[2]) <= allowance
                     for data in (
                         host_geometry._source_line_axis_data((*start, *end), geometry)
                         for start, end in zip(points, points[1:])

@@ -10,6 +10,12 @@ on:
       - .github/workflows/gpt2-ft3-source-owned-floor-finish-consumer.yml
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   original-ft3-bounded-material-and-floor-consumer:
     runs-on: ubuntu-latest
@@ -22,6 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -38,8 +45,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          mkdir -p artifacts/gpt2-ft3-source-owned
-          git rev-parse HEAD > artifacts/gpt2-ft3-source-owned/head.txt
+          git rev-parse HEAD
           python - <<'PY'
           import hashlib, json
           from pathlib import Path
@@ -47,39 +53,44 @@ jobs:
           source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
           sha = hashlib.sha256(source).hexdigest()
           assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-          result = replay(source, page_number=11, raster_supports=False)
+          result = replay(
+              source, page_number=11, raster_supports=False,
+              source_native_finish_text_shadow=True,
+          )
           definition = result["unchanged_nominated_definition_results"]["FT3"]
           occurrences = [
               item for scope in result["material_occurrence_scopes"]
               for item in scope["records"] if item["code"] == "FT3"
           ]
           report = {
-              "original_source_sha256": sha,
+              "original_source_sha_verified": True,
               "original_bounded_plan_view_count": result["bounded_plan_view_count"],
               "material_definition_status": definition["status"],
-              "material_definition_record": definition["record"],
               "ft3_individually_owned_positive_record_count": len(occurrences),
               "material_scope_complete_count": result["scope_complete_count"],
               "new_authenticated_room_floor_correspondence": False,
               "new_verified_floor_finish_quantities": 0,
               "benchmark_truth_changed": False,
           }
-          Path("artifacts/gpt2-ft3-source-owned/original.json").write_text(
-              json.dumps(report, sort_keys=True, indent=2) + "\n"
-          )
           assert result["published_snapshot_unchanged"]
+          assert result["source_native_finish_text_shadow"] is True
           assert result["default_segmentation_unchanged"]
           assert result["default_occurrence_results_unchanged"]
           assert result["incomplete_scopes_rejected_by_existing_floor_consumer"]
           assert result["bounded_plan_view_count"] == 1
-          assert result["scope_complete_count"] == 0
+          assert not result["physical_floor_identity_granted"]
+          assert not result["metric_authority_granted"]
+          assert not result["whole_sheet_plan_universe_proven"]
+          assert result["scope_complete_count"] == 1
+          assert len(result["material_occurrence_scopes"]) == 1
+          scope = result["material_occurrence_scopes"][0]
+          assert scope["status"] == "corroborated" and scope["scope_complete"] is True
+          assert scope["source_viewport_ownership_id"]
+          assert not scope["unresolved_source_text_observation_ids"]
+          assert definition["status"] == "corroborated" and definition["record"]
+          assert len(occurrences) == 5
+          assert all(item["source_text_observation_ids"] and item["source_evidence_id"] for item in occurrences)
           assert not result["commercial_projection_allowed"]
           assert result["published_quantities"] == []
           print("GPT2_ORIGINAL_FT3_SOURCE_OWNED_CONSUMER_GATE", json.dumps(report))
           PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gpt2-ft3-source-owned-floor-consumer-${{ matrix.python }}
-          path: artifacts/gpt2-ft3-source-owned
-          retention-days: 30

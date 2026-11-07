@@ -66,6 +66,58 @@ def _origin(store, snapshots, observation_id):
     raise AssertionError(observation_id)
 
 
+def _membership_history(chain):
+    source, published, store, snapshots = chain
+    parent = published.snapshot.observation_ids[0]
+    latest = snapshots[-1]
+    for index in range(8):
+        latest = source._producer.publish_derived_observation(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            base_snapshot_id=latest.snapshot_id,
+            page_id="1", source_partition_id="page:1",
+            observation_kind="synthetic_membership_annotation",
+            source_primitive_ref=f"membership-test:{index}",
+            parent_observation_ids=(parent,), geometry=(0., 0., 1., 1.),
+            origin_kind="synthetic_membership_annotation",
+        )
+        snapshots.append(latest)
+    return source, published, store, snapshots, parent
+
+
+def test_membership_hints_remain_bounded_after_derived_commits(chain):
+    source, published, store, snapshots, parent = _membership_history(chain)
+    assert len(store.snapshots) == len(snapshots)
+    assert len(store.snapshot_observation_id_sets) <= 3
+    inventories = {snapshot.snapshot_id: snapshot.observation_ids for snapshot in snapshots}
+    for snapshot in snapshots:
+        result = _resolve(source, published, snapshot, parent)
+        assert result.status is EvidenceResolutionStatus.CORROBORATED
+        assert result.observation.snapshot_id == snapshot.snapshot_id
+        assert result.observation.producer_generation == snapshot.producer_generation
+        assert store.snapshots[snapshot.snapshot_id].observation_ids == inventories[snapshot.snapshot_id]
+        assert len(store.snapshot_observation_id_sets) <= 3
+    # Membership hints, unlike immutable source history, can be discarded.
+    store.snapshot_observation_id_sets.clear()
+    assert _resolve(source, published, snapshots[0], parent).status is EvidenceResolutionStatus.CORROBORATED
+    assert len(store.snapshots) == len(snapshots)
+
+
+def test_evicted_membership_rechecks_a_replaced_snapshot_inventory(chain):
+    source, published, store, snapshots, parent = _membership_history(chain)
+    earliest = snapshots[0]
+    assert earliest.snapshot_id not in store.snapshot_observation_id_sets
+    changed = replace(earliest, observation_ids=tuple(x for x in earliest.observation_ids if x != parent))
+    store.snapshots[earliest.snapshot_id] = changed
+    try:
+        result = _resolve(source, published, changed, parent)
+        assert result.status is not EvidenceResolutionStatus.CORROBORATED
+        assert result.observation is None
+    finally:
+        store.snapshots[earliest.snapshot_id] = earliest
+    assert _resolve(source, published, earliest, parent).status is EvidenceResolutionStatus.CORROBORATED
+
+
 def test_unchanged_records_are_shared_objects_across_generations(chain) -> None:
     _source, _published, store, snapshots = chain
     for earlier, later in pairwise(snapshots):

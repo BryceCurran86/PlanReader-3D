@@ -147,22 +147,38 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
     rcp=_valid_polygon(original_rcp_ink.get("source_ceiling_ink_polygon_pdf_pts"))
     if not all((registered_floor,registered_rcp,w4_floor,rcp)):
         return {**blocked,"first_failure":"A120_source_perimeter_invalid"}
+    # The original RCP source receipt must describe the actual native ink
+    # polygon in PDF square points, not an independently mutable area value.
+    # This is NOT a metric conversion or a new ceiling-quantity authority.
+    original_area=original_rcp_ink.get("source_ceiling_polygon_area_pdf_pt2_not_m2")
+    if (type(original_area) not in (int,float)
+            or not math.isfinite(original_area)
+            or original_area<=0
+            or not math.isclose(float(original_area),rcp.area,rel_tol=0.0,abs_tol=1e-6)):
+        return {**blocked,"first_failure":"A120_original_ink_area_receipt_mismatch"}
     if (not registered_floor.equals(w4_floor)
             or not registered_rcp.equals(rcp)
             or not material_polygon.equals(rcp)):
         return {**blocked,"first_failure":"A120_ceiling_area_cannot_borrow_floor_perimeter"}
     translation=independently_registered_rcp.get(
         "source_cross_sheet_translation_pdf_pts")
-    if type(translation) not in (list,tuple) or len(translation)!=2:
+    # Original native ink registration uses 0.001-point PDF coordinates.
+    # Do not coerce strings/bools into apparently authenticated offsets.
+    if (type(translation) not in (list,tuple) or len(translation)!=2
+            or any(type(v) not in (int,float) for v in translation)):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
-    try:
-        dx,dy=(float(v) for v in translation)
-    except (TypeError,ValueError,OverflowError):
-        return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
+    dx,dy=(float(v) for v in translation)
     if not math.isfinite(dx) or not math.isfinite(dy):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_unavailable"}
-    from shapely.affinity import translate
-    if not translate(registered_floor,xoff=dx,yoff=dy).equals(rcp):
+    # Replay the upstream source's native three-decimal comparison. Shapely's
+    # binary-float translate may give a different polygon for the same drawn
+    # vertices (e.g. 20.12 + 0.1 != 20.22 before rounding). This does not
+    # enlarge the source snap or infer a metric ceiling measurement.
+    translated_native=Polygon(tuple(
+        (round(float(x)+dx,3),round(float(y)+dy,3))
+        for x,y in registered_floor.exterior.coords[:-1]
+    ))
+    if not translated_native.is_valid or not translated_native.equals(rcp):
         return {**blocked,"first_failure":"original_floor_to_A120_registration_conflict"}
     return {
         **blocked,

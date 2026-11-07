@@ -31,6 +31,11 @@ LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY = (
 LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY = (
     "pb_opening_elevation_frame_area_authority.authenticated_elevation_frame_area"
 )
+# Owner-approved second axis: an ASSUMPTION supplied by the owner for a door that
+# prints one figure. Never FIRM or corroborated; it is a review-lineage shadow row.
+LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY = (
+    "pb_door_height_owner_gate_shadow.owner_approved_second_axis_area"
+)
 
 
 def _opening_quantity(
@@ -243,6 +248,38 @@ def _opening_quantity(
         ):
             return None
         quantity_authority = LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY
+    elif basis == "owner_approved_second_axis":
+        # The owner approved ONE axis; the other is a printed figure bound by the
+        # label authority. Recompute the product from retained records and never
+        # trust a replayed area. The approved axes must not appear as metric axes.
+        approval_id = opening.owner_approved_second_axis_record_id
+        label_record_id = opening.figured_area_record_id
+        width_mm = opening.owner_approved_width_mm
+        height_mm = opening.owner_approved_height_mm
+        if (
+            opening_kind != "door"
+            or opening.geometry_complete is not False
+            or opening.width_m is not None
+            or opening.height_m is not None
+            or any(
+                type(record_id) is not str or not record_id
+                or record_id != record_id.strip() or record_id not in evidence_ids
+                for record_id in (approval_id, label_record_id)
+            )
+            or type(width_mm) not in (int, float)
+            or type(height_mm) not in (int, float)
+            or not math.isfinite(width_mm) or not math.isfinite(height_mm)
+            or width_mm <= 0.0 or height_mm <= 0.0
+            or not math.isclose(
+                value, float(width_mm) * float(height_mm) / 1_000_000.0,
+                rel_tol=0.0, abs_tol=1e-6,
+            )
+        ):
+            return None
+        measurement_record_id = approval_id
+        quantity_authority = (
+            LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY
+        )
     else:
         # Unknown area bases cannot silently become commercial quantities.
         return None
@@ -278,18 +315,31 @@ def _opening_quantity(
                 else (
                     "authenticated outer-frame schedule width * height"
                     if basis == "authenticated_frame_schedule"
-                    else "authenticated physical opening width * height"
+                    else (
+                        "authenticated printed door width * owner-approved height"
+                        if basis == "owner_approved_second_axis"
+                        else "authenticated physical opening width * height"
+                    )
                 )
             )
         ),
         formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
         evidence_ids=evidence_ids,
         authority=quantity_authority,
-        status="corroborated",
+        status=(
+            "review_required" if basis == "owner_approved_second_axis" else "corroborated"
+        ),
         confidence=1.0,
         abstained=False,
         blocking_reasons=(),
-        reason_codes=(LIVE_OPENING_AREA_QUANTITY_RESOLVED,),
+        reason_codes=(
+            (
+                LIVE_OPENING_AREA_QUANTITY_RESOLVED,
+                "owner_approved_second_axis_is_an_assumption",
+            )
+            if basis == "owner_approved_second_axis"
+            else (LIVE_OPENING_AREA_QUANTITY_RESOLVED,)
+        ),
         metadata={
             "document_id": opening.document_id,
             "revision_id": opening.revision_id,
@@ -311,7 +361,17 @@ def _opening_quantity(
             "schedule_row_basis_source": (
                 opening.schedule_row_basis_source or None
             ),
-            "commercial_projection_allowed": True,
+            "commercial_projection_allowed": basis != "owner_approved_second_axis",
+            **(
+                {
+                    "shadow_only": True,
+                    "second_axis_basis": "user_approved",
+                    "owner_approved_width_mm": float(opening.owner_approved_width_mm),
+                    "owner_approved_height_mm": float(opening.owner_approved_height_mm),
+                }
+                if basis == "owner_approved_second_axis"
+                else {}
+            ),
             "section": "Openings",
             "element": f"{opening_kind.title()} area",
             "location": str(opening.type_mark or "").strip() or opening_kind.title(),
@@ -402,6 +462,7 @@ __all__ = [
     "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
     "publish_live_opening_area_quantities",

@@ -464,6 +464,20 @@ def publish_cross_view_ceiling_quantities(
 
         room = room_rows[0]
         finish = finish_rows[0]
+        # The alternate original RCP ink/GRID source binder can publish a
+        # genuine MATERIAL-only source receipt before any independently
+        # calibrated ceiling surface exists. Never manufacture FIRM ceiling
+        # square metres by copying the floor's documented room area.
+        if (
+            finish.commercial_projection_allowed is not True
+            or finish.material_only
+        ):
+            # Original-page material/source-zone proof is NOT a measured
+            # ceiling area. This lineage veto is independent of the mutable
+            # caller-side flag/ID so that an edited/reconstructed receipt cannot
+            # borrow the signed FLOOR area as ceiling FIRM.
+            unresolved.add(physical_id)
+            continue
         if (
             not valid_issuer_id(finish.occurrence_record_id)
             or not valid_issuer_id(finish.definition_record_id)

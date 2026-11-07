@@ -114,6 +114,23 @@ def test_unordered_pairs_single_axes_and_unknown_types_are_not_nominal_axis_auth
     assert build_nominal_opening_canonical_shadow(p,sel) is None
 
 
+@pytest.mark.parametrize("text", ["900 - 1200 asw", "1200 - 900 asw"])
+def test_unordered_axes_do_not_rewrite_authentic_figured_area(text):
+    p, pub = _ingest(_pdf(labels=((88., 124., text),)), "pair-" + text)
+    selector = _opening_selector(p, pub)
+    producer = OpeningLabelDimensionProducer.from_source_visibility_producer(p)
+    base = producer.publish_scope(selector)
+    assert base.status is Status.CORROBORATED
+    assert base.evidence is not None
+    frozen = asdict(base)
+
+    result = producer.ordered_compact_axes_shadow(selector)
+
+    assert result.status is Status.ABSTAINED
+    assert result.evidence is None
+    assert asdict(producer.publish_scope(selector)) == frozen
+
+
 def test_raster_viewport_scope_is_compiled_once_and_source_tamper_still_abstains(monkeypatch):
     import pb_physical_opening_viewport_scope_authority as viewport
     p,pub=source()

@@ -80,3 +80,162 @@ def test_compound_role_must_be_full_printed_word_not_substring():
         *_row(2,"D02","900","2050","INDOORING","SLIDINGLY"),
     )
     assert _original_source_row_candidates(words)==()
+
+
+def test_opt_in_native_raster_source_proves_exact_door_code_without_quantity(monkeypatch):
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+        inspect_published_door_schedule,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+
+    setup = _Setup(_glyph_unverified_pdf([("D02", 40, 120)]), _both("D02"))
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    assert len(words) == 1 and words[0].literal == "D02"
+    assert words[0].trusted is False
+
+    upgraded = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert upgraded[0].trusted is True
+    assert upgraded[0].observation_id == words[0].observation_id
+    assert upgraded[0].raster_text_receipt_id
+    assert words[0].trusted is False  # immutable native record
+
+    original = inspect_published_door_schedule(
+        setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
+    )
+    from pb_raster_text_corroboration_authority import RasterTextCorroborationProducer
+    monkeypatch.setattr(
+        RasterTextCorroborationProducer, "from_source_visibility_producer",
+        lambda source: setup.producer if source is setup.svp else object(),
+    )
+    optional = inspect_published_door_schedule(
+        setup.svp, revision_id=setup.published.revision.revision_id, page_id="1",
+        raster_text_source_shadow=True,
+    )
+    # Source-proven code alone does NOT mint a row without role/table cells.
+    assert original.rows == optional.rows == ()
+    assert original.unparsed_original_door_codes == ("D02",)
+    assert optional.unparsed_original_door_codes == ("D02",)
+    assert optional.new_opening_counts == optional.new_opening_areas_m2 == 0
+    assert optional.title_source_trusted is False
+    assert optional.complete_source_word_universe is False
+
+
+def test_opt_in_native_raster_source_rejects_wrong_reading_and_foreign_owner():
+    import pytest
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+
+    data = _glyph_unverified_pdf([("D02", 40, 120)])
+    setup = _Setup(data, _both("D03"))
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    bad = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert bad == words
+    other = _Setup(data, _both("D02"))
+    with pytest.raises(ValueError, match="raster_source_schedule_producer_mismatch"):
+        _raster_corroborated_schedule_words(
+            setup.svp, setup.published, words,
+            raster_text_producer=other.producer,
+        )
+    with pytest.raises(TypeError, match="raster_text_producer must be source-owned"):
+        _raster_corroborated_schedule_words(
+            setup.svp, setup.published, words,
+            raster_text_producer=object(),
+        )
+
+
+def test_source_corroborated_raster_receipt_is_retained_as_row_lineage():
+    from dataclasses import replace
+    source_words = (
+        *_row(1, "DOOR", "SCHEDULE"),
+        *_row(2, "D02", "ROOM", "SWING", "900", "2050", "DOOR"),
+    )
+    selected = tuple(
+        replace(w, raster_text_receipt_id="raster-verified-receipt")
+        if w.literal == "D02" else w
+        for w in source_words
+    )
+    result = _original_source_row_candidates(selected)
+    assert len(result) == 1
+    assert result[0].source_raster_text_receipt_ids == (
+        "raster-verified-receipt",
+    )
+    assert result[0].width_height_metric_units_authenticated is False
+    assert result[0].physical_host_or_frame_authenticated is False
+    assert result[0].new_customer_quantity_authority is False
+
+
+def test_raster_schedule_text_does_not_upgrade_unrelated_non_door_note():
+    from pb_source_door_schedule_authority import (
+        _producer_owned_native_words, _raster_corroborated_schedule_words,
+    )
+    from test_raster_text_corroboration_authority_v1 import (
+        _Setup, _both, _glyph_unverified_pdf,
+    )
+    setup = _Setup(
+        _glyph_unverified_pdf([("UNRELATED", 40, 120)]),
+        _both("UNRELATED"),
+    )
+    words = _producer_owned_native_words(setup.svp, setup.published, "1")
+    upgraded = _raster_corroborated_schedule_words(
+        setup.svp, setup.published, words, raster_text_producer=setup.producer,
+    )
+    assert upgraded == words
+
+
+def test_live_schedule_source_shadow_is_bool_not_test_ocr_injection():
+    import pytest
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    import fitz
+    pdf = fitz.open()
+    pdf.new_page(width=200,height=200)
+    data = pdf.tobytes()
+    pdf.close()
+    source = SourceVisibilityProducer(producer_method="a600-opt-in-type-guard",
+                                      producer_version="1")
+    published = source.ingest_native_pdf_bytes(
+        document_id="a600-type-guard",source_bytes=data,
+        source_locator="memory://synthetic.pdf",page_ids=("1",),
+    )
+    with pytest.raises(TypeError,match="raster_text_source_shadow must be bool"):
+        inspect_published_door_schedule(
+            source,revision_id=published.revision.revision_id,page_id="1",
+            raster_text_source_shadow="true",
+        )
+
+
+def test_compound_native_description_can_classify_glazed_kind_candidate_only():
+    words=(
+        *_row(1,"DOOR","SCHEDULE"),
+        *_row(2,"D02","900","2050","ALUMINIUM FRAMED GLASS DOOR"),
+    )
+    rows=_original_source_row_candidates(words)
+    assert len(rows)==1
+    assert rows[0].door_kind_candidate=="glazed_access_candidate"
+    assert rows[0].source_dimension_column_roles_authenticated is False
+    assert rows[0].width_height_metric_units_authenticated is False
+    assert rows[0].physical_host_or_frame_authenticated is False
+    assert rows[0].default_opening_count is None
+    assert rows[0].new_customer_quantity_authority is False
+
+
+def test_compound_native_roles_keep_opposing_source_kinds_in_conflict():
+    words=(
+        *_row(1,"DOOR","SCHEDULE"),
+        *_row(2,"D04","900","2050","DISPLAY SHELVING","SWING DOOR"),
+    )
+    rows=_original_source_row_candidates(words)
+    assert len(rows)==1
+    assert rows[0].door_kind_candidate=="original_door_kind_conflicting_source_roles"
+    assert rows[0].new_customer_quantity_authority is False

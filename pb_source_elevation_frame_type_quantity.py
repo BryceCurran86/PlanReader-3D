@@ -142,6 +142,9 @@ def publish_nominal_elevation_frame_type_area(
             "axis_x_mm":x,
             "axis_y_mm":y,
             "quantity_scope":"single_nominal_frame_type",
+            # Use the standard source-owned veto understood by every generic
+            # customer/seal consumer, independently of the type-only status.
+            "commercial_projection_allowed":False,
             "installed_opening_count_granted":False,
             "physical_opening_identity_granted":False,
             "host_wall_binding_granted":False,
