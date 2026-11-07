@@ -302,9 +302,9 @@ def compose_owner_approved_opening_voids(
 ) -> LivePhysicalOpeningVoidComposition:
     """Re-derive the opening composition exactly as the claim collector does, with the owner approvals as an explicit extra input.
 
-    ``single_width_uniform_page_door_height_shadow`` must be the value the claim collector ran with: a door the claim already
-    measured from a source-printed uniform page door height must not look unmeasured here (and so must not be offered for, or
-    given, an owner-assumed height).
+    ``single_width_uniform_page_door_height_shadow`` stays disabled in the
+    claim collector and both optional review lanes. The composer rejects
+    enabling it: another door's height cannot supply this target's axis.
     """
     from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
     from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids

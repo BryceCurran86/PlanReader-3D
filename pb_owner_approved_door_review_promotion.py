@@ -1,7 +1,7 @@
-"""Owner-approved door area: estimator-review promotion and sealed export (default-off, unwired).
+"""Owner-approved door area: estimator-review promotion and sealed export (default-off).
 
 This module is an explicit authority-promotion boundary, modelled on ``pb_ceiling_lining_review_promotion``. It does NOT make a door area FIRM or
-CORROBORATED, does NOT bypass estimator review, and nothing live imports it.
+CORROBORATED, does NOT bypass estimator review, and is used only by the optional owner-review handoff.
 
 A door with exactly ONE printed figure (its width, bound by the label authority) cannot get a measured height from the drawing. When the owner
 supplies an explicit, named, dated, timezone-aware height approval, layer A publishes a shadow ``review_required`` area. This module may turn that

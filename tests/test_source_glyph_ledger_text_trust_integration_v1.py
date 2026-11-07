@@ -203,6 +203,63 @@ def test_calling_the_upgrade_twice_is_idempotent(monkeypatch):
     assert {t: r.receipt for t, r in _by_text(_results(svp, published)).items()} == before
 
 
+def test_second_glyph_pass_cannot_trust_the_opposite_mapping(monkeypatch):
+    """A fresh ledger must not forget already-accepted votes for this snapshot."""
+    import pb_font_glyph_mapping_corroboration_shadow as glyphs
+
+    words = ("I", "II", "WWW", "WWWW")
+    reader = _Reader()
+    reader.widths = {text: fitz.get_text_length(text, fontname="helv", fontsize=SIZE)
+                     for text in words}
+    _install_reader(monkeypatch, reader)
+    # Model a glyph/encoding alias in a damaged native trace: the same embedded
+    # program/glyph key carries opposite raw characters in two word groups.
+    monkeypatch.setattr(glyphs, "word_glyphs", lambda oid, text, font, bbox, spans:
+                        glyphs.WordGlyphs(oid, text, font, tuple((1, char) for char in text)))
+    svp = SourceVisibilityProducer(producer_method="glyph-repeat-test", producer_version="1",
+                                   source_glyph_ledger_text_trust=True)
+    svp._source_glyph_ledger_text_trust = False
+    published = svp.ingest_native_pdf_bytes(
+        document_id="glyph-opposite-votes",
+        source_bytes=_pdf([[(text, 30.0 + 90.0 * i, 60.0) for i, text in enumerate(words)]]),
+        source_locator="memory://glyph-opposite-votes.pdf")
+    svp._source_glyph_ledger_text_trust = True
+    revision = published.revision.revision_id
+    svp.upgrade_glyph_only_text(revision)
+    before = _by_text(_results(svp, published))
+    assert {text for text, result in before.items() if result.receipt.trusted} == {"I", "II"}
+    calls = reader.calls
+    svp.upgrade_glyph_only_text(revision)
+    after = _by_text(_results(svp, published))
+    assert {text for text, result in after.items() if result.receipt.trusted} == {"I", "II"}
+    assert reader.calls == calls
+
+
+@pytest.mark.parametrize("policy", [{"min_words": 3}, {"max_attempts": 1}, {"page_ids": ("1",)}])
+def test_glyph_pass_cannot_change_its_proof_policy_after_trust(monkeypatch, policy):
+    reader = _Reader()
+    _install_reader(monkeypatch, reader)
+    svp, published = _ingest(_pdf([_layout(), _layout()]), flag=True)
+    before = _results(svp, published)
+    calls = reader.calls
+    with pytest.raises(ValueError, match="proof_policy_already_fixed"):
+        svp.upgrade_glyph_only_text(published.revision.revision_id, **policy)
+    assert _results(svp, published) == before
+    assert reader.calls == calls
+
+
+def test_glyph_pass_can_repeat_with_equivalent_explicit_page_scope(monkeypatch):
+    reader = _Reader()
+    _install_reader(monkeypatch, reader)
+    svp, published = _ingest(_pdf([_layout()]), flag=True)
+    before = _results(svp, published)
+    calls = reader.calls
+    result = svp.upgrade_glyph_only_text(published.revision.revision_id, page_ids=("1", "1"))
+    assert result.decisions == {}
+    assert _results(svp, published) == before
+    assert reader.calls == calls
+
+
 def test_an_unknown_revision_is_refused_and_page_ids_must_name_pages(monkeypatch):
     _install_reader(monkeypatch, _Reader())
     svp, published = _ingest(_pdf([_layout()]), flag=True)

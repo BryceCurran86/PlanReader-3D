@@ -405,7 +405,7 @@ def test_the_step_sees_exactly_the_scope_and_options_the_claim_collector_saw(tmp
     assert kwargs["room_area_support_pages"] is world.seen["room_area_support_pages"] is None
     assert kwargs["page_count"] == 3 and kwargs["source_sha256"] == world.sha
     assert kwargs["native_text_kwargs"] == {"source_glyph_ledger_text_trust": True}
-    assert kwargs["single_width_uniform_page_door_height_shadow"] is world.seen["single_width_uniform_page_door_height_shadow"] is True
+    assert kwargs["single_width_uniform_page_door_height_shadow"] is world.seen["single_width_uniform_page_door_height_shadow"] is False
     assert set(kwargs) == {"claim", "source_sha256", "page_count", "pages", "topology_pages", "room_area_support_pages", "native_text_kwargs",
                            "single_width_uniform_page_door_height_shadow"}
 

@@ -976,6 +976,7 @@ class SourceVisibilityProducer:
             raise ValueError("source_glyph_ledger_text_trust_requires_explicit_bool")
         self._source_glyph_ledger_text_trust = source_glyph_ledger_text_trust
         self._glyph_ledger_raster_producer = None
+        self._glyph_ledger_pass_policy: dict[str, tuple] = {}
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
@@ -1819,6 +1820,9 @@ class SourceVisibilityProducer:
         at least ``min_words`` corroborated words and none contradicts it. A new receipt is
         minted; any word with another blocker (clip, paint, trace, font binding, Unicode) is
         never touched. ``page_ids=None`` considers every ingested page, which can be slow.
+        One pass fixes the proof policy for the immutable revision. Repeating
+        it is a no-op; a different policy requires a fresh producer, so a new
+        ledger cannot forget votes behind words already upgraded here.
         """
         if not self._source_glyph_ledger_text_trust:
             raise RuntimeError("glyph_ledger_text_trust_not_enabled")
@@ -1840,6 +1844,17 @@ class SourceVisibilityProducer:
 
         snapshot_id = published.snapshot.snapshot_id
         wanted = None if page_ids is None else {str(item) for item in page_ids}
+        policy = (
+            frozenset(str(page) for page in published.coverage.decoded_pages)
+            if wanted is None else frozenset(wanted),
+            min_words, max_attempts,
+        )
+        if str(revision_id) in self._glyph_ledger_pass_policy:
+            if self._glyph_ledger_pass_policy[str(revision_id)] != policy:
+                raise ValueError("glyph_ledger_proof_policy_already_fixed_for_revision")
+            return decide_glyph_text_trust(
+                (), lambda _observation_id: False,
+                min_words=min_words, max_attempts=max_attempts)
         base = {
             observation_id: receipt
             for (receipt_snapshot_id, observation_id), receipt
@@ -1912,10 +1927,14 @@ class SourceVisibilityProducer:
 
         result = decide_glyph_text_trust(
             candidates, corroborate, min_words=min_words, max_attempts=max_attempts)
-        for observation_id, decision in result.decisions.items():
-            if decision.status is EvidenceResolutionStatus.CORROBORATED:
-                self._text_integrity_receipts[(snapshot_id, observation_id)] = (
-                    upgraded_text_integrity_receipt(base[observation_id], decision))
+        upgrades = {
+            (snapshot_id, observation_id): upgraded_text_integrity_receipt(
+                base[observation_id], decision)
+            for observation_id, decision in result.decisions.items()
+            if decision.status is EvidenceResolutionStatus.CORROBORATED
+        }
+        self._glyph_ledger_pass_policy[str(revision_id)] = policy
+        self._text_integrity_receipts.update(upgrades)
         return result
 
     def published_snapshot_for_revision(
@@ -3641,6 +3660,26 @@ class SourceVisibilityAuthority:
             if receipt_snapshot_id == snapshot_id
         )
         return frozenset(ids)
+
+    def raster_visible_observation_ids_for_page(
+        self, snapshot_id: str, page_id: str
+    ) -> frozenset[str]:
+        """Address raster-segment receipts without authenticating their claims.
+
+        ``resolve_visible`` takes its native branch whenever a native receipt
+        exists; that branch cannot yield RASTER_PDF_VISIBLE_SEGMENT. Other
+        missing/foreign-page raster receipts cannot yield such a line on this
+        page either. Every retained ID still requires full resolve_visible.
+        """
+        snapshot_id, page_id = str(snapshot_id), str(page_id)
+        return frozenset(
+            observation_id
+            for (receipt_snapshot_id, observation_id), receipt
+            in self._raster_visibility_receipts.items()
+            if receipt_snapshot_id == snapshot_id
+            and self._visibility_receipts.get((snapshot_id, observation_id)) is None
+            and str(receipt.page_id) == page_id
+        )
 
     def raster_opening_primitive_observation_ids_for_snapshot(
         self, snapshot_id: str

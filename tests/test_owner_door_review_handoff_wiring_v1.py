@@ -211,7 +211,7 @@ def test_the_step_sees_exactly_the_scope_and_options_the_claim_collector_saw(tmp
     assert kwargs["native_text_kwargs"] == {"source_glyph_ledger_text_trust": True}
     assert world.seen["source_glyph_ledger_text_trust"] is True
     # the lane re-derives the composition, so it must run with the option the claim collector ran with
-    assert kwargs["single_width_uniform_page_door_height_shadow"] is world.seen["single_width_uniform_page_door_height_shadow"] is True
+    assert kwargs["single_width_uniform_page_door_height_shadow"] is world.seen["single_width_uniform_page_door_height_shadow"] is False
 
 
 def test_the_step_gets_no_text_options_unless_the_run_has_them(tmp_path, monkeypatch):

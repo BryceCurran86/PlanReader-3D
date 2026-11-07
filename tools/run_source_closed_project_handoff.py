@@ -494,9 +494,9 @@ def _generate_project_handoff_locked(
 
     _write_json(output_dir / "production_summary.json", summary)
 
-    # One value for the claim collector AND the optional owner-door lanes, which re-derive the opening composition and must see
-    # the same source-printed uniform page door heights the claim saw.
-    single_width_uniform_page_door_height_shadow = True
+    # Keep the claim and both optional owner-review lanes on the same source
+    # policy. Another door's page height cannot supply a target's second axis.
+    single_width_uniform_page_door_height_shadow = False
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
