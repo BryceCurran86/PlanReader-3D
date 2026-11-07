@@ -1244,12 +1244,19 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
 
         # Maryborough Office case: support p11, target p7
         if support_page == "11" and target_page == "7" and "OFFICE" in (area_rec.room_label or "").upper():
-            payload = None
-            if store is not None:
-                payload = getattr(store, "source_bytes_by_revision", {}).get(floor.revision_id)
-                if payload is None and getattr(store, "source_bytes_by_revision", {}):
-                    payload = next(iter(store.source_bytes_by_revision.values()))
-            if payload is None:
+            # The floor's exact revision owns the only acceptable PDF bytes.
+            # A different cached revision can contain similarly shaped ink,
+            # but must not be relabelled as this floor's source authority.
+            # In particular, never fall back to the first cached revision.
+            by_revision = getattr(store, "source_bytes_by_revision", None)
+            if not isinstance(by_revision, Mapping):
+                continue
+            payload = by_revision.get(floor.revision_id)
+            if (
+                type(payload) is not bytes
+                or type(floor.source_sha256) is not str
+                or hashlib.sha256(payload).hexdigest() != floor.source_sha256
+            ):
                 continue
             cr = authenticate_maryborough_office_cross_sheet_correspondence(
                 document_id=floor.document_id,
