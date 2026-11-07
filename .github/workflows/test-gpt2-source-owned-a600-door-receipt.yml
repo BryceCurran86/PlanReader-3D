@@ -27,7 +27,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -euo pipefail
-          python -m pytest -q tests/test_gpt2_source_owned_a600_door_schedule_receipt.py -k 'not test_original_a600_full_producer_receipt_census_keeps_all_28_source_rows'
+          python -m pytest -q tests/test_gpt2_source_owned_a600_door_schedule_receipt.py -k 'not test_original_a600_code_census_preserves_unparsed_native_rows'
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
 

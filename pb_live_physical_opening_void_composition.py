@@ -364,6 +364,7 @@ def compose_live_physical_opening_voids(
     bifold_descriptor_shadow: bool = False,
     owner_approved_second_axis: Sequence[MeasurementRecord] = (),
     single_width_uniform_page_door_height_shadow: bool = False,
+    rotated_native_schedule_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
     """Compose the exact sealed prerequisite chain for every proven opening.
 
@@ -383,6 +384,8 @@ def compose_live_physical_opening_voids(
         raise ValueError("single width uniform page door height shadow must be explicit boolean")
     if single_width_uniform_page_door_height_shadow:
         raise ValueError("target-owned source or approved door height is required; page-wide inference is unsupported")
+    if type(rotated_native_schedule_shadow) is not bool:
+        raise TypeError("rotated_native_schedule_shadow must be bool")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -455,7 +458,8 @@ def compose_live_physical_opening_voids(
 
     schedule_binding_producer = (
         ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(
-            source_visibility_producer
+            source_visibility_producer,
+            rotated_native_schedule_shadow=rotated_native_schedule_shadow,
         )
     )
     schedule_results = {}

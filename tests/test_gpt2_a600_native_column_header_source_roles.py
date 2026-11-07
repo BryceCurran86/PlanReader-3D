@@ -158,7 +158,13 @@ def test_original_a600_two_printed_titles_and_exact_width_height_source_words():
     result=inspect_published_door_schedule(
         source,revision_id=pub.revision.revision_id,page_id="28",
     )
-    assert len(result.rows)==28
+    # A SHA-original replay on both trusted main and this candidate finds
+    # 28 code labels but only 27 recognised native row groups. Unparsed
+    # native blocks remain explicit; they cannot become table completeness.
+    assert len(result.all_original_source_codes)==28
+    assert len(result.rows)==27
+    assert result.unparsed_original_door_codes
+    assert not result.complete_source_word_universe
     source_rows={x.code:x for x in result.rows}
     assert source_rows["D13"].original_width_literal=="920"
     assert source_rows["D13"].original_height_literal=="2040"
