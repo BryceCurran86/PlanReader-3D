@@ -25,7 +25,9 @@ from tools import q5446_source_role_customer_runtime as runtime
 
 
 def _setup(tmp_path, monkeypatch):
-    source = tmp_path / "fake.pdf"
+    source_dir = tmp_path / "source-private"
+    source_dir.mkdir()
+    source = source_dir / "fake.pdf"
     source.write_bytes(b"synthetic original role for regression; not a real Q5446 PDF")
     sha = hashlib.sha256(source.read_bytes()).hexdigest()
     project = "source-neutral-project"
