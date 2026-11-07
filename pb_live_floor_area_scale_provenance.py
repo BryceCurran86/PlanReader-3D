@@ -98,9 +98,11 @@ def _same_original_owners(
         or not floor.room_entity_id or not floor.source_room_face_record_id
         or not floor.snapshot_id or not floor.document_id or not floor.revision_id
         or not floor.source_sha256 or not floor.page_id
-        or type(floor.viewport_id) is not str or not floor.viewport_id
+        or (floor.viewport_id is not None and
+            (type(floor.viewport_id) is not str or not floor.viewport_id))
         or page != floor.page_id
-        or meta.get("viewport_id") != floor.viewport_id
+        or type(meta.get("viewport_id")) is not str or not meta.get("viewport_id")
+        or (floor.viewport_id is not None and meta.get("viewport_id") != floor.viewport_id)
         or meta.get("source_sha256") != floor.source_sha256
         or meta.get("revision_id") != floor.revision_id
         or (meta.get("room_snapshot_id") is not None
@@ -117,7 +119,7 @@ def _same_original_owners(
             floor.document_id, floor.revision_id, floor.source_sha256,
             floor.snapshot_id, floor.page_id,
         )
-        or (selector.viewport_id is not None and selector.viewport_id != floor.viewport_id)
+        or (selector.viewport_id is not None and selector.viewport_id != meta.get("viewport_id"))
         or physical.viewport_id != selector.viewport_id
         or physical.source_kind != "native_graphic_scale_bar"
         or type(physical.record_id) is not str or not physical.record_id
@@ -175,7 +177,7 @@ def source_owned_floor_scale_receipt(
         source_sha256=floor.source_sha256,
         snapshot_id=floor.snapshot_id,
         page_id=floor.page_id,
-        viewport_id=floor.viewport_id,
+        viewport_id=str(quantity.metadata["viewport_id"]),
         scale_fingerprint=scale_calibration_fingerprint(bridge.calibration),
         physical_scale_evidence=bridge.physical_scale_evidence,
         calibration=bridge.calibration,
@@ -201,7 +203,7 @@ def validated_floor_scale_metadata(
             floor.room_entity_id, floor.source_room_face_record_id,
             source.quantity_id, floor.document_id, floor.revision_id,
             floor.source_sha256, floor.snapshot_id, floor.page_id,
-            floor.viewport_id)
+            source.metadata.get("viewport_id"))
         or receipt.scale_fingerprint != scale_calibration_fingerprint(receipt.calibration)
         or not _same_original_owners(floor, source, receipt.physical_scale_evidence, receipt.calibration)
     ):
