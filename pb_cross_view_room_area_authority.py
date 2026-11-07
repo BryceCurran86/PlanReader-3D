@@ -369,7 +369,11 @@ def _trusted_lines_for_page(
         list[tuple[str, object, object]],
     ] = {}
 
-    for observation_id in published.text_observation_ids:
+    # The resolver returns this same receipt. Other-page or missing receipts
+    # were already discarded below, so address only this page before reproof.
+    page_text_ids = text_authority.observation_ids_with_receipt_page(
+        published.snapshot.snapshot_id, published.text_observation_ids, str(page_id))
+    for observation_id in page_text_ids:
         result = text_authority.resolve_text(
             ObservationSelector(
                 document_id=published.revision.document_id,
@@ -1570,11 +1574,19 @@ class CrossViewRoomAreaProducer:
         page_annotation_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
             page_id = str(int(page_number))
+            # A room's own page cannot be its cross-view support. Exclude its
+            # label before OCR as well as in the unchanged post-proof filters.
+            page_candidate_labels = tuple(
+                label for label, room in unique_labels.items()
+                if str(room.page_id) != page_id
+            )
+            if not page_candidate_labels:
+                continue
             trusted_lines = _trusted_lines_for_page(
                 self._source,
                 revision_id=revision_id,
                 page_id=page_id,
-                candidate_labels=tuple(unique_labels),
+                candidate_labels=page_candidate_labels,
             )
             relevant_lines = tuple(
                 line
@@ -1605,7 +1617,7 @@ class CrossViewRoomAreaProducer:
                 self._source,
                 revision_id=revision_id,
                 page_id=page_id,
-                candidate_labels=tuple(unique_labels),
+                candidate_labels=page_candidate_labels,
                 allow_compound_annotations=True,
             )
             page_annotation_lines[page_id] = tuple(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import fitz
+import pytest
 
 import pb_cross_view_room_area_authority as cross_view
 from pb_cross_view_room_area_authority import (
@@ -585,6 +586,85 @@ def test_record_constructor_rejects_caller_forgery():
         pass
     else:
         raise AssertionError("caller-forged cross-view room area record was accepted")
+
+def test_cross_view_label_reader_authenticates_only_its_receipt_page(monkeypatch):
+    source, rooms = _source_and_room()
+    revision_id = rooms.rooms[0].revision_id
+    published = source.published_snapshot_for_revision(revision_id)
+    authority = source.text_integrity_authority()
+    authority_type = type(authority)
+    expected = cross_view._trusted_lines_for_page(
+        source, revision_id=revision_id, page_id="2", candidate_labels=("TEST ROOM",))
+    assert expected
+    addressed = authority.observation_ids_with_receipt_page(
+        published.snapshot.snapshot_id, published.text_observation_ids, "2")
+    assert len(addressed) < len(published.text_observation_ids)
+    original = authority_type.resolve_text
+    visited = []
+
+    def checked(self, selector):
+        visited.append(selector.observation_id)
+        return original(self, selector)
+
+    monkeypatch.setattr(authority_type, "resolve_text", checked)
+    actual = cross_view._trusted_lines_for_page(
+        source, revision_id=revision_id, page_id="2", candidate_labels=("TEST ROOM",))
+
+    assert actual == expected
+    assert tuple(visited) == addressed
+
+
+@pytest.mark.parametrize("damage", ["missing", "foreign-page"])
+def test_cross_view_receipt_page_filter_matches_unfiltered_damaged_source(monkeypatch, damage):
+    source, rooms = _source_and_room()
+    revision_id = rooms.rooms[0].revision_id
+    published = source.published_snapshot_for_revision(revision_id)
+    authority = source.text_integrity_authority()
+    receipts = authority._receipts
+    key = next(key for key, receipt in receipts.items()
+               if key[0] == published.snapshot.snapshot_id
+               and receipt.page_id == "2" and receipt.raw_text == "TEST")
+    if damage == "missing":
+        del receipts[key]
+    else:
+        receipts[key] = replace(receipts[key], page_id="9")
+    actual = cross_view._trusted_lines_for_page(
+        source, revision_id=revision_id, page_id="2", candidate_labels=("TEST ROOM",))
+    monkeypatch.setattr(type(authority), "observation_ids_with_receipt_page",
+                        lambda self, snapshot, ids, page: tuple(ids))
+    unfiltered = cross_view._trusted_lines_for_page(
+        source, revision_id=revision_id, page_id="2", candidate_labels=("TEST ROOM",))
+    assert actual == unfiltered == ()
+
+
+@pytest.mark.parametrize("mixed_pages", [False, True])
+def test_cross_view_never_requests_a_rooms_own_page_label(monkeypatch, mixed_pages):
+    source, rooms = _source_and_room()
+    if mixed_pages:
+        other = replace(rooms.rooms[0], canonical_room_id="room-2",
+                        physical_room_id="physical-room-2", page_id="2",
+                        source_room_face_record_id="source-face-record-2",
+                        room_label="SECOND ROOM",
+                        room_label_binding_record_id="label-binding:room-2")
+        rooms = replace(rooms, rooms=(*rooms.rooms, other))
+    expected = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+    assert expected.records
+    requests = []
+    original = cross_view._trusted_lines_for_page
+
+    def checked(source_arg, **kwargs):
+        requests.append((kwargs["page_id"], tuple(kwargs["candidate_labels"])))
+        return original(source_arg, **kwargs)
+
+    monkeypatch.setattr(cross_view, "_trusted_lines_for_page", checked)
+    actual = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+    assert actual == expected
+    assert requests
+    for page_id, labels in requests:
+        own_labels = {cross_view._norm_label(room.room_label)
+                      for room in rooms.rooms if str(room.page_id) == page_id}
+        assert not own_labels.intersection(labels)
+
 
 def test_cross_view_narrows_dimension_auth_to_authenticated_candidate_lines(monkeypatch):
     source, rooms = _source_and_room()
