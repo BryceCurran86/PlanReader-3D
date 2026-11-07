@@ -228,6 +228,14 @@ def test_dense_irrelevant_geometry_is_not_rechecked_per_endpoint() -> None:
     assert len(right_candidates) < 20
 
 
+def test_no_authenticated_words_cannot_start_a_scale_tick_search(monkeypatch):
+    segments = [_segment("unlabelled-ink", (0.0, 0.0), (100.0, 0.0))]
+    def unexpected_index(*args, **kwargs):
+        raise AssertionError("unlabelled ink cannot prove a physical scale bar")
+    monkeypatch.setattr(module, "_TickEndpointIndex", unexpected_index)
+    assert module._bar_candidates(segments, ()) == ()
+
+
 def test_index_preserves_duplicate_observation_exclusion() -> None:
     baseline = module._VisibleSegment(
         observation_id="base",

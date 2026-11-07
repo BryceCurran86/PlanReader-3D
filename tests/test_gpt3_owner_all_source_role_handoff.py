@@ -221,3 +221,21 @@ def test_invalid_resource_policy_cannot_run_any_source_producers(tmp_path, famil
             family_group=family, timeout_min=timeout,
             max_private_gb=private, min_free_commit_gb=free,
         )
+
+
+def test_resource_abort_preserves_only_safe_numeric_usage(tmp_path, monkeypatch):
+    project, root, _ = _fake_sources(tmp_path, monkeypatch)
+    usage = {"peak_working_set_kb": 1024, "peak_private_kb": 2048,
+             "min_system_free_commit_kb": "private path must not propagate",
+             "unknown_field": "untrusted child source text"}
+    monkeypatch.setattr(module, "run_logged", lambda *a, **k: (None, "MEMORY_LIMIT", usage))
+    result = module.produce_all_source_roles(project_id=project, source_dir=root,
+        output_dir=tmp_path/"private-results")
+    for row in result["roles"]:
+        assert row["resource_usage"] == {"peak_working_set_kb": 1024,
+            "peak_private_kb": 2048, "min_system_free_commit_kb": None}
+        assert row["sealed"] is False
+        assert row["process_status"] == "MEMORY_LIMIT"
+    assert "private path" not in json.dumps(result)
+    assert "untrusted child" not in json.dumps(result)
+    assert result["benchmark_score_granted"] is False

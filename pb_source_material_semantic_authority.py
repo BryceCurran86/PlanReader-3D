@@ -16,6 +16,7 @@ import hashlib
 import io
 import math
 import re
+import struct
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -33,6 +34,8 @@ from pb_material_schedule_v1222 import (
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_migration_provider_envelope import ProviderContext
 from pb_pdf_text_integrity_authority import (
+    PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP,
+    _intersection_ratio,
     TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
 )
@@ -1654,9 +1657,335 @@ def _material_candidate_codes_with_untrusted_words(
             blocked.add(code)
     return tuple(sorted(blocked))
 
+
+
+def _float32(value: object) -> float:
+    """Round to the precision of the PDF text pipeline (MuPDF stores glyph positions as float32)."""
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def _native_word_chars_by_address(page, native_words_by_address: dict) -> dict:
+    """Ordered ``(character, origin)`` pairs of each native word, keyed like ``get_text("words")``.
+
+    Only used to bind a text-trace glyph to the word's OWN native characters. A word gets an entry only when its
+    characters, rebuilt from the native text page, spell exactly the native word row and their boxes make up exactly
+    that row's box; anything irregular (ambiguous address, odd whitespace, mismatching box) gets no entry, which the
+    caller treats as "not proven".
+    """
+    lines: dict[tuple[int, int], list] = {}
+    for block in page.get_text("rawdict", sort=False).get("blocks", ()):
+        if block.get("type") != 0 or type(block.get("number")) is not int:
+            continue
+        for line_no, line in enumerate(block.get("lines", ())):
+            chars: list = []
+            for span in line.get("spans", ()):
+                chars.extend(span.get("chars", ()))
+            lines[(block["number"], line_no)] = chars
+    result: dict[tuple[int, int, int], tuple] = {}
+    for address, rows in native_words_by_address.items():
+        if len(rows) != 1 or len(address) != 3 or len(rows[0]) < 8:
+            continue
+        row = rows[0]
+        chars = lines.get((address[0], address[1]))
+        if not chars:
+            continue
+        runs: list[list] = []
+        current: list = []
+        for char in chars:
+            if str(char.get("c", " ")).isspace():
+                if current:
+                    runs.append(current)
+                    current = []
+            else:
+                current.append(char)
+        if current:
+            runs.append(current)
+        if type(address[2]) is not int or not 0 <= address[2] < len(runs):
+            continue
+        run = runs[address[2]]
+        try:
+            if "".join(str(char["c"]) for char in run) != row[4]:
+                continue
+            union = (
+                min(float(char["bbox"][0]) for char in run),
+                min(float(char["bbox"][1]) for char in run),
+                max(float(char["bbox"][2]) for char in run),
+                max(float(char["bbox"][3]) for char in run),
+            )
+            if any(abs(a - float(b)) > 1e-5 for a, b in zip(union, row[:4])):
+                continue
+            result[address] = tuple(
+                (str(char["c"]), (float(char["origin"][0]), float(char["origin"][1])))
+                for char in run
+            )
+        except (KeyError, TypeError, ValueError, IndexError, OverflowError):
+            continue
+    return result
+
+
+def _original_native_word_paint_within_parent(
+    word: _TrustedTextWord, receipt, *, native_words_by_address: dict,
+    native_chars_by_address: dict,
+    trace_by_seq: dict, bboxlog: Sequence[object], parent_bbox: Sequence[float],
+) -> bool:
+    """Recheck a trusted native word's *paint*, not its oversized font cell.
+
+    The caller must have already SHA-verified the original producer-owned PDF
+    and resolved a CORROBORATED text-integrity receipt. No raw OCR, project
+    name, guessed crop, approximate snap or candidate ranking is admitted.
+
+    The trace glyphs are bound to the word by identity, not by a rectangle
+    proxy: each glyph must be the word's own native character (same
+    character, same pen origin at float32 precision). A glyph rectangle is
+    never compared with the word cell, so float noise between the trace and
+    the native text page cannot reject (or admit) a word; the paint must
+    still lie inside the parent.
+    """
+    if (type(word) is not _TrustedTextWord or receipt is None
+            or receipt.trusted is not True
+            or type(word.observation_id) is not str or not word.observation_id
+            or not word.trusted
+            or not _bbox_intersects(word.bbox, parent_bbox)
+            or _bbox_fully_inside(word.bbox, parent_bbox)
+            or receipt.raw_text != word.text
+            or receipt.page_id != word.page_id
+            or receipt.source_partition_id != word.source_partition_id
+            or tuple(receipt.geometry) != tuple(word.bbox)):
+        return False
+    address = (word.block_no, word.line_no, word.word_no)
+    original_words = native_words_by_address.get(address, ())
+    if len(original_words) != 1:
+        return False
+    original_word = original_words[0]
+    if (len(original_word) < 8
+            or original_word[4] != word.text
+            or any(
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or abs(float(value) - word.bbox[index]) > 1e-5
+                for index, value in enumerate(original_word[:4])
+            )):
+        return False
+    native_chars = native_chars_by_address.get(address, ())
+    try:
+        if (type(native_chars) not in (tuple, list)
+                or "".join(item[0] for item in native_chars) != word.text):
+            return False
+        native_origins = tuple(
+            (_float32(item[1][0]), _float32(item[1][1])) for item in native_chars
+        )
+    except (TypeError, ValueError, IndexError, OverflowError, struct.error):
+        return False
+    if any(not math.isfinite(v) for origin in native_origins for v in origin):
+        return False
+    seqnos = receipt.trace_sequence_numbers or (receipt.sequence_number,)
+    if (type(seqnos) not in (tuple, list)
+            or not 1 <= len(seqnos) <= 2
+            or any(type(seq) is not int or seq < 0 or seq >= len(bboxlog)
+                   for seq in seqnos)
+            or len(set(seqnos)) != len(seqnos)
+            or receipt.sequence_number != seqnos[0]):
+        return False
+    if len(seqnos) == 2 and seqnos[1] != seqnos[0] + 1:
+        return False
+    kinds = []
+    owned_glyph_runs = []
+    for seq in seqnos:
+        spans = trace_by_seq.get(seq, ())
+        if (type(spans) not in (tuple, list) or not 1 <= len(spans) <= 16):
+            return False
+        try:
+            entry = bboxlog[seq]
+            kind, paint = entry[0], entry[1]
+            paint_box = tuple(float(v) for v in paint)
+        except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+            return False
+        if (kind not in ("fill-text", "stroke-text")
+                or len(paint_box) != 4
+                or any(not math.isfinite(v) for v in paint_box)
+                or paint_box[2] <= paint_box[0]
+                or paint_box[3] <= paint_box[1]):
+            return False
+
+        # Multiple native source text spans can share ONE paint sequence:
+        # PyMuPDF splits glyph runs by font/orientation while bboxlog records
+        # one paint operation. Retain EVERY span in this source operation and
+        # require a single source-glyph word run, without ranking by distance.
+        matches = []
+        for span in spans:
+            if not isinstance(span, dict):
+                return False
+            try:
+                codepoints = tuple(span["chars"])
+                text = "".join(chr(int(c[0])) for c in codepoints)
+                native_type = int(span["type"])
+            except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+                return False
+            if (not text
+                    or native_type != (0 if kind == "fill-text" else 1)):
+                return False
+
+            span_matches = []
+            start = text.find(word.text)
+            while start >= 0:
+                part = codepoints[start:start + len(word.text)]
+                if len(part) == len(word.text):
+                    try:
+                        glyph_boxes = tuple(
+                            tuple(float(v) for v in char[3]) for char in part
+                        )
+                        glyph_origins = tuple(
+                            (_float32(char[2][0]), _float32(char[2][1]))
+                            for char in part
+                        )
+                    except (TypeError, ValueError, IndexError, OverflowError,
+                            struct.error):
+                        glyph_boxes = ()
+                        glyph_origins = ()
+                    if (len(glyph_boxes) == len(word.text)
+                            and glyph_origins == native_origins
+                            and all(
+                                len(rect) == 4
+                                and all(math.isfinite(v) for v in rect)
+                                and rect[2] > rect[0] and rect[3] > rect[1]
+                                and (
+                                    _bbox_fully_inside(
+                                        paint_box, parent_bbox, tolerance=1e-6,
+                                    )
+                                    or _bbox_fully_inside(
+                                        rect, parent_bbox, tolerance=1e-6,
+                                    )
+                                )
+                                for rect in glyph_boxes
+                            )):
+                        span_matches.append((start, tuple(part)))
+                start = text.find(word.text, start + 1)
+            matches.extend(span_matches)
+
+            # An overlapping character not belonging to the unique source
+            # word remains a competing paint owner even in another span with
+            # the SAME sequence. Do not ignore it as irrelevant by index.
+            protected_indices = set()
+            for match_start, _part in span_matches:
+                protected_indices.update(
+                    range(match_start, match_start + len(word.text))
+                )
+            for offset, char in enumerate(codepoints):
+                if offset in protected_indices:
+                    continue
+                try:
+                    foreign_box = tuple(float(v) for v in char[3])
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    return False
+                if (len(foreign_box) != 4
+                        or any(not math.isfinite(v) for v in foreign_box)
+                        or foreign_box[2] <= foreign_box[0]
+                        or foreign_box[3] <= foreign_box[1]):
+                    return False
+                if _intersection_ratio(
+                    foreign_box, word.bbox,
+                ) >= PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP:
+                    return False
+
+        if len(matches) != 1:
+            return False
+        kinds.append(kind)
+        owned_glyph_runs.append(matches[0][1])
+    # A second span can only be the SAME original word overprinted with
+    # complementary fill/stroke source glyphs. Separate/different words or
+    # mismatched glyphs remain evidence conflicts.
+    if len(seqnos) == 2 and (
+        set(kinds) != {"fill-text", "stroke-text"}
+        or owned_glyph_runs[0] != owned_glyph_runs[1]
+    ):
+        return False
+    return True
+
+
+def _original_paint_owned_plan_word_ids(
+    source: SourceVisibilityProducer, published, page_number: int,
+    viewport: SegmentedViewport, words: Sequence[_TrustedTextWord],
+) -> frozenset[str]:
+    """Original-SHA-backed F07 text paint exception; never change native trust."""
+    empty = frozenset()
+    if (type(source) is not SourceVisibilityProducer
+            or type(page_number) is not int or page_number < 1
+            or viewport.bounding_box is None
+            or viewport.page_number != page_number
+            or not is_segment_page_viewports_product(viewport)):
+        return empty
+    candidates = tuple(word for word in words if
+        word.trusted and _bbox_intersects(word.bbox, viewport.bounding_box)
+        and not _bbox_fully_inside(word.bbox, viewport.bounding_box))
+    if not candidates:
+        return empty
+    revision = published.revision
+    if page_number not in published.coverage.decoded_pages:
+        return empty
+    try:
+        stored = source._producer._store.source_bytes_by_revision.get(
+            revision.revision_id
+        )
+        if stored is None:
+            return empty
+        pdf_bytes = bytes(stored)
+        if hashlib.sha256(pdf_bytes).hexdigest() != revision.source_sha256:
+            return empty
+        authority = source.text_integrity_authority()
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            if page_number > doc.page_count:
+                return empty
+            page = doc[page_number - 1]
+            native = {}
+            for row in page.get_text("words", sort=False):
+                if len(row) < 8:
+                    return empty
+                address = tuple(row[5:8])
+                native.setdefault(address, []).append(row)
+            trace = {}
+            for span in page.get_texttrace():
+                seq = span.get("seqno")
+                if type(seq) is not int:
+                    return empty
+                trace.setdefault(seq, []).append(span)
+            bboxlog = page.get_bboxlog()
+            native_chars = _native_word_chars_by_address(page, native)
+            owned = set()
+            for word in candidates:
+                selector = ObservationSelector(
+                    document_id=revision.document_id,
+                    revision_id=revision.revision_id,
+                    source_sha256=revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=word.observation_id,
+                )
+                result = authority.resolve_text(selector)
+                receipt = result.receipt
+                if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                        or result.trusted_text != word.text
+                        or receipt is None
+                        or receipt.document_id != revision.document_id
+                        or receipt.revision_id != revision.revision_id
+                        or receipt.source_sha256 != revision.source_sha256):
+                    continue
+                if _original_native_word_paint_within_parent(
+                    word, receipt, native_words_by_address=native,
+                    native_chars_by_address=native_chars,
+                    trace_by_seq=trace, bboxlog=bboxlog,
+                    parent_bbox=viewport.bounding_box,
+                ):
+                    owned.add(word.observation_id)
+            return frozenset(owned)
+    except (AttributeError, ValueError, TypeError, RuntimeError,
+            IndexError, OSError, OverflowError):
+        return empty
+
+
 def _trusted_lines_for_viewport(
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
+    *,
+    original_paint_owned_ids: frozenset[str] = frozenset(),
 ) -> tuple[
     tuple[tuple[str, tuple[float, float, float, float], tuple[str, ...]], ...],
     bool,
@@ -1681,7 +2010,8 @@ def _trusted_lines_for_viewport(
     for word in words:
         if not _bbox_intersects(word.bbox, viewport.bounding_box):
             continue
-        if not _bbox_fully_inside(word.bbox, viewport.bounding_box):
+        if (not _bbox_fully_inside(word.bbox, viewport.bounding_box)
+                and word.observation_id not in original_paint_owned_ids):
             complete = False
             reasons.append(SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED)
             reasons.append("text_crosses_viewport_boundary")
@@ -1725,10 +2055,13 @@ def _trusted_lines_for_viewport(
 
 def _complete_source_plan_lines(
     words: Sequence[_TrustedTextWord], viewport: SegmentedViewport,
+    *, original_paint_owned_ids: frozenset[str] = frozenset(),
 ):
-    """Keep complete original lines; never promote a readable line fragment."""
+    """Keep complete original lines; native paint exception is source-replayed."""
     assert viewport.bounding_box is not None
-    _, complete, reasons = _trusted_lines_for_viewport(words, viewport)
+    _, complete, reasons = _trusted_lines_for_viewport(
+        words, viewport, original_paint_owned_ids=original_paint_owned_ids,
+    )
     reasons = list(reasons)
     grouped = {}
     for word in words:
@@ -1742,7 +2075,9 @@ def _complete_source_plan_lines(
             continue
         line_words = sorted(line_words, key=lambda w: (w.word_no, w.observation_id))
         owned = all(
-            _bbox_fully_inside(w.bbox, viewport.bounding_box) for w in line_words
+            _bbox_fully_inside(w.bbox, viewport.bounding_box)
+            or (w.trusted and w.observation_id in original_paint_owned_ids)
+            for w in line_words
         )
         indices = [w.word_no for w in line_words]
         consecutive = indices == list(range(len(indices)))
@@ -1837,6 +2172,7 @@ class SourceMaterialSemanticProducer:
         _physical_plan_page_ids: tuple[str, ...] = (),
         _source_native_multirow_material_shadow: bool = False,
         _source_native_schedule_page_ids: tuple[str, ...] = (),
+        _source_connected_rcp_plan_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
@@ -1851,6 +2187,9 @@ class SourceMaterialSemanticProducer:
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
+        self._source_connected_rcp_plan_page_ids = frozenset(
+            _source_connected_rcp_plan_page_ids
+        )
         self._plan_raster = (
             RasterTextCorroborationProducer.for_physical_plan_view_shadow(
                 source_visibility_producer
@@ -1922,6 +2261,33 @@ class SourceMaterialSemanticProducer:
             _source_native_schedule_page_ids=tuple(
                 sorted(set(page_ids),key=int)
             ),
+        )
+
+    @classmethod
+    def for_source_connected_original_rcp_plan_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Explicit original RCP plan + schedule scope, no quantities.
+
+        The opt-in F07 parent may be an original unstroked CAD underlay,
+        NOT a physical wall. Independent source-reissued ceiling ink, W4
+        wall face and unique finish marks remain separate gates.
+        """
+        if (not isinstance(page_ids, Sequence)
+                or isinstance(page_ids, (str, bytes)) or not page_ids):
+            raise ValueError("explicit_original_rcp_source_page_ids_required")
+        if any(type(p) is not str or not p.isdecimal()
+               or str(int(p))!=p or int(p)<1 for p in page_ids):
+            raise ValueError("canonical_original_rcp_page_ids_required")
+        selected=tuple(sorted(set(page_ids),key=int))
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_schedule_page_ids=selected,
+            _source_connected_rcp_plan_page_ids=selected,
         )
 
     @classmethod
@@ -2175,7 +2541,13 @@ class SourceMaterialSemanticProducer:
                         **({
                             "source_connected_table_cell_shadow":True,
                             "source_native_multipath_semantic_frame_shadow":True,
-                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                            "source_connected_text_cell_plan_frame_shadow":True,
+                        } if str(page_number) in self._source_connected_rcp_plan_page_ids
+                           else {
+                            "source_connected_table_cell_shadow":True,
+                            "source_native_multipath_semantic_frame_shadow":True,
+                        } if str(page_number) in self._source_native_schedule_page_ids
+                           else {}),
                     )
                 )
                 if (
@@ -2525,7 +2897,13 @@ class SourceMaterialSemanticProducer:
                         published, page_words, viewport,
                         {**dictionary_for_scan, **{c: {} for c in relevant_blocked_codes}},
                     )
-                    lines, text_complete, text_reasons, unresolved_text_ids = _complete_source_plan_lines(page_words, viewport)
+                    original_paint_owned = _original_paint_owned_plan_word_ids(
+                        self._source, published, page_number, viewport, page_words,
+                    )
+                    lines, text_complete, text_reasons, unresolved_text_ids = _complete_source_plan_lines(
+                        page_words, viewport,
+                        original_paint_owned_ids=original_paint_owned,
+                    )
                 else:
                     lines, text_complete, text_reasons = _trusted_lines_for_viewport(page_words, viewport)
                 if not text_complete and not plan_shadow:

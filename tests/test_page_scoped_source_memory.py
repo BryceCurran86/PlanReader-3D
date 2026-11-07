@@ -1,8 +1,10 @@
 """Repeated source proofs must not copy the whole drawing or the PDF again."""
 
 from dataclasses import replace
+import pytest
 
 from pb_source_observation_authority import ObservationSelector
+import pb_source_visibility_authority as visibility_module
 from test_wall_visible_observation_page_index import _source
 
 
@@ -163,3 +165,134 @@ def test_replaced_competitor_on_another_page_is_not_served_from_cache():
         raise AssertionError("replaced competitor geometry was accepted")
     finally:
         store.observations[key] = prior
+
+
+def test_repeated_page_proof_reuses_aliases_but_not_the_return_tuple(monkeypatch):
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    first = authority.authenticated_visible_observations(published, bind_page_id="1")
+    original = visibility_module._native_visible_alias
+    calls = []
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(visibility_module, "_native_visible_alias", counting)
+    second = authority.authenticated_visible_observations(published, bind_page_id="1")
+    assert second == first
+    assert second is not first
+    assert second[0][1] is first[0][1]
+    assert calls == [], "unchanged source aliases were materialized again"
+
+
+def test_mutated_page_bound_clone_is_rebuilt_from_its_source():
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    first = authority.authenticated_visible_observations(published, bind_page_id="1")
+    geometry = first[0][1].geometry
+    object.__setattr__(first[0][1], "geometry", (900.0, 900.0, 1000.0, 900.0))
+    fresh = authority.authenticated_visible_observations(published, bind_page_id="1")
+    assert fresh[0][1].geometry == geometry
+    assert fresh[0][1] is not first[0][1]
+
+
+def test_page_alias_cache_replaces_the_previous_page():
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    store = source._producer._store
+    for page in ("1", "2", "1"):
+        rows = authority.authenticated_visible_observations(published, bind_page_id=page)
+        cached = store.visible_page_bound_rows
+        assert cached[0] == published.snapshot.snapshot_id
+        assert cached[1] == page
+        assert cached[4] == rows
+        assert {record.page_id for _, record in cached[4]} == {page}
+
+
+@pytest.mark.parametrize("bind_page", (None, "1"))
+@pytest.mark.parametrize("changed_page", ("1", "2"))
+def test_cached_proof_rejects_changed_native_origin_receipt(bind_page, changed_page):
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    all_rows = authority.authenticated_visible_observations(published)
+    changed = next(oid for oid, row in all_rows if row.page_id == changed_page)
+    authority.authenticated_visible_observations(published, bind_page_id=bind_page)
+    key = (published.snapshot.snapshot_id, changed)
+    old = authority._visible_origin_kinds[key]
+    replacement = visibility_module.RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND
+    if replacement == old:
+        replacement = visibility_module.VISIBLE_SEGMENT_ORIGIN_KIND
+    authority._visible_origin_kinds[key] = replacement
+    try:
+        with pytest.raises(RuntimeError):
+            authority.authenticated_visible_observations(published, bind_page_id=bind_page)
+    finally:
+        authority._visible_origin_kinds[key] = old
+
+
+def test_cached_page_rejects_changed_other_page_fingerprint():
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    all_rows = authority.authenticated_visible_observations(published)
+    other = next(oid for oid, row in all_rows if row.page_id == "2")
+    authority.authenticated_visible_observations(published, bind_page_id="1")
+    native = authority._visibility_receipts[(published.snapshot.snapshot_id, other)]
+    store = source._producer._store
+    key = (published.snapshot.snapshot_id, native)
+    prior = store.record_fingerprints[key]
+    store.record_fingerprints[key] = "0" * 64
+    try:
+        with pytest.raises(RuntimeError):
+            authority.authenticated_visible_observations(published, bind_page_id="1")
+    finally:
+        store.record_fingerprints[key] = prior
+
+
+def test_page_bound_alias_cache_is_owned_by_each_producer():
+    one, first, _ = _source(page_count=1)
+    two, second, _ = _source(page_count=1)
+    one.authority().authenticated_visible_observations(first, bind_page_id="1")
+    assert two._producer._store.visible_page_bound_rows is None
+    two.authority().authenticated_visible_observations(second, bind_page_id="1")
+    assert one._producer._store.visible_page_bound_rows is not two._producer._store.visible_page_bound_rows
+
+
+def test_page_indices_do_not_pin_every_derived_flat_snapshot(monkeypatch):
+    import fitz
+    from test_source_visibility_batch_wall_index import _image_pdf
+    from pb_raster_visible_segment_detector import RasterDetectedSegment
+    doc = fitz.open()
+    original = fitz.open(stream=_image_pdf(), filetype="pdf")
+    try:
+        for _ in range(3):
+            doc.insert_pdf(original)
+        payload = doc.tobytes(garbage=4, deflate=True)
+    finally:
+        original.close()
+        doc.close()
+    segment = RasterDetectedSegment(pixel_geometry=(40.0, 120.0, 360.0, 120.0),
+        geometry_pt=(20.0, 60.0, 180.0, 60.0), orientation="horizontal")
+    monkeypatch.setattr(visibility_module, "detect_axis_aligned_raster_segments",
+                        lambda *a, **k: (segment,))
+    source = visibility_module.SourceVisibilityProducer(producer_method="snapshot-index-bound", producer_version="1")
+    pub = source.ingest_native_pdf_bytes(document_id="snapshot-index-bound", source_bytes=payload,
+        source_locator="memory://synthetic-snapshot-index-bound.pdf")
+    states = []
+    store = source._producer._store
+    for page in ("1", "2", "3"):
+        pub = source.augment_with_raster_visible_segments(pub.revision.revision_id, page_ids=(page,))
+        if states:
+            # A new snapshot's page proof must release the previous whole-
+            # source clone hint, not just a full-cache key for this new ID.
+            source.authority().authenticated_visible_observations(pub, bind_page_id=page)
+            assert store.visible_authentication_cache == {}
+        rows = source.authority().authenticated_visible_observations(pub)
+        assert rows
+        states.append((pub, rows))
+        assert len(store.visible_page_index) == 1
+        assert set(store.visible_page_index) == {pub.snapshot.snapshot_id}
+    # Evicting derived read indices must never evict source truth. An older
+    # immutable selector still re-proves the same complete native/raster rows.
+    for historical, expected in states:
+        fresh = source.authority().authenticated_visible_observations(historical)
+        assert fresh == expected
+        assert len(store.visible_page_index) == 1

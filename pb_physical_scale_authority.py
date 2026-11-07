@@ -607,6 +607,10 @@ def _bar_candidates(
     segments: Sequence[_VisibleSegment],
     words: Sequence[_TrustedWord],
 ) -> tuple[_BarCandidate, ...]:
+    # Every accepted bar needs authenticated endpoint labels. With no words
+    # the geometric search can only return the same empty candidate universe.
+    if not words:
+        return ()
     candidates: list[_BarCandidate] = []
     tick_index = _TickEndpointIndex(segments)
     for baseline in segments:
@@ -948,6 +952,10 @@ class PhysicalScaleProducer:
             return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, scope_error or PHYSICAL_SCALE_SCOPE_UNAVAILABLE))
 
         words = _scope_words(self._trusted_words(selector, published), scope_bbox)
+        # Every accepted bar needs authenticated endpoint labels. Match the
+        # existing empty-word result before materializing unusable geometry.
+        if not words:
+            return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_BAR_UNAVAILABLE))
         segments = _scope_segments(self._visible_segments(selector, published), scope_bbox)
         cached_bars = self._bar_candidates_cache.get(selector.key)
         if cached_bars is None:

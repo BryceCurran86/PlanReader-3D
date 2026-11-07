@@ -49,6 +49,7 @@ _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
+_SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
 # Representation cache only. Lookups stay the same above and below this size.
 _SNAPSHOT_FLATTEN_MIN = 4096
 
@@ -129,29 +130,6 @@ def _decode_native_page_for_cache(
         # prepared before the failure remain visible exactly as in the old
         # append-as-you-go path, while coverage marks the page failed.
         return _NativePageDecodeCacheEntry(True, tuple(items), None)
-
-
-def _pending_dicts_from_cached_page(
-    entry: _NativePageDecodeCacheEntry,
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "page_id": page_id,
-            "partition_id": partition_id,
-            "kind": kind,
-            "primitive_ref": primitive_ref,
-            "raw_text": raw_text,
-            "geometry": geometry,
-        }
-        for (
-            page_id,
-            partition_id,
-            kind,
-            primitive_ref,
-            raw_text,
-            geometry,
-        ) in entry.pending_items
-    ]
 
 
 class ProducerIntegrityError(RuntimeError):
@@ -500,9 +478,9 @@ class _SourceObservationStore:
         # Identity-bound O(1) membership index for immutable snapshot records.
         # Replacement of a snapshot object causes the index to be rebuilt from
         # that replacement, preserving the previous resolution semantics.
-        self.snapshot_observation_id_sets: dict[
+        self.snapshot_observation_id_sets: OrderedDict[
             str, tuple[ProducerSnapshotRecord, frozenset[str]]
-        ] = {}
+        ] = OrderedDict()
         self.source_snapshot_by_revision: dict[str, str] = {}
         # Derived snapshots share unchanged records. Each snapshot stores only
         # its own writes, and a write on one snapshot cannot change another.
@@ -530,6 +508,9 @@ class _SourceObservationStore:
         # the records themselves; a write clears them. This does not retain a
         # bound copy of every page.
         self.visible_page_index: dict[str, tuple] = {}
+        # One page's private read views and validated returned clones. This
+        # replaces its predecessor; source observations are never evicted.
+        self.visible_page_bound_rows: tuple | None = None
 
     def source_bytes_match_revision(
         self,
@@ -556,6 +537,15 @@ class _SourceObservationStore:
         )
         return True
 
+    def cache_snapshot_membership(self, snapshot: ProducerSnapshotRecord):
+        """Bound read hints; immutable source inventories remain authoritative."""
+        cached = (snapshot, frozenset(snapshot.observation_ids))
+        self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+        self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
+        while len(self.snapshot_observation_id_sets) > _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS:
+            self.snapshot_observation_id_sets.popitem(last=False)
+        return cached
+
     def snapshot_contains_observation(
         self,
         snapshot: ProducerSnapshotRecord,
@@ -563,8 +553,9 @@ class _SourceObservationStore:
     ) -> bool:
         cached = self.snapshot_observation_id_sets.get(snapshot.snapshot_id)
         if cached is None or cached[0] is not snapshot:
-            cached = (snapshot, frozenset(snapshot.observation_ids))
-            self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+            cached = self.cache_snapshot_membership(snapshot)
+        else:
+            self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
         return str(observation_id) in cached[1]
 
     def next_generation(self) -> int:
@@ -1316,7 +1307,9 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        pending: list[dict[str, Any]] = []
+        # Retain native immutable tuples, not redundant per-primitive dictionaries.
+        # Final records and source identities below remain unchanged.
+        pending: list[tuple[str, str, str, str, str, tuple[float, ...]]] = []
         decoded_pages: list[int] = []
         failed_pages: list[int] = []
         pdf: Optional[fitz.Document] = None
@@ -1390,7 +1383,7 @@ class SourceObservationProducer:
                             ) from exc
                     cached_page = _decode_native_page_for_cache(pdf, page_number)
                     self._remember_native_page(digest, page_number, cached_page)
-                pending.extend(_pending_dicts_from_cached_page(cached_page))
+                pending.extend(cached_page.pending_items)
                 if cached_page.failed:
                     failed_pages.append(page_number)
                 else:
@@ -1446,16 +1439,23 @@ class SourceObservationProducer:
         )
 
         records: list[SourceObservationRecord] = []
-        for item in pending:
+        for (
+            page_id,
+            partition_id,
+            kind,
+            primitive_ref,
+            raw_text,
+            geometry,
+        ) in pending:
             identity = {
                 "document_id": document_id,
                 "revision_id": revision_id,
-                "partition_id": item["partition_id"],
-                "page_id": item["page_id"],
-                "kind": item["kind"],
-                "primitive_ref": item["primitive_ref"],
-                "raw_text": item["raw_text"],
-                "geometry": item["geometry"],
+                "partition_id": partition_id,
+                "page_id": page_id,
+                "kind": kind,
+                "primitive_ref": primitive_ref,
+                "raw_text": raw_text,
+                "geometry": geometry,
             }
             observation_id = stable_contract_id(
                 "source_observation", identity, digest_chars=32
@@ -1465,13 +1465,13 @@ class SourceObservationProducer:
                 document_id=document_id,
                 revision_id=revision_id,
                 source_sha256=digest,
-                source_partition_id=str(item["partition_id"]),
-                page_id=str(item["page_id"]),
+                source_partition_id=str(partition_id),
+                page_id=str(page_id),
                 viewport_id=None,
-                observation_kind=str(item["kind"]),
-                source_primitive_ref=str(item["primitive_ref"]),
-                raw_text=str(item["raw_text"]),
-                geometry=_finite_tuple(item["geometry"]),
+                observation_kind=str(kind),
+                source_primitive_ref=str(primitive_ref),
+                raw_text=str(raw_text),
+                geometry=_finite_tuple(geometry),
                 origin_kind="native",
                 derivation_parent_ids=(),
                 producer_method=self._producer_method,
@@ -1966,10 +1966,7 @@ class SourceObservationProducer:
         self._store.source_bytes_by_revision[revision.revision_id] = stored_source_bytes
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
-        self._store.snapshot_observation_id_sets[snapshot.snapshot_id] = (
-            snapshot,
-            frozenset(snapshot.observation_ids),
-        )
+        self._store.cache_snapshot_membership(snapshot)
         if parent_id is not None:
             self._store.observations.fork(snapshot.snapshot_id, parent_id)
             self._store.record_fingerprints.fork(snapshot.snapshot_id, parent_id)

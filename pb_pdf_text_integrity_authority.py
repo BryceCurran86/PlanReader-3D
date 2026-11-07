@@ -1004,6 +1004,149 @@ def _exact_fill_stroke_overprint_pair(
     return spans
 
 
+
+
+def _exact_interleaved_fragmented_overprint_word(
+    page: object,
+    word: Mapping[str, object],
+    spans: Sequence[Mapping[str, object]],
+) -> Optional[tuple[Mapping[str, object], ...]]:
+    """Reconstruct one native word from complete source fill/stroke fragments.
+
+    This is only trace-identity proof. All individual text paint, decoding,
+    glyph, clipping, layer and occlusion checks still run in the ordinary
+    classifier. Only exact paired paints separated by independently verified
+    opaque white source rectangles are allowed; no skipped unknown path or
+    arbitrary substring selection can construct a word.
+    """
+    raw_text = word.get("text")
+    if type(raw_text) is not str or len(raw_text) < 2:
+        return None
+    try:
+        word_bbox = _rect_tuple(word["bbox"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    owned: list[Mapping[str, object]] = []
+    for span in spans:
+        if not isinstance(span, Mapping):
+            continue
+        if _intersection_ratio(word_bbox, span.get("bbox") or ()) < 0.05:
+            continue
+        seq = _span_seqno(span)
+        chars = _trace_chars(span)
+        if (seq is None or not chars
+                or any(
+                    _intersection_ratio(char_box, word_bbox) < 0.99
+                    for _char, char_box in chars
+                )):
+            # A substantial competing native source text run must not be
+            # ignored simply because a cleaner subset can spell the word.
+            return None
+        owned.append(span)
+    if len(owned) < 4 or len(owned) > 16 or len(owned) % 2:
+        return None
+    ordered = sorted(owned, key=lambda item: _span_seqno(item))
+    seqnos = [_span_seqno(span) for span in ordered]
+    if any(seq is None for seq in seqnos) or len(set(seqnos)) != len(seqnos):
+        return None
+    try:
+        bboxlog = _cached_bboxlog(page)
+    except Exception:
+        return None
+    if any(seq < 0 or seq >= len(bboxlog) for seq in seqnos):
+        return None
+
+    pieces: list[str] = []
+    anchors: list[tuple[int, int]] = []
+    shared_font = ""
+    shared_layer = ""
+    shared_opacity: Optional[float] = None
+    for index in range(0, len(ordered), 2):
+        first, second = ordered[index:index + 2]
+        left_seq, right_seq = seqnos[index:index + 2]
+        if right_seq != left_seq + 1:
+            return None
+        first_text, second_text = _trace_text(first), _trace_text(second)
+        if not first_text or first_text != second_text:
+            return None
+        if (
+            _trace_char_identity_signature(first) is None
+            or _trace_char_identity_signature(first)
+            != _trace_char_identity_signature(second)
+        ):
+            return None
+        try:
+            bboxes = tuple(_rect_tuple(item.get("bbox") or ()) for item in (first, second))
+            modes = tuple(int(item["type"]) for item in (first, second))
+            kinds = tuple(str(bboxlog[seq][0]) for seq in (left_seq, right_seq))
+            opacity = tuple(float(item.get("opacity", 1.0)) for item in (first, second))
+        except (TypeError, ValueError, KeyError, IndexError):
+            return None
+        if (
+            any(abs(a - b) > 1e-6 for a, b in zip(*bboxes))
+            or modes != (0, 1)
+            or kinds != ("fill-text", "stroke-text")
+            or any(not math.isfinite(x) or x < 0.95 for x in opacity)
+            or opacity[0] != opacity[1]
+        ):
+            return None
+        font = str(first.get("font") or "")
+        layer = str(first.get("layer") or "")
+        if (
+            not font or font != str(second.get("font") or "")
+            or layer != str(second.get("layer") or "")
+            or (shared_font and font != shared_font)
+            or (shared_opacity is not None and opacity[0] != shared_opacity)
+            or (index and layer != shared_layer)
+        ):
+            return None
+        shared_font, shared_layer, shared_opacity = font, layer, opacity[0]
+        pieces.append(first_text)
+        anchors.append((left_seq, right_seq))
+    if "".join(pieces) != raw_text:
+        return None
+
+    # The one gap between independent text-fragment pairs must be a real
+    # opaque WHITE source rectangle, not a hidden text, layer, annotation,
+    # unknown path or a source trace chosen by proximity.
+    try:
+        path_by_seq: dict[int, list[Mapping[str, object]]] = {}
+        for drawing in page.get_drawings():  # type: ignore[attr-defined]
+            seq = drawing.get("seqno")
+            if type(seq) is int:
+                path_by_seq.setdefault(seq, []).append(drawing)
+    except (AttributeError, ValueError, TypeError):
+        return None
+    for previous, following in zip(anchors, anchors[1:]):
+        gap_seq = previous[1] + 1
+        if following[0] != gap_seq + 1 or gap_seq >= len(bboxlog):
+            return None
+        if str(bboxlog[gap_seq][0]) != "fill-path":
+            return None
+        draws = path_by_seq.get(gap_seq, ())
+        if len(draws) != 1:
+            return None
+        draw = draws[0]
+        try:
+            fill = tuple(float(value) for value in draw.get("fill") or ())
+            opacity = float(draw.get("fill_opacity"))
+            items = draw.get("items") or ()
+            op_rect = _rect_tuple(draw["rect"])
+            log_rect = _rect_tuple(bboxlog[gap_seq][1])
+        except (TypeError, ValueError, KeyError, OverflowError):
+            return None
+        if (
+            draw.get("type") != "f"
+            or len(fill) != 3 or any(v < 0.999 or v > 1.0 for v in fill)
+            or not math.isfinite(opacity) or opacity < 0.999
+            or len(items) != 1 or items[0][0] != "re"
+            or any(abs(a - b) > 1e-6 for a, b in zip(op_rect, log_rect))
+            or op_rect[2] <= op_rect[0] or op_rect[3] <= op_rect[1]
+        ):
+            return None
+    return tuple(ordered)
+
+
 def _matching_trace_spans(
     page: object,
     word: Mapping[str, object],
@@ -1043,6 +1186,15 @@ def _matching_trace_spans(
 
     chain, reasons = _owned_span_chain(spans, raw_text, bbox)
     if chain is None:
+        # Native PDF word extraction may join one vertical CAD label that was
+        # painted as several fill/stroke fragment pairs. Only a completely
+        # source-verified pair chain plus intervening original white paths
+        # can corroborate that word. No candidate ordering or gap snap.
+        fragments = _exact_interleaved_fragmented_overprint_word(
+            page, word, spans,
+        )
+        if fragments is not None:
+            return fragments, raw_text, ()
         return (), "", reasons
     return chain, "".join(_trace_text(span) for span in chain), ()
 
