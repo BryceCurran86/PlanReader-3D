@@ -14,6 +14,10 @@ from collections.abc import Mapping
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_canonical_room_composition import LiveCanonicalRoomObject
+from pb_live_floor_area_scale_provenance import (
+    LiveFloorScaleSourceReceipt,
+    validated_floor_scale_metadata,
+)
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
@@ -53,6 +57,13 @@ def _valid_original_source_sha(value: object) -> bool:
 
 def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
     """Reject untyped/replayed source m² before room-to-floor commercial reissue."""
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    # Physical measurement authority cannot cancel a source publication veto.
+    # Both canonical reissuers grant commercial projection only after this
+    # shared validator. Retain explicitly noncommercial room measurements in
+    # the original claim, without replacing their False permission with True.
+    if metadata.get("commercial_projection_allowed") is False:
+        return False
     if (
         quantity.family != "room_area"
         or quantity.abstained
@@ -331,6 +342,33 @@ def publish_live_floor_area_quantities(
         if not set(quantity.evidence_ids).issubset(set(floor.evidence_ids)):
             continue
 
+        # A PDF-scaled FIRM room area alone does not carry commercial scale
+        # authority. Match the independently producer-owned native scale bar
+        # to this exact canonical floor, source face and upstream area claim.
+        # Duplicates (including verbatim replays) are ambiguous; never pick
+        # the first/nearest scale or trust copied metadata scale fields.
+        output_metadata = dict(metadata)
+        if quantity.authority == MeasurementAuthorityType.PDF_SCALED.value:
+            for key in ("resolved_scale_id", "scale_status", "scale_conflicts"):
+                output_metadata.pop(key, None)
+            matching_scale_receipts = tuple(
+                receipt
+                for receipt in claim.source_owned_floor_scale_receipts
+                if type(receipt) is LiveFloorScaleSourceReceipt
+                and (
+                    receipt.canonical_floor_id == floor.canonical_floor_id
+                    or receipt.physical_floor_surface_id == floor.physical_floor_surface_id
+                    or receipt.source_room_face_record_id == floor.source_room_face_record_id
+                    or receipt.room_area_quantity_id == source_id
+                )
+            )
+            if len(matching_scale_receipts) == 1:
+                original_scale_metadata = validated_floor_scale_metadata(
+                    matching_scale_receipts[0], floor=floor, source=quantity
+                )
+                if original_scale_metadata is not None:
+                    output_metadata.update(original_scale_metadata)
+
         payload = {
             "schema_version": LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION,
             "upstream_room_area_quantity_id": source_id,
@@ -359,7 +397,7 @@ def publish_live_floor_area_quantities(
                 blocking_reasons=(),
                 reason_codes=tuple(quantity.reason_codes),
                 metadata={
-                    **dict(metadata),
+                    **output_metadata,
                     "upstream_room_area_quantity_id": source_id,
                     "canonical_floor_id": floor.canonical_floor_id,
                     "physical_floor_surface_id": floor.physical_floor_surface_id,

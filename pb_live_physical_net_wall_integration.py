@@ -29,6 +29,10 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
     compose_live_canonical_rooms,
 )
+from pb_live_floor_area_scale_provenance import (
+    LiveFloorScaleSourceReceipt,
+    source_owned_floor_scale_receipt,
+)
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_external_physical_net_wall_publication import (
@@ -144,6 +148,9 @@ class LivePhysicalNetWallClaim:
     # Source-owned physical-scale failures are independent of documented area.
     # Each entry owns an exact physical-room ID and the scale producer's reasons.
     physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Independent typed original physical-scale proofs for exact PDF-scaled
+    # canonical floor owners. A scale failure creates no positive receipt.
+    source_owned_floor_scale_receipts: tuple[LiveFloorScaleSourceReceipt, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -592,6 +599,7 @@ def _collect_live_physical_net_wall_claim(
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
+    source_owned_floor_scale_receipts: list[LiveFloorScaleSourceReceipt] = []
     same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
@@ -770,6 +778,7 @@ def _collect_live_physical_net_wall_claim(
             )
 
             scale_calibration = None
+            scale_bridge = None
             scale_bridge_reasons: tuple[str, ...] = ()
             scale_selector = PhysicalScaleSelector(
                 document_id=scope_rooms[0].document_id,
@@ -926,6 +935,32 @@ def _collect_live_physical_net_wall_claim(
                 canonical_floors,
                 bridge,
             )
+            # Bind a physical scale bar to the *same* floor/room/source
+            # quantity while the original corroborated scale bridge is still
+            # in scope. No metadata-derived string grants scale authority.
+            if scale_bridge is not None:
+                scope_face_ids = {record.record_id for record in room_scope.records}
+                # Preserve one immutable source publisher snapshot per scope,
+                # not one copied lookup map per physical floor. Large plans
+                # may have hundreds of rooms sharing one native scale bar.
+                original_scale_authority = scale_producer.authority()
+                for floor in canonical_floors.floors:
+                    if floor.source_room_face_record_id not in scope_face_ids:
+                        continue
+                    for source_quantity in bridge.quantities:
+                        if source_quantity.quantity_id != floor.metric_area_quantity_id:
+                            continue
+                        receipt = source_owned_floor_scale_receipt(
+                            floor=floor,
+                            quantity=source_quantity,
+                            bridge=scale_bridge,
+                            # Only the actual source producer can grant this.
+                            # The native PhysicalScaleEvidence dataclass alone
+                            # is not a customer measurement authority.
+                            scale_authority=original_scale_authority,
+                        )
+                        if receipt is not None:
+                            source_owned_floor_scale_receipts.append(receipt)
             room_area_quantity_evidence.extend(bridge.quantities)
 
     # Surface finish semantics may live on schedules/RCP/support sheets that
@@ -1117,6 +1152,7 @@ def _collect_live_physical_net_wall_claim(
             physical_scale_first_failure_codes=tuple(sorted(
                 physical_scale_failures_by_room.items()
             )),
+            source_owned_floor_scale_receipts=tuple(source_owned_floor_scale_receipts),
         )
 
     return LivePhysicalNetWallClaim(
@@ -1171,6 +1207,7 @@ def _collect_live_physical_net_wall_claim(
         physical_scale_first_failure_codes=tuple(sorted(
             physical_scale_failures_by_room.items()
         )),
+        source_owned_floor_scale_receipts=tuple(source_owned_floor_scale_receipts),
     )
 
 
