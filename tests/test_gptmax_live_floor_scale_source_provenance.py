@@ -251,3 +251,39 @@ def test_tamper_mutable_calibration_after_receipt_creation_invalidates_original_
     floor, source, _bridge, receipt = _binding()
     receipt.calibration.px_per_m *= 2.0
     assert validated_floor_scale_metadata(receipt, floor=floor, source=source) is None
+
+
+
+def test_second_source_scale_claim_for_same_physical_floor_or_upstream_room_blocks_authority():
+    floor, source, _bridge, receipt = _binding()
+    # Different canonical address with the SAME physical owner is still a
+    # competing scale claim; a one-to-one floor cannot silently select one.
+    variants = (
+        replace(receipt, canonical_floor_id="other-canonical-floor"),
+        replace(receipt, source_room_face_record_id="other-source-face"),
+        replace(receipt, room_area_quantity_id="another-upstream-area"),
+    )
+    for competing in variants:
+        output = publish_live_floor_area_quantities(_claim(source, floor, receipt, competing))
+        assert len(output) == 1
+        assert "resolved_scale_id" not in output[0].metadata
+
+
+def test_non_native_manual_or_unverified_scale_cannot_borrow_original_bar_identity():
+    floor, source, bridge, _receipt = _binding()
+    original = bridge.calibration
+    for status, source_type, method in (
+        ("user_approved", "manual", "MANUAL"),
+        ("valid", "title_block", "TITLE_BLOCK"),
+        ("provisional", "scale_bar", "SCALE_BAR"),
+        ("valid", "scale_bar", "OCR_TEXT"),
+    ):
+        other = replace(original, status=status, source_type=source_type, method=method)
+        changed = replace(source, metadata={
+            **source.metadata, "scale_fingerprint": scale_calibration_fingerprint(other)
+        })
+        assert source_owned_floor_scale_receipt(
+            floor=floor,
+            quantity=changed,
+            bridge=replace(bridge, calibration=other),
+        ) is None
