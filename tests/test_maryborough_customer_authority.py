@@ -1,78 +1,114 @@
-"""Unit tests for pb_maryborough_customer_authority."""
+"""Regression gates for the quarantined project-specific quantity shortcut.
+
+Synthetic fixtures establish rejection behavior only. The optional private
+check uses the unchanged original PDF and cannot claim a measurement gain.
+"""
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
+import fitz
 import pytest
 
-from pb_maryborough_customer_authority import (
-    AIRLOCK_PHYSICAL_FLOOR_ID,
-    FOOD_PREP_PHYSICAL_FLOOR_ID,
-    LAUNDRY_PHYSICAL_FLOOR_ID,
-    OFFICE_PHYSICAL_FLOOR_ID,
-    PWD_PHYSICAL_FLOOR_ID,
-    issue_all_original_maryborough_customer_quantities,
-)
-
-PDF_PATH = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+import pb_maryborough_customer_authority as authority
 
 
-@pytest.mark.skipif(not PDF_PATH.is_file(), reason="Source PDF not present")
-def test_maryborough_customer_authority_all_24_items() -> None:
-    res = issue_all_original_maryborough_customer_quantities(PDF_PATH)
-    assert res.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
-    assert len(res.quantities) == 24
-    assert res.sealed_run is not None
-    assert len(res.customer_rows) == 24
-    assert len(res.identity_map_bindings) == 24
+def _known_fixture(tmp_path, monkeypatch, *, text="MEETING AREA", pages=31):
+    document = fitz.open()
+    for index in range(pages):
+        page = document.new_page()
+        if index == 0 and text:
+            page.insert_text((40, 60), text)
+    path = tmp_path / "known-source-fixture.pdf"
+    path.write_bytes(document.tobytes())
+    document.close()
+    monkeypatch.setattr(
+        authority, "MARYBOROUGH_SOURCE_SHA256",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    return path
 
-    # Verify all quantities are firm and lineage-verified
-    assert all(q.status == "firm" for q in res.quantities)
-    assert all(not q.abstained for q in res.quantities)
-    assert all(q.confidence == 1.0 for q in res.quantities)
-    assert all(q.lineage_ok for q in res.sealed_run.quantities)
 
-    # Floor quantities verification
-    q_map = {q.semantic_key: q for q in res.quantities}
-    office_key = f"floor_area:{OFFICE_PHYSICAL_FLOOR_ID}:maryborough-office-ft3-floor-area"
-    food_prep_key = f"floor_area:{FOOD_PREP_PHYSICAL_FLOOR_ID}:maryborough-food-prep-ft3-floor-area"
-    pwd_key = f"floor_area:{PWD_PHYSICAL_FLOOR_ID}:maryborough-pwd-ft2-floor-area"
-    airlock_key = f"floor_area:{AIRLOCK_PHYSICAL_FLOOR_ID}:maryborough-airlock-ft2-floor-area"
-    laundry_key = f"floor_area:{LAUNDRY_PHYSICAL_FLOOR_ID}:maryborough-laundry-ft2-floor-area"
+def _assert_empty_abstain(result):
+    assert result.status == "ABSTAIN"
+    assert result.quantities == ()
+    assert result.traces == ()
+    assert result.sealed_run is None
+    assert result.customer_rows == ()
+    assert result.identity_map_bindings == ()
 
-    assert office_key in q_map
-    assert q_map[office_key].value == 9.05352
-    assert q_map[office_key].unit == "m2"
 
-    assert food_prep_key in q_map
-    assert q_map[food_prep_key].value == 13.270425
-    assert q_map[food_prep_key].unit == "m2"
+@pytest.mark.parametrize("backend", ["native", "empty", "unavailable"])
+def test_known_pdf_without_quantity_authority_never_issues_rows(
+    tmp_path, monkeypatch, backend,
+):
+    path = _known_fixture(tmp_path, monkeypatch)
+    original = path.read_bytes()
+    if backend == "empty":
+        monkeypatch.setattr(fitz.Page, "get_text", lambda *_args, **_kwargs: [])
+    elif backend == "unavailable":
+        def unavailable(*_args, **_kwargs):
+            raise RuntimeError("observation backend unavailable")
+        monkeypatch.setattr(fitz.Page, "get_text", unavailable)
+    result = authority.issue_all_original_maryborough_customer_quantities(path)
+    _assert_empty_abstain(result)
+    assert result.reason_codes == (
+        authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,
+    )
+    assert path.read_bytes() == original
 
-    assert pwd_key in q_map
-    assert q_map[pwd_key].value == 7.854
-    assert q_map[pwd_key].unit == "m2"
 
-    assert airlock_key in q_map
-    assert q_map[airlock_key].value == 7.66688
-    assert q_map[airlock_key].unit == "m2"
+def test_missing_or_foreign_source_cannot_reenable_the_shortcut(tmp_path):
+    missing = authority.issue_all_original_maryborough_customer_quantities(
+        tmp_path / "absent.pdf",
+    )
+    _assert_empty_abstain(missing)
+    foreign = tmp_path / "foreign.pdf"
+    foreign.write_bytes(b"%PDF-1.7 unrelated source")
+    rejected = authority.issue_all_original_maryborough_customer_quantities(foreign)
+    _assert_empty_abstain(rejected)
+    assert rejected.reason_codes == ("maryborough_source_sha_mismatch",)
 
-    assert laundry_key in q_map
-    assert q_map[laundry_key].value == 8.34782
-    assert q_map[laundry_key].unit == "m2"
 
-    # Opening counts verification
-    item_map = {b["benchmark_item_id"]: b for b in res.identity_map_bindings}
-    assert "maryborough-window-tagged-count" in item_map
-    assert "maryborough-door-ipf3-count" in item_map
-    assert "maryborough-door-laminex-partition-count" in item_map
-    assert "maryborough-door-aluminium-glazed-count" in item_map
+@pytest.mark.parametrize("workspace", [None, True, False, 0, -1, "1", 1.5])
+def test_invalid_workspace_is_rejected_before_source_read(monkeypatch, workspace):
+    def unexpected_read(_path):
+        raise AssertionError("an unauthenticated workspace read source bytes")
+    monkeypatch.setattr(Path, "read_bytes", unexpected_read)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        "unused.pdf", workspace_id=workspace,
+    )
+    _assert_empty_abstain(result)
+    assert result.reason_codes == ("authenticated_workspace_unavailable",)
 
-    counts_by_item = {
-        q.metadata.get("benchmark_item_id", q.semantic_key.split(":")[-1]): q.value
-        for q in res.quantities
-        if q.unit == "nr"
-    }
-    assert counts_by_item["maryborough-window-tagged-count"] == 6.0
-    assert counts_by_item["maryborough-door-ipf3-count"] == 11.0
-    assert counts_by_item["maryborough-door-laminex-partition-count"] == 3.0
-    assert counts_by_item["maryborough-door-aluminium-glazed-count"] == 2.0
+
+def test_admitted_digest_without_a_decodable_pdf_is_not_authority(tmp_path, monkeypatch):
+    path = tmp_path / "broken.pdf"
+    payload = b"not a decodable PDF"
+    path.write_bytes(payload)
+    monkeypatch.setattr(
+        authority, "MARYBOROUGH_SOURCE_SHA256", hashlib.sha256(payload).hexdigest(),
+    )
+    result = authority.issue_all_original_maryborough_customer_quantities(path)
+    _assert_empty_abstain(result)
+    assert result.reason_codes == ("source_pdf_unreadable",)
+
+
+def test_original_sha_with_empty_observations_retains_quarantine(monkeypatch):
+    path = Path(os.environ.get(
+        "PLANREADER_ORIGINAL_MARYBOROUGH",
+        "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf",
+    ))
+    if not path.is_file():
+        pytest.skip("private original unavailable here; no source-pass claim")
+    original_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert original_sha == authority.MARYBOROUGH_SOURCE_SHA256
+    monkeypatch.setattr(fitz.Page, "get_text", lambda *_args, **_kwargs: [])
+    result = authority.issue_all_original_maryborough_customer_quantities(path)
+    _assert_empty_abstain(result)
+    assert result.reason_codes == (
+        authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,
+    )
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == original_sha

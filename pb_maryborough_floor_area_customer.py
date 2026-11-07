@@ -1,7 +1,4 @@
-"""Maryborough original-source OFFICE & FOOD PREP floor area -> customer rows.
-
-Backwards-compatible wrapper delegating to pb_maryborough_customer_authority.
-"""
+"""Fail-closed compatibility wrapper for the quarantined floor subset."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,27 +37,25 @@ def issue_original_maryborough_floor_customer_areas(
     *,
     workspace_id: int = 1,
 ) -> OriginalMaryboroughFloorCustomerResult:
-    """Validate source drawing ink on Page 11 and Page 7, then seal customer rows."""
-    res = issue_all_original_maryborough_customer_quantities(pdf_path, workspace_id=workspace_id)
-    if res.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW":
-        return res
-    floor_quantities = tuple(
-        q for q in res.quantities if q.input_entity_ids[0] in (OFFICE_PHYSICAL_FLOOR_ID, FOOD_PREP_PHYSICAL_FLOOR_ID)
-    )
-    floor_rows = tuple(
-        r
-        for r in res.customer_rows
-        if any(
-            cid in (OFFICE_PHYSICAL_FLOOR_ID, FOOD_PREP_PHYSICAL_FLOOR_ID)
-            for cid in r.get("canonical_entity_ids", ())
+    """Return no subset until its own source-owned authority and seal exist."""
+    if type(workspace_id) is not int or workspace_id <= 0:
+        return OriginalMaryboroughFloorCustomerResult(
+            "ABSTAIN", ("authenticated_workspace_unavailable",),
         )
+    result = issue_all_original_maryborough_customer_quantities(
+        pdf_path, workspace_id=workspace_id,
     )
+    if (
+        result.status == "ABSTAIN"
+        and not result.quantities
+        and not result.traces
+        and result.sealed_run is None
+        and not result.customer_rows
+        and not result.identity_map_bindings
+    ):
+        return result
+    # Never return two selected rows with an unrelated larger source seal.
+    # A future upstream implementation cannot silently re-enable this subset.
     return OriginalMaryboroughFloorCustomerResult(
-        status=res.status,
-        reason_codes=res.reason_codes,
-        quantities=floor_quantities,
-        traces=res.traces,
-        sealed_run=res.sealed_run,
-        customer_rows=floor_rows,
-        identity_map_bindings=res.identity_map_bindings,
+        "ABSTAIN", ("source_owned_floor_subset_authority_unavailable",),
     )
