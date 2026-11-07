@@ -15,6 +15,8 @@ from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType,
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_page_scale_calibration_authority import (
+    ScaleCalibrationStatus,
+    ScaleSourceType,
     measurement_authority_for_page_scale,
     scale_calibration_fingerprint,
 )
@@ -127,6 +129,11 @@ def _same_original_owners(
         or not _trusted_observations(physical.source_text_observation_ids)
         or _canonical_page(calibration.page_no) != floor.page_id
         or calibration.revision_id != floor.revision_id
+        # A manual approval, title text, or OCR description cannot impersonate
+        # the producer's one independently reconstructed native graphic bar.
+        or calibration.source_type != ScaleSourceType.SCALE_BAR.value
+        or calibration.status != ScaleCalibrationStatus.VALID.value
+        or calibration.method != ScaleSourceType.SCALE_BAR.value.upper()
         or measurement_authority_for_page_scale(calibration) != AuthorityStatus.FIRM.value
         or not calibration.is_usable_for_firm_measurement()
         or meta.get("scale_fingerprint") != scale_calibration_fingerprint(calibration)
