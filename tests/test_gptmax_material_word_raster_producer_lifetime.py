@@ -114,7 +114,7 @@ def test_same_producer_reuses_positive_and_negative_outcome_storage_without_prom
 def test_poisoned_foreign_source_entry_is_rejected_not_silently_replaced():
     source = _source()
     foreign = _normal(_source())
-    material._ORDINARY_WORD_RASTER_BY_SOURCE[source] = ref(foreign._raster)
+    setattr(source, material._ORDINARY_WORD_RASTER_CACHE_ATTR, foreign._raster)
     with pytest.raises(ValueError, match="source_policy_conflict"):
         _normal(source)
 
@@ -122,7 +122,7 @@ def test_poisoned_foreign_source_entry_is_rejected_not_silently_replaced():
 def test_poisoned_clip_only_entry_is_rejected():
     source = _source()
     clip = RasterTextCorroborationProducer.for_physical_plan_view_shadow(source)
-    material._ORDINARY_WORD_RASTER_BY_SOURCE[source] = ref(clip)
+    setattr(source, material._ORDINARY_WORD_RASTER_CACHE_ATTR, clip)
     with pytest.raises(ValueError, match="source_policy_conflict"):
         _normal(source)
 
@@ -135,7 +135,22 @@ def test_poisoned_original_observation_producer_entry_is_rejected():
         _normal(source)
 
 
-def test_material_raster_memo_never_keeps_source_alive_by_itself():
+def test_memo_survives_floor_publisher_release_before_ceiling_stage():
+    source = _source()
+    floor = _normal(source)
+    original = floor._raster
+    memo = ("doc", "rev", "source-sha", "snap", "word")
+    original._results[memo] = "SOURCE_OWNED_ABSTENTION"
+    del floor
+    gc.collect()
+    ceiling = material.SourceMaterialSemanticProducer.for_source_connected_original_rcp_plan_shadow(
+        source, page_ids=("9",)
+    )
+    assert ceiling._raster is original
+    assert ceiling._raster._results[memo] == "SOURCE_OWNED_ABSTENTION"
+
+
+def test_material_raster_source_cycle_collects_after_source_is_released():
     source = _source()
     producer = _normal(source)
     raster_weak = ref(producer._raster)
