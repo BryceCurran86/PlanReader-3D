@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import fitz
 
@@ -136,6 +136,12 @@ class LivePhysicalNetWallClaim:
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     ceiling_lining_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    # Diagnostic only (the opt-in finished-face gate): per ring face, which source fact the original does or
+    # does not state about the wall face the ring follows. Never a quantity, scale or authority.
+    layered_finished_face_receipts: tuple[Any, ...] = ()
+    # Diagnostic only: per statement page, how many words each text authority proved (counts and refusal
+    # codes, never text), so a receipt without a statement says why.
+    layered_finished_face_statement_diagnostics: tuple[Any, ...] = ()
     # Source-authenticated same-view measurement first-gate receipts; a separate
     # cross-view or scaled authority may independently resolve the room area.
     same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
@@ -415,6 +421,13 @@ def _collect_live_physical_net_wall_claim(
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
+    single_width_uniform_page_door_height_shadow: bool = False,
+    layered_doorway_room_rings: bool = False,
+    layered_sliding_leaf_closure: bool = False,
+    layered_partition_witness: bool = False,
+    layered_finished_face_gate: bool = False,
+    layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -432,12 +445,34 @@ def _collect_live_physical_net_wall_claim(
     The proof needs the optional fontTools dependency and abstains without it.
     """
 
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
-    native_text_kwargs = (
-        {"source_native_finish_text_shadow": True}
-        if source_native_finish_text_shadow else {}
-    )
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("glyph ledger text trust must be an explicit boolean")
+    if type(layered_doorway_room_rings) is not bool:
+        raise ValueError("layered doorway room rings must be an explicit boolean")
+    if type(layered_sliding_leaf_closure) is not bool:
+        raise ValueError("layered sliding leaf closure must be an explicit boolean")
+    if layered_sliding_leaf_closure and not layered_doorway_room_rings:
+        raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_partition_witness) is not bool:
+        raise ValueError("layered partition witness must be an explicit boolean")
+    if layered_partition_witness and not layered_sliding_leaf_closure:
+        raise ValueError("layered partition witness needs layered sliding leaf closure")
+    if type(layered_finished_face_gate) is not bool:
+        raise ValueError("layered finished face gate must be an explicit boolean")
+    if layered_finished_face_gate and not layered_doorway_room_rings:
+        raise ValueError("layered finished face gate needs layered doorway room rings")
+    if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
+        raise ValueError("layered finished face statement pages need the finished face gate")
+    native_text_kwargs = {
+        **({"source_native_finish_text_shadow": True}
+           if source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if source_glyph_ledger_text_trust else {}),
+    }
     path = Path(pdf_path)
     payload = path.read_bytes()
     source_sha = hashlib.sha256(payload).hexdigest()
@@ -572,6 +607,14 @@ def _collect_live_physical_net_wall_claim(
         unresolved_wall_candidate_ids=(
             canonical_wall_core.unresolved_wall_candidate_ids
         ),
+        **({"layered_doorway_room_rings": True}
+           if layered_doorway_room_rings else {}),
+        **({"layered_sliding_leaf_closure": True}
+           if layered_sliding_leaf_closure else {}),
+        **({"layered_partition_witness": True}
+           if layered_partition_witness else {}),
+        **({"layered_finished_face_gate": True}
+           if layered_finished_face_gate else {}),
     )
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
@@ -583,6 +626,9 @@ def _collect_live_physical_net_wall_claim(
     ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
+    finished_face_receipts: list[Any] = []
+    finished_face_statements: Optional[tuple[Any, ...]] = None
+    finished_face_statement_diagnostics: tuple[Any, ...] = ()
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
     same_view_area = None
     cross_view_area = None
@@ -590,7 +636,10 @@ def _collect_live_physical_net_wall_claim(
         same_view_area = SameViewRoomAreaProducer.from_source(
             source=source,
             rooms=canonical_rooms,
-        ).publish()
+        ).publish(
+            **({"layered_ring_box_selection_shadow": True}
+               if layered_doorway_room_rings else {}),
+        )
         same_view_by_record = dict(
             same_view_area.evidence_by_source_room_face_record_id
         )
@@ -664,10 +713,27 @@ def _collect_live_physical_net_wall_claim(
             ):
                 continue
 
+            gated_record_ids: frozenset[str] = frozenset()
+            if layered_finished_face_gate:
+                from pb_layered_wall_doorway_room_face_scope_shadow import (
+                    RING_FINISHED_FACE_REQUIRED_PREFIX,
+                )
+
+                gated_record_ids = frozenset(
+                    record.record_id for record in room_scope.records
+                    if f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}"
+                    in room_scope.reason_codes
+                )
             explicit_by_face_id = _uniquely_owned_explicit_area_by_source_face(
                 source_face_records=room_scope.records,
                 canonical_rooms=scope_rooms,
-                evidence_by_source_record=evidence_by_record,
+                evidence_by_source_record=(
+                    {
+                        record_id: evidence
+                        for record_id, evidence in evidence_by_record.items()
+                        if record_id not in gated_record_ids
+                    } if gated_record_ids else evidence_by_record
+                ),
             )
 
             containing_viewport = None
@@ -898,6 +964,28 @@ def _collect_live_physical_net_wall_claim(
                     else:
                         physical_scale_failures_by_room[physical_id] = failure_reasons
 
+            if gated_record_ids:
+                if finished_face_statements is None:
+                    finished_face_statements, finished_face_statement_diagnostics = _collect_finished_face_statements(
+                        native_text_kwargs=native_text_kwargs,
+                        payload=payload,
+                        document_id=document_id,
+                        published=published,
+                        statement_pages=layered_finished_face_statement_pages,
+                    )
+                finished_face_receipts.extend(
+                    _finished_face_receipts(
+                        records=tuple(
+                            record for record in room_scope.records
+                            if record.record_id in gated_record_ids
+                        ),
+                        payload=payload,
+                        page_no=page_no,
+                        statements=finished_face_statements,
+                        scale_calibration=scale_calibration,
+                    )
+                )
+
             if not explicit_by_face_id and scale_calibration is None:
                 continue
 
@@ -995,6 +1083,7 @@ def _collect_live_physical_net_wall_claim(
             )
 
     physical_void = compose_live_physical_opening_voids(
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
@@ -1108,6 +1197,8 @@ def _collect_live_physical_net_wall_claim(
             physical_scale_first_failure_codes=tuple(sorted(
                 physical_scale_failures_by_room.items()
             )),
+            layered_finished_face_receipts=tuple(finished_face_receipts),
+            layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
         )
 
     return LivePhysicalNetWallClaim(
@@ -1162,6 +1253,61 @@ def _collect_live_physical_net_wall_claim(
         physical_scale_first_failure_codes=tuple(sorted(
             physical_scale_failures_by_room.items()
         )),
+        layered_finished_face_receipts=tuple(finished_face_receipts),
+        layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
+    )
+
+
+def _collect_finished_face_statements(
+    *, native_text_kwargs, payload, document_id, published, statement_pages,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """(authenticated internal-wall build-up statements, counts-only diagnostics) of the pages named."""
+    if not statement_pages:
+        return (), ()
+    from pb_wall_build_up_statement_shadow import collect_wall_build_up_statements_with_diagnostics
+
+    page_ids = tuple(str(int(index) + 1) for index in statement_pages)
+    statement_source = SourceVisibilityProducer(
+        producer_method="live-wall-build-up-statement",
+        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+        **native_text_kwargs,
+    )
+    statement_published = statement_source.ingest_native_pdf_bytes(
+        document_id=document_id,
+        source_bytes=payload,
+        source_locator="memory://live-wall-build-up-source.pdf",
+        page_ids=page_ids,
+    )
+    if (
+        statement_published.revision.document_id != published.revision.document_id
+        or statement_published.revision.revision_id != published.revision.revision_id
+        or statement_published.revision.source_sha256 != published.revision.source_sha256
+    ):
+        return (), ()
+    return collect_wall_build_up_statements_with_diagnostics(
+        statement_source, revision_id=statement_published.revision.revision_id, page_ids=page_ids,
+    )
+
+
+def _finished_face_receipts(
+    *, records, payload, page_no, statements, scale_calibration,
+) -> tuple[Any, ...]:
+    """Diagnostic face identity of each gated ring face; the page scale comes only from the existing authority."""
+    from pb_layered_wall_face_identity_shadow import (
+        classify_record_face_identity,
+        wall_strip_facts,
+    )
+
+    mm_per_pt = None
+    if scale_calibration is not None and scale_calibration.is_usable_for_firm_measurement():
+        mm_per_pt = 1000.0 / float(scale_calibration.px_per_m)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        facts = wall_strip_facts(document[page_no - 1].get_drawings())
+    return tuple(
+        classify_record_face_identity(
+            record, strip_facts=facts, statements=statements, mm_per_pt=mm_per_pt,
+        )
+        for record in sorted(records, key=lambda item: item.record_id)
     )
 
 
@@ -1175,6 +1321,13 @@ def collect_live_physical_net_wall_claim(
     recover_additional_opening_areas: bool = False,
     recover_supported_opening_areas: bool = False,
     source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
+    single_width_uniform_page_door_height_shadow: bool = False,
+    layered_doorway_room_rings: bool = False,
+    layered_sliding_leaf_closure: bool = False,
+    layered_partition_witness: bool = False,
+    layered_finished_face_gate: bool = False,
+    layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1189,8 +1342,28 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("supported opening area recovery must be an explicit boolean")
     if recover_additional_opening_areas and recover_supported_opening_areas:
         raise ValueError("choose one opening area recovery policy")
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
+    if type(source_glyph_ledger_text_trust) is not bool:
+        raise ValueError("glyph ledger text trust must be an explicit boolean")
+    if type(layered_doorway_room_rings) is not bool:
+        raise ValueError("layered doorway room rings must be an explicit boolean")
+    if type(layered_sliding_leaf_closure) is not bool:
+        raise ValueError("layered sliding leaf closure must be an explicit boolean")
+    if layered_sliding_leaf_closure and not layered_doorway_room_rings:
+        raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_partition_witness) is not bool:
+        raise ValueError("layered partition witness must be an explicit boolean")
+    if layered_partition_witness and not layered_sliding_leaf_closure:
+        raise ValueError("layered partition witness needs layered sliding leaf closure")
+    if type(layered_finished_face_gate) is not bool:
+        raise ValueError("layered finished face gate must be an explicit boolean")
+    if layered_finished_face_gate and not layered_doorway_room_rings:
+        raise ValueError("layered finished face gate needs layered doorway room rings")
+    if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
+        raise ValueError("layered finished face statement pages need the finished face gate")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1214,8 +1387,21 @@ def collect_live_physical_net_wall_claim(
         pdf_path, pages=pages, topology_pages=topology_pages,
         room_area_support_pages=room_area_support_pages,
         surface_semantic_pages=surface_semantic_pages,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if source_glyph_ledger_text_trust else {}),
+        **({"layered_doorway_room_rings": True}
+           if layered_doorway_room_rings else {}),
+        **({"layered_sliding_leaf_closure": True}
+           if layered_sliding_leaf_closure else {}),
+        **({"layered_partition_witness": True}
+           if layered_partition_witness else {}),
+        **({"layered_finished_face_gate": True}
+           if layered_finished_face_gate else {}),
+        **({"layered_finished_face_statement_pages": layered_finished_face_statement_pages}
+           if layered_finished_face_statement_pages is not None else {}),
     )
     if recovery_page_id is None:
         return claim
@@ -1241,6 +1427,7 @@ def collect_live_physical_net_wall_claim(
     return recover_source_opening_areas(
         claim, Path(pdf_path).read_bytes(), page_id=recovery_page_id,
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+        single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
 
 

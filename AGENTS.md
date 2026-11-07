@@ -1,5 +1,22 @@
 # PlanReader-3D agent contract
 
+## Owner three-agent succession — 2026-11-06 (current top-priority role assignment)
+
+**Effective immediately, GPT1, GPT2 and GPT3 are retired as separate working agents.** The owner has reassigned ALL of their open code, source, measurement, customer and release responsibilities to **GPT MAX, Claude and AntiGravity**. Their three recurring ChatGPT tasks have been disabled. Do not reenable, message, assign to, await handoff from or create new GPT1/GPT2/GPT3 agents. Historical PR/issue author names are not active assignments.
+
+**Mandatory master handover:** [docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md](docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md). Read it alongside this contract and the playbook before touching work inherited from the three retired agents.
+
+| Continuing agent | Full inherited owner role |
+|---|---|
+| **GPT MAX** | Overall technical/integration/release lead; former GPT3 pinned private-original replay, signed/customer lineage and frozen four-project 120 scorer; former GPT1 quantity/customer release integration; existing Lot16 source host/frame work. Coordinates conflicts, final-head CI, source verification and safe merges. |
+| **Claude** | Former GPT2 Maryborough pages 7/11/9 physical room/FT2/FT3/D13-D15/RCP source interpretation; former GPT1 finish and ceiling issuers/customer output; former GPT3 family semantic/lineage verification; related glazing-source work. |
+| **AntiGravity** | Former GPT1 original metric/physical quantities and native observation memory; former GPT2 W2-W4 source geometry/room/doorway/ceiling physical bindings; former GPT3 memory-bound source-role runtime and existing Lot16 structural wall/host/frame work. |
+
+**Any of the three continuing agents may edit end-to-end across former lane boundaries** when required to complete an original-source-to-customer vertical slice. The strict cross-lane file editing prohibition is rescinded. Coordinate exact file/function claims on [#4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135); never overwrite concurrent work, force-push unexplained branches or wait for retired agents. Preserve existing PRs and source-positive evidence; review overlaps before integrating. The old 2026-10-31 GPT1/GPT2/GPT3 role table below is historical only and **superseded**.
+
+**Unchanged non-negotiables:** all ten original PDFs stay in the private companion repo; immutable four-project frozen 120-item evaluator, reference truth/tolerances, 20,000 primitive cap and 2.5-point snap remain intact; no gold-based prediction, fake dimension, missing width/height default, source-ambiguous FIRM, or customer score. Existing signed Lot16 and Maryborough outputs and their full source lineage must be retained. Source-positive original private replay, exact-head Python 3.13/3.14 CI and verified customer results remain prerequisites to any release merge (independent reviewer vote is optional). As of the takeover, only a **provisional 9/120 development coverage** after merged Q5446 #4218 is known; the **official four-project score is not published**.
+
+
 This file records the default engineering contract. Explicit current owner instructions supersede conflicting repository workflow instructions.
 
 ## Owner focused integration sprint — 2026-10-31

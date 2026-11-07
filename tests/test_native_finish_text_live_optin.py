@@ -85,7 +85,9 @@ def test_every_source_producer_in_the_live_chain_receives_the_same_kwargs():
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "SourceVisibilityProducer"
     ]
-    assert len(calls) == 2  # geometry source and the independent surface-semantic source
+    # geometry source, the independent surface-semantic source and the opt-in wall build-up statement source;
+    # every one of them must receive exactly the same native-text kwargs (checked below)
+    assert len(calls) == 3
     for call in calls:
         unpacked = [kw.value.id for kw in call.keywords if kw.arg is None and isinstance(kw.value, ast.Name)]
         assert unpacked == ["native_text_kwargs"], ast.dump(call)[:200]

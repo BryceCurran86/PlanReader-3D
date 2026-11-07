@@ -10,8 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
+from pb_geometry_takeoff_model import MeasurementRecord
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
@@ -124,9 +125,16 @@ class LiveCanonicalOpeningObject:
     # field does not classify an opening or authorize a grouped quantity.
     schedule_row_description: str = ""
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
+    # Owner-approved second axis for a door with ONE printed figure. These are an
+    # owner-supplied ASSUMPTION, not a measurement; they are None for every opening
+    # unless the caller passes explicit approval records, and they are never
+    # copied into width_m / height_m.
+    owner_approved_second_axis_record_id: Optional[str] = None
+    owner_approved_width_mm: Optional[float] = None
+    owner_approved_height_mm: Optional[float] = None
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "canonical_opening_id": self.canonical_opening_id,
             "physical_opening_id": self.physical_opening_id,
             "document_id": self.document_id,
@@ -179,6 +187,14 @@ class LiveCanonicalOpeningObject:
             "schedule_row_description": self.schedule_row_description,
             "schema_version": self.schema_version,
         }
+        if self.owner_approved_second_axis_record_id is not None:
+            # Emitted only when set, so every default object serialises exactly as before.
+            result.update({
+                "owner_approved_second_axis_record_id": self.owner_approved_second_axis_record_id,
+                "owner_approved_width_mm": self.owner_approved_width_mm,
+                "owner_approved_height_mm": self.owner_approved_height_mm,
+            })
+        return result
 
 
 @dataclass(frozen=True)
@@ -346,11 +362,28 @@ def compose_live_physical_opening_voids(
     source_visibility_producer: SourceVisibilityProducer,
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
     bifold_descriptor_shadow: bool = False,
+    owner_approved_second_axis: Sequence[MeasurementRecord] = (),
+    single_width_uniform_page_door_height_shadow: bool = False,
     rotated_native_schedule_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Compose the exact sealed prerequisite chain for every proven opening."""
+    """Compose the exact sealed prerequisite chain for every proven opening.
+
+    ``owner_approved_second_axis`` is an explicit, default-empty input: owner
+    ``USER_APPROVED`` height records for doors that print exactly one figure.
+    It never overrides another area basis and never fills width_m/height_m.
+    """
     if type(bifold_descriptor_shadow) is not bool:
         raise ValueError("bifold descriptor shadow must be explicit boolean")
+    if not isinstance(owner_approved_second_axis, (list, tuple)) or any(
+        type(item) is not MeasurementRecord for item in owner_approved_second_axis
+    ):
+        raise TypeError(
+            "owner_approved_second_axis must be a list or tuple of MeasurementRecord"
+        )
+    if type(single_width_uniform_page_door_height_shadow) is not bool:
+        raise ValueError("single width uniform page door height shadow must be explicit boolean")
+    if single_width_uniform_page_door_height_shadow:
+        raise ValueError("target-owned source or approved door height is required; page-wide inference is unsupported")
     if type(rotated_native_schedule_shadow) is not bool:
         raise TypeError("rotated_native_schedule_shadow must be bool")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
@@ -852,6 +885,31 @@ def compose_live_physical_opening_voids(
             schedule_record=schedule_record,
             geometry_complete=void_record is not None,
         )
+        owner_approval_id = None
+        owner_width_mm = None
+        owner_height_mm = None
+        if (
+            owner_approved_second_axis
+            and area_m2 is None
+            and existence_record is not None
+            and opening_kind == "door"
+            and figured_label is not None
+        ):
+            from pb_door_height_owner_gate_shadow import (
+                assess_owner_approved_door_area_shadow,
+            )
+
+            owner_review = assess_owner_approved_door_area_shadow(
+                existence_record=existence_record,
+                label_result=figured_label,
+                approvals=owner_approved_second_axis,
+            )
+            if owner_review["first_remaining_gate"] == "owner_approved_door_area_review_only":
+                area_m2 = owner_review["area_m2"]
+                area_basis = "owner_approved_second_axis"
+                owner_approval_id = owner_review["approval_id"]
+                owner_width_mm = owner_review["width_mm"]
+                owner_height_mm = owner_review["height_mm"]
 
         if existence_record is not None:
             evidence_ids = _canonical_provenance_ids(
@@ -877,6 +935,7 @@ def compose_live_physical_opening_voids(
                     tag_observation_id,
                     *schedule_row_observation_ids,
                     figured_area_record_id,
+                    owner_approval_id,
                     *(
                         elevation_frame_record.source_observation_ids
                         if elevation_frame_record is not None
@@ -992,6 +1051,9 @@ def compose_live_physical_opening_voids(
                     schedule_row_dimension_basis=schedule_row_dimension_basis,
                     schedule_row_basis_source=schedule_row_basis_source,
                     schedule_row_description=schedule_row_description,
+                    owner_approved_second_axis_record_id=owner_approval_id,
+                    owner_approved_width_mm=owner_width_mm,
+                    owner_approved_height_mm=owner_height_mm,
                 )
             )
 

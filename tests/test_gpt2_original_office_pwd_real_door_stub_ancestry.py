@@ -53,6 +53,15 @@ def test_original_five_source_strokes_exactly_account_for_doorway_no_auto_snap(
     assert not result["source_room_finished_face_binding_granted"]
     assert not result["source_virtual_closing_wall_painted"]
     assert result["new_firm_quantities"]==0
+    # Even when the D15 short stub differs on p11, preserve the exact
+    # independent original wall strokes for MAX; never call them W4 faces.
+    source_pairs=result["original_exact_native_stroke_source_pairs"]
+    assert len(source_pairs)==(
+        4 if room is OFFICE and second_page==11 else 5
+    )
+    assert result["original_exact_stroke_pair_universe_unambiguous"] is True
+    assert all(not pair["physical_wall_face_issuer_granted"] for pair in source_pairs)
+    assert result["source_W4_room_or_doorway_threshold_issuer_granted"] is False
     if second_page==11 and room is OFFICE:
         assert result["first_unclosed_gate"]=="original_short_wall_stub_disagrees_across_sheets"
         assert result["original_unmatched_second_side_ink_pdf_pts"]

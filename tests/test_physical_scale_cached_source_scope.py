@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import fitz
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_SCOPE_UNAVAILABLE,
     PHYSICAL_SCALE_SOURCE_INTEGRITY_FAILURE,
+    PHYSICAL_SCALE_BAR_UNAVAILABLE,
     PhysicalScaleProducer,
 )
+from pb_source_visibility_authority import SourceVisibilityProducer
 from test_physical_scale_page_input_index import _multi_page_scale_pdf, _selector, _source
 
 
@@ -96,3 +99,33 @@ def test_healthy_cache_still_avoids_geometry_work_and_retains_original_lineage(m
     assert set(evidence.source_text_observation_ids) <= set(published.text_observation_ids)
     assert set(evidence.source_segment_observation_ids) <= set(published.visible_observation_ids)
     assert source.published_snapshot_for_revision(published.revision.revision_id) == published
+
+
+def test_label_free_source_abstains_without_geometry_and_still_checks_changed_bytes(monkeypatch):
+    pdf = fitz.open()
+    page = pdf.new_page(width=420, height=260)
+    for start, end in [((60, 100), (110, 100)), ((60, 92), (60, 108)),
+                       ((110, 92), (110, 108))]:
+        page.draw_line(start, end, width=1)
+    data = pdf.tobytes()
+    pdf.close()
+    source = SourceVisibilityProducer(producer_method="label-free-scale", producer_version="1")
+    published = source.ingest_native_pdf_bytes(
+        document_id="label-free-scale", source_bytes=data,
+        source_locator="memory://label-free-scale.pdf")
+    selector = _selector(published, "1")
+    expected = PhysicalScaleProducer.from_source_visibility_producer(source).publish_scope(selector)
+    assert expected.status is EvidenceResolutionStatus.ABSTAINED
+    assert expected.reason_codes == (PHYSICAL_SCALE_BAR_UNAVAILABLE,)
+    assert expected.evidence is None
+
+    producer = PhysicalScaleProducer.from_source_visibility_producer(source)
+
+    def unused_geometry(*args, **kwargs):
+        raise AssertionError("no authenticated labels can own any graphic scale geometry")
+
+    monkeypatch.setattr(producer, "_visible_segments", unused_geometry)
+    assert producer.publish_scope(selector) == expected
+    source._producer._store.source_bytes_by_revision[published.revision.revision_id] = b"changed"
+    with pytest.raises(RuntimeError, match=PHYSICAL_SCALE_SOURCE_INTEGRITY_FAILURE):
+        producer.publish_scope(selector)

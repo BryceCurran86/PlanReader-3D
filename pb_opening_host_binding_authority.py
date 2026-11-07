@@ -639,6 +639,10 @@ class OpeningHostBindingProducer:
                 geometry,
                 include_spanning_raster_candidates=(
                     opening.structural_pattern in RASTER_WALL_BAND_HOST_PATTERNS
+                    or opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+                ),
+                include_two_face_flank_candidates=(
+                    opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
                 ),
                 invariant_index=invariant_index,
             )
@@ -675,6 +679,23 @@ class OpeningHostBindingProducer:
                 host_records,
                 host_equivalence,
             )
+            if (
+                two_face_lineage_resolution is not None
+                and two_face_lineage_resolution.status is EvidenceResolutionStatus.ABSTAINED
+                and HOST_TWO_FACE_LINEAGE_UNMAPPED in two_face_lineage_resolution.reason_codes
+                and opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+                and host_source_observation_ids
+            ):
+                if geometry is None:
+                    geometry = _opening_geometry(self._opening, opening)
+                two_face_lineage_resolution = _resolve_two_face_lineage_host(
+                    self._opening,
+                    opening,
+                    host_records,
+                    host_equivalence,
+                    geometry=geometry,
+                    source_observation_ids=host_source_observation_ids,
+                )
             # Positive source-lineage authority supersedes the weaker geometry
             # path, and a genuine ownership conflict remains fail-closed.
             # Mere lineage unavailability/unmapped state is an ABSTAIN, not a
@@ -698,7 +719,10 @@ class OpeningHostBindingProducer:
                 host_equivalence,
             )
             if (
-                opening.structural_pattern in RASTER_WALL_BAND_HOST_PATTERNS
+                (
+                    opening.structural_pattern in RASTER_WALL_BAND_HOST_PATTERNS
+                    or opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+                )
                 and band_resolution.status is EvidenceResolutionStatus.CORROBORATED
                 and not band_resolution.bands
             ):
@@ -1294,9 +1318,9 @@ def _resolve_gap_lineage_host_from_records(
             (HOST_GAP_LINEAGE_UNAVAILABLE,),
         )
 
-    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
-    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
+    unsafe_ids = _unsafe_original_lineage_group_members(equivalence)
     group_lookup = _equivalence_group_lookup(equivalence)
+    pair_lookup = _pair_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
     for raw_id in (left_raw, right_raw):
         owners = tuple(
@@ -1311,12 +1335,23 @@ def _resolve_gap_lineage_host_from_records(
                 (),
                 (HOST_GAP_LINEAGE_UNMAPPED,),
             )
-        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+        if any(record.wall_candidate_id in unsafe_ids for record in owners):
             return _HostBandResolution(
                 EvidenceResolutionStatus.CONFLICT,
                 (),
                 (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
             )
+        if len(owners) > 1:
+            for idx, o1 in enumerate(owners):
+                for o2 in owners[idx + 1 :]:
+                    k = tuple(sorted((o1.wall_candidate_id, o2.wall_candidate_id)))
+                    cls = pair_lookup.get(k)
+                    if cls is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return _HostBandResolution(
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
+                        )
 
         by_group: dict[tuple[str, ...], list[PhysicalWallCandidateRecord]] = {}
         for record in owners:
@@ -1505,9 +1540,9 @@ def _resolve_two_face_lineage_host_from_records(
             (HOST_TWO_FACE_LINEAGE_UNAVAILABLE,),
         )
 
-    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
-    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
+    unsafe_ids = _unsafe_original_lineage_group_members(equivalence)
     group_lookup = _equivalence_group_lookup(equivalence)
+    pair_lookup = _pair_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
 
     for raw_id in raw_ids:
@@ -1524,7 +1559,7 @@ def _resolve_two_face_lineage_host_from_records(
                 (),
                 (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
             )
-        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+        if any(record.wall_candidate_id in unsafe_ids for record in owners):
             return _HostBandResolution(
                 EvidenceResolutionStatus.CONFLICT,
                 (),
@@ -1533,6 +1568,20 @@ def _resolve_two_face_lineage_host_from_records(
                     HOST_EQUIVALENCE_AMBIGUOUS,
                 ),
             )
+        if len(owners) > 1:
+            for idx, o1 in enumerate(owners):
+                for o2 in owners[idx + 1 :]:
+                    k = tuple(sorted((o1.wall_candidate_id, o2.wall_candidate_id)))
+                    cls = pair_lookup.get(k)
+                    if cls is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return _HostBandResolution(
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (
+                                HOST_TWO_FACE_LINEAGE_AMBIGUOUS,
+                                HOST_EQUIVALENCE_AMBIGUOUS,
+                            ),
+                        )
 
         by_group: dict[
             tuple[str, ...], list[PhysicalWallCandidateRecord]
@@ -1603,11 +1652,345 @@ def _resolve_two_face_lineage_host_from_records(
     )
 
 
+def _authenticated_native_source_lines(
+    authority: PhysicalOpeningAuthority,
+    opening: PhysicalOpeningExistenceRecord,
+    source_observation_ids: Sequence[str],
+) -> dict[str, tuple[float, float, float, float]]:
+    """Return exact producer-authenticated native lines keyed by raw primitive."""
+
+    visibility = authority.source_visibility_authority()
+    if type(visibility) is not SourceVisibilityAuthority:
+        return {}
+    cache = getattr(authority, "_authenticated_native_source_lines_cache", None)
+    if cache is None:
+        cache = {}
+        authority._authenticated_native_source_lines_cache = cache
+    page_key = (
+        opening.document_id,
+        opening.revision_id,
+        opening.source_sha256,
+        opening.snapshot_id,
+        str(opening.page_id),
+    )
+    memo = cache.get(page_key)
+    if memo is None:
+        memo = {}
+        cache[page_key] = memo
+
+    lines: dict[str, tuple[float, float, float, float]] = {}
+    conflicted: set[str] = set()
+    for observation_id in source_observation_ids:
+        obs_id_str = str(observation_id)
+        if obs_id_str in memo:
+            pair = memo[obs_id_str]
+            if pair is not None:
+                primitive_id, line = pair
+                prior = lines.get(primitive_id)
+                if prior is not None and prior != line:
+                    conflicted.add(primitive_id)
+                else:
+                    lines[primitive_id] = line
+            continue
+        result = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=obs_id_str,
+            )
+        )
+        observation = result.observation
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or str(observation.page_id) != str(opening.page_id)
+        ):
+            memo[obs_id_str] = None
+            continue
+        primitive_id = _raw_source_primitive_id(observation)
+        line = _line(observation)
+        if not primitive_id or line is None:
+            memo[obs_id_str] = None
+            continue
+        memo[obs_id_str] = (primitive_id, line)
+        prior = lines.get(primitive_id)
+        if prior is not None and prior != line:
+            conflicted.add(primitive_id)
+            continue
+        lines[primitive_id] = line
+    for primitive_id in conflicted:
+        lines.pop(primitive_id, None)
+    return lines
+
+
+def _resolve_two_face_reveal_stub_flank_lineage_host_from_records(
+    opening_records: Sequence[SourceObservationRecord],
+    wall_records: Sequence[PhysicalWallCandidateRecord],
+    opening: Optional[_OpeningGeometry],
+    equivalence: PhysicalWallEquivalenceResolution,
+    source_lines_by_primitive: Mapping[str, Sequence[float]],
+) -> _HostBandResolution:
+    """Bind a two-face interruption whose opening support carries reveal stubs.
+
+    CAD window blocks often draw short wall-face reveal stubs between the
+    window jambs and the outer flanking wall faces. W4 filters sub-point reveal
+    stubs while retaining the exact flanking wall-face source primitives at the
+    reveal stubs' outer endpoints. Every flanking role must map to one
+    unambiguous upstream equivalence group and locally reach the reveal stub.
+    """
+    if opening is None or not source_lines_by_primitive:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+    stub_data = [
+        data
+        for record in opening_records
+        if (line := _line(record)) is not None
+        and (data := _source_line_axis_data(line, opening)) is not None
+    ]
+    left_stubs = [
+        data
+        for data in stub_data
+        if -DEFAULT_GAP_SNAP_TOLERANCE_PT - _COORD_TOL <= data[0] < -_COORD_TOL
+        and abs(data[1]) <= 1e-3
+    ]
+    right_stubs = [
+        data
+        for data in stub_data
+        if abs(data[0] - opening.length) <= 1e-3
+        and (
+            opening.length + _COORD_TOL
+            < data[1]
+            <= opening.length + DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+        )
+    ]
+    if len(left_stubs) != 2 or len(right_stubs) != 2:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+    if (
+        abs(left_stubs[0][0] - left_stubs[1][0]) > 1e-3
+        or abs(right_stubs[0][1] - right_stubs[1][1]) > 1e-3
+    ):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+    left_outer = (left_stubs[0][0] + left_stubs[1][0]) / 2.0
+    right_outer = (right_stubs[0][1] + right_stubs[1][1]) / 2.0
+
+    roles_pids: dict[tuple[str, str], set[str]] = {
+        ("left", "neg"): set(),
+        ("left", "pos"): set(),
+        ("right", "neg"): set(),
+        ("right", "pos"): set(),
+    }
+    for pid, line in source_lines_by_primitive.items():
+        data = _source_line_axis_data(line, opening)
+        if data is None:
+            continue
+        p_lo, p_hi, offset = data
+        if abs(offset) > opening.thickness + 0.5 or abs(offset) <= 0.1:
+            continue
+        sign = "neg" if offset < 0.0 else "pos"
+        if p_lo < left_outer - 0.5 and abs(p_hi - left_outer) <= 0.25:
+            roles_pids[("left", sign)].add(str(pid))
+        if p_hi > right_outer + 0.5 and abs(p_lo - right_outer) <= 0.25:
+            roles_pids[("right", sign)].add(str(pid))
+
+    if any(not pids for pids in roles_pids.values()):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+
+    local_wall_records = tuple(
+        record
+        for record in wall_records
+        if _candidate_locally_participates_in_two_face_band(record, opening)
+    )
+    if not local_wall_records:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+    audit = equivalence.candidate_pair_audit
+    local_equivalence = resolve_physical_wall_equivalence(
+        tuple(record.physical_identity for record in local_wall_records),
+        points_per_mm=None if audit is None else audit.verified_points_per_mm,
+    )
+    unsafe_ids = _unsafe_original_lineage_group_members(local_equivalence)
+    group_lookup = _equivalence_group_lookup(local_equivalence)
+    pair_lookup = _pair_lookup(local_equivalence)
+    role_members: list[_RoleCandidate] = []
+    snap_tol = DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+
+    for (side, sign), pids in sorted(roles_pids.items()):
+        edge = left_outer if side == "left" else right_outer
+        raw_owners: list[tuple[frozenset[str], PhysicalWallCandidateRecord]] = []
+        for record in local_wall_records:
+            identity = record.physical_identity
+            wall = record.wall_candidate
+            if (
+                not identity.usable
+                or not identity.candidate_identity_id
+                or wall.is_curved
+                or "non_simple_chain_topology_fallback_ordering" in wall.reason_codes
+            ):
+                continue
+            overlap = frozenset(pids & set(identity.source_primitive_ids))
+            if not overlap:
+                continue
+            points = wall.centerline_pts
+            locally_owned = False
+            for start, end in zip(points, points[1:]):
+                al0 = _project(start, opening.origin, opening.axis)
+                al1 = _project(end, opening.origin, opening.axis)
+                of0 = _project(start, opening.origin, opening.normal)
+                of1 = _project(end, opening.origin, opening.normal)
+                s_lo, s_hi = min(al0, al1), max(al0, al1)
+                if s_hi - s_lo <= abs(of1 - of0) or abs(of1 - of0) > snap_tol:
+                    continue
+                s_off = (of0 + of1) / 2.0
+                if abs(s_off) > opening.thickness + snap_tol:
+                    continue
+                if (
+                    side == "left"
+                    and s_lo < edge - 0.5
+                    and (abs(s_hi - edge) <= snap_tol or s_hi >= right_outer - 0.5)
+                ):
+                    locally_owned = True
+                    break
+                if (
+                    side == "right"
+                    and s_hi > edge + 0.5
+                    and (abs(s_lo - edge) <= snap_tol or s_lo <= left_outer + 0.5)
+                ):
+                    locally_owned = True
+                    break
+            if locally_owned:
+                raw_owners.append((overlap, record))
+
+        owners = tuple(
+            record
+            for overlap, record in raw_owners
+            if not any(other_overlap > overlap for other_overlap, _ in raw_owners)
+        )
+        if not owners:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.ABSTAINED,
+                (),
+                (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+            )
+        if any(record.wall_candidate_id in unsafe_ids for record in owners):
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (
+                    HOST_TWO_FACE_LINEAGE_AMBIGUOUS,
+                    HOST_EQUIVALENCE_AMBIGUOUS,
+                ),
+            )
+        if len(owners) > 1:
+            for idx, o1 in enumerate(owners):
+                for o2 in owners[idx + 1 :]:
+                    k = tuple(sorted((o1.wall_candidate_id, o2.wall_candidate_id)))
+                    cls = pair_lookup.get(k)
+                    if cls is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return _HostBandResolution(
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (
+                                HOST_TWO_FACE_LINEAGE_AMBIGUOUS,
+                                HOST_EQUIVALENCE_AMBIGUOUS,
+                            ),
+                        )
+        by_group: dict[
+            tuple[str, ...], list[PhysicalWallCandidateRecord]
+        ] = {}
+        for record in owners:
+            group = _equivalence_group_for(
+                local_equivalence,
+                record.wall_candidate_id,
+                group_lookup=group_lookup,
+            )
+            by_group.setdefault(group, []).append(record)
+        if len(by_group) != 1:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_TWO_FACE_LINEAGE_AMBIGUOUS,),
+            )
+        group, members = next(iter(by_group.items()))
+        chosen = sorted(
+            members, key=lambda record: record.wall_candidate_id
+        )[0]
+        role_members.append(
+            _RoleCandidate(
+                offset=0.0,
+                record=chosen,
+                candidate_group=group,
+            )
+        )
+
+    member_ids = tuple(
+        sorted({member.record.wall_candidate_id for member in role_members})
+    )
+    identity_ids = tuple(
+        sorted(
+            {
+                str(member.record.physical_identity.candidate_identity_id)
+                for member in role_members
+                if member.record.physical_identity.candidate_identity_id
+            }
+        )
+    )
+    groups = tuple(
+        sorted(
+            {
+                tuple(sorted(member.candidate_group))
+                for member in role_members
+            }
+        )
+    )
+    if len(member_ids) < 2 or not identity_ids or not groups:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_TWO_FACE_LINEAGE_UNMAPPED,),
+        )
+
+    return _HostBandResolution(
+        EvidenceResolutionStatus.CORROBORATED,
+        (
+            _HostBand(
+                member_ids=member_ids,
+                member_candidate_identity_ids=identity_ids,
+                member_equivalence_groups=groups,
+                center_offset=0.0,
+            ),
+        ),
+        (TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED,),
+    )
+
+
 def _resolve_two_face_lineage_host(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
     wall_records: Sequence[PhysicalWallCandidateRecord],
     equivalence: PhysicalWallEquivalenceResolution,
+    *,
+    geometry: Optional[_OpeningGeometry] = None,
+    source_observation_ids: Sequence[str] = (),
 ) -> Optional[_HostBandResolution]:
     if opening.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION:
         return None
@@ -1641,10 +2024,27 @@ def _resolve_two_face_lineage_host(
             )
         observations.append(result.observation)
 
-    return _resolve_two_face_lineage_host_from_records(
+    direct = _resolve_two_face_lineage_host_from_records(
         observations,
         wall_records,
         equivalence,
+    )
+    if (
+        direct.status is not EvidenceResolutionStatus.ABSTAINED
+        or HOST_TWO_FACE_LINEAGE_UNMAPPED not in direct.reason_codes
+        or not source_observation_ids
+    ):
+        return direct
+    return _resolve_two_face_reveal_stub_flank_lineage_host_from_records(
+        observations,
+        wall_records,
+        geometry,
+        equivalence,
+        _authenticated_native_source_lines(
+            authority,
+            opening,
+            source_observation_ids,
+        ),
     )
 
 
@@ -1861,7 +2261,10 @@ def _host_roles_from_axis_data(
 ) -> tuple[str, ...]:
     if data is None:
         return ()
-    along_min, along_max, _offset = data
+    along_min, along_max, offset = data
+    proximity_limit = max(24.0, opening.thickness * 3.0)
+    if abs(offset) > proximity_limit:
+        return ()
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
     roles: list[str] = []
     if along_min < -edge_tol and abs(along_max) <= edge_tol:
@@ -1940,10 +2343,13 @@ def _raster_whole_wall_axis_data_is_role(
         return False
     along_min, along_max, offset = data
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    # This shortcut requires the W4 centerline to equal the G17 band center.
+    # A candidate elsewhere inside a thick wall band is a different claim.
+    cross_limit = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
     return (
         along_min < -edge_tol
         and along_max > opening.length + edge_tol
-        and abs(offset) <= _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+        and abs(offset) <= cross_limit
     )
 
 
@@ -2167,11 +2573,56 @@ def _build_local_boundary_scope_invariant_index(
     )
 
 
+def _candidate_locally_participates_in_two_face_band(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> bool:
+    identity = record.physical_identity
+    wall = record.wall_candidate
+    if (
+        not identity.usable
+        or not identity.candidate_identity_id
+        or not any(str(v).strip() for v in identity.source_primitive_ids)
+        or wall.is_curved
+        or len(wall.centerline_pts) < 2
+        or "non_simple_chain_topology_fallback_ordering" in wall.reason_codes
+    ):
+        return False
+    points = wall.centerline_pts
+    line = (points[0][0], points[0][1], points[-1][0], points[-1][1])
+    unit = _canonical_unit(line)
+    if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+        return False
+    snap_tol = DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+    of0 = _project(points[0], opening.origin, opening.normal)
+    if abs(of0) > opening.thickness + snap_tol + 5.0:
+        return False
+    for start, end in zip(points, points[1:]):
+        al0 = _project(start, opening.origin, opening.axis)
+        al1 = _project(end, opening.origin, opening.axis)
+        of0 = _project(start, opening.origin, opening.normal)
+        of1 = _project(end, opening.origin, opening.normal)
+        s_lo, s_hi = min(al0, al1), max(al0, al1)
+        if s_hi - s_lo <= abs(of1 - of0) or abs(of1 - of0) > snap_tol:
+            continue
+        s_off = (of0 + of1) / 2.0
+        if abs(s_off) > opening.thickness + snap_tol:
+            continue
+        if s_lo < -0.5 and (abs(s_hi) <= snap_tol or s_hi >= opening.length - 0.5):
+            return True
+        if s_hi > opening.length + 0.5 and (
+            abs(s_lo - opening.length) <= snap_tol or s_lo <= 0.5
+        ):
+            return True
+    return False
+
+
 def _local_boundary_clean_host_scope(
     wall_result: PhysicalWallCandidateScopeResult,
     opening: _OpeningGeometry,
     *,
     include_spanning_raster_candidates: bool = False,
+    include_two_face_flank_candidates: bool = False,
     invariant_index: Optional[_LocalBoundaryScopeInvariantIndex] = None,
 ) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
     """Prove one opening's host search locally closed without promoting global scope.
@@ -2233,6 +2684,13 @@ def _local_boundary_clean_host_scope(
                             edge_tol=edge_tol,
                         )
                     )
+                )
+            )
+            or (
+                include_two_face_flank_candidates
+                and _candidate_locally_participates_in_two_face_band(
+                    record,
+                    opening,
                 )
             )
         )
@@ -3005,9 +3463,15 @@ def _authenticated_raster_source_lines(
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
         return {}
+    raster_ids = visibility.raster_visible_observation_ids_for_page(
+        opening.snapshot_id, str(opening.page_id))
+    if not raster_ids:
+        return {}
     lines: dict[str, tuple[float, float, float, float]] = {}
     conflicted: set[str] = set()
     for observation_id in source_observation_ids:
+        if str(observation_id) not in raster_ids:
+            continue
         result = visibility.resolve_visible(
             ObservationSelector(
                 document_id=opening.document_id,
