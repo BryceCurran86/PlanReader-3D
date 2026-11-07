@@ -2172,6 +2172,10 @@ class SourceMaterialSemanticAuthority:
 # the process lifetime. A material publisher retains the raster while active.
 _ORDINARY_WORD_RASTER_LOCK = RLock()
 _ORDINARY_WORD_RASTER_BY_SOURCE: WeakKeyDictionary = WeakKeyDictionary()
+# Pin the real class at module import. Existing source-neutral tests replace the
+# module's factory class with tiny probes. Those probes must remain uncached;
+# the actual production class and its original-source policy are never relaxed.
+_PRODUCTION_ORDINARY_RASTER_CLASS = RasterTextCorroborationProducer
 
 
 def _ordinary_source_word_raster(
@@ -2184,6 +2188,12 @@ def _ordinary_source_word_raster(
     selector source SHA and immutable bytes on every cached hit; no memo
     outcome is promoted into material/geometry/quantity authority here.
     """
+    if RasterTextCorroborationProducer is not _PRODUCTION_ORDINARY_RASTER_CLASS:
+        # Synthetic source-neutral tests replace this module's class with
+        # minimal word/line probes. Do not cache them as source authorities.
+        return RasterTextCorroborationProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
     with _ORDINARY_WORD_RASTER_LOCK:
         handle = _ORDINARY_WORD_RASTER_BY_SOURCE.get(source_visibility_producer)
         raster = handle() if handle is not None else None
