@@ -417,6 +417,9 @@ def _collect_live_physical_net_wall_claim(
     source_native_finish_text_shadow: bool = False,
     source_glyph_ledger_text_trust: bool = False,
     single_width_uniform_page_door_height_shadow: bool = False,
+    layered_doorway_room_rings: bool = False,
+    layered_sliding_leaf_closure: bool = False,
+    layered_partition_witness: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -440,6 +443,16 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
         raise ValueError("glyph ledger text trust must be an explicit boolean")
+    if type(layered_doorway_room_rings) is not bool:
+        raise ValueError("layered doorway room rings must be an explicit boolean")
+    if type(layered_sliding_leaf_closure) is not bool:
+        raise ValueError("layered sliding leaf closure must be an explicit boolean")
+    if layered_sliding_leaf_closure and not layered_doorway_room_rings:
+        raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_partition_witness) is not bool:
+        raise ValueError("layered partition witness must be an explicit boolean")
+    if layered_partition_witness and not layered_sliding_leaf_closure:
+        raise ValueError("layered partition witness needs layered sliding leaf closure")
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -580,6 +593,12 @@ def _collect_live_physical_net_wall_claim(
         unresolved_wall_candidate_ids=(
             canonical_wall_core.unresolved_wall_candidate_ids
         ),
+        **({"layered_doorway_room_rings": True}
+           if layered_doorway_room_rings else {}),
+        **({"layered_sliding_leaf_closure": True}
+           if layered_sliding_leaf_closure else {}),
+        **({"layered_partition_witness": True}
+           if layered_partition_witness else {}),
     )
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
@@ -598,7 +617,10 @@ def _collect_live_physical_net_wall_claim(
         same_view_area = SameViewRoomAreaProducer.from_source(
             source=source,
             rooms=canonical_rooms,
-        ).publish()
+        ).publish(
+            **({"layered_ring_box_selection_shadow": True}
+               if layered_doorway_room_rings else {}),
+        )
         same_view_by_record = dict(
             same_view_area.evidence_by_source_room_face_record_id
         )
@@ -1186,6 +1208,9 @@ def collect_live_physical_net_wall_claim(
     source_native_finish_text_shadow: bool = False,
     source_glyph_ledger_text_trust: bool = False,
     single_width_uniform_page_door_height_shadow: bool = False,
+    layered_doorway_room_rings: bool = False,
+    layered_sliding_leaf_closure: bool = False,
+    layered_partition_witness: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1206,6 +1231,16 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
         raise ValueError("glyph ledger text trust must be an explicit boolean")
+    if type(layered_doorway_room_rings) is not bool:
+        raise ValueError("layered doorway room rings must be an explicit boolean")
+    if type(layered_sliding_leaf_closure) is not bool:
+        raise ValueError("layered sliding leaf closure must be an explicit boolean")
+    if layered_sliding_leaf_closure and not layered_doorway_room_rings:
+        raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_partition_witness) is not bool:
+        raise ValueError("layered partition witness must be an explicit boolean")
+    if layered_partition_witness and not layered_sliding_leaf_closure:
+        raise ValueError("layered partition witness needs layered sliding leaf closure")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1234,6 +1269,12 @@ def collect_live_physical_net_wall_claim(
            if source_native_finish_text_shadow else {}),
         **({"source_glyph_ledger_text_trust": True}
            if source_glyph_ledger_text_trust else {}),
+        **({"layered_doorway_room_rings": True}
+           if layered_doorway_room_rings else {}),
+        **({"layered_sliding_leaf_closure": True}
+           if layered_sliding_leaf_closure else {}),
+        **({"layered_partition_witness": True}
+           if layered_partition_witness else {}),
     )
     if recovery_page_id is None:
         return claim

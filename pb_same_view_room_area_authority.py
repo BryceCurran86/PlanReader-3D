@@ -37,6 +37,7 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -47,6 +48,10 @@ SAME_VIEW_ROOM_AREA_UNAVAILABLE = "same_view_room_area_unavailable"
 SAME_VIEW_ROOM_AREA_CONFLICT = "same_view_room_area_conflict"
 SAME_VIEW_ROOM_AREA_LINEAGE_CONFLICT = "same_view_room_area_lineage_conflict"
 SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = "authenticated_same_view_room_area"
+# A figured pair is accepted for a layered-ring face only when its witness box equals the ring's
+# bounding box. 0.5 pt is representation noise between a witness line and a drawn face, far
+# below the 2.5 pt production snap, and a hard bound.
+_LAYERED_RING_BOX_TOLERANCE_PT = 0.5
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -118,11 +123,44 @@ class SameViewRoomAreaProducer:
     ) -> "SameViewRoomAreaProducer":
         return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
 
+    def _layered_ring_bounding_box(self, room: LiveCanonicalRoomObject):
+        """(bounding box, face_is_its_rectangle, is_partition_part) of a doorway-closed ring face, else None."""
+        binding = self._rooms.room_face_authority_binding_for(room)
+        if binding is None:
+            return None
+        from pb_layered_wall_doorway_room_face_scope_shadow import (
+            LAYERED_RING_SCOPE_REASON,
+            RING_NOT_A_RECTANGLE_PREFIX,
+            RING_PARTITION_PART_PREFIX,
+            ring_face_bounding_box,
+        )
+
+        scope = binding.authority.resolve_scope(SourceRoomFaceSelector(
+            document_id=room.document_id, revision_id=room.revision_id,
+            source_sha256=room.source_sha256, snapshot_id=room.snapshot_id,
+            page_id=room.page_id, decision_scope_id=room.decision_scope_id,
+        ))
+        if LAYERED_RING_SCOPE_REASON not in scope.reason_codes:
+            return None
+        record = next(
+            (r for r in scope.records if r.record_id == room.source_room_face_record_id), None,
+        )
+        if record is None:
+            return None
+        return (
+            ring_face_bounding_box(record),
+            f"{RING_NOT_A_RECTANGLE_PREFIX}{record.record_id}" not in scope.reason_codes,
+            f"{RING_PARTITION_PART_PREFIX}{record.record_id}" in scope.reason_codes,
+        )
+
     def publish(
         self, *, repeated_label_source_ownership_shadow: bool = False,
+        layered_ring_box_selection_shadow: bool = False,
     ) -> SameViewRoomAreaResult:
         if type(repeated_label_source_ownership_shadow) is not bool:
             raise TypeError('repeated_label_source_ownership_shadow must be bool')
+        if type(layered_ring_box_selection_shadow) is not bool:
+            raise TypeError('layered_ring_box_selection_shadow must be bool')
         rooms = tuple(self._rooms.rooms)
         if not rooms:
             return SameViewRoomAreaResult(
@@ -380,10 +418,46 @@ class SameViewRoomAreaProducer:
                 ): (owned_line, horizontal, vertical)
                 for owned_line, horizontal, vertical in matches
             }
+            ring_face = (
+                self._layered_ring_bounding_box(room)
+                if layered_ring_box_selection_shadow else None
+            )
+            ring_box = None if ring_face is None else ring_face[0]
+            ring_not_rectangle = ring_face is not None and not ring_face[1]
+            ring_partition_part = ring_face is not None and ring_face[2]
+            ring_box_rejected = False
+            if (ring_not_rectangle or ring_partition_part) and deduped:
+                # A figured width x depth is the area of its rectangle, not of a face with a wall
+                # return or a recess split off inside it: the documented route is withdrawn and the
+                # face's own polygon at a verified scale is the only measure left. A part of a
+                # sliding-leaf partition is corroborated by the UNION's pair, which is never a part's area.
+                deduped = {}
+                ring_box_rejected = True
+            elif ring_box is not None and deduped:
+                # Exact equality with independent physical ink, never a nearest/first/smallest pick:
+                # zero equal pairs rejects the room, several equal pairs stay a conflict below.
+                tol = _LAYERED_RING_BOX_TOLERANCE_PT
+                kept = {}
+                for pair_key, (pair_line, pair_h, pair_v) in deduped.items():
+                    hx = sorted((float(pair_h.endpoints_pt[0][0]), float(pair_h.endpoints_pt[1][0])))
+                    vy = sorted((float(pair_v.endpoints_pt[0][1]), float(pair_v.endpoints_pt[1][1])))
+                    if (
+                        abs(hx[0] - ring_box[0]) <= tol and abs(hx[1] - ring_box[2]) <= tol
+                        and abs(vy[0] - ring_box[1]) <= tol and abs(vy[1] - ring_box[3]) <= tol
+                    ):
+                        kept[pair_key] = (pair_line, pair_h, pair_v)
+                ring_box_rejected = not kept
+                deduped = kept
             if len(deduped) != 1:
                 room_id = str(room.physical_room_id)
                 unresolved.add(room_id)
-                if len(deduped) > 1:
+                if ring_partition_part:
+                    first_failures[room_id] = "same_view_layered_ring_partition_part"
+                elif ring_not_rectangle:
+                    first_failures[room_id] = "same_view_layered_ring_not_a_rectangle"
+                elif ring_box_rejected:
+                    first_failures[room_id] = "same_view_figured_box_differs_from_layered_ring"
+                elif len(deduped) > 1:
                     conflict_seen = True
                     first_failures[room_id] = "same_view_multiple_authenticated_dimension_pairs"
                 elif not horizontals or not verticals:

@@ -814,9 +814,27 @@ def compose_live_canonical_rooms(
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
     canonical_wall_ids_by_candidate: Optional[Mapping[str, str]] = None,
     unresolved_wall_candidate_ids: Optional[Collection[str]] = None,
+    layered_doorway_room_rings: bool = False,
+    layered_sliding_leaf_closure: bool = False,
+    layered_partition_witness: bool = False,
 ) -> LiveCanonicalRoomComposition:
-    """Project sealed room-face authority into persistent canonical room objects."""
+    """Project sealed room-face authority into persistent canonical room objects.
 
+    ``layered_doorway_room_rings`` (default False: nothing changes) replaces the page room-face
+    scope with doorway-closed rings read from the SHA-pinned native wall-layer ink, for pages
+    where at least one ring closes. The W2/W4 wall scope that walls and openings use is untouched.
+    """
+
+    if type(layered_doorway_room_rings) is not bool:
+        raise ValueError("layered_doorway_room_rings must be an explicit boolean")
+    if type(layered_sliding_leaf_closure) is not bool:
+        raise ValueError("layered_sliding_leaf_closure must be an explicit boolean")
+    if layered_sliding_leaf_closure and not layered_doorway_room_rings:
+        raise ValueError("layered_sliding_leaf_closure needs layered_doorway_room_rings")
+    if type(layered_partition_witness) is not bool:
+        raise ValueError("layered_partition_witness must be an explicit boolean")
+    if layered_partition_witness and not layered_sliding_leaf_closure:
+        raise ValueError("layered_partition_witness needs layered_sliding_leaf_closure")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -833,8 +851,22 @@ def compose_live_canonical_rooms(
             source_pages=(),
         )
 
+    ring_overrides = {}
+    if layered_doorway_room_rings:
+        from pb_layered_wall_doorway_room_face_scope_shadow import (
+            layered_ring_scope_overrides,
+        )
+
+        ring_overrides = layered_ring_scope_overrides(
+            source_visibility_producer,
+            revision_id=wall_opening_composition.revision_id,
+            page_ids=wall_opening_composition.page_ids,
+            sliding_leaf_frame_closure=layered_sliding_leaf_closure,
+            partition_witness=layered_partition_witness,
+        )
     authority = build_source_room_face_authority(
-        wall_opening_composition.physical_wall_candidate_authority
+        wall_opening_composition.physical_wall_candidate_authority,
+        **({"scope_overrides": ring_overrides} if ring_overrides else {}),
     )
 
     # Resolve the cheap sealed room-face scopes before constructing any
