@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install complete production and test dependencies
-        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Original Q5446 role dispatch / customer bijection and authenticated source negatives
         run: |
           python -m pytest -q \
@@ -43,6 +43,16 @@ jobs:
             tests/test_gpt3_owner_all_source_role_handoff.py \
             tests/test_source_role_customer_aggregation.py \
             tests/test_gpt1_q5446_alfresco_original_customer.py
+      - name: Exact-head full public regressions, static checks and customer smoke
+        env:
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-q-role-pycache
+        run: |
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+          python -m pytest -q -rs tests/
+          python tests/ci_smoke.py
       - name: Frozen120 truth/provider integrity (no original source or accuracy claim)
         run: |
           python scripts/check_full_plan_v2_integrity.py
