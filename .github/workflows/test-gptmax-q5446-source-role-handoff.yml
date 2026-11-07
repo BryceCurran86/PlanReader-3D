@@ -30,6 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The complete public regression suite includes a fixed-head
+          # historical validator replay. Preserve the entire commit graph;
+          # a one-commit shallow checkout cannot resolve its pinned SHA.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
