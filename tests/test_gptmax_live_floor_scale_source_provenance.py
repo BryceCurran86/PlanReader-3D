@@ -182,6 +182,37 @@ def test_documented_dimension_floor_publication_unchanged():
     assert publish_live_floor_area_quantities(new) == first
 
 
+@pytest.mark.parametrize("scaled", (False, True))
+def test_upstream_commercial_veto_survives_real_scale_and_final_floor_projection(scaled):
+    from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
+
+    if scaled:
+        floor, source, _bridge, receipt = _binding()
+        claim = _claim(source, floor, receipt)
+    else:
+        source = _source_area()
+        claim = _claim_with(source)
+
+    # Establish the genuine positive path before adding just the upstream
+    # veto. A resolved native scale cannot reverse a publication decision.
+    original = publish_live_floor_area_quantities(claim)
+    assert len(original) == 1
+    if scaled:
+        assert original[0].metadata["scale_status"] == "resolved"
+
+    blocked = replace(source, metadata={
+        **source.metadata, "commercial_projection_allowed": False,
+    })
+    vetoed = replace(claim, room_area_quantity_evidence=(blocked,))
+    assert publish_live_floor_area_quantities(vetoed) == ()
+    assert project_live_floor_area_customer_rows(
+        vetoed, workspace_id=1, project_id="source-project",
+    ) == ()
+    assert vetoed.room_area_quantity_evidence == (blocked,)
+    assert blocked.metadata["commercial_projection_allowed"] is False
+    assert publish_live_floor_area_quantities(claim) == original
+
+
 def test_source_scale_receipt_not_manually_constructible():
     floor, source, bridge = _typed_inputs()
     legit = source_owned_floor_scale_receipt(scale_authority=_source_authority(bridge), floor=floor, quantity=source, bridge=bridge)

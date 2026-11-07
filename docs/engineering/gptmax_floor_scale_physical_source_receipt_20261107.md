@@ -29,3 +29,44 @@ The trust boundary is *not* just a self-asserted metadata string or copied six-p
 No `pb_source_room_face_authority.py`, Claude #4230 room-ring/doorway code, AntiGravity D15 ownership, benchmark reference, expected quantities, 20k primitive cap, 2.5pt snap, or default-OFF behavior will be changed.
 
 Run synthetic negative tests (wrong SHA/revision/snapshot/page/viewport/face/floor/upstream quantity, duplicate/competing scale, missing source witnesses, non-FIRM stale calibration, forged scale metadata) and positive original-equivalent typed record. Then run exact-head Python 3.13/3.14 CI, unchanged Lot16 eight and Maryborough three + Q5446 protected original/customer retention, and real 3Laurel source->room->scale->floor->sealed/customer. Even a new customer row is **not** a frozen120 score until independent mapping and unchanged scorer publish it.
+
+## Source commercial veto discovered during continuation
+
+**Observed:** `_valid_source_room_area_quantity` accepts a FIRM original room
+quantity even when its metadata explicitly says
+`commercial_projection_allowed=False`. Both canonical quantity reissuers then
+replace that metadata with `True`. A local reproduction using the existing
+producer-owned scale test fixture changes an upstream False to downstream True
+and obtains a nonempty customer measurement authority. The shared commercial
+adapter correctly rejects False when it reaches that adapter unchanged.
+
+**Inference:** adding valid physical scale metadata can expose this earlier
+permission-loss bug; physical scale does not revoke an upstream publication
+veto. The original room-area diagnostic must remain inspectable without being
+reissued as a commercial floor or canonical room quantity.
+
+**Bounded correction:** reject the explicit upstream False at the shared source
+quantity validator, before either canonical reissuer. Leave claims without an
+explicit veto and genuine True permissions unchanged. Verify both documented
+and PDF-scaled paths, including an otherwise genuine sealed scale receipt and
+the actual floor customer projector. This does not treat a canonical floor's
+default `commercial_quantity_authority=False` as an upstream veto: that field
+describes the pre-issuer geometry object, whose commercial authority is decided
+by the existing final quantity issuer.
+
+**Benchmark observations:** the protected page-3 scale census on an earlier
+head reported hundreds of source faces. Such counts are not proof of finished
+rooms, correct physical boundaries, verified customer takeoffs or scored items;
+they must not choose the implementation or its thresholds. Keep this PR draft
+until fixed-head original source/customer and historical retention gates pass.
+
+The exact `767a3fb...` protected boundary replay `42349587803` subsequently
+completed all existing source-trace, seal and customer-verification functions:
+292 faces/scale receipts/rows, 10 authenticated labels, but **zero rooms with
+complete canonical wall relationships**. That green execution is a contract
+and lineage result, not independent physical finished-face validation. In
+particular it does not disprove the earlier original-source evidence of
+fixture/hatch/joinery fragments. Do not release the scale grant or call those
+rows correct rooms until the independent physical boundary gate is resolved.
+The commercial-veto correction is necessary but does not fix that geometry
+blocker. Claude's default-off source-ring work remains separate.

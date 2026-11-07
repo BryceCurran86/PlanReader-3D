@@ -59,6 +59,23 @@ def test_unique_firm_room_area_publishes_exactly_one_canonical_floor_quantity() 
     assert result.metadata["upstream_room_area_quantity_id"] == "room-area-1"
 
 
+def test_explicit_source_commercial_veto_blocks_both_canonical_reissuers() -> None:
+    source = _source_area()
+    blocked = replace(source, metadata={
+        **source.metadata, "commercial_projection_allowed": False,
+    })
+    claim = _claim_with(blocked)
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_canonical_room_area_quantities(claim) == ()
+    assert claim.room_area_quantity_evidence == (blocked,)
+    assert blocked.metadata["commercial_projection_allowed"] is False
+
+    allowed = replace(source, metadata={
+        **source.metadata, "commercial_projection_allowed": True,
+    })
+    assert len(publish_live_floor_area_quantities(_claim_with(allowed))) == 1
+
+
 def test_competing_room_area_sources_for_one_physical_floor_fail_closed() -> None:
     source = _source_area()
     floor = _floor()

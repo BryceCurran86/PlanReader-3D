@@ -57,6 +57,13 @@ def _valid_original_source_sha(value: object) -> bool:
 
 def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
     """Reject untyped/replayed source m² before room-to-floor commercial reissue."""
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    # Physical measurement authority cannot cancel a source publication veto.
+    # Both canonical reissuers grant commercial projection only after this
+    # shared validator. Retain explicitly noncommercial room measurements in
+    # the original claim, without replacing their False permission with True.
+    if metadata.get("commercial_projection_allowed") is False:
+        return False
     if (
         quantity.family != "room_area"
         or quantity.abstained
