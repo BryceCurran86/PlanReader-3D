@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
+from weakref import WeakValueDictionary
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 
@@ -135,6 +136,9 @@ class RoomWetDryClassification:
     _seal: object = field(default=None, repr=False, compare=False)
 
 
+_ISSUED_CLASSIFICATIONS: WeakValueDictionary[int, RoomWetDryClassification] = WeakValueDictionary()
+
+
 def _clean(value: Any) -> Optional[str]:
     return value if isinstance(value, str) and value and value == value.strip() else None
 
@@ -169,7 +173,7 @@ def _classify_one(room: Any) -> RoomWetDryClassification:
         "rule_set_version": ROOM_WET_DRY_RULE_SET_VERSION,
         "rule_id": rule.rule_id if classified else "",
     }
-    return RoomWetDryClassification(
+    receipt = RoomWetDryClassification(
         record_id=stable_contract_id("room_wet_dry", payload),
         canonical_room_id=str(getattr(room, "canonical_room_id", "") or ""),
         physical_room_id=str(getattr(room, "physical_room_id", "") or ""),
@@ -190,6 +194,11 @@ def _classify_one(room: Any) -> RoomWetDryClassification:
         reason_codes=(reason,),
         _seal=_RECORD_SEAL,
     )
+    # Object identity, not a public digest or copyable marker, is the
+    # producer boundary. dataclasses.replace and reconstructed records cannot
+    # enter the finished-face consumer even after recomputing stable IDs.
+    _ISSUED_CLASSIFICATIONS[id(receipt)] = receipt
+    return receipt
 
 
 def classify_room_wet_dry(rooms: Sequence[Any]) -> tuple[RoomWetDryClassification, ...]:
@@ -205,7 +214,11 @@ def _producer_issued_classification_is_valid(item: Any) -> bool:
     finished-face consumer uses this diagnostic. This does not grant a FIRM
     floor, wall or finish.
     """
-    if type(item) is not RoomWetDryClassification or item._seal is not _RECORD_SEAL:
+    if (
+        type(item) is not RoomWetDryClassification
+        or item._seal is not _RECORD_SEAL
+        or _ISSUED_CLASSIFICATIONS.get(id(item)) is not item
+    ):
         return False
     if (
         item.schema_version != ROOM_WET_DRY_SCHEMA_VERSION
