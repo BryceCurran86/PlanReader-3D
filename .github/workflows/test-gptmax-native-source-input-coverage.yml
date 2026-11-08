@@ -25,7 +25,7 @@ jobs:
     env:
       PYTHONPATH: .:tests
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-input-coverage-pycache
+      PYTHONPYCACHEPREFIX: /tmp/planreader-native-input-coverage-pycache
       PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
       BASE_SHA: ${{ github.event.pull_request.base.sha || '22ebd4e3c97f8efff807e9b9d84ea78837424647' }}
     steps:
