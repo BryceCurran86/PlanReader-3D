@@ -162,6 +162,7 @@ def _classify_one(room: Any) -> RoomWetDryClassification:
     payload = {
         **{field: scope[field] or "" for field in _SCOPE_FIELDS},
         "canonical_room_id": str(getattr(room, "canonical_room_id", "") or ""),
+        "physical_room_id": str(getattr(room, "physical_room_id", "") or ""),
         "room_label_binding_record_id": binding_id or "",
         "room_label_evidence_ids": list(evidence_ids),
         "rule_set_id": ROOM_WET_DRY_RULE_SET_ID,
@@ -238,6 +239,7 @@ def _producer_issued_classification_is_valid(item: Any) -> bool:
     expected_id = stable_contract_id("room_wet_dry", {
         **{field: getattr(item, field) for field in _SCOPE_FIELDS},
         "canonical_room_id": item.canonical_room_id,
+        "physical_room_id": item.physical_room_id,
         "room_label_binding_record_id": item.room_label_binding_record_id,
         "room_label_evidence_ids": list(item.room_label_evidence_ids),
         "rule_set_id": ROOM_WET_DRY_RULE_SET_ID,
