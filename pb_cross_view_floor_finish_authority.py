@@ -387,37 +387,11 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
         return True
     if _clean(floor.page_id) == _clean(occurrence.page_id):
         return True
-    if correspondence_records:
-        for cr in correspondence_records:
-            st = getattr(cr, "status", None)
-            st_name = getattr(st, "name", str(st)) if st is not None else ""
-            if st_name != "CORROBORATED":
-                continue
-            if not getattr(cr, "commercial_projection_allowed", False):
-                continue
-            if getattr(cr, "authority_blockers", None):
-                continue
-            if not getattr(cr, "wall_bounded_on_both_sheets", False):
-                continue
-            if not getattr(cr, "wall_evidence_identical_on_both_sheets", False):
-                continue
-            if _clean(getattr(cr, "canonical_floor_id", "")) != _clean(floor.canonical_floor_id):
-                continue
-            cr_code = getattr(cr, "material_code", None)
-            if cr_code is not None and _clean(cr_code) != _clean(occurrence.code):
-                continue
-            supp_box = getattr(cr, "support_dimension_box_pdf_pts", None)
-            if supp_box and not _bbox_fully_inside(occurrence.bbox_pdf_pts, supp_box):
-                continue
-            wall_eqs = getattr(cr, "cross_sheet_wall_equivalences", ())
-            if len(wall_eqs) < 4:
-                continue
-            if any(getattr(w, "status", None) != EvidenceResolutionStatus.CORROBORATED for w in wall_eqs):
-                continue
-            doorways = getattr(cr, "doorway_transitions", ())
-            if not doorways or any(getattr(d, "status", None) != EvidenceResolutionStatus.CORROBORATED for d in doorways):
-                continue
-            return True
+    # Current correspondence records are geometric diagnostics, without
+    # producer-owned finished-face, doorway or metric authority. Caller flags
+    # (including CORROBORATED) cannot authenticate a cross-sheet physical floor.
+    # Retain the argument for existing diagnostic callers; no current record
+    # contract can override this boundary.
     return False
 
 
@@ -1087,45 +1061,17 @@ class CrossViewFloorFinishProducer:
                 ),
             )
 
-        def _has_corroborated_correspondence(floor_id: str) -> bool:
-            return any(
-                getattr(cr, "status", None) == EvidenceResolutionStatus.CORROBORATED
-                and getattr(cr, "commercial_projection_allowed", False)
-                and _clean(getattr(cr, "canonical_floor_id", "")) == _clean(floor_id)
-                and getattr(cr, "wall_bounded_on_both_sheets", False)
-                and getattr(cr, "wall_evidence_identical_on_both_sheets", False)
-                and len(getattr(cr, "cross_sheet_wall_equivalences", ())) >= 4
-                and getattr(cr, "doorway_transitions", ())
-                and all(getattr(d, "status", None) == EvidenceResolutionStatus.CORROBORATED for d in getattr(cr, "doorway_transitions", ()))
-                for cr in self._correspondence_records
+        material_producer = (
+            SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+                self._source, page_ids=self._physical_plan_page_ids
             )
-
-        needs_material_producer = not (
-            self._correspondence_records
-            and area_records
-            and all(
-                (fl := _matching_floor(self._floors, ar)) is not None
-                and _has_corroborated_correspondence(fl.canonical_floor_id)
-                for ar in area_records
+            if self._physical_plan_page_ids else
+            SourceMaterialSemanticProducer.from_source_visibility_producer(
+                self._source
             )
         )
-
-        if needs_material_producer:
-            material_producer = (
-                SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
-                    self._source, page_ids=self._physical_plan_page_ids
-                )
-                if self._physical_plan_page_ids else
-                SourceMaterialSemanticProducer.from_source_visibility_producer(
-                    self._source
-                )
-            )
-            material_authority = material_producer.publish(revision_id)
-            occurrence_results = material_producer.published_occurrence_results()
-        else:
-            material_producer = None
-            material_authority = None
-            occurrence_results = ()
+        material_authority = material_producer.publish(revision_id)
+        occurrence_results = material_producer.published_occurrence_results()
 
         records: list[CrossViewFloorFinishRecord] = []
         unresolved: set[str] = set(unresolved_disputed_area_floors)
@@ -1162,18 +1108,15 @@ class CrossViewFloorFinishProducer:
             ],
         ] = {}
         floor_finish_viewports = (
-            (
-                _source_owned_floor_finish_viewports(
-                    material_producer,
-                    published=published,
-                    permitted_page_ids=self._physical_plan_page_ids,
-                )
-                if self._physical_plan_page_ids else
-                _floor_finish_viewports(
-                    self._source, revision_id=revision_id,
-                )
+            _source_owned_floor_finish_viewports(
+                material_producer,
+                published=published,
+                permitted_page_ids=self._physical_plan_page_ids,
             )
-            if needs_material_producer else {}
+            if self._physical_plan_page_ids else
+            _floor_finish_viewports(
+                self._source, revision_id=revision_id,
+            )
         )
         if floor_finish_viewports and unique_area_by_label:
             support_page_ids = tuple(
@@ -1334,69 +1277,6 @@ class CrossViewFloorFinishProducer:
                 ):
                     continue
                 candidates.append((occurrence, definition))
-
-            if not candidates and self._correspondence_records:
-                for cr in self._correspondence_records:
-                    if (
-                        getattr(cr, "status", None) == EvidenceResolutionStatus.CORROBORATED
-                        and getattr(cr, "commercial_projection_allowed", False)
-                        and _clean(getattr(cr, "canonical_floor_id", "")) == _clean(floor.canonical_floor_id)
-                        and getattr(cr, "wall_bounded_on_both_sheets", False)
-                        and getattr(cr, "wall_evidence_identical_on_both_sheets", False)
-                        and len(getattr(cr, "cross_sheet_wall_equivalences", ())) >= 4
-                        and getattr(cr, "doorway_transitions", ())
-                        and all(getattr(d, "status", None) == EvidenceResolutionStatus.CORROBORATED for d in getattr(cr, "doorway_transitions", ()))
-                    ):
-                        cr_code = getattr(cr, "material_code", "FT3")
-                        occ_id = stable_contract_id(
-                            "source_material_occurrence_record",
-                            {
-                                "document_id": document_id,
-                                "revision_id": revision_id,
-                                "page_id": area_record.source_dimension_page_id,
-                                "code": cr_code,
-                            },
-                        )
-                        def_id = stable_contract_id(
-                            "source_material_definition_record",
-                            {
-                                "document_id": document_id,
-                                "revision_id": revision_id,
-                                "code": cr_code,
-                            },
-                        )
-                        occ_rec = SourceMaterialOccurrenceRecord(
-                            record_id=occ_id,
-                            document_id=document_id,
-                            revision_id=revision_id,
-                            source_sha256=next(iter(source_hashes)),
-                            snapshot_id=published.snapshot.snapshot_id,
-                            page_id=area_record.source_dimension_page_id,
-                            viewport_id=floor.viewport_id or "vp_plan",
-                            code=cr_code,
-                            semantic_finish="floor_finish",
-                            definition_record_id=def_id,
-                            bbox_pdf_pts=getattr(cr, "support_dimension_box_pdf_pts", box),
-                            raw_text=cr_code,
-                            source_evidence_id=f"ev_mark_{occ_id[:16]}",
-                        )
-                        def_rec = SourceMaterialDefinitionRecord(
-                            record_id=def_id,
-                            document_id=document_id,
-                            revision_id=revision_id,
-                            source_sha256=next(iter(source_hashes)),
-                            snapshot_id=published.snapshot.snapshot_id,
-                            code=cr_code,
-                            description=f"Floor tile {cr_code}",
-                            substrate="Floor",
-                            finish="Tile",
-                            semantic_finish="floor_finish",
-                            source_definition_ids=(f"ev_def_{def_id[:16]}",),
-                            source_page_ids=(area_record.source_dimension_page_id,),
-                            source_viewport_ids=(floor.viewport_id or "vp_plan",),
-                        )
-                        candidates.append((occ_rec, def_rec))
-                        break
 
             binding_mode = "dimension_box"
             support_source_partition_id = ""

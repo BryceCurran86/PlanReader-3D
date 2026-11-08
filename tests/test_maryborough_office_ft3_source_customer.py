@@ -1,9 +1,9 @@
-"""Tests for genuine source-owned Maryborough Office FT3 floor finish chain.
+"""Maryborough Office FT3 remains quarantined without physical source authority.
 
 Verifies:
-1. Genuine source PDF yields FIRM_SOURCE_CUSTOMER_TO_REVIEW with exactly 1 quantity (9.05352 m2),
-   1 customer row, and verified sealed run.
-2. Floor subset authority returns the identical verified 1-quantity / 1-row result.
+1. Original document identity cannot replace missing source-issued physical,
+   metric, material and doorway authority.
+2. The legacy customer/subset entry points retain empty ABSTAIN results.
 3. Fail-closed regressions:
    - missing drawing observations (get_drawings return empty list)
    - unavailable geometry backend (get_pixmap raises RuntimeError)
@@ -15,7 +15,7 @@ Verifies:
    - missing wall bounding on support or target sheet
    - shifted / un-unique registration translation
    - conflicting correspondence record
-4. Exact seal and customer row bijection passing verify_sealed_customer_output.
+4. Geometric candidates cannot create a seal or a customer row.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import pytest
 
 import pb_maryborough_customer_authority as authority
 import pb_maryborough_floor_area_customer as floor_authority
-from pb_customer_output_verification import verify_sealed_customer_output
+from tests.test_maryborough_customer_authority import _assert_empty_abstain
 from pb_source_cross_view_floor_correspondence_shadow import (
     COMPETING_FINISH_CODES_IN_BOX,
     REGISTRATION_NOT_UNIQUE,
@@ -62,53 +62,22 @@ def maryborough_pdf_path() -> Path:
     return path
 
 
-def test_genuine_maryborough_office_ft3_complete_chain(maryborough_pdf_path):
+def test_original_office_ft3_without_physical_issuer_retains_quarantine(maryborough_pdf_path):
     result = authority.issue_all_original_maryborough_customer_quantities(
         maryborough_pdf_path,
         workspace_id=1,
     )
-    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
-    assert result.reason_codes == ("source_owned_physical_quantity_resolved",)
-    assert len(result.quantities) == 1
-    assert len(result.traces) == 1
-    assert len(result.customer_rows) == 1
-    assert result.sealed_run is not None
-
-    q = result.quantities[0]
-    assert q.family == "floor_finish_area"
-    assert q.value == 9.05352
-    assert q.unit == "m2"
-    assert q.status.lower() == "firm"
-    assert not q.abstained
-    assert authority.OFFICE_PHYSICAL_FLOOR_ID in q.input_entity_ids
-
-    row = result.customer_rows[0]
-    assert row["quantity"] == 9.05352
-    assert row["unit"] == "m2"
-    assert row["quantity_status"] == "To review"
-    assert row["origin"] == "AI"
-    assert row["row_role"] == "floor_area"
-
-    # Verify 1-to-1 sealed customer output
-    verify_sealed_customer_output(result.sealed_run, result.customer_rows)
+    _assert_empty_abstain(result)
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
 
 
-def test_genuine_maryborough_office_ft3_floor_subset_chain(maryborough_pdf_path):
+def test_original_office_ft3_subset_without_its_own_authority_stays_empty(maryborough_pdf_path):
     result = floor_authority.issue_original_maryborough_floor_customer_areas(
         maryborough_pdf_path,
         workspace_id=1,
     )
-    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
-    assert result.reason_codes == ("source_owned_physical_quantity_resolved",)
-    assert len(result.quantities) == 1
-    assert len(result.customer_rows) == 1
-    assert result.sealed_run is not None
-
-    q = result.quantities[0]
-    assert q.value == 9.05352
-    assert q.unit == "m2"
-
-    verify_sealed_customer_output(result.sealed_run, result.customer_rows)
+    _assert_empty_abstain(result)
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
 
 
 def test_missing_drawing_geometry_abstains_fails_closed(maryborough_pdf_path):
@@ -297,7 +266,7 @@ def test_shifted_registration_abstains():
 
 
 def test_conflicting_correspondence_abstains(maryborough_pdf_path, monkeypatch):
-    import pb_maryborough_customer_authority as auth_mod
+    import pb_source_cross_view_floor_correspondence_shadow as correspondence_mod
 
     def blocked_correspondence(*args, **kwargs):
         return SourceCrossViewFloorCorrespondenceRecord(
@@ -328,7 +297,7 @@ def test_conflicting_correspondence_abstains(maryborough_pdf_path, monkeypatch):
         )
 
     monkeypatch.setattr(
-        auth_mod,
+        correspondence_mod,
         "authenticate_maryborough_office_cross_sheet_correspondence",
         blocked_correspondence,
     )

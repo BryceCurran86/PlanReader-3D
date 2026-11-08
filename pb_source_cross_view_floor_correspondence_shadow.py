@@ -521,28 +521,28 @@ class SourceCrossViewFloorCorrespondenceSelector:
 
 @dataclass(frozen=True)
 class DoorwayTransitionEvidence:
-    """Source-attested doorway transition establishing finished face boundary."""
+    """Diagnostic doorway observation; not a finished-face threshold receipt."""
 
     door_callout: str
     page_id: str
     wall_side: str
     schedule_page_id: str
-    door_width_mm: float
-    threshold_aligned_with_internal_face: bool = True
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    door_width_mm: Optional[float] = None
+    threshold_aligned_with_internal_face: bool = False
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED
 
 
 @dataclass(frozen=True)
 class CrossSheetWallEquivalenceRecord:
-    """Source-authenticated physical wall equivalence between support and target drawings."""
+    """Candidate geometric correspondence, without physical wall authority."""
 
     support_page_id: str
     target_page_id: str
     side_name: str
     support_face_coord: float
     target_face_coord: float
-    covered_interval_iou: float
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    covered_interval_iou: Optional[float]
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     doorway_transition: Optional[DoorwayTransitionEvidence] = None
 
 
@@ -926,7 +926,7 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     target_page_id: str = "7",
     material_code: str = "FT3",
     door_callout: str = "D15",
-    door_width_mm: float = 920.0,
+    door_width_mm: Optional[float] = None,
     dim_h_val_mm: float = 2536.0,
     dim_v_val_mm: float = 3570.0,
     registration_translation: tuple[float, float] = (-78.0, 0.0),
@@ -941,7 +941,12 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
     room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> SourceCrossViewFloorCorrespondenceRecord:
-    """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough Office."""
+    """Retain Office geometric correspondence without granting quantity authority.
+
+    Words, drawing overlap and caller observations do not prove a physical
+    finished face, dimension witness ownership or a schedule-linked threshold.
+    Even a geometrically consistent result remains CANDIDATE/noncommercial.
+    """
     box_sup = (251.04, 1382.72, 394.80, 1585.04)
     box_tgt = (173.04, 1382.72, 316.80, 1585.04)
 
@@ -1159,15 +1164,16 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     if len(floor_mark_codes) > 1:
         return _abstained(reason_codes=(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,))
 
-    # 5. Authenticate doorway transition and build wall equivalence records
+    # 5. Retain geometric observations. The code/schedule word checks above
+    # establish neither a door-leaf measurement nor its physical threshold.
     d15_evidence = DoorwayTransitionEvidence(
         door_callout=door_callout,
         page_id=target_page_id,
         wall_side="y0",
         schedule_page_id="28",
-        door_width_mm=door_width_mm,
-        threshold_aligned_with_internal_face=True,
-        status=EvidenceResolutionStatus.CORROBORATED,
+        door_width_mm=None,
+        threshold_aligned_with_internal_face=False,
+        status=EvidenceResolutionStatus.ABSTAINED,
     )
 
     sides = corr["sides"]
@@ -1178,8 +1184,8 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             side_name="x0",
             support_face_coord=sides["x0"]["support_sheet"]["coordinate"],
             target_face_coord=sides["x0"]["target_sheet"]["coordinate"],
-            covered_interval_iou=sides["x0"]["covered_interval_iou"] or 1.0,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            covered_interval_iou=sides["x0"]["covered_interval_iou"],
+            status=EvidenceResolutionStatus.CANDIDATE,
         ),
         CrossSheetWallEquivalenceRecord(
             support_page_id=support_page_id,
@@ -1187,8 +1193,8 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             side_name="x1",
             support_face_coord=sides["x1"]["support_sheet"]["coordinate"],
             target_face_coord=sides["x1"]["target_sheet"]["coordinate"],
-            covered_interval_iou=sides["x1"]["covered_interval_iou"] or 1.0,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            covered_interval_iou=sides["x1"]["covered_interval_iou"],
+            status=EvidenceResolutionStatus.CANDIDATE,
         ),
         CrossSheetWallEquivalenceRecord(
             support_page_id=support_page_id,
@@ -1196,8 +1202,8 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             side_name="y0",
             support_face_coord=sides["y0"]["support_sheet"]["coordinate"],
             target_face_coord=sides["y0"]["target_sheet"]["coordinate"],
-            covered_interval_iou=sides["y0"]["covered_interval_iou"] or 0.98,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            covered_interval_iou=sides["y0"]["covered_interval_iou"],
+            status=EvidenceResolutionStatus.CANDIDATE,
             doorway_transition=d15_evidence,
         ),
         CrossSheetWallEquivalenceRecord(
@@ -1206,8 +1212,8 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             side_name="y1",
             support_face_coord=sides["y1"]["support_sheet"]["coordinate"],
             target_face_coord=sides["y1"]["target_sheet"]["coordinate"],
-            covered_interval_iou=sides["y1"]["covered_interval_iou"] or 1.0,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            covered_interval_iou=sides["y1"]["covered_interval_iou"],
+            status=EvidenceResolutionStatus.CANDIDATE,
         ),
     )
 
@@ -1225,6 +1231,12 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             "physical_room_id": physical_room_id,
             "box_support": box_sup,
             "doorway_transition": door_callout,
+            "status": EvidenceResolutionStatus.CANDIDATE.value,
+            "authority_blockers": [
+                *STANDING_AUTHORITY_BLOCKERS,
+                DOORWAY_TRANSITION_UNAVAILABLE,
+                DIMENSION_WITNESS_UNAVAILABLE,
+            ],
         },
     )
 
@@ -1248,11 +1260,15 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         side_kinds=MappingProxyType(corr["side_kinds"]),
         finish_codes_in_box=MappingProxyType({material_code: 1}),
         material_code=material_code,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,),
-        authority_blockers=(),
-        commercial_projection_allowed=True,
-        takeoff_eligible=True,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_CANDIDATE,),
+        authority_blockers=(
+            *STANDING_AUTHORITY_BLOCKERS,
+            DOORWAY_TRANSITION_UNAVAILABLE,
+            DIMENSION_WITNESS_UNAVAILABLE,
+        ),
+        commercial_projection_allowed=False,
+        takeoff_eligible=False,
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d15_evidence,),
     )
@@ -1298,11 +1314,16 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
             payload = None
             if store is not None:
                 bytes_map = getattr(store, "source_bytes_by_revision", {})
+                if not isinstance(bytes_map, Mapping):
+                    continue
                 payload = bytes_map.get(floor.revision_id)
-            if payload is None:
+            if type(payload) is not bytes or not payload:
+                continue
+            expected_sha = floor.source_sha256
+            if type(expected_sha) is not str or len(expected_sha) != 64:
                 continue
             actual_sha = hashlib.sha256(payload).hexdigest().lower()
-            if actual_sha != str(floor.source_sha256).lower():
+            if actual_sha != expected_sha.lower():
                 continue
             cr = authenticate_maryborough_office_cross_sheet_correspondence(
                 document_id=floor.document_id,
