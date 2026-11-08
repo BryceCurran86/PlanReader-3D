@@ -442,6 +442,8 @@ def _generate_project_handoff_locked(
         "verified_customer_row_count": 0,
         "customer_rows_verified": False,
         "customer_rows_file": None,
+        "full_project_customer_first_gate": "NO_SEALED_PROJECT",
+        "full_project_customer_error_type": None,
         # A verified FINISH-ONLY customer projection never certifies the
         # complete mixed-family customer universe or frozen V2 score.
         "floor_finish_customer_rows_verified": False,
@@ -876,6 +878,7 @@ def _generate_project_handoff_locked(
         "wall_net_area": wall_surface_quantities,
         "floor_finish_area": floor_finish_quantities,
         "opening_area": opening_area_quantities,
+        "opening_metric_axes": opening_dimension_quantities,
         "opening_count": opening_count_quantities,
         "ceiling_area": ceiling_quantities,
     }
@@ -1089,6 +1092,56 @@ def _generate_project_handoff_locked(
             # Customer-family first failure is a separate diagnostic;
             # never mutate original-source claim reason codes merely because
             # an optional customer projection did not pass.
+
+    # Full-project source sealing and customer projection are distinct gates.
+    # Reuse the actual family projectors; never synthesize rows from the seal
+    # or mistake a verified finish/ceiling subset for the whole project.
+    if combined is not None and clean_family_group == "all":
+        try:
+            summary["full_project_customer_first_gate"] = "FULL_PROJECT_FAMILY_SCOPE"
+            supported = {"floor_area", "floor_finish_area", "opening_area",
+                         "opening_count", "ceiling_area"}
+            if any(family not in supported for family, _ in family_runs):
+                # Measured opening axes are explicitly engineering-only.
+                # Their existence must not mint a customer permission or be
+                # silently dropped from the exact combined source seal.
+                raise ValueError("source-only family has no commercial projector")
+            project_rows = []
+            if floor_quantities:
+                summary["full_project_customer_first_gate"] = "FLOOR_AREA_CUSTOMER_PROJECTION"
+                project_rows.extend(project_live_floor_area_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
+            if opening_area_quantities or opening_count_quantities:
+                summary["full_project_customer_first_gate"] = "OPENING_CUSTOMER_PROJECTION"
+                project_rows.extend(project_live_opening_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
+            if floor_finish_quantities:
+                summary["full_project_customer_first_gate"] = "FLOOR_FINISH_CUSTOMER_UNVERIFIED"
+                if verified_floor_finish_customer_rows is None:
+                    raise ValueError("floor-finish family customer projection unverified")
+                project_rows.extend(verified_floor_finish_customer_rows)
+            if ceiling_quantities:
+                summary["full_project_customer_first_gate"] = "CEILING_CUSTOMER_UNVERIFIED"
+                if verified_ceiling_customer_rows is None:
+                    raise ValueError("ceiling family customer projection unverified")
+                project_rows.extend(verified_ceiling_customer_rows)
+            summary["full_project_customer_first_gate"] = "EXACT_SEALED_PROJECT_CUSTOMER_BIJECTION"
+            verified = verify_sealed_customer_output(combined, project_rows)
+            project_ids = {q.quantity_id for q in combined.quantities}
+            if (len(project_ids) != len(combined.quantities)
+                    or len(project_rows) != len(project_ids)
+                    or verified.customer_row_count != len(project_ids)
+                    or set(verified.verified_quantity_ids) != project_ids):
+                raise ValueError("complete project customer quantity bijection unavailable")
+            verified_partial_customer_rows = tuple(project_rows)
+            summary["full_project_customer_first_gate"] = "PROJECT_VERIFIED"
+        except Exception as exc:
+            # Preserve independently genuine source/family receipts for review.
+            # Do not publish an incomplete whole-project customer artifact,
+            # alter source reason codes, or promote any missing authority.
+            summary["full_project_customer_error_type"] = type(exc).__name__
 
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
