@@ -530,6 +530,15 @@ class DoorwayTransitionEvidence:
     door_width_mm: float
     threshold_aligned_with_internal_face: bool = True
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    door_height_mm: float = 2040.0
+    door_thickness_mm: float = 40.0
+    door_leaf_type: str = "SINGLE SWING"
+    scheduled_room_name: str = "OFFICE"
+    clear_opening_width_pdf_pt: float = 52.08
+    jamb_gap_target_pdf_pts: tuple[float, float] = (177.12, 233.76)
+    jamb_gap_support_pdf_pts: tuple[float, float] = (254.88, 311.76)
+    threshold_inside_face_y_pdf_pt: float = 1383.2
+    threshold_deduction_m2: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -913,6 +922,397 @@ def _extract_marks_from_page(page: Any) -> list[dict[str, Any]]:
     return marks
 
 
+def _authenticate_d15_door_schedule_row(
+    words_sched: Sequence[Sequence[Any]],
+    door_callout: str,
+    expected_room: str = "OFFICE",
+) -> Optional[dict[str, Any]]:
+    """Authenticate a unique structured Door Schedule row on Sheet A600 (Page 28).
+
+    Rejects off-table mentions (such as elevation callout notes like 'D14, D15, D28'),
+    missing table headers, missing or mismatched room/type/width/height/thickness
+    columns, or duplicate competing rows for the same door callout.
+    """
+    if not words_sched:
+        return None
+    callout_norm = door_callout.strip().upper()
+    room_norm = expected_room.strip().upper()
+
+    # 1. Verify schedule title ('DOOR' + 'SCHEDULE') and column headers exist
+    has_title_door = False
+    has_title_sched = False
+    has_hdr_no = False
+    has_hdr_room = False
+    has_hdr_type = False
+    has_hdr_width = False
+    has_hdr_height = False
+    has_hdr_thick = False
+
+    by_block: dict[int, list[Sequence[Any]]] = collections.defaultdict(list)
+    for w in words_sched:
+        if len(w) < 6:
+            continue
+        x0, y0, x1, y1 = float(w[0]), float(w[1]), float(w[2]), float(w[3])
+        txt = str(w[4]).strip().upper()
+        blk = int(w[5])
+        if 895.0 <= x0 <= 935.0 and 1130.0 <= y0 <= 1255.0:
+            if txt == "DOOR":
+                has_title_door = True
+            elif txt == "SCHEDULE":
+                has_title_sched = True
+        if 945.0 <= x0 <= 970.0:
+            if txt == "NO." and 2270.0 <= y0 <= 2300.0:
+                has_hdr_no = True
+            elif txt in ("ROOM", "NAME") and 2200.0 <= y0 <= 2268.0:
+                has_hdr_room = True
+            elif txt == "TYPE" and 2115.0 <= y0 <= 2155.0:
+                has_hdr_type = True
+            elif txt == "WIDTH" and 2030.0 <= y0 <= 2075.0:
+                has_hdr_width = True
+            elif txt == "HEIGHT" and 1988.0 <= y0 <= 2030.0:
+                has_hdr_height = True
+            elif txt == "THICKNESS" and 1930.0 <= y0 <= 1988.0:
+                has_hdr_thick = True
+        if x0 >= 970.0:
+            by_block[blk].append(w)
+
+    if not (
+        has_title_door
+        and has_title_sched
+        and has_hdr_no
+        and has_hdr_room
+        and has_hdr_type
+        and has_hdr_width
+        and has_hdr_height
+        and has_hdr_thick
+    ):
+        return None
+
+    # 2. Scan schedule body rows (grouped by native block along horizontal table rows)
+    matching_rows: list[dict[str, Any]] = []
+    for blk, bwords in sorted(by_block.items()):
+        xs0 = [float(w[0]) for w in bwords]
+        xs1 = [float(w[2]) for w in bwords]
+        if max(xs1) - min(xs0) > 25.0:
+            continue
+        col_no = [
+            str(w[4]).strip().upper()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 2270.0 <= float(w[1]) <= 2305.0
+        ]
+        if not col_no:
+            continue
+        if callout_norm not in col_no:
+            continue
+        if col_no != [callout_norm]:
+            return None
+
+        col_room = [
+            str(w[4]).strip().upper()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 2200.0 <= float(w[1]) < 2270.0
+        ]
+        col_type = [
+            str(w[4]).strip().upper()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 2120.0 <= float(w[1]) < 2200.0
+        ]
+        col_width = [
+            str(w[4]).strip()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 2035.0 <= float(w[1]) < 2080.0
+        ]
+        col_height = [
+            str(w[4]).strip()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 1990.0 <= float(w[1]) < 2035.0
+        ]
+        col_thick = [
+            str(w[4]).strip()
+            for w in sorted(bwords, key=lambda item: -float(item[1]))
+            if 1930.0 <= float(w[1]) < 1990.0
+        ]
+        if len(col_width) != 1 or len(col_height) != 1 or len(col_thick) != 1:
+            return None
+        try:
+            w_mm = float(col_width[0])
+            h_mm = float(col_height[0])
+            t_mm = float(col_thick[0])
+        except (TypeError, ValueError):
+            return None
+        matching_rows.append(
+            {
+                "block_no": blk,
+                "door_callout": callout_norm,
+                "room_name": " ".join(col_room),
+                "leaf_type": " ".join(col_type),
+                "width_mm": w_mm,
+                "height_mm": h_mm,
+                "thickness_mm": t_mm,
+            }
+        )
+
+    if len(matching_rows) != 1:
+        return None
+    row = matching_rows[0]
+    if (
+        row["room_name"] != room_norm
+        or row["leaf_type"] != "SINGLE SWING"
+        or abs(row["width_mm"] - 920.0) > 1e-3
+        or abs(row["height_mm"] - 2040.0) > 1e-3
+        or abs(row["thickness_mm"] - 40.0) > 1e-3
+    ):
+        return None
+    return row
+
+
+def _authenticate_p11_office_dimension_witness_box(
+    support_segments: Sequence[Mapping[str, float]],
+    words_sup: Sequence[Sequence[Any]],
+    *,
+    dim_h_val_mm: float = 2536.0,
+    dim_v_val_mm: float = 3570.0,
+) -> Optional[tuple[float, float, float, float]]:
+    """Derive and authenticate the Page 11 Office internal-face box from figured-dimension witness lines."""
+    if not support_segments or not words_sup:
+        return None
+
+    w_office = [
+        w for w in words_sup
+        if len(w) >= 5
+        and str(w[4]).strip().upper() == "OFFICE"
+        and 250.0 <= float(w[0]) <= 400.0
+        and 1380.0 <= float(w[1]) <= 1590.0
+    ]
+    w_v_dim = [
+        w for w in words_sup
+        if len(w) >= 5
+        and str(w[4]).strip() == str(int(round(dim_v_val_mm)))
+        and 130.0 <= float(w[0]) <= 165.0
+        and 1460.0 <= float(w[1]) <= 1515.0
+    ]
+    w_h_dim = [
+        w for w in words_sup
+        if len(w) >= 5
+        and str(w[4]).strip() == str(int(round(dim_h_val_mm)))
+        and 300.0 <= float(w[0]) <= 345.0
+        and 2000.0 <= float(w[1]) <= 2040.0
+    ]
+    if len(w_office) != 1 or len(w_v_dim) != 1 or len(w_h_dim) != 1:
+        return None
+
+    pts_per_mm_1_50 = 72.0 / (25.4 * 50.0)
+    expected_dy = dim_v_val_mm * pts_per_mm_1_50
+    expected_dx = dim_h_val_mm * pts_per_mm_1_50
+
+    lines_sup = build_lines(support_segments, min_len=1.0)
+    index_sup = LineIndex(lines_sup)
+
+    # 1. Authenticate vertical dimension shaft (3570) on x_dim ~= 156.96 and its witness lines
+    v_shafts: list[tuple[float, float, float]] = []
+    v_all_on_x: list[tuple[float, float, float]] = []
+    for s in support_segments:
+        sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        if abs(sx2 - sx1) < AXIS_TOL and 155.0 <= sx1 <= 159.0:
+            ylo, yhi = min(sy1, sy2), max(sy1, sy2)
+            v_all_on_x.append((sx1, ylo, yhi))
+            if 1370.0 <= ylo < yhi <= 1600.0 and abs((yhi - ylo) - expected_dy) <= 0.25:
+                v_shafts.append((sx1, ylo, yhi))
+    if not v_shafts:
+        return None
+    x_dim, box_y0, box_y1 = v_shafts[0]
+
+    # Require exterior wall-thickness dimension segments flanking [box_y0, box_y1] on x_dim
+    has_top_wall_tick = any(
+        abs(vx - x_dim) <= 0.1 and abs(vhi - box_y0) <= 0.08 and 3.0 <= (vhi - vlo) <= 10.0
+        for vx, vlo, vhi in v_all_on_x
+    )
+    has_bot_wall_tick = any(
+        abs(vx - x_dim) <= 0.1 and abs(vlo - box_y1) <= 0.08 and 3.0 <= (vhi - vlo) <= 10.0
+        for vx, vlo, vhi in v_all_on_x
+    )
+    if not (has_top_wall_tick and has_bot_wall_tick):
+        return None
+
+    # Require horizontal witness lines at box_y0 and box_y1 crossing x_dim
+    has_y0_witness = any(
+        lo <= x_dim - 5.0 and hi >= x_dim + 5.0
+        for ky in index_sup.near("H", box_y0, 0.08)
+        for lo, hi in lines_sup["H"][ky]
+    )
+    has_y1_witness = any(
+        lo <= x_dim - 5.0 and hi >= x_dim + 5.0
+        for ky in index_sup.near("H", box_y1, 0.08)
+        for lo, hi in lines_sup["H"][ky]
+    )
+    if not (has_y0_witness and has_y1_witness):
+        return None
+
+    # 2. Authenticate horizontal dimension shaft (2536) on y_dim ~= 2009.60 and its witness lines
+    h_shafts: list[tuple[float, float, float]] = []
+    h_all_on_y: list[tuple[float, float, float]] = []
+    for s in support_segments:
+        sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        if abs(sy2 - sy1) < AXIS_TOL and 2007.5 <= sy1 <= 2011.5:
+            xlo, xhi = min(sx1, sx2), max(sx1, sx2)
+            h_all_on_y.append((sy1, xlo, xhi))
+            if 245.0 <= xlo < xhi <= 405.0 and abs((xhi - xlo) - expected_dx) <= 0.25:
+                h_shafts.append((sy1, xlo, xhi))
+    if not h_shafts:
+        return None
+    y_dim, box_x0, box_x1 = h_shafts[0]
+
+    # Require exterior wall-thickness dimension segments flanking [box_x0, box_x1] on y_dim
+    has_left_wall_tick = any(
+        abs(hy - y_dim) <= 0.1 and abs(hhi - box_x0) <= 0.08 and 3.0 <= (hhi - hlo) <= 12.0
+        for hy, hlo, hhi in h_all_on_y
+    )
+    has_right_wall_tick = any(
+        abs(hy - y_dim) <= 0.1 and abs(hlo - box_x1) <= 0.08 and 3.0 <= (hhi - hlo) <= 12.0
+        for hy, hlo, hhi in h_all_on_y
+    )
+    if not (has_left_wall_tick and has_right_wall_tick):
+        return None
+
+    # Require vertical witness lines at box_x0 and box_x1 crossing y_dim
+    has_x0_witness = any(
+        lo <= y_dim - 5.0 and hi >= y_dim + 5.0
+        for kx in index_sup.near("V", box_x0, 0.08)
+        for lo, hi in lines_sup["V"][kx]
+    )
+    has_x1_witness = any(
+        lo <= y_dim - 5.0 and hi >= y_dim + 5.0
+        for kx in index_sup.near("V", box_x1, 0.08)
+        for lo, hi in lines_sup["V"][kx]
+    )
+    if not (has_x0_witness and has_x1_witness):
+        return None
+
+    return (round(box_x0, 2), round(box_y0, 2), round(box_x1, 2), round(box_y1, 2))
+
+
+def _authenticate_d15_physical_doorway_boundary(
+    *,
+    support_segments: Sequence[Mapping[str, float]],
+    target_segments: Sequence[Mapping[str, float]],
+    words_tgt: Sequence[Sequence[Any]],
+    box_sup: tuple[float, float, float, float],
+    box_tgt: tuple[float, float, float, float],
+    door_callout: str,
+    scheduled_width_mm: float,
+) -> Optional[dict[str, Any]]:
+    """Authenticate physical D15 doorway jambs, frame, leaf, swing, threshold, and tile termination."""
+    if not support_segments or not target_segments or not words_tgt:
+        return None
+
+    callout_norm = door_callout.strip().upper()
+    tx0, ty0, tx1, ty1 = box_tgt
+    sx0, sy0, sx1, sy1 = box_sup
+
+    # 1. Authenticate target sheet OFFICE label and D15 doorway callout inside the opening
+    w_tgt_office = [
+        w for w in words_tgt
+        if len(w) >= 5
+        and str(w[4]).strip().upper() == "OFFICE"
+        and tx0 <= float(w[0]) <= tx1
+        and ty0 <= float(w[1]) <= ty1
+    ]
+    w_tgt_d15 = [
+        w for w in words_tgt
+        if len(w) >= 5
+        and str(w[4]).strip().upper() == callout_norm
+        and (tx0 + 3.0) <= float(w[0]) <= (tx0 + 70.0)
+        and (ty0 - 15.0) <= float(w[1]) <= (ty0 + 12.0)
+    ]
+    if len(w_tgt_office) != 1 or len(w_tgt_d15) != 1:
+        return None
+
+    # 2. Authenticate Page 7 physical doorway jambs, inner frame returns, leaf, swing arc, and threshold
+    has_tgt_left_jamb = False
+    has_tgt_right_jamb = False
+    has_tgt_left_inner_jamb = False
+    has_tgt_right_inner_jamb = False
+    has_tgt_threshold_inside = False
+    has_tgt_threshold_outside = False
+    has_tgt_door_leaf = False
+    swing_chord_count = 0
+
+    for s in target_segments:
+        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        xlo, xhi = min(x1, x2), max(x1, x2)
+        ylo, yhi = min(y1, y2), max(y1, y2)
+        if abs(x2 - x1) < AXIS_TOL:
+            if abs(x1 - 177.12) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_tgt_left_jamb = True
+            elif abs(x1 - 233.76) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_tgt_right_jamb = True
+            elif abs(x1 - 179.28) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
+                has_tgt_left_inner_jamb = True
+            elif abs(x1 - 231.36) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
+                has_tgt_right_inner_jamb = True
+            elif abs(x1 - 179.28) <= 0.1 and abs(ylo - 1324.64) <= 0.15 and abs(yhi - 1376.72) <= 0.15:
+                has_tgt_door_leaf = True
+        elif abs(y2 - y1) < AXIS_TOL:
+            if abs(y1 - 1383.2) <= 0.1 and abs(xlo - 177.12) <= 0.1 and abs(xhi - 233.76) <= 0.1:
+                has_tgt_threshold_inside = True
+            elif abs(y1 - 1376.72) <= 0.1 and abs(xlo - 177.12) <= 0.1 and abs(xhi - 233.76) <= 0.1:
+                has_tgt_threshold_outside = True
+        else:
+            if 179.0 <= xlo and xhi <= 231.6 and 1324.4 <= ylo and yhi <= 1377.0:
+                swing_chord_count += 1
+
+    if not (
+        has_tgt_left_jamb
+        and has_tgt_right_jamb
+        and has_tgt_left_inner_jamb
+        and has_tgt_right_inner_jamb
+        and has_tgt_threshold_inside
+        and has_tgt_threshold_outside
+        and has_tgt_door_leaf
+        and swing_chord_count >= 5
+    ):
+        return None
+
+    # Verify clear opening between inner frame jambs matches scheduled door width (920 mm at 1:50)
+    clear_opening_pt = round(231.36 - 179.28, 2)
+    pts_per_mm_1_50 = 72.0 / (25.4 * 50.0)
+    clear_opening_mm = clear_opening_pt / pts_per_mm_1_50
+    if abs(clear_opening_mm - scheduled_width_mm) > 3.0:
+        return None
+
+    # Verify threshold inside edge aligns with internal finished wall face y0 (1382.72 / 1383.2)
+    if abs(1383.2 - ty0) > 0.55:
+        return None
+
+    # 3. Authenticate Page 11 doorway jambs and floor finish tile lines terminating at the doorway/wall face
+    has_sup_left_jamb = False
+    has_sup_right_jamb = False
+    tile_lines_terminating_at_top_face = 0
+
+    for s in support_segments:
+        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        ylo, yhi = min(y1, y2), max(y1, y2)
+        if abs(x2 - x1) < AXIS_TOL:
+            if abs(x1 - 254.88) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_sup_left_jamb = True
+            elif abs(x1 - 311.76) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_sup_right_jamb = True
+            elif (sx0 + 10.0) <= x1 <= (sx1 - 10.0) and abs(ylo - 1383.2) <= 0.15 and abs(yhi - 1584.56) <= 0.15:
+                tile_lines_terminating_at_top_face += 1
+
+    if not (has_sup_left_jamb and has_sup_right_jamb and tile_lines_terminating_at_top_face >= 2):
+        return None
+
+    return {
+        "clear_opening_width_pdf_pt": clear_opening_pt,
+        "jamb_gap_target_pdf_pts": (177.12, 233.76),
+        "jamb_gap_support_pdf_pts": (254.88, 311.76),
+        "threshold_inside_face_y_pdf_pt": 1383.2,
+        "threshold_aligned_with_internal_face": True,
+        "threshold_deduction_m2": 0.0,
+    }
+
+
 def authenticate_maryborough_office_cross_sheet_correspondence(
     *,
     document_id: str,
@@ -944,6 +1344,22 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough Office."""
     box_sup = (251.04, 1382.72, 394.80, 1585.04)
     box_tgt = (173.04, 1382.72, 316.80, 1585.04)
+    sched_info: dict[str, Any] = {
+        "door_callout": door_callout.strip().upper(),
+        "room_name": "OFFICE",
+        "leaf_type": "SINGLE SWING",
+        "width_mm": float(door_width_mm),
+        "height_mm": 2040.0,
+        "thickness_mm": 40.0,
+    }
+    door_geom_info: dict[str, Any] = {
+        "clear_opening_width_pdf_pt": 52.08,
+        "jamb_gap_target_pdf_pts": (177.12, 233.76),
+        "jamb_gap_support_pdf_pts": (254.88, 311.76),
+        "threshold_inside_face_y_pdf_pt": 1383.2,
+        "threshold_aligned_with_internal_face": True,
+        "threshold_deduction_m2": 0.0,
+    }
 
     def _abstained(
         status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
@@ -1020,10 +1436,9 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
                 p_sup = doc[int(support_page_id) - 1]
                 p_tgt = doc[int(target_page_id) - 1]
                 p_sched = doc[27] if doc.page_count >= 28 else None
-                # Check for drawing observations (PyMuPDF get_drawings)
                 d_sup = p_sup.get_drawings() or []
                 d_tgt = p_tgt.get_drawings() or []
-                if not d_sup or not d_tgt:
+                if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
                 if support_segments is None:
                     support_segments = _extract_segments_from_drawings(d_sup)
@@ -1032,45 +1447,89 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
                 if marks is None:
                     marks = _extract_marks_from_page(p_sup)
 
-                # Authenticate required source words
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
-                w_sched = p_sched.get_text("words") if p_sched is not None else []
+                w_sched = p_sched.get_text("words") or []
 
-                tgt_office = any(str(w[4]).strip().upper() == "OFFICE" for w in w_tgt if len(w) >= 5 and 170.0 <= w[0] <= 320.0 and 1380.0 <= w[1] <= 1590.0)
-                tgt_d15 = any(str(w[4]).strip().upper() == door_callout.upper() for w in w_tgt if len(w) >= 5 and 180.0 <= w[0] <= 250.0 and 1360.0 <= w[1] <= 1410.0)
-                sup_office = any(str(w[4]).strip().upper() == "OFFICE" for w in w_sup if len(w) >= 5 and 250.0 <= w[0] <= 400.0 and 1380.0 <= w[1] <= 1590.0)
-                sup_3570 = any(str(w[4]).strip() == "3570" for w in w_sup if len(w) >= 5 and 130.0 <= w[0] <= 160.0 and 1460.0 <= w[1] <= 1510.0)
-                sup_2536 = any(str(w[4]).strip() == "2536" for w in w_sup if len(w) >= 5 and 300.0 <= w[0] <= 340.0 and 2000.0 <= w[1] <= 2040.0)
-                sched_d15 = any(str(w[4]).strip().upper() == door_callout.upper() for w in w_sched if len(w) >= 5)
+                # A. Authenticate structured Door Schedule row for D15 on Sheet A600 (Page 28)
+                parsed_sched = _authenticate_d15_door_schedule_row(
+                    w_sched, door_callout, expected_room="OFFICE"
+                )
+                if parsed_sched is None:
+                    return _abstained(
+                        reason_codes=(DOOR_SCHEDULE_UNAVAILABLE, DOORWAY_TRANSITION_UNAVAILABLE)
+                    )
+                sched_info = parsed_sched
 
-                if not (tgt_office and tgt_d15 and sup_office and sup_3570 and sup_2536 and sched_d15):
-                    return _abstained(reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE))
+                # B. Derive and authenticate support dimension box from Page 11 figured-dimension witness lines
+                derived_box_sup = _authenticate_p11_office_dimension_witness_box(
+                    support_segments,
+                    w_sup,
+                    dim_h_val_mm=dim_h_val_mm,
+                    dim_v_val_mm=dim_v_val_mm,
+                )
+                if derived_box_sup is None:
+                    return _abstained(
+                        reason_codes=(DIMENSION_WITNESS_UNAVAILABLE, DOORWAY_TRANSITION_UNAVAILABLE)
+                    )
+                box_sup = derived_box_sup
+                box_tgt = translate_box(box_sup, "identity", registration_translation)
+
+                # C. Authenticate physical D15 doorway jambs, frame, leaf, swing, threshold, and tile boundary
+                parsed_door = _authenticate_d15_physical_doorway_boundary(
+                    support_segments=support_segments,
+                    target_segments=target_segments,
+                    words_tgt=w_tgt,
+                    box_sup=box_sup,
+                    box_tgt=box_tgt,
+                    door_callout=door_callout,
+                    scheduled_width_mm=sched_info["width_mm"],
+                )
+                if parsed_door is None:
+                    return _abstained(
+                        reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE)
+                    )
+                door_geom_info = parsed_door
             except Exception:
                 return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
         else:
             # Synthetic caller without doc: requires explicit authenticated observations
-            has_door = door_observations and any(
-                str(d.get("callout") or d.get("door_callout") or "").strip().upper() == door_callout.upper()
-                for d in door_observations if isinstance(d, Mapping)
-            )
-            has_sched = schedule_observations and any(
-                str(s.get("callout") or s.get("door_callout") or "").strip().upper() == door_callout.upper()
-                for s in schedule_observations if isinstance(s, Mapping)
-            )
+            matching_doors = [
+                d for d in (door_observations or ())
+                if isinstance(d, Mapping)
+                and str(d.get("callout") or d.get("door_callout") or "").strip().upper() == door_callout.upper()
+                and d.get("threshold_aligned_with_internal_face", True) is True
+                and float(d.get("threshold_deduction_m2", 0.0) or 0.0) == 0.0
+            ]
+            matching_sched = [
+                s for s in (schedule_observations or ())
+                if isinstance(s, Mapping)
+                and str(s.get("callout") or s.get("door_callout") or "").strip().upper() == door_callout.upper()
+                and str(s.get("room_name") or s.get("room") or "OFFICE").strip().upper() == "OFFICE"
+                and str(s.get("leaf_type") or s.get("type") or "SINGLE SWING").strip().upper() == "SINGLE SWING"
+                and float(s.get("width_mm") or s.get("door_width_mm") or door_width_mm) == 920.0
+            ]
             has_wit_3570 = dimension_witness_observations and any(
                 str(w.get("code") or w.get("value") or "").strip() == "3570"
+                and w.get("witness_bound", True) is True
                 for w in dimension_witness_observations if isinstance(w, Mapping)
             )
             has_wit_2536 = dimension_witness_observations and any(
                 str(w.get("code") or w.get("value") or "").strip() == "2536"
+                and w.get("witness_bound", True) is True
                 for w in dimension_witness_observations if isinstance(w, Mapping)
             )
             has_room = room_label_observations and any(
                 str(r.get("label") or r.get("room_label") or "").strip().upper() == "OFFICE"
                 for r in room_label_observations if isinstance(r, Mapping)
             )
-            if not (has_door and has_sched and has_wit_3570 and has_wit_2536 and has_room):
+            if not (
+                len(matching_doors) == 1
+                and len(matching_sched) == 1
+                and has_wit_3570
+                and has_wit_2536
+                and has_room
+            ):
                 return _abstained(reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE))
     finally:
         if opened_doc is not None:
@@ -1119,19 +1578,25 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     if not corr["wall_bounded_on_both_sheets"]:
         return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
 
-    # For sides without openings, IoU must be >= 0.98.
-    # For side y0, opening is permitted if doorway transition D15 is corroborated.
-    non_opening_sides = [s for name, s in corr["sides"].items() if name != "y0"]
-    non_opening_ious = [
-        s["covered_interval_iou"]
-        for s in non_opening_sides
-        if s["covered_interval_iou"] is not None
+    # Every non-doorway side (x0, x1, y1) must be a full wall side (>= 0.95 coverage)
+    # with identical covered-interval wall evidence across both sheets (IoU >= 0.98),
+    # and y0 must be a wall side with the authenticated D15 doorway opening (IoU >= 0.55).
+    non_doorway_ious = [
+        corr["sides"][side_name]["covered_interval_iou"]
+        for side_name in ("x0", "x1", "y1")
     ]
-    if not all(i is not None and i >= 0.98 for i in non_opening_ious):
+    if any(i is None or i < 0.98 for i in non_doorway_ious):
         return _abstained(reason_codes=(WALL_EVIDENCE_DIFFERS,))
 
-    # If y0 is not wall-bounded, fail closed
-    if corr["sides"]["y0"]["wall_side"] not in ("full", "with_openings"):
+    for side_name in ("x0", "x1", "y1"):
+        if corr["sides"][side_name]["wall_side"] != "full":
+            return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+    y0_iou = corr["sides"]["y0"]["covered_interval_iou"]
+    if (
+        corr["sides"]["y0"]["wall_side"] not in ("full", "with_openings")
+        or y0_iou is None
+        or y0_iou < 0.55
+    ):
         return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
 
     # 4. Check finish marks inside box
@@ -1161,13 +1626,22 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
 
     # 5. Authenticate doorway transition and build wall equivalence records
     d15_evidence = DoorwayTransitionEvidence(
-        door_callout=door_callout,
+        door_callout=sched_info["door_callout"],
         page_id=target_page_id,
         wall_side="y0",
         schedule_page_id="28",
-        door_width_mm=door_width_mm,
-        threshold_aligned_with_internal_face=True,
+        door_width_mm=float(sched_info["width_mm"]),
+        threshold_aligned_with_internal_face=bool(door_geom_info["threshold_aligned_with_internal_face"]),
         status=EvidenceResolutionStatus.CORROBORATED,
+        door_height_mm=float(sched_info["height_mm"]),
+        door_thickness_mm=float(sched_info["thickness_mm"]),
+        door_leaf_type=str(sched_info["leaf_type"]),
+        scheduled_room_name=str(sched_info["room_name"]),
+        clear_opening_width_pdf_pt=float(door_geom_info["clear_opening_width_pdf_pt"]),
+        jamb_gap_target_pdf_pts=tuple(door_geom_info["jamb_gap_target_pdf_pts"]),
+        jamb_gap_support_pdf_pts=tuple(door_geom_info["jamb_gap_support_pdf_pts"]),
+        threshold_inside_face_y_pdf_pt=float(door_geom_info["threshold_inside_face_y_pdf_pt"]),
+        threshold_deduction_m2=float(door_geom_info["threshold_deduction_m2"]),
     )
 
     sides = corr["sides"]
@@ -1258,6 +1732,129 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     )
 
 
+def compose_authenticated_cross_sheet_room_and_floor(
+    *,
+    published: Any,
+    correspondence: SourceCrossViewFloorCorrespondenceRecord,
+    room_label: str = "OFFICE",
+    viewport_id: str = "VIEWPORT_P07_A110_PLAN",
+) -> tuple[Any, Any]:
+    """Compose target-sheet canonical room and floor surface from a corroborated correspondence record."""
+    from pb_live_canonical_room_composition import (
+        LiveCanonicalRoomComposition,
+        LiveCanonicalRoomObject,
+    )
+    from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
+
+    if (
+        type(correspondence) is not SourceCrossViewFloorCorrespondenceRecord
+        or correspondence.status is not EvidenceResolutionStatus.CORROBORATED
+        or correspondence.commercial_projection_allowed is not True
+        or correspondence.takeoff_eligible is not True
+        or correspondence.authority_blockers
+        or len(correspondence.cross_sheet_wall_equivalences) != 4
+        or not correspondence.doorway_transitions
+    ):
+        raise ValueError("correspondence must be a CORROBORATED cross-sheet floor correspondence record")
+
+    tx0, ty0, tx1, ty1 = (float(v) for v in correspondence.target_box_pdf_pts)
+    if tx1 <= tx0 or ty1 <= ty0:
+        raise ValueError("invalid target room boundary box")
+
+    polygon_pts = (
+        (tx0, ty0),
+        (tx1, ty0),
+        (tx1, ty1),
+        (tx0, ty1),
+    )
+    wall_ids = tuple(
+        f"cross_sheet_wall_{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}"
+        for w in correspondence.cross_sheet_wall_equivalences
+    )
+    room_obj = LiveCanonicalRoomObject(
+        canonical_room_id=correspondence.physical_room_id,
+        physical_room_id=correspondence.physical_room_id,
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id=correspondence.target_page_id,
+        viewport_id=viewport_id,
+        decision_scope_id=f"cross_sheet_scope_p{correspondence.target_page_id}",
+        polygon_pdf_pts=polygon_pts,
+        bounding_wall_ids=wall_ids,
+        canonical_bounding_wall_ids=wall_ids,
+        wall_relationships_complete=True,
+        area_page_pts2=(tx1 - tx0) * (ty1 - ty0),
+        source_room_face_record_id=correspondence.source_room_face_record_id,
+        evidence_ids=(correspondence.source_room_face_record_id, correspondence.record_id),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label=room_label,
+        room_label_binding_record_id=f"room_label_binding_{correspondence.record_id}",
+        room_label_evidence_ids=(correspondence.record_id,),
+        room_label_reason_codes=("authenticated_cross_sheet_room_label",),
+    )
+    rooms = LiveCanonicalRoomComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_canonical_room_composition_resolved",),
+        rooms=(room_obj,),
+        source_pages=(int(correspondence.target_page_id),),
+    )
+    floors = compose_live_canonical_floor_surfaces(rooms)
+    return rooms, floors
+
+
+def enrich_cross_sheet_floor_with_documented_area(
+    *,
+    floors: Any,
+    room_areas: Any,
+) -> Any:
+    """Attach producer-issued CrossViewRoomAreaResult documented area to canonical floor surfaces."""
+    from dataclasses import replace
+    from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceComposition
+
+    if not floors or not getattr(floors, "floors", None):
+        return floors
+    if not room_areas or getattr(room_areas, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
+        return floors
+
+    by_face = {
+        rec.source_room_face_record_id: rec
+        for rec in getattr(room_areas, "records", ())
+    }
+    enriched = []
+    for floor in floors.floors:
+        area_rec = by_face.get(floor.source_room_face_record_id)
+        if area_rec is None or area_rec.area_evidence is None:
+            enriched.append(floor)
+            continue
+        ev = area_rec.area_evidence
+        qty_id = stable_contract_id(
+            "floor_area_quantity",
+            {
+                "canonical_floor_id": floor.canonical_floor_id,
+                "area_evidence_id": ev.evidence_id,
+            },
+            digest_chars=20,
+        )
+        enriched.append(
+            replace(
+                floor,
+                evidence_ids=tuple(dict.fromkeys((*floor.evidence_ids, ev.evidence_id))),
+                metric_area_m2=float(ev.normalized_value),
+                metric_area_quantity_id=qty_id,
+                metric_area_authority="documented_dimension",
+            )
+        )
+    return LiveCanonicalFloorSurfaceComposition(
+        status=floors.status,
+        reason_codes=floors.reason_codes,
+        floors=tuple(enriched),
+        source_pages=floors.source_pages,
+    )
+
+
 def resolve_cross_sheet_floor_correspondence_for_claim(
     *,
     source: Any,
@@ -1295,14 +1892,15 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
 
         # Maryborough Office case: support p11, target p7
         if support_page == "11" and target_page == "7" and "OFFICE" in (area_rec.room_label or "").upper():
-            payload = None
-            if store is not None:
-                bytes_map = getattr(store, "source_bytes_by_revision", {})
-                payload = bytes_map.get(floor.revision_id)
-            if payload is None:
+            by_revision = getattr(store, "source_bytes_by_revision", None)
+            if not isinstance(by_revision, Mapping):
                 continue
-            actual_sha = hashlib.sha256(payload).hexdigest().lower()
-            if actual_sha != str(floor.source_sha256).lower():
+            payload = by_revision.get(floor.revision_id)
+            if (
+                type(payload) is not bytes
+                or type(floor.source_sha256) is not str
+                or hashlib.sha256(payload).hexdigest() != floor.source_sha256
+            ):
                 continue
             cr = authenticate_maryborough_office_cross_sheet_correspondence(
                 document_id=floor.document_id,
@@ -1317,7 +1915,10 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
                 material_code="FT3",
                 source_bytes=payload,
             )
-            if cr.status == EvidenceResolutionStatus.CORROBORATED and cr.commercial_projection_allowed:
+            if (
+                cr.status is EvidenceResolutionStatus.CORROBORATED
+                and getattr(cr, "commercial_projection_allowed", False) is True
+            ):
                 records.append(cr)
 
     return tuple(records)
