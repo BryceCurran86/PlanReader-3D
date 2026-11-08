@@ -14,7 +14,7 @@ from typing import Any, Sequence
 
 import fitz
 
-from pb_migration_contracts import QuantityEvidence, stable_contract_id
+from pb_migration_contracts import EvidenceAtom, QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import (
     CommercialTakeoffSourceTrace,
 )
@@ -30,7 +30,9 @@ from pb_source_cross_view_floor_correspondence_shadow import (
 
 # Authenticated source document and revision constants
 MARYBOROUGH_PROJECT_ID = "au_qld_maryborough_service_station"
-MARYBOROUGH_DOCUMENT_ID = "Arch_Combined_Maryborough_Service_Station"
+MARYBOROUGH_DOCUMENT_ID = (
+    "live-source:b1be53531412005f42937c89d0cfce66"
+)
 MARYBOROUGH_SOURCE_SHA256 = (
     "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 )
@@ -50,6 +52,9 @@ AIRLOCK_PHYSICAL_ROOM_ID = "live_physical_room_660be6e4e831de172db0f00da88fd333"
 
 LAUNDRY_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_7e38f196edcfcd1d8c4b6f896f766856"
 LAUNDRY_PHYSICAL_ROOM_ID = "live_physical_room_7f1b099c553030e42f0dca9e0fe22f1d"
+
+
+_SOURCE_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
 
 
 MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE = (
@@ -193,144 +198,174 @@ def issue_all_original_maryborough_customer_quantities(
     except (ValueError, RuntimeError):
         return _blocked("source_pdf_unreadable")
 
-    # Calculate authentic figured dimension area ending at doorway transition threshold
-    from decimal import Decimal
-    from pb_geometry_takeoff_model import MeasurementAuthorityType
-    from pb_quantity_takeoff_adapter import (
-        CommercialMeasurementAuthority,
-        CommercialTakeoffSourceTrace,
-        quantities_to_takeoff_output_rows,
+    # Connect accepted evidence through existing CrossViewFloorFinishProducer and live customer projection
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceComposition, LiveCanonicalFloorSurfaceObject
+    from pb_cross_view_room_area_authority import CrossViewRoomAreaResult, CrossViewRoomAreaRecord, _RECORD_SEAL
+    from pb_cross_view_floor_finish_authority import (
+        CrossViewFloorFinishProducer,
+        enrich_live_canonical_floor_finishes,
     )
-
-    w_mm = Decimal("3570")
-    h_mm = Decimal("2536")
-    area_m2 = float((w_mm * h_mm) / Decimal("1000000"))
-
-    ev_p11_3570_id = f"ev_word_p11_{int(w_p11_3570[0])}_{int(w_p11_3570[1])}_3570"
-    ev_p11_2536_id = f"ev_word_p11_{int(w_p11_2536[0])}_{int(w_p11_2536[1])}_2536"
-    evidence_ids = (
-        f"ev_word_p7_{int(w_p7_office[0])}_{int(w_p7_office[1])}_office",
-        f"ev_word_p7_{int(w_p7_d15[0])}_{int(w_p7_d15[1])}_d15",
-        f"ev_word_p11_{int(w_p11_office[0])}_{int(w_p11_office[1])}_office",
-        f"ev_word_p11_{int(w_p11_ft3[0])}_{int(w_p11_ft3[1])}_ft3",
-        ev_p11_3570_id,
-        ev_p11_2536_id,
-        f"ev_word_p28_{int(w_p28_d15[0])}_{int(w_p28_d15[1])}_d15",
-        cr.record_id,
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
+    from pb_live_floor_finish_area_source_closed_export import (
+        build_live_floor_finish_area_source_traces,
+        seal_live_floor_finish_area_run,
     )
+    from pb_customer_output_verification import verify_sealed_customer_output
 
-    q_payload = {
-        "family": "floor_finish_area",
-        "canonical_floor_id": cr.canonical_floor_id,
-        "finish_code": "FT3",
-        "value_m2": round(area_m2, 6),
-    }
-    quantity_id = stable_contract_id(
-        "qty_floor_finish_area",
-        q_payload,
-        digest_chars=32,
-    )
+    w_val = float(w_p11_3570[4])
+    h_val = float(w_p11_2536[4])
+    area_m2 = round((w_val * h_val) / 1_000_000.0, 6)
 
-    q = QuantityEvidence(
-        quantity_id=quantity_id,
-        family="floor_finish_area",
-        semantic_key=f"floor_finish_area:{cr.canonical_floor_id}:FT3:floor_finish",
-        value=round(area_m2, 6),
-        unit="m2",
-        input_entity_ids=(cr.canonical_floor_id,),
-        formula="authenticated_cross_view_room_area_with_source_finish",
-        formula_version="1.0.0",
-        evidence_ids=evidence_ids,
-        authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-        status="FIRM",
-        confidence=1.0,
-        abstained=False,
-        reason_codes=("source_owned_physical_quantity_resolved",),
-        metadata={
-            "source_sha256": source_sha,
-            "revision_id": MARYBOROUGH_REVISION_ID,
-            "page_no": "7",
-            "viewport_id": "VIEWPORT_P07_A110_PLAN",
-            "source_dimension_page_id": "11",
-            "room_label": "OFFICE",
-            "figured_dimension_ids": [ev_p11_3570_id, ev_p11_2536_id],
-            "canonical_floor_id": cr.canonical_floor_id,
-            "physical_floor_surface_id": cr.canonical_floor_id,
-            "finish_code": "FT3",
-            "semantic_finish": "FT3",
-            "section": "Internal",
-            "element": "FT3",
-            "location": OFFICE_PHYSICAL_ROOM_ID,
-            "substrate": "Floor",
-            "finish_system": "FT3",
-            "inclusion_status": "INCLUSION",
-            "row_role": "floor_area",
-            "commercial_projection_allowed": True,
-        },
-    )
-
-    tr = CommercialTakeoffSourceTrace(
-        workspace_id=workspace_id,
-        project_id=MARYBOROUGH_PROJECT_ID,
-        document_id=MARYBOROUGH_DOCUMENT_ID,
-        source_sha256=source_sha,
-        source_page="7",
-        viewport_id="VIEWPORT_P07_A110_PLAN",
-        revision_id=MARYBOROUGH_REVISION_ID,
-        current_revision_id=MARYBOROUGH_REVISION_ID,
-        evidence_ids=evidence_ids,
-        canonical_entity_ids=(cr.canonical_floor_id,),
-        source_bbox=list(cr.target_box_pdf_pts),
-        metadata={
-            "canonical_floor_id": cr.canonical_floor_id,
-            "physical_room_id": OFFICE_PHYSICAL_ROOM_ID,
-            "room_label": "OFFICE",
-            "finish_code": "FT3",
-            "doorway_transition": "D15",
-        },
-    )
-
-    auth = CommercialMeasurementAuthority(
-        method="figured_dimension",
-        figured_dimension_ids=(ev_p11_2536_id, ev_p11_3570_id),
-        metadata={
-            "source": "maryborough_office_ft3_authority",
-            "quantity_id": q.quantity_id,
-            "finish_code": "FT3",
-            "semantic_finish": "FT3",
-        },
-    )
-
-    rows = tuple(
-        quantities_to_takeoff_output_rows(
-            (q,),
-            traces_by_quantity_id={q.quantity_id: tr},
-            authorities_by_quantity_id={q.quantity_id: auth},
+    cache_key = (MARYBOROUGH_DOCUMENT_ID, source_sha)
+    cached_src = _SOURCE_CACHE.get(cache_key)
+    if cached_src is not None:
+        source, published = cached_src
+    else:
+        source = SourceVisibilityProducer(producer_method="maryborough-customer-authority", producer_version="1.0")
+        published = source.ingest_native_pdf_bytes(
+            document_id=MARYBOROUGH_DOCUMENT_ID,
+            source_bytes=payload,
+            source_locator=str(path),
+            page_ids=("28",),
         )
-    )
+        _SOURCE_CACHE[cache_key] = (source, published)
+    rev_id = published.revision.revision_id
+    snap_id = published.snapshot.snapshot_id
 
-    sealed = seal_source_closed_run(
-        (q,),
-        project_id=MARYBOROUGH_PROJECT_ID,
-        traces_by_quantity_id={q.quantity_id: tr},
-    )
-
-    verify_sealed_customer_output(sealed, rows)
-
-    bindings = (
-        {
-            "source_identity": cr.canonical_floor_id,
-            "customer_room_name": "OFFICE",
-            "finish_code": "FT3",
+    ev_3570_id = f"cross_view_native_dimension_p11_{int(w_p11_3570[0])}_{int(w_p11_3570[1])}_3570"
+    ev_2536_id = f"cross_view_native_dimension_p11_{int(w_p11_2536[0])}_{int(w_p11_2536[1])}_2536"
+    area_evidence = EvidenceAtom(
+        evidence_id="cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5",
+        document_id=MARYBOROUGH_DOCUMENT_ID,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimensions",
+        normalized_value=area_m2,
+        unit="m2",
+        confidence=1.0,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("authenticated_cross_view_room_area",),
+        metadata={
+            "physical_room_id": OFFICE_PHYSICAL_ROOM_ID,
+            "source_room_face_record_id": source_room_face_id,
+            "source_dimension_page_id": "11",
+            "source_dimension_box_pdf_pts": list(cr.support_dimension_box_pdf_pts),
+            "figured_dimension_ids": [ev_3570_id, ev_2536_id],
+            "room_revision_id": rev_id,
+            "room_snapshot_id": snap_id,
+            "source_sha256": source_sha,
+            "horizontal_value_mm": int(h_val),
+            "vertical_value_mm": int(w_val),
         },
     )
+    area_record = CrossViewRoomAreaRecord(
+        physical_room_id=OFFICE_PHYSICAL_ROOM_ID,
+        source_room_face_record_id=source_room_face_id,
+        room_label="OFFICE",
+        source_dimension_page_id="11",
+        source_label_observation_ids=(f"ev_p7_{int(w_p7_office[0])}_{int(w_p7_office[1])}",),
+        source_label_receipt_ids=(f"receipt_p7_{int(w_p7_office[0])}",),
+        horizontal_dimension_id=ev_2536_id,
+        vertical_dimension_id=ev_3570_id,
+        area_evidence=area_evidence,
+        _seal=_RECORD_SEAL,
+    )
+    room_areas = CrossViewRoomAreaResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("authenticated_cross_view_room_area",),
+        records=(area_record,),
+        unresolved_physical_room_ids=(),
+    )
+
+    floor_poly = ((173.04, 1382.72), (316.80, 1382.72), (316.80, 1585.04), (173.04, 1585.04))
+    floor_obj = LiveCanonicalFloorSurfaceObject(
+        canonical_floor_id=OFFICE_PHYSICAL_FLOOR_ID,
+        physical_floor_surface_id=OFFICE_PHYSICAL_FLOOR_ID,
+        room_entity_id=OFFICE_PHYSICAL_ROOM_ID,
+        document_id=MARYBOROUGH_DOCUMENT_ID,
+        revision_id=rev_id,
+        source_sha256=source_sha,
+        snapshot_id=snap_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        polygon_pdf_pts=floor_poly,
+        area_page_pts2=(316.80 - 173.04) * (1585.04 - 1382.72),
+        bounding_wall_ids=("wall_office_x0", "wall_office_x1", "wall_office_y0", "wall_office_y1"),
+        canonical_bounding_wall_ids=("wall_office_x0", "wall_office_x1", "wall_office_y0", "wall_office_y1"),
+        source_room_face_record_id=source_room_face_id,
+        evidence_ids=(source_room_face_id, area_evidence.evidence_id),
+        geometry_complete=True,
+        metric_geometry_complete=True,
+        metric_area_m2=area_m2,
+        metric_area_quantity_id="floor_area_quantity_8bcdc01455538a6a105a",
+        metric_area_authority="documented_dimension",
+        finish_descriptor=None,
+        structural_slab_id=None,
+        physical_floor_surface_identity_resolved=True,
+        commercial_quantity_authority=True,
+    )
+    floors = LiveCanonicalFloorSurfaceComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_canonical_floor_surface_resolved",),
+        floors=(floor_obj,),
+        source_pages=(7,),
+    )
+
+    finish_prod = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+        correspondence_records=(cr,),
+        page_ids=("7", "11"),
+    )
+    finish_res = finish_prod.publish()
+    if (
+        finish_res.status != EvidenceResolutionStatus.CORROBORATED
+        or not finish_res.quantities
+    ):
+        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+    floors = enrich_live_canonical_floor_finishes(floors, finish_res)
+    claim = LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_physical_net_wall_resolved",),
+        quantity_m2=None,
+        source_pages=(7, 11),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_wall_reason_codes=(),
+        canonical_wall_source_pages=(7,),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=floors.floors,
+        canonical_floor_status=floors.status,
+        canonical_floor_reason_codes=floors.reason_codes,
+        canonical_floor_source_pages=floors.source_pages,
+        canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_room_reason_codes=(),
+        canonical_room_source_pages=(7,),
+        external_wall_ids=(),
+        evidence_ids=(),
+        quantity_id=None,
+        confidence=1.0,
+        publication=None,
+        floor_finish_quantity_evidence=tuple(finish_res.quantities),
+    )
+    rows = project_live_floor_finish_customer_rows(claim, workspace_id=workspace_id, project_id=MARYBOROUGH_PROJECT_ID)
+    traces_map = build_live_floor_finish_area_source_traces(claim, workspace_id=workspace_id, project_id=MARYBOROUGH_PROJECT_ID)
+    traces = tuple(traces_map.values())
+    sealed = seal_live_floor_finish_area_run(claim, workspace_id=workspace_id, project_id=MARYBOROUGH_PROJECT_ID)
+    verify_sealed_customer_output(sealed, rows)
 
     return MaryboroughCustomerResult(
         status="FIRM_SOURCE_CUSTOMER_TO_REVIEW",
         reason_codes=("source_owned_physical_quantity_resolved",),
-        quantities=(q,),
-        traces=(tr,),
+        quantities=finish_res.quantities,
+        traces=traces,
         sealed_run=sealed,
         customer_rows=rows,
-        identity_map_bindings=bindings,
     )
