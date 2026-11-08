@@ -159,7 +159,10 @@ def produce_all_source_roles(
     *, project_id: str, source_dir: Path, output_dir: Path,
     family_group: str = "all", timeout_min: int = 180,
     max_private_gb: float = 10, min_free_commit_gb: float = 3,
+    record_native_source_input_coverage: bool = False,
 ) -> dict[str, Any]:
+    if type(record_native_source_input_coverage) is not bool:
+        raise ValueError("native source input coverage audit must be an explicit boolean")
     if family_group not in ("all", "core", "surfaces", "floor_area"):
         raise ValueError("invalid canonical source producer family")
     if (
@@ -190,11 +193,30 @@ def produce_all_source_roles(
         "official_four_project_accuracy": None,
         "status": "INCOMPLETE",
     }
+    if record_native_source_input_coverage:
+        from tools.gpt3_native_source_execution_coverage import (
+            build_native_source_execution_coverage,
+            verify_native_source_execution_coverage,
+        )
+        from tools.gpt3_original_source_preflight import _stable_original_digest
+        # Input coverage is separate from quantity-seal coverage. Persist an
+        # unverified attempt before decoding; failures cannot leave a success.
+        report["native_source_input_coverage_verified"] = False
+        _write_summary(output_dir / "SOURCE_ROLE_STATUS.json", report)
     sealed: list[Path] = []
     customer_rows: list[dict] = []
     for index, role in enumerate(roster):
         role_dir = output_dir / ("source_role_%02d" % (index + 1))
         role_dir.mkdir(parents=True)
+        native_input = None
+        if record_native_source_input_coverage:
+            native_digest, native_source_identity = _stable_original_digest(role["path"])
+            if native_digest != role["sha256"]:
+                raise ValueError("native source input changed before role production")
+            native_input = build_native_source_execution_coverage(
+                pdf_path=role["path"], expected_sha256=role["sha256"],
+                expected_page_count=role["page_count"],
+            )
         # The immutable roster already proved this PDF hash and page count.
         # Select the one source-specific original issuer by source ownership,
         # not by project name, filename, expected item or frozen quantity.
@@ -213,6 +235,16 @@ def produce_all_source_roles(
             max_private_mb=int(max_private_gb * 1024),
             min_free_commit_mb=int(min_free_commit_gb * 1024),
         )
+        if record_native_source_input_coverage:
+            # Reconstruct coverage after the real child. Never attach a
+            # borrowed, modified or stale pre-process input receipt.
+            native_input = verify_native_source_execution_coverage(
+                native_input, pdf_path=role["path"],
+                expected_sha256=role["sha256"], expected_page_count=role["page_count"],
+            )
+            final_digest, final_identity = _stable_original_digest(role["path"])
+            if final_digest != role["sha256"] or final_identity != native_source_identity:
+                raise ValueError("native source input changed during role production")
         measured = usage if type(usage) is dict else {}
         safe_usage = {}
         for key in ("peak_working_set_kb", "peak_private_kb", "min_system_free_commit_kb"):
@@ -227,6 +259,9 @@ def produce_all_source_roles(
             "customer_first_failure": None,
             "resource_usage": safe_usage,
         }
+        if record_native_source_input_coverage:
+            row["native_source_input_coverage"] = native_input
+            row["native_source_input_coverage_verified"] = True
         if rc == 0 and status == "COMPLETED":
             summary_file = role_dir / "production_summary.json"
             if summary_file.is_file():
@@ -299,6 +334,12 @@ def produce_all_source_roles(
         # Only original roles that produce a genuine, individually authentic
         # run are allowed in the cross-document signer. Missing roles veto
         # aggregate publication: do not stuff their SHA into an envelope.
+    if record_native_source_input_coverage:
+        report["native_source_input_coverage_verified"] = (
+            len(report["roles"]) == len(roster)
+            and all(row.get("native_source_input_coverage_verified") is True
+                    for row in report["roles"])
+        )
     if len(sealed) == len(roster):
         combined = combine_sealed_run_files(sealed, project_id=project_id)
         expected = {x["sha256"] for x in roster}
@@ -337,20 +378,29 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--timeout-min", type=int, default=180)
     p.add_argument("--max-private-gb", type=float, default=10)
     p.add_argument("--min-free-commit-gb", type=float, default=3)
+    p.add_argument(
+        "--record-native-source-input-coverage", action="store_true",
+        help="Opt in to native original-page input audit; does not complete quantity seals or permit scoring",
+    )
     args = p.parse_args(argv)
     report = produce_all_source_roles(
         project_id=args.project_id, source_dir=args.source_dir,
         output_dir=args.output_dir, family_group=args.family_group,
         timeout_min=args.timeout_min, max_private_gb=args.max_private_gb,
         min_free_commit_gb=args.min_free_commit_gb,
+        **({"record_native_source_input_coverage": True}
+           if args.record_native_source_input_coverage else {}),
     )
-    print(json.dumps({
+    console = {
         "status": report["status"],
         "project_id": report["project_id"],
         "sealed_roles": sum(row["sealed"] for row in report["roles"]),
         "required_roles": report["expected_source_document_roles"],
         "official_four_project_accuracy": None,
-    }, sort_keys=True))
+    }
+    if args.record_native_source_input_coverage:
+        console["native_source_input_coverage_verified"] = report["native_source_input_coverage_verified"]
+    print(json.dumps(console, sort_keys=True))
     return 0 if report["source_role_coverage_verified"] else 2
 
 
