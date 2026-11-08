@@ -1101,10 +1101,6 @@ def _authenticate_p11_office_dimension_witness_box(
     if len(w_office) != 1 or len(w_v_dim) != 1 or len(w_h_dim) != 1:
         return None
 
-    pts_per_mm_1_50 = 72.0 / (25.4 * 50.0)
-    expected_dy = dim_v_val_mm * pts_per_mm_1_50
-    expected_dx = dim_h_val_mm * pts_per_mm_1_50
-
     lines_sup = build_lines(support_segments, min_len=1.0)
     index_sup = LineIndex(lines_sup)
 
@@ -1116,9 +1112,22 @@ def _authenticate_p11_office_dimension_witness_box(
         if abs(sx2 - sx1) < AXIS_TOL and 155.0 <= sx1 <= 159.0:
             ylo, yhi = min(sy1, sy2), max(sy1, sy2)
             v_all_on_x.append((sx1, ylo, yhi))
-            if 1370.0 <= ylo < yhi <= 1600.0 and abs((yhi - ylo) - expected_dy) <= 0.25:
-                v_shafts.append((sx1, ylo, yhi))
-    if not v_shafts:
+            if 1370.0 <= ylo < yhi <= 1600.0 and (yhi - ylo) >= 150.0:
+                has_ylo = any(
+                    lo <= sx1 - 5.0 and hi >= sx1 + 5.0
+                    for ky in index_sup.near("H", ylo, 0.15)
+                    for lo, hi in lines_sup["H"][ky]
+                )
+                has_yhi = any(
+                    lo <= sx1 - 5.0 and hi >= sx1 + 5.0
+                    for ky in index_sup.near("H", yhi, 0.15)
+                    for lo, hi in lines_sup["H"][ky]
+                )
+                if has_ylo and has_yhi:
+                    v_shafts.append((sx1, ylo, yhi))
+
+    # Reject missing or ambiguous (> 1) vertical dimension shafts
+    if len(v_shafts) != 1:
         return None
     x_dim, box_y0, box_y1 = v_shafts[0]
 
@@ -1134,20 +1143,6 @@ def _authenticate_p11_office_dimension_witness_box(
     if not (has_top_wall_tick and has_bot_wall_tick):
         return None
 
-    # Require horizontal witness lines at box_y0 and box_y1 crossing x_dim
-    has_y0_witness = any(
-        lo <= x_dim - 5.0 and hi >= x_dim + 5.0
-        for ky in index_sup.near("H", box_y0, 0.08)
-        for lo, hi in lines_sup["H"][ky]
-    )
-    has_y1_witness = any(
-        lo <= x_dim - 5.0 and hi >= x_dim + 5.0
-        for ky in index_sup.near("H", box_y1, 0.08)
-        for lo, hi in lines_sup["H"][ky]
-    )
-    if not (has_y0_witness and has_y1_witness):
-        return None
-
     # 2. Authenticate horizontal dimension shaft (2536) on y_dim ~= 2009.60 and its witness lines
     h_shafts: list[tuple[float, float, float]] = []
     h_all_on_y: list[tuple[float, float, float]] = []
@@ -1156,9 +1151,22 @@ def _authenticate_p11_office_dimension_witness_box(
         if abs(sy2 - sy1) < AXIS_TOL and 2007.5 <= sy1 <= 2011.5:
             xlo, xhi = min(sx1, sx2), max(sx1, sx2)
             h_all_on_y.append((sy1, xlo, xhi))
-            if 245.0 <= xlo < xhi <= 405.0 and abs((xhi - xlo) - expected_dx) <= 0.25:
-                h_shafts.append((sy1, xlo, xhi))
-    if not h_shafts:
+            if 245.0 <= xlo < xhi <= 405.0 and (xhi - xlo) >= 100.0:
+                has_xlo = any(
+                    lo <= sy1 - 5.0 and hi >= sy1 + 5.0
+                    for kx in index_sup.near("V", xlo, 0.15)
+                    for lo, hi in lines_sup["V"][kx]
+                )
+                has_xhi = any(
+                    lo <= sy1 - 5.0 and hi >= sy1 + 5.0
+                    for kx in index_sup.near("V", xhi, 0.15)
+                    for lo, hi in lines_sup["V"][kx]
+                )
+                if has_xlo and has_xhi:
+                    h_shafts.append((sy1, xlo, xhi))
+
+    # Reject missing or ambiguous (> 1) horizontal dimension shafts
+    if len(h_shafts) != 1:
         return None
     y_dim, box_x0, box_x1 = h_shafts[0]
 
@@ -1174,18 +1182,16 @@ def _authenticate_p11_office_dimension_witness_box(
     if not (has_left_wall_tick and has_right_wall_tick):
         return None
 
-    # Require vertical witness lines at box_x0 and box_x1 crossing y_dim
-    has_x0_witness = any(
-        lo <= y_dim - 5.0 and hi >= y_dim + 5.0
-        for kx in index_sup.near("V", box_x0, 0.08)
-        for lo, hi in lines_sup["V"][kx]
-    )
-    has_x1_witness = any(
-        lo <= y_dim - 5.0 and hi >= y_dim + 5.0
-        for kx in index_sup.near("V", box_x1, 0.08)
-        for lo, hi in lines_sup["V"][kx]
-    )
-    if not (has_x0_witness and has_x1_witness):
+    # Derive scale from both shafts and verify pair consistency (matching _figured_pair_scale_consistent)
+    scale_v = (box_y1 - box_y0) / dim_v_val_mm
+    scale_h = (box_x1 - box_x0) / dim_h_val_mm
+    if max(scale_v, scale_h) <= 0.0:
+        return None
+    if abs(scale_v - scale_h) / max(scale_v, scale_h) > 0.005:
+        return None
+
+    nominal_scale_ratio = (scale_v * 25.4) / 72.0
+    if not (0.018 <= nominal_scale_ratio <= 0.022):
         return None
 
     return (round(box_x0, 2), round(box_y0, 2), round(box_x1, 2), round(box_y1, 2))
@@ -1738,11 +1744,19 @@ def compose_authenticated_cross_sheet_room_and_floor(
     correspondence: SourceCrossViewFloorCorrespondenceRecord,
     room_label: str = "OFFICE",
     viewport_id: str = "VIEWPORT_P07_A110_PLAN",
-) -> tuple[Any, Any]:
-    """Compose target-sheet canonical room and floor surface from a corroborated correspondence record."""
+) -> tuple[Any, Any, Any]:
+    """Compose target-sheet canonical room, floor surface, and finished walls from a corroborated correspondence record."""
     from pb_live_canonical_room_composition import (
         LiveCanonicalRoomComposition,
         LiveCanonicalRoomObject,
+    )
+    from pb_live_canonical_wall_composition import (
+        LiveCanonicalWallComposition,
+    )
+    from pb_live_external_physical_net_wall_publication import (
+        CANONICAL_WALL_OBJECT_SCHEMA_VERSION,
+        CanonicalWallPlanMember,
+        LiveCanonicalWallObject,
     )
     from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
 
@@ -1771,6 +1785,83 @@ def compose_authenticated_cross_sheet_room_and_floor(
         f"cross_sheet_wall_{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}"
         for w in correspondence.cross_sheet_wall_equivalences
     )
+
+    canonical_wall_objects = []
+    candidate_to_canonical = {}
+    for w in correspondence.cross_sheet_wall_equivalences:
+        wall_id = f"cross_sheet_wall_{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}"
+        cand_id = f"candidate_{wall_id}"
+        candidate_to_canonical[cand_id] = wall_id
+        if w.side_name == "x0":
+            pt_a, pt_b = (tx0, ty0), (tx0, ty1)
+        elif w.side_name == "x1":
+            pt_a, pt_b = (tx1, ty0), (tx1, ty1)
+        elif w.side_name == "y0":
+            pt_a, pt_b = (tx0, ty0), (tx1, ty0)
+        else:
+            pt_a, pt_b = (tx0, ty1), (tx1, ty1)
+
+        plan_member = CanonicalWallPlanMember(
+            wall_candidate_id=cand_id,
+            physical_identity_id=wall_id,
+            viewport_id=viewport_id,
+            centerline_pts=(pt_a, pt_b),
+            curve_control_pts=(),
+            is_curved=False,
+            thickness_m=None,
+            length_m=None,
+            level_id=None,
+            end_node_ids=(f"node_{wall_id}_start", f"node_{wall_id}_end"),
+            junction_types=("corner", "corner"),
+            source_primitive_ids=(f"primitive_{wall_id}",),
+            supporting_evidence_ids=(correspondence.record_id,),
+            coordinate_space="source_page_points",
+        )
+        opening_ids = ()
+        if w.doorway_transition is not None:
+            opening_ids = (f"opening_{w.doorway_transition.door_callout}",)
+
+        wall_obj = LiveCanonicalWallObject(
+            canonical_wall_id=wall_id,
+            physical_wall_id=wall_id,
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=correspondence.target_page_id,
+            decision_scope_id=f"cross_sheet_scope_p{correspondence.target_page_id}",
+            wall_local_frame_id=None,
+            role="internal_finished_wall_face",
+            coordinate_unit="source_page_points",
+            length_m=None,
+            height_m=None,
+            gross_area_m2=None,
+            net_area_m2=None,
+            gross_polygon_wkb_hex=None,
+            net_polygon_wkb_hex=None,
+            member_wall_candidate_ids=(cand_id,),
+            plan_members=(plan_member,),
+            level_ids=(),
+            opening_identity_ids=opening_ids,
+            opening_voids=(),
+            gross_geometry_record_id=None,
+            whole_wall_role_record_id=None,
+            evidence_ids=(correspondence.record_id,),
+            schema_version=CANONICAL_WALL_OBJECT_SCHEMA_VERSION,
+            identity_status="physical_resolved",
+            physical_identity_resolved=True,
+        )
+        canonical_wall_objects.append(wall_obj)
+
+    walls = LiveCanonicalWallComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_canonical_wall_composition_resolved",),
+        walls=tuple(canonical_wall_objects),
+        source_pages=(int(correspondence.target_page_id),),
+        unresolved_wall_candidate_ids=(),
+        candidate_to_canonical_wall_id=candidate_to_canonical,
+    )
+
     room_obj = LiveCanonicalRoomObject(
         canonical_room_id=correspondence.physical_room_id,
         physical_room_id=correspondence.physical_room_id,
@@ -1802,7 +1893,7 @@ def compose_authenticated_cross_sheet_room_and_floor(
         source_pages=(int(correspondence.target_page_id),),
     )
     floors = compose_live_canonical_floor_surfaces(rooms)
-    return rooms, floors
+    return rooms, floors, walls
 
 
 def enrich_cross_sheet_floor_with_documented_area(

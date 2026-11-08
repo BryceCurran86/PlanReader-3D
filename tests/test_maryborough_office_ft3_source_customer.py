@@ -556,3 +556,228 @@ def test_authenticated_d15_doorway_transition_details_on_genuine_pdf(maryborough
     assert d15.threshold_aligned_with_internal_face is True
     assert d15.threshold_deduction_m2 == 0.0
 
+
+def test_claim_with_zero_canonical_walls_fails_closed():
+    """Prove that a LivePhysicalNetWallClaim with canonical_walls=() cannot project rows or seal."""
+    from copy import copy
+    from dataclasses import replace
+    from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+    from pb_live_canonical_room_composition import LiveCanonicalRoomObject
+    from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
+    from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    from pb_migration_contracts import QuantityEvidence
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+    from tests.test_live_floor_finish_area_source_closed_export import _claim, _floor, _quantity
+
+    floor = _floor()
+    qty = _quantity()
+    room = LiveCanonicalRoomObject(
+        canonical_room_id=floor.room_entity_id,
+        physical_room_id=floor.room_entity_id,
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        viewport_id=floor.viewport_id,
+        decision_scope_id="scope-1",
+        polygon_pdf_pts=floor.polygon_pdf_pts,
+        bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        canonical_bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        wall_relationships_complete=True,
+        area_page_pts2=floor.area_page_pts2,
+        source_room_face_record_id=floor.source_room_face_record_id,
+        evidence_ids=("ev-1",),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+    )
+    bad_claim = replace(
+        _claim(floor),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_rooms=(room,),
+        canonical_walls=(),
+        floor_finish_quantity_evidence=(qty,),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="canonical walls missing"):
+        project_live_floor_finish_customer_rows(bad_claim, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="canonical walls missing"):
+        seal_live_floor_finish_area_run(bad_claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("side_name", ["x0", "x1", "y0", "y1"])
+def test_missing_any_single_finished_wall_face_abstains(maryborough_pdf_path, monkeypatch, side_name):
+    """Prove that missing even one of the 4 internal finished wall faces on Page 7 prevents a FIRM quantity."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def strip_single_face_drawings(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 6:
+            return drawings
+        filtered = []
+        for d in drawings:
+            items = d.get("items", ())
+            drop = False
+            for it in items:
+                if not it:
+                    continue
+                op = it[0]
+                if op == "l":
+                    p1, p2 = it[1:3]
+                    x_min, x_max = min(float(p1.x), float(p2.x)), max(float(p1.x), float(p2.x))
+                    y_min, y_max = min(float(p1.y), float(p2.y)), max(float(p1.y), float(p2.y))
+                elif op == "re":
+                    r = it[1]
+                    x_min, x_max = min(float(r.x0), float(r.x1)), max(float(r.x0), float(r.x1))
+                    y_min, y_max = min(float(r.y0), float(r.y1)), max(float(r.y0), float(r.y1))
+                else:
+                    continue
+
+                if side_name == "x0" and (abs(x_min - 173.04) < 1.0 or abs(x_max - 173.04) < 1.0):
+                    if not (y_max < 1382.72 or y_min > 1585.04):
+                        drop = True
+                        break
+                elif side_name == "x1" and (abs(x_min - 316.80) < 1.0 or abs(x_max - 316.80) < 1.0):
+                    if not (y_max < 1382.72 or y_min > 1585.04):
+                        drop = True
+                        break
+                elif side_name == "y0" and (abs(y_min - 1382.72) < 1.0 or abs(y_max - 1382.72) < 1.0):
+                    if not (x_max < 173.04 or x_min > 316.80):
+                        drop = True
+                        break
+                elif side_name == "y1" and (abs(y_min - 1585.04) < 1.0 or abs(y_max - 1585.04) < 1.0):
+                    if not (x_max < 173.04 or x_min > 316.80):
+                        drop = True
+                        break
+            if not drop:
+                filtered.append(d)
+        return filtered
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", strip_single_face_drawings)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_valid_d15_schedule_row_without_physical_threshold_line_abstains(maryborough_pdf_path, monkeypatch):
+    """Prove that a valid D15 schedule entry without a physically authenticated threshold also ABSTAINS."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def strip_p7_threshold_line(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 6:
+            return drawings
+        filtered = []
+        for d in drawings:
+            items = d.get("items", ())
+            drop = False
+            for it in items:
+                if not it:
+                    continue
+                op = it[0]
+                if op == "l":
+                    p1, p2 = it[1:3]
+                    if abs(float(p1.y) - 1383.20) < 0.15 and abs(float(p2.y) - 1383.20) < 0.15:
+                        xlo, xhi = min(float(p1.x), float(p2.x)), max(float(p1.x), float(p2.x))
+                        if 176.0 <= xlo and xhi <= 235.0:
+                            drop = True
+                            break
+                elif op == "re":
+                    r = it[1]
+                    if abs(float(r.y0) - 1383.20) < 0.15 or abs(float(r.y1) - 1383.20) < 0.15:
+                        xlo, xhi = min(float(r.x0), float(r.x1)), max(float(r.x0), float(r.x1))
+                        if 176.0 <= xlo and xhi <= 235.0:
+                            drop = True
+                            break
+            if not drop:
+                filtered.append(d)
+        return filtered
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", strip_p7_threshold_line)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_ambiguous_dimension_witness_shafts_abstains(maryborough_pdf_path, monkeypatch):
+    """Prove that two plausible vertical dimension shafts on Page 11 cause witness ambiguity and ABSTAIN."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def inject_second_vertical_shaft(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 10:
+            return drawings
+        injected = []
+        for d in drawings:
+            injected.append(d)
+            for it in d.get("items", ()):
+                if it and it[0] == "l":
+                    p1, p2 = it[1:3]
+                    if abs(float(p1.x) - 156.96) < 0.2 and abs(float(p2.x) - 156.96) < 0.2:
+                        injected.append({
+                            "items": [("l", fitz.Point(157.50, p1.y), fitz.Point(157.50, p2.y))],
+                            "rect": fitz.Rect(157.0, min(p1.y, p2.y), 158.0, max(p1.y, p2.y)),
+                        })
+        return injected
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", inject_second_vertical_shaft)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_inconsistent_dimension_witness_scale_abstains(maryborough_pdf_path, monkeypatch):
+    """Prove that mutually inconsistent vertical and horizontal shaft lengths fail scale check and ABSTAIN."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def alter_vertical_shaft_length(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 10:
+            return drawings
+        modified = []
+        for d in drawings:
+            new_items = []
+            for it in d.get("items", ()):
+                if it and it[0] == "l":
+                    p1, p2 = it[1:3]
+                    if abs(float(p1.x) - 156.96) < 0.2 and abs(float(p2.x) - 156.96) < 0.2:
+                        y_min = min(p1.y, p2.y)
+                        y_max = max(p1.y, p2.y) - 15.0
+                        new_items.append(("l", fitz.Point(p1.x, y_min), fitz.Point(p1.x, y_max)))
+                    else:
+                        new_items.append(it)
+                else:
+                    new_items.append(it)
+            modified.append({**d, "items": new_items})
+        return modified
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", alter_vertical_shaft_length)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+

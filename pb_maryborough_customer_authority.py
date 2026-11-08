@@ -199,10 +199,10 @@ def issue_all_original_maryborough_customer_quantities(
     upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id)
     cached_upstream = _UPSTREAM_CACHE.get(upstream_key) if upstream_cache_ok else None
     if cached_upstream is not None:
-        rooms, floors, finish_res = cached_upstream
+        rooms, floors, walls, finish_res = cached_upstream
     else:
         try:
-            rooms, floors = compose_authenticated_cross_sheet_room_and_floor(
+            rooms, floors, walls = compose_authenticated_cross_sheet_room_and_floor(
                 published=published,
                 correspondence=cr,
                 room_label="OFFICE",
@@ -214,8 +214,10 @@ def issue_all_original_maryborough_customer_quantities(
         if (
             rooms.status is not EvidenceResolutionStatus.CORROBORATED
             or floors.status is not EvidenceResolutionStatus.CORROBORATED
+            or walls.status is not EvidenceResolutionStatus.CORROBORATED
             or not rooms.rooms
             or not floors.floors
+            or len(walls.walls) != 4
         ):
             return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
@@ -259,17 +261,17 @@ def issue_all_original_maryborough_customer_quantities(
 
         floors = enrich_live_canonical_floor_finishes(floors, finish_res)
         if upstream_cache_ok:
-            _UPSTREAM_CACHE[upstream_key] = (rooms, floors, finish_res)
+            _UPSTREAM_CACHE[upstream_key] = (rooms, floors, walls, finish_res)
     claim = LivePhysicalNetWallClaim(
         status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=("live_physical_net_wall_resolved",),
         quantity_m2=None,
         source_pages=(7, 11),
-        canonical_walls=(),
-        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
-        canonical_wall_reason_codes=(),
-        canonical_wall_source_pages=(7,),
-        unresolved_wall_candidate_ids=(),
+        canonical_walls=walls.walls,
+        canonical_wall_status=walls.status,
+        canonical_wall_reason_codes=walls.reason_codes,
+        canonical_wall_source_pages=walls.source_pages,
+        unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
         canonical_openings=(),
         canonical_rooms=rooms.rooms,
         canonical_floors=floors.floors,
