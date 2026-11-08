@@ -556,3 +556,36 @@ def test_authenticated_d15_doorway_transition_details_on_genuine_pdf(maryborough
     assert d15.threshold_aligned_with_internal_face is True
     assert d15.threshold_deduction_m2 == 0.0
 
+
+
+def test_no_empty_corrob_wall_claim_can_release_office_customer():
+    """An FT3/source candidate is not physical wall or D15 takeoff authority."""
+    import inspect
+    from pb_maryborough_customer_authority import issue_all_original_maryborough_customer_quantities
+    text = inspect.getsource(issue_all_original_maryborough_customer_quantities)
+    assert "LivePhysicalNetWallClaim(" not in text
+    assert "canonical_walls=()" not in text
+    assert "canonical_wall_status=EvidenceResolutionStatus.CORROBORATED" not in text
+    assert 'return _blocked("source_owned_finished_wall_and_d15_claim_unavailable")' in text
+    assert "project_live_floor_finish_customer_rows(" not in text
+    assert "seal_live_floor_finish_area_run(" not in text
+
+
+def test_maryborough_missing_original_and_untrusted_workspace_remain_abstained(tmp_path):
+    """No source/issuer shortcut may accidentally publish a customer quantity."""
+    path = tmp_path / "missing.pdf"
+    result = authority.issue_all_original_maryborough_customer_quantities(path)
+    assert result.status == "ABSTAIN"
+    assert result.quantities == result.traces == result.customer_rows == ()
+    assert result.sealed_run is None
+    bad = authority.issue_all_original_maryborough_customer_quantities(path, workspace_id=True)
+    assert bad.status == "ABSTAIN"
+    assert bad.reason_codes == ("authenticated_workspace_unavailable",)
+
+
+def test_valid_sha_original_still_does_not_bypass_missing_physical_wall_source(maryborough_pdf_path):
+    """Original words, FT3 and D15 alone must not release missing physical walls."""
+    result = authority.issue_all_original_maryborough_customer_quantities(maryborough_pdf_path)
+    assert result.status == "ABSTAIN"
+    assert result.quantities == result.traces == result.customer_rows == ()
+    assert result.sealed_run is None
