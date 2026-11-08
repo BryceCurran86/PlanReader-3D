@@ -22,7 +22,7 @@ gate. It is noncommercial and diagnostic only.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -30,6 +30,10 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 ROOM_WET_DRY_SCHEMA_VERSION = "1.0.0"
 ROOM_WET_DRY_RULE_SET_ID = "room_wet_dry_label_rules"
 ROOM_WET_DRY_RULE_SET_VERSION = "1.0.0"
+
+# A source classification is a producer-authored diagnostic receipt, not an
+# arbitrary caller-constructed decision about wall lining.
+_RECORD_SEAL = object()
 
 CLASS_WET_AREA = "wet_area"
 CLASS_DRY_AREA = "dry_area"
@@ -128,6 +132,7 @@ class RoomWetDryClassification:
     commercial_projection_allowed: bool = False
     grants_finish_or_metric_authority: bool = False
     diagnostic_only: bool = True
+    _seal: object = field(default=None, repr=False, compare=False)
 
 
 def _clean(value: Any) -> Optional[str]:
@@ -182,12 +187,64 @@ def _classify_one(room: Any) -> RoomWetDryClassification:
         rule_set_version=ROOM_WET_DRY_RULE_SET_VERSION,
         status=EvidenceResolutionStatus.CORROBORATED if classified else EvidenceResolutionStatus.ABSTAINED,
         reason_codes=(reason,),
+        _seal=_RECORD_SEAL,
     )
 
 
 def classify_room_wet_dry(rooms: Sequence[Any]) -> tuple[RoomWetDryClassification, ...]:
     """One record per room, ordered by record id. Never reads words; only the already-verified room label."""
     return tuple(sorted((_classify_one(room) for room in rooms), key=lambda item: item.record_id))
+
+
+def _producer_issued_classification_is_valid(item: Any) -> bool:
+    """Require an unmodified classification from the existing label-rule issuer.
+
+    Exact matching face/source ids do not authorize caller-provided DRY/WET
+    state. Validate record origin and rule/lineage binding before the wall
+    finished-face consumer uses this diagnostic. This does not grant a FIRM
+    floor, wall or finish.
+    """
+    if type(item) is not RoomWetDryClassification or item._seal is not _RECORD_SEAL:
+        return False
+    if (
+        item.schema_version != ROOM_WET_DRY_SCHEMA_VERSION
+        or item.rule_set_id != ROOM_WET_DRY_RULE_SET_ID
+        or item.rule_set_version != ROOM_WET_DRY_RULE_SET_VERSION
+        or item.status is not EvidenceResolutionStatus.CORROBORATED
+        or item.reason_codes != (REASON_CLASSIFIED,)
+        or item.classification not in (CLASS_WET_AREA, CLASS_DRY_AREA)
+        or item.takeoff_eligible is not False
+        or item.commercial_projection_allowed is not False
+        or item.grants_finish_or_metric_authority is not False
+        or item.diagnostic_only is not True
+    ):
+        return False
+    if any(_clean(getattr(item, field, None)) is None for field in _SCOPE_FIELDS):
+        return False
+    if (
+        _clean(item.canonical_room_id) is None
+        or _clean(item.physical_room_id) is None
+        or _clean(item.room_label_binding_record_id) is None
+        or type(item.room_label_evidence_ids) is not tuple
+        or not item.room_label_evidence_ids
+        or any(_clean(x) is None for x in item.room_label_evidence_ids)
+    ):
+        return False
+    if not any(
+        rule.rule_id == item.rule_id and rule.classification == item.classification
+        for rule in WET_DRY_ROOM_LABEL_RULES
+    ):
+        return False
+    expected_id = stable_contract_id("room_wet_dry", {
+        **{field: getattr(item, field) for field in _SCOPE_FIELDS},
+        "canonical_room_id": item.canonical_room_id,
+        "room_label_binding_record_id": item.room_label_binding_record_id,
+        "room_label_evidence_ids": list(item.room_label_evidence_ids),
+        "rule_set_id": ROOM_WET_DRY_RULE_SET_ID,
+        "rule_set_version": ROOM_WET_DRY_RULE_SET_VERSION,
+        "rule_id": item.rule_id,
+    })
+    return item.record_id == expected_id
 
 
 def wet_area_status_by_face_record(
@@ -219,9 +276,7 @@ def wet_area_status_by_face_record(
             continue
         classes = {
             item.classification for item in classifications
-            if type(item) is RoomWetDryClassification
-            and item.status is EvidenceResolutionStatus.CORROBORATED
-            and item.classification in (CLASS_WET_AREA, CLASS_DRY_AREA)
+            if _producer_issued_classification_is_valid(item)
             and all(getattr(item, field) == value for field, value in record_scope.items())
         }
         out[record_id] = (classes == {CLASS_WET_AREA}) if len(classes) == 1 else None
