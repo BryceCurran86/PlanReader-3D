@@ -149,6 +149,37 @@ def test_forged_abstention_cannot_be_upgraded_into_dry_or_wet():
         assert _apply(forged) == {"face-17": None}
 
 
+def test_recomputed_public_stable_id_and_matching_rule_still_cannot_forge_record():
+    # A public digest and private *class marker* are both copyable by
+    # dataclasses.replace. Only the object registered by the label issuer is
+    # authorized. This regression failed on the old #4243 head.
+    from pb_migration_contracts import stable_contract_id
+
+    source = _class()
+    forged_rule = "wet:bathroom"
+    payload = {
+        **_SCOPE,
+        "canonical_room_id": source.canonical_room_id,
+        "physical_room_id": source.physical_room_id,
+        "room_label_binding_record_id": source.room_label_binding_record_id,
+        "room_label_evidence_ids": list(source.room_label_evidence_ids),
+        "rule_set_id": source.rule_set_id,
+        "rule_set_version": source.rule_set_version,
+        "rule_id": forged_rule,
+    }
+    counterfeit_id = stable_contract_id("room_wet_dry", payload)
+    counterfeit = replace(
+        source,
+        classification=CLASS_WET_AREA,
+        rule_id=forged_rule,
+        record_id=counterfeit_id,
+    )
+    assert counterfeit.record_id == counterfeit_id
+    assert counterfeit.classification == CLASS_WET_AREA
+    assert _apply(counterfeit) == {"face-17": None}
+    assert _apply(source) == {"face-17": False}
+
+
 def test_unrelated_faces_and_duplicate_rivals_remain_fail_closed():
     dry, wet = _class(), _class("ENS")
     assert wet_area_status_by_face_record((dry, wet), (_face(),)) == {
