@@ -422,3 +422,137 @@ def test_foreign_revision_resolution_abstains():
         canonical_floors=canonical_floors,
     )
     assert result == ()
+
+
+def test_no_consumer_constructed_authority_in_maryborough_or_floor_finish_modules():
+    """Verify consumer modules do not import _RECORD_SEAL or fabricate upstream records."""
+    auth_src = Path(authority.__file__).read_text(encoding="utf-8")
+    assert "_RECORD_SEAL" not in auth_src
+    assert "CrossViewRoomAreaRecord(" not in auth_src
+
+    import pb_cross_view_floor_finish_authority as finish_mod
+    finish_src = Path(finish_mod.__file__).read_text(encoding="utf-8")
+    assert "SourceMaterialOccurrenceRecord(" not in finish_src
+    assert "SourceMaterialDefinitionRecord(" not in finish_src
+
+
+def test_d15_door_schedule_off_table_mention_alone_abstains(maryborough_pdf_path, monkeypatch):
+    """Removing the structured D15 schedule row (Block 139) while keeping off-table D15 notes abstains."""
+    original_get_text = fitz.Page.get_text
+
+    def selective_get_text(page_self, *args, **kwargs):
+        words = original_get_text(page_self, *args, **kwargs)
+        if (kwargs.get("text") == "words" or (args and args[0] == "words")) and page_self.number == 27:
+            # Remove only the structured schedule table row for D15 (x >= 970, block 139),
+            # leaving the off-table 'D14, D15, D28' note at x=849.5 intact.
+            return [
+                w for w in words
+                if not (float(w[0]) >= 970.0 and int(w[5]) == 139)
+            ]
+        return words
+
+    monkeypatch.setattr(fitz.Page, "get_text", selective_get_text)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+
+
+def test_d15_physical_doorway_threshold_or_tile_boundary_missing_abstains(maryborough_pdf_path, monkeypatch):
+    """Removing physical doorway threshold/leaf on Page 7 or tile termination on Page 11 abstains."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def strip_p7_doorway_threshold_and_leaf(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 6:
+            return drawings
+        filtered = []
+        for d in drawings:
+            items = d.get("items", ())
+            drop = False
+            for it in items:
+                if it and it[0] == "l":
+                    p1, p2 = it[1:3]
+                    # Drop the D15 door leaf at x=179.28, y=[1324.64, 1376.72]
+                    if abs(float(p1.x) - 179.28) < 0.5 and abs(float(p2.x) - 179.28) < 0.5:
+                        drop = True
+                        break
+            if not drop:
+                filtered.append(d)
+        return filtered
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", strip_p7_doorway_threshold_and_leaf)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+
+
+def test_dimension_words_without_witness_lines_abstain(maryborough_pdf_path, monkeypatch):
+    """Keeping '3570' and '2536' words while removing their witness/shaft lines on Page 11 abstains."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def strip_p11_dimension_shaft(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 10:
+            return drawings
+        filtered = []
+        for d in drawings:
+            items = d.get("items", ())
+            drop = False
+            for it in items:
+                if it and it[0] == "l":
+                    p1, p2 = it[1:3]
+                    # Drop vertical dimension shaft at x=156.96
+                    if abs(float(p1.x) - 156.96) < 0.5 and abs(float(p2.x) - 156.96) < 0.5:
+                        drop = True
+                        break
+            if not drop:
+                filtered.append(d)
+        return filtered
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", strip_p11_dimension_shaft)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+
+
+def test_authenticated_d15_doorway_transition_details_on_genuine_pdf(maryborough_pdf_path):
+    """Verify full D15 schedule and physical doorway boundary attributes on genuine Maryborough PDF."""
+    with fitz.open(maryborough_pdf_path) as doc:
+        cr = authenticate_maryborough_office_cross_sheet_correspondence(
+            document_id=authority.MARYBOROUGH_DOCUMENT_ID,
+            revision_id=authority.MARYBOROUGH_REVISION_ID,
+            source_sha256=authority.MARYBOROUGH_SOURCE_SHA256,
+            snapshot_id="snap_verify",
+            canonical_floor_id=authority.OFFICE_PHYSICAL_FLOOR_ID,
+            physical_room_id=authority.OFFICE_PHYSICAL_ROOM_ID,
+            source_room_face_record_id=authority.OFFICE_SOURCE_ROOM_FACE_ID,
+            doc=doc,
+        )
+    assert cr.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(cr.doorway_transitions) == 1
+    d15 = cr.doorway_transitions[0]
+    assert d15.door_callout == "D15"
+    assert d15.scheduled_room_name == "OFFICE"
+    assert d15.door_leaf_type == "SINGLE SWING"
+    assert d15.door_width_mm == 920.0
+    assert d15.door_height_mm == 2040.0
+    assert d15.door_thickness_mm == 40.0
+    assert d15.clear_opening_width_pdf_pt == pytest.approx(52.08, abs=0.05)
+    assert d15.jamb_gap_target_pdf_pts == pytest.approx((177.12, 233.76), abs=0.05)
+    assert d15.jamb_gap_support_pdf_pts == pytest.approx((254.88, 311.76), abs=0.05)
+    assert d15.threshold_inside_face_y_pdf_pt == pytest.approx(1383.2, abs=0.05)
+    assert d15.threshold_aligned_with_internal_face is True
+    assert d15.threshold_deduction_m2 == 0.0
+
