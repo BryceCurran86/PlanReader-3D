@@ -33,10 +33,20 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     COMPETING_FINISH_CODES_IN_BOX,
     REGISTRATION_NOT_UNIQUE,
     BOX_NOT_WALL_BOUNDED,
+    DOORWAY_TRANSITION_UNAVAILABLE,
+    DIMENSION_WITNESS_UNAVAILABLE,
     EvidenceResolutionStatus,
     SourceCrossViewFloorCorrespondenceRecord,
     authenticate_maryborough_office_cross_sheet_correspondence,
+    resolve_cross_sheet_floor_correspondence_for_claim,
 )
+
+VALID_SYNTHETIC_OBSERVATIONS = {
+    "door_observations": [{"callout": "D15"}],
+    "schedule_observations": [{"door_callout": "D15", "door_width_mm": 920.0}],
+    "dimension_witness_observations": [{"code": "3570"}, {"code": "2536"}],
+    "room_label_observations": [{"label": "OFFICE"}],
+}
 
 
 @pytest.fixture
@@ -68,7 +78,7 @@ def test_genuine_maryborough_office_ft3_complete_chain(maryborough_pdf_path):
     assert q.family == "floor_finish_area"
     assert q.value == 9.05352
     assert q.unit == "m2"
-    assert q.status == "FIRM"
+    assert q.status.lower() == "firm"
     assert not q.abstained
     assert authority.OFFICE_PHYSICAL_FLOOR_ID in q.input_entity_ids
 
@@ -216,6 +226,7 @@ def test_competing_finish_marks_in_box_conflicts_and_abstains():
         support_segments=sup_segs,
         target_segments=tgt_segs,
         marks=competing_marks,
+        **VALID_SYNTHETIC_OBSERVATIONS,
     )
     assert cr.status == EvidenceResolutionStatus.CONFLICT
     assert COMPETING_FINISH_CODES_IN_BOX in cr.reason_codes
@@ -243,6 +254,7 @@ def test_missing_wall_bounding_abstains():
         support_segments=sup_segs,
         target_segments=tgt_segs,
         marks=marks,
+        **VALID_SYNTHETIC_OBSERVATIONS,
     )
     assert cr.status == EvidenceResolutionStatus.ABSTAINED
     assert BOX_NOT_WALL_BOUNDED in cr.reason_codes
@@ -277,6 +289,7 @@ def test_shifted_registration_abstains():
         target_segments=tgt_segs,
         marks=marks,
         registration_translation=(-78.0, 0.0),  # expected -78.0 but segments are at 0.0
+        **VALID_SYNTHETIC_OBSERVATIONS,
     )
     assert cr.status == EvidenceResolutionStatus.ABSTAINED
     assert REGISTRATION_NOT_UNIQUE in cr.reason_codes
@@ -326,3 +339,86 @@ def test_conflicting_correspondence_abstains(maryborough_pdf_path, monkeypatch):
     assert result.status == "ABSTAIN"
     assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
     assert result.quantities == ()
+
+
+def test_no_door_observation_abstains():
+    """Verify missing door observation in synthetic test fails closed without bypass."""
+    from tests.test_source_cross_view_floor_correspondence_shadow import support_sheet, TARGET_SHEET
+    marks = [{"code": "FT3", "x": 300.0, "y": 1450.0, "registered_region": True}]
+    obs = dict(VALID_SYNTHETIC_OBSERVATIONS)
+    obs["door_observations"] = []
+    cr = authenticate_maryborough_office_cross_sheet_correspondence(
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="sha1",
+        snapshot_id="snap1",
+        canonical_floor_id="floor1",
+        physical_room_id="room1",
+        source_room_face_record_id="face1",
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        marks=marks,
+        **obs,
+    )
+    assert cr.status == EvidenceResolutionStatus.ABSTAINED
+    assert DOORWAY_TRANSITION_UNAVAILABLE in cr.reason_codes
+    assert not cr.commercial_projection_allowed
+
+
+def test_no_dimension_witness_observation_abstains():
+    """Verify missing dimension witness in synthetic test fails closed."""
+    from tests.test_source_cross_view_floor_correspondence_shadow import support_sheet, TARGET_SHEET
+    marks = [{"code": "FT3", "x": 300.0, "y": 1450.0, "registered_region": True}]
+    obs = dict(VALID_SYNTHETIC_OBSERVATIONS)
+    obs["dimension_witness_observations"] = []
+    cr = authenticate_maryborough_office_cross_sheet_correspondence(
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="sha1",
+        snapshot_id="snap1",
+        canonical_floor_id="floor1",
+        physical_room_id="room1",
+        source_room_face_record_id="face1",
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        marks=marks,
+        **obs,
+    )
+    assert cr.status == EvidenceResolutionStatus.ABSTAINED
+    assert DIMENSION_WITNESS_UNAVAILABLE in cr.reason_codes
+    assert not cr.commercial_projection_allowed
+
+
+def test_foreign_revision_resolution_abstains():
+    """Verify resolve_cross_sheet_floor_correspondence_for_claim fails closed if revision or SHA mismatches."""
+    from types import SimpleNamespace
+    store = SimpleNamespace(
+        source_bytes_by_revision={
+            "rev1": b"%PDF-foreign-content",
+        }
+    )
+    source = SimpleNamespace(_store=store)
+    area_rec = SimpleNamespace(
+        source_room_face_record_id="face1",
+        physical_room_id="room1",
+        source_dimension_page_id="11",
+        room_label="OFFICE",
+    )
+    cross_view_area = SimpleNamespace(records=(area_rec,))
+    floor = SimpleNamespace(
+        source_room_face_record_id="face1",
+        room_entity_id="room1",
+        canonical_floor_id="floor1",
+        page_id="7",
+        revision_id="rev1",
+        source_sha256="expected_sha_that_does_not_match",
+        document_id="doc1",
+        snapshot_id="snap1",
+    )
+    canonical_floors = SimpleNamespace(floors=(floor,))
+    result = resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source,
+        cross_view_area=cross_view_area,
+        canonical_floors=canonical_floors,
+    )
+    assert result == ()

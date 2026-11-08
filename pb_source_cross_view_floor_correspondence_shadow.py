@@ -34,6 +34,13 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 SCHEMA_VERSION = "1.0.0"
 
 # Public Reason Codes
+DOORWAY_TRANSITION_UNAVAILABLE = "doorway_transition_unavailable"
+DIMENSION_WITNESS_UNAVAILABLE = "dimension_witness_unavailable"
+ROOM_LABEL_UNAVAILABLE = "room_label_unavailable"
+DOOR_SCHEDULE_UNAVAILABLE = "door_schedule_unavailable"
+SOURCE_REVISION_BYTES_UNAVAILABLE = "source_revision_bytes_unavailable"
+SOURCE_DIGEST_MISMATCH = "source_digest_mismatch"
+
 SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED = (
     "source_cross_view_floor_correspondence_resolved"
 )
@@ -929,6 +936,10 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     support_segments: Optional[Sequence[Mapping[str, float]]] = None,
     target_segments: Optional[Sequence[Mapping[str, float]]] = None,
     marks: Optional[Sequence[Mapping[str, Any]]] = None,
+    door_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    schedule_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> SourceCrossViewFloorCorrespondenceRecord:
     """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough Office."""
     box_sup = (251.04, 1382.72, 394.80, 1585.04)
@@ -1008,6 +1019,7 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             try:
                 p_sup = doc[int(support_page_id) - 1]
                 p_tgt = doc[int(target_page_id) - 1]
+                p_sched = doc[27] if doc.page_count >= 28 else None
                 # Check for drawing observations (PyMuPDF get_drawings)
                 d_sup = p_sup.get_drawings() or []
                 d_tgt = p_tgt.get_drawings() or []
@@ -1019,8 +1031,47 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
                     target_segments = _extract_segments_from_drawings(d_tgt)
                 if marks is None:
                     marks = _extract_marks_from_page(p_sup)
+
+                # Authenticate required source words
+                w_tgt = p_tgt.get_text("words") or []
+                w_sup = p_sup.get_text("words") or []
+                w_sched = p_sched.get_text("words") if p_sched is not None else []
+
+                tgt_office = any(str(w[4]).strip().upper() == "OFFICE" for w in w_tgt if len(w) >= 5 and 170.0 <= w[0] <= 320.0 and 1380.0 <= w[1] <= 1590.0)
+                tgt_d15 = any(str(w[4]).strip().upper() == door_callout.upper() for w in w_tgt if len(w) >= 5 and 180.0 <= w[0] <= 250.0 and 1360.0 <= w[1] <= 1410.0)
+                sup_office = any(str(w[4]).strip().upper() == "OFFICE" for w in w_sup if len(w) >= 5 and 250.0 <= w[0] <= 400.0 and 1380.0 <= w[1] <= 1590.0)
+                sup_3570 = any(str(w[4]).strip() == "3570" for w in w_sup if len(w) >= 5 and 130.0 <= w[0] <= 160.0 and 1460.0 <= w[1] <= 1510.0)
+                sup_2536 = any(str(w[4]).strip() == "2536" for w in w_sup if len(w) >= 5 and 300.0 <= w[0] <= 340.0 and 2000.0 <= w[1] <= 2040.0)
+                sched_d15 = any(str(w[4]).strip().upper() == door_callout.upper() for w in w_sched if len(w) >= 5)
+
+                if not (tgt_office and tgt_d15 and sup_office and sup_3570 and sup_2536 and sched_d15):
+                    return _abstained(reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE))
             except Exception:
                 return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+        else:
+            # Synthetic caller without doc: requires explicit authenticated observations
+            has_door = door_observations and any(
+                str(d.get("callout") or d.get("door_callout") or "").strip().upper() == door_callout.upper()
+                for d in door_observations if isinstance(d, Mapping)
+            )
+            has_sched = schedule_observations and any(
+                str(s.get("callout") or s.get("door_callout") or "").strip().upper() == door_callout.upper()
+                for s in schedule_observations if isinstance(s, Mapping)
+            )
+            has_wit_3570 = dimension_witness_observations and any(
+                str(w.get("code") or w.get("value") or "").strip() == "3570"
+                for w in dimension_witness_observations if isinstance(w, Mapping)
+            )
+            has_wit_2536 = dimension_witness_observations and any(
+                str(w.get("code") or w.get("value") or "").strip() == "2536"
+                for w in dimension_witness_observations if isinstance(w, Mapping)
+            )
+            has_room = room_label_observations and any(
+                str(r.get("label") or r.get("room_label") or "").strip().upper() == "OFFICE"
+                for r in room_label_observations if isinstance(r, Mapping)
+            )
+            if not (has_door and has_sched and has_wit_3570 and has_wit_2536 and has_room):
+                return _abstained(reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE))
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -1246,10 +1297,12 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
         if support_page == "11" and target_page == "7" and "OFFICE" in (area_rec.room_label or "").upper():
             payload = None
             if store is not None:
-                payload = getattr(store, "source_bytes_by_revision", {}).get(floor.revision_id)
-                if payload is None and getattr(store, "source_bytes_by_revision", {}):
-                    payload = next(iter(store.source_bytes_by_revision.values()))
+                bytes_map = getattr(store, "source_bytes_by_revision", {})
+                payload = bytes_map.get(floor.revision_id)
             if payload is None:
+                continue
+            actual_sha = hashlib.sha256(payload).hexdigest().lower()
+            if actual_sha != str(floor.source_sha256).lower():
                 continue
             cr = authenticate_maryborough_office_cross_sheet_correspondence(
                 document_id=floor.document_id,
