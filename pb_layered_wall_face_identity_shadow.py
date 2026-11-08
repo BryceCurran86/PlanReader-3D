@@ -46,6 +46,11 @@ CLASS_FILL_NOT_CLASSIFIED = "wall_fill_not_classified"
 CLASS_OWNER_UNKNOWN = "wall_owner_not_in_strip_facts"
 CLASS_OWNERS_MIXED = "edge_owned_by_mixed_classes"
 CLASS_THRESHOLD_CHORD = "threshold_chord"
+# An edge the owner list calls a lined frame face is re-checked against the drawn shapes ON the edge. These
+# classes are demotion-only: they can only turn a lined edge into an unresolved one.
+CLASS_END_FACE_NOT_CLASSIFIED = "wall_end_face_not_classified"
+CLASS_EDGE_NOT_COVERED = "wall_edge_extent_not_covered_by_classified_members"
+CLASS_EDGE_GEOMETRY_UNVERIFIABLE = "wall_edge_geometry_not_verifiable"
 
 REASON_STATEMENT_UNAVAILABLE = "internal_wall_build_up_statement_unavailable"
 REASON_STATEMENTS_CONFLICT = "internal_wall_build_up_statements_conflict"
@@ -66,6 +71,9 @@ class WallStripFact:
     layer: str
     is_strip: bool
     thickness_pt: Optional[float]
+    # Every drawn shape of the path as (x0, y0, x1, y1, is_strip). A lined edge is verified against these, not
+    # against the owner list (which names only the shape nearest the edge midpoint).
+    shapes_pt: tuple[tuple[float, float, float, float, bool], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,17 +97,24 @@ class RingFaceIdentity:
 def wall_strip_facts(drawings: Sequence[Mapping[str, Any]]) -> dict[int, WallStripFact]:
     """Layer and thickness of every wall-layer strip or fill the ring module can own an edge with."""
     strips, other_fills = _collect_strips(drawings)
+    shapes: dict[int, list[tuple[float, float, float, float, bool]]] = {}
+    for strip in strips:
+        shapes.setdefault(strip.path_index, []).append(
+            (float(strip.x0), float(strip.y0), float(strip.x1), float(strip.y1), True))
+    for index, polygon in other_fills:
+        x0, y0, x1, y1 = polygon.bounds
+        shapes.setdefault(int(index), []).append((float(x0), float(y0), float(x1), float(y1), False))
     facts: dict[int, WallStripFact] = {}
     for strip in strips:
         thickness = min(strip.x1 - strip.x0, strip.y1 - strip.y0)
         facts[strip.path_index] = WallStripFact(
             path_index=strip.path_index, layer=str(drawings[strip.path_index].get("layer") or ""),
-            is_strip=True, thickness_pt=float(thickness),
+            is_strip=True, thickness_pt=float(thickness), shapes_pt=tuple(sorted(shapes[strip.path_index])),
         )
     for index, _polygon in other_fills:
         facts[int(index)] = WallStripFact(
             path_index=int(index), layer=str(drawings[int(index)].get("layer") or ""),
-            is_strip=False, thickness_pt=None,
+            is_strip=False, thickness_pt=None, shapes_pt=tuple(sorted(shapes[int(index)])),
         )
     return facts
 
@@ -148,6 +163,109 @@ def _edge_class(
     if len(classes) == 1:
         return next(iter(classes))
     return CLASS_OWNERS_MIXED
+
+
+def _edge_axis(first: Sequence[float], second: Sequence[float]) -> Optional[str]:
+    """``h``/``v`` for an axis-aligned edge longer than the noise; None for a slanted or degenerate one."""
+    dx, dy = abs(second[0] - first[0]), abs(second[1] - first[1])
+    if dy <= NOISE_PT < dx:
+        return "h"
+    if dx <= NOISE_PT < dy:
+        return "v"
+    return None
+
+
+def _long_axis(x0: float, y0: float, x1: float, y1: float) -> Optional[str]:
+    width, height = x1 - x0, y1 - y0
+    if width - height > NOISE_PT:
+        return "h"
+    if height - width > NOISE_PT:
+        return "v"
+    return None  # a (near) square shape has no run direction: it is never a long face
+
+
+def _shape_class(
+    layer: str, shape: tuple[float, float, float, float, bool], *,
+    frame_mm: Optional[float], mm_per_pt: Optional[float], edge_axis: str,
+) -> str:
+    """The class of ONE drawn shape lying on an edge (the same rules as ``_edge_class``, plus the run direction)."""
+    x0, y0, x1, y1, is_strip = shape
+    if not is_strip:
+        return CLASS_FILL_NOT_CLASSIFIED
+    kind = _layer_kind(layer)
+    if kind == "external":
+        return CLASS_EXTERNAL_LINING_NOT_STATED
+    if kind == "other":
+        return CLASS_LAYER_NOT_CLASSIFIED
+    if frame_mm is None or mm_per_pt is None:
+        return CLASS_INTERNAL_STATEMENT_UNUSABLE
+    if abs(min(x1 - x0, y1 - y0) * mm_per_pt - frame_mm) > NOISE_PT * mm_per_pt:
+        return CLASS_INTERNAL_THICKNESS_MISMATCH
+    if _long_axis(x0, y0, x1, y1) != edge_axis:
+        return CLASS_END_FACE_NOT_CLASSIFIED  # the edge is a short (end) face of the strip, not its long face
+    return CLASS_LINED_INTERNAL_FRAME_FACE
+
+
+def _verify_lined_edge(
+    first: Sequence[float], second: Sequence[float], owners: Sequence[str], facts: Mapping[int, WallStripFact], *,
+    frame_mm: Optional[float], mm_per_pt: Optional[float],
+) -> str:
+    """Re-check an edge the owner list calls a lined frame face against EVERY drawn shape lying on it.
+
+    The ring names an edge's owners only at the edge midpoint, so a thin end member abutting a frame run on the
+    same face is invisible to ``_edge_class``. Here every wall-layer shape whose boundary lies on the edge and
+    overlaps it must itself be a frame-thickness strip running parallel to the edge, and together they must cover
+    the edge. A slanted edge, a short (end) face, a member of another class, a gap in coverage or missing geometry
+    each leave the edge unresolved. This can only demote: it never makes an unresolved edge lined.
+    """
+    axis = _edge_axis(first, second)
+    if axis is None:
+        return CLASS_END_FACE_NOT_CLASSIFIED
+    for owner in owners:
+        try:
+            fact = facts.get(int(owner[len(_STRIP_OWNER_PREFIX):]))
+        except ValueError:
+            fact = None
+        if fact is None or not fact.shapes_pt:
+            return CLASS_EDGE_GEOMETRY_UNVERIFIABLE
+    if axis == "h":
+        fixed = (first[1] + second[1]) / 2.0
+        lo, hi = sorted((first[0], second[0]))
+    else:
+        fixed = (first[0] + second[0]) / 2.0
+        lo, hi = sorted((first[1], second[1]))
+    members: list[tuple[str, tuple[float, float, float, float, bool], float, float]] = []
+    for index in sorted(facts):
+        fact = facts[index]
+        for shape in fact.shapes_pt:
+            x0, y0, x1, y1, _is_strip = shape
+            if axis == "h":
+                on_face = abs(y0 - fixed) <= NOISE_PT or abs(y1 - fixed) <= NOISE_PT
+                s_lo, s_hi = x0, x1
+            else:
+                on_face = abs(x0 - fixed) <= NOISE_PT or abs(x1 - fixed) <= NOISE_PT
+                s_lo, s_hi = y0, y1
+            if on_face and min(hi, s_hi) - max(lo, s_lo) > NOISE_PT:
+                members.append((fact.layer, shape, s_lo, s_hi))
+    if not members:
+        return CLASS_EDGE_GEOMETRY_UNVERIFIABLE
+    classes = {
+        _shape_class(layer, shape, frame_mm=frame_mm, mm_per_pt=mm_per_pt, edge_axis=axis)
+        for layer, shape, _lo, _hi in members
+    }
+    if len(classes) > 1:
+        return CLASS_OWNERS_MIXED
+    only = next(iter(classes))
+    if only != CLASS_LINED_INTERNAL_FRAME_FACE:
+        return only
+    reach = lo
+    for s_lo, s_hi in sorted((member[2], member[3]) for member in members):
+        if s_lo - reach > NOISE_PT:
+            break
+        reach = max(reach, s_hi)
+    if hi - reach > NOISE_PT:
+        return CLASS_EDGE_NOT_COVERED
+    return CLASS_LINED_INTERNAL_FRAME_FACE
 
 
 def classify_ring_face_identity(
@@ -252,6 +370,11 @@ def _classify_edges(
         edge_class = _edge_class(
             owners, strip_facts, frame_mm=frame_mm, mm_per_pt=float(mm_per_pt) if scale_ok else None,  # type: ignore[arg-type]
         )
+        if edge_class == CLASS_LINED_INTERNAL_FRAME_FACE:
+            edge_class = _verify_lined_edge(
+                first, second, owners, strip_facts,
+                frame_mm=frame_mm, mm_per_pt=float(mm_per_pt) if scale_ok else None,  # type: ignore[arg-type]
+            )
         lengths[edge_class] = lengths.get(edge_class, 0.0) + length
         if edge_class == CLASS_LINED_INTERNAL_FRAME_FACE and lining_mm is not None:
             offsets.append((index, lining_mm))
@@ -272,6 +395,9 @@ def _classify_edges(
 
 
 __all__ = [
+    "CLASS_EDGE_GEOMETRY_UNVERIFIABLE",
+    "CLASS_EDGE_NOT_COVERED",
+    "CLASS_END_FACE_NOT_CLASSIFIED",
     "CLASS_EXTERNAL_LINING_NOT_STATED",
     "CLASS_FILL_NOT_CLASSIFIED",
     "CLASS_INTERNAL_STATEMENT_UNUSABLE",
