@@ -1,0 +1,52 @@
+name: GPT MAX 3Laurel source-owned wet-dry receipt integrity
+
+on:
+  push:
+    branches: [gptmax/3laurel-source-classification-receipt-integrity-20261108]
+  pull_request:
+    paths:
+      - pb_room_wet_dry_classification_shadow.py
+      - tests/test_gptmax_3laurel_wet_dry_receipt_integrity.py
+      - .github/workflows/test-gptmax-3laurel-wet-dry-receipt-integrity.yml
+permissions:
+  contents: read
+
+jobs:
+  source-classification:
+    name: 3Laurel source-label trust / frozen release gates (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      PYTHONPATH: .:tests
+      PYTHONDONTWRITEBYTECODE: "1"
+      PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install complete production/test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Check source-owned classification negative and existing consumer semantics
+        run: |
+          python -m pytest -q \
+            tests/test_gptmax_3laurel_wet_dry_receipt_integrity.py \
+            tests/test_room_wet_dry_classification_shadow_v1.py \
+            tests/test_layered_finished_face_gate_v1.py
+      - name: Exact-head full production/customer regressions and frozen integrity
+        run: |
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+          python -m pytest -q -rs tests/
+          python tests/ci_smoke.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_v2_truth_separation.py
