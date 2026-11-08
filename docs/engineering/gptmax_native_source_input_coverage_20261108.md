@@ -1,7 +1,8 @@
 # Native original-input coverage bridge
 
-8 November 2026, GPT MAX. Standalone input proof only; no existing application,
-source-role runner, customer exporter or scorer calls the new helper.
+8 November 2026, GPT MAX. Input proof only; the existing owner source-role
+runner may explicitly opt in. Applications, customer exporters and the scorer
+do not consume this helper.
 
 ## Observed
 
@@ -53,6 +54,22 @@ Blank and image-only pages may have valid input coverage; that never means their
 physical or semantic content has been interpreted.
 
 ## Validation and limits
+
+The existing `produce_all_source_roles` exposes
+`record_native_source_input_coverage=False`; its CLI forwards the option only
+when `--record-native-source-input-coverage` is explicitly present. It builds
+and independently re-verifies each native receipt before/after the actual
+producer subprocess and retains a private source-file identity witness across
+that subprocess. The existing role report carries the input-only receipts and
+their separate `native_source_input_coverage_verified` status. Source mutation,
+same-byte inode replacement and failed native input halt this opt-in run.
+
+This input audit cannot set `source_role_coverage_verified`, create an empty
+quantity seal, enable customer rows, clear an actual producer failure or change
+the incomplete exit code. Default commands and report keys remain unchanged.
+All genuine per-document quantity seals are still required by the existing
+cross-role composer. Successful input coverage alongside unavailable quantity
+seals therefore remains `SOURCE_ROLES_INCOMPLETE`.
 
 The focused tests cover native blank/text/vector and rotated originals,
 image-only input, JSON round trip and deterministic independent replay,

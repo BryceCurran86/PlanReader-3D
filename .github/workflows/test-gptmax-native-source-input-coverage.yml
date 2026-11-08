@@ -2,11 +2,13 @@ name: GPT MAX native source input coverage authority bridge
 
 on:
   push:
-    branches: [gptmax/native-source-input-coverage-20261108]
+    branches: [gptmax/native-source-input-coverage-20261108, gptmax/native-source-role-input-audit-20261108]
   pull_request:
     paths:
       - tools/gpt3_native_source_execution_coverage.py
       - tests/test_gpt3_native_source_execution_coverage.py
+      - tools/gpt3_owner_all_source_role_handoff.py
+      - tests/test_gpt3_owner_all_source_role_handoff.py
       - .github/workflows/test-gptmax-native-source-input-coverage.yml
   workflow_dispatch:
 
@@ -40,12 +42,13 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Compile and inspect the isolated bridge
         run: |
-          python -m py_compile tools/gpt3_native_source_execution_coverage.py tests/test_gpt3_native_source_execution_coverage.py
-          ruff check --select F821,F823 tools/gpt3_native_source_execution_coverage.py tests/test_gpt3_native_source_execution_coverage.py
+          python -m py_compile tools/gpt3_native_source_execution_coverage.py tools/gpt3_owner_all_source_role_handoff.py tests/test_gpt3_native_source_execution_coverage.py tests/test_gpt3_owner_all_source_role_handoff.py
+          ruff check --select F821,F823 tools/gpt3_native_source_execution_coverage.py tools/gpt3_owner_all_source_role_handoff.py tests/test_gpt3_native_source_execution_coverage.py tests/test_gpt3_owner_all_source_role_handoff.py
       - name: Native input authority, page ownership, tamper, memory lifetime and signed fixture regressions
         run: |
           python -m pytest -q -rs \
             tests/test_gpt3_native_source_execution_coverage.py \
+            tests/test_gpt3_owner_all_source_role_handoff.py \
             tests/test_source_observation_defensive_copies.py \
             tests/test_source_observation_integrity_hash_cache.py \
             tests/test_source_observation_shared_generation_records.py \
