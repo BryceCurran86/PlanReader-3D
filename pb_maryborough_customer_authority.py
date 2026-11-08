@@ -113,12 +113,6 @@ def issue_all_original_maryborough_customer_quantities(
         CrossViewFloorFinishProducer,
         enrich_live_canonical_floor_finishes,
     )
-    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
-    from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
-    from pb_live_floor_finish_area_source_closed_export import (
-        build_live_floor_finish_area_source_traces,
-        seal_live_floor_finish_area_run,
-    )
 
     try:
         with fitz.open(stream=payload, filetype="pdf") as document:
@@ -260,55 +254,11 @@ def issue_all_original_maryborough_customer_quantities(
         floors = enrich_live_canonical_floor_finishes(floors, finish_res)
         if upstream_cache_ok:
             _UPSTREAM_CACHE[upstream_key] = (rooms, floors, finish_res)
-    claim = LivePhysicalNetWallClaim(
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=("live_physical_net_wall_resolved",),
-        quantity_m2=None,
-        source_pages=(7, 11),
-        canonical_walls=(),
-        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
-        canonical_wall_reason_codes=(),
-        canonical_wall_source_pages=(7,),
-        unresolved_wall_candidate_ids=(),
-        canonical_openings=(),
-        canonical_rooms=rooms.rooms,
-        canonical_floors=floors.floors,
-        canonical_floor_status=floors.status,
-        canonical_floor_reason_codes=floors.reason_codes,
-        canonical_floor_source_pages=floors.source_pages,
-        canonical_room_status=rooms.status,
-        canonical_room_reason_codes=rooms.reason_codes,
-        canonical_room_source_pages=rooms.source_pages,
-        external_wall_ids=(),
-        evidence_ids=(),
-        quantity_id=None,
-        confidence=1.0,
-        publication=None,
-        floor_finish_quantity_evidence=tuple(finish_res.quantities),
-    )
-    rows = project_live_floor_finish_customer_rows(
-        claim,
-        workspace_id=workspace_id,
-        project_id=MARYBOROUGH_PROJECT_ID,
-    )
-    traces_map = build_live_floor_finish_area_source_traces(
-        claim,
-        workspace_id=workspace_id,
-        project_id=MARYBOROUGH_PROJECT_ID,
-    )
-    traces = tuple(traces_map.values())
-    sealed = seal_live_floor_finish_area_run(
-        claim,
-        workspace_id=workspace_id,
-        project_id=MARYBOROUGH_PROJECT_ID,
-    )
-    verify_sealed_customer_output(sealed, rows)
-
-    return MaryboroughCustomerResult(
-        status="FIRM_SOURCE_CUSTOMER_TO_REVIEW",
-        reason_codes=("source_owned_physical_quantity_resolved",),
-        quantities=finish_res.quantities,
-        traces=traces,
-        sealed_run=sealed,
-        customer_rows=rows,
-    )
+    # The finish and room producers above do not publish a physical wall
+    # inventory or a wall/doorway consumer receipt. In particular, an empty
+    # canonical_walls inventory is NOT a corroborated four-face room boundary.
+    # Preserve all upstream source evidence without manufacturing a commercial
+    # claim, customer row, source trace or sealed run. A later integration may
+    # consume a genuine source-producer-owned physical claim only after its
+    # finished faces and D15 threshold are independently authenticated.
+    return _blocked("source_owned_finished_wall_and_d15_claim_unavailable")
