@@ -1,4 +1,4 @@
-name: GPT2 Original Maryborough Physical Room Area Owner Integrity
+name: GPT2 Maryborough Source-Neutral Physical Room Area Owner Integrity
 on:
   pull_request:
     paths:
@@ -28,36 +28,10 @@ jobs:
       - name: Original source room-area physical identity regressions
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_cross_view_floor_finish_authority_v1.py
-      - name: Real immutable PDF source and canonical area scope replay
+      - name: Original-source test is NOT RUN on public PRs
+        shell: bash
         run: |
           set -euo pipefail
-          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
-          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u - <<'PY'
-          from pathlib import Path
-          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
-          from pb_cross_view_floor_finish_authority import (
-              _unique_documented_area_owner_receipts,
-          )
-          from pb_migration_contracts import EvidenceResolutionStatus
-          source=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
-          claim=collect_live_physical_net_wall_claim(
-              source,pages=(6,),topology_pages=(6,),
-              room_area_support_pages=(10,),
-          )
-          # Producer-authenticated quantities may be partial: do not force the
-          # historical three measured controls into an incomplete latest scope.
-          assert hasattr(claim,'room_area_quantity_evidence')
-          assert hasattr(claim,'canonical_rooms')
-          assert hasattr(claim,'canonical_floors')
-          assert all(r.source_sha256=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-                     for r in claim.canonical_rooms)
-          assert all(f.source_sha256=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-                     for f in claim.canonical_floors)
-          assert callable(_unique_documented_area_owner_receipts)
-          print('GPT2_REAL_SOURCE_CANONICAL_COUNTS',len(claim.canonical_rooms),
-                len(claim.canonical_floors),
-                len(claim.room_area_quantity_evidence),
-                len(claim.floor_finish_quantity_evidence))
-          PY
+          test ! -e documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          echo '::notice::Original Maryborough tests NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source tests NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
