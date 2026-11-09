@@ -314,3 +314,94 @@ def test_composer_authorizes_successfully_decoded_scoped_page() -> None:
     assert wall_scope.status is EvidenceResolutionStatus.CORROBORATED
     assert wall_scope.scope_complete is True
     assert wall_scope.wall_candidate_ids
+
+def test_source_negative_w4_optin_requires_boolean_and_separate_source_policy():
+    import pytest
+    source, published = _ingest(_host_fixture_pdf(), "typed-negative-invalid-options")
+    args = dict(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    with pytest.raises(TypeError, match="explicit boolean"):
+        compose_live_wall_opening_authority(
+            **args, filter_typed_negative_non_wall_ink_shadow="yes",
+        )
+    for incompatible in (
+        {"source_revision_scope_shadow": True},
+        {"include_unmeasured_ink_closed_flanks_shadow": True},
+        {"source_fragment_roles_shadow": True},
+    ):
+        with pytest.raises(ValueError, match="cannot mix"):
+            compose_live_wall_opening_authority(
+                **args,
+                filter_typed_negative_non_wall_ink_shadow=True,
+                **incompatible,
+            )
+
+
+def test_source_negative_w4_optin_uses_producer_owned_source_and_fresh_snapshot(monkeypatch):
+    from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+    source, published = _ingest(_host_fixture_pdf(), "typed-negative-optin-source")
+    original = (
+        PhysicalWallCandidateProducer
+        .from_source_visibility_typed_negative_wall_ink_shadow
+    )
+    observed = []
+
+    def on_source(cls, actual_source, *, page_ids=None, **kwargs):
+        observed.append(tuple(page_ids or ()))
+        assert actual_source is source
+        assert not kwargs
+        return original(actual_source, page_ids=page_ids)
+
+    monkeypatch.setattr(
+        PhysicalWallCandidateProducer,
+        "from_source_visibility_typed_negative_wall_ink_shadow",
+        classmethod(on_source),
+    )
+    result = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+        filter_typed_negative_non_wall_ink_shadow=True,
+    )
+    assert observed == [("1",)]
+    assert result.page_ids == ("1",)
+    assert len(result.wall_scopes) == 1
+    updated = source.published_snapshot_for_revision(published.revision.revision_id)
+    assert updated is not None
+    selector = (
+        result.physical_wall_candidate_authority
+        .selector_for_decision_scope(
+            document_id=updated.revision.document_id,
+            revision_id=updated.revision.revision_id,
+            source_sha256=updated.revision.source_sha256,
+            snapshot_id=updated.snapshot.snapshot_id,
+            page_id="1", decision_scope_id="wall-source:page-1",
+        )
+    )
+    assert selector is not None
+    source_wall_scope = result.physical_wall_candidate_authority.resolve_scope(selector)
+    assert source_wall_scope.status == result.wall_scopes[0].status
+    assert source_wall_scope.scope_complete == result.wall_scopes[0].scope_complete
+    assert tuple(row.wall_candidate_id for row in source_wall_scope.records) == result.wall_scopes[0].wall_candidate_ids
+
+
+def test_typed_negative_w4_flag_is_default_off_and_standard_constructor_unchanged(monkeypatch):
+    from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+    source, published = _ingest(_host_fixture_pdf(), "typed-negative-off")
+    def impossible(*_a, **_kw):
+        raise AssertionError("default wall-opening run used experimental W4 filter")
+    monkeypatch.setattr(
+        PhysicalWallCandidateProducer,
+        "from_source_visibility_typed_negative_wall_ink_shadow",
+        impossible,
+    )
+    result = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert result.wall_scopes
+    assert result.page_ids == ("1",)
