@@ -76,6 +76,22 @@ So the policy does not rescue the two ids that the drawing places inside the hou
 
 Even with a height (source or assumed), the policy itself requires authenticated external classification, scope, width, host and frame first. For `22e7e155` the host and kind gates are still closed, so no provisional row can be issued for it yet either.
 
+## 3b. External-door kind gate (MAX 6731504428 action 2: "first authenticate external door kind")
+
+Read-only trace on the original, same composition as above, for the three reported openings, the unmapped south entry and the slider (control):
+
+| Opening | Label authority | Semantic authority | Canonical kind |
+|---|---|---|---|
+| `22e7e155` | corroborated, one width (1,200) | `ABSTAINED`, `opening_label_semantic_unavailable` | `None` |
+| `be1e67bf` | corroborated, one width (870) | same | `None` |
+| `9d4dc1b3` | corroborated, one width (870) | same | `None` |
+| `a93486dc` (not mapped) | corroborated, one width (870) | same | `None` |
+| slider (control) | corroborated, two figures | same | **door**, from its printed opening token in the label |
+
+Why: `pb_opening_kind_authority.resolve_opening_kind` classifies only from a structural door/window pattern or a bound schedule row. The `jamb_bounded_two_face_interruption` pattern carries neither, and these four labels print a width with no opening token. So **there is no kind source today for any single-figure door on this page**, independent of height, host or the policy. Two evidence families could supply one, both new bridges (not built): a plan door-swing symbol bound to the opening, or the elevation leader label that ends on the registered outline (the A0.4 Front and Lhs entry doors each carry one), carried across the plan-to-elevation registration above. Neither is allowed to be a nearest or first guess.
+
+Consequence for the policy path: `be1e67bf` and `9d4dc1b3` stay unclassified, and per the drawing they are not external, so the 2100 assumption cannot apply to them; `22e7e155` needs a proven kind plus host before even a provisional row.
+
 ## 4. Benchmark observations that must not influence implementation
 
 None were read. The 2,100 above is the dimension printed on the drawing and re-derived from drawn spacing. No item id, name, tolerance or expected quantity was used.
