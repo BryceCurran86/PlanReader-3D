@@ -160,7 +160,15 @@ def produce_all_source_roles(
     family_group: str = "all", timeout_min: int = 180,
     max_private_gb: float = 10, min_free_commit_gb: float = 3,
     record_native_source_input_coverage: bool = False,
+    source_native_finish_text_shadow: bool = False,
+    source_glyph_ledger_text_trust: bool = False,
 ) -> dict[str, Any]:
+    requested_controls = {
+        "source_native_finish_text_shadow": source_native_finish_text_shadow,
+        "source_glyph_ledger_text_trust": source_glyph_ledger_text_trust,
+    }
+    if any(type(value) is not bool for value in requested_controls.values()):
+        raise ValueError("source text controls must be explicit booleans")
     if type(record_native_source_input_coverage) is not bool:
         raise ValueError("native source input coverage audit must be an explicit boolean")
     if family_group not in ("all", "core", "surfaces", "floor_area"):
@@ -193,6 +201,11 @@ def produce_all_source_roles(
         "official_four_project_accuracy": None,
         "status": "INCOMPLETE",
     }
+    if any(requested_controls.values()):
+        # These are requested execution settings, never source proof or
+        # permission to seal a physical quantity. Keep legacy reports intact.
+        report["requested_source_controls"] = requested_controls
+        _write_summary(output_dir / "SOURCE_ROLE_STATUS.json", report)
     if record_native_source_input_coverage:
         from tools.gpt3_native_source_execution_coverage import (
             build_native_source_execution_coverage,
@@ -228,6 +241,26 @@ def produce_all_source_roles(
             "--pdf", str(role["path"]), "--project-id", project_id,
             "--family-group", family_group, "--output-dir", str(role_dir),
         ]
+        forwarded_controls = None
+        if any(requested_controls.values()):
+            if producer_module == "tools.run_source_closed_project_handoff":
+                for name, enabled in requested_controls.items():
+                    if enabled:
+                        command.append("--" + name.replace("_", "-"))
+                forwarded_controls = {
+                    "status": "FORWARDED",
+                    "forwarded": dict(requested_controls),
+                }
+            elif producer_module == "tools.q5446_source_role_customer_runtime":
+                # This registered SHA-owned issuer authenticates its own
+                # original-source evidence. Generic parser flags do not
+                # replace that proof and are not accepted by its parser.
+                forwarded_controls = {
+                    "status": "NOT_APPLICABLE_SOURCE_OWNED_ISSUER",
+                    "forwarded": {name: False for name in requested_controls},
+                }
+            else:
+                raise ValueError("source controls unsupported by registered role producer")
         rc, status, usage = run_logged(
             command, Path(__file__).resolve().parents[1],
             output_dir / ("source_role_%02d.log" % (index + 1)),
@@ -259,6 +292,8 @@ def produce_all_source_roles(
             "customer_first_failure": None,
             "resource_usage": safe_usage,
         }
+        if forwarded_controls is not None:
+            row["source_controls"] = forwarded_controls
         if record_native_source_input_coverage:
             row["native_source_input_coverage"] = native_input
             row["native_source_input_coverage_verified"] = True
@@ -382,6 +417,14 @@ def main(argv: list[str] | None = None) -> int:
         "--record-native-source-input-coverage", action="store_true",
         help="Opt in to native original-page input audit; does not complete quantity seals or permit scoring",
     )
+    p.add_argument(
+        "--source-native-finish-text-shadow", action="store_true",
+        help="Forward existing native source text proof to generic roles; grants no quantity authority",
+    )
+    p.add_argument(
+        "--source-glyph-ledger-text-trust", action="store_true",
+        help="Forward existing glyph-ledger trust to generic roles; source-owned issuers retain their own proof",
+    )
     args = p.parse_args(argv)
     report = produce_all_source_roles(
         project_id=args.project_id, source_dir=args.source_dir,
@@ -390,6 +433,10 @@ def main(argv: list[str] | None = None) -> int:
         min_free_commit_gb=args.min_free_commit_gb,
         **({"record_native_source_input_coverage": True}
            if args.record_native_source_input_coverage else {}),
+        **({"source_native_finish_text_shadow": True}
+           if args.source_native_finish_text_shadow else {}),
+        **({"source_glyph_ledger_text_trust": True}
+           if args.source_glyph_ledger_text_trust else {}),
     )
     console = {
         "status": report["status"],

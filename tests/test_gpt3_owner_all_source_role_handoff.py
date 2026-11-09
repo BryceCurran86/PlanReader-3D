@@ -383,3 +383,95 @@ def test_cli_forwards_only_explicit_input_audit_and_retains_incomplete_exit(tmp_
     else:
         assert "record_native_source_input_coverage" not in called[0]
         assert "native_source_input_coverage_verified" not in console
+
+
+@pytest.mark.parametrize("native,glyph", ((True, False), (False, True), (True, True)))
+def test_source_text_controls_reach_each_generic_role_without_granting_seals(tmp_path, monkeypatch, native, glyph):
+    project, root, _docs = _fake_sources(tmp_path, monkeypatch)
+    called = []
+    monkeypatch.setattr(module, "run_logged", _no_quantity_runner(called))
+    requested = {"source_native_finish_text_shadow": native, "source_glyph_ledger_text_trust": glyph}
+    out = tmp_path / "controlled-output"
+    result = module.produce_all_source_roles(
+        project_id=project, source_dir=root, output_dir=out, **requested,
+    )
+    assert len(called) == 2
+    for command, row in zip(called, result["roles"]):
+        assert ("--source-native-finish-text-shadow" in command) is native
+        assert ("--source-glyph-ledger-text-trust" in command) is glyph
+        assert row["source_controls"] == {"status": "FORWARDED", "forwarded": requested}
+        assert row["sealed"] is False and row["customer_bijection_verified"] is False
+    assert result["requested_source_controls"] == requested
+    assert result["source_role_coverage_verified"] is False
+    assert result["benchmark_score_granted"] is False
+    assert result["official_four_project_accuracy"] is None
+    assert not (out / "ALL_SOURCE_ROLES.sealed.json").exists()
+
+
+@pytest.mark.parametrize("name", ("source_native_finish_text_shadow", "source_glyph_ledger_text_trust"))
+@pytest.mark.parametrize("value", (0, 1, "true", None, [], {}))
+def test_source_text_control_rejects_non_boolean_before_source_io(tmp_path, monkeypatch, name, value):
+    monkeypatch.setattr(module, "original_roster", lambda *args: pytest.fail("source I/O started"))
+    out = tmp_path / "bad-control"
+    with pytest.raises(ValueError, match="explicit booleans"):
+        module.produce_all_source_roles(
+            project_id=module.PROJECTS[0], source_dir=tmp_path, output_dir=out, **{name: value},
+        )
+    assert not out.exists()
+
+
+def test_legacy_source_text_controls_do_not_change_commands_or_report(tmp_path, monkeypatch):
+    project, root, _docs = _fake_sources(tmp_path, monkeypatch)
+    called = []
+    monkeypatch.setattr(module, "run_logged", _no_quantity_runner(called))
+    result = module.produce_all_source_roles(project_id=project, source_dir=root, output_dir=tmp_path / "legacy")
+    assert "requested_source_controls" not in result
+    assert all("source_controls" not in row for row in result["roles"])
+    assert all("--source-native-finish-text-shadow" not in cmd and "--source-glyph-ledger-text-trust" not in cmd for cmd in called)
+
+
+def test_source_owned_issuer_gets_no_unsupported_generic_parser_flags(tmp_path, monkeypatch):
+    project, root, _docs = _fake_sources(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(module, "run_logged", _no_quantity_runner(calls))
+    monkeypatch.setattr(module, "source_owned_role_module", lambda *args, **kwargs: "tools.q5446_source_role_customer_runtime")
+    result = module.produce_all_source_roles(
+        project_id=project, source_dir=root, output_dir=tmp_path / "registered",
+        source_native_finish_text_shadow=True, source_glyph_ledger_text_trust=True,
+    )
+    for command, row in zip(calls, result["roles"]):
+        assert not any(arg in command for arg in ("--source-native-finish-text-shadow", "--source-glyph-ledger-text-trust"))
+        assert row["source_controls"] == {"status": "NOT_APPLICABLE_SOURCE_OWNED_ISSUER", "forwarded": {
+            "source_native_finish_text_shadow": False, "source_glyph_ledger_text_trust": False,
+        }}
+    assert result["source_role_coverage_verified"] is False
+
+
+def test_unknown_issuer_cannot_silently_drop_requested_source_controls(tmp_path, monkeypatch):
+    project, root, _docs = _fake_sources(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "source_owned_role_module", lambda *args, **kwargs: "tools.unknown_source_issuer")
+    monkeypatch.setattr(module, "run_logged", lambda *args, **kwargs: pytest.fail("unsupported child started"))
+    out = tmp_path / "unknown"
+    with pytest.raises(ValueError, match="unsupported by registered role producer"):
+        module.produce_all_source_roles(
+            project_id=project, source_dir=root, output_dir=out, source_native_finish_text_shadow=True,
+        )
+    attempted = json.loads((out / "SOURCE_ROLE_STATUS.json").read_text())
+    assert attempted["roles"] == [] and attempted["source_role_coverage_verified"] is False
+    assert not (out / "ALL_SOURCE_ROLES.sealed.json").exists()
+
+
+@pytest.mark.parametrize("flag", ("source_native_finish_text_shadow", "source_glyph_ledger_text_trust"))
+def test_cli_forwards_only_requested_source_text_control(tmp_path, monkeypatch, capsys, flag):
+    called = []
+    def produce(**kwargs):
+        called.append(kwargs)
+        return {"status": "SOURCE_ROLES_INCOMPLETE", "project_id": kwargs["project_id"],
+                "roles": [], "expected_source_document_roles": 2, "source_role_coverage_verified": False}
+    monkeypatch.setattr(module, "produce_all_source_roles", produce)
+    assert module.main(["--project-id", module.PROJECTS[0], "--source-dir", str(tmp_path),
+                        "--output-dir", str(tmp_path / "cli"), "--" + flag.replace("_", "-")]) == 2
+    assert called[0][flag] is True
+    other = "source_glyph_ledger_text_trust" if flag == "source_native_finish_text_shadow" else "source_native_finish_text_shadow"
+    assert other not in called[0]
+    assert json.loads(capsys.readouterr().out)["official_four_project_accuracy"] is None
