@@ -55,6 +55,19 @@ Registration found the same offsets as my manual measurement (Front 984.285, Lhs
 
 **Still open (not built):** door kind attached to the same physical instance (the label leader needs its own trace), a genuine host binding for `22e7e155` and an independent terminator witness for the slider, and the production opening quantity, seal and customer gates. This adds receipts to a diagnostic; it is not a physical authority and no quantity, score or customer row follows.
 
+
+## Fail-closed text trust (MAX 6733270532, head `53ddbfaab`)
+
+**Defect found in review:** the raw-text fallback accepted an `ABSTAINED`, untrusted word when `set(reason_codes).issubset(approved)`. An empty reason set is a subset of every set, so a word with **no** stated reason passed as a datum figure. (The same expression exists in the opening label authority's text fallback; that module is not changed here.)
+
+**Fix:** the fallback now needs a **non-empty** reason set that is a subset of the two approved reasons (glyph mapping unverified, clip state unresolved), an `ABSTAINED` status and an untrusted receipt. Every word carries an explicit trust tag (`corroborated` or `raw_unverified`); the tag flows into `DatumLevel.text_trust`, and the witness result reports the worst-of value as `text_trust` (`corroborated`, `raw_unverified_diagnostic_only`, or empty when a plain input claims nothing). The tag is part of the result identity, so a raw-text result can never alias a verified one, and a raw-text result stays `CANDIDATE`-only.
+
+**Rule for promotion (MAX):** a commercial source-owned kind or height requires text-integrity `CORROBORATED` (or a separately authenticated native glyph closure), not this fallback.
+
+**Original (read in place):** both candidates (`22e7e155`, `a93486dc`) currently rest on `raw_unverified` datum figures under the default producer, so the printed 2,100 is **not** yet a verified source word. The geometry independently agrees with it (the drawn spacing reproduces every printed figure within 0.5 percent), but that is not the authority's required status.
+
+**Proof added:** empty reason set, unknown or mixed reasons, a non-abstained untrusted word, approved-only reasons tagged raw, trust propagation (worst-of, never stronger than `CANDIDATE`), and identity separation. Eight single-line mutations of these rules were each caught.
+
 ## Not proven / limits
 
 The extractor reads vector fills and words with PyMuPDF; it is a diagnostic, not yet a source-authenticated observation path. The kind (door) gate for `22e7e155` and `a93486dc` is still `None` (no elevation leader label is bound), their host and frame gates are unchanged, and no quantity is issued. No score, no benchmark item newly eligible. Protected-environment behaviour and Lot16-eight / Maryborough-three retention at this head are not run here (no production code changed).

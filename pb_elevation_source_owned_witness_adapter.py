@@ -20,7 +20,9 @@ from dataclasses import dataclass
 import re
 from typing import Optional, Sequence
 
-from pb_elevation_door_vertical_witness_shadow import DatumLevel, ElevOutline, ElevationDatum, Scope
+from pb_elevation_door_vertical_witness_shadow import (
+    DatumLevel, ElevOutline, ElevationDatum, Scope, TEXT_CORROBORATED, TEXT_RAW_UNVERIFIED,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 
@@ -33,13 +35,21 @@ TOUCH_TOL = 0.06
 AXIS_TOL = 0.05
 
 
+def _approved_raw_reasons() -> frozenset:
+    from pb_pdf_text_integrity_authority import TEXT_CLIP_STATE_UNRESOLVED, TEXT_GLYPH_MAPPING_UNVERIFIED
+    return frozenset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
+
+
+RAW_TEXT_APPROVED_REASONS = _approved_raw_reasons()
+
+
 @dataclass(frozen=True)
 class SourceOwnedPage:
     scope: Scope
     page_id: str
     lines: tuple[tuple, ...]        # (x0, y0, x1, y1, observation_id)
     rects: tuple[tuple, ...]        # (x0, y0, x1, y1, fill, (observation_id, ...))
-    words: tuple[tuple, ...]        # (x0, y0, x1, y1, text, observation_id)
+    words: tuple[tuple, ...]        # (x0, y0, x1, y1, text, observation_id, trust)
 
 
 # ---------------------------------------------------------------------------------------- reading
@@ -90,24 +100,26 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
                           tuple(sorted({f.observation_id for f in edges}))))
     words = []
     integrity = source.text_integrity_authority()
-    from pb_pdf_text_integrity_authority import TEXT_CLIP_STATE_UNRESOLVED, TEXT_GLYPH_MAPPING_UNVERIFIED
-
     for observation_id in published.text_observation_ids:
         resolved = integrity.resolve_text(selector(observation_id))
         receipt = resolved.receipt
         if receipt is None or str(receipt.page_id) != str(page_id) or len(receipt.geometry) != 4:
             continue
-        text = None
+        text, trust = None, None
         if resolved.status is EvidenceResolutionStatus.CORROBORATED and resolved.trusted_text:
-            text = str(resolved.trusted_text)
-        elif (resolved.status is EvidenceResolutionStatus.ABSTAINED and not receipt.trusted
-              and set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
-              and str(receipt.raw_text or "").strip()):
-            text = str(receipt.raw_text).strip()
+            text, trust = str(resolved.trusted_text), TEXT_CORROBORATED
+        else:
+            # Raw fallback is DIAGNOSTIC provenance only and needs a NON-EMPTY approved reason set: an empty set is a
+            # subset of every set, so a word with no stated reason must never pass this test.
+            reasons = set(receipt.reason_codes or ())
+            if (resolved.status is EvidenceResolutionStatus.ABSTAINED and not receipt.trusted
+                    and reasons and reasons <= RAW_TEXT_APPROVED_REASONS
+                    and str(receipt.raw_text or "").strip()):
+                text, trust = str(receipt.raw_text).strip(), TEXT_RAW_UNVERIFIED
         if text is None:
             continue
         g = tuple(float(v) for v in receipt.geometry)
-        words.append((*g, text, str(receipt.parent_observation_id or observation_id)))
+        words.append((*g, text, str(receipt.parent_observation_id or observation_id), trust))
     return SourceOwnedPage(scope, str(page_id), tuple(lines), tuple(rects), tuple(words))
 
 
@@ -147,13 +159,13 @@ def extract_views(lines: Sequence[tuple], rects: Sequence[tuple], words: Sequenc
         top, bottom = ticks(x, ya), ticks(x, yb)
         if not top or not bottom:
             continue
-        found = [(_number(w[4]), _rid(w, 5)) for w in words
+        found = [(_number(w[4]), _rid(w, 5), (w[6] if len(w) > 6 else "")) for w in words
                  if (w[3] - w[1]) > 1.5 * (w[2] - w[0]) and _number(w[4]) is not None
                  and abs((w[0] + w[2]) / 2 - x) <= 12.0 and ya - 6.0 <= (w[1] + w[3]) / 2 <= yb + 6.0]
         if len(found) == 1:
             ids = set(v_ids) | {i for r in top for i in r} | {i for r in bottom for i in r} | set(found[0][1])
             bottom_ids = {i for r in bottom for i in r}
-            dims.append((x, ya, yb, found[0][0], tuple(sorted(ids)), tuple(sorted(bottom_ids))))
+            dims.append((x, ya, yb, found[0][0], tuple(sorted(ids)), tuple(sorted(bottom_ids)), found[0][2]))
     by_bottom: dict[float, list] = {}
     for d in dims:
         by_bottom.setdefault(round(d[2], 1), []).append(d)
@@ -164,7 +176,7 @@ def extract_views(lines: Sequence[tuple], rects: Sequence[tuple], words: Sequenc
         if len(chain) < 2:
             continue
         ffl_y = sum(d[2] for d in chain) / len(chain)
-        levels = tuple(DatumLevel(f"L{int(d[3])}", d[1], d[3], d[4]) for d in sorted(chain, key=lambda d: d[1]))
+        levels = tuple(DatumLevel(f"L{int(d[3])}", d[1], d[3], d[4], d[6]) for d in sorted(chain, key=lambda d: d[1]))
         ffl_receipts = tuple(sorted({i for d in chain for i in d[5]}))
         x_max = max(d[0] for d in chain)
         y_lo, y_hi = min(d[1] for d in chain) - 15.0, ffl_y + 12.0

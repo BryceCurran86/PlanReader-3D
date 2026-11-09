@@ -61,6 +61,19 @@ INVALID_INPUT = "elevation_witness_input_invalid"
 DUPLICATE_IDENTITY = "elevation_witness_duplicate_identity"
 COMPETING_VIEWS = "competing_elevation_views"
 PROMOTION_GATE = "authority_promotion_review_required_kind_host_frame_untouched"
+TEXT_CORROBORATED = "corroborated"
+TEXT_RAW_UNVERIFIED = "raw_unverified"
+TEXT_TRUST_RAW_DIAGNOSTIC = "raw_unverified_diagnostic_only"
+
+
+def datum_text_trust(datum: "ElevationDatum") -> str:
+    """Worst-of trust of every printed figure the datum rests on. Never promotes: raw text is diagnostic only."""
+    values = {lv.text_trust for lv in datum.levels}
+    if TEXT_RAW_UNVERIFIED in values:
+        return TEXT_TRUST_RAW_DIAGNOSTIC
+    if values == {TEXT_CORROBORATED}:
+        return TEXT_CORROBORATED
+    return ""
 
 
 @dataclass(frozen=True)
@@ -92,6 +105,7 @@ class DatumLevel:
     y: float
     figured_mm: float
     receipt_ids: tuple[str, ...] = ()   # dimension line, tick and figured-word observation ids
+    text_trust: str = ""                # "corroborated", "raw_unverified" or "" (unspecified) for the printed figure
 
 
 @dataclass(frozen=True)
@@ -133,6 +147,7 @@ class VerticalWitnessResult:
     overlapping_plan_record_ids: tuple[str, ...] = ()
     registration_anchor_widths_pt: tuple[float, ...] = ()
     source_observation_ids: tuple[str, ...] = ()
+    text_trust: str = ""
     result_id: Optional[str] = None
     schema_version: str = SCHEMA_VERSION
 
@@ -147,6 +162,7 @@ def _result(record_id, status, reasons, **kw) -> VerticalWitnessResult:
         "outline": kw.get("outline_id"), "height": kw.get("opening_height_mm"), "head": kw.get("head_level_name"),
         "competing": tuple(kw.get("competing_plan_record_ids", ())),
         "receipts": tuple(kw.get("source_observation_ids", ())),
+        "text_trust": kw.get("text_trust", ""),
     }
     return VerticalWitnessResult(
         record_id=record_id, status=status, reason_codes=tuple(reasons),
@@ -329,7 +345,7 @@ def resolve_vertical_witness(
     )))
     return _result(
         record_id, EvidenceResolutionStatus.CANDIDATE, (CANDIDATE_REASON,), outline_id=outline.outline_id,
-        source_observation_ids=receipts,
+        source_observation_ids=receipts, text_trust=datum_text_trust(datum),
         opening_height_mm=float(head.figured_mm), head_level_name=head.name,
         leaf_height_mm=round((outline.y_base_leaf - outline.y_head) * scale, 1), mm_per_pt=round(scale, 4),
         registration_anchor_widths_pt=registration.anchor_widths_pt,
@@ -402,7 +418,7 @@ def assess_elevation_vertical_witness_shadow(
 
 
 __all__ = [
-    "CANDIDATE_REASON", "COMPETING_VIEWS", "DUPLICATE_IDENTITY", "INVALID_INPUT", "aggregate_across_views", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
+    "CANDIDATE_REASON", "TEXT_CORROBORATED", "TEXT_RAW_UNVERIFIED", "TEXT_TRUST_RAW_DIAGNOSTIC", "datum_text_trust", "COMPETING_VIEWS", "DUPLICATE_IDENTITY", "INVALID_INPUT", "aggregate_across_views", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
     "VerticalWitnessResult", "assess_elevation_vertical_witness_shadow", "calibrate_datum",
     "register_plan_to_elevation", "resolve_vertical_witness",
 ]

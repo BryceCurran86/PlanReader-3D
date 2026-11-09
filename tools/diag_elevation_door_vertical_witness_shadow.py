@@ -122,7 +122,8 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     aggregated = aggregate_across_views(per_view_results)
     reasons = Counter(r.reason_codes[0] for r in aggregated)
     candidates = [{"record": r.record_id[-8:], "opening_height_mm": r.opening_height_mm, "leaf_height_mm": r.leaf_height_mm,
-                   "head_level": r.head_level_name, "receipt_count": len(r.source_observation_ids), "result_id": r.result_id}
+                   "head_level": r.head_level_name, "receipt_count": len(r.source_observation_ids),
+                   "text_trust": r.text_trust, "result_id": r.result_id}
                   for r in aggregated if r.is_candidate]
     focus_rows = [{"record": r.record_id[-8:], "status": r.status.value, "reasons": list(r.reason_codes), "outline": r.outline_id,
                    "competing_plan_records": [c[-8:] for c in r.competing_plan_record_ids]}

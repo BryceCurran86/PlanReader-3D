@@ -601,6 +601,8 @@ def test_original_source_owned_path_reproduces_the_diagnostic_result_and_names_i
     assert owned["input_path"] == "source_owned" and diagnostic["input_path"] == "pymupdf_diagnostic"
     assert [c["record"] for c in owned["candidates"]] == [c["record"] for c in diagnostic["candidates"]] == ["22e7e155", "a93486dc"]
     assert all(c["receipt_count"] > 0 and c["opening_height_mm"] == 2100.0 for c in owned["candidates"])
+    assert all(c["text_trust"] in ("corroborated", "raw_unverified_diagnostic_only") for c in owned["candidates"])   # trust is always stated
+    assert all(c["text_trust"] == "" for c in diagnostic["candidates"])        # the PyMuPDF path claims no text trust
     assert all(c["leaf_height_mm"] != c["opening_height_mm"] for c in owned["candidates"] if c["record"] == "22e7e155")
     offsets = lambda r: sorted((v["page"], v["view"], v.get("offset")) for v in r["views"] if v.get("registered_axes"))
     assert offsets(owned) == offsets(diagnostic)                          # the same unique registrations
@@ -689,3 +691,90 @@ def test_a_segment_without_a_corroborated_visibility_receipt_is_not_used():
     page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
     assert dropped.isdisjoint({l[4] for l in page.lines})
     assert len(page.lines) == len(baseline.lines) - 1
+
+
+# ------------------------------------------------------------------ MAX review 6733270532: untrusted text must fail closed
+def _words_with_reasons(reasons, *, status=None):
+    """Read the synthetic page while the text authority reports every word as untrusted with `reasons`."""
+    import dataclasses
+    import types
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real = source.text_integrity_authority()
+    forced = status if status is not None else EvidenceResolutionStatus.ABSTAINED
+
+    class Doubt:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def resolve_text(self, selector):
+            r = real.resolve_text(selector)
+            receipt = dataclasses.replace(r.receipt, trusted=False, reason_codes=tuple(reasons))
+            return types.SimpleNamespace(status=forced, receipt=receipt, trusted_text=None)
+
+    source.text_integrity_authority = lambda: Doubt()
+    return adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+
+
+def test_an_untrusted_word_with_no_stated_reason_is_never_a_datum_word():
+    # An empty reason set is a subset of every set; it must not pass the raw fallback.
+    page = _words_with_reasons(())
+    assert page.words == ()
+    assert adapter.source_owned_views(page) == []                       # no figured chain, so no view at all
+
+
+@pytest.mark.parametrize("reasons", [("something_unknown",), ("text_glyph_mapping_unverified", "something_unknown"),
+                                     ("text_clip_state_unresolved", "text_glyph_mapping_unverified", "other")])
+def test_unknown_or_mixed_reasons_are_not_accepted_as_raw_text(reasons):
+    assert _words_with_reasons(reasons).words == ()
+
+
+@pytest.mark.parametrize("reasons", [("text_glyph_mapping_unverified",), ("text_clip_state_unresolved",),
+                                     ("text_glyph_mapping_unverified", "text_clip_state_unresolved")])
+def test_only_approved_reasons_give_raw_text_and_it_is_tagged_unverified(reasons):
+    page = _words_with_reasons(reasons)
+    assert page.words and {w[6] for w in page.words} == {"raw_unverified"}
+    views = adapter.source_owned_views(page)
+    assert views and all(lv.text_trust == "raw_unverified" for lv in views[0]["datum"].levels)
+
+
+def test_a_non_abstained_untrusted_word_is_not_raw_fallback():
+    page = _words_with_reasons(("text_glyph_mapping_unverified",), status=EvidenceResolutionStatus.CONFLICT)
+    assert page.words == ()
+
+
+def test_real_producer_words_carry_an_explicit_trust_tag():
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert page.words and {w[6] for w in page.words} <= {"corroborated", "raw_unverified"}
+
+
+def _trust_scene(trust_values):
+    lines, rects, words = synthetic_page()
+    tagged = []
+    for i, w in enumerate(words):
+        tagged.append((*w, f"word{i}", trust_values[i % len(trust_values)]))
+    return adapter.extract_views(lines, rects, tagged)[0], tagged
+
+
+def test_text_trust_reaches_the_result_and_never_makes_a_candidate_stronger():
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    for trust, expected in ((["corroborated"], "corroborated"), (["corroborated", "raw_unverified"], "raw_unverified_diagnostic_only"),
+                            (["raw_unverified"], "raw_unverified_diagnostic_only")):
+        view, _ = _trust_scene(trust)
+        r = run("leaf_rec", plan, view["outlines"], view["datum"])
+        assert r.status is CAND and r.text_trust == expected and r.status is not EvidenceResolutionStatus.CORROBORATED
+    # a plain tuple with no trust tag claims nothing
+    lines, rects, words = synthetic_page()
+    view = adapter.extract_views(lines, rects, words)[0]
+    assert run("leaf_rec", plan, view["outlines"], view["datum"]).text_trust == ""
+    assert shadow.datum_text_trust(view["datum"]) == ""
+
+
+def test_text_trust_is_part_of_the_result_identity():
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    a_view, _ = _trust_scene(["corroborated"])
+    b_view, _ = _trust_scene(["raw_unverified"])
+    a = run("leaf_rec", plan, a_view["outlines"], a_view["datum"])
+    b = run("leaf_rec", plan, b_view["outlines"], b_view["datum"])
+    assert a.result_id != b.result_id                                   # a raw-text result can never alias a verified one
