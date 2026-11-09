@@ -26,6 +26,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
+    RASTER_CORNER_FRAMED_OPENING_LEG,
     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
@@ -486,6 +487,7 @@ def _gap_span_for_opening(
     if opening.structural_pattern in {
         RASTER_FRAMED_WALL_BAND_INTERRUPTION,
         RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+        RASTER_CORNER_FRAMED_OPENING_LEG,
     }:
         bbox = opening.aperture_bbox_pt
         if bbox is None or len(bbox) != 4:

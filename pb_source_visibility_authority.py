@@ -957,13 +957,17 @@ class SourceVisibilityProducer:
                  exact_g17_nomination_shadow: bool = False,
                  source_native_finish_text_shadow: bool = False,
                  raster_double_face_negative_shadow: bool = False,
-                 source_glyph_ledger_text_trust: bool = False) -> None:
+                 source_glyph_ledger_text_trust: bool = False,
+                 raster_corner_framed_opening_shadow: bool = False) -> None:
         if type(raster_double_face_negative_shadow) is not bool:
             raise ValueError("double-face negative shadow requires an explicit boolean")
         self._raster_double_face_negative_shadow = raster_double_face_negative_shadow
         if type(raster_paired_outer_faces_shadow) is not bool:
             raise ValueError("raster paired outer faces shadow must be explicit boolean")
         self._raster_paired_outer_faces_shadow = raster_paired_outer_faces_shadow
+        if type(raster_corner_framed_opening_shadow) is not bool:
+            raise ValueError("raster corner framed opening shadow must be explicit boolean")
+        self._raster_corner_framed_opening_shadow = raster_corner_framed_opening_shadow
         if type(exact_g17_nomination_shadow) is not bool:
             raise ValueError("exact G17 nomination shadow must be explicit boolean")
         self._exact_g17_nomination_shadow = exact_g17_nomination_shadow
@@ -1785,6 +1789,8 @@ class SourceVisibilityProducer:
             raise RuntimeError("original raster source policy changed after authority creation")
         if self._physical_opening_authority_cache._raster_double_face_negative_shadow != self._raster_double_face_negative_shadow:
             raise RuntimeError("original raster negative policy changed after authority creation")
+        if getattr(self._physical_opening_authority_cache, "_raster_corner_framed_opening_shadow", False) != self._raster_corner_framed_opening_shadow:
+            raise RuntimeError("original raster corner policy changed after authority creation")
         return self._physical_opening_authority_cache
 
     def physical_scale_producer(self):
@@ -2561,6 +2567,7 @@ class SourceVisibilityProducer:
         exact_g17_nomination_shadow: bool = False,
         include_revision_ancestry_shadow: bool = False,
         raster_double_face_negative_shadow: bool = False,
+        raster_corner_framed_opening_shadow: bool = False,
     ):
         """Replay an independent source policy without rewriting this issuer.
 
@@ -2572,7 +2579,8 @@ class SourceVisibilityProducer:
         """
         if any(type(flag) is not bool for flag in (
                 raster_paired_outer_faces_shadow, exact_g17_nomination_shadow,
-                include_revision_ancestry_shadow, raster_double_face_negative_shadow)):
+                include_revision_ancestry_shadow, raster_double_face_negative_shadow,
+                raster_corner_framed_opening_shadow)):
             raise ValueError("source fork policies require explicit booleans")
         published = self.published_snapshot_for_revision(revision_id)
         if (published is None or self._producer.current_revision_id(
@@ -2615,6 +2623,7 @@ class SourceVisibilityProducer:
             raster_paired_outer_faces_shadow=raster_paired_outer_faces_shadow,
             exact_g17_nomination_shadow=exact_g17_nomination_shadow,
             raster_double_face_negative_shadow=raster_double_face_negative_shadow,
+            raster_corner_framed_opening_shadow=raster_corner_framed_opening_shadow,
         )
         for ancestor, payload, coverage in reversed(lineage):
             replay = fork.ingest_native_pdf_bytes(

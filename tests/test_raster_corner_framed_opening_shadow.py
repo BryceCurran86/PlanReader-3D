@@ -408,6 +408,7 @@ def test_no_production_module_imports_the_shadow_detector() -> None:
     pattern = re.compile(r"\bpb_raster_corner_framed_opening_shadow\b")
     allowed = {
         ROOT / "pb_raster_corner_framed_opening_shadow.py",
+        ROOT / "pb_physical_opening_authority.py",
         ROOT / "tools" / "diag_cursor_corner_framed_opening_shadow.py",
     }
     importers = [
@@ -416,3 +417,6 @@ def test_no_production_module_imports_the_shadow_detector() -> None:
         if path not in allowed and pattern.search(path.read_text(encoding="utf-8", errors="ignore"))
     ]
     assert importers == []
+    authority = (ROOT / "pb_physical_opening_authority.py").read_text(encoding="utf-8")
+    assert "detect_raster_corner_framed_openings_shadow" in authority
+    assert "if self._raster_corner_framed_opening_shadow:" in authority

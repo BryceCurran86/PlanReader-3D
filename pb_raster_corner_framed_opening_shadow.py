@@ -88,6 +88,20 @@ class RasterCornerFramedLeg:
     face_observation_ids: tuple[str, ...]
     frame_line_observation_ids: tuple[str, ...]
 
+    def aperture_bbox_pt(self) -> tuple[float, float, float, float]:
+        along0, along1 = self.clear_span_along_pt
+        cross0, cross1 = self.cross_range_pt
+        if self.axis == HORIZONTAL:
+            return (along0, cross0, along1, cross1)
+        return (cross0, along0, cross1, along1)
+
+    def support_observation_ids(self) -> tuple[str, ...]:
+        return tuple(sorted({
+            self.jamb_end_observation_id,
+            *self.face_observation_ids,
+            *self.frame_line_observation_ids,
+        } - {""}))
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "axis": self.axis,

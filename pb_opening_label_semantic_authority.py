@@ -29,7 +29,7 @@ _LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.I)
 _EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.I)
 _EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.I)
 _EXPLICIT_DOOR_PHRASE_RE = re.compile(
-    r"\b(?:STACKER|STACKING\s+DOOR|PANEL[\s-]+LIFT(?:\s+DOOR)?)\b",
+    r"\b(?:STACKER|CRNR\s+STACK(?:ER)?|STACKING\s+DOOR|PANEL[\s-]+LIFT(?:\s+DOOR)?)\b",
     re.I,
 )
 
