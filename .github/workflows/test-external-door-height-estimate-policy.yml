@@ -1,0 +1,43 @@
+name: Owner external-door height estimate policy
+
+on:
+  push:
+    branches:
+      - gptmax/external-door-2100-owner-estimate-policy-20261109
+  pull_request:
+    paths:
+      - AGENTS.md
+      - pb_external_door_height_estimate_policy.py
+      - tests/test_external_door_height_estimate_policy.py
+      - docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md
+      - .github/workflows/test-external-door-height-estimate-policy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-external-door-height:
+    name: Height assumption source-neutral (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install source-neutral test dependency only
+        run: python -m pip install pytest
+      - name: Policy regression and public source-neutral firewall
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m compileall -q pb_external_door_height_estimate_policy.py tests/test_external_door_height_estimate_policy.py
+          python -m pytest -q -p no:cacheprovider tests/test_external_door_height_estimate_policy.py
