@@ -803,6 +803,27 @@ def _prefer_richer_label_fragments(
             kept.append(fragment)
     return tuple(kept)
 
+def _raw_text_fallback_permitted(resolved: object) -> bool:
+    """Only a stated, recognized glyph/clip failure permits raw diagnostic input.
+
+    Empty reason sets and conflicting/untrusted states never authenticate raw text.
+    Source/word ownership and independent raster corroboration remain separate gates.
+    """
+    receipt = getattr(resolved, "receipt", None)
+    if receipt is None:
+        return False
+    reasons = set(receipt.reason_codes or ())
+    return (
+        resolved.status is EvidenceResolutionStatus.ABSTAINED
+        and not receipt.trusted
+        and bool(reasons)
+        and reasons.issubset({
+            TEXT_GLYPH_MAPPING_UNVERIFIED,
+            TEXT_CLIP_STATE_UNRESOLVED,
+        })
+    )
+
+
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
@@ -832,9 +853,7 @@ def _trusted_text_lines(
         if resolved.status is EvidenceResolutionStatus.CORROBORATED and resolved.trusted_text:
             text_val = str(resolved.trusted_text)
         elif (
-            resolved.status is EvidenceResolutionStatus.ABSTAINED
-            and not receipt.trusted
-            and set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
+            _raw_text_fallback_permitted(resolved)
             and str(receipt.raw_text or "").strip()
         ):
             text_val = str(receipt.raw_text).strip()
@@ -1006,13 +1025,14 @@ class OpeningLabelDimensionProducer:
             source_cache[cache_key] = False
             return False
         raw = str(receipt.raw_text or '').strip()
-        if raw in ('-', '–', '—', 'x', '×', 'X'):
-            ok = set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED})
-            source_cache[cache_key] = ok
-            return ok
-        if not set(receipt.reason_codes or ()).issubset({TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED}):
+        if not raw or not _raw_text_fallback_permitted(resolved):
             source_cache[cache_key] = False
             return False
+        if raw in ('-', '–', '—', 'x', '×', 'X'):
+            # Punctuation has no lexical raster comparison, so the explicit
+            # source-text reason/status gate above must always hold.
+            source_cache[cache_key] = True
+            return True
         raster_producer = getattr(self._source, "_raster_corroboration_producer", None)
         if raster_producer is None:
             raster_producer = RasterTextCorroborationProducer.for_physical_plan_view_shadow(self._source)
