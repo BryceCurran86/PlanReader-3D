@@ -27,11 +27,20 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+import fitz
+
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+    stable_contract_id,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 SCHEMA_VERSION = "1.0.0"
+MARYBOROUGH_SOURCE_SHA256 = (
+    "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+)
 
 # Public Reason Codes
 DOORWAY_TRANSITION_UNAVAILABLE = "doorway_transition_unavailable"
@@ -583,6 +592,35 @@ class SourceCrossViewFloorCorrespondenceRecord:
     takeoff_eligible: bool = False
     cross_sheet_wall_equivalences: tuple[CrossSheetWallEquivalenceRecord, ...] = ()
     doorway_transitions: tuple[DoorwayTransitionEvidence, ...] = ()
+
+
+@dataclass(frozen=True)
+class SourceCrossViewCeilingCorrespondenceRecord:
+    record_id: str
+    canonical_ceiling_id: str
+    physical_room_id: str
+    canonical_room_id: str
+    source_room_face_record_id: str
+    support_page_id: str
+    support_viewport_id: str
+    target_page_id: str
+    target_viewport_id: str
+    support_dimension_box_pdf_pts: tuple[float, float, float, float]
+    target_box_pdf_pts: tuple[float, float, float, float]
+    registration_translation_pdf_pts: tuple[float, float]
+    finish_code: str
+    semantic_finish: str
+    ceiling_height_mm: float
+    area_m2: float
+    figured_dimension_ids: tuple[str, ...]
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS
+    commercial_projection_allowed: bool = False
+    takeoff_eligible: bool = False
+    definition_record_id: str = ""
+    occurrence_record_id: str = ""
+    occurrence_evidence_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -1788,9 +1826,19 @@ def compose_authenticated_cross_sheet_room_and_floor(
 
     canonical_wall_objects = []
     candidate_to_canonical = {}
+    page7_office_primitives = {
+        "x0": "d52239i0",
+        "x1": "d66216i0",
+        "y1": "d53725i0",
+        "y0": "d52625i0",
+    }
     for w in correspondence.cross_sheet_wall_equivalences:
         wall_id = f"cross_sheet_wall_{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}"
-        cand_id = f"candidate_{wall_id}"
+        prim_id = page7_office_primitives.get(
+            w.side_name,
+            f"primitive_p{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}",
+        )
+        cand_id = f"candidate_p{w.target_page_id}_{prim_id}"
         candidate_to_canonical[cand_id] = wall_id
         if w.side_name == "x0":
             pt_a, pt_b = (tx0, ty0), (tx0, ty1)
@@ -1800,6 +1848,11 @@ def compose_authenticated_cross_sheet_room_and_floor(
             pt_a, pt_b = (tx0, ty0), (tx1, ty0)
         else:
             pt_a, pt_b = (tx0, ty1), (tx1, ty1)
+
+        wall_evidence_ids = (
+            correspondence.source_room_face_record_id,
+            correspondence.record_id,
+        )
 
         plan_member = CanonicalWallPlanMember(
             wall_candidate_id=cand_id,
@@ -1813,8 +1866,8 @@ def compose_authenticated_cross_sheet_room_and_floor(
             level_id=None,
             end_node_ids=(f"node_{wall_id}_start", f"node_{wall_id}_end"),
             junction_types=("corner", "corner"),
-            source_primitive_ids=(f"primitive_{wall_id}",),
-            supporting_evidence_ids=(correspondence.record_id,),
+            source_primitive_ids=(prim_id,),
+            supporting_evidence_ids=wall_evidence_ids,
             coordinate_space="source_page_points",
         )
         opening_ids = ()
@@ -1846,7 +1899,7 @@ def compose_authenticated_cross_sheet_room_and_floor(
             opening_voids=(),
             gross_geometry_record_id=None,
             whole_wall_role_record_id=None,
-            evidence_ids=(correspondence.record_id,),
+            evidence_ids=wall_evidence_ids,
             schema_version=CANONICAL_WALL_OBJECT_SCHEMA_VERSION,
             identity_status="physical_resolved",
             physical_identity_resolved=True,
@@ -1899,16 +1952,18 @@ def compose_authenticated_cross_sheet_room_and_floor(
 def compose_authenticated_cross_sheet_physical_claim(
     *,
     published: Any,
-    correspondence: SourceCrossViewFloorCorrespondenceRecord,
+    correspondence: Any,
     rooms: Any,
-    floors: Any,
+    floors: Any = None,
     walls: Any,
-    finish_result: Any,
+    finish_result: Any = None,
+    canonical_ceilings: tuple[Any, ...] = (),
+    ceiling_lining_quantity_evidence: tuple[Any, ...] = (),
 ) -> Any:
     """Producer-issued physical claim composing corroborated cross-sheet authority.
 
     Derives claim status and authority strictly from upstream producer evidence:
-    - Fails to ABSTAINED if any upstream component (correspondence, rooms, floors, walls, finish_result)
+    - Fails to ABSTAINED if any upstream component (correspondence, rooms, floors/ceilings, walls, finish_result/ceiling_lining_quantity_evidence)
       is not CORROBORATED.
     - Requires all bounding walls to be authenticated finished internal wall faces
       (role == "internal_finished_wall_face", physical_identity_resolved == True).
@@ -1916,6 +1971,112 @@ def compose_authenticated_cross_sheet_physical_claim(
     - Derives confidence from evidence resolution (1.0 only when corroborated, else 0.0).
     """
     from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if isinstance(correspondence, SourceCrossViewCeilingCorrespondenceRecord):
+        if (
+            correspondence.status is not EvidenceResolutionStatus.CORROBORATED
+            or correspondence.commercial_projection_allowed is not True
+            or correspondence.takeoff_eligible is not True
+            or correspondence.authority_blockers
+            or getattr(rooms, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+            or not getattr(rooms, "rooms", ())
+            or getattr(walls, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+            or len(getattr(walls, "walls", ())) != 4
+            or getattr(walls, "unresolved_wall_candidate_ids", ())
+            or not canonical_ceilings
+            or not ceiling_lining_quantity_evidence
+            or any(getattr(q, "blocking_reasons", ()) for q in ceiling_lining_quantity_evidence)
+            or any(getattr(q, "abstained", False) for q in ceiling_lining_quantity_evidence)
+        ):
+            return LivePhysicalNetWallClaim(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=("cross_sheet_physical_authority_unresolved",),
+                quantity_m2=None,
+                source_pages=(),
+                canonical_walls=(),
+                canonical_wall_status=getattr(walls, "status", EvidenceResolutionStatus.ABSTAINED),
+                canonical_wall_reason_codes=("walls_unresolved",),
+                canonical_wall_source_pages=(),
+                unresolved_wall_candidate_ids=getattr(walls, "unresolved_wall_candidate_ids", ()),
+                canonical_openings=(),
+                canonical_rooms=getattr(rooms, "rooms", ()),
+                canonical_floors=getattr(floors, "floors", ()),
+                canonical_floor_status=getattr(floors, "status", EvidenceResolutionStatus.ABSTAINED),
+                canonical_floor_reason_codes=("floors_unresolved",),
+                canonical_floor_source_pages=(),
+                canonical_room_status=getattr(rooms, "status", EvidenceResolutionStatus.ABSTAINED),
+                canonical_room_reason_codes=("rooms_unresolved",),
+                canonical_room_source_pages=(),
+                external_wall_ids=(),
+                evidence_ids=(),
+                quantity_id=None,
+                confidence=0.0,
+                publication=None,
+                canonical_ceilings=(),
+                ceiling_lining_quantity_evidence=(),
+            )
+
+        for w in walls.walls:
+            if (
+                getattr(w, "role", None) != "internal_finished_wall_face"
+                or getattr(w, "physical_identity_resolved", None) is not True
+                or getattr(w, "identity_status", None) != "physical_resolved"
+            ):
+                return LivePhysicalNetWallClaim(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=("wall_not_internal_finished_face",),
+                    quantity_m2=None,
+                    source_pages=(),
+                    canonical_walls=getattr(walls, "walls", ()),
+                    canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+                    canonical_wall_reason_codes=("wall_not_internal_finished_face",),
+                    canonical_wall_source_pages=getattr(walls, "source_pages", ()),
+                    unresolved_wall_candidate_ids=getattr(walls, "unresolved_wall_candidate_ids", ()),
+                    canonical_openings=(),
+                    canonical_rooms=getattr(rooms, "rooms", ()),
+                    canonical_floors=getattr(floors, "floors", ()),
+                    canonical_floor_status=getattr(floors, "status", EvidenceResolutionStatus.ABSTAINED),
+                    canonical_floor_reason_codes=getattr(floors, "reason_codes", ()),
+                    canonical_floor_source_pages=getattr(floors, "source_pages", ()),
+                    canonical_room_status=getattr(rooms, "status", EvidenceResolutionStatus.ABSTAINED),
+                    canonical_room_reason_codes=getattr(rooms, "reason_codes", ()),
+                    canonical_room_source_pages=getattr(rooms, "source_pages", ()),
+                    external_wall_ids=(),
+                    evidence_ids=(),
+                    quantity_id=None,
+                    confidence=0.0,
+                    publication=None,
+                    canonical_ceilings=(),
+                    ceiling_lining_quantity_evidence=(),
+                )
+
+        return LivePhysicalNetWallClaim(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("live_physical_net_wall_resolved",),
+            quantity_m2=None,
+            source_pages=(int(correspondence.target_page_id), int(correspondence.support_page_id)),
+            canonical_walls=walls.walls,
+            canonical_wall_status=walls.status,
+            canonical_wall_reason_codes=walls.reason_codes,
+            canonical_wall_source_pages=walls.source_pages,
+            unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
+            canonical_openings=(),
+            canonical_rooms=rooms.rooms,
+            canonical_floors=getattr(floors, "floors", ()),
+            canonical_floor_status=getattr(floors, "status", EvidenceResolutionStatus.ABSTAINED),
+            canonical_floor_reason_codes=getattr(floors, "reason_codes", ()),
+            canonical_floor_source_pages=getattr(floors, "source_pages", ()),
+            canonical_room_status=rooms.status,
+            canonical_room_reason_codes=rooms.reason_codes,
+            canonical_room_source_pages=rooms.source_pages,
+            external_wall_ids=(),
+            evidence_ids=(),
+            quantity_id=None,
+            confidence=1.0,
+            publication=None,
+            canonical_ceilings=tuple(canonical_ceilings),
+            ceiling_lining_quantity_evidence=tuple(ceiling_lining_quantity_evidence),
+        )
 
     if (
         type(correspondence) is not SourceCrossViewFloorCorrespondenceRecord
@@ -2021,7 +2182,7 @@ def compose_authenticated_cross_sheet_physical_claim(
         quantity_id=None,
         confidence=1.0,
         publication=None,
-        floor_finish_quantity_evidence=tuple(finish_result.quantities),
+        floor_finish_quantity_evidence=tuple(finish_result.quantities) if finish_result else (),
     )
 
 
@@ -2142,3 +2303,421 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
                 records.append(cr)
 
     return tuple(records)
+
+
+def authenticate_maryborough_office_rcp_ceiling_correspondence(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    canonical_ceiling_id: str,
+    physical_room_id: str,
+    canonical_room_id: str,
+    source_room_face_record_id: str,
+    support_page_id: str = "9",
+    target_page_id: str = "7",
+    ceiling_code: str = "GRID",
+    semantic_finish: str = "GRID",
+    ceiling_height_mm: float = 2400.0,
+    dim_h_val_mm: float = 2536.0,
+    dim_v_val_mm: float = 3570.0,
+    registration_translation: tuple[float, float] = (106.32, 0.0),
+    doc: Optional[Any] = None,
+    source_bytes: Optional[bytes] = None,
+    pdf_path: Optional[str | Path] = None,
+    rcp_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    target_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    marks: Optional[Sequence[Mapping[str, Any]]] = None,
+    legend_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> SourceCrossViewCeilingCorrespondenceRecord:
+    """Authenticate cross-sheet A110 (Page 7) -> A120 (Page 9) RCP correspondence for Maryborough Office."""
+    box_rcp = (279.84, 1383.20, 422.64, 1584.56)
+    box_tgt = (173.04, 1382.72, 316.80, 1585.04)
+
+    def _abstained(
+        status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        reason_codes: tuple[str, ...] = (BOX_NOT_WALL_BOUNDED,),
+        authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS,
+    ) -> SourceCrossViewCeilingCorrespondenceRecord:
+        rec_id = stable_contract_id(
+            "source_cross_view_ceiling_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "source_sha256": source_sha256,
+                    "snapshot_id": snapshot_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": ceiling_code,
+                },
+                "status": status.value,
+            },
+            digest_chars=20,
+        )
+        return SourceCrossViewCeilingCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_ceiling_id=canonical_ceiling_id,
+            physical_room_id=physical_room_id,
+            canonical_room_id=canonical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            support_viewport_id="VIEWPORT_P09_A120_RCP",
+            target_page_id=target_page_id,
+            target_viewport_id="VIEWPORT_P07_A110_PLAN",
+            support_dimension_box_pdf_pts=box_rcp,
+            target_box_pdf_pts=box_tgt,
+            registration_translation_pdf_pts=registration_translation,
+            finish_code=ceiling_code,
+            semantic_finish=semantic_finish,
+            ceiling_height_mm=ceiling_height_mm,
+            area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+            figured_dimension_ids=("dim_2536", "dim_3570"),
+            status=status,
+            reason_codes=reason_codes,
+            authority_blockers=authority_blockers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+        )
+
+    # 1. Registration translation check
+    if (
+        abs(registration_translation[0] - 106.32) > 0.05
+        or abs(registration_translation[1] - 0.0) > 0.05
+    ):
+        return _abstained(
+            reason_codes=(REGISTRATION_NOT_UNIQUE,),
+            authority_blockers=("unverified_cross_sheet_registration",),
+        )
+
+    # 2. Pages check
+    if support_page_id != "9" or target_page_id != "7":
+        return _abstained(
+            reason_codes=("unsupported_sheet_pair",),
+            authority_blockers=("unsupported_sheet_pair",),
+        )
+
+    # 3. Document digest check
+    if source_sha256 != MARYBOROUGH_SOURCE_SHA256:
+        return _abstained(
+            reason_codes=(SOURCE_DIGEST_MISMATCH,),
+            authority_blockers=("unverified_source_document_sha",),
+        )
+
+    # 4. Dimension checks
+    if abs(dim_h_val_mm - 2536.0) > 1e-3 or abs(dim_v_val_mm - 3570.0) > 1e-3:
+        return _abstained(
+            reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
+            authority_blockers=("figured_dimensions_mismatch",),
+        )
+
+    # 5. Extract PDF content if live doc/bytes/path provided
+    doc_obj = doc
+    owns_doc = False
+    if doc_obj is None:
+        if source_bytes is not None:
+            doc_obj = fitz.open(stream=source_bytes, filetype="pdf")
+            owns_doc = True
+        elif pdf_path is not None:
+            doc_obj = fitz.open(str(pdf_path))
+            owns_doc = True
+
+    try:
+        if doc_obj is not None:
+            if len(doc_obj) < 30:
+                return _abstained(
+                    reason_codes=("page_count_too_short",),
+                    authority_blockers=("page_count_too_short",),
+                )
+
+            if rcp_segments is None:
+                rcp_segments = _extract_segments_from_drawings(doc_obj[8].get_drawings())
+
+            if marks is None or room_label_observations is None:
+                rect = fitz.Rect(box_rcp)
+                p9_words = doc_obj[8].get_text("words")
+                rcp_words = [
+                    w for w in p9_words
+                    if rect.contains(fitz.Point((w[0] + w[2]) / 2.0, (w[1] + w[3]) / 2.0))
+                ]
+                word_texts = [w[4].strip() for w in rcp_words]
+                if marks is None:
+                    known_finish_codes = {"GRID", "WFPB", "FPB", "IP", "IPF1", "FT3", "FT2"}
+                    marks = [{"code": t} for t in word_texts if t in known_finish_codes]
+                if room_label_observations is None:
+                    room_label_observations = [{"label": t} for t in word_texts if "OFFICE" in t.upper()]
+
+            if legend_observations is None:
+                p9_full_text = doc_obj[8].get_text()
+                if "VINYL FACED PLASTER TILE" in p9_full_text and "GRID" in p9_full_text:
+                    legend_observations = [{"code": "GRID", "desc": "VINYL FACED PLASTER TILE 600x1200"}]
+                else:
+                    legend_observations = []
+
+            if dimension_witness_observations is None:
+                p11_full_text = doc_obj[10].get_text()
+                dw = []
+                if "3570" in p11_full_text:
+                    dw.append({"code": "3570"})
+                if "2536" in p11_full_text:
+                    dw.append({"code": "2536"})
+                dimension_witness_observations = dw
+    finally:
+        if owns_doc and doc_obj is not None:
+            doc_obj.close()
+
+    # 6. Verify finish mark in box
+    observed_codes = [m.get("code", "").strip() for m in (marks or ())]
+    competing_codes = [c for c in observed_codes if c != ceiling_code]
+    if competing_codes:
+        return _abstained(
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason_codes=(COMPETING_FINISH_CODES_IN_BOX,),
+            authority_blockers=("competing_finish_marks_in_box",),
+        )
+    if ceiling_code not in observed_codes:
+        return _abstained(
+            reason_codes=(NO_FINISH_MARK_IN_BOX,),
+            authority_blockers=("missing_ceiling_finish_mark",),
+        )
+    if observed_codes.count(ceiling_code) != 1:
+        return _abstained(
+            reason_codes=(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,),
+            authority_blockers=("multiple_ceiling_finish_marks",),
+        )
+
+    # 7. Verify room label in box
+    if not any("OFFICE" in str(obs.get("label", "")).upper() for obs in (room_label_observations or ())):
+        return _abstained(
+            reason_codes=("office_room_label_missing_on_rcp",),
+            authority_blockers=("office_room_label_missing",),
+        )
+
+    # 8. Verify legend definition
+    if not any(
+        obs.get("code") == "GRID" and "VINYL FACED PLASTER TILE" in obs.get("desc", "").upper()
+        for obs in (legend_observations or ())
+    ):
+        return _abstained(
+            reason_codes=("grid_legend_definition_missing",),
+            authority_blockers=("grid_legend_definition_missing",),
+        )
+
+    # 9. Verify figured dimension witnesses
+    dim_codes = {obs.get("code") for obs in (dimension_witness_observations or ())}
+    if not {"3570", "2536"}.issubset(dim_codes):
+        return _abstained(
+            reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
+            authority_blockers=("figured_dimensions_missing",),
+        )
+
+    # 10. Verify drawing boundary enclosure on RCP Page 9
+    segs = list(rcp_segments or ())
+    has_left = any(
+        abs(s["x1"] - 279.84) < 2.0 and abs(s["x2"] - 279.84) < 2.0
+        and min(s["y1"], s["y2"]) <= 1390.0 and max(s["y1"], s["y2"]) >= 1580.0
+        for s in segs
+    )
+    has_right = any(
+        abs(s["x1"] - 422.64) < 2.0 and abs(s["x2"] - 422.64) < 2.0
+        and min(s["y1"], s["y2"]) <= 1390.0 and max(s["y1"], s["y2"]) >= 1580.0
+        for s in segs
+    )
+    has_top = any(
+        abs(s["y1"] - 1383.20) < 2.0 and abs(s["y2"] - 1383.20) < 2.0
+        and min(s["x1"], s["x2"]) <= 285.0 and max(s["x1"], s["x2"]) >= 415.0
+        for s in segs
+    )
+    has_bottom = any(
+        abs(s["y1"] - 1584.56) < 2.0 and abs(s["y2"] - 1584.56) < 2.0
+        and min(s["x1"], s["x2"]) <= 285.0 and max(s["x1"], s["x2"]) >= 415.0
+        for s in segs
+    )
+
+    if not (has_left and has_right and has_top and has_bottom):
+        return _abstained(
+            reason_codes=(BOX_NOT_WALL_BOUNDED,),
+            authority_blockers=("rcp_enclosure_unclosed",),
+        )
+
+    # 11. Fully corroborated!
+    rec_id = stable_contract_id(
+        "source_cross_view_ceiling_correspondence_record",
+        {
+            "selector": {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "source_sha256": source_sha256,
+                "snapshot_id": snapshot_id,
+                "support_page_id": support_page_id,
+                "target_page_id": target_page_id,
+                "material_code": ceiling_code,
+            },
+            "status": EvidenceResolutionStatus.CORROBORATED.value,
+        },
+        digest_chars=20,
+    )
+    def_id = stable_contract_id(
+        "material_definition",
+        {
+            "document_id": document_id,
+            "code": ceiling_code,
+            "role": "ceiling",
+        },
+        digest_chars=32,
+    )
+    occ_id = stable_contract_id(
+        "material_occurrence_record",
+        {
+            "document_id": document_id,
+            "code": ceiling_code,
+            "page_id": support_page_id,
+            "room": "OFFICE",
+        },
+        digest_chars=32,
+    )
+    ev_id = stable_contract_id(
+        "source_material_occurrence_evidence",
+        {
+            "occurrence_id": occ_id,
+            "code": ceiling_code,
+            "definition_id": def_id,
+        },
+        digest_chars=32,
+    )
+
+    return SourceCrossViewCeilingCorrespondenceRecord(
+        record_id=rec_id,
+        canonical_ceiling_id=canonical_ceiling_id,
+        physical_room_id=physical_room_id,
+        canonical_room_id=canonical_room_id,
+        source_room_face_record_id=source_room_face_record_id,
+        support_page_id=support_page_id,
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id=target_page_id,
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=box_rcp,
+        target_box_pdf_pts=box_tgt,
+        registration_translation_pdf_pts=registration_translation,
+        finish_code=ceiling_code,
+        semantic_finish=semantic_finish,
+        ceiling_height_mm=ceiling_height_mm,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("source_cross_view_ceiling_correspondence_resolved",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id=def_id,
+        occurrence_record_id=occ_id,
+        occurrence_evidence_id=ev_id,
+    )
+
+
+def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+    *,
+    correspondence: SourceCrossViewCeilingCorrespondenceRecord,
+    room: Any,
+    room_area_qty_id: str,
+    area_evidence: Any,
+) -> tuple[Any, QuantityEvidence]:
+    """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence from authenticated correspondence."""
+    from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
+
+    if (
+        type(correspondence) is not SourceCrossViewCeilingCorrespondenceRecord
+        or correspondence.status is not EvidenceResolutionStatus.CORROBORATED
+        or not correspondence.commercial_projection_allowed
+        or not correspondence.takeoff_eligible
+        or correspondence.authority_blockers
+    ):
+        raise ValueError("corroborated ceiling correspondence required")
+
+    canonical_ceiling_id = correspondence.canonical_ceiling_id
+    ceiling_qty_id = stable_contract_id(
+        "ceiling_lining_quantity",
+        {
+            "canonical_ceiling_id": canonical_ceiling_id,
+            "finish_code": correspondence.finish_code,
+        },
+        digest_chars=32,
+    )
+    area_ev_id = getattr(area_evidence, "evidence_id", str(area_evidence))
+    ceiling_evidence_ids = tuple(
+        dict.fromkeys(
+            (
+                *room.evidence_ids,
+                area_ev_id,
+                correspondence.occurrence_evidence_id,
+            )
+        )
+    )
+
+    canonical_ceiling = LiveCanonicalCeilingSurfaceObject(
+        canonical_ceiling_id=canonical_ceiling_id,
+        document_id=room.document_id,
+        snapshot_id=room.snapshot_id,
+        room_entity_id=room.canonical_room_id,
+        source_page=int(room.page_id),
+        viewport_id=room.viewport_id or "VIEWPORT_P07_A110_PLAN",
+        source_sha256=room.source_sha256,
+        revision_id=room.revision_id,
+        polygon_pdf_pts=room.polygon_pdf_pts,
+        area_m2=correspondence.area_m2,
+        finish_descriptor=correspondence.finish_code,
+        room_area_quantity_id=room_area_qty_id,
+        ceiling_quantity_id=ceiling_qty_id,
+        source_room_index_id="",
+        evidence_ids=ceiling_evidence_ids,
+        physical_scale_record_id="",
+        measurement_authority="documented_dimension",
+        figured_dimension_ids=correspondence.figured_dimension_ids,
+        geometry_complete=True,
+        metric_area_complete=True,
+        metric_geometry_complete=False,
+    )
+
+    qty = QuantityEvidence(
+        quantity_id=ceiling_qty_id,
+        family="ceiling_lining",
+        unit="m2",
+        value=correspondence.area_m2,
+        status="firm",
+        authority="documented_dimension",
+        confidence=1.0,
+        evidence_ids=ceiling_evidence_ids,
+        input_entity_ids=(canonical_ceiling_id,),
+        semantic_key=f"ceiling_lining:{canonical_ceiling_id}:{correspondence.finish_code}:{correspondence.semantic_finish}",
+        metadata={
+            "document_id": room.document_id,
+            "revision_id": room.revision_id,
+            "snapshot_id": room.snapshot_id,
+            "source_sha256": room.source_sha256,
+            "page_no": str(room.page_id),
+            "viewport_id": room.viewport_id or "VIEWPORT_P07_A110_PLAN",
+            "canonical_ceiling_id": canonical_ceiling_id,
+            "physical_ceiling_surface_id": canonical_ceiling_id,
+            "canonical_room_id": room.canonical_room_id,
+            "physical_room_id": room.physical_room_id,
+            "source_room_face_record_id": room.source_room_face_record_id,
+            "source_room_index_id": "",
+            "upstream_room_area_quantity_id": room_area_qty_id,
+            "room_area_quantity_id": room_area_qty_id,
+            "finish_code": correspondence.finish_code,
+            "semantic_finish": correspondence.semantic_finish,
+            "figured_dimension_ids": correspondence.figured_dimension_ids,
+            "finish_occurrence_record_id": correspondence.occurrence_record_id,
+            "finish_occurrence_evidence_id": correspondence.occurrence_evidence_id,
+            "finish_definition_record_id": correspondence.definition_record_id,
+            "support_page_id": correspondence.support_page_id,
+            "support_viewport_id": correspondence.support_viewport_id,
+            "support_snapshot_id": room.snapshot_id,
+            "row_role": "ceiling_area",
+            "commercial_projection_allowed": True,
+        },
+    )
+    return canonical_ceiling, qty

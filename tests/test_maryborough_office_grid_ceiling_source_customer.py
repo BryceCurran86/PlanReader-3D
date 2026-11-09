@@ -1,0 +1,511 @@
+"""Tests for genuine source-owned Maryborough Office GRID ceiling lining chain.
+
+Verifies:
+1. Genuine source PDF yields FIRM_SOURCE_CUSTOMER_TO_REVIEW with exactly 1 quantity (9.05352 m2),
+   1 customer row, and verified sealed run.
+2. Ceiling customer authority produces 1-to-1 sealed customer output matching
+   the exact verified ceiling benchmark item (maryborough-office-grid-ceiling-area).
+3. Fail-closed regressions:
+   - missing drawing observations (get_drawings return empty list)
+   - unavailable geometry backend (get_pixmap raises RuntimeError)
+   - missing ceiling finish mark ('GRID') in RCP enclosure
+   - competing ceiling finish mark ('WFPB' + 'GRID') in RCP enclosure
+   - missing room label ('OFFICE') on Page 9 RCP
+   - missing Ceiling Legend definition ('GRID' -> 'VINYL FACED PLASTER TILE')
+   - missing figured dimension witnesses ('3570' or '2536')
+   - unclosed RCP drawing boundary vector
+   - shifted / un-unique registration translation
+   - wall role not internal finished wall face
+   - unresolved wall candidates
+   - consumer-authored CORROBORATED status attempting to override unresolved evidence
+4. Exact seal and customer row bijection passing verify_sealed_customer_output.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+import fitz
+import pytest
+
+import pb_maryborough_ceiling_customer as ceiling_authority
+from pb_customer_output_verification import verify_sealed_customer_output
+from pb_source_cross_view_floor_correspondence_shadow import (
+    COMPETING_FINISH_CODES_IN_BOX,
+    NO_FINISH_MARK_IN_BOX,
+    REGISTRATION_NOT_UNIQUE,
+    BOX_NOT_WALL_BOUNDED,
+    DIMENSION_WITNESS_UNAVAILABLE,
+    EvidenceResolutionStatus,
+    SourceCrossViewCeilingCorrespondenceRecord,
+    authenticate_maryborough_office_rcp_ceiling_correspondence,
+    compose_authenticated_cross_sheet_physical_claim,
+)
+from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_lining_source_closed_export import (
+    build_live_ceiling_lining_source_traces,
+    seal_live_ceiling_lining_run,
+)
+from pb_source_closed_run_export import SourceClosedRunConflictError
+
+
+@pytest.fixture
+def maryborough_pdf_path() -> Path:
+    path = Path(
+        os.environ.get(
+            "PLANREADER_ORIGINAL_MARYBOROUGH",
+            "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf",
+        )
+    )
+    if not path.is_file():
+        pytest.skip("private original Maryborough PDF unavailable in test environment")
+    return path
+
+
+def test_genuine_maryborough_office_grid_ceiling_complete_chain(maryborough_pdf_path):
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+    assert result.reason_codes == ("source_owned_physical_quantity_resolved",)
+    assert len(result.quantities) == 1
+    assert len(result.traces) == 1
+    assert len(result.customer_rows) == 1
+    assert result.sealed_run is not None
+
+    q = result.quantities[0]
+    assert q.family == "ceiling_lining"
+    assert q.value == 9.05352
+    assert q.unit == "m2"
+    assert q.status.lower() == "firm"
+    assert not q.abstained
+    assert ceiling_authority.OFFICE_PHYSICAL_CEILING_ID in q.input_entity_ids
+
+    row = result.customer_rows[0]
+    assert row["quantity"] == 9.05352
+    assert row["unit"] == "m2"
+    assert row["quantity_status"] == "To review"
+    assert row["element"] == "Ceiling lining area"
+    assert row["finish_system"] == "GRID"
+    assert row["section"] == "Internal"
+
+    # Verify 1-to-1 sealed customer output
+    verify_sealed_customer_output(result.sealed_run, result.customer_rows)
+
+
+def test_missing_rcp_drawing_observations_abstains(maryborough_pdf_path, monkeypatch):
+    """Empty get_drawings on Page 9 must fail closed to ABSTAIN."""
+    orig_get_drawings = fitz.Page.get_drawings
+
+    def mock_get_drawings(page_self, *args, **kwargs):
+        if page_self.number == 8:
+            return []
+        return orig_get_drawings(page_self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", mock_get_drawings)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_unavailable_geometry_backend_abstains(maryborough_pdf_path, monkeypatch):
+    """RuntimeError in get_pixmap on Page 9 must fail closed to ABSTAIN."""
+    orig_get_pixmap = fitz.Page.get_pixmap
+
+    def mock_get_pixmap(page_self, *args, **kwargs):
+        if page_self.number == 8:
+            raise RuntimeError("mupdf render device unavailable")
+        return orig_get_pixmap(page_self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_pixmap", mock_get_pixmap)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_missing_grid_mark_in_rcp_enclosure_abstains(maryborough_pdf_path, monkeypatch):
+    """Dropping 'GRID' from the Office enclosure on Page 9 must fail closed to ABSTAIN."""
+    orig_get_text = fitz.Page.get_text
+
+    def mock_get_text(page_self, *args, **kwargs):
+        if page_self.number == 8 and args and args[0] == "words":
+            words = orig_get_text(page_self, *args, **kwargs)
+            filtered = []
+            for w in words:
+                if len(w) >= 5 and str(w[4]).strip().upper() == "GRID":
+                    # Drop GRID in Office box
+                    if 279.0 <= float(w[0]) <= 425.0 and 1380.0 <= float(w[1]) <= 1585.0:
+                        continue
+                filtered.append(w)
+            return filtered
+        return orig_get_text(page_self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_competing_ceiling_marks_in_rcp_enclosure_conflicts(maryborough_pdf_path, monkeypatch):
+    """Adding a competing finish mark 'WFPB' inside the Office enclosure on Page 9 must fail closed."""
+    orig_get_text = fitz.Page.get_text
+
+    def mock_get_text(page_self, *args, **kwargs):
+        if page_self.number == 8 and args and args[0] == "words":
+            words = list(orig_get_text(page_self, *args, **kwargs))
+            # Inject WFPB inside the Office box
+            words.append((350.0, 1450.0, 380.0, 1465.0, "WFPB", 999, 0, 0))
+            return words
+        return orig_get_text(page_self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_missing_office_label_on_rcp_abstains(maryborough_pdf_path, monkeypatch):
+    """Dropping 'OFFICE' word inside Page 9 enclosure must fail closed to ABSTAIN."""
+    orig_get_text = fitz.Page.get_text
+
+    def mock_get_text(page_self, *args, **kwargs):
+        if page_self.number == 8 and args and args[0] == "words":
+            words = orig_get_text(page_self, *args, **kwargs)
+            return [w for w in words if "OFFICE" not in str(w[4]).upper() or float(w[0]) < 279.0]
+        return orig_get_text(page_self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_missing_ceiling_legend_definition_abstains(maryborough_pdf_path, monkeypatch):
+    """Removing 'VINYL FACED PLASTER TILE' from Page 9 text must fail closed to ABSTAIN."""
+    orig_get_text = fitz.Page.get_text
+
+    def mock_get_text(page_self, *args, **kwargs):
+        text = orig_get_text(page_self, *args, **kwargs)
+        if page_self.number == 8 and isinstance(text, str):
+            return text.replace("VINYL FACED PLASTER TILE", "CORRUPTED_DEFINITION")
+        return text
+
+    monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_missing_dimension_witnesses_abstains(maryborough_pdf_path, monkeypatch):
+    """Dropping '3570' from Page 11 text must fail closed to ABSTAIN."""
+    orig_get_text = fitz.Page.get_text
+
+    def mock_get_text(page_self, *args, **kwargs):
+        text = orig_get_text(page_self, *args, **kwargs)
+        if page_self.number == 10 and isinstance(text, str):
+            return text.replace("3570", "0000")
+        return text
+
+    monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_unclosed_rcp_drawing_boundary_abstains(maryborough_pdf_path, monkeypatch):
+    """Removing top boundary lines of the Office enclosure on Page 9 must fail closed to ABSTAIN."""
+    orig_get_drawings = fitz.Page.get_drawings
+
+    def mock_get_drawings(page_self, *args, **kwargs):
+        drawings = orig_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 8:
+            return drawings
+        return [
+            d for d in drawings
+            if not (
+                (abs(d.get("rect", fitz.Rect()).y0 - 1383.20) < 2.0 or abs(d.get("rect", fitz.Rect()).y1 - 1383.20) < 2.0)
+                and d.get("rect", fitz.Rect()).x0 <= 285.0
+                and d.get("rect", fitz.Rect()).x1 >= 415.0
+            )
+        ]
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", mock_get_drawings)
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (ceiling_authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_shifted_registration_translation_abstains(maryborough_pdf_path):
+    """Shifted translation must reject correspondence with REGISTRATION_NOT_UNIQUE and ABSTAIN."""
+    cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
+        document_id=ceiling_authority.MARYBOROUGH_DOCUMENT_ID,
+        revision_id=ceiling_authority.MARYBOROUGH_REVISION_ID,
+        source_sha256=ceiling_authority.MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap_test",
+        canonical_ceiling_id=ceiling_authority.OFFICE_PHYSICAL_CEILING_ID,
+        physical_room_id=ceiling_authority.OFFICE_PHYSICAL_ROOM_ID,
+        canonical_room_id=ceiling_authority.OFFICE_PHYSICAL_ROOM_ID,
+        source_room_face_record_id=ceiling_authority.OFFICE_SOURCE_ROOM_FACE_ID,
+        registration_translation=(95.0, 0.0),
+        pdf_path=maryborough_pdf_path,
+    )
+    assert cr.status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_NOT_UNIQUE in cr.reason_codes
+    assert cr.commercial_projection_allowed is False
+
+
+def test_missing_finished_wall_face_abstains_in_claim():
+    """Wall without role 'internal_finished_wall_face' must prevent claim corroboration."""
+    from types import SimpleNamespace
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_1",
+        canonical_ceiling_id="c_1",
+        physical_room_id="r_1",
+        canonical_room_id="r_1",
+        source_room_face_record_id="f_1",
+        support_page_id="9",
+        support_viewport_id="vp9",
+        target_page_id="7",
+        target_viewport_id="vp7",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+    )
+    # Wall with generic role instead of internal_finished_wall_face
+    bad_wall = SimpleNamespace(
+        role="generic_partition",
+        physical_identity_resolved=True,
+        identity_status="physical_resolved",
+    )
+    good_wall = SimpleNamespace(
+        role="internal_finished_wall_face",
+        physical_identity_resolved=True,
+        identity_status="physical_resolved",
+    )
+    walls = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        walls=(bad_wall, good_wall, good_wall, good_wall),
+        source_pages=(7,),
+        reason_codes=(),
+        unresolved_wall_candidate_ids=(),
+    )
+    rooms = SimpleNamespace(status=EvidenceResolutionStatus.CORROBORATED, rooms=(SimpleNamespace(),), source_pages=(7,))
+    qty = SimpleNamespace(status="firm", blocking_reasons=(), abstained=False)
+    ceiling_obj = SimpleNamespace()
+
+    claim = compose_authenticated_cross_sheet_physical_claim(
+        published=None,
+        correspondence=corr,
+        rooms=rooms,
+        walls=walls,
+        canonical_ceilings=(ceiling_obj,),
+        ceiling_lining_quantity_evidence=(qty,),
+    )
+    assert claim.status is EvidenceResolutionStatus.ABSTAINED
+    assert claim.confidence == 0.0
+    assert "wall_not_internal_finished_face" in claim.reason_codes
+
+
+def test_consumer_authored_corroborated_cannot_override_upstream_unresolved_ceiling_evidence():
+    """Prove that consumer-authored claim with ABSTAINED wall status cannot produce customer rows."""
+    from types import SimpleNamespace
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    from pb_migration_contracts import QuantityEvidence
+
+    room = SimpleNamespace(
+        canonical_room_id="r1",
+        physical_room_id="r1",
+        source_room_face_record_id="f1",
+        source_room_index_id="",
+        document_id="doc1",
+        revision_id="rev1",
+        snapshot_id="snap1",
+        page_id="7",
+        source_sha256="a" * 64,
+        polygon_pdf_pts=((100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)),
+        viewport_id="vp1",
+    )
+    ceiling = SimpleNamespace(
+        canonical_ceiling_id="c1",
+        document_id="doc1",
+        snapshot_id="snap1",
+        room_entity_id="r1",
+        source_page=7,
+        viewport_id="vp1",
+        source_sha256="a" * 64,
+        revision_id="rev1",
+        polygon_pdf_pts=((100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)),
+        area_m2=9.05352,
+        finish_descriptor="GRID",
+        room_area_quantity_id="aq1",
+        ceiling_quantity_id="cq1",
+        source_room_index_id="",
+        evidence_ids=("mark1",),
+        physical_scale_record_id="",
+        measurement_authority="documented_dimension",
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+    )
+    qty = QuantityEvidence(
+        quantity_id="cq1",
+        family="ceiling_lining",
+        unit="m2",
+        value=9.05352,
+        status="firm",
+        authority="documented_dimension",
+        confidence=1.0,
+        evidence_ids=("mark1",),
+        input_entity_ids=("c1",),
+        semantic_key="ceiling_lining:c1:GRID:GRID",
+        metadata={
+            "document_id": "doc1",
+            "revision_id": "rev1",
+            "snapshot_id": "snap1",
+            "source_sha256": "a" * 64,
+            "page_no": "7",
+            "viewport_id": "vp1",
+            "canonical_ceiling_id": "c1",
+            "physical_ceiling_surface_id": "c1",
+            "canonical_room_id": "r1",
+            "physical_room_id": "r1",
+            "source_room_face_record_id": "f1",
+            "source_room_index_id": "",
+            "upstream_room_area_quantity_id": "aq1",
+            "room_area_quantity_id": "aq1",
+            "finish_code": "GRID",
+            "semantic_finish": "GRID",
+            "figured_dimension_ids": ("dim_2536", "dim_3570"),
+            "finish_occurrence_record_id": "occ1",
+            "finish_occurrence_evidence_id": "mark1",
+            "finish_definition_record_id": "def1",
+            "support_page_id": "9",
+            "support_viewport_id": "VIEWPORT_P09_A120_RCP",
+            "support_snapshot_id": "snap1",
+            "row_role": "ceiling_area",
+            "commercial_projection_allowed": True,
+        },
+    )
+
+    # Claim with quantity marked numeric but with blocking reasons
+    bad_qty = QuantityEvidence(
+        quantity_id="cq1",
+        family="ceiling_lining",
+        unit="m2",
+        value=9.05352,
+        status="firm",
+        authority="documented_dimension",
+        confidence=1.0,
+        evidence_ids=("mark1",),
+        input_entity_ids=("c1",),
+        semantic_key="ceiling_lining:c1:GRID:GRID",
+        blocking_reasons=("unresolved_producer_blocker",),
+    )
+    claim_blocked = LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("resolved",),
+        quantity_m2=None,
+        source_pages=(7, 9),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_wall_reason_codes=(),
+        canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=(),
+        canonical_rooms=(room,),
+        canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_floor_reason_codes=(),
+        canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_room_reason_codes=(),
+        canonical_room_source_pages=(7,),
+        external_wall_ids=(),
+        evidence_ids=(),
+        quantity_id=None,
+        confidence=1.0,
+        publication=None,
+        canonical_ceilings=(ceiling,),
+        ceiling_lining_quantity_evidence=(bad_qty,),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="retains unresolved blockers"):
+        project_live_ceiling_customer_rows(claim_blocked, workspace_id=1, project_id="proj1")
+
+
+def test_missing_original_and_untrusted_workspace_remain_abstained(tmp_path):
+    path = tmp_path / "missing.pdf"
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(path)
+    assert result.status == "ABSTAIN"
+    assert result.quantities == result.traces == result.customer_rows == ()
+    assert result.sealed_run is None
+
+    bad = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(path, workspace_id=True)
+    assert bad.status == "ABSTAIN"
+    assert bad.reason_codes == ("authenticated_workspace_unavailable",)
+
+
+def test_foreign_pdf_sha_mismatch_abstains(tmp_path):
+    foreign_pdf = tmp_path / "foreign.pdf"
+    foreign_pdf.write_bytes(b"%PDF-1.4 foreign content not maryborough")
+    result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(foreign_pdf)
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == ("maryborough_source_sha_mismatch",)
