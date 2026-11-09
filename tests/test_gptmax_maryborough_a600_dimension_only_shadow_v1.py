@@ -143,3 +143,57 @@ def test_original_source_inspector_shadow_is_explicit_boolean_and_default_off():
         inspect_published_door_schedule(
             source, **args, dimension_only_source_shadow="yes",
         )
+
+
+def test_sha_pinned_original_a600_shadow_cannot_change_legacy_source_or_commercial_rows():
+    """Protected original-only: prove default / opt-in outputs on same immutable PDF.
+
+    Public source-neutral CI must visibly skip without the private original.
+    A new row candidate is never an issued door and cannot overwrite the
+    existing 27-group source census or the historical signed takeoff.
+    """
+    import hashlib
+    from pathlib import Path
+
+    pdf_path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+    if not pdf_path.is_file():
+        pytest.skip("private original unavailable; original-positive NOT RUN")
+    raw = pdf_path.read_bytes()
+    source_digest = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert hashlib.sha256(raw).hexdigest() == source_digest
+    source = SourceVisibilityProducer(
+        producer_method="original-a600-dimension-only-shadow-review",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="original-maryborough-source-native-shadow",
+        source_bytes=raw,
+        source_locator="memory://protected-original-a600.pdf",
+        page_ids=("28",),
+    )
+    selector = dict(revision_id=published.revision.revision_id, page_id="28")
+    original = inspect_published_door_schedule(source, **selector)
+    reviewed = inspect_published_door_schedule(
+        source, **selector, dimension_only_source_shadow=True,
+    )
+    assert reviewed.rows == original.rows
+    assert reviewed.all_original_source_codes == original.all_original_source_codes
+    assert reviewed.unparsed_original_door_codes == original.unparsed_original_door_codes
+    assert reviewed.complete_source_word_universe == original.complete_source_word_universe
+    assert reviewed.title_source_trusted == original.title_source_trusted
+    assert not original.dimension_only_shadow_rows
+    assert not reviewed.complete_source_word_universe
+    assert {r.code for r in reviewed.dimension_only_shadow_rows}.issubset(
+        set(original.unparsed_original_door_codes)
+    )
+    assert all(
+        r.status == "source_dimension_only_shadow_not_schedule_authority"
+        and not r.width_height_metric_units_authenticated
+        and not r.physical_host_or_frame_authenticated
+        and r.default_opening_count is None
+        and not r.new_customer_quantity_authority
+        for r in reviewed.dimension_only_shadow_rows
+    )
+    assert reviewed.new_opening_counts == original.new_opening_counts == 0
+    assert reviewed.new_opening_areas_m2 == original.new_opening_areas_m2 == 0
+    assert hashlib.sha256(pdf_path.read_bytes()).hexdigest() == source_digest
