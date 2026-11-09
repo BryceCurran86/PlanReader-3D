@@ -68,6 +68,27 @@ Registration found the same offsets as my manual measurement (Front 984.285, Lhs
 
 **Proof added:** empty reason set, unknown or mixed reasons, a non-abstained untrusted word, approved-only reasons tagged raw, trust propagation (worst-of, never stronger than `CANDIDATE`), and identity separation. Eight single-line mutations of these rules were each caught.
 
+
+## Opening measurement composition (owner request: turn the evidence into authenticated opening measurements)
+
+`compose_opening_measurement` composes two independent source views of one physical opening and lists exactly what still gates it:
+
+- **Height** is the printed elevation datum (FFL to head) the witness found; the drawn leaf height is a separate field and is never substituted.
+- **Width** is the plan's single printed figure, read through the existing label authority; the trust of **every word it used** is re-checked against text integrity (so the label authority's own raw fallback cannot pass as verified).
+- **Cross-check:** the witnessed elevation outline width at the datum-calibrated scale must agree with the printed width within 0.5 percent. It corroborates; it never replaces the printed value. A disagreement is a `CONFLICT`.
+- **Gates, in order:** text integrity not corroborated, door kind not authenticated, host binding not authenticated; when none is open, `authority_promotion_review_required_existing_issuer_untouched`. The result is `CANDIDATE` only: an authenticated quantity is issued by the existing issuer or not at all.
+
+**A defect the width check caught.** The source-owned extractor had merged two 0.14 pt hairline fills (edge lines drawn as fills) into the Lhs door outline, so it measured 24.95 pt (880 mm) against the printed 870 mm; the witness's 0.15 pt edge tolerance had admitted it. Fills thinner than 0.3 pt are now excluded from unions (regression test; disabling the filter fails it).
+
+**Original (read in place, default producer, so text trust is raw):**
+
+| Opening | Printed width | Elevation width | Opening height | Area | Drawn leaf | Open gates |
+|---|---|---|---|---|---|---|
+| `22e7e155` | 1,200 mm | 1,200.2 mm | 2,100 mm | 2.52 m2 | 2,020 mm (80 mm sill band) | text integrity, kind, host |
+| `a93486dc` (not a mapped item) | 870 mm | 870.3 mm | 2,100 mm | 1.827 m2 | 2,100 mm (no sill band) | text integrity, kind, host |
+
+With the opt-in glyph-ledger text trust, every datum word on page 4 (including both 2,100 words) is text-integrity `CORROBORATED` (`amortized_glyph_verified`, two `raster_corroborated_direct`); that run takes about 20 minutes per page.
+
 ## Not proven / limits
 
 The extractor reads vector fills and words with PyMuPDF; it is a diagnostic, not yet a source-authenticated observation path. The kind (door) gate for `22e7e155` and `a93486dc` is still `None` (no elevation leader label is bound), their host and frame gates are unchanged, and no quantity is issued. No score, no benchmark item newly eligible. Protected-environment behaviour and Lot16-eight / Maryborough-three retention at this head are not run here (no production code changed).

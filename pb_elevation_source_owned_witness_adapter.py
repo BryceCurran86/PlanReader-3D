@@ -33,6 +33,7 @@ OUTLINE_W = (10.0, 160.0)
 OUTLINE_H = (30.0, 90.0)
 TOUCH_TOL = 0.06
 AXIS_TOL = 0.05
+THIN_FILL_PT = 0.3     # a fill thinner than a stroke is an edge line drawn as a fill, not a part of a leaf
 
 
 def _approved_raw_reasons() -> frozenset:
@@ -182,7 +183,8 @@ def extract_views(lines: Sequence[tuple], rects: Sequence[tuple], words: Sequenc
         y_lo, y_hi = min(d[1] for d in chain) - 15.0, ffl_y + 12.0
         local = [r for r in filled if r[0] > x_max + 5.0 and r[1] >= y_lo and r[3] <= y_hi
                  and (r[2] - r[0]) <= OUTLINE_W[1] and (r[3] - r[1]) <= 100.0]
-        groups = _touching_groups(local) + [[r] for r in local]
+        solid = [r for r in local if min(r[2] - r[0], r[3] - r[1]) >= THIN_FILL_PT]
+        groups = _touching_groups(solid) + [[r] for r in solid]
         outlines = {}
         for g in groups:
             x0, y0 = min(r[0] for r in g), min(r[1] for r in g)
@@ -228,4 +230,45 @@ def _touching_groups(rects: Sequence[tuple]) -> list[list[tuple]]:
     return groups
 
 
-__all__ = ["SourceOwnedPage", "extract_views", "read_source_owned_page", "source_owned_views"]
+def label_text_trust(statuses: Sequence) -> str:
+    """``corroborated`` only when there is at least one word and EVERY word is text-integrity CORROBORATED."""
+    statuses = list(statuses)
+    if not statuses:
+        return ""
+    return TEXT_CORROBORATED if all(s is EvidenceResolutionStatus.CORROBORATED for s in statuses) else TEXT_RAW_UNVERIFIED
+
+
+def plan_label_width(source, composition, opening_identity_id: str):
+    """``(width_mm, text_trust, receipt_ids)`` of one plan opening's single printed width, else ``(None, "", ())``.
+
+    The width comes from the existing opening label authority; its own text acceptance may include a raw fallback, so
+    the trust of EVERY word it used is re-checked here against the text-integrity authority. Two printed figures
+    (a width and a height) are not a single width and are refused.
+    """
+    from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
+
+    trace = next((t for t in composition.opening_bindings if t.opening_identity_id == opening_identity_id), None)
+    selector = composition.binding_selectors.get(opening_identity_id)
+    if trace is None or selector is None:
+        return None, "", ()
+    obs = ObservationSelector(document_id=selector.document_id, revision_id=selector.revision_id,
+                              source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
+                              observation_id=trace.representative_observation_id)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(source).publish_scope(obs)
+    evidence = getattr(result, "evidence", None)
+    if (result.status is not EvidenceResolutionStatus.CORROBORATED or evidence is None
+            or len(evidence.dimension_values_mm) != 1):
+        return None, "", ()
+    integrity = source.text_integrity_authority()
+    statuses = [
+        integrity.resolve_text(ObservationSelector(
+            document_id=selector.document_id, revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id, observation_id=oid)).status
+        for oid in evidence.source_text_observation_ids
+    ]
+    receipts = tuple(sorted({*evidence.source_text_observation_ids, evidence.evidence_id}))
+    return float(evidence.dimension_values_mm[0]), label_text_trust(statuses), receipts
+
+
+__all__ = ["SourceOwnedPage", "extract_views", "label_text_trust", "plan_label_width", "read_source_owned_page",
+           "source_owned_views"]

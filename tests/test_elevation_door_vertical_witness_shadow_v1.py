@@ -778,3 +778,121 @@ def test_text_trust_is_part_of_the_result_identity():
     a = run("leaf_rec", plan, a_view["outlines"], a_view["datum"])
     b = run("leaf_rec", plan, b_view["outlines"], b_view["datum"])
     assert a.result_id != b.result_id                                   # a raw-text result can never alias a verified one
+
+
+# ------------------------------------------------------------------ opening measurement composition
+from pb_elevation_door_vertical_witness_shadow import compose_opening_measurement   # noqa: E402
+
+
+def _measure(record_id="entry", *, scale=1.0, plan_width=1200.0, label_trust="corroborated", witness_trust=None,
+             label_receipts=("label1", "label2"), **flags):
+    plan, outlines, d = make_scene(scale=scale)
+    if witness_trust is not None:
+        d = ElevationDatum(d.ffl_y, tuple(DatumLevel(l.name, l.y, l.figured_mm, ("dim",), witness_trust) for l in d.levels), d.receipt_ids)
+    w = run(record_id, plan, outlines, d)
+    return w, compose_opening_measurement(w, outlines, plan_width_mm=plan_width, plan_label_text_trust=label_trust,
+                                          plan_label_receipt_ids=label_receipts, **flags)
+
+
+def test_measurement_uses_the_printed_width_and_the_printed_datum_never_the_leaf():
+    w, m = _measure(witness_trust="corroborated")
+    assert m.status is CAND and m.reason_codes == (shadow.MEASUREMENT_CANDIDATE,)
+    assert m.width_mm == 1200.0 and m.height_mm == 2100.0
+    assert m.area_m2 == pytest.approx(2.52, abs=1e-4)                          # 1.2 m x 2.1 m, not 1.2 x the 2.02 m leaf
+    assert m.leaf_height_mm == pytest.approx(2100.0 - SILL * MM, abs=1.0) and m.leaf_height_mm != m.height_mm
+    assert m.elevation_width_mm == pytest.approx(1200.2, abs=0.5)               # corroboration only
+    assert m.status is not EvidenceResolutionStatus.CORROBORATED
+
+
+def test_remaining_gates_are_listed_in_order_and_never_become_a_quantity():
+    _, raw = _measure(witness_trust="raw_unverified")
+    assert raw.text_trust == "raw_unverified_diagnostic_only"
+    assert raw.remaining_gates == (shadow.GATE_TEXT, shadow.GATE_KIND, shadow.GATE_HOST) and raw.first_remaining_gate == shadow.GATE_TEXT
+    _, verified = _measure(witness_trust="corroborated")
+    assert verified.text_trust == "corroborated"
+    assert verified.remaining_gates == (shadow.GATE_KIND, shadow.GATE_HOST) and verified.first_remaining_gate == shadow.GATE_KIND
+    _, kind_only = _measure(witness_trust="corroborated", kind_authenticated=True)
+    assert kind_only.remaining_gates == (shadow.GATE_HOST,)
+    _, all_open = _measure(witness_trust="corroborated", kind_authenticated=True, host_authenticated=True)
+    assert all_open.remaining_gates == () and all_open.first_remaining_gate == shadow.GATE_PROMOTION
+    assert all_open.is_candidate and all_open.status is not EvidenceResolutionStatus.CORROBORATED   # the issuer decides, not this
+
+
+def test_one_untrusted_label_word_makes_the_whole_measurement_raw():
+    _, m = _measure(witness_trust="corroborated", label_trust="raw_unverified")
+    assert m.text_trust == "raw_unverified_diagnostic_only" and m.remaining_gates[0] == shadow.GATE_TEXT
+    _, unspecified = _measure(witness_trust="corroborated", label_trust="")
+    assert unspecified.text_trust == "" and unspecified.remaining_gates[0] == shadow.GATE_TEXT   # claims nothing, so gated
+
+
+@pytest.mark.parametrize("plan_width", [None, NAN, INF, -INF, 0.0, -1200.0, True])
+def test_a_missing_or_invalid_plan_width_abstains(plan_width):
+    _, m = _measure(plan_width=plan_width)
+    assert m.status is ABST and m.reason_codes == (shadow.PLAN_WIDTH_UNAVAILABLE,) and m.area_m2 is None and m.height_mm is None
+
+
+def test_plan_width_that_disagrees_with_the_elevation_outline_conflicts():
+    for width in (900.0, 1260.0, 1200.0 * 1.006, 1200.0 * 0.994):
+        _, m = _measure(plan_width=width)
+        assert m.status is CONF and m.reason_codes == (shadow.WIDTH_DISAGREES,) and m.area_m2 is None and m.width_mm is None
+    for width in (1200.0 * 1.004, 1200.0 * 0.996, 1200.2):                      # inside the 0.5 percent corroboration band
+        assert _measure(plan_width=width)[1].status is CAND
+
+
+def test_a_failed_witness_propagates_and_is_never_measured():
+    for rid, reason in (("win1", shadow.BASE_NOT_ON_FFL), ("win2", shadow.BASE_NOT_ON_FFL)):
+        w, m = _measure(rid)
+        assert not w.is_candidate and m.status is w.status and m.reason_codes == (reason,) and m.area_m2 is None
+    plan, outlines, d = make_scene(extra_plan=[PlanSpan("entry_dup", 300.29, 334.31)])
+    w = run("entry", plan, outlines, d)
+    m = compose_opening_measurement(w, outlines, plan_width_mm=1200.0, plan_label_text_trust="corroborated")
+    assert m.status is CONF and m.reason_codes == (shadow.MULTIPLE_PLAN_RECORDS,)          # duplicate record held, not measured
+
+
+def test_a_witness_whose_outline_is_missing_abstains():
+    plan, outlines, d = make_scene()
+    w = run("entry", plan, outlines, d)
+    m = compose_opening_measurement(w, [o for o in outlines if o.outline_id != w.outline_id], plan_width_mm=1200.0,
+                                    plan_label_text_trust="corroborated")
+    assert m.status is ABST and m.reason_codes == (shadow.OUTLINE_UNAVAILABLE,)
+
+
+def test_measurement_is_scale_invariant_and_collects_receipts():
+    for scale in (1.0, 1.5, 2.0):
+        _, m = _measure(scale=scale, witness_trust="corroborated")
+        assert m.width_mm == 1200.0 and m.height_mm == 2100.0 and m.elevation_width_mm == pytest.approx(1200.2, abs=0.6)
+    _, m = _measure(witness_trust="corroborated", label_receipts=("labelA", "labelB"))
+    assert {"labelA", "labelB"} <= set(m.source_observation_ids)
+
+
+def test_measurement_identity_is_deterministic_and_content_derived():
+    _, a = _measure(witness_trust="corroborated")
+    _, b = _measure(witness_trust="corroborated")
+    assert a == b and a.result_id == b.result_id
+    assert _measure(witness_trust="raw_unverified")[1].result_id != a.result_id                  # trust is part of identity
+    assert _measure(witness_trust="corroborated", kind_authenticated=True)[1].result_id != a.result_id   # so are the open gates
+    assert _measure(witness_trust="corroborated", label_receipts=("other",))[1].result_id != a.result_id
+
+
+def test_hairline_edge_fills_do_not_widen_a_leaf_outline():
+    # A leaf drawn in parts, plus 0.14 pt strips of the same fill that render the frame's edge lines on both sides.
+    # Merging the strips would make the outline 0.28 pt wider than the printed width and the head 0.14 pt higher.
+    lines, rects, words = synthetic_page()
+    head = 300.0 - 2100.0 / MM
+    leaf = (0.3, 0.3, 0.3)
+    parts = [(200.0, head, 234.0, head + 3.0, leaf), (200.0, head + 3.0, 202.0, 300.0, leaf),
+             (232.0, head + 3.0, 234.0, 300.0, leaf), (200.0, 297.0, 234.0, 300.0, leaf)]
+    strips = [(199.86, head - 0.14, 199.99, 300.0, leaf), (234.0, head - 0.14, 234.14, 300.0, leaf),
+              (199.86, head - 0.14, 234.14, head, leaf)]
+    base = [r for r in rects if not (abs(r[0] - 200.0) < 0.01 and abs(r[2] - 234.0) < 0.01)]   # drop the single leaf rect
+    view = adapter.extract_views(lines, base + parts + strips, words)[0]
+    leaf_out = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.05 and abs(o.x1 - 234.0) < 0.05]
+    assert leaf_out and leaf_out[0].x1 - leaf_out[0].x0 == pytest.approx(34.0, abs=0.01)
+    assert leaf_out[0].y_head == pytest.approx(head, abs=0.01)
+    assert not any(abs(o.x0 - 199.86) < 0.01 for o in view["outlines"])                       # no outline includes the hairlines
+    # and it composes to the printed width with the datum height
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("win", 200.0, 249.0)]
+    w = run("leaf_rec", plan, view["outlines"], view["datum"])
+    m = compose_opening_measurement(w, view["outlines"], plan_width_mm=1199.5, plan_label_text_trust="corroborated")
+    assert m.status is CAND and m.height_mm == 2100.0
+

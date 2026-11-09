@@ -19,10 +19,12 @@ import re
 from pathlib import Path
 from typing import Optional, Sequence
 
-from pb_elevation_source_owned_witness_adapter import extract_views, read_source_owned_page, source_owned_views  # noqa: F401
+from pb_elevation_source_owned_witness_adapter import (  # noqa: F401
+    extract_views, plan_label_width, read_source_owned_page, source_owned_views,
+)
 from pb_elevation_door_vertical_witness_shadow import (
-    DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, register_plan_to_elevation,
-    resolve_vertical_witness,
+    DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, compose_opening_measurement,
+    register_plan_to_elevation, resolve_vertical_witness,
 )
 
 
@@ -67,7 +69,7 @@ def plan_spans_from_composition(comp, poa, axis_name: str) -> list[PlanSpan]:
 
 
 def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha: str, focus: Sequence[str] = (),
-        source_owned: bool = False) -> dict:
+        source_owned: bool = False, glyph_ledger: bool = False) -> dict:
     import fitz
     from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
     from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -81,6 +83,7 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall", producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
         raster_paired_outer_faces_shadow=True,
+        **({"source_glyph_ledger_text_trust": True} if glyph_ledger else {}),
     )
     initial = source.ingest_native_pdf_bytes(
         document_id=f"live-source:{sha[:32]}", source_bytes=payload,
@@ -96,7 +99,7 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     poa = comp.physical_opening_authority
     spans = {axis: plan_spans_from_composition(comp, poa, axis) for axis in ("x", "y")}
     doc = fitz.open(stream=payload, filetype="pdf")
-    views_out, per_view_results = [], []
+    views_out, per_view_results, outlines_of = [], [], {}
     for page_no in elevation_pages:
         if source_owned:
             page = read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id=str(page_no))
@@ -115,8 +118,10 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                 axis, reg = successes[0]
                 row.update({"axis": axis, "sign": reg.sign, "offset": round(reg.offset, 3), "anchor_widths_pt": list(reg.anchor_widths_pt)})
                 for span in sorted(spans[axis], key=lambda s: s.record_id):
-                    per_view_results.append(resolve_vertical_witness(
-                        span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=view_scope))
+                    witness = resolve_vertical_witness(
+                        span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=view_scope)
+                    per_view_results.append(witness)
+                    outlines_of[id(witness)] = view["outlines"]
             views_out.append(row)
     # one result per record across ALL views: competing views or values never become a candidate by cherry-picking
     aggregated = aggregate_across_views(per_view_results)
@@ -125,15 +130,29 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                    "head_level": r.head_level_name, "receipt_count": len(r.source_observation_ids),
                    "text_trust": r.text_trust, "result_id": r.result_id}
                   for r in aggregated if r.is_candidate]
+    measurements = []
+    for r in aggregated:
+        if not r.is_candidate:
+            continue
+        width_mm, label_trust, label_receipts = plan_label_width(source, comp, r.record_id)
+        m = compose_opening_measurement(r, outlines_of.get(id(r), ()), plan_width_mm=width_mm,
+                                        plan_label_text_trust=label_trust, plan_label_receipt_ids=label_receipts)
+        measurements.append({"record": r.record_id[-8:], "status": m.status.value, "reasons": list(m.reason_codes),
+                             "width_mm": m.width_mm, "height_mm": m.height_mm, "area_m2": m.area_m2,
+                             "elevation_width_mm": m.elevation_width_mm, "leaf_height_mm": m.leaf_height_mm,
+                             "text_trust": m.text_trust, "remaining_gates": list(m.remaining_gates),
+                             "first_remaining_gate": m.first_remaining_gate, "receipt_count": len(m.source_observation_ids),
+                             "result_id": m.result_id})
     focus_rows = [{"record": r.record_id[-8:], "status": r.status.value, "reasons": list(r.reason_codes), "outline": r.outline_id,
                    "competing_plan_records": [c[-8:] for c in r.competing_plan_record_ids]}
                   for r in aggregated if any(r.record_id.endswith(f) for f in focus)]
     return {
-        "schema_version": "1.2.0", "source_sha256": sha, "input_path": "source_owned" if source_owned else "pymupdf_diagnostic", "shadow_only": True, "benchmark_score_granted": False,
+        "schema_version": "1.3.0", "source_sha256": sha, "input_path": "source_owned" if source_owned else "pymupdf_diagnostic", "glyph_ledger_text_trust": bool(glyph_ledger), "shadow_only": True, "benchmark_score_granted": False,
         "plan_page": plan_page, "elevation_pages": list(elevation_pages),
         "views": views_out, "candidates": sorted(candidates, key=lambda c: c["record"]),
         "first_remaining_gate_counts": dict(sorted(reasons.items())),
         "focus_rows": focus_rows,
+        "measurements": sorted(measurements, key=lambda m: m["record"]),
     }
 
 
@@ -146,8 +165,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--focus", nargs="*", default=[], help="record id suffixes to explain")
     parser.add_argument("--source-owned", action="store_true", help="read elevation facts only from producer-owned authorities")
+    parser.add_argument("--glyph-ledger", action="store_true", help="opt-in glyph-ledger text trust (slow: raster corroboration at ingest)")
     args = parser.parse_args()
-    report = run(args.pdf, args.plan_page, args.elevation_pages, args.expected_source_sha256, args.focus, args.source_owned)
+    report = run(args.pdf, args.plan_page, args.elevation_pages, args.expected_source_sha256, args.focus, args.source_owned, args.glyph_ledger)
     args.output.write_text(json.dumps(report, indent=1, sort_keys=True), encoding="utf-8")
     print(json.dumps({"views": len(report["views"]), "candidates": len(report["candidates"])}))
     return 0
