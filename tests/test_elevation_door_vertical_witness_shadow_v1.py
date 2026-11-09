@@ -248,14 +248,6 @@ def test_adapter_is_default_off_and_strictly_boolean():
     assert {r.record_id for r in rows} == set(PLAN) and any(r.is_candidate for r in rows)
 
 
-def test_no_production_module_imports_the_shadow():
-    root = Path(__file__).resolve().parents[1]
-    offenders = [p.name for p in root.glob("*.py")
-                 if p.name != "pb_elevation_door_vertical_witness_shadow.py"
-                 and "pb_elevation_door_vertical_witness_shadow" in p.read_text(encoding="utf-8", errors="ignore")]
-    assert offenders == []
-
-
 def test_module_carries_no_project_or_id_special_cases():
     text = Path(shadow.__file__).read_text(encoding="utf-8").lower()
     for token in ("3laurel", "lot16", "maryborough", "22e7e155", "a93486dc", "reference_takeoff", "boq"):
@@ -494,3 +486,206 @@ def test_cross_view_view_level_conflicts_do_not_poison_a_clean_candidate():
     for second in (_view(sym_plan, sym_out, d), _view(dup_plan, outlines, d)):
         rows = {r.record_id: r for r in assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), second], enabled=True)}
         assert rows["entry"].is_candidate and rows["entry"].opening_height_mm == 2100.0, rows["entry"].reason_codes
+
+
+# ------------------------------------------------------------------ source-owned adapter (receipts)
+import fitz   # noqa: E402
+
+import pb_elevation_source_owned_witness_adapter as adapter   # noqa: E402
+from pb_source_visibility_authority import SourceVisibilityProducer   # noqa: E402
+
+
+def test_only_the_adapter_and_tools_may_import_the_shadow_and_nothing_imports_the_adapter():
+    root = Path(__file__).resolve().parents[1]
+    importers = sorted(p.name for p in root.glob("*.py")
+                       if p.name != "pb_elevation_door_vertical_witness_shadow.py"
+                       and "pb_elevation_door_vertical_witness_shadow" in p.read_text(encoding="utf-8", errors="ignore"))
+    assert importers == ["pb_elevation_source_owned_witness_adapter.py"]
+    adapter_importers = [p.name for p in root.glob("*.py")
+                         if p.name != "pb_elevation_source_owned_witness_adapter.py"
+                         and "pb_elevation_source_owned_witness_adapter" in p.read_text(encoding="utf-8", errors="ignore")]
+    assert adapter_importers == []
+
+
+def test_receipts_flow_from_drawn_facts_to_the_witness_result():
+    lines, rects, words = synthetic_page()
+    lines = [(*l, f"line{i}") for i, l in enumerate(lines)]
+    rects = [(*r, (f"rect{i}a", f"rect{i}b")) for i, r in enumerate(rects)]
+    words = [(*w, f"word{i}") for i, w in enumerate(words)]
+    view = adapter.extract_views(lines, rects, words)[0]
+    assert view["datum"].receipt_ids and all(lv.receipt_ids for lv in view["datum"].levels)
+    assert any(i.startswith("word") for lv in view["datum"].levels for i in lv.receipt_ids)     # the printed figure is a receipt
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.01 and abs(o.x1 - 234.0) < 0.01][0]
+    assert leaf.receipt_ids and all(i.startswith("rect") for i in leaf.receipt_ids)
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    result = run("leaf_rec", plan, view["outlines"], view["datum"])
+    assert result.is_candidate and result.source_observation_ids
+    assert set(result.source_observation_ids) >= set(leaf.receipt_ids) | set(view["datum"].receipt_ids)
+    assert any(i.startswith("word") for i in result.source_observation_ids)
+    assert run("frame_rec", plan, view["outlines"], view["datum"]).source_observation_ids == ()   # no receipts for a non-candidate
+
+
+def _synthetic_pdf() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=400)
+    base = 300.0
+    for x, mm in ((100.0, 2740.0), (120.0, 2700.0), (140.0, 2100.0)):
+        top = base - mm / MM
+        page.draw_line((x, top), (x, base), color=(0, 0, 0), width=0.4)
+        page.draw_line((x - 6, top), (x + 6, top), color=(0, 0, 0), width=0.4)
+        page.draw_line((x - 6, base), (x + 6, base), color=(0, 0, 0), width=0.4)
+        page.insert_text((x + 9, (top + base) / 2 + 8), f"{int(mm):,}", fontsize=7, rotate=90)
+    head = base - 2100.0 / MM
+    # CAD exports draw a filled rectangle as a closed line path, not as an `re` operator; do the same here
+    def fill_rect(x0, y0, x1, y1, fill):
+        page.draw_polyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], color=None, fill=fill, closePath=True)
+
+    fill_rect(196.9, head - 8.0, 237.1, base, (0.7, 0.7, 0.7))
+    fill_rect(200.0, head, 234.0, base - 2.26, (0.3, 0.3, 0.3))
+    fill_rect(300.0, head, 349.0, base - 20.0, (0.4, 0.4, 0.4))
+    return doc.tobytes()
+
+
+def test_synthetic_pdf_through_the_real_producers_gives_source_owned_views_with_receipts():
+    payload = _synthetic_pdf()
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://synthetic.pdf", page_ids=(1,))
+    page = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="1")
+    assert page is not None and page.scope.source_sha256 == sha and page.scope.revision_id == initial.revision.revision_id
+    assert page.lines and page.rects and page.words
+    assert all(r[5] for r in page.rects)                        # every rect names the observations that draw it
+    views = adapter.source_owned_views(page)
+    assert len(views) == 1
+    view = views[0]
+    assert [lv.figured_mm for lv in view["datum"].levels] == [2740.0, 2700.0, 2100.0]
+    assert calibrate_datum(view["datum"]) == pytest.approx(MM, rel=2e-2)
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.1 and abs(o.x1 - 234.0) < 0.1]
+    assert leaf and leaf[0].receipt_ids and leaf[0].y_base_frame == pytest.approx(300.0, abs=0.1)
+    # a foreign revision refuses the whole page: no facts without an intact lineage
+    assert adapter.read_source_owned_page(source, revision_id="source_revision_foreign", page_id="1") is None
+
+
+def test_page_filter_never_mixes_facts_from_another_page():
+    doc = fitz.open(stream=_synthetic_pdf(), filetype="pdf")
+    page2 = doc.new_page(width=600, height=400)
+    page2.draw_line((50.0, 100.0), (50.0, 300.0), color=(0, 0, 0), width=0.4)
+    page2.insert_text((60, 200), "3,000", fontsize=7, rotate=90)
+    page2.draw_polyline([(400.0, 150.0), (440.0, 150.0), (440.0, 250.0), (400.0, 250.0), (400.0, 150.0)],
+                        color=None, fill=(0.2, 0.2, 0.2), closePath=True)
+    payload = doc.tobytes()
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://two.pdf", page_ids=(1, 2))
+    one = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="1")
+    two = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="2")
+    assert "3,000" not in {w[4] for w in one.words} and "3,000" in {w[4] for w in two.words}
+    assert not any(abs(r[0] - 400.0) < 0.1 for r in one.rects) and any(abs(r[0] - 400.0) < 0.1 for r in two.rects)
+    assert {l[4] for l in one.lines}.isdisjoint({l[4] for l in two.lines})         # no shared observation ids
+    assert len(adapter.source_owned_views(one)) == 1 and adapter.source_owned_views(two) == []
+
+
+def test_original_source_owned_path_reproduces_the_diagnostic_result_and_names_its_receipts():
+    pdf = _original_pdf()
+    if pdf is None:
+        pytest.skip("private original PDF not available")
+    if hashlib.sha256(pdf.read_bytes()).hexdigest() != ORIGINAL_SHA256:
+        pytest.skip("original PDF hash differs")
+    from tools.diag_elevation_door_vertical_witness_shadow import run as run_tool
+
+    focus = ("22e7e155", "1cd959cc", "be1e67bf", "9d4dc1b3", "a93486dc")
+    owned = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=True)
+    diagnostic = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=False)
+    assert owned["input_path"] == "source_owned" and diagnostic["input_path"] == "pymupdf_diagnostic"
+    assert [c["record"] for c in owned["candidates"]] == [c["record"] for c in diagnostic["candidates"]] == ["22e7e155", "a93486dc"]
+    assert all(c["receipt_count"] > 0 and c["opening_height_mm"] == 2100.0 for c in owned["candidates"])
+    assert all(c["leaf_height_mm"] != c["opening_height_mm"] for c in owned["candidates"] if c["record"] == "22e7e155")
+    offsets = lambda r: sorted((v["page"], v["view"], v.get("offset")) for v in r["views"] if v.get("registered_axes"))
+    assert offsets(owned) == offsets(diagnostic)                          # the same unique registrations
+    held = {(r["record"], r["status"]) for r in owned["focus_rows"] if r["record"] in ("1cd959cc", "be1e67bf", "9d4dc1b3")}
+    assert all(status != "candidate" for _, status in held)               # frame record and interior doors still out
+
+
+def test_enclosing_frame_receipts_are_part_of_the_leaf_outline_receipts():
+    lines, rects, words = synthetic_page()
+    rects = [(*r, (f"rect{i}a", f"rect{i}b")) for i, r in enumerate(rects)]
+    view = adapter.extract_views(lines, rects, words)[0]
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.01 and abs(o.x1 - 234.0) < 0.01][0]
+    assert leaf.y_base_frame == pytest.approx(300.0)
+    surround_index = next(i for i, r in enumerate(rects) if abs(r[0] - 196.9) < 0.01)
+    assert {f"rect{surround_index}a", f"rect{surround_index}b"} <= set(leaf.receipt_ids)       # the frame that gives its base
+
+
+def test_an_ambiguous_figure_beside_a_dimension_line_is_not_read():
+    lines, rects, words = synthetic_page()
+    x = 140.0
+    top = 300.0 - 2100.0 / MM
+    extra = (x + 2, (top + 300.0) / 2 - 10, x + 10, (top + 300.0) / 2 + 10, "2,000")      # a second figure on the same dimension
+    view = adapter.extract_views(lines, rects, words + [extra])[0]
+    assert [lv.figured_mm for lv in view["datum"].levels] == [2740.0, 2700.0]               # the ambiguous dimension is dropped
+
+
+def _two_view_source(payload: bytes):
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://s.pdf", page_ids=(1,))
+    return source, initial.revision.revision_id
+
+
+def test_a_diagonal_fill_path_is_not_an_axis_aligned_outline():
+    doc = fitz.open(stream=_synthetic_pdf(), filetype="pdf")
+    page = doc[0]
+    page.draw_polyline([(400.0, 150.0), (450.0, 150.0), (470.0, 250.0), (420.0, 250.0), (400.0, 150.0)],
+                       color=None, fill=(0.2, 0.2, 0.2), closePath=True)      # skewed quad: diagonal edges
+    source, revision_id = _two_view_source(doc.tobytes())
+    page_facts = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert not any(abs(r[0] - 400.0) < 0.1 for r in page_facts.rects)
+    assert any(abs(r[0] - 200.0) < 0.1 for r in page_facts.rects)                 # the real leaf is still there
+
+
+def test_a_path_whose_edges_disagree_on_fill_is_not_a_single_outline():
+    import dataclasses
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real = source.native_paint_facts
+
+    def mixed(selector, *, observation_ids):
+        facts = list(real(selector, observation_ids=observation_ids))
+        leaf_path = next(f.path_index for f in facts if f.fill is not None and abs(f.geometry[0] - 200.0) < 0.1)
+        flipped = False
+        for i, f in enumerate(facts):
+            if f.path_index == leaf_path and not flipped:
+                facts[i] = dataclasses.replace(f, fill=(0.9, 0.9, 0.9))
+                flipped = True
+        return tuple(facts)
+
+    source.native_paint_facts = mixed
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert not any(abs(r[0] - 200.0) < 0.1 and abs(r[2] - 234.0) < 0.1 for r in page.rects)
+
+
+def test_a_segment_without_a_corroborated_visibility_receipt_is_not_used():
+    import types
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real_authority = source.authority()
+    baseline = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    dropped = {baseline.lines[0][4]}
+
+    class Doubt:
+        def __getattr__(self, name):
+            return getattr(real_authority, name)
+
+        def resolve_visible(self, selector):
+            result = real_authority.resolve_visible(selector)
+            if selector.observation_id in dropped:
+                return types.SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, observation=result.observation)
+            return result
+
+    source.authority = lambda: Doubt()
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert dropped.isdisjoint({l[4] for l in page.lines})
+    assert len(page.lines) == len(baseline.lines) - 1

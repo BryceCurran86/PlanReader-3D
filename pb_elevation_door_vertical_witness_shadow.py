@@ -83,6 +83,7 @@ class ElevOutline:
     y_base_leaf: float
     y_base_frame: Optional[float] = None
     explicit_height_mm: Optional[float] = None   # a height stated on this very outline, if any
+    receipt_ids: tuple[str, ...] = ()            # source observation ids that drew this outline (when source-owned)
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class DatumLevel:
     name: str
     y: float
     figured_mm: float
+    receipt_ids: tuple[str, ...] = ()   # dimension line, tick and figured-word observation ids
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class ElevationDatum:
 
     ffl_y: float
     levels: tuple[DatumLevel, ...]
+    receipt_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,7 @@ class VerticalWitnessResult:
     competing_plan_record_ids: tuple[str, ...] = ()
     overlapping_plan_record_ids: tuple[str, ...] = ()
     registration_anchor_widths_pt: tuple[float, ...] = ()
+    source_observation_ids: tuple[str, ...] = ()
     result_id: Optional[str] = None
     schema_version: str = SCHEMA_VERSION
 
@@ -142,6 +146,7 @@ def _result(record_id, status, reasons, **kw) -> VerticalWitnessResult:
         "schema_version": SCHEMA_VERSION, "record": record_id, "status": status.value, "reasons": tuple(reasons),
         "outline": kw.get("outline_id"), "height": kw.get("opening_height_mm"), "head": kw.get("head_level_name"),
         "competing": tuple(kw.get("competing_plan_record_ids", ())),
+        "receipts": tuple(kw.get("source_observation_ids", ())),
     }
     return VerticalWitnessResult(
         record_id=record_id, status=status, reason_codes=tuple(reasons),
@@ -318,8 +323,13 @@ def resolve_vertical_witness(
     if not any(_near(b, datum.ffl_y, BASE_TOL_PT) for b in bases):
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (BASE_NOT_ON_FFL,), outline_id=outline.outline_id,
                        mm_per_pt=scale, registration_anchor_widths_pt=registration.anchor_widths_pt)
+    anchors = [o for o in outlines if o.outline_id in registration.matched_outline_ids]
+    receipts = tuple(sorted(set(
+        outline.receipt_ids + head.receipt_ids + datum.receipt_ids + tuple(r for a in anchors for r in a.receipt_ids)
+    )))
     return _result(
         record_id, EvidenceResolutionStatus.CANDIDATE, (CANDIDATE_REASON,), outline_id=outline.outline_id,
+        source_observation_ids=receipts,
         opening_height_mm=float(head.figured_mm), head_level_name=head.name,
         leaf_height_mm=round((outline.y_base_leaf - outline.y_head) * scale, 1), mm_per_pt=round(scale, 4),
         registration_anchor_widths_pt=registration.anchor_widths_pt,

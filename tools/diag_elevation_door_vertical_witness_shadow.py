@@ -19,105 +19,12 @@ import re
 from pathlib import Path
 from typing import Optional, Sequence
 
+from pb_elevation_source_owned_witness_adapter import extract_views, read_source_owned_page, source_owned_views  # noqa: F401
 from pb_elevation_door_vertical_witness_shadow import (
     DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, register_plan_to_elevation,
     resolve_vertical_witness,
 )
 
-_NUMBER = re.compile(r"^\d{1,2},?\d{3}$|^\d{3}$")
-TICK_TOL = 0.06
-MIN_DIM_LEN_PT = 30.0
-OUTLINE_W = (10.0, 160.0)
-OUTLINE_H = (30.0, 90.0)
-TOUCH_TOL = 0.06
-
-
-def _number(text: str) -> Optional[float]:
-    t = text.strip()
-    if not _NUMBER.match(t):
-        return None
-    return float(t.replace(",", ""))
-
-
-def extract_views(lines: Sequence[tuple], rects: Sequence[tuple], words: Sequence[tuple]) -> list[dict]:
-    """lines (x0,y0,x1,y1); rects (x0,y0,x1,y1,fill); words (x0,y0,x1,y1,text). Pure and deterministic."""
-    vertical = sorted({(round(a[0], 2), round(min(a[1], a[3]), 2), round(max(a[1], a[3]), 2)) for a in lines
-                       if abs(a[0] - a[2]) <= 0.05 and abs(a[1] - a[3]) >= MIN_DIM_LEN_PT})
-    horizontal = [(round(a[1], 2), min(a[0], a[2]), max(a[0], a[2])) for a in lines
-                  if abs(a[1] - a[3]) <= 0.05 and abs(a[0] - a[2]) >= 6.0]
-
-    def has_tick(x, y):
-        return any(abs(hy - y) <= TICK_TOL and xa - 0.5 <= x <= xb + 0.5 for hy, xa, xb in horizontal)
-
-    dims = []
-    for x, ya, yb in vertical:
-        if not (has_tick(x, ya) and has_tick(x, yb)):
-            continue
-        values = [
-            _number(t) for (wx0, wy0, wx1, wy1, t) in words
-            if (wy1 - wy0) > 1.5 * (wx1 - wx0) and _number(t) is not None
-            and abs((wx0 + wx1) / 2 - x) <= 12.0 and ya - 6.0 <= (wy0 + wy1) / 2 <= yb + 6.0
-        ]
-        if len(values) == 1:
-            dims.append((x, ya, yb, values[0]))
-    by_bottom: dict[float, list] = {}
-    for d in dims:
-        by_bottom.setdefault(round(d[2], 1), []).append(d)
-    filled = sorted({(round(r[0], 2), round(r[1], 2), round(r[2], 2), round(r[3], 2), tuple(round(v, 2) for v in r[4]))
-                     for r in rects if r[4] is not None})
-    views = []
-    for bottom, chain in sorted(by_bottom.items()):
-        if len(chain) < 2:
-            continue
-        ffl_y = sum(d[2] for d in chain) / len(chain)
-        levels = tuple(DatumLevel(f"L{int(d[3])}", d[1], d[3]) for d in sorted(chain, key=lambda d: d[1]))
-        x_max = max(d[0] for d in chain)
-        y_lo, y_hi = min(d[1] for d in chain) - 15.0, ffl_y + 12.0
-        local = [r for r in filled if r[0] > x_max + 5.0 and r[1] >= y_lo and r[3] <= y_hi
-                 and (r[2] - r[0]) <= OUTLINE_W[1] and (r[3] - r[1]) <= 100.0]
-        # Candidate outlines: every connected group of touching same-fill rects (a leaf drawn in parts) AND every
-        # single filled rect (a leaf or frame drawn as one shape). Nested frame and leaf are different outlines.
-        groups = _touching_groups(local) + [[r] for r in local]
-        outlines = []
-        for g in groups:
-            x0, y0 = min(r[0] for r in g), min(r[1] for r in g)
-            x1, y1 = max(r[2] for r in g), max(r[3] for r in g)
-            if not (OUTLINE_W[0] <= x1 - x0 <= OUTLINE_W[1] and OUTLINE_H[0] <= y1 - y0 <= OUTLINE_H[1]):
-                continue
-            frame_base = None
-            enclosing = [r for r in local if r[0] <= x0 + 0.01 and r[2] >= x1 - 0.01 and r[3] >= y1 - 0.01
-                         and (r[2] - r[0]) - (x1 - x0) <= 8.0 and (r[0], r[1], r[2], r[3]) != (x0, y0, x1, y1)]
-            if enclosing:
-                frame_base = min(enclosing, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))[3]
-            outlines.append((round(x0, 2), round(x1, 2), round(y0, 2), round(y1, 2), frame_base))
-        outlines = sorted(set(outlines))
-        views.append({
-            "datum": ElevationDatum(ffl_y, levels),
-            "outlines": tuple(ElevOutline(f"e{i}", o[0], o[1], o[2], o[3], o[4]) for i, o in enumerate(outlines)),
-            "chain_x": x_max,
-        })
-    return views
-
-
-def _touching_groups(rects: Sequence[tuple]) -> list[list[tuple]]:
-    """Connected groups of same-fill rects that touch or overlap (diagnostic grouping of drawn leaf parts)."""
-    remaining = list(rects)
-    groups = []
-    while remaining:
-        seed = remaining.pop()
-        group, frontier = [seed], [seed]
-        while frontier:
-            cur = frontier.pop()
-            for other in list(remaining):
-                if other[4] == cur[4] and not (
-                    other[0] > cur[2] + TOUCH_TOL or other[2] < cur[0] - TOUCH_TOL
-                    or other[1] > cur[3] + TOUCH_TOL or other[3] < cur[1] - TOUCH_TOL
-                ):
-                    remaining.remove(other)
-                    group.append(other)
-                    frontier.append(other)
-        groups.append(group)
-    return groups
 
 
 def page_primitives(page) -> tuple[list, list, list]:
@@ -159,7 +66,8 @@ def plan_spans_from_composition(comp, poa, axis_name: str) -> list[PlanSpan]:
     return spans
 
 
-def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha: str, focus: Sequence[str] = ()) -> dict:
+def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha: str, focus: Sequence[str] = (),
+        source_owned: bool = False) -> dict:
     import fitz
     from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
     from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -190,8 +98,12 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     doc = fitz.open(stream=payload, filetype="pdf")
     views_out, per_view_results = [], []
     for page_no in elevation_pages:
-        lines, rects, words = page_primitives(doc[page_no - 1])
-        for view_no, view in enumerate(extract_views(lines, rects, words)):
+        if source_owned:
+            page = read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id=str(page_no))
+            page_views, view_scope = (source_owned_views(page), page.scope) if page is not None else ([], scope)
+        else:
+            page_views, view_scope = extract_views(*page_primitives(doc[page_no - 1])), scope
+        for view_no, view in enumerate(page_views):
             successes = []
             for axis in ("x", "y"):
                 reg, why = register_plan_to_elevation(spans[axis], view["outlines"])
@@ -204,18 +116,19 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                 row.update({"axis": axis, "sign": reg.sign, "offset": round(reg.offset, 3), "anchor_widths_pt": list(reg.anchor_widths_pt)})
                 for span in sorted(spans[axis], key=lambda s: s.record_id):
                     per_view_results.append(resolve_vertical_witness(
-                        span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=scope))
+                        span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=view_scope))
             views_out.append(row)
     # one result per record across ALL views: competing views or values never become a candidate by cherry-picking
     aggregated = aggregate_across_views(per_view_results)
     reasons = Counter(r.reason_codes[0] for r in aggregated)
     candidates = [{"record": r.record_id[-8:], "opening_height_mm": r.opening_height_mm, "leaf_height_mm": r.leaf_height_mm,
-                   "head_level": r.head_level_name, "result_id": r.result_id} for r in aggregated if r.is_candidate]
+                   "head_level": r.head_level_name, "receipt_count": len(r.source_observation_ids), "result_id": r.result_id}
+                  for r in aggregated if r.is_candidate]
     focus_rows = [{"record": r.record_id[-8:], "status": r.status.value, "reasons": list(r.reason_codes), "outline": r.outline_id,
                    "competing_plan_records": [c[-8:] for c in r.competing_plan_record_ids]}
                   for r in aggregated if any(r.record_id.endswith(f) for f in focus)]
     return {
-        "schema_version": "1.1.0", "source_sha256": sha, "shadow_only": True, "benchmark_score_granted": False,
+        "schema_version": "1.2.0", "source_sha256": sha, "input_path": "source_owned" if source_owned else "pymupdf_diagnostic", "shadow_only": True, "benchmark_score_granted": False,
         "plan_page": plan_page, "elevation_pages": list(elevation_pages),
         "views": views_out, "candidates": sorted(candidates, key=lambda c: c["record"]),
         "first_remaining_gate_counts": dict(sorted(reasons.items())),
@@ -231,8 +144,9 @@ def main() -> int:
     parser.add_argument("--expected-source-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--focus", nargs="*", default=[], help="record id suffixes to explain")
+    parser.add_argument("--source-owned", action="store_true", help="read elevation facts only from producer-owned authorities")
     args = parser.parse_args()
-    report = run(args.pdf, args.plan_page, args.elevation_pages, args.expected_source_sha256, args.focus)
+    report = run(args.pdf, args.plan_page, args.elevation_pages, args.expected_source_sha256, args.focus, args.source_owned)
     args.output.write_text(json.dumps(report, indent=1, sort_keys=True), encoding="utf-8")
     print(json.dumps({"views": len(report["views"]), "candidates": len(report["candidates"])}))
     return 0

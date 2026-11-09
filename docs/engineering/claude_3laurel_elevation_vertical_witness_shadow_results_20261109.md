@@ -39,6 +39,22 @@ Registration found the same offsets as my manual measurement (Front 984.285, Lhs
 3. **Cross-view uniqueness gate.** `assess_elevation_vertical_witness_shadow` now returns ONE result per record through `aggregate_across_views`. Two views that both witness a record, or a candidate plus a record-level conflict elsewhere, are a `CONFLICT` (`competing_elevation_views`). A view that cannot calibrate or register says nothing about the record and does not poison a clean candidate. The diagnostic tool uses the same gate, so its candidate list cannot be cherry-picked.
 4. **Production note (accepted, not built).** The PyMuPDF extraction remains a diagnostic. A production slice must source-authenticate exact revision, snapshot, page and viewport native witness observations, a unique registered physical instance, door semantic kind and host binding, and must not select the nested frame record or the two interior openings.
 
+
+## Source-owned input path with receipts (MAX 6732848990, next work item 1)
+
+`pb_elevation_source_owned_witness_adapter.py` reads the elevation facts only from producer-owned authorities and carries the observation ids that drew each one, so a witness result names its receipts (`source_observation_ids`):
+
+- **Segments:** `SourceVisibilityAuthority` visible native observations for the exact revision and snapshot (corroborated visibility receipt required, page must match).
+- **Outlines:** `SourceVisibilityProducer.native_paint_facts` (authenticated paint provenance). The four edges of one filled path share a `path_index`, so a filled rectangle is rebuilt from the observations that actually draw it; a path that is not axis-aligned or whose edges disagree on fill is not an outline.
+- **Words:** `PdfTextIntegrityAuthority` receipts, accepted by the same rule as the opening label authority.
+- A foreign or advanced revision returns nothing (no facts without an intact lineage). The adapter asserts no role and writes no kind, host, frame, quantity or customer field; only the diagnostic tool imports it.
+
+**Original (3Laurel, read in place):** reading page 4 takes about 4 s and page 5 about 10 s. The source-owned path gives the same four views, datum levels and FFL as the PyMuPDF diagnostic, the same unique registrations (Front 984.286 pt, Lhs 15.496 pt), the same two candidates (`22e7e155`, `a93486dc`; 444 and 238 receipt ids) and identical per-record first-gate counts. The frame record `1cd959cc` and the two interior openings are still held out. The outline sets are not identical to the PyMuPDF ones (visibility and paint facts differ), but the witness result is.
+
+**Proof added:** 76 source-neutral tests (receipts flow from drawn facts to the result, enclosing-frame receipts, ambiguous figure not read, page filter across a two-page synthetic PDF, diagonal fill path, mixed-fill path, stale visibility receipt, foreign revision, a synthetic PDF through the real ingest, visibility, paint-fact and text-integrity producers) plus two original-source tests (skipped without the private PDF). Ten single-line mutations of the adapter were each caught after the first pass exposed five test gaps.
+
+**Still open (not built):** door kind attached to the same physical instance (the label leader needs its own trace), a genuine host binding for `22e7e155` and an independent terminator witness for the slider, and the production opening quantity, seal and customer gates. This adds receipts to a diagnostic; it is not a physical authority and no quantity, score or customer row follows.
+
 ## Not proven / limits
 
 The extractor reads vector fills and words with PyMuPDF; it is a diagnostic, not yet a source-authenticated observation path. The kind (door) gate for `22e7e155` and `a93486dc` is still `None` (no elevation leader label is bound), their host and frame gates are unchanged, and no quantity is issued. No score, no benchmark item newly eligible. Protected-environment behaviour and Lot16-eight / Maryborough-three retention at this head are not run here (no production code changed).
