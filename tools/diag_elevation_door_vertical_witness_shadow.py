@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from pb_elevation_source_owned_witness_adapter import (  # noqa: F401
-    extract_views, plan_label_width, read_source_owned_page, source_owned_views,
+    extract_views, kind_proposal_for_outline, plan_label_width, read_source_owned_page, source_owned_views,
 )
 from pb_elevation_door_vertical_witness_shadow import (
     DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, compose_opening_measurement,
@@ -99,11 +99,12 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     poa = comp.physical_opening_authority
     spans = {axis: plan_spans_from_composition(comp, poa, axis) for axis in ("x", "y")}
     doc = fitz.open(stream=payload, filetype="pdf")
-    views_out, per_view_results, outlines_of = [], [], {}
+    views_out, per_view_results, outlines_of, page_inputs_of = [], [], {}, {}
     for page_no in elevation_pages:
         if source_owned:
             page = read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id=str(page_no))
             page_views, view_scope = (source_owned_views(page), page.scope) if page is not None else ([], scope)
+            page_inputs = (page.strokes, page.words) if page is not None else ((), ())
         else:
             page_views, view_scope = extract_views(*page_primitives(doc[page_no - 1])), scope
         for view_no, view in enumerate(page_views):
@@ -122,6 +123,8 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                         span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=view_scope)
                     per_view_results.append(witness)
                     outlines_of[id(witness)] = view["outlines"]
+                    if source_owned:
+                        page_inputs_of[id(witness)] = page_inputs
             views_out.append(row)
     # one result per record across ALL views: competing views or values never become a candidate by cherry-picking
     aggregated = aggregate_across_views(per_view_results)
@@ -130,6 +133,16 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                    "head_level": r.head_level_name, "receipt_count": len(r.source_observation_ids),
                    "text_trust": r.text_trust, "result_id": r.result_id}
                   for r in aggregated if r.is_candidate]
+    kind_rows = []
+    if source_owned:
+        for r in aggregated:
+            if not r.is_candidate or id(r) not in page_inputs_of:
+                continue
+            strokes, words = page_inputs_of[id(r)]
+            k = kind_proposal_for_outline(r.record_id, r.outline_id, outlines_of[id(r)], strokes, words)
+            kind_rows.append({"record": r.record_id[-8:], "status": k.status.value, "reasons": list(k.reason_codes), "kind": k.kind,
+                              "label_block": k.label_block_id, "text_trust": k.text_trust, "nested_outlines": len(k.nested_outline_ids),
+                              "receipt_count": len(k.source_observation_ids), "result_id": k.result_id})
     measurements = []
     for r in aggregated:
         if not r.is_candidate:
@@ -147,12 +160,13 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                    "competing_plan_records": [c[-8:] for c in r.competing_plan_record_ids]}
                   for r in aggregated if any(r.record_id.endswith(f) for f in focus)]
     return {
-        "schema_version": "1.3.0", "source_sha256": sha, "input_path": "source_owned" if source_owned else "pymupdf_diagnostic", "glyph_ledger_text_trust": bool(glyph_ledger), "shadow_only": True, "benchmark_score_granted": False,
+        "schema_version": "1.4.0", "source_sha256": sha, "input_path": "source_owned" if source_owned else "pymupdf_diagnostic", "glyph_ledger_text_trust": bool(glyph_ledger), "shadow_only": True, "benchmark_score_granted": False,
         "plan_page": plan_page, "elevation_pages": list(elevation_pages),
         "views": views_out, "candidates": sorted(candidates, key=lambda c: c["record"]),
         "first_remaining_gate_counts": dict(sorted(reasons.items())),
         "focus_rows": focus_rows,
         "measurements": sorted(measurements, key=lambda m: m["record"]),
+        "kind_proposals": sorted(kind_rows, key=lambda k: k["record"]),
     }
 
 

@@ -23,6 +23,9 @@ from typing import Optional, Sequence
 from pb_elevation_door_vertical_witness_shadow import (
     DatumLevel, ElevOutline, ElevationDatum, Scope, TEXT_CORROBORATED, TEXT_RAW_UNVERIFIED,
 )
+from pb_elevation_label_kind_proposal_shadow import (
+    KindProposal, LabelBlock, NO_KIND_TOKEN, OutlineBox, StrokeSegment, label_kind, propose_kind_from_leader,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 
@@ -34,6 +37,9 @@ OUTLINE_H = (30.0, 90.0)
 TOUCH_TOL = 0.06
 AXIS_TOL = 0.05
 THIN_FILL_PT = 0.3     # a fill thinner than a stroke is an edge line drawn as a fill, not a part of a leaf
+OPAQUE = 0.99          # a leader must be opaque stroke ink
+SAME_LINE_GAP = 1.5    # words closer than this many text heights on one line belong to one label
+STACK_GAP = 0.6        # text lines closer than this many text heights, with overlapping extent, belong to one label
 
 
 def _approved_raw_reasons() -> frozenset:
@@ -51,9 +57,16 @@ class SourceOwnedPage:
     lines: tuple[tuple, ...]        # (x0, y0, x1, y1, observation_id)
     rects: tuple[tuple, ...]        # (x0, y0, x1, y1, fill, (observation_id, ...))
     words: tuple[tuple, ...]        # (x0, y0, x1, y1, text, observation_id, trust)
+    strokes: tuple[tuple, ...] = ()  # (x0, y0, x1, y1, observation_id): opaque stroke-only line segments (no fill)
 
 
 # ---------------------------------------------------------------------------------------- reading
+
+def is_stroke_ink(fact) -> bool:
+    """A native line painted ONLY as an opaque stroke: no fill, so not an edge of a painted shape, and not translucent."""
+    return bool(fact.fill is None and fact.kind == "line" and fact.stroke_color is not None
+                and fact.stroke_opacity is not None and fact.stroke_opacity >= OPAQUE and len(fact.geometry) == 4)
+
 
 def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optional[SourceOwnedPage]:
     """Authenticated page facts for one exact revision and snapshot, or ``None`` if the lineage is not intact."""
@@ -81,8 +94,12 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
         segment_ids.append(observation_id)
         lines.append((*g, observation_id))
     rects = []
+    strokes = []
     if segment_ids:
         facts = source.native_paint_facts(selector(segment_ids[0]), observation_ids=segment_ids)
+        for fact in facts:
+            if is_stroke_ink(fact):
+                strokes.append((*(float(v) for v in fact.geometry), fact.observation_id))
         by_path: dict[int, list] = {}
         for fact in facts:
             if fact.fill is not None and fact.kind == "line":
@@ -121,7 +138,7 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
             continue
         g = tuple(float(v) for v in receipt.geometry)
         words.append((*g, text, str(receipt.parent_observation_id or observation_id), trust))
-    return SourceOwnedPage(scope, str(page_id), tuple(lines), tuple(rects), tuple(words))
+    return SourceOwnedPage(scope, str(page_id), tuple(lines), tuple(rects), tuple(words), tuple(sorted(strokes)))
 
 
 def source_owned_views(page: SourceOwnedPage) -> list[dict]:
@@ -228,6 +245,90 @@ def _touching_groups(rects: Sequence[tuple]) -> list[list[tuple]]:
                     frontier.append(other)
         groups.append(group)
     return groups
+
+
+# ------------------------------------------------------------------------------- label -> kind proposal
+
+def label_blocks(words: Sequence[tuple]) -> list[LabelBlock]:
+    """Printed labels that carry an explicit door or window token. Pure, deterministic, order-invariant.
+
+    Words on one text line join when they are within ``SAME_LINE_GAP`` text heights; text lines join into one label when
+    their extents overlap and they are within ``STACK_GAP`` text heights. Block trust is the worst of its words.
+    """
+    items = []
+    for w in words:
+        x0, y0, x1, y1 = (float(v) for v in w[:4])
+        text = str(w[4]).strip()
+        if not text or not all(v == v and abs(v) != float("inf") for v in (x0, y0, x1, y1)) or y1 <= y0 or x1 < x0:
+            continue
+        items.append({"b": (x0, y0, x1, y1), "t": text, "r": _rid(w, 5), "k": (w[6] if len(w) > 6 else "")})
+    items.sort(key=lambda i: (i["b"], i["t"]))
+    n = len(items)
+
+    def height(i):
+        return i["b"][3] - i["b"][1]
+
+    def find(parent, i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    line_parent, block_parent = list(range(n)), list(range(n))
+
+    def union(parent, a, b):
+        ra, rb = find(parent, a), find(parent, b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    for a in range(n):
+        for b in range(a + 1, n):
+            ba, bb = items[a]["b"], items[b]["b"]
+            h = max(height(items[a]), height(items[b]))
+            cya, cyb = (ba[1] + ba[3]) / 2, (bb[1] + bb[3]) / 2
+            gap_x = max(bb[0] - ba[2], ba[0] - bb[2])
+            if abs(cya - cyb) <= 0.35 * h and gap_x <= SAME_LINE_GAP * h:
+                union(line_parent, a, b)
+                union(block_parent, a, b)
+                continue
+            gap_y = max(bb[1] - ba[3], ba[1] - bb[3])
+            overlap_x = min(ba[2], bb[2]) - max(ba[0], bb[0])
+            if -0.2 * h <= gap_y <= STACK_GAP * h and overlap_x > 0 and abs(cya - cyb) > 0.35 * h:
+                union(block_parent, a, b)
+    # lines may need joining through a stacked neighbour: reading order is by line cluster, then x
+    blocks: dict[int, list[int]] = {}
+    for i in range(n):
+        blocks.setdefault(find(block_parent, i), []).append(i)
+    out = []
+    for members in blocks.values():
+        lines: dict[int, list[int]] = {}
+        for i in members:
+            lines.setdefault(find(line_parent, i), []).append(i)
+        ordered_lines = sorted(lines.values(), key=lambda ids: (sum((items[i]["b"][1] + items[i]["b"][3]) / 2 for i in ids) / len(ids)))
+        text = " ".join(" ".join(items[i]["t"] for i in sorted(ids, key=lambda i: items[i]["b"][0])) for ids in ordered_lines)
+        kind, problem = label_kind(text)
+        if problem == NO_KIND_TOKEN:
+            continue
+        x0 = min(items[i]["b"][0] for i in members)
+        y0 = min(items[i]["b"][1] for i in members)
+        x1 = max(items[i]["b"][2] for i in members)
+        y1 = max(items[i]["b"][3] for i in members)
+        trusts = [items[i]["k"] for i in members]
+        trust = TEXT_CORROBORATED if trusts and all(t == TEXT_CORROBORATED for t in trusts) else TEXT_RAW_UNVERIFIED
+        receipts = tuple(sorted({r for i in members for r in items[i]["r"]}))
+        out.append(LabelBlock(f"blk@{x0:.2f},{y0:.2f}", text, (x0, y0, x1, y1), receipts, trust))
+    return sorted(out, key=lambda b: b.block_id)
+
+
+def kind_proposal_for_outline(record_id: str, outline_id: str, outlines: Sequence[ElevOutline],
+                              strokes: Sequence[tuple], words: Sequence[tuple]) -> KindProposal:
+    """Propose the kind of the physical opening whose witnessed elevation outline is ``outline_id``.
+
+    A proposal only (CANDIDATE, receipts, never an authority); the opening kind authority is untouched.
+    """
+    boxes = [OutlineBox(o.outline_id, o.x0, o.y_head, o.x1, o.y_base_leaf, tuple(o.receipt_ids)) for o in outlines]
+    segs = [StrokeSegment(float(t[0]), float(t[1]), float(t[2]), float(t[3]), (t[4] if len(t) > 4 else "")) for t in strokes]
+    return propose_kind_from_leader(record_id, outline_id, boxes, label_blocks(words), segs)
 
 
 def label_text_trust(statuses: Sequence) -> str:

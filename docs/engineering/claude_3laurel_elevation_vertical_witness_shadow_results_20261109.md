@@ -89,6 +89,43 @@ Registration found the same offsets as my manual measurement (Front 984.285, Lhs
 
 With the opt-in glyph-ledger text trust, every datum word on page 4 (including both 2,100 words) is text-integrity `CORROBORATED` (`amortized_glyph_verified`, two `raster_corroborated_direct`); that run takes about 20 minutes per page.
 
+## Host binding: first failed predicate, traced from the original (no host is invented)
+
+Read-only trace on page 3 of the original with the live composition (`include_unmeasured_ink_closed_flanks_shadow`, `source_fragment_roles_shadow`), current main modules. Counts and point coordinates only. All three records bind to `abstained` / `no_authenticated_host_wall_band`; the trace says why.
+
+| Fact (source coordinates, pt) | `22e7e155` (Front entry) | `a93486dc` (Lhs, not a mapped item) |
+|---|---|---|
+| Opening length / thickness | 34.02 / 2.551, axis (0,1) | 24.66 / 2.551, axis (1,0) |
+| Opening face stubs | four 0.85 pt reveal returns at x 947.56 and 950.11 | four 0.85 pt reveal returns at y 426.12 and 428.67 |
+| Stub owners among W4 candidates | **none of the four** | **none of the four** |
+| Wall face lines the stubs should continue | x 947.27 and 949.83: the stubs sit **0.29 pt** off them | y 426.40 and 428.95: the stubs sit **0.28 pt** off them |
+| Face line across the opening span | west face has the gap (299.44 to 335.15); **east face x 949.83 runs continuously 298.45 to 336.15, owned by one W4 candidate (`537b8fa8`, 5 primitives)** | **both** faces are drawn across the span (y 426.40 unowned, y 428.95 owned by one candidate) |
+
+First failed predicate: the exact-contact flank lineage needs the four face stubs to be owned by W4 candidates and to coincide with the flanking wall faces (contact is exact source coincidence, 1e-3 pt; 2.5 pt snap is candidate locality only). The stubs are unowned and offset by about 0.28 pt, so no flank pair can be formed. Independently, a face line that is continuous across the opening span (the east face of the entry wall, both faces of the Lhs opening) is not an interrupted through-wall face: the original does not draw, for those faces, a collinear face on each side that ends at the jamb. The source does not say whether that continuous line is a threshold, a frame head or a porch edge, so this module does not say either. **Outcome: ABSTAIN, first failed predicate recorded, no default host, no corner promotion on the shadow-only slider match, no frame, no quantity.** The nested frame record `1cd959cc` shows the same pattern (its west-face stubs are owned by `1272732b` and `56099100`, its east-face stubs are about 1 pt and unowned).
+
+A host will need either a source-owned return that coincides with the wall face (not present here) or the separate wall-band authority MAX owns; neither is changed here.
+
+## Door kind from a stroked leader (proposal only; the kind authority is untouched)
+
+`pb_elevation_label_kind_proposal_shadow.py` (pure core), `label_blocks` / `kind_proposal_for_outline` / `is_stroke_ink` in the source-owned adapter, and `kind_proposals` in the counts-only tool (schema 1.4.0). Default off, never wired.
+
+Rules: the kind comes only from an explicit `DOOR` / `WINDOW` token in the label's own words (no height, no 2,100, no leaf, no outline shape, no width input exists in the module). A label attaches to an instance only through a leader of **opaque stroke-only, axis-aligned** segments (so fill edges, translucent lines and diagonal hatching never count) that starts within 6 pt of the label's extent, leads away from it and joins end to end at exact source coordinates. A fork is explored on every branch; **only a route end that lies strictly inside an outline attaches anything**, so a branch into blank space changes nothing, but more than 16 routes or a route longer than 6 segments abstains. Every route end inside an outline must lie inside **one nested chain** (leaf inside frame inside surround) that contains the witnessed outline: two overlapping outlines that do not nest, or routes into different instances, abstain (`label_leaders_reach_different_instances`); two labels with different kinds on one instance are a `CONFLICT`. Result is `CANDIDATE` with receipts (label words, leader strokes, outlines), `text_trust` worst-of its words, never `CORROBORATED`.
+
+**A failure mode the original revealed (geometry, not a benchmark value).** The first run on the original abstained on the Front entry label (`leader_chain_branches_or_is_unfinished`) because brick/ground hatching sits within 2.1 pt of the label: diagonal hatch strokes and one short vertical-then-diagonal polyline qualified as "leader starts" and one of them forked. Two principled changes, no threshold tuned to a value: leaders are orthogonal only (a diagonal leader abstains), and a fork matters only where a route end lands in an outline.
+
+**Original (read in place, default producer so the words are raw, 3Laurel p4):**
+
+| Opening | Kind proposal | Label block (2 stacked lines) | Nested outlines | Text trust | Receipts |
+|---|---|---|---|---|---|
+| `22e7e155` (Front entry) | door, `CANDIDATE` | at (609.10, 303.30) | 3 | raw_unverified_diagnostic_only | 215 |
+| `a93486dc` (Lhs, not a mapped item) | door, `CANDIDATE` | at (302.93, 619.85) | 3 | raw_unverified_diagnostic_only | 233 |
+
+The Front entry leader is the stroked polyline (647.25, 308.17) to (658.91, 308.17) to (658.91, 264.24) starting inside the label's extent; nothing else touches its end within 1.2 pt. The nested frame record `1cd959cc`, `be1e67bf` and `9d4dc1b3` have no witnessed outline, so they get no proposal.
+
+**Still open for kind:** the words are raw. A kind needs text-integrity `CORROBORATED` words (explicit glyph-ledger opt-in, about 20 minutes a page) and the hand-over of this proposal to the existing kind authority, which stays MAX's. Nothing here writes a kind.
+
+**Proof:** 62 source-neutral tests (positives, look-alike negatives, ambiguity and conflict, translation, input-order, segment-splitting and segment-direction invariance, unrelated-content invariance, deterministic replay, no mutation, non-finite and duplicate input, real producers through a synthetic PDF) and 30 single-line mutations of the core rules and the adapter extraction, all caught (a first run left four survivors; each closed with a test or by removing a redundant branch).
+
 ## Not proven / limits
 
-The extractor reads vector fills and words with PyMuPDF; it is a diagnostic, not yet a source-authenticated observation path. The kind (door) gate for `22e7e155` and `a93486dc` is still `None` (no elevation leader label is bound), their host and frame gates are unchanged, and no quantity is issued. No score, no benchmark item newly eligible. Protected-environment behaviour and Lot16-eight / Maryborough-three retention at this head are not run here (no production code changed).
+The source-owned adapter (not the PyMuPDF diagnostic) is the input path for the witness, the measurement and the kind proposal; the PyMuPDF path is kept only to cross-check it. Door kind for `22e7e155` and `a93486dc` is a **raw-text `CANDIDATE` proposal only**: text integrity is not corroborated by default, the existing kind authority has not received it, and no kind is written. Host binding **abstains** for both (first failed predicate recorded above; no default host, no corner promotion on the shadow-only slider match). No frame, no quantity, no seal, no customer row, no score, no benchmark item newly eligible. Protected exact-head original replay and Lot16-eight / Maryborough-three retention for the head that carries this are MAX's to run and are not run here (no production code changed).
