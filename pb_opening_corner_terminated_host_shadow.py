@@ -74,12 +74,14 @@ FLANK_AMBIGUOUS = "corner_collinear_flank_ambiguous"
 TERMINATOR_OVERLAPS_HOST = "corner_terminator_overlaps_host_lineage"
 ORIENTATION_AMBIGUOUS = "corner_orientation_ambiguous"
 WALL_SCOPE_UNAVAILABLE = "corner_wall_scope_unavailable"
+WALL_SCOPE_OWNERSHIP_MISMATCH = "corner_wall_scope_ownership_mismatch"
 OPENING_GEOMETRY_UNAVAILABLE = "corner_opening_geometry_unavailable"
 
 # Reported when a shadow positive exists: the registry, binding, frame, quantity
 # and customer fields stay untouched, so the first remaining gate is the
 # authority-promotion review itself.
 PROMOTION_GATE = "authority_promotion_review_required_registry_untouched"
+_OWNERSHIP_MISMATCH = object()
 
 Point = tuple[float, float]
 Line = tuple[float, float, float, float]
@@ -153,6 +155,24 @@ class CornerTerminatedHostShadowRecord:
     binding_reason_codes: tuple[str, ...]
     result: CornerTerminatedHostShadowResult
     first_remaining_gate: str
+
+
+_OWNERSHIP_FIELDS = ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id")
+
+
+def wall_scope_is_owned_by_opening(scope, opening, selector) -> bool:
+    """Exact document/revision/SHA/snapshot/page ownership of the wall scope.
+
+    A foreign, stale or re-based wall scope (any of the five ids differs from the
+    opening's own, or from the selector the composition used) is never evidence
+    for this opening.
+    """
+
+    for name in _OWNERSHIP_FIELDS:
+        wanted = str(getattr(opening, name))
+        if str(getattr(scope, name)) != wanted or str(getattr(selector, name)) != wanted:
+            return False
+    return True
 
 
 # --------------------------------------------------------------------- geometry
@@ -541,7 +561,9 @@ def assess_corner_terminated_host_shadow(
             )
         )
         ctx = None
-        if (
+        if not wall_scope_is_owned_by_opening(scope, opening, selector):
+            ctx = _OWNERSHIP_MISMATCH
+        elif (
             scope.status is EvidenceResolutionStatus.CORROBORATED
             and scope.records
             and scope.equivalence is not None
@@ -620,7 +642,9 @@ def assess_corner_terminated_host_shadow(
 
         ctx = scope_context(selector, opening)
         geometry = _opening_geometry(poa, opening)
-        if ctx is None:
+        if ctx is _OWNERSHIP_MISMATCH:
+            result = _result(EvidenceResolutionStatus.ABSTAINED, (WALL_SCOPE_OWNERSHIP_MISMATCH,))
+        elif ctx is None:
             result = _result(EvidenceResolutionStatus.ABSTAINED, (WALL_SCOPE_UNAVAILABLE,))
         elif geometry is None:
             result = _result(EvidenceResolutionStatus.ABSTAINED, (OPENING_GEOMETRY_UNAVAILABLE,))
@@ -683,4 +707,5 @@ __all__ = [
     "OwnerRef",
     "assess_corner_terminated_host_shadow",
     "resolve_corner_terminated_stub_host_shadow",
+    "wall_scope_is_owned_by_opening",
 ]

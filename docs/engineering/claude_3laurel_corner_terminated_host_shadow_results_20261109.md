@@ -44,14 +44,14 @@ host thickness of 2.5512 pt. The rule contains no project, file or id special ca
 
 ## Proof
 
-56 synthetic tests (source-neutral, plain tuples moved rigidly): positive; rotation 0/90/180/270/37 degrees x mirror x flipped
+61 synthetic tests (source-neutral, plain tuples moved rigidly): positive; rotation 0/90/180/270/37 degrees x mirror x flipped
 frame (flank on either side); translation x scale 1.0/1.5/2.0; input-order, segment-splitting, unrelated-content and
 viewport-expansion invariance; deterministic replay and stable ids; no mutation; look-alike negatives (missing mitre, unowned
 furniture/dimension/joinery ink, detached pier, wrong-thickness wall, collinear continuation, through wall, two terminators,
 unexplained contact, inverted stagger, symmetric opening, unsupported faces); stale/foreign/ambiguous evidence (unclean terminator,
 unclean flank, far-piece owner, snap boundary 2.4 vs 2.6 pt, two groups, pairwise ambiguity, terminator overlapping host, no flank);
-default-off strict-bool adapter; no production importer. One original-source test (skipped without the private PDF) proves the
-adapter is read-only and finds exactly one candidate. Eight single-line mutations of the rule were each caught by the matrix.
+exact document/revision/SHA/snapshot/page ownership of the wall scope (a foreign or stale scope refuses every opening; also proved on the original with re-based snapshot and revision proxies); default-off strict-bool adapter; no production importer. One original-source test (skipped without the private PDF) proves the
+adapter is read-only and finds exactly one candidate. Nine single-line mutations of the rule (including the ownership check) were each caught by the matrix.
 
 ## Not proven
 

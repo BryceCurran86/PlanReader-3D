@@ -412,6 +412,24 @@ def test_no_collinear_flank_on_either_side_abstains():
     assert r.status is ABSTAINED and r.reason_codes == (shadow.FLANK_UNMAPPED,)
 
 
+# --------------------------------------------- exact ownership of the wall scope
+
+class _Ids:
+    def __init__(self, **kw):
+        base = dict(document_id="doc", revision_id="rev", source_sha256="a" * 64, snapshot_id="snap", page_id="3")
+        base.update(kw)
+        self.__dict__.update(base)
+
+
+@pytest.mark.parametrize("field", ["document_id", "revision_id", "source_sha256", "snapshot_id", "page_id"])
+def test_foreign_or_stale_wall_scope_is_never_evidence(field):
+    opening, selector = _Ids(), _Ids()
+    assert shadow.wall_scope_is_owned_by_opening(_Ids(), opening, selector) is True
+    assert shadow.wall_scope_is_owned_by_opening(_Ids(**{field: "other"}), opening, selector) is False
+    # a selector that disagrees with the opening is equally refused
+    assert shadow.wall_scope_is_owned_by_opening(_Ids(), opening, _Ids(**{field: "other"})) is False
+
+
 # ------------------------------------------------------------ default-off / isolation
 
 def test_adapter_is_default_off_and_strictly_boolean():
@@ -492,6 +510,27 @@ def test_original_source_shadow_is_read_only_and_finds_the_corner_slider():
     assert records == assess_corner_terminated_host_shadow(comp, enabled=True)   # deterministic
     assert len(records) > 50
     assert all(r.binding_status != "corroborated" for r in records)   # only non-hosted openings are assessed
+    # foreign / stale wall scope: re-based snapshot or revision must refuse every opening
+    import dataclasses
+    import types
+
+    real_authority = comp.physical_wall_candidate_authority
+    for field in ("snapshot_id", "revision_id"):
+        class _Rebased:
+            def resolve_scope(self, selector, _field=field):
+                scope = real_authority.resolve_scope(selector)
+                return dataclasses.replace(scope, **{_field: "foreign-" + _field})
+
+        proxy = types.SimpleNamespace(
+            physical_opening_authority=comp.physical_opening_authority,
+            physical_wall_candidate_authority=_Rebased(),
+            opening_bindings=comp.opening_bindings,
+            binding_selectors=comp.binding_selectors,
+        )
+        foreign = assess_corner_terminated_host_shadow(proxy, enabled=True)
+        assert len(foreign) == len(records)
+        assert not [r for r in foreign if r.result.is_candidate]
+        assert {r.result.reason_codes for r in foreign} == {(shadow.WALL_SCOPE_OWNERSHIP_MISMATCH,)}
     candidates = [r for r in records if r.result.is_candidate]
     assert [r.opening_identity_id[-8:] for r in candidates] == ["b5091e15"]
     only = candidates[0].result
