@@ -160,6 +160,7 @@ def compose_live_wall_opening_authority(
     include_unmeasured_ink_closed_flanks_shadow: bool = False,
     source_fragment_roles_shadow: bool = False,
     source_revision_scope_shadow: bool = False,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -179,6 +180,14 @@ def compose_live_wall_opening_authority(
         raise TypeError("source fragment roles shadow must be an explicit boolean")
     if type(source_revision_scope_shadow) is not bool:
         raise TypeError("source revision scope shadow must be an explicit boolean")
+    if type(filter_typed_negative_non_wall_ink_shadow) is not bool:
+        raise TypeError("typed-negative W4 source filter must be an explicit boolean")
+    if filter_typed_negative_non_wall_ink_shadow and (
+        source_revision_scope_shadow
+        or include_unmeasured_ink_closed_flanks_shadow
+        or source_fragment_roles_shadow
+    ):
+        raise ValueError("typed-negative W4 source filter cannot mix with revision/G17 shadows")
     if source_fragment_roles_shadow and not include_unmeasured_ink_closed_flanks_shadow:
         raise ValueError("source fragment roles require isolated G17 source capture")
     revision_id = str(revision_id or "").strip()
@@ -220,7 +229,18 @@ def compose_live_wall_opening_authority(
     # are excluded by the ordinary page AND F.07 viewport source filters.
     # The separate incomplete supplemental wall producer below consumes the
     # one-page G17 families, never the elevation as another opening.
-    if source_revision_scope_shadow:
+    if filter_typed_negative_non_wall_ink_shadow:
+        # Source-proved negative drafting ink only: this is a default-off
+        # W4 diagnostic. No wall, host, frame, room or commercial authority
+        # is granted solely by removing verified non-wall primitives.
+        wall_producer = (
+            PhysicalWallCandidateProducer
+            .from_source_visibility_typed_negative_wall_ink_shadow(
+                source_visibility_producer,
+                page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
+            )
+        )
+    elif source_revision_scope_shadow:
         wall_producer = PhysicalWallCandidateProducer.from_source_revision_shadow(
             source_visibility_producer,revision_id=revision_id,
             page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
