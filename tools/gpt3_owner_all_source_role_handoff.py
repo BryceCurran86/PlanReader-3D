@@ -27,8 +27,9 @@ import fitz
 from pb_combine_source_closed_runs import (
     combine_sealed_run_files, load_verified_sealed_run,
 )
+from pb_customer_output_verification import verify_sealed_customer_output
 from tools.four_job_windows_launcher import PROJECTS, run_logged
-from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object
+from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object, _json_customer_rows
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 
@@ -126,6 +127,33 @@ def _write_exclusive(path: Path, content: str) -> None:
             stage.unlink(missing_ok=True)
 
 
+def _verified_role_customer_rows(role_dir: Path, summary: dict, signed) -> tuple[dict, ...]:
+    """Only the complete role artifact may match this role's actual source seal.
+
+    Family-only files are intentionally excluded: globbing all verified files
+    duplicates their rows once a whole-project file exists, or borrows a full
+    source seal for an independently verified subset.
+    """
+    if summary.get("customer_rows_verified") is not True:
+        raise ValueError("complete role customer output unavailable")
+    name = summary.get("customer_rows_file")
+    if type(name) is not str:
+        raise ValueError("complete role customer artifact unavailable")
+    path = Path(name)
+    if (path.name != "verified_customer_rows.json"
+            or path.resolve().parent != role_dir.resolve()
+            or path.is_symlink() or not path.is_file()):
+        raise ValueError("untrusted complete role customer artifact path")
+    rows = _json_customer_rows(path)
+    verified = verify_sealed_customer_output(signed, rows)
+    expected = {q.quantity_id for q in signed.quantities if not q.abstained}
+    if (len(rows) != len(expected)
+            or verified.customer_row_count != len(expected)
+            or set(verified.verified_quantity_ids) != expected):
+        raise ValueError("complete role customer quantity bijection unavailable")
+    return tuple(rows)
+
+
 def produce_all_source_roles(
     *, project_id: str, source_dir: Path, output_dir: Path,
     family_group: str = "all", timeout_min: int = 180,
@@ -162,6 +190,7 @@ def produce_all_source_roles(
         "status": "INCOMPLETE",
     }
     sealed: list[Path] = []
+    customer_rows: list[dict] = []
     for index, role in enumerate(roster):
         role_dir = output_dir / ("source_role_%02d" % (index + 1))
         role_dir.mkdir(parents=True)
@@ -187,12 +216,39 @@ def produce_all_source_roles(
             "process_status": status, "process_exit_code": rc,
             "sealed": False,
             "first_failure": None,
+            "customer_bijection_verified": False,
+            "customer_first_failure": None,
             "resource_usage": safe_usage,
         }
         if rc == 0 and status == "COMPLETED":
             summary_file = role_dir / "production_summary.json"
             if summary_file.is_file():
                 summary = _json_object(summary_file)
+                # Counts/status only. Do not copy private source text, paths,
+                # error messages, room names, geometry or quantity values.
+                statuses = {"sealed", "no_sealable_quantities", "source_complexity_blocked",
+                            "production_failed", "source_envelope_conflict",
+                            "family_quantity_identity_conflict", "sealed_project_combination_failed"}
+                row["production_status"] = (
+                    summary.get("status") if summary.get("status") in statuses else "OTHER"
+                )
+                counts = summary.get("family_counts", {})
+                row["family_counts"] = {
+                    name: counts[name] for name in (
+                        "floor_area", "floor_finish_area", "opening_area", "opening_count",
+                        "opening_width", "opening_height", "ceiling_area", "wall_net_area",
+                    ) if type(counts) is dict and type(counts.get(name)) is int and counts[name] >= 0
+                }
+                customer_gates = {
+                    "NO_SEALED_PROJECT", "FULL_PROJECT_FAMILY_SCOPE",
+                    "FLOOR_AREA_CUSTOMER_PROJECTION", "OPENING_CUSTOMER_PROJECTION",
+                    "FLOOR_FINISH_CUSTOMER_UNVERIFIED", "CEILING_CUSTOMER_UNVERIFIED",
+                    "EXACT_SEALED_PROJECT_CUSTOMER_BIJECTION", "PROJECT_VERIFIED",
+                }
+                gate = summary.get("full_project_customer_first_gate")
+                row["full_project_customer_first_gate"] = (
+                    gate if type(gate) is str and gate in customer_gates else "UNAVAILABLE"
+                )
                 file = summary.get("combined_run_file")
                 if summary.get("status") == "sealed" and type(file) is str:
                     sealed_file = Path(file)
@@ -211,6 +267,16 @@ def produce_all_source_roles(
                             ):
                                 sealed.append(sealed_file)
                                 row["sealed"] = True
+                                if summary.get("customer_rows_verified") is True:
+                                    try:
+                                        batch = _verified_role_customer_rows(role_dir, summary, signed)
+                                    except (OSError, TypeError, ValueError, RuntimeError):
+                                        row["customer_first_failure"] = "role_customer_output_invalid"
+                                    else:
+                                        customer_rows.extend(batch)
+                                        row["customer_bijection_verified"] = True
+                                else:
+                                    row["customer_first_failure"] = "role_customer_output_unavailable"
                             else:
                                 row["first_failure"] = "original_role_seal_source_envelope_conflict"
                     else:
@@ -234,6 +300,21 @@ def produce_all_source_roles(
         _write_exclusive(output_dir / "ALL_SOURCE_ROLES.sealed.json", combined.to_json())
         report["source_role_coverage_verified"] = True
         report["status"] = "ALL_ROLES_SEALED_CUSTOMER_AND_V2_PENDING"
+        if all(row["customer_bijection_verified"] for row in report["roles"]):
+            # Recheck the union against the actual cross-document composer;
+            # individual role success alone is insufficient project proof.
+            verified = verify_sealed_customer_output(combined, customer_rows)
+            expected = {q.quantity_id for q in combined.quantities if not q.abstained}
+            if (len(customer_rows) != len(expected)
+                    or verified.customer_row_count != len(expected)
+                    or set(verified.verified_quantity_ids) != expected):
+                raise ValueError("combined role customer quantity bijection unavailable")
+            _write_exclusive(
+                output_dir / "ALL_SOURCE_ROLES.customer_rows.json",
+                json.dumps(customer_rows, sort_keys=True, allow_nan=False) + "\n",
+            )
+            report["customer_bijection_verified"] = True
+            report["status"] = "ALL_ROLES_SEALED_CUSTOMER_VERIFIED_V2_PENDING"
     else:
         report["status"] = "SOURCE_ROLES_INCOMPLETE"
     _write_summary(output_dir / "SOURCE_ROLE_STATUS.json", report)
