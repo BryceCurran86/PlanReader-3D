@@ -97,8 +97,9 @@ def _digest(path: Path) -> str:
 def inspect_q5446_finish_support(roster: Iterable[Mapping[str, object]]) -> Q5446FinishMaterialWitness:
     """Inspect original support documents, not scored takeoffs or role substitutes.
 
-    Exact existing owner roster role+SHA+page authentication is rechecked both
-    before and after extraction, refusing in-place source mutation.
+    The roster's source SHA and page claims are rechecked on immutable bytes;
+    that same snapshot is parsed. A changed or replaced on-disk source fails
+    closed after extraction. No source bytes escape to any status report.
     """
     roles = {}
     for record in roster:
@@ -117,18 +118,29 @@ def inspect_q5446_finish_support(roster: Iterable[Mapping[str, object]]) -> Q544
             not isinstance(path, Path) or path.is_symlink() or not path.is_file()
             or record.get("sha256") != SOURCE_IDS[role]
             or record.get("page_count") != SOURCE_PAGE_COUNTS[role]
-            or _digest(path) != SOURCE_IDS[role]
         ):
             return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_identity_invalid")
         try:
-            with fitz.open(path) as doc:
+            # One immutable byte snapshot is BOTH the SHA-authenticated source
+            # and the exact PDF parsed. Hashing a path and opening that path
+            # again is unsafe: it could have been replaced in between.
+            source_bytes = path.read_bytes()
+        except OSError:
+            return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_identity_invalid")
+        if sha256(source_bytes).hexdigest() != SOURCE_IDS[role]:
+            return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_identity_invalid")
+        try:
+            with fitz.open(stream=source_bytes, filetype="pdf") as doc:
                 if len(doc) != SOURCE_PAGE_COUNTS[role]:
                     return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_page_count_invalid")
                 index = 0 if role == "standard_inclusions" else 5
                 original_texts[role] = doc[index].get_text("text")
         except (OSError, RuntimeError, ValueError):
             return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_decode_failed")
-        if _digest(path) != SOURCE_IDS[role]:
+        try:
+            if path.is_symlink() or _digest(path) != SOURCE_IDS[role]:
+                return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_changed_during_read")
+        except OSError:
             return Q5446FinishMaterialWitness("ABSTAIN", reason_code="support_source_changed_during_read")
     scopes = parse_source_material_scope(
         original_texts["standard_inclusions"],

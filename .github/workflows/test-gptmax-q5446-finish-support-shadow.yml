@@ -6,6 +6,7 @@ on:
       - pb_gptmax_q5446_finish_support_shadow.py
       - tools/gpt3_owner_all_source_role_handoff.py
       - tests/test_gptmax_q5446_finish_support_shadow.py
+      - tests/test_gptmax_q5446_finish_source_snapshot_atomic.py
       - .github/workflows/test-gptmax-q5446-finish-support-shadow.yml
   push:
     branches:
@@ -38,8 +39,8 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -m compileall -q pb_gptmax_q5446_finish_support_shadow.py tests/test_gptmax_q5446_finish_support_shadow.py
-          python -m pytest -q -p no:cacheprovider tests/test_gptmax_q5446_finish_support_shadow.py
+          python -m compileall -q pb_gptmax_q5446_finish_support_shadow.py tests/test_gptmax_q5446_finish_support_shadow.py tests/test_gptmax_q5446_finish_source_snapshot_atomic.py
+          python -m pytest -q -p no:cacheprovider tests/test_gptmax_q5446_finish_support_shadow.py tests/test_gptmax_q5446_finish_source_snapshot_atomic.py
       - name: Clarify original-source authority was not run
         if: always()
         run: |
