@@ -1,0 +1,47 @@
+name: GPT MAX Q5446 supporting finish source shadow
+
+on:
+  pull_request:
+    paths:
+      - pb_gptmax_q5446_finish_support_shadow.py
+      - tools/gpt3_owner_all_source_role_handoff.py
+      - tests/test_gptmax_q5446_finish_support_shadow.py
+      - .github/workflows/test-gptmax-q5446-finish-support-shadow.yml
+  push:
+    branches:
+      - gptmax/q5446-supporting-finish-source-shadow-20261109
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-neutral-material-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install limited test dependencies
+        run: python -m pip install pytest pymupdf
+      - name: Source-neutral only, no private originals or score
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m compileall -q pb_gptmax_q5446_finish_support_shadow.py tests/test_gptmax_q5446_finish_support_shadow.py
+          python -m pytest -q -p no:cacheprovider tests/test_gptmax_q5446_finish_support_shadow.py
+      - name: Clarify original-source authority was not run
+        if: always()
+        run: |
+          echo '::notice::Source-neutral tests only; exact original-source, customer, retention and frozen120 score NOT VERIFIED'
+          echo 'Original PDF tests NOT RUN. No new quantity or benchmark score.' >> "$GITHUB_STEP_SUMMARY"
