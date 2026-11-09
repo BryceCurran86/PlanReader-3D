@@ -23,13 +23,21 @@ New files only: `pb_elevation_door_vertical_witness_shadow.py`, `tests/test_elev
 | Candidates | **2**: `22e7e155` (opening 2,100 mm, leaf 2,020 mm) and `a93486dc` (opening 2,100 mm, leaf 2,105 mm because that door has no sill band) |
 | Nested frame record `1cd959cc` | `ABSTAINED`, `elevation_head_not_on_datum`: its outline is the door frame, head 0.85 pt above the datum. Held, not merged into `22e7e155` |
 | Interior doors `be1e67bf`, `9d4dc1b3` | no elevation outline at their registered intervals |
-| Other first gates across all assessed spans | no outline 274, competing outlines 5, head not on datum 6, base not on FFL 3 (windows) |
+| First gate per plan record, aggregated across views (one row per record) | no outline 164, competing outlines 5, head not on datum 6, base not on FFL 3 (windows), candidate 2 |
 
 Registration found the same offsets as my manual measurement (Front 984.285, Lhs 15.5), independently, from widths alone.
 
 ## Proof
 
-45 source-neutral tests: positives; sign x scale x translation metamorphic; input order, unrelated content and viewport expansion; replay and stable ids; no mutation; duplicate physical candidate (both held), nested frame record, interior doorway, wrong elevation, single anchor, symmetric (ambiguous) scene, foreign or stale scope (four fields), competing explicit height, two outlines at one interval, head off datum, base off FFL, non-calibrating datum, leaf-vs-opening confusion; extractor on a synthetic drawing (nested frame and leaf, contaminated chain, no chain); default-off strict-bool; no production importer; no project or id special case. One original-source test (skipped without the private PDF). Ten single-line mutations of the rule (including leaf height used as opening height) were each caught.
+68 source-neutral tests: positives; sign x scale x translation metamorphic; input order, unrelated content and viewport expansion; replay and stable ids; no mutation; duplicate physical candidate (both held), nested frame record, interior doorway, wrong elevation, single anchor, symmetric (ambiguous) scene, foreign or stale scope (four fields), competing explicit height, two outlines at one interval, head off datum, base off FFL, non-calibrating datum, leaf-vs-opening confusion; extractor on a synthetic drawing (nested frame and leaf, contaminated chain, no chain); default-off strict-bool; no production importer; no project or id special case. One original-source test (skipped without the private PDF). Thirteen single-line mutations of the rule (including leaf height used as opening height, and every check added after review) were each caught; two survivors found along the way were closed with new tests.
+
+
+## Review fixes (MAX 6732228656, head `c9e76a8f2`)
+
+1. **Non-finite values fail closed.** `calibrate_datum` rejects NaN, infinity, booleans, strings, zero or negative spacing and values, and an overflowing ratio whose mean is infinite (inf/inf is NaN and would otherwise slip past the tolerance). Plan spans and outlines are validated (finite, `a0 < a1`, `x0 < x1`, head above base, finite positive explicit height) before any selection, and abstain with `elevation_witness_input_invalid`.
+2. **No silent pick on a duplicate identity.** A repeated `record_id` or `outline_id` (even with different geometry) is a `CONFLICT` (`elevation_witness_duplicate_identity`); the old `next(...)` is gone and input order cannot choose.
+3. **Cross-view uniqueness gate.** `assess_elevation_vertical_witness_shadow` now returns ONE result per record through `aggregate_across_views`. Two views that both witness a record, or a candidate plus a record-level conflict elsewhere, are a `CONFLICT` (`competing_elevation_views`). A view that cannot calibrate or register says nothing about the record and does not poison a clean candidate. The diagnostic tool uses the same gate, so its candidate list cannot be cherry-picked.
+4. **Production note (accepted, not built).** The PyMuPDF extraction remains a diagnostic. A production slice must source-authenticate exact revision, snapshot, page and viewport native witness observations, a unique registered physical instance, door semantic kind and host binding, and must not select the nested frame record or the two interior openings.
 
 ## Not proven / limits
 

@@ -32,6 +32,7 @@ Contract (AGENTS.md; MAX 6731795141)
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -56,6 +57,9 @@ MULTIPLE_PLAN_RECORDS = "elevation_outline_matches_multiple_plan_records"
 HEAD_NOT_ON_DATUM = "elevation_head_not_on_datum"
 COMPETING_HEIGHTS = "elevation_competing_heights"
 BASE_NOT_ON_FFL = "elevation_base_not_on_ffl"
+INVALID_INPUT = "elevation_witness_input_invalid"
+DUPLICATE_IDENTITY = "elevation_witness_duplicate_identity"
+COMPETING_VIEWS = "competing_elevation_views"
 PROMOTION_GATE = "authority_promotion_review_required_kind_host_frame_untouched"
 
 
@@ -145,20 +149,46 @@ def _result(record_id, status, reasons, **kw) -> VerticalWitnessResult:
     )
 
 
+# --------------------------------------------------------------------------- validation
+
+def _finite(*values) -> bool:
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values)
+
+
+def _validate(plan: Sequence[PlanSpan], outlines: Sequence[ElevOutline]) -> Optional[str]:
+    """``INVALID_INPUT`` for non-finite or inverted geometry, ``DUPLICATE_IDENTITY`` for a repeated id, else ``None``."""
+    for p in plan:
+        if not isinstance(p.record_id, str) or not p.record_id or not _finite(p.a0, p.a1) or not p.a1 > p.a0:
+            return INVALID_INPUT
+    for o in outlines:
+        if (not isinstance(o.outline_id, str) or not o.outline_id
+                or not _finite(o.x0, o.x1, o.y_head, o.y_base_leaf) or not o.x1 > o.x0 or not o.y_base_leaf > o.y_head):
+            return INVALID_INPUT
+        if o.y_base_frame is not None and (not _finite(o.y_base_frame) or not o.y_base_frame >= o.y_head):
+            return INVALID_INPUT
+        if o.explicit_height_mm is not None and (not _finite(o.explicit_height_mm) or not o.explicit_height_mm > 0.0):
+            return INVALID_INPUT
+    if len({p.record_id for p in plan}) != len(plan) or len({o.outline_id for o in outlines}) != len(outlines):
+        return DUPLICATE_IDENTITY
+    return None
+
+
 # ----------------------------------------------------------------------------------- datum
 
 def calibrate_datum(datum: ElevationDatum) -> Optional[float]:
     """mm per page point from the printed values, or ``None`` if the chain does not self-calibrate."""
-    if not datum.levels:
+    if not datum.levels or not _finite(datum.ffl_y):
         return None
     ratios = []
     for level in datum.levels:
+        if not _finite(level.y, level.figured_mm):
+            return None
         spacing = datum.ffl_y - level.y
-        if spacing <= 0.0 or level.figured_mm <= 0.0:
+        if spacing <= 0.0 or level.figured_mm <= 0.0 or not math.isfinite(spacing):
             return None
         ratios.append(level.figured_mm / spacing)
     mean = sum(ratios) / len(ratios)
-    if mean <= 0.0 or any(abs(r - mean) / mean > DATUM_SCALE_TOL for r in ratios):
+    if not math.isfinite(mean) or mean <= 0.0 or any(abs(r - mean) / mean > DATUM_SCALE_TOL for r in ratios):
         return None
     return mean
 
@@ -179,6 +209,9 @@ def register_plan_to_elevation(
     plan: Sequence[PlanSpan], outlines: Sequence[ElevOutline],
 ) -> tuple[Optional[Registration], Optional[str]]:
     """Unique (sign, offset) or a reason. Deterministic and order-invariant."""
+    invalid = _validate(plan, outlines)
+    if invalid is not None:
+        return None, invalid
     plan = tuple(sorted(plan, key=lambda p: (p.record_id, p.a0, p.a1)))
     outlines = tuple(sorted(outlines, key=lambda o: (o.outline_id, o.x0, o.x1)))
     candidates: dict[tuple[int, int], float] = {}
@@ -232,11 +265,17 @@ def resolve_vertical_witness(
     """Witness for ONE plan record, against all facade spans and one elevation view."""
     if plan_scope != elevation_scope:
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (FOREIGN_SCOPE,))
+    invalid = _validate(plan, outlines)
+    if invalid == DUPLICATE_IDENTITY:
+        return _result(record_id, EvidenceResolutionStatus.CONFLICT, (DUPLICATE_IDENTITY,))
+    if invalid is not None:
+        return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (invalid,))
     scale = calibrate_datum(datum)
     if scale is None:
         reason = DATUM_UNAVAILABLE if not datum.levels else DATUM_SCALE_INCONSISTENT
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (reason,))
-    target = next((p for p in plan if p.record_id == record_id), None)
+    matches = [p for p in plan if p.record_id == record_id]    # unique after validation
+    target = matches[0] if matches else None
     if target is None:
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (NO_OUTLINE,), mm_per_pt=scale)
     registration, why = register_plan_to_elevation(plan, outlines)
@@ -287,13 +326,56 @@ def resolve_vertical_witness(
     )
 
 
+_VIEW_LEVEL = frozenset({
+    DATUM_UNAVAILABLE, DATUM_SCALE_INCONSISTENT, FOREIGN_SCOPE, REGISTRATION_INSUFFICIENT, REGISTRATION_AMBIGUOUS,
+    INVALID_INPUT, DUPLICATE_IDENTITY,
+})
+_ABSTAIN_PRIORITY = (
+    HEAD_NOT_ON_DATUM, BASE_NOT_ON_FFL, COMPETING_HEIGHTS, COMPETING_OUTLINES, MULTIPLE_PLAN_RECORDS, NO_OUTLINE,
+    DATUM_SCALE_INCONSISTENT, DATUM_UNAVAILABLE, REGISTRATION_AMBIGUOUS, REGISTRATION_INSUFFICIENT, FOREIGN_SCOPE,
+    INVALID_INPUT, DUPLICATE_IDENTITY,
+)
+
+
+def aggregate_across_views(results: Sequence[VerticalWitnessResult]) -> tuple[VerticalWitnessResult, ...]:
+    """One result per plan record from per-view results, so no view can be cherry-picked.
+
+    A view that could not register or calibrate says nothing about a record and is ignored for conflicts. Among the
+    views that did assess the record: two candidates, or a candidate plus a record-level conflict elsewhere, is a
+    CONFLICT (``competing_elevation_views``). Exactly one candidate and no record-level conflict stays a CANDIDATE;
+    otherwise the most specific abstention is reported. Deterministic and input-order invariant.
+    """
+    by_record: dict[str, list[VerticalWitnessResult]] = {}
+    for r in results:
+        by_record.setdefault(r.record_id, []).append(r)
+    out = []
+    for record_id in sorted(by_record):
+        rows = sorted(by_record[record_id], key=lambda r: (r.status.value, r.reason_codes, r.outline_id or "", r.result_id or ""))
+        assessed = [r for r in rows if r.reason_codes[0] not in _VIEW_LEVEL]
+        candidates = [r for r in assessed if r.is_candidate]
+        conflicts = [r for r in assessed if r.status is EvidenceResolutionStatus.CONFLICT]
+        if len(candidates) >= 2 or (candidates and conflicts):
+            out.append(_result(record_id, EvidenceResolutionStatus.CONFLICT, (COMPETING_VIEWS,)))
+        elif len(candidates) == 1:
+            out.append(candidates[0])
+        elif conflicts:
+            out.append(sorted(conflicts, key=lambda r: (r.reason_codes, r.outline_id or ""))[0])
+        else:
+            def rank(r):
+                code = r.reason_codes[0]
+                return _ABSTAIN_PRIORITY.index(code) if code in _ABSTAIN_PRIORITY else len(_ABSTAIN_PRIORITY)
+            out.append(sorted(rows, key=lambda r: (rank(r), r.reason_codes, r.outline_id or ""))[0])
+    return tuple(out)
+
+
 def assess_elevation_vertical_witness_shadow(
     views: Sequence[Mapping[str, object]], *, enabled: bool = False,
 ) -> tuple[VerticalWitnessResult, ...]:
     """Default off. ``views``: mappings with ``plan``, ``outlines``, ``datum``, ``plan_scope``, ``elevation_scope``.
 
-    Returns one result per plan record per view. Every record is assessed against every view; a record is only a
-    candidate where exactly one view gives a candidate (two views disagreeing is reported by the caller).
+    Returns ONE result per plan record: every record is assessed against every view and the per-view results go
+    through ``aggregate_across_views``, so competing views or values can never be turned into a candidate by
+    picking one of them.
     """
     if type(enabled) is not bool:
         raise TypeError("enabled must be a bool")
@@ -306,11 +388,11 @@ def assess_elevation_vertical_witness_shadow(
                 span.record_id, view["plan"], view["outlines"], view["datum"],
                 plan_scope=view["plan_scope"], elevation_scope=view["elevation_scope"],
             ))
-    return tuple(rows)
+    return aggregate_across_views(rows)
 
 
 __all__ = [
-    "CANDIDATE_REASON", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
+    "CANDIDATE_REASON", "COMPETING_VIEWS", "DUPLICATE_IDENTITY", "INVALID_INPUT", "aggregate_across_views", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
     "VerticalWitnessResult", "assess_elevation_vertical_witness_shadow", "calibrate_datum",
     "register_plan_to_elevation", "resolve_vertical_witness",
 ]

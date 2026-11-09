@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from pb_elevation_door_vertical_witness_shadow import (
-    DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, register_plan_to_elevation, resolve_vertical_witness,
+    DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, register_plan_to_elevation,
+    resolve_vertical_witness,
 )
 
 _NUMBER = re.compile(r"^\d{1,2},?\d{3}$|^\d{3}$")
@@ -187,7 +188,7 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
     poa = comp.physical_opening_authority
     spans = {axis: plan_spans_from_composition(comp, poa, axis) for axis in ("x", "y")}
     doc = fitz.open(stream=payload, filetype="pdf")
-    views_out, candidates, reasons, focus_rows = [], [], Counter(), []
+    views_out, per_view_results = [], []
     for page_no in elevation_pages:
         lines, rects, words = page_primitives(doc[page_no - 1])
         for view_no, view in enumerate(extract_views(lines, rects, words)):
@@ -202,22 +203,21 @@ def run(pdf: Path, plan_page: int, elevation_pages: Sequence[int], expected_sha:
                 axis, reg = successes[0]
                 row.update({"axis": axis, "sign": reg.sign, "offset": round(reg.offset, 3), "anchor_widths_pt": list(reg.anchor_widths_pt)})
                 for span in sorted(spans[axis], key=lambda s: s.record_id):
-                    res = resolve_vertical_witness(span.record_id, spans[axis], view["outlines"], view["datum"],
-                                                   plan_scope=scope, elevation_scope=scope)
-                    reasons[res.reason_codes[0]] += 1
-                    if any(span.record_id.endswith(f) for f in focus):
-                        focus_rows.append({"record": span.record_id[-8:], "page": page_no, "view": view_no, "status": res.status.value,
-                                           "reasons": list(res.reason_codes), "outline": res.outline_id,
-                                           "competing_plan_records": [c[-8:] for c in res.competing_plan_record_ids]})
-                    if res.is_candidate:
-                        candidates.append({"record": span.record_id[-8:], "page": page_no, "view": view_no,
-                                           "opening_height_mm": res.opening_height_mm, "leaf_height_mm": res.leaf_height_mm,
-                                           "head_level": res.head_level_name, "result_id": res.result_id})
+                    per_view_results.append(resolve_vertical_witness(
+                        span.record_id, spans[axis], view["outlines"], view["datum"], plan_scope=scope, elevation_scope=scope))
             views_out.append(row)
+    # one result per record across ALL views: competing views or values never become a candidate by cherry-picking
+    aggregated = aggregate_across_views(per_view_results)
+    reasons = Counter(r.reason_codes[0] for r in aggregated)
+    candidates = [{"record": r.record_id[-8:], "opening_height_mm": r.opening_height_mm, "leaf_height_mm": r.leaf_height_mm,
+                   "head_level": r.head_level_name, "result_id": r.result_id} for r in aggregated if r.is_candidate]
+    focus_rows = [{"record": r.record_id[-8:], "status": r.status.value, "reasons": list(r.reason_codes), "outline": r.outline_id,
+                   "competing_plan_records": [c[-8:] for c in r.competing_plan_record_ids]}
+                  for r in aggregated if any(r.record_id.endswith(f) for f in focus)]
     return {
-        "schema_version": "1.0.0", "source_sha256": sha, "shadow_only": True, "benchmark_score_granted": False,
+        "schema_version": "1.1.0", "source_sha256": sha, "shadow_only": True, "benchmark_score_granted": False,
         "plan_page": plan_page, "elevation_pages": list(elevation_pages),
-        "views": views_out, "candidates": sorted(candidates, key=lambda c: (c["record"], c["page"], c["view"])),
+        "views": views_out, "candidates": sorted(candidates, key=lambda c: c["record"]),
         "first_remaining_gate_counts": dict(sorted(reasons.items())),
         "focus_rows": focus_rows,
     }

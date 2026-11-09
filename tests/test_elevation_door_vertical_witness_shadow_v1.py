@@ -358,3 +358,139 @@ def test_original_source_witness_is_read_only_unique_and_keeps_interior_doors_ou
     assert not {"be1e67bf", "9d4dc1b3", "1cd959cc"} & set(candidates)       # interior doors and the frame record: no witness
     focus = {(r["record"], r["status"]) for r in report["focus_rows"] if r["record"] in ("1cd959cc", "be1e67bf", "9d4dc1b3")}
     assert all(status != "candidate" for _, status in focus)
+
+
+# ------------------------------------------------------------------ MAX review 6732228656: defects 1 to 3
+NAN, INF = float("nan"), float("inf")
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, -INF, True, "2100", None])
+def test_datum_fails_closed_on_non_finite_or_non_numeric_values(bad):
+    good = make_datum()
+    for broken in (
+        ElevationDatum(bad, good.levels),
+        ElevationDatum(good.ffl_y, (DatumLevel("J", bad, 2100.0),) + good.levels[1:]),
+        ElevationDatum(good.ffl_y, (DatumLevel("J", good.levels[0].y, bad),) + good.levels[1:]),
+    ):
+        assert calibrate_datum(broken) is None
+        plan, outlines, _ = make_scene()
+        r = run("entry", plan, outlines, broken)
+        assert r.status is ABST and r.reason_codes in ((shadow.DATUM_SCALE_INCONSISTENT,), (shadow.DATUM_UNAVAILABLE,))
+        assert r.opening_height_mm is None
+
+
+def test_zero_or_negative_spacing_and_value_fail_closed():
+    good = make_datum()
+    assert calibrate_datum(ElevationDatum(FFL, (DatumLevel("J", FFL, 2100.0),))) is None            # zero spacing
+    assert calibrate_datum(ElevationDatum(FFL, (DatumLevel("J", FFL + 5.0, 2100.0),))) is None       # head below FFL
+    assert calibrate_datum(ElevationDatum(FFL, (DatumLevel("J", good.levels[0].y, 0.0),))) is None   # zero value
+    assert calibrate_datum(ElevationDatum(FFL, (DatumLevel("J", good.levels[0].y, -2100.0),))) is None
+
+
+@pytest.mark.parametrize("mutate", ["plan_nan", "plan_inverted", "outline_nan", "outline_inverted", "head_below_base",
+                                    "frame_inf", "explicit_nan", "explicit_zero", "empty_id"])
+def test_invalid_plan_or_outline_geometry_abstains_before_any_selection(mutate):
+    plan, outlines, d = make_scene()
+    o = outlines[0]
+    if mutate == "plan_nan":
+        plan[0] = PlanSpan(plan[0].record_id, NAN, plan[0].a1)
+    elif mutate == "plan_inverted":
+        plan[0] = PlanSpan(plan[0].record_id, plan[0].a1, plan[0].a0)
+    elif mutate == "outline_nan":
+        outlines[0] = ElevOutline(o.outline_id, NAN, o.x1, o.y_head, o.y_base_leaf, o.y_base_frame)
+    elif mutate == "outline_inverted":
+        outlines[0] = ElevOutline(o.outline_id, o.x1, o.x0, o.y_head, o.y_base_leaf, o.y_base_frame)
+    elif mutate == "head_below_base":
+        outlines[0] = ElevOutline(o.outline_id, o.x0, o.x1, o.y_base_leaf + 1.0, o.y_base_leaf, o.y_base_frame)
+    elif mutate == "frame_inf":
+        outlines[0] = ElevOutline(o.outline_id, o.x0, o.x1, o.y_head, o.y_base_leaf, INF)
+    elif mutate == "explicit_nan":
+        outlines[0] = ElevOutline(o.outline_id, o.x0, o.x1, o.y_head, o.y_base_leaf, o.y_base_frame, NAN)
+    elif mutate == "explicit_zero":
+        outlines[0] = ElevOutline(o.outline_id, o.x0, o.x1, o.y_head, o.y_base_leaf, o.y_base_frame, 0.0)
+    else:
+        plan[0] = PlanSpan("", plan[0].a0, plan[0].a1)
+    r = run("entry", plan, outlines, d)
+    assert r.status is ABST and r.reason_codes == (shadow.INVALID_INPUT,) and r.opening_height_mm is None
+    assert register_plan_to_elevation(plan, outlines) == (None, shadow.INVALID_INPUT)
+
+
+def test_duplicate_record_or_outline_identity_conflicts_instead_of_silently_picking_one():
+    plan, outlines, d = make_scene()
+    dup_plan = plan + [PlanSpan("entry", 700.0, 733.0)]          # same record_id, DIFFERENT geometry
+    r = run("entry", dup_plan, outlines, d)
+    assert r.status is CONF and r.reason_codes == (shadow.DUPLICATE_IDENTITY,) and r.opening_height_mm is None
+    assert run("entry", list(reversed(dup_plan)), outlines, d) == r                      # order cannot choose either
+    dup_out = outlines + [ElevOutline(outlines[0].outline_id, 5.0, 25.0, d.levels[0].y, d.ffl_y)]
+    r2 = run("entry", plan, dup_out, d)
+    assert r2.status is CONF and r2.reason_codes == (shadow.DUPLICATE_IDENTITY,)
+    assert register_plan_to_elevation(dup_plan, outlines) == (None, shadow.DUPLICATE_IDENTITY)
+
+
+# ---- cross-view gate (defect 3)
+def _view(plan, outlines, datum, scope=SCOPE):
+    return {"plan": plan, "outlines": outlines, "datum": datum, "plan_scope": SCOPE, "elevation_scope": scope}
+
+
+def test_cross_view_competing_candidates_conflict_and_cannot_be_cherry_picked():
+    plan, outlines, d = make_scene()
+    d2 = ElevationDatum(d.ffl_y, (DatumLevel("HEAD", d.ffl_y - 2400.0 / MM, 2400.0),))   # a second view with another printed head
+    out2 = [ElevOutline(o.outline_id + "b", o.x0, o.x1, d2.levels[0].y, o.y_base_leaf, o.y_base_frame) for o in outlines]
+    rows = assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), _view(plan, out2, d2)], enabled=True)
+    by = {r.record_id: r for r in rows}
+    assert len(rows) == len(PLAN)                                  # one result per record, not per view
+    assert by["entry"].status is CONF and by["entry"].reason_codes == (shadow.COMPETING_VIEWS,)
+    assert by["entry"].opening_height_mm is None
+    assert by["garage"].status is CONF                             # seen by both views as well
+    swapped = assess_elevation_vertical_witness_shadow([_view(plan, out2, d2), _view(plan, outlines, d)], enabled=True)
+    assert swapped == rows                                         # view order cannot choose
+
+
+def test_cross_view_one_candidate_with_a_blind_or_empty_other_view_stays_a_candidate():
+    plan, outlines, d = make_scene()
+    elsewhere = [ElevOutline("x1", 5000.0, 5020.0, d.levels[0].y, d.ffl_y), ElevOutline("x2", 5100.0, 5170.0, d.levels[0].y, d.ffl_y)]
+    broken_datum = make_datum(joinery_mm=2400.0)                  # a view-level failure says nothing about the record
+    foreign = Scope("doc", "other", "a" * 64, "snap")
+    for second in (_view(plan, elsewhere, d), _view(plan, outlines, broken_datum), _view(plan, outlines, d, foreign)):
+        rows = {r.record_id: r for r in assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), second], enabled=True)}
+        assert rows["entry"].is_candidate and rows["entry"].opening_height_mm == 2100.0, rows["entry"].reason_codes
+
+
+def test_cross_view_candidate_plus_record_level_conflict_elsewhere_conflicts():
+    plan, outlines, d = make_scene()
+    twin = [outlines[0], ElevOutline("o_twin", outlines[0].x0, outlines[0].x1, d.levels[0].y, d.ffl_y)] + list(outlines[1:])
+    rows = {r.record_id: r for r in assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), _view(plan, twin, d)], enabled=True)}
+    assert rows["entry"].status is CONF and rows["entry"].reason_codes == (shadow.COMPETING_VIEWS,)
+
+
+def test_cross_view_all_abstain_reports_the_most_specific_gate_deterministically():
+    plan, outlines, d = make_scene()
+    bad_head = [ElevOutline(o.outline_id, o.x0, o.x1, o.y_head + 1.0, o.y_base_leaf, o.y_base_frame) for o in outlines]
+    rows = assess_elevation_vertical_witness_shadow([_view(plan, bad_head, d), _view(plan, [], d)], enabled=True)
+    entry = {r.record_id: r for r in rows}["entry"]
+    assert entry.status is ABST and entry.reason_codes == (shadow.HEAD_NOT_ON_DATUM,)
+    assert assess_elevation_vertical_witness_shadow([_view(plan, [], d), _view(plan, bad_head, d)], enabled=True) == rows
+
+
+def test_overflowing_ratio_cannot_slip_past_the_scale_tolerance():
+    # tiny but non-zero spacing with a huge finite printed value: ratio overflows to infinity, and inf/inf is NaN,
+    # which compares False against any tolerance. The mean must be rejected explicitly.
+    huge = ElevationDatum(FFL, (DatumLevel("J", FFL - 1e-13, 1e300),))
+    assert calibrate_datum(huge) is None
+    plan, outlines, _ = make_scene()
+    assert run("entry", plan, outlines, huge).reason_codes == (shadow.DATUM_SCALE_INCONSISTENT,)
+
+
+def test_cross_view_view_level_conflicts_do_not_poison_a_clean_candidate():
+    plan, outlines, d = make_scene()
+    # a second view whose registration is ambiguous (symmetric scene) and which contains the same record id
+    sym_plan = [PlanSpan("entry", 100.0, 134.0), PlanSpan("b", 192.68, 241.32), PlanSpan("c", 300.0, 334.0)]
+    sym_out = [ElevOutline("s" + n, x0 + 500.0, x1 + 500.0, d.levels[0].y, d.ffl_y)
+               for n, (x0, x1) in (("a", (100, 134)), ("b", (192.68, 241.32)), ("c", (300, 334)))]
+    assert run("entry", sym_plan, sym_out, d).reason_codes == (shadow.REGISTRATION_AMBIGUOUS,)   # view-level conflict
+    # and a view with a repeated identity (also a view-level conflict)
+    dup_plan = plan + [PlanSpan("entry", 700.0, 733.0)]
+    assert run("entry", dup_plan, outlines, d).reason_codes == (shadow.DUPLICATE_IDENTITY,)
+    for second in (_view(sym_plan, sym_out, d), _view(dup_plan, outlines, d)):
+        rows = {r.record_id: r for r in assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), second], enabled=True)}
+        assert rows["entry"].is_candidate and rows["entry"].opening_height_mm == 2100.0, rows["entry"].reason_codes
