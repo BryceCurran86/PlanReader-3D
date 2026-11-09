@@ -1,0 +1,42 @@
+name: Fast PlanReader agent first-gate runner tests
+
+on:
+  push:
+    branches:
+      - gptmax/agent-first-gate-fast-loop-20261109
+  pull_request:
+    paths:
+      - tools/agent_fast_gate.py
+      - tests/test_agent_fast_gate.py
+      - .github/workflows/test-gptmax-agent-fast-gate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-gate-unit:
+    name: Agent fast gate (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install source-neutral testing dependency
+        run: python -m pip install pytest
+      - name: Fast-gate source-neutral tests
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m compileall -q tools/agent_fast_gate.py tests/test_agent_fast_gate.py
+          python -m pytest -q -p no:cacheprovider tests/test_agent_fast_gate.py
