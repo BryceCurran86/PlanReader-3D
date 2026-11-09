@@ -206,6 +206,12 @@ def produce_all_source_roles(
         # permission to seal a physical quantity. Keep legacy reports intact.
         report["requested_source_controls"] = requested_controls
         _write_summary(output_dir / "SOURCE_ROLE_STATUS.json", report)
+    if record_native_source_input_coverage and project_id == "au_qld_q5446_armstrong32_harlequin":
+        # Original material-support evidence may corroborate a finish *scope*.
+        # It grants no quantity, customer seal, signed role or V2 credit.
+        # Never expose proprietary source text or physical geometry in status.
+        from pb_gptmax_q5446_finish_support_shadow import inspect_q5446_finish_support
+        report["q5446_finish_support_shadow"] = inspect_q5446_finish_support(roster).public_summary()
     if record_native_source_input_coverage:
         from tools.gpt3_native_source_execution_coverage import (
             build_native_source_execution_coverage,
