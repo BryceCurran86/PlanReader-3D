@@ -29,6 +29,7 @@ from pb_combine_source_closed_runs import (
 )
 from pb_customer_output_verification import verify_sealed_customer_output
 from tools.four_job_windows_launcher import PROJECTS, run_logged
+from tools.q5446_source_role_customer_runtime import source_owned_role_module
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object, _json_customer_rows
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -194,8 +195,14 @@ def produce_all_source_roles(
     for index, role in enumerate(roster):
         role_dir = output_dir / ("source_role_%02d" % (index + 1))
         role_dir.mkdir(parents=True)
+        # The immutable roster already proved this PDF hash and page count.
+        # Select the one source-specific original issuer by source ownership,
+        # not by project name, filename, expected item or frozen quantity.
+        producer_module = source_owned_role_module(
+            role["sha256"], family_group=family_group,
+        )
         command = [
-            sys.executable, "-m", "tools.run_source_closed_project_handoff",
+            sys.executable, "-m", producer_module,
             "--pdf", str(role["path"]), "--project-id", project_id,
             "--family-group", family_group, "--output-dir", str(role_dir),
         ]

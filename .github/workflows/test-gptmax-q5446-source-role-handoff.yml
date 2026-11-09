@@ -1,0 +1,64 @@
+name: GPT MAX original Q5446 source-role to customer dispatch
+
+on:
+  pull_request:
+    paths:
+      - tools/q5446_source_role_customer_runtime.py
+      - tools/gpt3_owner_all_source_role_handoff.py
+      - tests/test_q5446_source_role_customer_runtime.py
+      - .github/workflows/test-gptmax-q5446-source-role-handoff.yml
+  push:
+    branches:
+      - gptmax/q5446-source-role-dispatch-20261108
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-role:
+    name: Original-role source-neutral dispatch (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      PYTHONPATH: .:tests
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The complete public regression suite includes a fixed-head
+          # historical validator replay. Preserve the entire commit graph;
+          # a one-commit shallow checkout cannot resolve its pinned SHA.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install complete production and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original Q5446 role dispatch / customer bijection and authenticated source negatives
+        run: |
+          python -m pytest -q \
+            tests/test_q5446_source_role_customer_runtime.py \
+            tests/test_gpt3_owner_all_source_role_handoff.py \
+            tests/test_source_role_customer_aggregation.py \
+            tests/test_gpt1_q5446_alfresco_original_customer.py
+      - name: Exact-head full public regressions, static checks and customer smoke
+        env:
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-q-role-pycache
+        run: |
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+          python -m pytest -q -rs tests/
+          python tests/ci_smoke.py
+      - name: Frozen120 truth/provider integrity (no original source or accuracy claim)
+        run: |
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_v2_truth_separation.py
