@@ -25,6 +25,7 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_cross_view_floor_correspondence_shadow import (
     EvidenceResolutionStatus,
     authenticate_maryborough_office_cross_sheet_correspondence,
+    authenticate_maryborough_food_prep_cross_sheet_correspondence,
     compose_authenticated_cross_sheet_physical_claim,
     compose_authenticated_cross_sheet_room_and_floor,
     enrich_cross_sheet_floor_with_documented_area,
@@ -47,6 +48,7 @@ OFFICE_SOURCE_ROOM_FACE_ID = "source_room_face_record_735f9b309cca70f513c9fcd939
 
 FOOD_PREP_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7"
 FOOD_PREP_PHYSICAL_ROOM_ID = "live_physical_room_7f9fb47969b3ac3c1496e2a18104b812"
+FOOD_PREP_SOURCE_ROOM_FACE_ID = "source_room_face_record_a163b3690c0b2db83f89fcf7465bd831"
 
 PWD_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_5c7f261811485d3597a232c1380b277f"
 PWD_PHYSICAL_ROOM_ID = "live_physical_room_decceeeb5c395a8edee347b1454f0881"
@@ -92,6 +94,7 @@ def issue_all_original_maryborough_customer_quantities(
     pdf_path: str | Path,
     *,
     workspace_id: int = 1,
+    room_label: str = "OFFICE",
 ) -> MaryboroughCustomerResult:
     """Authenticate genuine source-owned Maryborough Office FT3 floor finish."""
     if type(workspace_id) is not int or workspace_id <= 0:
@@ -142,18 +145,33 @@ def issue_all_original_maryborough_customer_quantities(
             except Exception:
                 pass
 
-            # Authenticate cross-sheet correspondence, D15 Door Schedule row,
-            # D15 physical doorway boundary, and Page 11 witness-line box first
-            cr = authenticate_maryborough_office_cross_sheet_correspondence(
-                document_id=MARYBOROUGH_DOCUMENT_ID,
-                revision_id=MARYBOROUGH_REVISION_ID,
-                source_sha256=source_sha,
-                snapshot_id=f"snap_{source_sha[:16]}",
-                canonical_floor_id=OFFICE_PHYSICAL_FLOOR_ID,
-                physical_room_id=OFFICE_PHYSICAL_ROOM_ID,
-                source_room_face_record_id=OFFICE_SOURCE_ROOM_FACE_ID,
-                doc=document,
-            )
+            is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
+            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
+            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
+            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
+
+            if is_food_prep:
+                cr = authenticate_maryborough_food_prep_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=MARYBOROUGH_REVISION_ID,
+                    source_sha256=source_sha,
+                    snapshot_id=f"snap_{source_sha[:16]}",
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+            else:
+                cr = authenticate_maryborough_office_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=MARYBOROUGH_REVISION_ID,
+                    source_sha256=source_sha,
+                    snapshot_id=f"snap_{source_sha[:16]}",
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
 
             if (
                 cr.status is not EvidenceResolutionStatus.CORROBORATED
@@ -196,7 +214,7 @@ def issue_all_original_maryborough_customer_quantities(
         hooks_unmodified
         and authenticate_maryborough_office_cross_sheet_correspondence is _ORIG_CORR_AUTH
     )
-    upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id)
+    upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id, room_label)
     cached_upstream = _UPSTREAM_CACHE.get(upstream_key) if upstream_cache_ok else None
     if cached_upstream is not None:
         claim, finish_res = cached_upstream
@@ -205,7 +223,7 @@ def issue_all_original_maryborough_customer_quantities(
             rooms, floors, walls = compose_authenticated_cross_sheet_room_and_floor(
                 published=published,
                 correspondence=cr,
-                room_label="OFFICE",
+                room_label=room_label,
                 viewport_id="VIEWPORT_P07_A110_PLAN",
             )
         except Exception:
@@ -305,4 +323,17 @@ def issue_all_original_maryborough_customer_quantities(
         traces=traces,
         sealed_run=sealed,
         customer_rows=rows,
+    )
+
+
+def issue_original_maryborough_food_prep_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough Food Prep FT3 floor finish."""
+    return issue_all_original_maryborough_customer_quantities(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="FOOD PREP",
     )

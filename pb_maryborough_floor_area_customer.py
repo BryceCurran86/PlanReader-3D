@@ -9,6 +9,7 @@ from pb_source_closed_run_export import seal_source_closed_run
 from pb_maryborough_customer_authority import (
     FOOD_PREP_PHYSICAL_FLOOR_ID,
     FOOD_PREP_PHYSICAL_ROOM_ID,
+    FOOD_PREP_SOURCE_ROOM_FACE_ID,
     MARYBOROUGH_DOCUMENT_ID,
     MARYBOROUGH_PROJECT_ID,
     MARYBOROUGH_REVISION_ID,
@@ -24,6 +25,7 @@ from pb_maryborough_customer_authority import (
 __all__ = [
     "FOOD_PREP_PHYSICAL_FLOOR_ID",
     "FOOD_PREP_PHYSICAL_ROOM_ID",
+    "FOOD_PREP_SOURCE_ROOM_FACE_ID",
     "MARYBOROUGH_DOCUMENT_ID",
     "MARYBOROUGH_PROJECT_ID",
     "MARYBOROUGH_REVISION_ID",
@@ -32,6 +34,7 @@ __all__ = [
     "OFFICE_PHYSICAL_ROOM_ID",
     "OriginalMaryboroughFloorCustomerResult",
     "issue_original_maryborough_floor_customer_areas",
+    "issue_original_maryborough_food_prep_floor_customer_areas",
 ]
 
 
@@ -39,6 +42,7 @@ def issue_original_maryborough_floor_customer_areas(
     pdf_path: str | Path,
     *,
     workspace_id: int = 1,
+    room_label: str = "OFFICE",
 ) -> OriginalMaryboroughFloorCustomerResult:
     """Return authentic floor subset with dedicated 1-to-1 sealed run."""
     if type(workspace_id) is not int or workspace_id <= 0:
@@ -46,7 +50,9 @@ def issue_original_maryborough_floor_customer_areas(
             "ABSTAIN", ("authenticated_workspace_unavailable",),
         )
     result = issue_all_original_maryborough_customer_quantities(
-        pdf_path, workspace_id=workspace_id,
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label=room_label,
     )
     if (
         result.status == "ABSTAIN"
@@ -67,13 +73,15 @@ def issue_original_maryborough_floor_customer_areas(
         and result.traces
         and result.customer_rows
     ):
+        is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
+        target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
         floor_quantities = tuple(
             q for q in result.quantities
             if isinstance(q, QuantityEvidence)
             and q.family == "floor_finish_area"
             and not q.abstained
             and q.value is not None
-            and OFFICE_PHYSICAL_FLOOR_ID in q.input_entity_ids
+            and target_floor_id in q.input_entity_ids
         )
         if floor_quantities and len(floor_quantities) == len(result.quantities):
             # The entire result is the authenticated floor finish quantity and seal
@@ -108,4 +116,17 @@ def issue_original_maryborough_floor_customer_areas(
     # An unverified upstream implementation cannot silently re-enable this subset.
     return OriginalMaryboroughFloorCustomerResult(
         "ABSTAIN", ("source_owned_floor_subset_authority_unavailable",),
+    )
+
+
+def issue_original_maryborough_food_prep_floor_customer_areas(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalMaryboroughFloorCustomerResult:
+    """Return authentic food prep floor subset with dedicated 1-to-1 sealed run."""
+    return issue_original_maryborough_floor_customer_areas(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="FOOD PREP",
     )
