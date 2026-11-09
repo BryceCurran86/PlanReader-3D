@@ -25,6 +25,7 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_cross_view_floor_correspondence_shadow import (
     EvidenceResolutionStatus,
     authenticate_maryborough_office_cross_sheet_correspondence,
+    compose_authenticated_cross_sheet_physical_claim,
     compose_authenticated_cross_sheet_room_and_floor,
     enrich_cross_sheet_floor_with_documented_area,
     resolve_cross_sheet_floor_correspondence_for_claim,
@@ -113,7 +114,6 @@ def issue_all_original_maryborough_customer_quantities(
         CrossViewFloorFinishProducer,
         enrich_live_canonical_floor_finishes,
     )
-    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
     from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
     from pb_live_floor_finish_area_source_closed_export import (
         build_live_floor_finish_area_source_traces,
@@ -199,7 +199,7 @@ def issue_all_original_maryborough_customer_quantities(
     upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id)
     cached_upstream = _UPSTREAM_CACHE.get(upstream_key) if upstream_cache_ok else None
     if cached_upstream is not None:
-        rooms, floors, walls, finish_res = cached_upstream
+        claim, finish_res = cached_upstream
     else:
         try:
             rooms, floors, walls = compose_authenticated_cross_sheet_room_and_floor(
@@ -260,34 +260,26 @@ def issue_all_original_maryborough_customer_quantities(
             return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
         floors = enrich_live_canonical_floor_finishes(floors, finish_res)
+        claim = compose_authenticated_cross_sheet_physical_claim(
+            published=published,
+            correspondence=cr,
+            rooms=rooms,
+            floors=floors,
+            walls=walls,
+            finish_result=finish_res,
+        )
+        if (
+            claim.status is not EvidenceResolutionStatus.CORROBORATED
+            or claim.canonical_wall_status is not EvidenceResolutionStatus.CORROBORATED
+            or claim.canonical_room_status is not EvidenceResolutionStatus.CORROBORATED
+            or claim.canonical_floor_status is not EvidenceResolutionStatus.CORROBORATED
+            or claim.unresolved_wall_candidate_ids
+            or claim.confidence != 1.0
+        ):
+            return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
         if upstream_cache_ok:
-            _UPSTREAM_CACHE[upstream_key] = (rooms, floors, walls, finish_res)
-    claim = LivePhysicalNetWallClaim(
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=("live_physical_net_wall_resolved",),
-        quantity_m2=None,
-        source_pages=(7, 11),
-        canonical_walls=walls.walls,
-        canonical_wall_status=walls.status,
-        canonical_wall_reason_codes=walls.reason_codes,
-        canonical_wall_source_pages=walls.source_pages,
-        unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
-        canonical_openings=(),
-        canonical_rooms=rooms.rooms,
-        canonical_floors=floors.floors,
-        canonical_floor_status=floors.status,
-        canonical_floor_reason_codes=floors.reason_codes,
-        canonical_floor_source_pages=floors.source_pages,
-        canonical_room_status=rooms.status,
-        canonical_room_reason_codes=rooms.reason_codes,
-        canonical_room_source_pages=rooms.source_pages,
-        external_wall_ids=(),
-        evidence_ids=(),
-        quantity_id=None,
-        confidence=1.0,
-        publication=None,
-        floor_finish_quantity_evidence=tuple(finish_res.quantities),
-    )
+            _UPSTREAM_CACHE[upstream_key] = (claim, finish_res)
     rows = project_live_floor_finish_customer_rows(
         claim,
         workspace_id=workspace_id,

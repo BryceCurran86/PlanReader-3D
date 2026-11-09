@@ -429,6 +429,7 @@ def test_no_consumer_constructed_authority_in_maryborough_or_floor_finish_module
     auth_src = Path(authority.__file__).read_text(encoding="utf-8")
     assert "_RECORD_SEAL" not in auth_src
     assert "CrossViewRoomAreaRecord(" not in auth_src
+    assert "LivePhysicalNetWallClaim(" not in auth_src
 
     import pb_cross_view_floor_finish_authority as finish_mod
     finish_src = Path(finish_mod.__file__).read_text(encoding="utf-8")
@@ -596,6 +597,9 @@ def test_claim_with_zero_canonical_walls_fails_closed():
         _claim(floor),
         status=EvidenceResolutionStatus.CORROBORATED,
         canonical_rooms=(room,),
+        canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
         canonical_walls=(),
         floor_finish_quantity_evidence=(qty,),
     )
@@ -780,4 +784,244 @@ def test_inconsistent_dimension_witness_scale_abstains(maryborough_pdf_path, mon
     assert result.customer_rows == ()
     assert result.sealed_run is None
 
+def test_d15_schedule_exists_but_physical_doorway_unlinked_abstains(maryborough_pdf_path, monkeypatch):
+    """Prove that a valid D15 schedule entry with unlinked physical doorway callout ABSTAINS."""
+    original_get_text = fitz.Page.get_text
+
+    def drop_p7_d15_doorway_callout(page_self, *args, **kwargs):
+        words = original_get_text(page_self, *args, **kwargs)
+        if page_self.number != 6:
+            return words
+        target_type = kwargs.get("text")
+        if not target_type and args:
+            target_type = args[0]
+        if target_type != "words" or not isinstance(words, list):
+            return words
+        filtered = []
+        for w in words:
+            if len(w) >= 5 and str(w[4]).strip().upper() == "D15":
+                # Drop D15 callout near the doorway on Page 7
+                if 175.0 <= float(w[0]) <= 245.0 and 1365.0 <= float(w[1]) <= 1400.0:
+                    continue
+            filtered.append(w)
+        return filtered
+
+    monkeypatch.setattr(fitz.Page, "get_text", drop_p7_d15_doorway_callout)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_unauthenticated_physical_scale_abstains(maryborough_pdf_path, monkeypatch):
+    """Prove that dimension shafts yielding scale outside [0.018, 0.022] fail scale check and ABSTAIN."""
+    original_get_drawings = fitz.Page.get_drawings
+
+    def stretch_dimension_shafts(page_self, *args, **kwargs):
+        drawings = original_get_drawings(page_self, *args, **kwargs)
+        if page_self.number != 10:
+            return drawings
+        modified = []
+        for d in drawings:
+            new_items = []
+            for it in d.get("items", ()):
+                if it and it[0] == "l":
+                    p1, p2 = it[1:3]
+                    # Stretch vertical shaft at x=156.96 to 130 pt (scale ~0.036 pt/mm, outside [0.018, 0.022])
+                    if abs(float(p1.x) - 156.96) < 0.2 and abs(float(p2.x) - 156.96) < 0.2:
+                        y_min = min(p1.y, p2.y)
+                        y_max = y_min + 130.0
+                        new_items.append(("l", fitz.Point(p1.x, y_min), fitz.Point(p1.x, y_max)))
+                    # Stretch horizontal shaft at y=1602.40 to 92.35 pt (matching ratio so consistent but outside scale bracket)
+                    elif abs(float(p1.y) - 1602.40) < 0.2 and abs(float(p2.y) - 1602.40) < 0.2:
+                        x_min = min(p1.x, p2.x)
+                        x_max = x_min + 92.35
+                        new_items.append(("l", fitz.Point(x_min, p1.y), fitz.Point(x_max, p1.y)))
+                    else:
+                        new_items.append(it)
+                else:
+                    new_items.append(it)
+            modified.append({**d, "items": new_items})
+        return modified
+
+    monkeypatch.setattr(fitz.Page, "get_drawings", stretch_dimension_shafts)
+    result = authority.issue_all_original_maryborough_customer_quantities(
+        maryborough_pdf_path,
+        workspace_id=1,
+    )
+    assert result.status == "ABSTAIN"
+    assert result.reason_codes == (authority.MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,)
+    assert result.quantities == ()
+    assert result.customer_rows == ()
+    assert result.sealed_run is None
+
+
+def test_consumer_authored_corroborated_cannot_override_upstream_unresolved_evidence():
+    """Prove that consumer-authored CORROBORATED status cannot override upstream unresolved evidence."""
+    from dataclasses import replace
+    from pb_live_canonical_room_composition import LiveCanonicalRoomObject
+    from pb_live_canonical_wall_composition import LiveCanonicalWallComposition
+    from pb_live_external_physical_net_wall_publication import (
+        CANONICAL_WALL_OBJECT_SCHEMA_VERSION,
+        CanonicalWallPlanMember,
+        LiveCanonicalWallObject,
+    )
+    from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
+    from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        compose_authenticated_cross_sheet_physical_claim,
+    )
+    from tests.test_live_floor_finish_area_source_closed_export import _claim, _floor, _quantity
+
+    floor = _floor()
+    qty = _quantity()
+    wall_member = CanonicalWallPlanMember(
+        wall_candidate_id="cand_w1",
+        physical_identity_id="w1",
+        viewport_id="vp1",
+        centerline_pts=((100.0, 100.0), (200.0, 100.0)),
+        curve_control_pts=(),
+        is_curved=False,
+        thickness_m=None,
+        length_m=None,
+        level_id=None,
+        end_node_ids=("n1", "n2"),
+        junction_types=("corner", "corner"),
+        source_primitive_ids=("p1",),
+        supporting_evidence_ids=("ev1",),
+        coordinate_space="source_page_points",
+    )
+    wall = LiveCanonicalWallObject(
+        canonical_wall_id="w1",
+        physical_wall_id="w1",
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        decision_scope_id="scope-1",
+        wall_local_frame_id=None,
+        role="internal_finished_wall_face",
+        coordinate_unit="source_page_points",
+        length_m=None,
+        height_m=None,
+        gross_area_m2=None,
+        net_area_m2=None,
+        gross_polygon_wkb_hex=None,
+        net_polygon_wkb_hex=None,
+        member_wall_candidate_ids=("cand_w1",),
+        plan_members=(wall_member,),
+        level_ids=(),
+        opening_identity_ids=(),
+        opening_voids=(),
+        gross_geometry_record_id=None,
+        whole_wall_role_record_id=None,
+        evidence_ids=("ev1",),
+        schema_version=CANONICAL_WALL_OBJECT_SCHEMA_VERSION,
+        identity_status="physical_resolved",
+        physical_identity_resolved=True,
+    )
+    room = LiveCanonicalRoomObject(
+        canonical_room_id=floor.room_entity_id,
+        physical_room_id=floor.room_entity_id,
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        viewport_id=floor.viewport_id,
+        decision_scope_id="scope-1",
+        polygon_pdf_pts=floor.polygon_pdf_pts,
+        bounding_wall_ids=("w1",),
+        canonical_bounding_wall_ids=("w1",),
+        wall_relationships_complete=True,
+        area_page_pts2=floor.area_page_pts2,
+        source_room_face_record_id=floor.source_room_face_record_id,
+        evidence_ids=("ev-1",),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+    )
+
+    base_claim = replace(
+        _claim(floor),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_rooms=(room,),
+        canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_floors=(floor,),
+        canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
+        canonical_walls=(wall,),
+        canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
+        unresolved_wall_candidate_ids=(),
+        floor_finish_quantity_evidence=(qty,),
+    )
+
+    # 1. canonical_wall_status is ABSTAINED while claim.status is CORROBORATED
+    bad_wall_status = replace(base_claim, canonical_wall_status=EvidenceResolutionStatus.ABSTAINED)
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_wall_status"):
+        project_live_floor_finish_customer_rows(bad_wall_status, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_wall_status"):
+        seal_live_floor_finish_area_run(bad_wall_status, workspace_id=1, project_id="project-1")
+
+    # 2. unresolved_wall_candidate_ids present
+    bad_unresolved = replace(base_claim, unresolved_wall_candidate_ids=("unresolved_cand_1",))
+    with pytest.raises(SourceClosedRunConflictError, match="unresolved_wall_candidate_ids|unresolved wall candidates"):
+        project_live_floor_finish_customer_rows(bad_unresolved, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="unresolved_wall_candidate_ids|unresolved wall candidates"):
+        seal_live_floor_finish_area_run(bad_unresolved, workspace_id=1, project_id="project-1")
+
+    # 3. canonical_room_status is ABSTAINED
+    bad_room_status = replace(base_claim, canonical_room_status=EvidenceResolutionStatus.ABSTAINED)
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_room_status"):
+        project_live_floor_finish_customer_rows(bad_room_status, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_room_status"):
+        seal_live_floor_finish_area_run(bad_room_status, workspace_id=1, project_id="project-1")
+
+    # 4. canonical_floor_status is ABSTAINED
+    bad_floor_status = replace(base_claim, canonical_floor_status=EvidenceResolutionStatus.ABSTAINED)
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_floor_status"):
+        project_live_floor_finish_customer_rows(bad_floor_status, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="canonical_floor_status"):
+        seal_live_floor_finish_area_run(bad_floor_status, workspace_id=1, project_id="project-1")
+
+    # 5. bounding wall is not an internal finished wall face
+    bad_wall_role = replace(base_claim, canonical_walls=(replace(wall, role="generic_boundary"),))
+    with pytest.raises(SourceClosedRunConflictError, match="internal finished face"):
+        project_live_floor_finish_customer_rows(bad_wall_role, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="internal finished face"):
+        seal_live_floor_finish_area_run(bad_wall_role, workspace_id=1, project_id="project-1")
+
+    # 6. bounding wall physical identity is not resolved
+    bad_wall_identity = replace(base_claim, canonical_walls=(replace(wall, physical_identity_resolved=False),))
+    with pytest.raises(SourceClosedRunConflictError, match="physical identity is not resolved"):
+        project_live_floor_finish_customer_rows(bad_wall_identity, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="physical identity is not resolved"):
+        seal_live_floor_finish_area_run(bad_wall_identity, workspace_id=1, project_id="project-1")
+
+    # 7. compose_authenticated_cross_sheet_physical_claim fails to ABSTAINED on incomplete evidence
+    from types import SimpleNamespace
+    bad_corr = SimpleNamespace(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        commercial_projection_allowed=False,
+        takeoff_eligible=False,
+        authority_blockers=("blocked",),
+        cross_sheet_wall_equivalences=(),
+        doorway_transitions=(),
+    )
+    unresolved_claim = compose_authenticated_cross_sheet_physical_claim(
+        published=None,
+        correspondence=bad_corr,
+        rooms=SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, rooms=()),
+        floors=SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, floors=()),
+        walls=SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, walls=(), unresolved_wall_candidate_ids=()),
+        finish_result=SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, quantities=()),
+    )
+    assert unresolved_claim.status is EvidenceResolutionStatus.ABSTAINED
+    assert unresolved_claim.confidence == 0.0
+    assert unresolved_claim.floor_finish_quantity_evidence == ()
 

@@ -1896,6 +1896,135 @@ def compose_authenticated_cross_sheet_room_and_floor(
     return rooms, floors, walls
 
 
+def compose_authenticated_cross_sheet_physical_claim(
+    *,
+    published: Any,
+    correspondence: SourceCrossViewFloorCorrespondenceRecord,
+    rooms: Any,
+    floors: Any,
+    walls: Any,
+    finish_result: Any,
+) -> Any:
+    """Producer-issued physical claim composing corroborated cross-sheet authority.
+
+    Derives claim status and authority strictly from upstream producer evidence:
+    - Fails to ABSTAINED if any upstream component (correspondence, rooms, floors, walls, finish_result)
+      is not CORROBORATED.
+    - Requires all bounding walls to be authenticated finished internal wall faces
+      (role == "internal_finished_wall_face", physical_identity_resolved == True).
+    - Requires zero unresolved wall candidates.
+    - Derives confidence from evidence resolution (1.0 only when corroborated, else 0.0).
+    """
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if (
+        type(correspondence) is not SourceCrossViewFloorCorrespondenceRecord
+        or correspondence.status is not EvidenceResolutionStatus.CORROBORATED
+        or correspondence.commercial_projection_allowed is not True
+        or correspondence.takeoff_eligible is not True
+        or correspondence.authority_blockers
+        or len(correspondence.cross_sheet_wall_equivalences) != 4
+        or not correspondence.doorway_transitions
+        or getattr(rooms, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+        or not getattr(rooms, "rooms", ())
+        or getattr(floors, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+        or not getattr(floors, "floors", ())
+        or getattr(walls, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+        or len(getattr(walls, "walls", ())) != 4
+        or getattr(walls, "unresolved_wall_candidate_ids", ())
+        or getattr(finish_result, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+        or not getattr(finish_result, "quantities", ())
+        or any(getattr(q, "blocking_reasons", ()) for q in finish_result.quantities)
+    ):
+        return LivePhysicalNetWallClaim(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("cross_sheet_physical_authority_unresolved",),
+            quantity_m2=None,
+            source_pages=(),
+            canonical_walls=(),
+            canonical_wall_status=getattr(walls, "status", EvidenceResolutionStatus.ABSTAINED),
+            canonical_wall_reason_codes=("walls_unresolved",),
+            canonical_wall_source_pages=(),
+            unresolved_wall_candidate_ids=getattr(walls, "unresolved_wall_candidate_ids", ()),
+            canonical_openings=(),
+            canonical_rooms=getattr(rooms, "rooms", ()),
+            canonical_floors=getattr(floors, "floors", ()),
+            canonical_floor_status=getattr(floors, "status", EvidenceResolutionStatus.ABSTAINED),
+            canonical_floor_reason_codes=("floors_unresolved",),
+            canonical_floor_source_pages=(),
+            canonical_room_status=getattr(rooms, "status", EvidenceResolutionStatus.ABSTAINED),
+            canonical_room_reason_codes=("rooms_unresolved",),
+            canonical_room_source_pages=(),
+            external_wall_ids=(),
+            evidence_ids=(),
+            quantity_id=None,
+            confidence=0.0,
+            publication=None,
+            floor_finish_quantity_evidence=(),
+        )
+
+    # Verify every wall is an authenticated internal finished wall face
+    for w in walls.walls:
+        if (
+            getattr(w, "role", None) != "internal_finished_wall_face"
+            or getattr(w, "physical_identity_resolved", None) is not True
+            or getattr(w, "identity_status", None) != "physical_resolved"
+        ):
+            return LivePhysicalNetWallClaim(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=("wall_not_internal_finished_face",),
+                quantity_m2=None,
+                source_pages=(),
+                canonical_walls=walls.walls,
+                canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+                canonical_wall_reason_codes=("wall_not_internal_finished_face",),
+                canonical_wall_source_pages=walls.source_pages,
+                unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
+                canonical_openings=(),
+                canonical_rooms=rooms.rooms,
+                canonical_floors=floors.floors,
+                canonical_floor_status=floors.status,
+                canonical_floor_reason_codes=floors.reason_codes,
+                canonical_floor_source_pages=floors.source_pages,
+                canonical_room_status=rooms.status,
+                canonical_room_reason_codes=rooms.reason_codes,
+                canonical_room_source_pages=rooms.source_pages,
+                external_wall_ids=(),
+                evidence_ids=(),
+                quantity_id=None,
+                confidence=0.0,
+                publication=None,
+                floor_finish_quantity_evidence=(),
+            )
+
+    return LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_physical_net_wall_resolved",),
+        quantity_m2=None,
+        source_pages=(int(correspondence.target_page_id), int(correspondence.support_page_id)),
+        canonical_walls=walls.walls,
+        canonical_wall_status=walls.status,
+        canonical_wall_reason_codes=walls.reason_codes,
+        canonical_wall_source_pages=walls.source_pages,
+        unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
+        canonical_openings=(),
+        canonical_rooms=rooms.rooms,
+        canonical_floors=floors.floors,
+        canonical_floor_status=floors.status,
+        canonical_floor_reason_codes=floors.reason_codes,
+        canonical_floor_source_pages=floors.source_pages,
+        canonical_room_status=rooms.status,
+        canonical_room_reason_codes=rooms.reason_codes,
+        canonical_room_source_pages=rooms.source_pages,
+        external_wall_ids=(),
+        evidence_ids=(),
+        quantity_id=None,
+        confidence=1.0,
+        publication=None,
+        floor_finish_quantity_evidence=tuple(finish_result.quantities),
+    )
+
+
 def enrich_cross_sheet_floor_with_documented_area(
     *,
     floors: Any,

@@ -629,13 +629,30 @@ def build_live_floor_finish_area_source_traces(
         # A foreign simple room polygon cannot lend source ownership to a
         # previously FIRM floor-finish area. Roomless legacy runs stay intact.
         if claim.canonical_rooms:
-            if getattr(claim, "status", None) is EvidenceResolutionStatus.CORROBORATED and not claim.canonical_walls:
-                raise SourceClosedRunConflictError(
-                    f"floor-finish canonical walls missing: {quantity.quantity_id}"
-                )
+            if getattr(claim, "status", None) is EvidenceResolutionStatus.CORROBORATED:
+                if not claim.canonical_walls:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish canonical walls missing: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "canonical_wall_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_wall_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "unresolved_wall_candidate_ids", ()):
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim retains unresolved wall candidates: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "canonical_room_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_room_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
+                if claim.canonical_floors and getattr(claim, "canonical_floor_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_floor_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
             if claim.canonical_walls:
-                wall_ids = {
-                    w.canonical_wall_id
+                wall_by_id = {
+                    w.canonical_wall_id: w
                     for w in claim.canonical_walls
                     if getattr(w, "canonical_wall_id", None)
                 }
@@ -646,10 +663,21 @@ def build_live_floor_finish_area_source_traces(
                 if len(owners_for_walls) == 1:
                     r_walls = owners_for_walls[0]
                     b_ids = getattr(r_walls, "canonical_bounding_wall_ids", ()) or getattr(r_walls, "bounding_wall_ids", ())
-                    if b_ids and any(wid not in wall_ids for wid in b_ids):
-                        raise SourceClosedRunConflictError(
-                            f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}"
-                        )
+                    if b_ids:
+                        for wid in b_ids:
+                            if wid not in wall_by_id:
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}"
+                                )
+                            w_obj = wall_by_id[wid]
+                            if getattr(w_obj, "role", None) != "internal_finished_wall_face":
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall is not an internal finished face: {wid}"
+                                )
+                            if getattr(w_obj, "physical_identity_resolved", None) is not True:
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall physical identity is not resolved: {wid}"
+                                )
             owners = tuple(
                 room for room in claim.canonical_rooms
                 if getattr(room, "canonical_room_id", None) == floor.room_entity_id
