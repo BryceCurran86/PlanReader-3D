@@ -116,6 +116,7 @@
   "project_id": "au_qld_lot16_power",
   "schema_version": "1.0.0",
   "source_sha256s": [
-    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+    "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6"
   ]
 }
