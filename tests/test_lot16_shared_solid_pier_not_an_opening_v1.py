@@ -266,6 +266,69 @@ def test_pier_overlap_measure_detects_an_aperture_inside_the_pier_and_ignores_th
     assert _overlap_pt((60.0, 120.0, 70.0, 123.0), pier) == 0.0  # same x, different wall line
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Independent anchoring (answer to the bounded-test-gap review): forbidden regions taken from W4 wall-candidate
+# runs on SPLIT walls, never from the opening boxes under test. A whole-wall candidate that runs through its
+# openings carries no pier information and is ignored.
+# ---------------------------------------------------------------------------------------------------------------
+PERP_TOL_PT = 3.0
+
+
+def _intervals(box, axis):
+    """(along_lo, along_hi, perp_lo, perp_hi) of a box on a wall line with unit axis `axis` (normal = (-ay, ax))."""
+    corners = [(box[0], box[1]), (box[2], box[1]), (box[0], box[3]), (box[2], box[3])]
+    along = [x * axis[0] + y * axis[1] for x, y in corners]
+    perp = [-x * axis[1] + y * axis[0] for x, y in corners]
+    return min(along), max(along), min(perp), max(perp)
+
+
+def _boxes_inside_anchored_runs(boxes, wall_lines):
+    """Boxes that reach into an independently anchored solid run. `wall_lines`: [{axis, perp, runs}] with runs
+    from W4 candidates; only walls split into >= 2 runs are anchors."""
+    offenders = []
+    for line_no, line in enumerate(wall_lines):
+        if len(line["runs"]) < 2:
+            continue
+        for key, box in boxes.items():
+            a0, a1, p0, p1 = _intervals(box, line["axis"])
+            if p1 < line["perp"] - PERP_TOL_PT or p0 > line["perp"] + PERP_TOL_PT:
+                continue
+            for r0, r1 in line["runs"]:
+                if min(a1, r1 - OVERLAP_PT) - max(a0, r0 + OVERLAP_PT) > 0.0:
+                    offenders.append((key, line_no, (r0, r1)))
+    return offenders
+
+
+ANCHORED_WALL = {"axis": (1.0, 0.0), "perp": 297.8,
+                 "runs": [(384.0, 400.0), (424.08, 579.5), (602.89, 625.79), (650.5, 717.04)]}
+REAL_BOXES = {"a": (400.3, 296.5, 424.1, 299.5), "b": (579.6, 296.5, 603.4, 299.5), "c": (626.4, 296.5, 650.2, 299.5)}
+
+
+def test_anchored_runs_catch_a_false_opening_inside_a_pier_that_the_box_derived_finder_misses():
+    assert _boxes_inside_anchored_runs(REAL_BOXES, [ANCHORED_WALL]) == []
+    injected = dict(REAL_BOXES, false=(480.0, 296.5, 500.0, 299.5))   # inside the 155 pt run, no boundary moved
+    assert [o[0] for o in _boxes_inside_anchored_runs(injected, [ANCHORED_WALL])] == ["false"]
+    # The old finder derives piers from the very boxes under test: with the false box present it splits the
+    # pier in two, so neither derived pier contains it. This is the documented gap the anchored check closes.
+    old_piers = _piers_between_adjacent_apertures(list(injected.values()))
+    old_offenders = [
+        key for pier in old_piers for key, box in injected.items()
+        if _overlap_pt(box, (pier[0] + OVERLAP_PT, pier[1] - OVERLAP_PT, pier[2], pier[3])) > 0.0
+    ]
+    assert old_offenders == []
+
+
+def test_anchored_check_ignores_whole_wall_candidates_and_other_wall_lines():
+    whole = {"axis": (1.0, 0.0), "perp": 297.8, "runs": [(384.0, 717.0)]}   # runs through its openings: no anchor
+    assert _boxes_inside_anchored_runs(REAL_BOXES, [whole]) == []
+    other_line = dict(ANCHORED_WALL, perp=420.0)
+    assert _boxes_inside_anchored_runs(dict(REAL_BOXES, false=(480.0, 296.5, 500.0, 299.5)), [other_line]) == []
+    vertical = {"axis": (0.0, 1.0), "perp": -300.0, "runs": [(0.0, 50.0), (80.0, 140.0)]}
+    hit = _boxes_inside_anchored_runs({"v": (299.0, 90.0, 302.0, 120.0)}, [vertical])
+    assert [o[0] for o in hit] == ["v"]                      # vertical wall line (normal = (-1, 0)) is handled
+    assert _boxes_inside_anchored_runs({"v": (299.0, 55.0, 302.0, 75.0)}, [vertical]) == []   # in the gap between runs
+
+
 def test_lot16_original_every_shared_pier_stays_wall_and_the_signed_eight_identities_remain():
     pdf = _original_pdf()
     if pdf is None:
@@ -314,3 +377,64 @@ def test_lot16_original_every_shared_pier_stays_wall_and_the_signed_eight_identi
         rect = (pier[0] + OVERLAP_PT, pier[1] - OVERLAP_PT, pier[2], pier[3])
         offenders = [key for key, box in boxes.items() if _overlap_pt(box, rect) > 0.0]
         assert not offenders, f"an opening reaches into the solid pier {pier}: {offenders}"
+
+    # ---- independent anchoring: W4 wall-candidate runs on split walls, not derived from the opening boxes ----
+    from pb_opening_host_frame_authority import OpeningHostFrameProducer
+    from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+
+    producer = OpeningHostFrameProducer.from_authorities(
+        physical_opening_authority=authority, host_binding_authority=composition.opening_host_binding_authority,
+        physical_wall_candidate_authority=composition.physical_wall_candidate_authority,
+        supplemental_wall_candidate_authority=composition.supplemental_physical_wall_candidate_authority,
+        raster_split_frame_shadow=True, source_fragment_roles_shadow=True,
+    )
+    frames = {}
+    for trace in composition.opening_bindings:
+        binding_selector = composition.binding_selectors.get(trace.opening_identity_id)
+        if binding_selector is None:
+            continue
+        outcome = producer.publish(
+            opening_selector=ObservationSelector(
+                document_id=published.revision.document_id, revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
+                observation_id=trace.representative_observation_id,
+            ),
+            host_binding_selector=binding_selector,
+        )
+        if outcome.evidence is not None:
+            frames[outcome.evidence.whole_wall_frame_id] = (outcome.evidence, binding_selector)
+    wall_lines = []
+    for evidence, binding_selector in frames.values():
+        scope = producer._walls.resolve_scope(PhysicalWallCandidateSelector(
+            document_id=binding_selector.document_id, revision_id=binding_selector.revision_id,
+            source_sha256=binding_selector.source_sha256, snapshot_id=binding_selector.snapshot_id,
+            page_id=binding_selector.page_id, decision_scope_id=binding_selector.decision_scope_id,
+        ))
+        by_id = {r.wall_candidate_id: r for r in scope.records}
+        axis = tuple(evidence.axis_unit)
+        normal = (-axis[1], axis[0])
+        runs, perps = [], []
+        for wall_id in evidence.whole_wall_candidate_ids:
+            member = by_id.get(wall_id)
+            projected = None
+            if member is not None:
+                projected = producer._record_projection(member, axis, normal, strict_collinearity_shadow=True)
+                if projected is None:
+                    projected = producer._record_projection(member, axis, normal)
+            if projected is not None:
+                runs.append((float(projected[0]), float(projected[1])))
+                perps.append(float(projected[2]))
+        if runs:
+            wall_lines.append({"axis": axis, "perp": sum(perps) / len(perps), "runs": sorted(runs)})
+    anchored = [line for line in wall_lines if len(line["runs"]) >= 2]
+    assert anchored, (
+        f"no wall line is split by W4 into independent solid runs (frames={len(frames)}, "
+        f"wall lines with runs={[len(line['runs']) for line in wall_lines]})"
+    )
+    offenders = _boxes_inside_anchored_runs(boxes, wall_lines)
+    assert not offenders, f"an opening reaches into an independently anchored solid wall run: {offenders}"
+    # DOCUMENTED BOUND: only piers that fall inside these split W4 runs are independently anchored. The other piers
+    # (including the south door/stacker pier, which has no W4 member at all) are protected only by the box-derived
+    # check above. Do not widen the claim without a new independent source anchor.
+    interior_runs = sum(max(0, len(line["runs"]) - 2) for line in anchored)
+    assert interior_runs >= 2, f"expected at least two independently anchored interior piers, found {interior_runs}"

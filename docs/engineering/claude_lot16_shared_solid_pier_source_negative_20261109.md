@@ -38,6 +38,14 @@ Two framed raster gaps separated by a solid pier, drawn at 2 px per point:
 
 `test_lot16_original_every_shared_pier_stays_wall_and_the_signed_eight_identities_remain` composes page 3, finds every pier between consecutive apertures on a wall line, requires the south door/stacker pier to be one of them, requires **no existence record to overlap any pier interior**, and requires all 8 signed physical identities to be present. It ran green on this machine in 6 min 11 s (`PLANREADER_LOT16_ORIGINAL_PDF` or `documents/sources/…`).
 
+## 3a. Bound of the original-source claim and independent anchoring (added after the exact-head review)
+
+The first version of the original-source check derived each pier from the **same opening boxes it then tested**. That cannot catch a false opening placed *inside* a pier: with the false box present, the derived span splits into two smaller piers and neither contains it (pure-data test `test_anchored_runs_catch_a_false_opening_inside_a_pier_that_the_box_derived_finder_misses` demonstrates exactly this). So that check supports only the explicit door/stacker anchor, not "every pier".
+
+What is now independent: forbidden regions taken from **W4 wall-candidate runs on split walls** (a wall the W4 stage broke into at least two runs), never from the boxes under test. Most frame members on this page are whole-wall candidates that run straight through their openings and carry no pier information; those are ignored. Measured on the original Lot16 page 3: only **2 of the 9 piers** (both on one wall line) are independently anchored this way. The other 7, including the south door/stacker pier (which has no W4 member at all), are protected only by the box-derived check.
+
+Claim, restated: the independently anchored piers contain no opening candidate, and the door/stacker pier is clear by its explicit anchor. **No universal "every pier is clear" claim is made.** A wider claim needs a new independent source anchor for the remaining piers (for example raster wall-band continuity), which does not exist today.
+
 ## 4. Measured production output (local, original PDF, no code change)
 
 | Run | Result |
