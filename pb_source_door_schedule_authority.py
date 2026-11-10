@@ -84,6 +84,9 @@ class SourceDoorScheduleResult:
     unparsed_original_door_codes: tuple[str, ...] = ()
     new_opening_counts: int = 0
     new_opening_areas_m2: int = 0
+    # Extra candidates from native D-code + numeric words are a read-only,
+    # explicitly requested diagnostic. Never counted as parsed/complete rows.
+    dimension_only_shadow_rows: tuple[SourceDoorScheduleRow, ...] = ()
 
 
 def _producer_owned_native_words(
@@ -341,6 +344,80 @@ def _original_source_row_candidates(
 
 
 
+def _dimension_only_native_rows_shadow(
+    words: tuple[SourceDoorScheduleWord, ...],
+    parsed_rows: tuple[SourceDoorScheduleRow, ...],
+) -> tuple[SourceDoorScheduleRow, ...]:
+    """Read-only recovery candidates for omitted native schedule text blocks.
+
+    A D-code with two independent source-number words but no explicit DOOR,
+    SWING, etc. role is a question for the existing original table-column
+    authority, NOT an extra issued schedule row. Do not infer which numbers
+    are widths/heights, material meaning, count or installed opening identity.
+    The normal parsed rows / source-universe completion are never modified.
+    """
+    grouped: dict[int, list[SourceDoorScheduleWord]] = defaultdict(list)
+    code_blocks: dict[str, set[int]] = defaultdict(set)
+    for word in words:
+        grouped[word.block_no].append(word)
+        if _DOOR_CODE.fullmatch(word.literal):
+            code_blocks[word.literal].add(word.block_no)
+    established_blocks = {row.native_block_no for row in parsed_rows}
+    proposed: list[SourceDoorScheduleRow] = []
+    for block, members in sorted(grouped.items()):
+        if block in established_blocks or not members:
+            continue
+        mark = members[0].literal
+        if not _DOOR_CODE.fullmatch(mark) or len(code_blocks[mark]) != 1:
+            continue
+        if sum(_DOOR_CODE.fullmatch(w.literal) is not None for w in members) != 1:
+            continue
+        source_addresses = {(w.page_id, w.partition_id) for w in members}
+        ids = tuple(w.observation_id for w in members)
+        if len(source_addresses) != 1 or len(ids) != len(set(ids)):
+            continue
+        numbers = [w for w in members[1:] if _NUMERIC.fullmatch(w.literal)]
+        if len(numbers) < 2 or len({w.observation_id for w in numbers}) < 2:
+            continue
+        proposed.append(SourceDoorScheduleRow(
+            code=mark,
+            source_page_id=members[0].page_id,
+            native_block_no=block,
+            observation_ids=ids,
+            original_width_literal=None,
+            original_height_literal=None,
+            door_kind_candidate="original_door_kind_unverified",
+            source_title_observation_ids=(),
+            complete_native_row_text_trusted=all(w.trusted for w in members),
+            status="source_dimension_only_shadow_not_schedule_authority",
+            first_unclosed_gate="original_schedule_row_membership_and_role_unproven",
+            source_raster_text_receipt_ids=tuple(sorted(
+                w.raster_text_receipt_id for w in members
+                if w.raster_text_receipt_id is not None
+            )),
+        ))
+    # Reuse the original independent native column authority to explain
+    # *which* candidate numbers could be printed width/height cells. It can
+    # decline the whole table. Preserve that result as shadow; unlike the
+    # normal parsed universe, it is never fed to an opening/quantity issuer.
+    checked, _table_trusted = _original_door_schedule_column_proof(
+        words, tuple(proposed),
+    )
+    return tuple(replace(
+        row,
+        status="source_dimension_only_shadow_not_schedule_authority",
+        first_unclosed_gate=(
+            "original_schedule_row_role_and_physical_instance_unproven"
+            if row.source_dimension_column_roles_authenticated
+            else "original_schedule_row_membership_and_columns_unproven"
+        ),
+        width_height_metric_units_authenticated=False,
+        physical_host_or_frame_authenticated=False,
+        default_opening_count=None,
+        new_customer_quantity_authority=False,
+    ) for row in checked)
+
+
 def _original_door_schedule_column_proof(
     words: tuple[SourceDoorScheduleWord, ...],
     rows: tuple[SourceDoorScheduleRow, ...],
@@ -518,6 +595,7 @@ def inspect_published_door_schedule(
     producer: SourceVisibilityProducer, *,
     revision_id: str, page_id: str,
     raster_text_source_shadow: bool = False,
+    dimension_only_source_shadow: bool = False,
 ) -> SourceDoorScheduleResult:
     if type(producer) is not SourceVisibilityProducer:
         raise TypeError("door_source_requires_existing_visibility_producer")
@@ -533,6 +611,8 @@ def inspect_published_door_schedule(
         raise ValueError("source_door_page_not_in_published_source_coverage")
     if type(raster_text_source_shadow) is not bool:
         raise TypeError("raster_text_source_shadow must be bool")
+    if type(dimension_only_source_shadow) is not bool:
+        raise TypeError("dimension_only_source_shadow must be bool")
     words=_producer_owned_native_words(producer,published,page_id)
     if raster_text_source_shadow:
         # The live producer creates its own OCR backend. A caller cannot
@@ -544,6 +624,10 @@ def inspect_published_door_schedule(
             producer,published,words,raster_text_producer=raster,
         )
     candidate_rows=_original_source_row_candidates(words)
+    dimension_only_rows = (
+        _dimension_only_native_rows_shadow(words, candidate_rows)
+        if dimension_only_source_shadow else ()
+    )
     # Count all native code-bearing blocks before lexical row filtering.
     # A Dxx header with unrecognised hardware/description is negative
     # evidence, not permission to claim a complete schedule census.
@@ -583,4 +667,5 @@ def inspect_published_door_schedule(
         # must also be complete for an authoritative door *table* census.
         complete_source_word_universe=bool(words) and not unparsed_codes,
         unparsed_original_door_codes=unparsed_codes,
+        dimension_only_shadow_rows=dimension_only_rows,
     )
