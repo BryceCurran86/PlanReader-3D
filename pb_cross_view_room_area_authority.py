@@ -172,6 +172,16 @@ class CrossViewRoomAreaRecord:
             raise TypeError("CrossViewRoomAreaRecord is producer-owned")
 
 
+_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: dict[tuple[str, str], "CrossViewRoomAreaRecord"] = {}
+
+
+def get_authenticated_room_area_record(
+    snapshot_id: str, evidence_id: str
+) -> Optional["CrossViewRoomAreaRecord"]:
+    """Retrieve authentic producer-issued CrossViewRoomAreaRecord by snapshot_id and area evidence_id."""
+    return _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.get((str(snapshot_id), str(evidence_id)))
+
+
 @dataclass(frozen=True)
 class CrossViewRoomAreaResult:
     status: EvidenceResolutionStatus
@@ -1994,6 +2004,9 @@ class CrossViewRoomAreaProducer:
             conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
+        for rec in records:
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.area_evidence.evidence_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.area_evidence.evidence_id))] = rec
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
             status = EvidenceResolutionStatus.CORROBORATED
@@ -2033,6 +2046,7 @@ __all__ = [
     "CROSS_VIEW_ROOM_AREA_SCHEMA_VERSION",
     "CROSS_VIEW_ROOM_AREA_UNAVAILABLE",
     "CrossViewRoomAreaProducer",
+    "get_authenticated_room_area_record",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
 ]

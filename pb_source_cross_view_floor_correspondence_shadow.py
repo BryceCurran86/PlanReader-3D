@@ -600,6 +600,16 @@ class SourceCrossViewFloorCorrespondenceRecord:
     snapshot_id: str = ""
 
 
+_REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT: dict[tuple[str, str], "SourceCrossViewCeilingCorrespondenceRecord"] = {}
+
+
+def get_authenticated_ceiling_correspondence(
+    snapshot_id: str, record_id: str
+) -> Optional["SourceCrossViewCeilingCorrespondenceRecord"]:
+    """Retrieve authentic producer-issued SourceCrossViewCeilingCorrespondenceRecord by snapshot_id and record_id."""
+    return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.get((str(snapshot_id), str(record_id)))
+
+
 @dataclass(frozen=True)
 class SourceCrossViewCeilingCorrespondenceRecord:
     record_id: str
@@ -3293,7 +3303,7 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         digest_chars=32,
     )
 
-    return SourceCrossViewCeilingCorrespondenceRecord(
+    res = SourceCrossViewCeilingCorrespondenceRecord(
         record_id=rec_id,
         canonical_ceiling_id=canonical_ceiling_id,
         physical_room_id=physical_room_id,
@@ -3324,6 +3334,9 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
+    return res
 
 
 
@@ -3531,7 +3544,7 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             },
             digest_chars=20,
         )
-        return SourceCrossViewCeilingCorrespondenceRecord(
+        res = SourceCrossViewCeilingCorrespondenceRecord(
             record_id=rec_id,
             canonical_ceiling_id=canonical_ceiling_id,
             physical_room_id=physical_room_id,
@@ -3565,6 +3578,9 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -3689,47 +3705,56 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     ):
         raise ValueError(f"room area evidence entity_id {meta_entity} does not match room")
 
-    # Reject unissued / unauthorized objects (must be authentic EvidenceAtom or QuantityEvidence)
+    # 1. Reject unissued / unauthorized objects (must be authentic EvidenceAtom or QuantityEvidence)
     if type(area_evidence) not in (EvidenceAtom, QuantityEvidence):
         raise ValueError(
             f"unissued or unauthorized room area evidence object: must be authentic producer-issued EvidenceAtom or QuantityEvidence, got {type(area_evidence).__name__}"
         )
 
-    ev_id_str = str(getattr(area_evidence, "evidence_id", "") or "")
-    if ev_id_str.startswith("unissued"):
-        raise ValueError("unissued area evidence cannot create firm ceiling authority")
+    # 2. Authenticate ceiling correspondence against authentic producer issuance
+    auth_corr = get_authenticated_ceiling_correspondence(correspondence.snapshot_id, correspondence.record_id)
+    if auth_corr is None or auth_corr is not correspondence:
+        raise ValueError(
+            f"unissued or caller-created ceiling correspondence record: record {correspondence.record_id} was not issued by an authentic ceiling correspondence producer"
+        )
+    if not correspondence.definition_record_id or not correspondence.occurrence_record_id or not correspondence.occurrence_evidence_id:
+        raise ValueError("ceiling correspondence missing definition or occurrence records")
+    if (
+        correspondence.definition_record_id != auth_corr.definition_record_id
+        or correspondence.occurrence_record_id != auth_corr.occurrence_record_id
+        or correspondence.occurrence_evidence_id != auth_corr.occurrence_evidence_id
+    ):
+        raise ValueError("ceiling correspondence definition or occurrence record mismatch")
 
-    # If EvidenceAtom, verify producer method and dimension metadata
-    if type(area_evidence) is EvidenceAtom:
-        ev_kind = getattr(area_evidence, "kind", None)
-        if ev_kind not in ("explicit_room_area", "room_area"):
-            raise ValueError(f"unauthorized EvidenceAtom kind: {ev_kind}")
-        ev_method = getattr(area_evidence, "method", None)
-        if ev_method not in (
-            "authenticated_cross_view_figured_dimension",
-            "cross_view_room_area_authority",
-            "live_physical_net_wall_integration",
-        ):
-            raise ValueError(f"unauthorized EvidenceAtom method: {ev_method}")
-        ev_meta = getattr(area_evidence, "metadata", None)
-        if isinstance(ev_meta, Mapping):
-            h_dim = ev_meta.get("horizontal_dimension_id")
-            v_dim = ev_meta.get("vertical_dimension_id")
-            if h_dim and v_dim and (h_dim, v_dim) != tuple(correspondence.figured_dimension_ids):
-                raise ValueError("area_evidence dimension IDs do not match ceiling correspondence figured dimensions")
+    # 3. Authenticate room area evidence against authentic CrossViewRoomAreaProducer records
+    from pb_cross_view_room_area_authority import get_authenticated_room_area_record
+    auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, area_ev_id)
+    if auth_area_rec is None:
+        raise ValueError(
+            f"unissued or unauthorized room area evidence: {area_ev_id} was not issued by an authentic room area producer"
+        )
+    if auth_area_rec.area_evidence is not area_evidence:
+        raise ValueError(
+            f"unauthorized room area evidence object: must be the exact authentic producer-issued EvidenceAtom for {area_ev_id}"
+        )
 
-    # If QuantityEvidence, verify producer authority
-    if type(area_evidence) is QuantityEvidence:
-        ev_auth = getattr(area_evidence, "authority", None)
-        if ev_auth not in (
-            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-            MeasurementAuthorityType.PDF_SCALED.value,
-            "documented_dimension",
-            "pdf_scaled",
-        ):
-            raise ValueError(f"unauthorized QuantityEvidence authority: {ev_auth}")
+    # 4. Verify figured dimension lineage
+    if not auth_area_rec.horizontal_dimension_id or not auth_area_rec.vertical_dimension_id:
+        raise ValueError("room area evidence missing figured dimension lineage")
+    if (auth_area_rec.horizontal_dimension_id, auth_area_rec.vertical_dimension_id) != tuple(correspondence.figured_dimension_ids):
+        raise ValueError(
+            f"room area figured dimensions ({auth_area_rec.horizontal_dimension_id}, {auth_area_rec.vertical_dimension_id}) "
+            f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
+        )
+    if isinstance(metadata, Mapping):
+        h_dim = metadata.get("horizontal_dimension_id")
+        v_dim = metadata.get("vertical_dimension_id")
+        if not h_dim or not v_dim or (h_dim, v_dim) != tuple(correspondence.figured_dimension_ids):
+            raise ValueError("area_evidence dimension IDs missing or do not match ceiling correspondence figured dimensions")
+    else:
+        raise ValueError("area_evidence missing metadata mapping with dimension lineage")
 
-    # RCP ownership verification on correspondence
+    # 5. RCP ownership verification on correspondence
     if correspondence.finish_code != "GRID":
         raise ValueError(f"invalid ceiling correspondence finish code: {correspondence.finish_code}; expected GRID")
     if str(correspondence.support_page_id) not in ("10", "9"):
