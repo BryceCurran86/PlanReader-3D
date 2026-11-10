@@ -315,7 +315,6 @@ def test_extractor_ignores_text_and_ticks_that_do_not_form_a_chain():
 
 
 # ------------------------------------------------------------------ original source (private PDF, skipped when absent)
-import hashlib   # noqa: E402
 import os        # noqa: E402
 
 ORIGINAL_SHA256 = "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
@@ -582,11 +581,7 @@ def test_page_filter_never_mixes_facts_from_another_page():
 
 
 def test_original_source_owned_path_reproduces_the_diagnostic_result_and_names_its_receipts():
-    pdf = _original_pdf()
-    if pdf is None:
-        pytest.skip("private original PDF not available")
-    if hashlib.sha256(pdf.read_bytes()).hexdigest() != ORIGINAL_SHA256:
-        pytest.skip("original PDF hash differs")
+    pdf = _original_pdf()                     # the one 3Laurel resolver: absent is NOT_RUN/FAIL, wrong bytes always FAIL (never a skip of its own)
     from tools.diag_elevation_door_vertical_witness_shadow import run as run_tool
 
     focus = ("22e7e155", "1cd959cc", "be1e67bf", "9d4dc1b3", "a93486dc")
