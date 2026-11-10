@@ -1,6 +1,6 @@
 # Architecture report: glyph-ledger recovery of rotated (vertical) words
 
-Status: report for review. **No code changed.** Date 2026-11-10. Lane: Claude, 3Laurel source-to-customer. Opt-in text-trust path only.
+Status: report (reviewed by MAX in #4135 comment 6755168519, which authorized implementation) plus the implementation and measured results below. Date 2026-11-10. Lane: Claude, 3Laurel source-to-customer. Opt-in text-trust path only.
 
 ## Compliance proof (AGENTS.md first deliverable)
 
@@ -38,3 +38,18 @@ The expected door widths, the 3Laurel opening list, how many words recover, and 
 ## Not proven
 
 That the recovered words verify; that the other door widths (garage and the room opposite it) are in the 26 figure words; the cause of the remaining failures on pages 4 and 5 and of the 10 horizontal failures on page 3.
+
+## Implementation (this PR) and measured results
+
+**Change.** `pb_font_glyph_mapping_corroboration_shadow.word_glyphs` only. It orders the selected characters by projection on the trace span's own unit direction instead of by x-centre, and it keeps the centre-in-box selection, the exact-spelling requirement, the 0.6 pt centre tolerance and the `WordGlyphs` contract. It returns `None` (the word casts no vote) when the characters come from spans with different directions, when the characters come from spans in different fonts, when a span direction is invalid (non-finite, mis-shaped, not a unit vector), or when two characters have no defined order. A span without a `dir` is read as horizontal, exactly as before. No other order is ever tried. The ledger (`decide_glyph_text_trust`), `upgrade_glyph_only_text`, the receipt builder, `min_words >= 2`, the contradiction veto, the raster corroboration and every default-off flag are untouched.
+
+**Tests (47 new, the existing glyph-ledger tests unchanged and passing; 18 single-line mutations of `word_glyphs` all caught, two survivors on the unit-vector tolerance closed with tests).** 0, 90, 180, 270 and 45 degrees; translation, uniform scale, whole-page rotation; shuffled characters, split and reordered spans; unrelated spans; determinism and no mutation; wrong and reversed claimed text; mixed direction; mixed font; non-finite, zero, non-unit, mis-shaped and non-sequence directions; two characters at one position; stray text of another direction in the box; a missing `dir` keeps the horizontal reading (a vertical word without one still abstains); 300 random horizontal words equal to a copy of the previous implementation (the regression oracle); real PDF text in all four rotations through PyMuPDF; and the existing ledger decision with rotated words (two corroborated words verify a glyph, one does not, a contradicting rotated word still vetoes).
+
+**Original 3Laurel, word_glyphs before and after (PyMuPDF words and trace spans, pages 3, 4, 5).** Page 3: 1,215 words, 51 newly recovered, 31 recovered by neither, **0 regressions**; figure-like words: 25 newly recovered, 1 still not. Page 4: no change. Page 5: 1 newly recovered. No word that was recovered before is lost, including the mixed-font tightening.
+
+**Original 3Laurel, the real ledger (explicit glyph-ledger opt-in, page 3).** Glyph-only candidates 1,140; recovered **1,114 (was 1,063)**; raster attempts 93 (was 92); directly corroborated 76; verified glyphs 115; contradicted glyphs 0. The Front entry's printed width word `1,200` (`6788f937`) was `ABSTAINED` `glyphs_not_recovered`; it is now **`CORROBORATED` by `amortized_glyph_verified`**: all five glyph occurrences are verified (corroborated words supporting each distinct glyph: 4, 3, 4, 8, 8; none contradicts). Through the text-integrity authority the label authority's word for the Front entry is now `corroborated`, `trusted`, no reason codes, decode `amortized_glyph_verified`; the Lhs `870` is unchanged.
+
+**What this does and does not prove.** It authenticates the printed text of the Front entry's width word under the explicit opt-in. It does not publish a width, does not authenticate door kind, host or frame, and is not a customer value. The first remaining gate for the Front entry is the host (the east face is continuous across the span and the opening's reveal stubs are unowned); that veto is unchanged. One figure-like word on page 3 remains unrecovered by direction-aware ordering (cause not examined).
+
+**For MAX (protected verification).** Frozen head and exact commands are in the PR description once pushed. The change is reachable only when `source_glyph_ledger_text_trust=True` (live integration and the handoff runner expose it, default False); any signed run that used the opt-in must be shown unchanged, and the Lot16-eight / Maryborough-three retention must be run for the PR head.
+

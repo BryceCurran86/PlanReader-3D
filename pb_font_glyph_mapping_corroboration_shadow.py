@@ -19,6 +19,7 @@ the claim alone. ``shadow_only`` is True, ``live_effect`` and ``text_trust_grant
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -31,6 +32,9 @@ GLYPHS_NOT_RECOVERED = "glyphs_not_recovered"
 
 DEFAULT_MIN_WORDS = 2
 CENTRE_TOLERANCE_PT = 0.6
+DIRECTION_UNIT_TOL = 1e-3     # a trace span direction must be a unit vector to this tolerance
+DIRECTION_SAME_TOL = 1e-3     # every span a word is read from must share one direction to this tolerance
+ORDER_TIE_TOL_PT = 1e-6       # two characters this close along the text direction have no defined order
 
 GlyphKey = Tuple[str, int]                        # (font program key, glyph id)
 
@@ -47,15 +51,44 @@ class WordGlyphs:
         return tuple(((self.font_key, gid), char) for gid, char in self.glyphs)
 
 
+def _span_direction(span: Mapping[str, object]) -> Optional[Tuple[float, float]]:
+    """The span's own text direction as a unit vector, or ``None`` when it is invalid.
+
+    A span without a ``dir`` is read as horizontal (1, 0): that is how every word was read before direction was used, so
+    horizontal words keep their baseline behaviour. A present but non-finite, mis-shaped or non-unit direction is invalid."""
+    raw = span.get("dir")
+    if raw is None:
+        return (1.0, 0.0)
+    try:
+        if len(raw) != 2:
+            return None
+        dx, dy = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(dx) and math.isfinite(dy)) or abs(math.hypot(dx, dy) - 1.0) > DIRECTION_UNIT_TOL:
+        return None
+    return (dx, dy)
+
+
 def word_glyphs(observation_id: str, text: str, font_key: str, bbox: Sequence[float],
                 spans: Iterable[Mapping[str, object]], *, tolerance: float = CENTRE_TOLERANCE_PT) -> Optional[WordGlyphs]:
     """Glyphs of ``text`` recovered from trace spans: the characters whose box centre stands in ``bbox``.
 
-    Returns None when the recovered characters do not spell exactly ``text`` (a ligature, a reordering, a split word): such a word contributes no
-    evidence in either direction. Glyph ids below zero (continuation components) are skipped, as the authority skips them."""
+    The characters are read in the order of the trace span's OWN text direction (projection of each character centre on the
+    span's unit direction), not left to right on the page, so a word printed bottom to top is read bottom to top. Exactly one
+    order is defined by the trace and it is the only one tried: the recovered characters must spell exactly ``text``.
+
+    Returns None (the word contributes no evidence in either direction) when the recovered characters do not spell exactly
+    ``text`` (a ligature, a reordering, a split word); when the characters come from spans with different directions or
+    different fonts; when a span direction is invalid (non-finite, mis-shaped, not a unit vector); or when two characters
+    have no defined order (equal position along the direction). Glyph ids below zero (continuation components) are skipped,
+    as the authority skips them."""
     x0, y0, x1, y1 = (float(v) for v in tuple(bbox)[:4])
-    found: List[Tuple[float, int, str]] = []
+    found: List[Tuple[float, float, int, str]] = []        # (cx, cy, gid, char)
+    directions: List[Tuple[float, float]] = []
+    fonts = set()
     for span in spans:
+        selected = False
         for char in span.get("chars") or ():
             try:
                 codepoint, gid = int(char[0]), int(char[1])
@@ -65,11 +98,28 @@ def word_glyphs(observation_id: str, text: str, font_key: str, bbox: Sequence[fl
                 return None
             if x0 - tolerance <= cx <= x1 + tolerance and y0 - tolerance <= cy <= y1 + tolerance:
                 if gid >= 0:
-                    found.append((cx, gid, chr(codepoint)))
-    found.sort(key=lambda item: item[0])
-    if "".join(c for _x, _g, c in found) != text or not found:
+                    found.append((cx, cy, gid, chr(codepoint)))
+                    selected = True
+        if selected:
+            direction = _span_direction(span)
+            if direction is None:
+                return None
+            directions.append(direction)
+            if span.get("font") is not None:
+                fonts.add(str(span.get("font")))
+    if not found:
         return None
-    return WordGlyphs(str(observation_id), str(text), str(font_key), tuple((gid, char) for _x, gid, char in found))
+    first = directions[0]
+    if any(abs(d[0] - first[0]) > DIRECTION_SAME_TOL or abs(d[1] - first[1]) > DIRECTION_SAME_TOL for d in directions) or len(fonts) > 1:
+        return None
+    dx, dy = first
+    ordered = sorted(found, key=lambda item: (item[0] * dx + item[1] * dy))
+    positions = [item[0] * dx + item[1] * dy for item in ordered]
+    if any(b - a <= ORDER_TIE_TOL_PT for a, b in zip(positions, positions[1:])):
+        return None
+    if "".join(c for _x, _y, _g, c in ordered) != text:
+        return None
+    return WordGlyphs(str(observation_id), str(text), str(font_key), tuple((gid, char) for _x, _y, gid, char in ordered))
 
 
 @dataclass(frozen=True)
