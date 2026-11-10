@@ -128,9 +128,19 @@ def _apply_one(
     if _blocked_non_personnel_door(opening):
         return opening
     host_wall_id = _clean(opening.host_wall_id)
-    role_record_id = external_wall_role_record_ids.get(host_wall_id)
-    if not host_wall_id or not role_record_id:
+    framed_wall_id = _clean(opening.wall_local_frame_id)
+    matched_role_ids = tuple(
+        dict.fromkeys(
+            role_id
+            for key in (host_wall_id, framed_wall_id)
+            if key
+            for role_id in (_clean(external_wall_role_record_ids.get(key)),)
+            if role_id
+        )
+    )
+    if len(matched_role_ids) != 1:
         return opening
+    role_record_id = matched_role_ids[0]
     width_mm = opening.figured_single_axis_mm
     if not _positive_mm(width_mm):
         return opening
