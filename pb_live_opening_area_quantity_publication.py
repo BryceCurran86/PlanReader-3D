@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import math
 
+from pb_external_door_height_estimate_policy import (
+    OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM,
+    OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
+    OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL,
+)
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
     LivePhysicalOpeningVoidComposition,
@@ -35,6 +40,9 @@ LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY = (
 # prints one figure. Never FIRM or corroborated; it is a review-lineage shadow row.
 LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY = (
     "pb_door_height_owner_gate_shadow.owner_approved_second_axis_area"
+)
+LIVE_OPENING_EXTERNAL_DOOR_HEIGHT_ESTIMATE_AREA_QUANTITY_AUTHORITY = (
+    "pb_external_door_height_estimate_policy.assumed_external_door_height_2100_mm"
 )
 
 
@@ -280,6 +288,52 @@ def _opening_quantity(
         quantity_authority = (
             LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY
         )
+    elif basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS:
+        # Printed one-figure width * owner 2100 mm assumption. Not FIRM, not a
+        # source height, and never a substitute for host/frame/kind/width proof.
+        width_mm = opening.figured_single_axis_mm
+        role_record_id = opening.external_wall_role_record_id
+        label_record_id = opening.figured_area_record_id
+        if (
+            opening_kind != "door"
+            or opening.height_m is not None
+            or type(width_mm) not in (int, float)
+            or not math.isfinite(width_mm)
+            or width_mm <= 0.0
+            or type(role_record_id) is not str
+            or not role_record_id
+            or role_record_id != role_record_id.strip()
+            or role_record_id not in evidence_ids
+            or type(label_record_id) is not str
+            or not label_record_id
+            or label_record_id != label_record_id.strip()
+            or label_record_id not in evidence_ids
+            or not math.isclose(
+                value,
+                float(width_mm) * float(OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM)
+                / 1_000_000.0,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+        ):
+            return None
+        if opening.width_m is not None:
+            if (
+                type(opening.width_m) not in (int, float)
+                or not math.isfinite(opening.width_m)
+                or opening.width_m <= 0.0
+                or not math.isclose(
+                    float(opening.width_m) * 1000.0,
+                    float(width_mm),
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                )
+            ):
+                return None
+        measurement_record_id = label_record_id
+        quantity_authority = (
+            LIVE_OPENING_EXTERNAL_DOOR_HEIGHT_ESTIMATE_AREA_QUANTITY_AUTHORITY
+        )
     else:
         # Unknown area bases cannot silently become commercial quantities.
         return None
@@ -318,7 +372,12 @@ def _opening_quantity(
                     else (
                         "authenticated printed door width * owner-approved height"
                         if basis == "owner_approved_second_axis"
-                        else "authenticated physical opening width * height"
+                        else (
+                            "authenticated printed external-door width * "
+                            "owner-assumed 2100 mm height (verify on site)"
+                            if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+                            else "authenticated physical opening width * height"
+                        )
                     )
                 )
             )
@@ -338,7 +397,14 @@ def _opening_quantity(
                 "owner_approved_second_axis_is_an_assumption",
             )
             if basis == "owner_approved_second_axis"
-            else (LIVE_OPENING_AREA_QUANTITY_RESOLVED,)
+            else (
+                (
+                    LIVE_OPENING_AREA_QUANTITY_RESOLVED,
+                    "external_door_height_not_specified_owner_2100_assumption",
+                )
+                if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+                else (LIVE_OPENING_AREA_QUANTITY_RESOLVED,)
+            )
         ),
         metadata={
             "document_id": opening.document_id,
@@ -372,9 +438,37 @@ def _opening_quantity(
                 if basis == "owner_approved_second_axis"
                 else {}
             ),
+            **(
+                {
+                    "commercial_review_required": True,
+                    "owner_external_door_height_assumption": True,
+                    "verify_on_site": True,
+                    "assumed_height_mm": float(OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM),
+                    "printed_width_mm": float(opening.figured_single_axis_mm),
+                    "external_wall_role_record_id": opening.external_wall_role_record_id,
+                    "can_issue_firm_quantity": False,
+                    "benchmark_score_granted": False,
+                }
+                if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+                else {}
+            ),
             "section": "Openings",
-            "element": f"{opening_kind.title()} area",
-            "location": str(opening.type_mark or "").strip() or opening_kind.title(),
+            "element": (
+                f"{opening_kind.title()} area — {OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL}"
+                if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+                else f"{opening_kind.title()} area"
+            ),
+            "location": (
+                (
+                    str(opening.type_mark or "").strip()
+                    or opening_kind.title()
+                )
+                + (
+                    f" — {OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL}"
+                    if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+                    else ""
+                )
+            ),
             "substrate": "Other",
             "inclusion_status": "PROVISIONAL",
             "row_role": "",
@@ -463,6 +557,7 @@ __all__ = [
     "LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_EXTERNAL_DOOR_HEIGHT_ESTIMATE_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
     "publish_live_opening_area_quantities",

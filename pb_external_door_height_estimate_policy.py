@@ -1,9 +1,12 @@
 """Owner policy: external doors use a *provisional* 2100 mm height when unstated.
 
 This is an estimating decision, NOT source measurement authority. It cannot
-issue a FIRM QuantityEvidence, a source-closed customer row or benchmark score.
-The original producer still authenticates each physical door, width, host,
-frame, schedule/elevation evidence and every downstream commercial permission.
+issue a FIRM QuantityEvidence, a source-closed signed measurement or a frozen
+benchmark score. The assumption case may be consumed as a labelled provisional
+customer costing line ("Assumed 2100 mm — verify on site") by the live opening
+issuer. The original producer still authenticates each physical door, width,
+host, frame, schedule/elevation evidence and every downstream commercial
+permission.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM = 2100
 OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS = (
     "assumed_external_door_height_2100_mm_owner_policy"
 )
+OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL = "Assumed 2100 mm — verify on site"
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,7 @@ class ExternalDoorHeightEstimate:
     can_issue_firm_quantity: bool = False
     can_seal_source_closed_customer: bool = False
     benchmark_score_granted: bool = False
+    can_issue_labelled_provisional_customer: bool = False
 
 
 def _positive_height(value: object) -> bool:
@@ -64,8 +69,10 @@ def resolve_external_door_height_estimate(
     evidence and *this opening's* unique association are positively supplied.
     Unsupported or conflicting claims block fallback rather than being silently
     ignored. A specific undimensioned exception also blocks defaulting.
-    All results are review inputs, never FIRM/customer/sealed outputs by
-    themselves. No assumption applies to internal doors, windows or joinery.
+    Authenticated schedule/elevation heights remain review inputs here, never
+    FIRM outputs of this helper. The unstated-height assumption may be consumed
+    as a labelled provisional customer costing line. No assumption applies to
+    internal doors, windows, garage panels or joinery.
     """
     if type(opening_id) is not str or not opening_id.strip():
         raise ValueError("physical opening identity required")
@@ -128,4 +135,5 @@ def resolve_external_door_height_estimate(
         "external_door_height_not_specified_owner_2100_assumption",
         (external_door_identity_evidence_id.strip(),),
         False, True, True,
+        can_issue_labelled_provisional_customer=True,
     )

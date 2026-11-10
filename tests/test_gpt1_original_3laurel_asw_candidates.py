@@ -43,9 +43,9 @@ def test_foreign_source_bytes_never_gain_original_identity():
 
 
 def test_exact_original_3laurel_source_positive_labels_are_only_candidates():
-    original = Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
-    if not original.is_file():
-        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: not an original-source pass")
+    from tests.original_source_3laurel import require_original_3laurel
+
+    original = require_original_3laurel()      # absent: NOT_RUN in public CI, FAIL otherwise; wrong bytes always FAIL
     from hashlib import sha256
     contents = original.read_bytes()
     assert sha256(contents).hexdigest() == ORIGINAL_SHA256

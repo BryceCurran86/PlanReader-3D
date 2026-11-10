@@ -135,6 +135,13 @@ def test_original_pdf_receipt_does_not_accept_changed_source(tmp_path, tamper):
         handoff._verify_original_source(pdf, manifest)
 
 
+def test_missing_lot16_original_is_source_unavailable_not_filenotfound(tmp_path):
+    pdf, _sha, manifest = _source(tmp_path)
+    pdf.unlink()
+    with pytest.raises(ValueError, match=handoff.SOURCE_UNAVAILABLE):
+        handoff._verify_original_source(pdf, manifest)
+
+
 @pytest.mark.parametrize("tamper", [
     "foreign_project", "foreign_sha", "missing_seal", "duplicate_quantity",
     "family_mismatch", "customer_mismatch", "extra_customer_rows",

@@ -24,7 +24,21 @@ import pytest
 # in the same files still run. Dedicated original-SHA workflows never enable
 # this flag, and MUST fail if the original PDF is unavailable.
 _MARYBOROUGH_ORIGINAL_NAME = "Arch_Combined_Maryborough_Service_Station.pdf"
+_LOT16_ARCHITECTURAL_ORIGINAL_NAME = (
+    "1. Construction Plans - Lot 16 Power (REV E).pdf"
+)
+_PRIVATE_ORIGINAL_NAMES = frozenset((
+    _MARYBOROUGH_ORIGINAL_NAME,
+    _LOT16_ARCHITECTURAL_ORIGINAL_NAME,
+))
 _PRIVATE_SOURCE_PUBLIC_CI_POLICY = "skip_missing_in_public_ci"
+
+
+def _missing_private_original_names() -> frozenset[str]:
+    root = Path.cwd() / "documents" / "sources"
+    return frozenset(
+        name for name in _PRIVATE_ORIGINAL_NAMES if not (root / name).is_file()
+    )
 
 
 def _public_ci_source_policy_enabled() -> bool:
@@ -33,15 +47,14 @@ def _public_ci_source_policy_enabled() -> bool:
         raise pytest.UsageError("invalid_private_original_source_ci_policy")
     return (
         policy == _PRIVATE_SOURCE_PUBLIC_CI_POLICY
-        and not (
-            Path.cwd() / "documents" / "sources" / _MARYBOROUGH_ORIGINAL_NAME
-        ).is_file()
+        and bool(_missing_private_original_names())
     )
 
 
 def _code_uses_original_source(
     function,
     *,
+    original_names: Optional[frozenset[str]] = None,
     max_depth: int = 4,
     _seen: Optional[set[int]] = None,
 ) -> bool:
@@ -55,6 +68,7 @@ def _code_uses_original_source(
     """
     if max_depth < 0:
         return False
+    names = _PRIVATE_ORIGINAL_NAMES if original_names is None else original_names
     code = getattr(function, "__code__", None)
     if not isinstance(code, types.CodeType):
         return False
@@ -64,11 +78,11 @@ def _code_uses_original_source(
     seen.add(id(code))
     globals_map = getattr(function, "__globals__", {})
     for constant in code.co_consts:
-        if isinstance(constant, str) and _MARYBOROUGH_ORIGINAL_NAME in constant:
+        if isinstance(constant, str) and any(name in constant for name in names):
             return True
     for name in code.co_names:
         val = globals_map.get(name)
-        if isinstance(val, Path) and val.name == _MARYBOROUGH_ORIGINAL_NAME:
+        if isinstance(val, Path) and val.name in names:
             return True
     if max_depth == 0:
         return False
@@ -79,7 +93,7 @@ def _code_uses_original_source(
             and getattr(val, "__module__", None)
             == getattr(function, "__module__", None)
             and _code_uses_original_source(
-                val, max_depth=max_depth - 1, _seen=seen,
+                val, original_names=names, max_depth=max_depth - 1, _seen=seen,
             )
         ):
             return True
@@ -87,13 +101,20 @@ def _code_uses_original_source(
 
 
 def _test_requires_missing_original_pdf(item) -> bool:
-    if _code_uses_original_source(getattr(item, "function", None)):
+    missing = _missing_private_original_names()
+    if not missing:
+        return False
+    if _code_uses_original_source(
+        getattr(item, "function", None), original_names=missing,
+    ):
         return True
     info = getattr(item, "_fixtureinfo", None)
     named = getattr(info, "name2fixturedefs", {}) or {}
     for fixture_name in getattr(item, "fixturenames", ()):
         for definition in named.get(fixture_name, ()):
-            if _code_uses_original_source(getattr(definition, "func", None)):
+            if _code_uses_original_source(
+                getattr(definition, "func", None), original_names=missing,
+            ):
                 return True
     return False
 

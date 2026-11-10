@@ -48,43 +48,10 @@ jobs:
         run: python tests/ci_smoke.py
   source-proof:
     runs-on: ubuntu-latest
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Real Lot16 source, wall and host handoff
-        run: >-
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
-          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          --page-id 3 --output lot16-source-band-host-handoff.json
-      - name: Verify exact source ownership and safety cap
+      - name: Original Lot16 source-proof NOT RUN on public CI
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('lot16-source-band-host-handoff.json').read_text())
-          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['opening_bindings']
-          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
-          assert report['source_owned_wall_scope_results']
-          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
-          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
-          assert len(ids) == len(set(ids))
-          assert 'quantities' not in report
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-source-band-host-handoff
-          path: lot16-source-band-host-handoff.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Lot16 source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Lot16 source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"

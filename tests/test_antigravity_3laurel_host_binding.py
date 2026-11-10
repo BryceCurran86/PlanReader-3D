@@ -30,9 +30,9 @@ from tools.diag_gpt1_original_3laurel_asw_candidates import (
 
 
 def test_3laurel_authoritative_derived_viewport_and_host_bindings():
-    pdf_path = Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
-    if not pdf_path.exists():
-        pytest.skip("Private 3Laurel original PDF not available in local workspace")
+    from tests.original_source_3laurel import require_original_3laurel
+
+    pdf_path = require_original_3laurel()      # absent: NOT_RUN in public CI, FAIL otherwise; wrong bytes always FAIL
 
     source_bytes = pdf_path.read_bytes()
     from hashlib import sha256

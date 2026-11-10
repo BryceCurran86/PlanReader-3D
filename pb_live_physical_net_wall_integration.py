@@ -44,6 +44,9 @@ from pb_live_physical_opening_void_composition import (
 from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
 )
+from pb_live_opening_external_door_height_estimate_publication import (
+    apply_live_external_door_height_estimates,
+)
 from pb_live_opening_count_quantity_publication import (
     publish_live_authenticated_opening_count_quantities,
 )
@@ -1087,9 +1090,6 @@ def _collect_live_physical_net_wall_claim(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
-    opening_quantity_evidence = publish_live_opening_area_quantities(
-        physical_void
-    )
     # Original measured frame/physical axes only. Area-only figured products
     # are not inverted to invent widths or heights. Remains independent of
     # the signed m² opening-area family and customer permission.
@@ -1115,6 +1115,15 @@ def _collect_live_physical_net_wall_claim(
         physical_void_composition=physical_void,
         gross_wall_composition=gross,
         whole_wall_role_composition=roles,
+    )
+    # Owner 2100 mm estimate needs EXTERNAL whole-wall identity, which exists
+    # only after roles. Figured two-axis areas are unchanged.
+    physical_void = apply_live_external_door_height_estimates(
+        composition=physical_void,
+        whole_wall_role_composition=roles,
+    )
+    opening_quantity_evidence = publish_live_opening_area_quantities(
+        physical_void
     )
 
     canonical_walls_by_id = {

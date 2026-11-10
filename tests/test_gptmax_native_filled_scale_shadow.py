@@ -219,9 +219,9 @@ def test_sha_and_page_scope_fail_closed():
 
 
 def test_private_original_source_positive_if_provisioned():
-    path = os.environ.get('THREELAUREL_ARCH_ORIGINAL')
-    if not path:
-        pytest.skip('private original source not provisioned; no source-positive claim')
+    from tests.original_source_3laurel import require_original_3laurel
+
+    path = require_original_3laurel()          # absent: NOT_RUN in public CI, FAIL otherwise; wrong bytes always FAIL
     data = Path(path).read_bytes()
     expected = '014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e'
     assert hashlib.sha256(data).hexdigest() == expected

@@ -11,8 +11,8 @@ Bryce's instruction: **assume 2100 mm for an authenticated external door if the 
 
 ## Authority and implementation
 
-Source-authenticated figured height and an owner assumption are different authority classes. A default may support a *provisional costing line with review provenance*, but it never by itself creates FIRM `QuantityEvidence`, a source-closed signed/customer measurement or a frozen120 score. It also cannot manufacture a missing opening host, frame, typed door kind or width.
+Source-authenticated figured height and an owner assumption are different authority classes. A default may support a *labelled provisional costing line with review provenance* ("Assumed 2100 mm — verify on site"), but it never by itself creates FIRM `QuantityEvidence`, a source-closed signed measurement or a frozen120 score. It also cannot manufacture a missing opening host, frame, typed door kind or width.
 
-Policy helper: `pb_external_door_height_estimate_policy.resolve_external_door_height_estimate`. This helper is deliberately read-only; it does not alter the live quantity issuers. Claude owns the source-based external-door cross-view wiring and eventual labelled provisional customer estimate workflow, with separate tests and source-safe releases.
+Policy helper: `pb_external_door_height_estimate_policy.resolve_external_door_height_estimate`. The helper stays read-only. The live opening issuer may consume the assumption case as a labelled provisional customer quantity once the door, unique EXTERNAL host and printed width are already authenticated.
 
 The default does not apply to internal doors, windows, garage panels or generic joinery elements. Existing signed Lot16 eight and Maryborough three and the immutable 2.5-point snap / 20,000 primitive limits remain unchanged.

@@ -1,10 +1,7 @@
 name: VERIFY Option A Original 3Laurel and Lot16 Same-Snapshot Sources
 on:
-  pull_request:
-    paths:
-      - "pb_live_canonical_wall_composition.py"
-      - "tools/verify_option_a_original_wall_source.py"
-      - ".github/workflows/verify-option-a-original-wall-source.yml"
+  # Legacy original-source diagnostic: never runs on public pull requests.
+  # Provisioned original-source verification for release belongs in the private repository.
   workflow_dispatch:
 
 jobs:

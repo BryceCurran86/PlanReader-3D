@@ -51,87 +51,10 @@ jobs:
         run: python tests/ci_smoke.py
   source-proof:
     runs-on: ubuntu-latest
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Real Lot16 source, wall and host handoff
-        run: >-
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
-          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          --page-id 3 --output lot16-opening-wall-face-handoff.json
-      - name: Verify exact source ownership and safety cap
+      - name: Original Lot16 source-proof NOT RUN on public CI
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('lot16-opening-wall-face-handoff.json').read_text())
-          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['preservation_proof_available']
-          assert report['source_owned_wall_scope_results']
-          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
-          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
-          assert len(ids) == len(set(ids))
-          assert 'quantities' not in report
-          PY
-      - name: Compare all-source Lot16 with exact current-main baseline
-        run: |
-          git show 184e32bf832746fe57e7ae3134fe11248f568a87:tools/diag_gptmax_source_authority_stages.py > /tmp/gptmax-source-stages.py
-          git worktree add /tmp/gptmax-face-baseline ${{ github.event.pull_request.base.sha }}
-          (cd /tmp/gptmax-face-baseline && PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/lot16-face-baseline.json)
-          PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output lot16-face-current.json
-          cp /tmp/lot16-face-baseline.json lot16-face-baseline.json
-          PYTHONPATH=. python - <<'PY'
-          import json
-          from pathlib import Path
-          old = json.loads(Path('lot16-face-baseline.json').read_text())
-          new = json.loads(Path('lot16-face-current.json').read_text())
-          assert old['source_sha256'] == new['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert old['primitive_safety_cap'] == new['primitive_safety_cap'] == 20_000
-          from tools.declared_additive_source_retention import assert_unchanged_or_declared
-          def normalize_void_reason_order(value):
-              # void reason codes come from a frozenset; two processes may order them differently
-              if isinstance(value, dict):
-                  return {k: (sorted(v) if k in ('void_reason_codes', 'opening_void_reason_codes') else normalize_void_reason_order(v)) for k, v in value.items()}
-              if isinstance(value, list):
-                  return [normalize_void_reason_order(v) for v in value]
-              return value
-          # Only a proven receipt rekey is eligible for a declaration.
-          # Source decode scope and canonical physical identities remain strict.
-          assert old['source_decode_coverage'] == new['source_decode_coverage']
-          hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
-          if hosted(old) != hosted(new):
-              assert_unchanged_or_declared(old, new, normalize=normalize_void_reason_order,
-                                           message="source-authenticated host bindings changed")
-          if old['resolved_host_frame_evidence'] != new['resolved_host_frame_evidence']:
-              assert_unchanged_or_declared(old, new, normalize=normalize_void_reason_order,
-                                           message="original host frame evidence changed")
-          ids = lambda report: {row['physical_opening_id']: row for row in report['canonical_openings']}
-          before, after = ids(old), ids(new)
-          assert before.keys() == after.keys()
-          assert len(before) == len(old['canonical_openings'])
-          assert len(after) == len(new['canonical_openings'])
-          for key in before:
-              for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
-                  assert before[key][field] == after[key][field]
-          assert 'quantities' not in new
-          print(json.dumps({'baseline': old['summary'], 'current': new['summary']}))
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-opening-wall-face-handoff
-          path: |
-            lot16-opening-wall-face-handoff.json
-            lot16-face-*.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Lot16 source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Lot16 source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"

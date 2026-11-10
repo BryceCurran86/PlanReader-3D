@@ -53,112 +53,19 @@ jobs:
         run: python tests/ci_smoke.py
   source-proof:
     runs-on: ubuntu-latest
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Replay exact PR-base Lot16 source (replaces a stale archived baseline)
-        # The 2026-10-08 artifact (run 37830114626) holds 23 physical claims; main has since retired two
-        # source-opposed native hypotheses and holds 21, so equality with it can no longer be satisfied by
-        # ANY head, including main. Every sibling gate replays the PR base instead.
+      - name: Original Lot16 source-proof NOT RUN on public CI
         run: |
-          mkdir -p prerequisite-lot16
-          git worktree add --detach /tmp/native-description-lot16-base "${{ github.event.pull_request.base.sha }}"
-          (
-            cd /tmp/native-description-lot16-base
-            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
-              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
-              --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json"
-          )
-      - name: Real Lot16 source, wall and host handoff
-        run: >-
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
-          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          --page-id 3 --output lot16-connected-frame-source-handoff.json
-      - name: Verify exact source ownership and safety cap
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
-          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['opening_bindings']
-          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
-          assert report['source_owned_wall_scope_results']
-          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
-          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
-          assert len(ids) == len(set(ids))
-          assert 'quantities' not in report
-          baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
-          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
-          assert baseline['source_sha256'] == report['source_sha256']
-          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-connected-frame-source-handoff
-          path: |
-            lot16-connected-frame-source-handoff.json
-            prerequisite-lot16/lot16-connected-frame-source-handoff.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Lot16 source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Lot16 source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
   maryborough-source-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: maryborough-connected-frame-source-handoff
-          path: prerequisite-maryborough
-      - name: Compare real Maryborough source and host identities with prerequisite
+      - name: Original Maryborough source-proof NOT RUN on public CI
         run: |
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          baseline = json.loads(Path('maryborough-source-baseline.json').read_text())
-          current = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
-          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
-          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
-          assert keyed(current['opening_bindings']) == keyed(baseline['opening_bindings'])
-          assert len(current['opening_bindings']) == len(keyed(current['opening_bindings']))
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(current['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          assert 'quantities' not in current
-          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: maryborough-connected-frame-source-handoff
-          path: maryborough-*.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Maryborough source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"

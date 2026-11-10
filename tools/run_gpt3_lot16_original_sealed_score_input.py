@@ -19,6 +19,7 @@ from pb_live_opening_source_closed_export import seal_live_opening_area_claim_ru
 from tools.diag_lot16_room_face_scope import inspect_source
 
 PROJECT = "au_qld_lot16_power"
+SOURCE_UNAVAILABLE = "source_unavailable"
 MANIFEST = (
     Path(__file__).resolve().parents[1]
     / "benchmarks/frozen_holdout/full_plan_v2/projects"
@@ -38,7 +39,9 @@ def _verify_original_source(pdf: Path, manifest_path: Path) -> str:
     if len(architectural) != 1:
         raise ValueError("ambiguous or missing original architectural source")
     original = architectural[0]
-    if not pdf.is_file() or pdf.name != original["name"]:
+    if not pdf.is_file():
+        raise ValueError(SOURCE_UNAVAILABLE)
+    if pdf.name != original["name"]:
         raise ValueError("wrong original architectural source filename")
     if pdf.stat().st_size != original["size_bytes"]:
         raise ValueError("original source size mismatch")
