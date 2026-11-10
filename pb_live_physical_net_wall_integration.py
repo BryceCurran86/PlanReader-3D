@@ -1092,14 +1092,19 @@ def _collect_live_physical_net_wall_claim(
                 correspondence_records = ()
                 correspondence_status = "correspondence_exception"
 
-        floor_finishes = CrossViewFloorFinishProducer.from_source(
-            source=surface_semantic_source,
-            room_areas=cross_view_area,
-            same_view_room_areas=same_view_area,
-            floors=canonical_floors,
-            correspondence_records=correspondence_records,
-            page_ids=support_pids,
-        ).publish()
+        floor_kwargs = {
+            "source": surface_semantic_source,
+            "room_areas": cross_view_area,
+            "same_view_room_areas": same_view_area,
+            "floors": canonical_floors,
+            "correspondence_records": correspondence_records,
+        }
+        if support_pids:
+            import inspect
+            sig = inspect.signature(CrossViewFloorFinishProducer.from_source)
+            if "page_ids" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                floor_kwargs["page_ids"] = support_pids
+        floor_finishes = CrossViewFloorFinishProducer.from_source(**floor_kwargs).publish()
         canonical_floors = enrich_live_canonical_floor_finishes(
             canonical_floors,
             floor_finishes,
@@ -1139,8 +1144,8 @@ def _collect_live_physical_net_wall_claim(
         "correspondence_status": correspondence_status,
         "correspondence_records_count": len(correspondence_records),
         "floor_finish_records_count": (
-            len(floor_finishes.records)
-            if floor_finishes is not None and floor_finishes.records
+            len(getattr(floor_finishes, "records", ()))
+            if floor_finishes is not None
             else 0
         ),
         "floor_finish_firm_quantities_count": (
@@ -1154,8 +1159,8 @@ def _collect_live_physical_net_wall_claim(
             sum(1 for q in floor_finish_quantity_evidence if q.abstained)
         ),
         "ceiling_finish_records_count": (
-            len(ceiling_finishes.records)
-            if ceiling_finishes is not None and ceiling_finishes.records
+            len(getattr(ceiling_finishes, "records", ()))
+            if ceiling_finishes is not None
             else 0
         ),
         "ceiling_firm_quantities_count": (
