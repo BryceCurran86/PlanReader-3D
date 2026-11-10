@@ -1,16 +1,22 @@
 """Default-off corner-leg existence and owner CRNR STACK pairing of both leaves."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_opening_label_dimension_authority import (
+    OpeningLabelDimensionEvidence,
     OpeningLabelDimensionProducer,
     _TrustedTextLine,
     _gap_span_for_opening,
     _label_matches_gap,
     parse_opening_label_dimensions,
+)
+from pb_raster_corner_framed_opening_shadow import (
+    detect_raster_corner_framed_openings_shadow,
 )
 from pb_opening_label_semantic_authority import (
     OpeningLabelSemanticProducer,
@@ -23,6 +29,7 @@ from pb_physical_opening_authority import (
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from test_raster_corner_framed_opening_shadow import (
+    ROOT,
     _existence_records,
     _pdf,
     _png,
@@ -220,10 +227,12 @@ def test_one_crnr_stack_callout_names_both_meeting_leaves() -> None:
         assert dimension.evidence is not None
         assert dimension.evidence.semantic_kind == "door"
         assert dimension.evidence.dimension_values_mm == (2100.0, 2400.0)
-        assert dimension.evidence.area_m2 == pytest.approx(5.04)
-        owned.append((record, dimension.evidence.raw_text))
+        # Compact HHWW product on the label evidence only. Not host/frame area.
+        assert type(dimension.evidence) is OpeningLabelDimensionEvidence
+        assert not isinstance(dimension.evidence, QuantityEvidence)
+        owned.append((record, dimension.evidence.raw_text, dimension.evidence.area_m2))
 
-    assert all("2124" in text for _record, text in owned)
+    assert all("2124" in text for _record, text, _area in owned)
 
     # The printed callout sits on one leaf. Sibling ownership, not nearest
     # label, is what names the other leaf.
@@ -236,3 +245,141 @@ def test_one_crnr_stack_callout_names_both_meeting_leaves() -> None:
     )
     assert _label_matches_gap(label, _gap_span_for_opening(producer, horizontal[1]))
     assert not _label_matches_gap(label, _gap_span_for_opening(producer, vertical[1]))
+
+
+def test_sibling_lookup_rejects_foreign_source_scope_with_the_same_bbox() -> None:
+    producer, published = _prepare(corner_shadow=True)
+    records = _existence_records(producer, published)
+    assert len(records) == 2
+    authority = producer.physical_opening_authority()
+    first, second = records
+    assert authority.raster_corner_leg_sibling_aperture(first) == second.aperture_bbox_pt
+    for foreign in (
+        replace(first, document_id="foreign-document"),
+        replace(first, revision_id="foreign-revision"),
+        replace(first, source_sha256="0" * 64),
+        replace(first, snapshot_id="foreign-snapshot"),
+        replace(first, page_id="99"),
+    ):
+        assert authority.raster_corner_leg_sibling_aperture(foreign) is None
+
+
+def _two_page_pdf(first, second) -> bytes:
+    doc = fitz.open()
+    try:
+        for gray in (first, second):
+            page = doc.new_page(width=gray.shape[1] / 2.0, height=gray.shape[0] / 2.0)
+            page.insert_image(page.rect, stream=_png(gray), keep_proportion=False)
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def _prepare_two_page(payload: bytes, page_ids=("1", "2")):
+    producer = SourceVisibilityProducer(
+        producer_method="raster-corner-optin-contract",
+        producer_version="1",
+        raster_corner_framed_opening_shadow=True,
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="corner-optin-two-page",
+        source_bytes=payload,
+        source_locator="memory://raster-corner-optin-two-page.pdf",
+        page_ids=page_ids,
+    )
+    published = producer.augment_with_raster_opening_primitives(
+        published.revision.revision_id, page_ids=page_ids)
+    return producer, published
+
+
+def _primitive_ids_by_page(producer, published):
+    visibility = producer.authority()
+    grouped: dict[str, list[str]] = {}
+    for observation_id in published.raster_opening_primitive_observation_ids:
+        resolved = visibility.resolve_raster_opening_primitive(
+            _selector(published, observation_id))
+        observation = resolved.observation
+        if observation is None:
+            continue
+        grouped.setdefault(str(observation.page_id), []).append(observation_id)
+    return grouped
+
+
+def _prove_ids(producer, published, observation_ids):
+    authority = producer.physical_opening_authority()
+    found = {}
+    for observation_id in observation_ids:
+        result = authority.prove_existence(_selector(published, observation_id))
+        record = result.existence_record
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and record is not None
+            and record.structural_pattern == RASTER_CORNER_FRAMED_OPENING_LEG
+        ):
+            found[record.record_id] = record
+    return tuple(found[key] for key in sorted(found))
+
+
+def test_two_page_same_bbox_collision_does_not_steal_a_sibling() -> None:
+    payload = _two_page_pdf(_sheet(), _sheet(v_band_high=80))
+    for page_order in (("2", "1"), ("1", "2")):
+        producer, published = _prepare_two_page(payload)
+        grouped = _primitive_ids_by_page(producer, published)
+        ordered_ids = [oid for page_id in page_order for oid in grouped.get(page_id, ())]
+        records = _prove_ids(producer, published, ordered_ids)
+        by_page = {}
+        for record in records:
+            by_page.setdefault(record.page_id, []).append(record)
+        assert set(by_page) == {"1", "2"}
+        assert all(len(legs) == 2 for legs in by_page.values())
+        authority = producer.physical_opening_authority()
+        page1_vertical = min(
+            by_page["1"],
+            key=lambda record: record.aperture_bbox_pt[2] - record.aperture_bbox_pt[0],
+        )
+        page2_vertical = min(
+            by_page["2"],
+            key=lambda record: record.aperture_bbox_pt[2] - record.aperture_bbox_pt[0],
+        )
+        assert page1_vertical.aperture_bbox_pt != page2_vertical.aperture_bbox_pt
+        for page_id, legs in by_page.items():
+            first, second = legs
+            assert authority.raster_corner_leg_sibling_aperture(first) == second.aperture_bbox_pt
+            assert authority.raster_corner_leg_sibling_aperture(second) == first.aperture_bbox_pt
+            foreign = replace(first, page_id="1" if page_id == "2" else "2")
+            assert authority.raster_corner_leg_sibling_aperture(foreign) is None
+
+
+def test_opt_in_label_product_stays_out_of_firm_customer_and_sealed_quantities() -> None:
+    producer, published = _prepare_labelled(stack_xy=(130.0, 96.0))
+    pairs = _corner_pairs(producer, published)
+    assert len(pairs) == 2
+    dimension_producer = OpeningLabelDimensionProducer.from_source_visibility_producer(producer)
+    shadow = detect_raster_corner_framed_openings_shadow(
+        producer, revision_id=published.revision.revision_id, page_id="1")
+    assert shadow.takeoff_eligible is False
+    assert shadow.candidates
+    assert all(
+        candidate.takeoff_eligible is False
+        and candidate.deduction_authority is False
+        and candidate.physical_opening_authority is False
+        for candidate in shadow.candidates
+    )
+    for selector, _record in pairs:
+        dimension = dimension_producer.publish_scope(selector)
+        assert dimension.status is EvidenceResolutionStatus.CORROBORATED
+        assert type(dimension.evidence) is OpeningLabelDimensionEvidence
+        assert not isinstance(dimension.evidence, QuantityEvidence)
+        assert getattr(dimension.evidence, "status", None) != "FIRM"
+        assert getattr(dimension.evidence, "authority", None) not in {"FIRM", "firm"}
+    blocked = (
+        ROOT / "pb_live_physical_net_wall_integration.py",
+        ROOT / "pb_live_append_only_opening_area_composition.py",
+        ROOT / "pb_live_physical_opening_void_composition.py",
+        ROOT / "tools" / "run_gpt3_lot16_original_sealed_score_input.py",
+        ROOT / "tools" / "run_source_closed_project_handoff.py",
+    )
+    for path in blocked:
+        text = path.read_text(encoding="utf-8")
+        assert "raster_corner_framed_opening_shadow" not in text
+        assert "RASTER_CORNER_FRAMED_OPENING_LEG" not in text

@@ -57,10 +57,11 @@ def _sheet(
     furniture: bool = False,
     unrelated_opening: bool = False,
     split_frames: bool = False,
+    v_band_high: int = 100,
 ) -> np.ndarray:
     gray = np.full((360, 640), 255, np.uint8)
     cv2.rectangle(gray, *H_BAND, 0, -1)
-    cv2.rectangle(gray, *V_BAND, 0, -1)
+    cv2.rectangle(gray, (V_BAND[0][0], V_BAND[0][1]), (V_BAND[1][0], v_band_high), 0, -1)
     for y in H_FRAME_ROWS[:frames]:
         if split_frames:
             cv2.line(gray, (h_frame_start, y), (260, y), 0, 1)
@@ -68,7 +69,7 @@ def _sheet(
         else:
             cv2.line(gray, (h_frame_start, y), (400, y), 0, 1)
     for x in V_FRAME_COLS[:frames]:
-        cv2.line(gray, (x, 100), (x, 164), 0, 1)
+        cv2.line(gray, (x, v_band_high), (x, 164), 0, 1)
     if face_lines:
         # The wall faces keep running past the jamb: a recess, not an opening.
         cv2.line(gray, (114, 150), (400, 150), 0, 1)
