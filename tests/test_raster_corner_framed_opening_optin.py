@@ -122,23 +122,26 @@ def test_crnr_stack_is_the_existing_stacker_door_phrase_not_a_raw_millimetre() -
     assert _explicit_word_kind("STACK OF BRICKS") == (None, False)
 
 
-def _labelled_pdf(*, stack_xy: tuple[float, float], bifold_xy: tuple[float, float] | None = None,
-                  unrelated_opening: bool = False) -> bytes:
+def _labelled_pdf(
+    *labels: tuple[tuple[float, float], str],
+    unrelated_opening: bool = False,
+) -> bytes:
     gray = _sheet(unrelated_opening=unrelated_opening)
     doc = fitz.open()
     try:
         page = doc.new_page(width=gray.shape[1] / 2.0, height=gray.shape[0] / 2.0)
         page.insert_image(page.rect, stream=_png(gray), keep_proportion=False)
-        page.insert_text(fitz.Point(*stack_xy), "2124 CRNR STACK", fontsize=7.0)
-        if bifold_xy is not None:
-            page.insert_text(fitz.Point(*bifold_xy), "2142 BIFOLD", fontsize=7.0)
+        for (x, y), text in labels:
+            page.insert_text(fitz.Point(x, y), text, fontsize=7.0)
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
 
 
-def _prepare_labelled(*, stack_xy: tuple[float, float], bifold_xy: tuple[float, float] | None = None,
-                      unrelated_opening: bool = False):
+def _prepare_labelled(
+    *labels: tuple[tuple[float, float], str],
+    unrelated_opening: bool = False,
+):
     producer = SourceVisibilityProducer(
         producer_method="raster-corner-optin-contract",
         producer_version="1",
@@ -146,8 +149,7 @@ def _prepare_labelled(*, stack_xy: tuple[float, float], bifold_xy: tuple[float, 
     )
     published = producer.ingest_native_pdf_bytes(
         document_id="corner-optin-contract",
-        source_bytes=_labelled_pdf(
-            stack_xy=stack_xy, bifold_xy=bifold_xy, unrelated_opening=unrelated_opening),
+        source_bytes=_labelled_pdf(*labels, unrelated_opening=unrelated_opening),
         source_locator="memory://raster-corner-optin-labelled.pdf",
         page_ids=("1",),
     )
@@ -202,8 +204,8 @@ def test_opt_in_does_not_pair_an_unrelated_straight_opening_as_a_sibling() -> No
 
 def test_one_crnr_stack_callout_names_both_meeting_leaves() -> None:
     producer, published = _prepare_labelled(
-        stack_xy=(130.0, 96.0),
-        bifold_xy=(110.0, 168.0),
+        ((130.0, 96.0), "2124 CRNR STACK"),
+        ((110.0, 168.0), "2142 BIFOLD"),
         unrelated_opening=True,
     )
     pairs = _corner_pairs(producer, published)
@@ -351,7 +353,7 @@ def test_two_page_same_bbox_collision_does_not_steal_a_sibling() -> None:
 
 
 def test_opt_in_label_product_stays_out_of_firm_customer_and_sealed_quantities() -> None:
-    producer, published = _prepare_labelled(stack_xy=(130.0, 96.0))
+    producer, published = _prepare_labelled(((130.0, 96.0), "2124 CRNR STACK"))
     pairs = _corner_pairs(producer, published)
     assert len(pairs) == 2
     dimension_producer = OpeningLabelDimensionProducer.from_source_visibility_producer(producer)
@@ -383,3 +385,55 @@ def test_opt_in_label_product_stays_out_of_firm_customer_and_sealed_quantities()
         text = path.read_text(encoding="utf-8")
         assert "raster_corner_framed_opening_shadow" not in text
         assert "RASTER_CORNER_FRAMED_OPENING_LEG" not in text
+
+
+def _horizontal_vertical(pairs):
+    horizontal = max(pairs, key=lambda item: item[1].aperture_bbox_pt[2] - item[1].aperture_bbox_pt[0])
+    vertical = min(pairs, key=lambda item: item[1].aperture_bbox_pt[2] - item[1].aperture_bbox_pt[0])
+    return horizontal, vertical
+
+
+def test_plain_door_callout_on_one_leaf_does_not_name_the_sibling() -> None:
+    producer, published = _prepare_labelled(((130.0, 96.0), "2118 DOOR"))
+    pairs = _corner_pairs(producer, published)
+    assert len(pairs) == 2
+    horizontal, vertical = _horizontal_vertical(pairs)
+    semantic_producer = OpeningLabelSemanticProducer.from_source_visibility_producer(producer)
+    dimension_producer = OpeningLabelDimensionProducer.from_source_visibility_producer(producer)
+
+    h_semantic = semantic_producer.publish_scope(horizontal[0])
+    h_dimension = dimension_producer.publish_scope(horizontal[0])
+    assert h_semantic.status is EvidenceResolutionStatus.CORROBORATED
+    assert h_semantic.evidence is not None
+    assert h_semantic.evidence.semantic_kind == "door"
+    assert h_dimension.status is EvidenceResolutionStatus.CORROBORATED
+    assert h_dimension.evidence is not None
+    assert h_dimension.evidence.dimension_values_mm == (2100.0, 1800.0)
+
+    v_semantic = semantic_producer.publish_scope(vertical[0])
+    v_dimension = dimension_producer.publish_scope(vertical[0])
+    assert v_semantic.status is EvidenceResolutionStatus.ABSTAINED
+    assert v_dimension.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_direct_sibling_door_callout_conflicts_instead_of_inheriting_crnr_stack() -> None:
+    producer, published = _prepare_labelled(
+        ((130.0, 96.0), "2124 CRNR STACK"),
+        ((8.0, 62.0), "2118 DOOR"),
+    )
+    pairs = _corner_pairs(producer, published)
+    assert len(pairs) == 2
+    horizontal, vertical = _horizontal_vertical(pairs)
+    semantic_producer = OpeningLabelSemanticProducer.from_source_visibility_producer(producer)
+    dimension_producer = OpeningLabelDimensionProducer.from_source_visibility_producer(producer)
+
+    h_semantic = semantic_producer.publish_scope(horizontal[0])
+    h_dimension = dimension_producer.publish_scope(horizontal[0])
+    assert h_semantic.status is EvidenceResolutionStatus.CORROBORATED
+    assert h_dimension.status is EvidenceResolutionStatus.CORROBORATED
+    assert h_dimension.evidence is not None
+    assert h_dimension.evidence.dimension_values_mm == (2100.0, 2400.0)
+    assert "2118" not in h_dimension.evidence.raw_text
+
+    v_dimension = dimension_producer.publish_scope(vertical[0])
+    assert v_dimension.status is EvidenceResolutionStatus.CONFLICT

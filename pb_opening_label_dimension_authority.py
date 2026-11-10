@@ -307,10 +307,12 @@ def _resolve_owned_dimension_values_mm(
     # Historical compact forms with an established modifier remain supported.
     # New/opaque suffixes do not gain meaning from parsing: they may unlock
     # compact expansion only when the independent producer-owned semantic
-    # authority has authenticated the same physical opening label.
+    # authority has authenticated the same physical opening label. The shared
+    # CRNR STACK assembly phrase is itself that authenticated door kind.
     if (
         _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
         and not authenticated_semantic_evidence
+        and not _is_common_corner_assembly_callout(parsed.raw_text)
     ):
         return None
 
@@ -508,24 +510,52 @@ def _gap_span_from_bbox(bbox) -> Optional[_GapSpan]:
     return None
 
 
+_CORNER_ASSEMBLY_CALLOUT_RE = re.compile(r"\bCRNR\s+STACK(?:ER)?\b", re.IGNORECASE)
+
+
+def _is_common_corner_assembly_callout(text: str) -> bool:
+    """True only for the authenticated shared CRNR STACK compact callout.
+
+    Ordinary DOOR, WINDOW or BIFOLD text on one leaf is not the other leaf's
+    label. Compact HHWW without the corner-assembly phrase does not inherit.
+    """
+    parsed = parse_opening_label_dimensions(text)
+    if parsed is None or not parsed.compact_hundreds_present:
+        return False
+    return _CORNER_ASSEMBLY_CALLOUT_RE.search(text or "") is not None
+
+
 def _label_ownership_gaps(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
-) -> tuple[_GapSpan, ...]:
-    """Own labels on this opening, plus the sibling corner-stacker leaf.
+) -> tuple[tuple[_GapSpan, ...], tuple[_GapSpan, ...]]:
+    """Return (primary gaps, sibling gaps) for one proven opening.
 
-    Owner rule: a CRNR STACK compact code names both meeting leaves. The
-    sibling aperture comes from the same nomination, not nearest geometry.
+    Primary-leg ownership stays ordinary. Sibling inheritance is only the
+    independently authenticated common CRNR STACK callout on the paired leaf.
     """
     primary = _gap_span_for_opening(source, opening)
-    gaps: list[_GapSpan] = [] if primary is None else [primary]
+    primaries: tuple[_GapSpan, ...] = () if primary is None else (primary,)
     if opening.structural_pattern != RASTER_CORNER_FRAMED_OPENING_LEG:
-        return tuple(gaps)
+        return primaries, ()
     sibling_box = source.physical_opening_authority().raster_corner_leg_sibling_aperture(opening)
     sibling = _gap_span_from_bbox(sibling_box)
-    if sibling is not None and sibling != primary:
-        gaps.append(sibling)
-    return tuple(gaps)
+    siblings: tuple[_GapSpan, ...] = (
+        (sibling,) if sibling is not None and sibling != primary else ()
+    )
+    return primaries, siblings
+
+
+def _label_matches_owned_opening(
+    line: "_TrustedTextLine",
+    primaries: tuple[_GapSpan, ...],
+    siblings: tuple[_GapSpan, ...],
+) -> bool:
+    if any(_label_matches_gap(line, gap) for gap in primaries):
+        return True
+    if not siblings or not _is_common_corner_assembly_callout(line.text):
+        return False
+    return any(_label_matches_gap(line, gap) for gap in siblings)
 
 
 def _gap_span_for_opening(
@@ -1144,8 +1174,8 @@ class OpeningLabelDimensionProducer:
         if prior is not None:
             return prior
 
-        gaps = _label_ownership_gaps(self._source, opening)
-        if not gaps:
+        primaries, siblings = _label_ownership_gaps(self._source, opening)
+        if not primaries:
             return self._store(
                 key,
                 _blocked(
@@ -1208,7 +1238,7 @@ class OpeningLabelDimensionProducer:
         ] = {}
         for line in self._trusted_text_lines_for_opening(opening):
             parsed = parse_opening_label_dimensions(line.text)
-            if parsed is None or not any(_label_matches_gap(line, gap) for gap in gaps):
+            if parsed is None or not _label_matches_owned_opening(line, primaries, siblings):
                 continue
             if not all(self._authenticate_word_observation(opening, oid) for oid in line.observation_ids):
                 continue

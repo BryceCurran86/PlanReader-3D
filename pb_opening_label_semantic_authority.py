@@ -10,7 +10,7 @@ from pb_opening_label_dimension_authority import (
     _TrustedTextLine,
     _bbox_overlap_fraction,
     _bbox_union,
-    _label_matches_gap,
+    _label_matches_owned_opening,
     _label_ownership_gaps,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
@@ -241,15 +241,15 @@ class OpeningLabelSemanticProducer:
                 EvidenceResolutionStatus.ABSTAINED,
                 (OPENING_LABEL_SEMANTIC_UNAVAILABLE,),
             )
-        gaps = _label_ownership_gaps(self._source, opening)
-        if not gaps:
+        primaries, siblings = _label_ownership_gaps(self._source, opening)
+        if not primaries:
             return OpeningLabelSemanticResult(EvidenceResolutionStatus.ABSTAINED, (OPENING_LABEL_SEMANTIC_UNAVAILABLE,))
 
         lines = _trusted_native_lines(self._source, opening)
         legend, legend_conflicts = _legend_semantics(lines)
         candidates = []
         for _block_no, _line_no, line in lines:
-            if not any(_label_matches_gap(line, gap) for gap in gaps):
+            if not _label_matches_owned_opening(line, primaries, siblings):
                 continue
             direct_kind, direct_conflict = _explicit_word_kind(line.text)
             compact_kind, compact_conflict = classify_compact_source_opening_text(
