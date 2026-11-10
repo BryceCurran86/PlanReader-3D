@@ -166,6 +166,92 @@ def test_compose_and_mixed_scope_shadow_flags_default_off():
     assert producer.parameters['source_fragment_roles_shadow'].default is False
 
 
+def test_fragment_nominated_member_without_whole_candidate_role_is_not_a_host(monkeypatch):
+    from test_raster_opening_split_centerline_host import OPENING, _record
+
+    ordinary = _record('right', start=140., end=220., offset=1., source_ids=('raw:right',))
+    parent = _record('parent', start=20., end=220., offset=-2., source_ids=('raw:parent',))
+    parent.wall_candidate.centerline_pts = (
+        (20., 53.), (100., 53.), (140., 53.), (220., 53.),
+    )
+
+    def source_band(auth, opening, records, geom, equivalence, source_ids):
+        return host._HostBandResolution(
+            Status.CORROBORATED,
+            (host._HostBand(
+                member_ids=('parent', 'right'),
+                member_candidate_identity_ids=('parent', 'right'),
+                member_equivalence_groups=(('parent',), ('right',)),
+                center_offset=0.0,
+            ),),
+            (host.RASTER_SOURCE_BAND_HOST_RESOLVED,),
+        )
+
+    monkeypatch.setattr(host, 'resolve_physical_wall_equivalence', lambda identities: identities)
+    monkeypatch.setattr(host, '_resolve_raster_source_band_host', source_band)
+    resolution = host._resolve_opening_local_mixed_scope_source_band(
+        None, None, OPENING, (ordinary,), (parent,), ('old',), ('new',),
+        source_fragment_roles_shadow=True,
+    )
+    assert resolution.bands == ()
+    assert resolution.reason_codes == (
+        host.OPENING_LOCAL_SUPPLEMENTAL_WHOLE_CANDIDATE_ROLE_UNMAPPED,
+    )
+
+
+def test_mixed_scope_host_with_only_shared_members_is_demoted():
+    from pb_opening_host_binding_authority import (
+        OPENING_HOST_BINDING_RESOLVED,
+        OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER,
+        OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
+        OpeningHostBindingRecord,
+        OpeningHostBindingResult,
+        _exclusive_mixed_scope_host_results,
+    )
+
+    def record(opening, members, mixed):
+        payload = OpeningHostBindingRecord(
+            record_id='rec-' + opening,
+            document_id='d',
+            revision_id='r',
+            source_sha256='s',
+            snapshot_id='n',
+            page_id='3',
+            decision_scope_id='wall-source:page-3',
+            opening_identity_id=opening,
+            host_wall_id='host-' + opening,
+            member_wall_candidate_ids=members,
+            member_candidate_identity_ids=members,
+            member_equivalence_groups=tuple((member,) for member in members),
+            source_observation_ids=('obs',),
+        )
+        reasons = (OPENING_HOST_BINDING_RESOLVED,)
+        if mixed:
+            reasons = reasons + (OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,)
+        return OpeningHostBindingResult(Status.CORROBORATED, reasons, payload)
+
+    neighbour = record('opening-neighbour', ('wall_shared_a', 'wall_unique_n'), mixed=True)
+    other = record('opening-other', ('wall_shared_b', 'wall_unique_o'), mixed=True)
+    borrowed = record('opening-borrowed', ('wall_shared_a', 'wall_shared_b'), mixed=True)
+    unique = record('opening-unique', ('wall_left', 'wall_right'), mixed=True)
+    ordinary = record('opening-ordinary', ('wall_ordinary',), mixed=False)
+    results = {
+        ('d', 'r', 's', 'n', '3', 'scope', 'opening-neighbour'): neighbour,
+        ('d', 'r', 's', 'n', '3', 'scope', 'opening-other'): other,
+        ('d', 'r', 's', 'n', '3', 'scope', 'opening-borrowed'): borrowed,
+        ('d', 'r', 's', 'n', '3', 'scope', 'opening-unique'): unique,
+        ('d', 'r', 's', 'n', '3', 'scope', 'opening-ordinary'): ordinary,
+    }
+    exclusive = _exclusive_mixed_scope_host_results(results)
+    assert exclusive[('d', 'r', 's', 'n', '3', 'scope', 'opening-neighbour')].record is neighbour.record
+    assert exclusive[('d', 'r', 's', 'n', '3', 'scope', 'opening-other')].record is other.record
+    assert exclusive[('d', 'r', 's', 'n', '3', 'scope', 'opening-unique')].record is unique.record
+    assert exclusive[('d', 'r', 's', 'n', '3', 'scope', 'opening-ordinary')].record is ordinary.record
+    demoted = exclusive[('d', 'r', 's', 'n', '3', 'scope', 'opening-borrowed')]
+    assert demoted.record is None
+    assert OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER in demoted.reason_codes
+
+
 def test_through_going_parent_is_not_a_left_owner_unless_fragment_flag(monkeypatch):
     from test_raster_opening_split_centerline_host import OPENING, _record
 
