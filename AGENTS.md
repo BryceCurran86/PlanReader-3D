@@ -1,5 +1,42 @@
 # PlanReader-3D agent contract
 
+## Owner autonomous completion directive — 2026-11-10 (current)
+
+The owner directs **GPT MAX, Cursor, Claude and AntiGravity** to continue their
+assigned source-to-customer and benchmark work autonomously until the documented
+acceptance conditions are met. Read the current ordered queues and handoff
+contract in [Autonomous completion queues](docs/engineering/AUTONOMOUS_COMPLETION_QUEUES_20261110.md)
+and the latest claims on #4135 before each task. This four-agent assignment
+supersedes the historical "no new Cursor tasks" wording below. GPT1/GPT2/GPT3
+remain retired.
+
+- An architecture report is followed by implementation and validation within
+  the same authorized task. Do not stop at "waiting for MAX/review/approval".
+  External review and formal approval votes are optional; required source,
+  physical/metric authority, automated checks and signed/customer retention are
+  mandatory. No missing evidence may be promoted to avoid a wait.
+- Freeze each handoff's full SHA while CI or protected replay runs. Immediately
+  take the next independent task in your queue in a separate branch/worktree.
+  Keep one active implementation claim per function; never overwrite another
+  agent's branch or borrow a result from a different tree.
+- A blocked object retains its source-backed ABSTAIN/CONFLICT. Record its exact
+  first failing gate, evidence needed and owner, then advance another actionable
+  task. Do not repeat an unchanged costly replay or end a session merely because
+  one review/run is pending. Checkpoint unfinished work before runtime limits.
+- Each agent owns its end-to-end evidence packet and final diff review. Merge
+  eligible changes after all applicable acceptance evidence passes, coordinating
+  the integration order and expected head with MAX. No unrelated review response
+  is a prerequisite. Benchmark/source-inventory evidence stays separate from
+  production code and never changes frozen120 values, IDs, tolerances or scoring
+  rules merely to enable publication.
+- Latest owner corner decision: **both 2124 stackers meet at the corner and the
+  shared 2124 callout describes both**. This supersedes labelled-leg-only notes
+  for that authenticated corner assembly; it does not authorize transferring
+  unrelated labels or source ownership between pages, revisions or assemblies.
+
+The directive records work authorization; GitHub comments do not launch or keep
+an external agent process alive. Report execution and progress only when observed.
+
 ## Owner external-door height estimate rule — 2026-11-09 (current)
 
 **Where a specific external-door height is not stated on the door schedule, elevations or plans, assume 2100 mm for a provisional external-door estimate unless otherwise specifically noted.** Use an authenticated door-specific schedule/elevation height in preference to the assumption, and do not hide explicit conflicts or exceptions. The default is restricted to source-authenticated **external doors**; it is not a default for internal doors, windows, garage panels or joinery.
