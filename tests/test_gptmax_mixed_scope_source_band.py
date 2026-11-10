@@ -252,6 +252,81 @@ def test_mixed_scope_host_with_only_shared_members_is_demoted():
     assert OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER in demoted.reason_codes
 
 
+def _mixed_scope_record(opening, members, *, document='d', revision='r',
+                        sha='s', snapshot='n', page='3'):
+    from pb_opening_host_binding_authority import (
+        OPENING_HOST_BINDING_RESOLVED,
+        OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
+        OpeningHostBindingRecord,
+        OpeningHostBindingResult,
+    )
+
+    payload = OpeningHostBindingRecord(
+        record_id='rec-' + opening,
+        document_id=document,
+        revision_id=revision,
+        source_sha256=sha,
+        snapshot_id=snapshot,
+        page_id=page,
+        decision_scope_id='wall-source:page-' + page,
+        opening_identity_id=opening,
+        host_wall_id='host-' + opening,
+        member_wall_candidate_ids=members,
+        member_candidate_identity_ids=members,
+        member_equivalence_groups=tuple((member,) for member in members),
+        source_observation_ids=('obs',),
+    )
+    return OpeningHostBindingResult(
+        Status.CORROBORATED,
+        (OPENING_HOST_BINDING_RESOLVED, OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED),
+        payload,
+    )
+
+
+@pytest.mark.parametrize('first_foreign', (False, True))
+@pytest.mark.parametrize('axis,foreign_value', (
+    ('document', 'other-doc'),
+    ('revision', 'other-rev'),
+    ('sha', 'other-sha'),
+    ('snapshot', 'other-snap'),
+    ('page', '11'),
+))
+def test_mixed_scope_exclusivity_is_namespaced_by_physical_source_scope(
+    first_foreign, axis, foreign_value,
+):
+    from pb_opening_host_binding_authority import (
+        OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER,
+        _exclusive_mixed_scope_host_results,
+    )
+
+    members = ('same-coordinate-left', 'same-coordinate-right')
+    local = _mixed_scope_record('opening-local', members)
+    foreign_kwargs = {axis: foreign_value}
+    foreign = _mixed_scope_record('opening-foreign', members, **foreign_kwargs)
+    local_key = (
+        local.record.document_id, local.record.revision_id,
+        local.record.source_sha256, local.record.snapshot_id,
+        local.record.page_id, 'scope', 'opening-local',
+    )
+    foreign_key = (
+        foreign.record.document_id, foreign.record.revision_id,
+        foreign.record.source_sha256, foreign.record.snapshot_id,
+        foreign.record.page_id, 'scope', 'opening-foreign',
+    )
+    alone = _exclusive_mixed_scope_host_results({local_key: local})
+    assert alone[local_key].record is local.record
+    ordered = (
+        {foreign_key: foreign, local_key: local}
+        if first_foreign else
+        {local_key: local, foreign_key: foreign}
+    )
+    exclusive = _exclusive_mixed_scope_host_results(ordered)
+    assert exclusive[local_key].record is local.record
+    assert exclusive[foreign_key].record is foreign.record
+    assert OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER not in exclusive[local_key].reason_codes
+    assert OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER not in exclusive[foreign_key].reason_codes
+
+
 def test_through_going_parent_is_not_a_left_owner_unless_fragment_flag(monkeypatch):
     from test_raster_opening_split_centerline_host import OPENING, _record
 

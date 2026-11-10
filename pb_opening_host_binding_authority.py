@@ -306,19 +306,31 @@ def _blocked_universe(
     )
 
 
+def _physical_source_scope(record: OpeningHostBindingRecord) -> tuple[str, str, str, str, str]:
+    """Exact document/revision/SHA/snapshot/page universe for one host record."""
+    return (
+        str(record.document_id),
+        str(record.revision_id),
+        str(record.source_sha256),
+        str(record.snapshot_id),
+        str(record.page_id),
+    )
+
+
 def _exclusive_mixed_scope_host_results(
     results: Mapping[_BindingKey, OpeningHostBindingResult],
 ) -> dict[_BindingKey, OpeningHostBindingResult]:
-    """Keep mixed-scope hosts only when at least one member is unshared."""
-    owners: dict[str, set[str]] = {}
+    """Keep mixed-scope hosts only when at least one same-source member is unshared."""
+    owners: dict[tuple[str, str, str, str, str, str], set[str]] = {}
     for result in results.values():
         record = result.record
         if (result.status is not EvidenceResolutionStatus.CORROBORATED
                 or record is None):
             continue
         opening_id = str(record.opening_identity_id)
+        scope = _physical_source_scope(record)
         for member_id in record.member_wall_candidate_ids:
-            owners.setdefault(str(member_id), set()).add(opening_id)
+            owners.setdefault((*scope, str(member_id)), set()).add(opening_id)
     exclusive: dict[_BindingKey, OpeningHostBindingResult] = {}
     for key, result in results.items():
         record = result.record
@@ -328,7 +340,7 @@ def _exclusive_mixed_scope_host_results(
                 not in result.reason_codes
                 or not record.member_wall_candidate_ids
                 or any(
-                    len(owners.get(str(member_id), ())) == 1
+                    len(owners.get((*_physical_source_scope(record), str(member_id)), ())) == 1
                     for member_id in record.member_wall_candidate_ids
                 )):
             exclusive[key] = result
