@@ -25,6 +25,13 @@ SOURCE_MISMATCH = "SOURCE_MISMATCH"
 ORIGINAL_PDF_ABSENT = "original_pdf_absent"
 ORIGINAL_PDF_DIGEST_MISMATCH = "original_pdf_digest_mismatch"
 
+# Same identity tuple must be used by preflight and downstream native-input audit.
+# Windows fstat reports st_ctime_ns differently from Path.lstat on some files.
+ORIGINAL_SOURCE_IDENTITY_FIELDS = (
+    "st_dev", "st_ino", "st_size", "st_mtime_ns",
+    "st_birthtime_ns" if os.name == "nt" else "st_ctime_ns",
+)
+
 
 
 def _original_source_path_kind(pdf_path: Path) -> str:
@@ -70,7 +77,7 @@ def _stable_original_digest(pdf_path: Path) -> tuple[str, tuple[int, ...]]:
         after = pdf_path.lstat()
     except OSError as exc:
         raise ValueError("original source changed or inaccessible during preflight") from exc
-    identity_and_content = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    identity_and_content = ORIGINAL_SOURCE_IDENTITY_FIELDS
     if (
         not S_ISREG(after.st_mode)
         or any(

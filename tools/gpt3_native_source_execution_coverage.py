@@ -23,13 +23,15 @@ from pb_source_observation_authority import (
     SOURCE_OBSERVATION_EXISTS, SourceDecodeCoverageRecord,
     SourceObservationProducer,
 )
-from tools.gpt3_original_source_preflight import _stable_original_digest
+from tools.gpt3_original_source_preflight import (
+    ORIGINAL_SOURCE_IDENTITY_FIELDS, _stable_original_digest,
+)
 
 
 _METHOD = "owner-native-source-execution-coverage"
 _VERSION = "1.0.0"
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
-_IDENTITY_FIELDS = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+_IDENTITY_FIELDS = ORIGINAL_SOURCE_IDENTITY_FIELDS
 
 
 def _original_bytes(path: Path, expected_sha256: str) -> tuple[bytes, tuple[int, ...]]:
