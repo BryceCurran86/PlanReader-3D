@@ -69,6 +69,8 @@ from pb_pdf_text_integrity_authority import (
     classify_native_word_integrity,
 )
 from pb_source_observation_authority import (
+    _REGISTERED_STORES_BY_SNAPSHOT,
+    get_source_observation_store_for_snapshot,
     _bind_record_to_snapshot,
     NativePageImagePlacement,
     OBSERVATION_UNAVAILABLE,
@@ -2489,6 +2491,11 @@ class SourceVisibilityProducer:
             self._visibility_page_cache.pop(cache_key, None)
 
         self._published_by_revision[published.revision.revision_id] = published
+        try:
+            _REGISTERED_STORES_BY_SNAPSHOT[published.snapshot.snapshot_id] = self._producer._store
+            _REGISTERED_STORES_BY_SNAPSHOT[published.revision.revision_id] = self._producer._store
+        except Exception:
+            pass
         if self._source_glyph_ledger_text_trust:
             self.upgrade_glyph_only_text(
                 published.revision.revision_id, page_ids=page_ids)

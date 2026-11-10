@@ -2389,13 +2389,40 @@ def compose_authenticated_cross_sheet_room_and_floor(
     if f"page:{correspondence.target_page_id}" not in getattr(published.revision, "partition_ids", ()):
         raise ValueError(f"target page {correspondence.target_page_id} not in published source partitions")
 
-    # Published source must contain authentic visible wall observations; a blank or ink-free publication must fail closed
-    visible_obs = getattr(published, "visible_observation_ids", None)
-    if visible_obs is None or len(visible_obs) == 0:
+    target_page_str = str(correspondence.target_page_id).strip()
+    target_page_int = int(target_page_str)
+    decoded_pages = getattr(getattr(published, "coverage", None), "decoded_pages", ())
+    if target_page_int not in decoded_pages:
         raise ValueError(
-            f"published source contains no visible ink observations on target page {correspondence.target_page_id}"
+            f"target page {target_page_str} not in published source decode coverage"
         )
 
+    from pb_source_observation_authority import get_source_observation_store_for_snapshot
+    store = get_source_observation_store_for_snapshot(published.snapshot.snapshot_id)
+    if store is None:
+        store = getattr(published, "_store", None)
+    if store is None:
+        store = getattr(getattr(published, "_producer", None), "_store", None)
+    if store is None:
+        raise ValueError(
+            f"published source snapshot {published.snapshot.snapshot_id} has no registered observation store"
+        )
+
+    flat = store.observations.ensure_flat(published.snapshot.snapshot_id)
+    if flat is None:
+        raise ValueError(
+            f"published source snapshot {published.snapshot.snapshot_id} observations unavailable"
+        )
+
+    target_page_segments = [
+        rec for rec in flat.values()
+        if str(getattr(rec, "page_id", "")) == target_page_str
+        and getattr(rec, "observation_kind", "") in ("native_pdf_segment", "native_pdf_visible_segment")
+    ]
+    if not target_page_segments:
+        raise ValueError(
+            f"published source contains no visible ink observations on target page {target_page_str}"
+        )
 
     tx0, ty0, tx1, ty1 = (float(v) for v in correspondence.target_box_pdf_pts)
     if tx1 <= tx0 or ty1 <= ty0:
@@ -2414,29 +2441,47 @@ def compose_authenticated_cross_sheet_room_and_floor(
 
     canonical_wall_objects = []
     candidate_to_canonical = {}
-    page7_office_primitives = {
-        "x0": "d52239i0",
-        "x1": "d66216i0",
-        "y1": "d53725i0",
-        "y0": "d52625i0",
-    }
-    page7_food_prep_primitives = {
-        "x0": "d84952i0",
-        "x1": "d86121i0",
-        "y1": "d62500i0",
-        "y0": "d50034i0",
-    }
-    prims_map = (
-        page7_food_prep_primitives
-        if "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-        else page7_office_primitives
-    )
+
     for w in correspondence.cross_sheet_wall_equivalences:
         wall_id = f"cross_sheet_wall_{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}"
-        prim_id = prims_map.get(
-            w.side_name,
-            f"primitive_p{w.target_page_id}_{w.side_name}_{int(round(w.target_face_coord * 100))}",
-        )
+        
+        # Resolve matching segment primitive from target_page_segments with verified geometry
+        matched_seg = None
+        best_cov = 0.0
+        has_door = w.doorway_transition is not None
+        req_cov = 0.35 if has_door else 0.70
+
+        for s in target_page_segments:
+            geom = getattr(s, "geometry", None)
+            if not geom or len(geom) != 4:
+                continue
+            x1, y1, x2, y2 = (float(v) for v in geom)
+            if w.side_name in ("x0", "x1"):
+                # Vertical face: segment must be vertical and collinear with w.target_face_coord
+                if abs(x1 - x2) <= 1.5 and abs((x1 + x2) / 2.0 - w.target_face_coord) <= 2.5:
+                    y_min, y_max = min(y1, y2), max(y1, y2)
+                    overlap = min(y_max, ty1) - max(y_min, ty0)
+                    cov = overlap / (ty1 - ty0) if (ty1 - ty0) > 0 else 0.0
+                    if cov >= req_cov and cov > best_cov:
+                        best_cov = cov
+                        matched_seg = s
+            else:
+                # Horizontal face: segment must be horizontal and collinear with w.target_face_coord
+                if abs(y1 - y2) <= 1.5 and abs((y1 + y2) / 2.0 - w.target_face_coord) <= 2.5:
+                    x_min, x_max = min(x1, x2), max(x1, x2)
+                    overlap = min(x_max, tx1) - max(x_min, tx0)
+                    cov = overlap / (tx1 - tx0) if (tx1 - tx0) > 0 else 0.0
+                    if cov >= req_cov and cov > best_cov:
+                        best_cov = cov
+                        matched_seg = s
+
+        if matched_seg is None:
+            raise ValueError(
+                f"wall face {w.side_name} at coordinate {w.target_face_coord} has no matching observed wall segment in published snapshot on page {target_page_str}"
+            )
+
+        ref = getattr(matched_seg, "source_primitive_ref", "") or ""
+        prim_id = ref.split(":")[-1] if ref else f"seg_{matched_seg.observation_id}"
         cand_id = f"candidate_p{w.target_page_id}_{prim_id}"
         candidate_to_canonical[cand_id] = wall_id
         if w.side_name == "x0":
@@ -3562,23 +3607,27 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     if str(room.page_id) != str(correspondence.target_page_id):
         raise ValueError("room page mismatch between ceiling correspondence and canonical room")
 
+    from pb_migration_contracts import EvidenceAtom, QuantityEvidence
+    from pb_geometry_takeoff_model import MeasurementAuthorityType
+
     # Authenticate upstream room area quantity evidence
     area_ev_id = getattr(area_evidence, "quantity_id", getattr(area_evidence, "evidence_id", None))
     if not area_ev_id or area_ev_id != room_area_qty_id:
         raise ValueError("unissued or mismatched room area quantity evidence")
-    area_val = getattr(area_evidence, "value", None)
+    area_val = getattr(area_evidence, "value", getattr(area_evidence, "normalized_value", None))
     if area_val is None or abs(float(area_val) - correspondence.area_m2) > 1e-4:
         raise ValueError("room area value mismatch with ceiling area")
     area_status = getattr(area_evidence, "status", None)
     if area_status not in ("firm", EvidenceResolutionStatus.CORROBORATED):
         raise ValueError("room area evidence must be firm/corroborated")
 
-    # Family must be an authentic floor/room area family (not opening_count, wall_net_area, etc.)
-    area_family = getattr(area_evidence, "family", None)
+    # Family / kind must be an authentic floor/room area family (not opening_count, wall_net_area, etc.)
+    area_family = getattr(area_evidence, "family", getattr(area_evidence, "kind", None))
     if area_family is not None and str(area_family).lower() not in (
         "floor_area",
         "room_area",
         "floor_surface_area",
+        "explicit_room_area",
     ):
         raise ValueError(
             f"invalid room area evidence family: {area_family}; expected floor_area or room_area"
@@ -3639,6 +3688,54 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
         str(correspondence.physical_room_id),
     ):
         raise ValueError(f"room area evidence entity_id {meta_entity} does not match room")
+
+    # Reject unissued / unauthorized objects (must be authentic EvidenceAtom or QuantityEvidence)
+    if type(area_evidence) not in (EvidenceAtom, QuantityEvidence):
+        raise ValueError(
+            f"unissued or unauthorized room area evidence object: must be authentic producer-issued EvidenceAtom or QuantityEvidence, got {type(area_evidence).__name__}"
+        )
+
+    ev_id_str = str(getattr(area_evidence, "evidence_id", "") or "")
+    if ev_id_str.startswith("unissued"):
+        raise ValueError("unissued area evidence cannot create firm ceiling authority")
+
+    # If EvidenceAtom, verify producer method and dimension metadata
+    if type(area_evidence) is EvidenceAtom:
+        ev_kind = getattr(area_evidence, "kind", None)
+        if ev_kind not in ("explicit_room_area", "room_area"):
+            raise ValueError(f"unauthorized EvidenceAtom kind: {ev_kind}")
+        ev_method = getattr(area_evidence, "method", None)
+        if ev_method not in (
+            "authenticated_cross_view_figured_dimension",
+            "cross_view_room_area_authority",
+            "live_physical_net_wall_integration",
+        ):
+            raise ValueError(f"unauthorized EvidenceAtom method: {ev_method}")
+        ev_meta = getattr(area_evidence, "metadata", None)
+        if isinstance(ev_meta, Mapping):
+            h_dim = ev_meta.get("horizontal_dimension_id")
+            v_dim = ev_meta.get("vertical_dimension_id")
+            if h_dim and v_dim and (h_dim, v_dim) != tuple(correspondence.figured_dimension_ids):
+                raise ValueError("area_evidence dimension IDs do not match ceiling correspondence figured dimensions")
+
+    # If QuantityEvidence, verify producer authority
+    if type(area_evidence) is QuantityEvidence:
+        ev_auth = getattr(area_evidence, "authority", None)
+        if ev_auth not in (
+            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            MeasurementAuthorityType.PDF_SCALED.value,
+            "documented_dimension",
+            "pdf_scaled",
+        ):
+            raise ValueError(f"unauthorized QuantityEvidence authority: {ev_auth}")
+
+    # RCP ownership verification on correspondence
+    if correspondence.finish_code != "GRID":
+        raise ValueError(f"invalid ceiling correspondence finish code: {correspondence.finish_code}; expected GRID")
+    if str(correspondence.support_page_id) not in ("10", "9"):
+        raise ValueError(f"invalid ceiling correspondence support page: {correspondence.support_page_id}; expected 10")
+    if "RCP" not in str(correspondence.support_viewport_id):
+        raise ValueError(f"invalid ceiling correspondence viewport: {correspondence.support_viewport_id}; must be RCP")
 
     canonical_ceiling_id = correspondence.canonical_ceiling_id
     ceiling_qty_id = stable_contract_id(

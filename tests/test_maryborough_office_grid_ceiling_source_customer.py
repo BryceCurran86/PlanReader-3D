@@ -786,3 +786,88 @@ def test_adversarial_wrong_family_foreign_snapshot_blocked_area_evidence_raises(
             room_area_qty_id="area_qty_1",
         )
 
+
+
+def test_unissued_area_simplenamespace_does_not_create_firm_ceiling_raises():
+    """Defect 2 regression: caller SimpleNamespace without producer authority must fail closed (raise ValueError)."""
+    from types import SimpleNamespace
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        EvidenceResolutionStatus,
+        SourceCrossViewCeilingCorrespondenceRecord,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+    )
+
+    doc_id = "doc1"
+    sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    rev_id = "rev1"
+    snap_id = "snap1"
+    room_id = "room_office_1"
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_1",
+        canonical_ceiling_id="c_1",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id="face_1",
+        support_page_id="10",
+        support_viewport_id="VIEWPORT_P10_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="SUSPENDED ACOUSTIC GRID CEILING",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+
+    room = SimpleNamespace(
+        canonical_room_id=room_id,
+        physical_room_id=room_id,
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+        source_room_face_record_id="face_1",
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        polygon_pdf_pts=((173.04, 1382.72), (316.80, 1382.72), (316.80, 1585.04), (173.04, 1585.04)),
+        evidence_ids=("ev_room",),
+    )
+
+    unissued_evidence = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+        evidence_id="unissued_area",
+        family="floor_area",
+        unit="m2",
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+        },
+    )
+
+    with pytest.raises(ValueError, match="unissued|unauthorized|EvidenceAtom"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            room_area_qty_id="area_qty_1",
+            area_evidence=unissued_evidence,
+        )

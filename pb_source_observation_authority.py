@@ -461,6 +461,15 @@ def committed_record_is_trusted(store: "_SourceObservationStore", snapshot_id: s
     )
 
 
+
+_REGISTERED_STORES_BY_SNAPSHOT: dict[str, "_SourceObservationStore"] = {}
+
+
+def get_source_observation_store_for_snapshot(snapshot_id: str) -> Optional["_SourceObservationStore"]:
+    """Retrieve authentic _SourceObservationStore for a producer-issued snapshot_id."""
+    return _REGISTERED_STORES_BY_SNAPSHOT.get(str(snapshot_id))
+
+
 class _SourceObservationStore:
     def __init__(self) -> None:
         self.generation = 0
@@ -542,6 +551,8 @@ class _SourceObservationStore:
         cached = (snapshot, frozenset(snapshot.observation_ids))
         self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
         self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.snapshot_id] = self
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.revision_id] = self
         while len(self.snapshot_observation_id_sets) > _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS:
             self.snapshot_observation_id_sets.popitem(last=False)
         return cached
@@ -1977,6 +1988,8 @@ class SourceObservationProducer:
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
         self._store.cache_snapshot_membership(snapshot)
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.snapshot_id] = self._store
+        _REGISTERED_STORES_BY_SNAPSHOT[revision.revision_id] = self._store
         if parent_id is not None:
             self._store.observations.fork(snapshot.snapshot_id, parent_id)
             self._store.record_fingerprints.fork(snapshot.snapshot_id, parent_id)
@@ -2179,6 +2192,7 @@ class SourceObservationAuthority:
 
 
 __all__ = [
+    "get_source_observation_store_for_snapshot",
     "LINEAGE_UNAVAILABLE",
     "NativePageImagePlacement",
     "OBSERVATION_UNAVAILABLE",

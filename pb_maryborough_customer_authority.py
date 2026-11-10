@@ -165,7 +165,7 @@ def issue_all_original_maryborough_customer_quantities(
                         document_id=MARYBOROUGH_DOCUMENT_ID,
                         source_bytes=payload,
                         source_locator=str(path),
-                        page_ids=("11",),
+                        page_ids=("7", "11"),
                     )
                 except Exception:
                     return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
