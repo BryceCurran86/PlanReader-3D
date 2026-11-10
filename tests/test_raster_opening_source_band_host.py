@@ -125,3 +125,30 @@ def test_source_alias_order_cannot_change_proven_band_geometry():
     assert first.status is Status.CORROBORATED
     assert replay == first
     assert first.bands[0].center_offset == 0.0  # midpoint of source faces 50/60
+
+
+def test_short_local_left_chain_that_reaches_the_authenticated_end_binds():
+    records, lines = _fixture()
+    records[0].wall_candidate.centerline_pts = ((93.52, 53.), (100., 53.))
+    lines['raw:left'] = (93.52, 53., 100., 53.)
+    result = _resolve(records, lines)
+    assert result.status is Status.CORROBORATED
+    assert result.reason_codes == (host.RASTER_SOURCE_BAND_HOST_RESOLVED,)
+    assert result.bands[0].member_ids == ('left', 'right')
+
+
+def test_remote_parent_fragment_cannot_own_the_missing_left_flank():
+    records, lines = _fixture()
+    records[0].wall_candidate.centerline_pts = ((20., 53.), (40., 53.))
+    result = _resolve(records, lines)
+    assert result.bands == ()
+    assert result.reason_codes == ('raster_source_band_left_local_wall_owner_unmapped',)
+
+
+def test_neighbour_wall_that_does_not_reach_this_left_end_stays_unmapped():
+    records, lines = _fixture()
+    records[0].wall_candidate.centerline_pts = ((20., 53.), (50., 53.))
+    lines['raw:left'] = (20., 53., 50., 53.)
+    result = _resolve(records, lines)
+    assert result.bands == ()
+    assert result.reason_codes == ('raster_source_band_left_source_primitive_unmapped',)

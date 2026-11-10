@@ -150,6 +150,54 @@ def test_identical_cross_scope_wall_address_cannot_count_as_supplemental(monkeyp
     )
 
 
+def test_compose_and_mixed_scope_shadow_flags_default_off():
+    import inspect
+    from pb_live_wall_opening_authority_composition import (
+        compose_live_wall_opening_authority,
+    )
+    from pb_opening_host_binding_authority import OpeningHostBindingProducer
+
+    compose = inspect.signature(compose_live_wall_opening_authority)
+    mixed = inspect.signature(host._resolve_opening_local_mixed_scope_source_band)
+    producer = inspect.signature(OpeningHostBindingProducer.__init__)
+    assert compose.parameters['include_unmeasured_ink_closed_flanks_shadow'].default is False
+    assert compose.parameters['source_fragment_roles_shadow'].default is False
+    assert mixed.parameters['source_fragment_roles_shadow'].default is False
+    assert producer.parameters['source_fragment_roles_shadow'].default is False
+
+
+def test_through_going_parent_is_not_a_left_owner_unless_fragment_flag(monkeypatch):
+    from test_raster_opening_split_centerline_host import OPENING, _record
+
+    ordinary = _record('right', start=140., end=220., offset=1., source_ids=('raw:right',))
+    parent = _record('parent', start=20., end=220., offset=-2., source_ids=('raw:parent',))
+    parent.wall_candidate.centerline_pts = (
+        (20., 53.), (100., 53.), (140., 53.), (220., 53.),
+    )
+    selected = []
+
+    def source_band(auth, opening, records, geom, equivalence, source_ids):
+        selected.append(tuple(row.wall_candidate_id for row in records))
+        return host._HostBandResolution(Status.CORROBORATED, ())
+
+    monkeypatch.setattr(host, 'resolve_physical_wall_equivalence', lambda identities: identities)
+    monkeypatch.setattr(host, '_resolve_raster_source_band_host', source_band)
+    off = host._resolve_opening_local_mixed_scope_source_band(
+        None, None, OPENING, (ordinary,), (parent,), ('old',), ('new',),
+    )
+    assert off.status is Status.CORROBORATED
+    assert off.bands == ()
+    assert selected == []
+
+    on = host._resolve_opening_local_mixed_scope_source_band(
+        None, None, OPENING, (ordinary,), (parent,), ('old',), ('new',),
+        source_fragment_roles_shadow=True,
+    )
+    assert selected == [('parent', 'right')]
+    assert on.status is Status.CORROBORATED
+    assert on.bands == ()
+
+
 def test_cross_scope_candidate_identity_alias_cannot_count_twice(monkeypatch):
     canonical = _record("wall_old", "shared")
     supplemental = _record("wall_new", "shared")
