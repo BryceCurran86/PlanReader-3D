@@ -80,7 +80,7 @@ def word_glyphs(observation_id: str, text: str, font_key: str, bbox: Sequence[fl
 
     Returns None (the word contributes no evidence in either direction) when the recovered characters do not spell exactly
     ``text`` (a ligature, a reordering, a split word); when the characters come from spans with different directions or
-    different fonts; when a span direction is invalid (non-finite, mis-shaped, not a unit vector); or when two characters
+    different fonts, or when some of them carry a font and others do not (an unknown font is never assumed to match); when a span direction is invalid (non-finite, mis-shaped, not a unit vector); or when two characters
     have no defined order (equal position along the direction). Glyph ids below zero (continuation components) are skipped,
     as the authority skips them."""
     x0, y0, x1, y1 = (float(v) for v in tuple(bbox)[:4])
@@ -105,8 +105,8 @@ def word_glyphs(observation_id: str, text: str, font_key: str, bbox: Sequence[fl
             if direction is None:
                 return None
             directions.append(direction)
-            if span.get("font") is not None:
-                fonts.add(str(span.get("font")))
+            font = span.get("font")
+            fonts.add(None if font in (None, "") else str(font))      # an unknown font is its own membership, never ignored
     if not found:
         return None
     first = directions[0]

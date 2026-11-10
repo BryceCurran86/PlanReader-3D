@@ -159,6 +159,45 @@ def test_characters_from_spans_in_different_fonts_abstain():
     assert recover([a, b], bbox=box_of([a, b])) == EXPECTED
 
 
+def test_a_span_without_a_font_is_never_assumed_to_match_a_span_with_one():
+    # review of #4263: a selected span with no font was silently left out of the font check
+    a = make_span(TEXT[:2], GIDS[:2], (100.0, 200.0), DIRECTIONS["270"])
+    b = make_span(TEXT[2:], GIDS[2:], (100.0, 200.0), DIRECTIONS["270"], offset=2)
+    box = box_of([a, b])
+    assert recover([a, b], bbox=box) == EXPECTED                          # same known font: still recovered
+    b_unknown = {k: v for k, v in b.items() if k != "font"}
+    assert recover([a, b_unknown], bbox=box) is None                        # one span's font unknown
+    assert recover([b_unknown, a], bbox=box) is None                        # and in the other order
+    a_unknown = {k: v for k, v in a.items() if k != "font"}
+    assert recover([a_unknown, b], bbox=box) is None
+    b_empty = {**b, "font": ""}
+    assert recover([a, b_empty], bbox=box) is None                          # an empty font name is unknown too
+    b_none = {**b, "font": None}
+    assert recover([a, b_none], bbox=box) is None
+
+
+def test_an_empty_font_name_and_a_missing_one_are_the_same_unknown_membership():
+    a = make_span(TEXT[:2], GIDS[:2], (100.0, 200.0), DIRECTIONS["270"])
+    b = make_span(TEXT[2:], GIDS[2:], (100.0, 200.0), DIRECTIONS["270"], offset=2)
+    a["font"] = ""
+    b.pop("font")
+    assert recover([a, b], bbox=box_of([a, b])) == EXPECTED               # both unknown: no font evidence either way, as when all are absent
+    a["font"] = None
+    b["font"] = ""
+    assert recover([a, b], bbox=box_of([a, b])) == EXPECTED
+
+
+def test_when_no_selected_span_carries_a_font_the_historical_reading_is_kept():
+    # all fonts absent: nothing can be compared, exactly as before this change; real traces always name the font
+    a = make_span(TEXT[:2], GIDS[:2], (100.0, 200.0), DIRECTIONS["270"])
+    b = make_span(TEXT[2:], GIDS[2:], (100.0, 200.0), DIRECTIONS["270"], offset=2)
+    a.pop("font"), b.pop("font")
+    assert recover([a, b], bbox=box_of([a, b])) == EXPECTED
+    horizontal = make_span(TEXT, GIDS, (100.0, 200.0), DIRECTIONS["0"])
+    horizontal.pop("font")
+    assert recover([horizontal]) == EXPECTED
+
+
 @pytest.mark.parametrize("bad", [(float("nan"), -1.0), (float("inf"), 0.0), (0.0, 0.0), (2.0, 0.0), (0.0, -1.0, 0.0), "up", (None, 1.0), 5])
 def test_an_invalid_direction_abstains(bad):
     span = make_span(TEXT, GIDS, (100.0, 200.0), DIRECTIONS["270"])
