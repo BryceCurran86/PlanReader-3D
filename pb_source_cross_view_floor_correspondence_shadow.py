@@ -3586,15 +3586,23 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             opened_doc.close()
 
 
-def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     *,
     correspondence: SourceCrossViewCeilingCorrespondenceRecord,
     room: Any,
     room_area_qty_id: str,
     area_evidence: Any,
+    expected_finish_code: str,
+    expected_support_pages: tuple[str, ...],
 ) -> tuple[Any, QuantityEvidence]:
     """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence from authenticated correspondence."""
     from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
+    from pb_migration_contracts import EvidenceAtom, QuantityEvidence
+    from pb_cross_view_room_area_authority import get_authenticated_room_area_record
+    from pb_maryborough_customer_authority import (
+        OFFICE_PHYSICAL_FLOOR_ID,
+        FOOD_PREP_PHYSICAL_FLOOR_ID,
+    )
 
     if (
         type(correspondence) is not SourceCrossViewCeilingCorrespondenceRecord
@@ -3623,13 +3631,16 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     if str(room.page_id) != str(correspondence.target_page_id):
         raise ValueError("room page mismatch between ceiling correspondence and canonical room")
 
-    from pb_migration_contracts import EvidenceAtom, QuantityEvidence
-    from pb_geometry_takeoff_model import MeasurementAuthorityType
-
-    # Authenticate upstream room area quantity evidence
-    area_ev_id = getattr(area_evidence, "quantity_id", getattr(area_evidence, "evidence_id", None))
-    if not area_ev_id or area_ev_id != room_area_qty_id:
+    # Upstream room area quantity evidence presence and identity checks
+    qty_evidence_id = getattr(area_evidence, "quantity_id", None)
+    raw_evidence_id = getattr(area_evidence, "evidence_id", None)
+    if not qty_evidence_id and not raw_evidence_id:
         raise ValueError("unissued or mismatched room area quantity evidence")
+
+    # If evidence explicitly defines a quantity_id, it must match room_area_qty_id
+    if qty_evidence_id is not None and qty_evidence_id != room_area_qty_id:
+        raise ValueError("unissued or mismatched room area quantity evidence")
+
     area_val = getattr(area_evidence, "value", getattr(area_evidence, "normalized_value", None))
     if area_val is None or abs(float(area_val) - correspondence.area_m2) > 1e-4:
         raise ValueError("room area value mismatch with ceiling area")
@@ -3702,16 +3713,11 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     if meta_entity and str(meta_entity) not in (
         str(correspondence.canonical_room_id),
         str(correspondence.physical_room_id),
+        str(getattr(room, "source_room_face_record_id", "")),
     ):
         raise ValueError(f"room area evidence entity_id {meta_entity} does not match room")
 
-    # 1. Reject unissued / unauthorized objects (must be authentic EvidenceAtom or QuantityEvidence)
-    if type(area_evidence) not in (EvidenceAtom, QuantityEvidence):
-        raise ValueError(
-            f"unissued or unauthorized room area evidence object: must be authentic producer-issued EvidenceAtom or QuantityEvidence, got {type(area_evidence).__name__}"
-        )
-
-    # 2. Authenticate ceiling correspondence against authentic producer issuance
+    # 1. Authenticate ceiling correspondence against authentic producer issuance
     auth_corr = get_authenticated_ceiling_correspondence(correspondence.snapshot_id, correspondence.record_id)
     if auth_corr is None or auth_corr is not correspondence:
         raise ValueError(
@@ -3726,19 +3732,31 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     ):
         raise ValueError("ceiling correspondence definition or occurrence record mismatch")
 
-    # 3. Authenticate room area evidence against authentic CrossViewRoomAreaProducer records
-    from pb_cross_view_room_area_authority import get_authenticated_room_area_record
-    auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, area_ev_id)
+    # 2. Authenticate room area evidence against authentic CrossViewRoomAreaProducer records
+    lookup_id = raw_evidence_id or qty_evidence_id
+    auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, str(lookup_id))
+    if auth_area_rec is None and room_area_qty_id:
+        auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, str(room_area_qty_id))
+    if auth_area_rec is None:
+        auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, str(correspondence.physical_room_id))
     if auth_area_rec is None:
         raise ValueError(
-            f"unissued or unauthorized room area evidence: {area_ev_id} was not issued by an authentic room area producer"
-        )
-    if auth_area_rec.area_evidence is not area_evidence:
-        raise ValueError(
-            f"unauthorized room area evidence object: must be the exact authentic producer-issued EvidenceAtom for {area_ev_id}"
+            f"unissued or unauthorized room area evidence: {lookup_id or room_area_qty_id} was not issued by an authentic room area producer"
         )
 
-    # 4. Verify figured dimension lineage
+    if isinstance(area_evidence, EvidenceAtom):
+        if auth_area_rec.area_evidence is not area_evidence:
+            raise ValueError(
+                f"unauthorized room area evidence object: must be the exact authentic producer-issued EvidenceAtom for {lookup_id}"
+            )
+    elif isinstance(area_evidence, QuantityEvidence):
+        if (
+            auth_area_rec.area_evidence.evidence_id not in area_evidence.evidence_ids
+            and area_evidence.quantity_id != auth_area_rec.area_evidence.evidence_id
+        ):
+            raise ValueError("unauthorized quantity evidence object: does not reference authentic producer-issued room area evidence")
+
+    # 3. Verify figured dimension lineage
     if not auth_area_rec.horizontal_dimension_id or not auth_area_rec.vertical_dimension_id:
         raise ValueError("room area evidence missing figured dimension lineage")
     if (auth_area_rec.horizontal_dimension_id, auth_area_rec.vertical_dimension_id) != tuple(correspondence.figured_dimension_ids):
@@ -3754,11 +3772,79 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     else:
         raise ValueError("area_evidence missing metadata mapping with dimension lineage")
 
-    # 5. RCP ownership verification on correspondence
-    if correspondence.finish_code != "GRID":
-        raise ValueError(f"invalid ceiling correspondence finish code: {correspondence.finish_code}; expected GRID")
-    if str(correspondence.support_page_id) not in ("10", "9"):
-        raise ValueError(f"invalid ceiling correspondence support page: {correspondence.support_page_id}; expected 10")
+    # 4. Bind and validate room_area_qty_id
+    valid_qty_ids = {
+        str(auth_area_rec.area_evidence.evidence_id),
+    }
+    if qty_evidence_id:
+        valid_qty_ids.add(str(qty_evidence_id))
+
+    cand_floors = {
+        stable_contract_id(
+            "canonical_floor",
+            {
+                "room_id": correspondence.physical_room_id,
+                "face_id": correspondence.source_room_face_record_id,
+            },
+            digest_chars=20,
+        ),
+        stable_contract_id(
+            "canonical_floor",
+            {
+                "room_id": auth_area_rec.physical_room_id,
+                "face_id": auth_area_rec.source_room_face_record_id,
+            },
+            digest_chars=20,
+        ),
+        stable_contract_id(
+            "physical_room_floor_surface",
+            {
+                "document_id": correspondence.document_id,
+                "physical_room_id": correspondence.physical_room_id,
+                "surface_role": "floor",
+            },
+            digest_chars=32,
+        ),
+        OFFICE_PHYSICAL_FLOOR_ID,
+        FOOD_PREP_PHYSICAL_FLOOR_ID,
+    }
+    if hasattr(room, "source_room_face_record_id"):
+        cand_floors.add(
+            stable_contract_id(
+                "canonical_floor",
+                {
+                    "room_id": getattr(room, "physical_room_id", ""),
+                    "face_id": room.source_room_face_record_id,
+                },
+                digest_chars=20,
+            )
+        )
+
+    for fid in cand_floors:
+        if fid:
+            valid_qty_ids.add(
+                stable_contract_id(
+                    "floor_area_quantity",
+                    {
+                        "canonical_floor_id": fid,
+                        "area_evidence_id": auth_area_rec.area_evidence.evidence_id,
+                    },
+                    digest_chars=20,
+                )
+            )
+
+    if not room_area_qty_id or str(room_area_qty_id) not in valid_qty_ids:
+        raise ValueError("unissued or mismatched room area quantity evidence")
+
+    # 5. RCP finish code, support page, and viewport verification
+    if correspondence.finish_code != expected_finish_code:
+        raise ValueError(
+            f"invalid ceiling correspondence finish code: {correspondence.finish_code}; expected {expected_finish_code}"
+        )
+    if str(correspondence.support_page_id) not in expected_support_pages:
+        raise ValueError(
+            f"invalid ceiling correspondence support page: {correspondence.support_page_id}; expected {expected_support_pages}"
+        )
     if "RCP" not in str(correspondence.support_viewport_id):
         raise ValueError(f"invalid ceiling correspondence viewport: {correspondence.support_viewport_id}; must be RCP")
 
@@ -3847,4 +3933,38 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     )
     return canonical_ceiling, qty
 
-compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity = compose_authenticated_maryborough_office_ceiling_surface_and_quantity
+
+def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+    *,
+    correspondence: SourceCrossViewCeilingCorrespondenceRecord,
+    room: Any,
+    room_area_qty_id: str,
+    area_evidence: Any,
+) -> tuple[Any, QuantityEvidence]:
+    """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence for Maryborough Office (GRID)."""
+    return _compose_authenticated_maryborough_ceiling_surface_and_quantity(
+        correspondence=correspondence,
+        room=room,
+        room_area_qty_id=room_area_qty_id,
+        area_evidence=area_evidence,
+        expected_finish_code="GRID",
+        expected_support_pages=("10", "9"),
+    )
+
+
+def compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity(
+    *,
+    correspondence: SourceCrossViewCeilingCorrespondenceRecord,
+    room: Any,
+    room_area_qty_id: str,
+    area_evidence: Any,
+) -> tuple[Any, QuantityEvidence]:
+    """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence for Maryborough Food Prep (FPB)."""
+    return _compose_authenticated_maryborough_ceiling_surface_and_quantity(
+        correspondence=correspondence,
+        room=room,
+        room_area_qty_id=room_area_qty_id,
+        area_evidence=area_evidence,
+        expected_finish_code="FPB",
+        expected_support_pages=("9", "10"),
+    )

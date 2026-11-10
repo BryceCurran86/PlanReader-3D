@@ -2007,6 +2007,10 @@ class CrossViewRoomAreaProducer:
         for rec in records:
             _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.area_evidence.evidence_id))] = rec
             _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.area_evidence.evidence_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.physical_room_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.physical_room_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.source_room_face_record_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.source_room_face_record_id))] = rec
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
             status = EvidenceResolutionStatus.CORROBORATED

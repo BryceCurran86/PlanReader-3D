@@ -17,6 +17,7 @@ import hashlib
 import math
 from operator import attrgetter
 from typing import Any, Mapping, Optional, Sequence
+import weakref
 
 import fitz
 
@@ -462,7 +463,7 @@ def committed_record_is_trusted(store: "_SourceObservationStore", snapshot_id: s
 
 
 
-_REGISTERED_STORES_BY_SNAPSHOT: dict[str, "_SourceObservationStore"] = {}
+_REGISTERED_STORES_BY_SNAPSHOT: weakref.WeakValueDictionary[str, "_SourceObservationStore"] = weakref.WeakValueDictionary()
 
 
 def get_source_observation_store_for_snapshot(snapshot_id: str) -> Optional["_SourceObservationStore"]:

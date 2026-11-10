@@ -269,12 +269,20 @@ def issue_original_maryborough_ceiling_customer_quantities(
             digest_chars=20,
         )
 
-        canonical_ceiling, ceiling_qty = compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
-            correspondence=cr,
-            room=room,
-            room_area_qty_id=room_area_qty_id,
-            area_evidence=area_ev,
-        )
+        if is_food_prep:
+            canonical_ceiling, ceiling_qty = compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity(
+                correspondence=cr,
+                room=room,
+                room_area_qty_id=room_area_qty_id,
+                area_evidence=area_ev,
+            )
+        else:
+            canonical_ceiling, ceiling_qty = compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+                correspondence=cr,
+                room=room,
+                room_area_qty_id=room_area_qty_id,
+                area_evidence=area_ev,
+            )
 
         claim = compose_authenticated_cross_sheet_physical_claim(
             published=published,
