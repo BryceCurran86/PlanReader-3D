@@ -26,7 +26,7 @@ Scope: how 3Laurel tests, tools and workflows find the private original, and wha
 
 ## Not done / for the bridge owner
 
-- The two remaining unguarded PR jobs (`test-gptmax-source-authority-stages / real-source-stages`, `verify-option-a-original-wall-source / original-3laurel-customer-shadow`) belong to other lanes and the canonical bridge; they are recorded in `KNOWN_UNMIGRATED`.
+- The two jobs that were unguarded when this audit was written (`test-gptmax-source-authority-stages / real-source-stages`, `verify-option-a-original-wall-source / original-3laurel-customer-shadow`) were retired by the canonical bridge change (#4269); `KNOWN_UNMIGRATED` is empty and the stale-allowlist test keeps it honest.
 - The resolver is a 3Laurel helper; if MAX defines the canonical resolver it should replace `tests/original_source_3laurel.py` behind the same `require_original_3laurel()` call.
 - The preflight's stable-inode check needs a Windows-safe identity comparison before the evidence reporter can run locally.
 - Nothing here is an original-source verification: no original was read by CI, no score, no frozen change.

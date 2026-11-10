@@ -2,8 +2,8 @@
 
 A workflow is an OFFENDER when it can run on ``pull_request``, has a job that names the 3Laurel original, and that job is neither
 restricted to ``workflow_dispatch`` nor under the public ``skip_missing_in_public_ci`` policy: on a public PR the original is
-absent, so the job can only fail (or, worse, pass without it). The jobs listed in ``KNOWN_UNMIGRATED`` belong to the canonical
-private-source bridge (MAX) and are tolerated until it retires them; a NEW offender, or a migrated one left in the list, fails.
+absent, so the job can only fail (or, worse, pass without it). Jobs listed in ``KNOWN_UNMIGRATED`` belong to the canonical
+private-source bridge (MAX) and are tolerated until it retires them (the list is empty now); a NEW offender, or a migrated one left in the list, fails.
 """
 from __future__ import annotations
 
@@ -17,12 +17,9 @@ POLICY = "PLANREADER_PRIVATE_ORIGINAL_POLICY"
 PUBLIC_POLICY = "skip_missing_in_public_ci"
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 
-# (workflow file stem, job id): migrate each to workflow_dispatch-only or to the public skip policy, then delete its entry
-KNOWN_UNMIGRATED: set[tuple[str, str]] = {
-    # `sha256sum --check` and the handoff on a PDF that public PR runs do not have; owned by the canonical bridge (MAX)
-    ("test-gptmax-source-authority-stages", "real-source-stages"),
-    ("verify-option-a-original-wall-source", "original-3laurel-customer-shadow"),
-}
+# (workflow file stem, job id): migrate each to workflow_dispatch-only or to the public skip policy, then delete its entry.
+# Empty since the canonical bridge change retired both previously listed jobs (real-source-stages, original-3laurel-customer-shadow).
+KNOWN_UNMIGRATED: set[tuple[str, str]] = set()
 
 
 def _events(document) -> set[str]:
