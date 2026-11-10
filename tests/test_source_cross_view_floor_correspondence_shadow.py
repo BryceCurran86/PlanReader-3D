@@ -835,3 +835,134 @@ def test_correspondence_registries_lifecycle_and_duplicate_key_rejection() -> No
     gc.collect()
     assert (snap, "rec-common") not in _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT
     assert (snap, "rec-common") not in _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT
+
+
+def test_floor_and_ceiling_registry_duplicate_key_sanitized_reason_code_privacy() -> None:
+    """Assert that duplicate-authority conflicts in floor and ceiling registries raise sanitized reason code and leak no record repr or identifiers."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT,
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+        DUPLICATE_AUTHORITY_CONFLICT,
+        SourceCrossViewFloorCorrespondenceRecord,
+        SourceCrossViewCeilingCorrespondenceRecord,
+    )
+
+    snap = "test-snap-privacy-fc"
+    key = (snap, "secret-rec-key")
+
+    floor1 = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="secret-floor-1",
+        canonical_floor_id="cfloor-1",
+        physical_room_id="room-secret-1",
+        source_room_face_record_id="face-secret-1",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        target_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        registration_orientation="0",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(0.0, 0.0),
+        registration_support_pt=100.0,
+        registration_runner_up_support_pt=50.0,
+        registration_null_support_pt=10.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={},
+        finish_codes_in_box={},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+    floor2 = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="secret-floor-2",
+        canonical_floor_id="cfloor-2",
+        physical_room_id="room-secret-2",
+        source_room_face_record_id="face-secret-2",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        target_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        registration_orientation="0",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(0.0, 0.0),
+        registration_support_pt=100.0,
+        registration_runner_up_support_pt=50.0,
+        registration_null_support_pt=10.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={},
+        finish_codes_in_box={},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[key] = floor1
+    with pytest.raises(ValueError) as excinfo_floor:
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[key] = floor2
+
+    err_floor = str(excinfo_floor.value)
+    assert err_floor == DUPLICATE_AUTHORITY_CONFLICT
+    assert "SourceCrossViewFloorCorrespondenceRecord" not in err_floor
+    assert "secret-floor" not in err_floor
+    assert "room-secret" not in err_floor
+    assert "face-secret" not in err_floor
+    assert "secret-rec-key" not in err_floor
+    assert snap not in err_floor
+
+    ceil1 = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="secret-ceil-1",
+        canonical_ceiling_id="cceil-1",
+        physical_room_id="room-secret-ceil-1",
+        canonical_room_id="croom-ceil-1",
+        source_room_face_record_id="face-secret-ceil-1",
+        support_page_id="9",
+        support_viewport_id="rcp",
+        target_page_id="7",
+        target_viewport_id="ga",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        target_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        registration_translation_pdf_pts=(0.0, 0.0),
+        finish_code="GRID",
+        semantic_finish="grid_ceiling",
+        ceiling_height_mm=2700.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim1-secret", "dim2-secret"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+    ceil2 = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="secret-ceil-2",
+        canonical_ceiling_id="cceil-2",
+        physical_room_id="room-secret-ceil-2",
+        canonical_room_id="croom-ceil-2",
+        source_room_face_record_id="face-secret-ceil-2",
+        support_page_id="9",
+        support_viewport_id="rcp",
+        target_page_id="7",
+        target_viewport_id="ga",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        target_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        registration_translation_pdf_pts=(0.0, 0.0),
+        finish_code="GRID",
+        semantic_finish="grid_ceiling",
+        ceiling_height_mm=2700.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim1-secret", "dim2-secret"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[key] = ceil1
+    with pytest.raises(ValueError) as excinfo_ceil:
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[key] = ceil2
+
+    err_ceil = str(excinfo_ceil.value)
+    assert err_ceil == DUPLICATE_AUTHORITY_CONFLICT
+    assert "SourceCrossViewCeilingCorrespondenceRecord" not in err_ceil
+    assert "secret-ceil" not in err_ceil
+    assert "room-secret-ceil" not in err_ceil
+    assert "face-secret-ceil" not in err_ceil
+    assert "dim1-secret" not in err_ceil
+    assert "secret-rec-key" not in err_ceil
+    assert snap not in err_ceil

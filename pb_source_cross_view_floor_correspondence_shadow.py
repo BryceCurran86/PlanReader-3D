@@ -79,6 +79,7 @@ BOX_OWNED_BY_OTHER_FINISH_CODE = "box_owned_by_other_finish_code"
 FLOOR_GEOMETRICALLY_OWNED_EQUIVALENCE_NOT_AUTHENTICATED = (
     "floor_geometrically_owned_equivalence_not_authenticated"
 )
+DUPLICATE_AUTHORITY_CONFLICT = "duplicate_authority_conflict"
 
 # Standard Standing Authority Blockers for Candidate Tier
 STANDING_AUTHORITY_BLOCKERS = (
@@ -607,9 +608,7 @@ class _UniqueWeakValueDictionary(WeakValueDictionary):
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
         if existing is not None and existing is not value and existing != value:
-            raise ValueError(
-                f"duplicate authority for key {key}: cannot overwrite existing {existing} with {value}"
-            )
+            raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
 
 

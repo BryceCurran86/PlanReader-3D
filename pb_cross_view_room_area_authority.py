@@ -89,6 +89,7 @@ CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT = "cross_view_room_area_lineage_conflict"
 CROSS_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = (
     "authenticated_cross_view_room_area"
 )
+DUPLICATE_AUTHORITY_CONFLICT = "duplicate_authority_conflict"
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -178,9 +179,7 @@ class _UniqueWeakValueDictionary(WeakValueDictionary):
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
         if existing is not None and existing is not value and existing != value:
-            raise ValueError(
-                f"duplicate authority for key {key}: cannot overwrite existing {existing} with {value}"
-            )
+            raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
 
 
@@ -2067,6 +2066,7 @@ __all__ = [
     "get_authenticated_room_area_record",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
+    "DUPLICATE_AUTHORITY_CONFLICT",
     "_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT",
     "_UniqueWeakValueDictionary",
 ]

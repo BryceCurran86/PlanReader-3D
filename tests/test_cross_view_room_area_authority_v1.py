@@ -1251,3 +1251,32 @@ def test_cross_view_room_area_registry_duplicate_key_rejection() -> None:
 
     # Earlier authority remains intact and was not overwritten
     assert get_authenticated_room_area_record(snap_id, "shared-authority-key") is rec1
+
+
+def test_cross_view_room_area_registry_duplicate_key_sanitized_reason_code_privacy() -> None:
+    """Verify that duplicate-authority conflict raises a sanitized reason code and leaks no record repr or identifiers."""
+    from pb_cross_view_room_area_authority import (
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT,
+        DUPLICATE_AUTHORITY_CONFLICT,
+    )
+
+    rec1 = _source_area_owner_record("room-secret-source-id-1", "9", "h1-secret-dim", "v1-secret-dim")
+    rec2 = _source_area_owner_record("room-secret-source-id-2", "9", "h2-secret-dim", "v2-secret-dim")
+
+    snap_id = "test-snap-privacy-audit"
+    key = (snap_id, "secret-evidence-key")
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[key] = rec1
+
+    with pytest.raises(ValueError) as excinfo:
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[key] = rec2
+
+    err_text = str(excinfo.value)
+    # Fixed sanitized reason code only:
+    assert err_text == DUPLICATE_AUTHORITY_CONFLICT
+    # No record repr or dataclass names
+    assert "CrossViewRoomAreaRecord" not in err_text
+    # No source-linked dimensions, room IDs, or evidence keys
+    assert "room-secret-source-id" not in err_text
+    assert "secret-dim" not in err_text
+    assert "secret-evidence-key" not in err_text
+    assert snap_id not in err_text
