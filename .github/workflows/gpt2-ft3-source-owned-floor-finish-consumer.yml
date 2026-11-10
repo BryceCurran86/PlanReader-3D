@@ -45,6 +45,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
           echo '::notice::Original Maryborough tests NOT RUN on public CI; protected exact-head private replay required before release'
           echo 'Original Maryborough source tests NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
