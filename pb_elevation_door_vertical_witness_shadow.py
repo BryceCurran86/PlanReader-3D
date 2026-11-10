@@ -61,6 +61,28 @@ INVALID_INPUT = "elevation_witness_input_invalid"
 DUPLICATE_IDENTITY = "elevation_witness_duplicate_identity"
 COMPETING_VIEWS = "competing_elevation_views"
 PROMOTION_GATE = "authority_promotion_review_required_kind_host_frame_untouched"
+WIDTH_AGREE_TOL = 0.005
+MEASUREMENT_CANDIDATE = "opening_measurement_candidate_shadow"
+PLAN_WIDTH_UNAVAILABLE = "plan_printed_width_unavailable"
+WIDTH_DISAGREES = "plan_width_disagrees_with_elevation_outline"
+OUTLINE_UNAVAILABLE = "witnessed_outline_unavailable"
+GATE_TEXT = "text_integrity_not_corroborated"
+GATE_KIND = "door_kind_not_authenticated"
+GATE_HOST = "host_binding_not_authenticated"
+GATE_PROMOTION = "authority_promotion_review_required_existing_issuer_untouched"
+TEXT_CORROBORATED = "corroborated"
+TEXT_RAW_UNVERIFIED = "raw_unverified"
+TEXT_TRUST_RAW_DIAGNOSTIC = "raw_unverified_diagnostic_only"
+
+
+def datum_text_trust(datum: "ElevationDatum") -> str:
+    """Worst-of trust of every printed figure the datum rests on. Never promotes: raw text is diagnostic only."""
+    values = {lv.text_trust for lv in datum.levels}
+    if TEXT_RAW_UNVERIFIED in values:
+        return TEXT_TRUST_RAW_DIAGNOSTIC
+    if values == {TEXT_CORROBORATED}:
+        return TEXT_CORROBORATED
+    return ""
 
 
 @dataclass(frozen=True)
@@ -83,6 +105,7 @@ class ElevOutline:
     y_base_leaf: float
     y_base_frame: Optional[float] = None
     explicit_height_mm: Optional[float] = None   # a height stated on this very outline, if any
+    receipt_ids: tuple[str, ...] = ()            # source observation ids that drew this outline (when source-owned)
 
 
 @dataclass(frozen=True)
@@ -90,6 +113,8 @@ class DatumLevel:
     name: str
     y: float
     figured_mm: float
+    receipt_ids: tuple[str, ...] = ()   # dimension line, tick and figured-word observation ids
+    text_trust: str = ""                # "corroborated", "raw_unverified" or "" (unspecified) for the printed figure
 
 
 @dataclass(frozen=True)
@@ -98,6 +123,7 @@ class ElevationDatum:
 
     ffl_y: float
     levels: tuple[DatumLevel, ...]
+    receipt_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +155,8 @@ class VerticalWitnessResult:
     competing_plan_record_ids: tuple[str, ...] = ()
     overlapping_plan_record_ids: tuple[str, ...] = ()
     registration_anchor_widths_pt: tuple[float, ...] = ()
+    source_observation_ids: tuple[str, ...] = ()
+    text_trust: str = ""
     result_id: Optional[str] = None
     schema_version: str = SCHEMA_VERSION
 
@@ -142,6 +170,8 @@ def _result(record_id, status, reasons, **kw) -> VerticalWitnessResult:
         "schema_version": SCHEMA_VERSION, "record": record_id, "status": status.value, "reasons": tuple(reasons),
         "outline": kw.get("outline_id"), "height": kw.get("opening_height_mm"), "head": kw.get("head_level_name"),
         "competing": tuple(kw.get("competing_plan_record_ids", ())),
+        "receipts": tuple(kw.get("source_observation_ids", ())),
+        "text_trust": kw.get("text_trust", ""),
     }
     return VerticalWitnessResult(
         record_id=record_id, status=status, reason_codes=tuple(reasons),
@@ -318,8 +348,13 @@ def resolve_vertical_witness(
     if not any(_near(b, datum.ffl_y, BASE_TOL_PT) for b in bases):
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (BASE_NOT_ON_FFL,), outline_id=outline.outline_id,
                        mm_per_pt=scale, registration_anchor_widths_pt=registration.anchor_widths_pt)
+    anchors = [o for o in outlines if o.outline_id in registration.matched_outline_ids]
+    receipts = tuple(sorted(set(
+        outline.receipt_ids + head.receipt_ids + datum.receipt_ids + tuple(r for a in anchors for r in a.receipt_ids)
+    )))
     return _result(
         record_id, EvidenceResolutionStatus.CANDIDATE, (CANDIDATE_REASON,), outline_id=outline.outline_id,
+        source_observation_ids=receipts, text_trust=datum_text_trust(datum),
         opening_height_mm=float(head.figured_mm), head_level_name=head.name,
         leaf_height_mm=round((outline.y_base_leaf - outline.y_head) * scale, 1), mm_per_pt=round(scale, 4),
         registration_anchor_widths_pt=registration.anchor_widths_pt,
@@ -391,8 +426,100 @@ def assess_elevation_vertical_witness_shadow(
     return aggregate_across_views(rows)
 
 
+# ------------------------------------------------------------------ opening measurement composition
+@dataclass(frozen=True)
+class OpeningMeasurementCandidate:
+    """Two independent source views of one physical opening, composed. Never a quantity, never a kind or a host."""
+
+    record_id: str
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    width_mm: Optional[float] = None            # the PRINTED plan figure (the authority for width)
+    height_mm: Optional[float] = None           # the PRINTED datum (FFL to head), the architectural opening height
+    area_m2: Optional[float] = None
+    elevation_width_mm: Optional[float] = None  # outline width x datum scale: corroboration only, never the value
+    leaf_height_mm: Optional[float] = None      # separate provenance, never substituted
+    text_trust: str = ""
+    remaining_gates: tuple[str, ...] = ()
+    source_observation_ids: tuple[str, ...] = ()
+    result_id: Optional[str] = None
+    schema_version: str = SCHEMA_VERSION
+
+    @property
+    def is_candidate(self) -> bool:
+        return self.status is EvidenceResolutionStatus.CANDIDATE
+
+    @property
+    def first_remaining_gate(self) -> str:
+        return self.remaining_gates[0] if self.remaining_gates else GATE_PROMOTION
+
+
+def _measure(record_id, status, reasons, **kw) -> OpeningMeasurementCandidate:
+    payload = {
+        "schema_version": SCHEMA_VERSION, "record": record_id, "status": status.value, "reasons": tuple(reasons),
+        "width": kw.get("width_mm"), "height": kw.get("height_mm"), "trust": kw.get("text_trust", ""),
+        "gates": tuple(kw.get("remaining_gates", ())), "receipts": tuple(kw.get("source_observation_ids", ())),
+    }
+    return OpeningMeasurementCandidate(
+        record_id=record_id, status=status, reason_codes=tuple(reasons),
+        result_id=stable_contract_id("elevation_opening_measurement_shadow", payload, digest_chars=32), **kw,
+    )
+
+
+def _combined_trust(*values: str) -> str:
+    if any(v == TEXT_RAW_UNVERIFIED or v == TEXT_TRUST_RAW_DIAGNOSTIC for v in values):
+        return TEXT_TRUST_RAW_DIAGNOSTIC
+    if values and all(v == TEXT_CORROBORATED for v in values):
+        return TEXT_CORROBORATED
+    return ""
+
+
+def compose_opening_measurement(
+    witness: VerticalWitnessResult,
+    outlines: Sequence[ElevOutline],
+    *,
+    plan_width_mm: Optional[float],
+    plan_label_text_trust: str,
+    plan_label_receipt_ids: Sequence[str] = (),
+    kind_authenticated: bool = False,
+    host_authenticated: bool = False,
+) -> OpeningMeasurementCandidate:
+    """Compose a witnessed opening height with the plan's printed width and an independent elevation width check.
+
+    * Height is the printed datum the witness found (never the leaf). Width is the printed plan figure.
+    * The elevation outline width at the datum-calibrated scale must agree with the printed width within
+      ``WIDTH_AGREE_TOL``; it corroborates, it never replaces the printed value.
+    * The result stays ``CANDIDATE``: only the existing issuer may authenticate a quantity. ``remaining_gates`` lists,
+      in order, what is still open (text integrity, door kind, host binding), or the promotion review when none is.
+    """
+    if not witness.is_candidate:
+        return _measure(witness.record_id, witness.status, witness.reason_codes)
+    outline = next((o for o in outlines if o.outline_id == witness.outline_id), None)
+    if outline is None or witness.mm_per_pt is None or witness.opening_height_mm is None:
+        return _measure(witness.record_id, EvidenceResolutionStatus.ABSTAINED, (OUTLINE_UNAVAILABLE,))
+    if not _finite(plan_width_mm) or plan_width_mm <= 0.0:
+        return _measure(witness.record_id, EvidenceResolutionStatus.ABSTAINED, (PLAN_WIDTH_UNAVAILABLE,))
+    measured = (outline.x1 - outline.x0) * witness.mm_per_pt
+    if not _finite(measured) or abs(measured - plan_width_mm) / plan_width_mm > WIDTH_AGREE_TOL:
+        return _measure(witness.record_id, EvidenceResolutionStatus.CONFLICT, (WIDTH_DISAGREES,),
+                        elevation_width_mm=round(measured, 1) if _finite(measured) else None)
+    trust = _combined_trust(witness.text_trust, plan_label_text_trust)
+    gates = tuple(g for g, open_ in (
+        (GATE_TEXT, trust != TEXT_CORROBORATED), (GATE_KIND, not kind_authenticated), (GATE_HOST, not host_authenticated),
+    ) if open_)
+    receipts = tuple(sorted(set(witness.source_observation_ids) | set(plan_label_receipt_ids)))
+    return _measure(
+        witness.record_id, EvidenceResolutionStatus.CANDIDATE, (MEASUREMENT_CANDIDATE,),
+        width_mm=float(plan_width_mm), height_mm=float(witness.opening_height_mm),
+        area_m2=round(float(plan_width_mm) * float(witness.opening_height_mm) / 1_000_000.0, 4),
+        elevation_width_mm=round(measured, 1), leaf_height_mm=witness.leaf_height_mm, text_trust=trust,
+        remaining_gates=gates, source_observation_ids=receipts,
+    )
+
+
 __all__ = [
-    "CANDIDATE_REASON", "COMPETING_VIEWS", "DUPLICATE_IDENTITY", "INVALID_INPUT", "aggregate_across_views", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
+    "CANDIDATE_REASON", "MEASUREMENT_CANDIDATE", "OpeningMeasurementCandidate", "compose_opening_measurement", "GATE_TEXT", "GATE_KIND",
+    "GATE_HOST", "GATE_PROMOTION", "PLAN_WIDTH_UNAVAILABLE", "WIDTH_DISAGREES", "OUTLINE_UNAVAILABLE", "TEXT_CORROBORATED", "TEXT_RAW_UNVERIFIED", "TEXT_TRUST_RAW_DIAGNOSTIC", "datum_text_trust", "COMPETING_VIEWS", "DUPLICATE_IDENTITY", "INVALID_INPUT", "aggregate_across_views", "DatumLevel", "ElevOutline", "ElevationDatum", "PlanSpan", "Registration", "Scope",
     "VerticalWitnessResult", "assess_elevation_vertical_witness_shadow", "calibrate_datum",
     "register_plan_to_elevation", "resolve_vertical_witness",
 ]

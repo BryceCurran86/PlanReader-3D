@@ -408,6 +408,23 @@ def test_the_real_four_project_fail_closed_inventory_is_excluded_and_never_rewri
     assert "provision-original-sources" not in text
 
 
+def test_protected_fixed_tree_job_keeps_its_audited_provisioning_order():
+    name, job = "gptmax-protected-lot16-fixed-receipts-public.yml", "acceptance"
+    assert (name, job) in T.EXCLUDED_JOBS
+    path = ROOT / ".github" / "workflows" / name
+    raw = path.read_bytes().decode("utf-8")
+    steps = yaml.safe_load(raw)["jobs"][job]["steps"]
+    secret_steps = [step for step in steps if "secrets.ORIGINAL_SOURCES_TOKEN" in str(step)]
+    assert len(secret_steps) == 1
+    command = secret_steps[0]["run"]
+    assert '"$RUNNER_TEMP/lot16-fixed-trusted/.github/actions/provision-original-sources/provision.py"' in command
+    assert "--destination documents/sources" in command
+    assert T.asserts_originals_absent(raw)  # mandatory cleanup, not an absent-source test
+    result = T.plan_file(path, T.manifest_names(ROOT), "main")
+    assert result is None or result == (raw, [], [job])
+    assert path.read_bytes().decode("utf-8") == raw
+
+
 def test_every_real_job_with_an_absence_assertion_is_deliberately_excluded():
     offenders = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):

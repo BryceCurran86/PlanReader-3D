@@ -66,8 +66,14 @@ def reads_originals(job_text: str) -> bool:
     return bool(WHOLE_SUITE.search(job_text)) or any(token in job_text for token in SOURCE_DIR_TOKENS)
 
 
-# (workflow file, job id) -> reason. These jobs are never given the originals.
+# (workflow file, job id) -> reason. Never insert the generic provisioning step
+# into these jobs: they either require source absence or own an audited, isolated
+# source lifecycle whose ordering must not be changed by this transform.
 EXCLUDED_JOBS = {
+    ("gptmax-protected-lot16-fixed-receipts-public.yml", "acceptance"):
+        "already provisions through the pinned trusted script, after dependency setup, in its single secret-bearing step; "
+        "injecting the generic step after checkout would expose originals before isolation/dependency checks and "
+        "duplicate the audited provisioning/cleanup lifecycle",
     ("package-full-plan-v2-verified-checkout.yml", "snapshot-public-repository-only"):
         "obsolete: it archives the tracked checkout and asserts that an original PDF is inside it, which is exactly what the "
         "originals-out-of-git policy forbids; provisioning would change nothing (git archive skips untracked files) and "

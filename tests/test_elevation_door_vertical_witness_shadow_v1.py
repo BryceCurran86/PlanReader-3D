@@ -248,14 +248,6 @@ def test_adapter_is_default_off_and_strictly_boolean():
     assert {r.record_id for r in rows} == set(PLAN) and any(r.is_candidate for r in rows)
 
 
-def test_no_production_module_imports_the_shadow():
-    root = Path(__file__).resolve().parents[1]
-    offenders = [p.name for p in root.glob("*.py")
-                 if p.name != "pb_elevation_door_vertical_witness_shadow.py"
-                 and "pb_elevation_door_vertical_witness_shadow" in p.read_text(encoding="utf-8", errors="ignore")]
-    assert offenders == []
-
-
 def test_module_carries_no_project_or_id_special_cases():
     text = Path(shadow.__file__).read_text(encoding="utf-8").lower()
     for token in ("3laurel", "lot16", "maryborough", "22e7e155", "a93486dc", "reference_takeoff", "boq"):
@@ -323,7 +315,6 @@ def test_extractor_ignores_text_and_ticks_that_do_not_form_a_chain():
 
 
 # ------------------------------------------------------------------ original source (private PDF, skipped when absent)
-import hashlib   # noqa: E402
 import os        # noqa: E402
 
 ORIGINAL_SHA256 = "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
@@ -488,3 +479,416 @@ def test_cross_view_view_level_conflicts_do_not_poison_a_clean_candidate():
     for second in (_view(sym_plan, sym_out, d), _view(dup_plan, outlines, d)):
         rows = {r.record_id: r for r in assess_elevation_vertical_witness_shadow([_view(plan, outlines, d), second], enabled=True)}
         assert rows["entry"].is_candidate and rows["entry"].opening_height_mm == 2100.0, rows["entry"].reason_codes
+
+
+# ------------------------------------------------------------------ source-owned adapter (receipts)
+import fitz   # noqa: E402
+
+import pb_elevation_source_owned_witness_adapter as adapter   # noqa: E402
+from pb_source_visibility_authority import SourceVisibilityProducer   # noqa: E402
+
+
+def test_only_the_adapter_and_tools_may_import_the_shadow_and_nothing_imports_the_adapter():
+    root = Path(__file__).resolve().parents[1]
+    importers = sorted(p.name for p in root.glob("*.py")
+                       if p.name != "pb_elevation_door_vertical_witness_shadow.py"
+                       and "pb_elevation_door_vertical_witness_shadow" in p.read_text(encoding="utf-8", errors="ignore"))
+    assert importers == ["pb_elevation_source_owned_witness_adapter.py"]
+    adapter_importers = [p.name for p in root.glob("*.py")
+                         if p.name != "pb_elevation_source_owned_witness_adapter.py"
+                         and "pb_elevation_source_owned_witness_adapter" in p.read_text(encoding="utf-8", errors="ignore")]
+    assert adapter_importers == []
+
+
+def test_receipts_flow_from_drawn_facts_to_the_witness_result():
+    lines, rects, words = synthetic_page()
+    lines = [(*l, f"line{i}") for i, l in enumerate(lines)]
+    rects = [(*r, (f"rect{i}a", f"rect{i}b")) for i, r in enumerate(rects)]
+    words = [(*w, f"word{i}") for i, w in enumerate(words)]
+    view = adapter.extract_views(lines, rects, words)[0]
+    assert view["datum"].receipt_ids and all(lv.receipt_ids for lv in view["datum"].levels)
+    assert any(i.startswith("word") for lv in view["datum"].levels for i in lv.receipt_ids)     # the printed figure is a receipt
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.01 and abs(o.x1 - 234.0) < 0.01][0]
+    assert leaf.receipt_ids and all(i.startswith("rect") for i in leaf.receipt_ids)
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    result = run("leaf_rec", plan, view["outlines"], view["datum"])
+    assert result.is_candidate and result.source_observation_ids
+    assert set(result.source_observation_ids) >= set(leaf.receipt_ids) | set(view["datum"].receipt_ids)
+    assert any(i.startswith("word") for i in result.source_observation_ids)
+    assert run("frame_rec", plan, view["outlines"], view["datum"]).source_observation_ids == ()   # no receipts for a non-candidate
+
+
+def _synthetic_pdf() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=400)
+    base = 300.0
+    for x, mm in ((100.0, 2740.0), (120.0, 2700.0), (140.0, 2100.0)):
+        top = base - mm / MM
+        page.draw_line((x, top), (x, base), color=(0, 0, 0), width=0.4)
+        page.draw_line((x - 6, top), (x + 6, top), color=(0, 0, 0), width=0.4)
+        page.draw_line((x - 6, base), (x + 6, base), color=(0, 0, 0), width=0.4)
+        page.insert_text((x + 9, (top + base) / 2 + 8), f"{int(mm):,}", fontsize=7, rotate=90)
+    head = base - 2100.0 / MM
+    # CAD exports draw a filled rectangle as a closed line path, not as an `re` operator; do the same here
+    def fill_rect(x0, y0, x1, y1, fill):
+        page.draw_polyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], color=None, fill=fill, closePath=True)
+
+    fill_rect(196.9, head - 8.0, 237.1, base, (0.7, 0.7, 0.7))
+    fill_rect(200.0, head, 234.0, base - 2.26, (0.3, 0.3, 0.3))
+    fill_rect(300.0, head, 349.0, base - 20.0, (0.4, 0.4, 0.4))
+    return doc.tobytes()
+
+
+def test_synthetic_pdf_through_the_real_producers_gives_source_owned_views_with_receipts():
+    payload = _synthetic_pdf()
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://synthetic.pdf", page_ids=(1,))
+    page = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="1")
+    assert page is not None and page.scope.source_sha256 == sha and page.scope.revision_id == initial.revision.revision_id
+    assert page.lines and page.rects and page.words
+    assert all(r[5] for r in page.rects)                        # every rect names the observations that draw it
+    views = adapter.source_owned_views(page)
+    assert len(views) == 1
+    view = views[0]
+    assert [lv.figured_mm for lv in view["datum"].levels] == [2740.0, 2700.0, 2100.0]
+    assert calibrate_datum(view["datum"]) == pytest.approx(MM, rel=2e-2)
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.1 and abs(o.x1 - 234.0) < 0.1]
+    assert leaf and leaf[0].receipt_ids and leaf[0].y_base_frame == pytest.approx(300.0, abs=0.1)
+    # a foreign revision refuses the whole page: no facts without an intact lineage
+    assert adapter.read_source_owned_page(source, revision_id="source_revision_foreign", page_id="1") is None
+
+
+def test_page_filter_never_mixes_facts_from_another_page():
+    doc = fitz.open(stream=_synthetic_pdf(), filetype="pdf")
+    page2 = doc.new_page(width=600, height=400)
+    page2.draw_line((50.0, 100.0), (50.0, 300.0), color=(0, 0, 0), width=0.4)
+    page2.insert_text((60, 200), "3,000", fontsize=7, rotate=90)
+    page2.draw_polyline([(400.0, 150.0), (440.0, 150.0), (440.0, 250.0), (400.0, 250.0), (400.0, 150.0)],
+                        color=None, fill=(0.2, 0.2, 0.2), closePath=True)
+    payload = doc.tobytes()
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://two.pdf", page_ids=(1, 2))
+    one = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="1")
+    two = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="2")
+    assert "3,000" not in {w[4] for w in one.words} and "3,000" in {w[4] for w in two.words}
+    assert not any(abs(r[0] - 400.0) < 0.1 for r in one.rects) and any(abs(r[0] - 400.0) < 0.1 for r in two.rects)
+    assert {l[4] for l in one.lines}.isdisjoint({l[4] for l in two.lines})         # no shared observation ids
+    assert len(adapter.source_owned_views(one)) == 1 and adapter.source_owned_views(two) == []
+
+
+def test_original_source_owned_path_reproduces_the_diagnostic_result_and_names_its_receipts():
+    pdf = _original_pdf()                     # the one 3Laurel resolver: absent is NOT_RUN/FAIL, wrong bytes always FAIL (never a skip of its own)
+    from tools.diag_elevation_door_vertical_witness_shadow import run as run_tool
+
+    focus = ("22e7e155", "1cd959cc", "be1e67bf", "9d4dc1b3", "a93486dc")
+    owned = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=True)
+    diagnostic = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=False)
+    assert owned["input_path"] == "source_owned" and diagnostic["input_path"] == "pymupdf_diagnostic"
+    # Both paths read the same DRAWN rectangles (closed subpaths and thin strips; never a compound path's bounding box), so they agree. The
+    # list is the evidence-based one (docs/engineering/claude_3laurel_elevation_source_subpath_attribution_20261110.md): 22e7e155 and
+    # a93486dc are the two the bounding-box reading also found (same outlines, narrower receipts); 836b31c3 and b5091e15 are two more
+    # drawn door openings whose elevation views only register once the invented rectangles are gone. It is not a target value.
+    assert [c["record"] for c in owned["candidates"]] == [c["record"] for c in diagnostic["candidates"]] == [
+        "22e7e155", "836b31c3", "a93486dc", "b5091e15"]
+    by_record = lambda r: {c["record"]: (c["opening_height_mm"], c["leaf_height_mm"], c["head_level"]) for c in r["candidates"]}
+    assert by_record(owned) == by_record(diagnostic)                      # same heights, leaf heights and datum level on both paths
+    assert all(c["receipt_count"] > 0 and c["opening_height_mm"] == 2100.0 for c in owned["candidates"])
+    assert all(c["text_trust"] in ("corroborated", "raw_unverified_diagnostic_only") for c in owned["candidates"])   # trust is always stated
+    assert all(c["text_trust"] == "" for c in diagnostic["candidates"])        # the PyMuPDF path claims no text trust
+    assert all(c["leaf_height_mm"] != c["opening_height_mm"] for c in owned["candidates"] if c["record"] == "22e7e155")
+    offsets = lambda r: sorted((v["page"], v["view"], v.get("offset")) for v in r["views"] if v.get("registered_axes"))
+    assert offsets(owned) == offsets(diagnostic)                          # the same unique registrations
+    held = {(r["record"], r["status"]) for r in owned["focus_rows"] if r["record"] in ("1cd959cc", "be1e67bf", "9d4dc1b3")}
+    assert all(status != "candidate" for _, status in held)               # frame record and interior doors still out
+
+
+def test_enclosing_frame_receipts_are_part_of_the_leaf_outline_receipts():
+    lines, rects, words = synthetic_page()
+    rects = [(*r, (f"rect{i}a", f"rect{i}b")) for i, r in enumerate(rects)]
+    view = adapter.extract_views(lines, rects, words)[0]
+    leaf = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.01 and abs(o.x1 - 234.0) < 0.01][0]
+    assert leaf.y_base_frame == pytest.approx(300.0)
+    surround_index = next(i for i, r in enumerate(rects) if abs(r[0] - 196.9) < 0.01)
+    assert {f"rect{surround_index}a", f"rect{surround_index}b"} <= set(leaf.receipt_ids)       # the frame that gives its base
+
+
+def test_an_ambiguous_figure_beside_a_dimension_line_is_not_read():
+    lines, rects, words = synthetic_page()
+    x = 140.0
+    top = 300.0 - 2100.0 / MM
+    extra = (x + 2, (top + 300.0) / 2 - 10, x + 10, (top + 300.0) / 2 + 10, "2,000")      # a second figure on the same dimension
+    view = adapter.extract_views(lines, rects, words + [extra])[0]
+    assert [lv.figured_mm for lv in view["datum"].levels] == [2740.0, 2700.0]               # the ambiguous dimension is dropped
+
+
+def _two_view_source(payload: bytes):
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = __import__("hashlib").sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://s.pdf", page_ids=(1,))
+    return source, initial.revision.revision_id
+
+
+def test_a_diagonal_fill_path_is_not_an_axis_aligned_outline():
+    doc = fitz.open(stream=_synthetic_pdf(), filetype="pdf")
+    page = doc[0]
+    page.draw_polyline([(400.0, 150.0), (450.0, 150.0), (470.0, 250.0), (420.0, 250.0), (400.0, 150.0)],
+                       color=None, fill=(0.2, 0.2, 0.2), closePath=True)      # skewed quad: diagonal edges
+    source, revision_id = _two_view_source(doc.tobytes())
+    page_facts = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert not any(abs(r[0] - 400.0) < 0.1 for r in page_facts.rects)
+    assert any(abs(r[0] - 200.0) < 0.1 for r in page_facts.rects)                 # the real leaf is still there
+
+
+def test_a_path_whose_edges_disagree_on_fill_is_not_a_single_outline():
+    import dataclasses
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real = source.native_paint_facts
+
+    def mixed(selector, *, observation_ids):
+        facts = list(real(selector, observation_ids=observation_ids))
+        leaf_path = next(f.path_index for f in facts if f.fill is not None and abs(f.geometry[0] - 200.0) < 0.1)
+        flipped = False
+        for i, f in enumerate(facts):
+            if f.path_index == leaf_path and not flipped:
+                facts[i] = dataclasses.replace(f, fill=(0.9, 0.9, 0.9))
+                flipped = True
+        return tuple(facts)
+
+    source.native_paint_facts = mixed
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert not any(abs(r[0] - 200.0) < 0.1 and abs(r[2] - 234.0) < 0.1 for r in page.rects)
+
+
+def test_a_segment_without_a_corroborated_visibility_receipt_is_not_used():
+    import types
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real_authority = source.authority()
+    baseline = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    dropped = {baseline.lines[0][4]}
+
+    class Doubt:
+        def __getattr__(self, name):
+            return getattr(real_authority, name)
+
+        def resolve_visible(self, selector):
+            result = real_authority.resolve_visible(selector)
+            if selector.observation_id in dropped:
+                return types.SimpleNamespace(status=EvidenceResolutionStatus.ABSTAINED, observation=result.observation)
+            return result
+
+    source.authority = lambda: Doubt()
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert dropped.isdisjoint({l[4] for l in page.lines})
+    assert len(page.lines) == len(baseline.lines) - 1
+
+
+# ------------------------------------------------------------------ MAX review 6733270532: untrusted text must fail closed
+def _words_with_reasons(reasons, *, status=None):
+    """Read the synthetic page while the text authority reports every word as untrusted with `reasons`."""
+    import dataclasses
+    import types
+
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    real = source.text_integrity_authority()
+    forced = status if status is not None else EvidenceResolutionStatus.ABSTAINED
+
+    class Doubt:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def resolve_text(self, selector):
+            r = real.resolve_text(selector)
+            receipt = dataclasses.replace(r.receipt, trusted=False, reason_codes=tuple(reasons))
+            return types.SimpleNamespace(status=forced, receipt=receipt, trusted_text=None)
+
+    source.text_integrity_authority = lambda: Doubt()
+    return adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+
+
+def test_an_untrusted_word_with_no_stated_reason_is_never_a_datum_word():
+    # An empty reason set is a subset of every set; it must not pass the raw fallback.
+    page = _words_with_reasons(())
+    assert page.words == ()
+    assert adapter.source_owned_views(page) == []                       # no figured chain, so no view at all
+
+
+@pytest.mark.parametrize("reasons", [("something_unknown",), ("text_glyph_mapping_unverified", "something_unknown"),
+                                     ("text_clip_state_unresolved", "text_glyph_mapping_unverified", "other")])
+def test_unknown_or_mixed_reasons_are_not_accepted_as_raw_text(reasons):
+    assert _words_with_reasons(reasons).words == ()
+
+
+@pytest.mark.parametrize("reasons", [("text_glyph_mapping_unverified",), ("text_clip_state_unresolved",),
+                                     ("text_glyph_mapping_unverified", "text_clip_state_unresolved")])
+def test_only_approved_reasons_give_raw_text_and_it_is_tagged_unverified(reasons):
+    page = _words_with_reasons(reasons)
+    assert page.words and {w[6] for w in page.words} == {"raw_unverified"}
+    views = adapter.source_owned_views(page)
+    assert views and all(lv.text_trust == "raw_unverified" for lv in views[0]["datum"].levels)
+
+
+def test_a_non_abstained_untrusted_word_is_not_raw_fallback():
+    page = _words_with_reasons(("text_glyph_mapping_unverified",), status=EvidenceResolutionStatus.CONFLICT)
+    assert page.words == ()
+
+
+def test_real_producer_words_carry_an_explicit_trust_tag():
+    source, revision_id = _two_view_source(_synthetic_pdf())
+    page = adapter.read_source_owned_page(source, revision_id=revision_id, page_id="1")
+    assert page.words and {w[6] for w in page.words} <= {"corroborated", "raw_unverified"}
+
+
+def _trust_scene(trust_values):
+    lines, rects, words = synthetic_page()
+    tagged = []
+    for i, w in enumerate(words):
+        tagged.append((*w, f"word{i}", trust_values[i % len(trust_values)]))
+    return adapter.extract_views(lines, rects, tagged)[0], tagged
+
+
+def test_text_trust_reaches_the_result_and_never_makes_a_candidate_stronger():
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    for trust, expected in ((["corroborated"], "corroborated"), (["corroborated", "raw_unverified"], "raw_unverified_diagnostic_only"),
+                            (["raw_unverified"], "raw_unverified_diagnostic_only")):
+        view, _ = _trust_scene(trust)
+        r = run("leaf_rec", plan, view["outlines"], view["datum"])
+        assert r.status is CAND and r.text_trust == expected and r.status is not EvidenceResolutionStatus.CORROBORATED
+    # a plain tuple with no trust tag claims nothing
+    lines, rects, words = synthetic_page()
+    view = adapter.extract_views(lines, rects, words)[0]
+    assert run("leaf_rec", plan, view["outlines"], view["datum"]).text_trust == ""
+    assert shadow.datum_text_trust(view["datum"]) == ""
+
+
+def test_text_trust_is_part_of_the_result_identity():
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("frame_rec", 98.4, 135.6), PlanSpan("win", 200.0, 249.0)]
+    a_view, _ = _trust_scene(["corroborated"])
+    b_view, _ = _trust_scene(["raw_unverified"])
+    a = run("leaf_rec", plan, a_view["outlines"], a_view["datum"])
+    b = run("leaf_rec", plan, b_view["outlines"], b_view["datum"])
+    assert a.result_id != b.result_id                                   # a raw-text result can never alias a verified one
+
+
+# ------------------------------------------------------------------ opening measurement composition
+from pb_elevation_door_vertical_witness_shadow import compose_opening_measurement   # noqa: E402
+
+
+def _measure(record_id="entry", *, scale=1.0, plan_width=1200.0, label_trust="corroborated", witness_trust=None,
+             label_receipts=("label1", "label2"), **flags):
+    plan, outlines, d = make_scene(scale=scale)
+    if witness_trust is not None:
+        d = ElevationDatum(d.ffl_y, tuple(DatumLevel(l.name, l.y, l.figured_mm, ("dim",), witness_trust) for l in d.levels), d.receipt_ids)
+    w = run(record_id, plan, outlines, d)
+    return w, compose_opening_measurement(w, outlines, plan_width_mm=plan_width, plan_label_text_trust=label_trust,
+                                          plan_label_receipt_ids=label_receipts, **flags)
+
+
+def test_measurement_uses_the_printed_width_and_the_printed_datum_never_the_leaf():
+    w, m = _measure(witness_trust="corroborated")
+    assert m.status is CAND and m.reason_codes == (shadow.MEASUREMENT_CANDIDATE,)
+    assert m.width_mm == 1200.0 and m.height_mm == 2100.0
+    assert m.area_m2 == pytest.approx(2.52, abs=1e-4)                          # 1.2 m x 2.1 m, not 1.2 x the 2.02 m leaf
+    assert m.leaf_height_mm == pytest.approx(2100.0 - SILL * MM, abs=1.0) and m.leaf_height_mm != m.height_mm
+    assert m.elevation_width_mm == pytest.approx(1200.2, abs=0.5)               # corroboration only
+    assert m.status is not EvidenceResolutionStatus.CORROBORATED
+
+
+def test_remaining_gates_are_listed_in_order_and_never_become_a_quantity():
+    _, raw = _measure(witness_trust="raw_unverified")
+    assert raw.text_trust == "raw_unverified_diagnostic_only"
+    assert raw.remaining_gates == (shadow.GATE_TEXT, shadow.GATE_KIND, shadow.GATE_HOST) and raw.first_remaining_gate == shadow.GATE_TEXT
+    _, verified = _measure(witness_trust="corroborated")
+    assert verified.text_trust == "corroborated"
+    assert verified.remaining_gates == (shadow.GATE_KIND, shadow.GATE_HOST) and verified.first_remaining_gate == shadow.GATE_KIND
+    _, kind_only = _measure(witness_trust="corroborated", kind_authenticated=True)
+    assert kind_only.remaining_gates == (shadow.GATE_HOST,)
+    _, all_open = _measure(witness_trust="corroborated", kind_authenticated=True, host_authenticated=True)
+    assert all_open.remaining_gates == () and all_open.first_remaining_gate == shadow.GATE_PROMOTION
+    assert all_open.is_candidate and all_open.status is not EvidenceResolutionStatus.CORROBORATED   # the issuer decides, not this
+
+
+def test_one_untrusted_label_word_makes_the_whole_measurement_raw():
+    _, m = _measure(witness_trust="corroborated", label_trust="raw_unverified")
+    assert m.text_trust == "raw_unverified_diagnostic_only" and m.remaining_gates[0] == shadow.GATE_TEXT
+    _, unspecified = _measure(witness_trust="corroborated", label_trust="")
+    assert unspecified.text_trust == "" and unspecified.remaining_gates[0] == shadow.GATE_TEXT   # claims nothing, so gated
+
+
+@pytest.mark.parametrize("plan_width", [None, NAN, INF, -INF, 0.0, -1200.0, True])
+def test_a_missing_or_invalid_plan_width_abstains(plan_width):
+    _, m = _measure(plan_width=plan_width)
+    assert m.status is ABST and m.reason_codes == (shadow.PLAN_WIDTH_UNAVAILABLE,) and m.area_m2 is None and m.height_mm is None
+
+
+def test_plan_width_that_disagrees_with_the_elevation_outline_conflicts():
+    for width in (900.0, 1260.0, 1200.0 * 1.006, 1200.0 * 0.994):
+        _, m = _measure(plan_width=width)
+        assert m.status is CONF and m.reason_codes == (shadow.WIDTH_DISAGREES,) and m.area_m2 is None and m.width_mm is None
+    for width in (1200.0 * 1.004, 1200.0 * 0.996, 1200.2):                      # inside the 0.5 percent corroboration band
+        assert _measure(plan_width=width)[1].status is CAND
+
+
+def test_a_failed_witness_propagates_and_is_never_measured():
+    for rid, reason in (("win1", shadow.BASE_NOT_ON_FFL), ("win2", shadow.BASE_NOT_ON_FFL)):
+        w, m = _measure(rid)
+        assert not w.is_candidate and m.status is w.status and m.reason_codes == (reason,) and m.area_m2 is None
+    plan, outlines, d = make_scene(extra_plan=[PlanSpan("entry_dup", 300.29, 334.31)])
+    w = run("entry", plan, outlines, d)
+    m = compose_opening_measurement(w, outlines, plan_width_mm=1200.0, plan_label_text_trust="corroborated")
+    assert m.status is CONF and m.reason_codes == (shadow.MULTIPLE_PLAN_RECORDS,)          # duplicate record held, not measured
+
+
+def test_a_witness_whose_outline_is_missing_abstains():
+    plan, outlines, d = make_scene()
+    w = run("entry", plan, outlines, d)
+    m = compose_opening_measurement(w, [o for o in outlines if o.outline_id != w.outline_id], plan_width_mm=1200.0,
+                                    plan_label_text_trust="corroborated")
+    assert m.status is ABST and m.reason_codes == (shadow.OUTLINE_UNAVAILABLE,)
+
+
+def test_measurement_is_scale_invariant_and_collects_receipts():
+    for scale in (1.0, 1.5, 2.0):
+        _, m = _measure(scale=scale, witness_trust="corroborated")
+        assert m.width_mm == 1200.0 and m.height_mm == 2100.0 and m.elevation_width_mm == pytest.approx(1200.2, abs=0.6)
+    _, m = _measure(witness_trust="corroborated", label_receipts=("labelA", "labelB"))
+    assert {"labelA", "labelB"} <= set(m.source_observation_ids)
+
+
+def test_measurement_identity_is_deterministic_and_content_derived():
+    _, a = _measure(witness_trust="corroborated")
+    _, b = _measure(witness_trust="corroborated")
+    assert a == b and a.result_id == b.result_id
+    assert _measure(witness_trust="raw_unverified")[1].result_id != a.result_id                  # trust is part of identity
+    assert _measure(witness_trust="corroborated", kind_authenticated=True)[1].result_id != a.result_id   # so are the open gates
+    assert _measure(witness_trust="corroborated", label_receipts=("other",))[1].result_id != a.result_id
+
+
+def test_hairline_edge_fills_do_not_widen_a_leaf_outline():
+    # A leaf drawn in parts, plus 0.14 pt strips of the same fill that render the frame's edge lines on both sides.
+    # Merging the strips would make the outline 0.28 pt wider than the printed width and the head 0.14 pt higher.
+    lines, rects, words = synthetic_page()
+    head = 300.0 - 2100.0 / MM
+    leaf = (0.3, 0.3, 0.3)
+    parts = [(200.0, head, 234.0, head + 3.0, leaf), (200.0, head + 3.0, 202.0, 300.0, leaf),
+             (232.0, head + 3.0, 234.0, 300.0, leaf), (200.0, 297.0, 234.0, 300.0, leaf)]
+    strips = [(199.86, head - 0.14, 199.99, 300.0, leaf), (234.0, head - 0.14, 234.14, 300.0, leaf),
+              (199.86, head - 0.14, 234.14, head, leaf)]
+    base = [r for r in rects if not (abs(r[0] - 200.0) < 0.01 and abs(r[2] - 234.0) < 0.01)]   # drop the single leaf rect
+    view = adapter.extract_views(lines, base + parts + strips, words)[0]
+    leaf_out = [o for o in view["outlines"] if abs(o.x0 - 200.0) < 0.05 and abs(o.x1 - 234.0) < 0.05]
+    assert leaf_out and leaf_out[0].x1 - leaf_out[0].x0 == pytest.approx(34.0, abs=0.01)
+    assert leaf_out[0].y_head == pytest.approx(head, abs=0.01)
+    assert not any(abs(o.x0 - 199.86) < 0.01 for o in view["outlines"])                       # no outline includes the hairlines
+    # and it composes to the printed width with the datum height
+    plan = [PlanSpan("leaf_rec", 100.0, 134.0), PlanSpan("win", 200.0, 249.0)]
+    w = run("leaf_rec", plan, view["outlines"], view["datum"])
+    m = compose_opening_measurement(w, view["outlines"], plan_width_mm=1199.5, plan_label_text_trust="corroborated")
+    assert m.status is CAND and m.height_mm == 2100.0
+
