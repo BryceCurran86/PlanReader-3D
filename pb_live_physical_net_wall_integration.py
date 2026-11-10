@@ -1073,6 +1073,7 @@ def _collect_live_physical_net_wall_claim(
             try:
                 from pb_source_cross_view_floor_correspondence_shadow import (
                     resolve_cross_sheet_floor_correspondence_for_claim,
+                    enrich_cross_sheet_floor_with_documented_area,
                 )
                 correspondence_records = resolve_cross_sheet_floor_correspondence_for_claim(
                     source=surface_semantic_source,
@@ -1081,6 +1082,10 @@ def _collect_live_physical_net_wall_claim(
                 )
                 if correspondence_records:
                     correspondence_status = "correspondence_resolved"
+                    canonical_floors = enrich_cross_sheet_floor_with_documented_area(
+                        floors=canonical_floors,
+                        room_areas=cross_view_area,
+                    )
                 else:
                     correspondence_status = "correspondence_empty"
             except Exception:

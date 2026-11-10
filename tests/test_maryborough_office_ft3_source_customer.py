@@ -1027,6 +1027,89 @@ def test_consumer_authored_corroborated_cannot_override_upstream_unresolved_evid
 
 
 
+def test_blank_source_in_compose_cross_sheet_room_and_floor_raises():
+    """Defect 1 regression (PR review 5837411122): blank published PDF with matching scope must fail closed (no wall ink)."""
+    import fitz
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        CrossSheetWallEquivalenceRecord,
+        DoorwayTransitionEvidence,
+        SourceCrossViewFloorCorrespondenceRecord,
+        compose_authenticated_cross_sheet_room_and_floor,
+    )
+
+    blank_pdf = fitz.open()
+    for _ in range(11):
+        blank_pdf.new_page()
+    blank_bytes = blank_pdf.tobytes()
+    blank_pdf.close()
+
+    producer = SourceVisibilityProducer(
+        producer_method="test",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="blank_doc",
+        source_bytes=blank_bytes,
+        source_locator="memory://blank.pdf",
+        page_ids=[str(i) for i in range(1, 12)],
+    )
+
+    d15 = DoorwayTransitionEvidence(
+        door_callout="D15",
+        page_id="7",
+        wall_side="y0",
+        schedule_page_id="16",
+        door_width_mm=920.0,
+    )
+    equivs = (
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x0", support_face_coord=250.0, target_face_coord=173.04, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x1", support_face_coord=394.0, target_face_coord=316.80, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y0", support_face_coord=1383.2, target_face_coord=1382.72, covered_interval_iou=1.0, doorway_transition=d15),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y1", support_face_coord=1584.56, target_face_coord=1585.04, covered_interval_iou=1.0),
+    )
+
+    corr = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="corr_1",
+        canonical_floor_id="floor_1",
+        physical_room_id="room_1",
+        source_room_face_record_id="face_1",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(250.0, 1383.2, 394.0, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_orientation="HORIZONTAL",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(77.0, 0.0),
+        registration_support_pt=250.0,
+        registration_runner_up_support_pt=250.0,
+        registration_null_support_pt=0.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={"x0": "SOLID", "x1": "SOLID", "y0": "SOLID", "y1": "SOLID"},
+        finish_codes_in_box={"FT3": 1},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        cross_sheet_wall_equivalences=equivs,
+        doorway_transitions=(d15,),
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+
+    with pytest.raises(ValueError, match="no visible ink"):
+        compose_authenticated_cross_sheet_room_and_floor(
+            published=published,
+            correspondence=corr,
+            room_label="OFFICE",
+        )
+
+
 def test_foreign_snapshot_in_compose_cross_sheet_room_and_floor_raises():
     """Defect 1 regression: passing synthetic or foreign snapshot to compose must raise ValueError."""
     from types import SimpleNamespace
@@ -1047,6 +1130,7 @@ def test_foreign_snapshot_in_compose_cross_sheet_room_and_floor_raises():
         ),
         snapshot=SimpleNamespace(snapshot_id="snap_valid"),
         coverage=SimpleNamespace(decoded_pages=(11,)),
+        visible_observation_ids=("source_obs_valid",),
     )
 
     d15 = DoorwayTransitionEvidence(

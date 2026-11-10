@@ -601,6 +601,8 @@ def test_compose_office_ceiling_with_mismatched_room_or_unissued_area_raises():
         quantity_id="area_qty_1",
         value=9.05352,
         status="firm",
+        family="floor_area",
+        unit="m2",
     )
     with pytest.raises(ValueError, match="room entity mismatch"):
         compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
@@ -664,3 +666,123 @@ def test_compose_office_ceiling_with_mismatched_room_or_unissued_area_raises():
             area_evidence=bad_value_evidence,
             room_area_qty_id="area_qty_1",
         )
+
+def test_adversarial_wrong_family_foreign_snapshot_blocked_area_evidence_raises():
+    """Defect 2 regression (PR review 5837411122): unissued, wrong-family, wrong-unit, foreign-snapshot, or blocked area evidence raises ValueError."""
+    from types import SimpleNamespace
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        EvidenceResolutionStatus,
+        SourceCrossViewCeilingCorrespondenceRecord,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+    )
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_1",
+        canonical_ceiling_id="c_1",
+        physical_room_id="room_office_1",
+        canonical_room_id="room_office_1",
+        source_room_face_record_id="f_1",
+        support_page_id="9",
+        support_viewport_id="vp9",
+        target_page_id="7",
+        target_viewport_id="vp7",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="snap1",
+    )
+    room = SimpleNamespace(
+        canonical_room_id="room_office_1",
+        physical_room_id="room_office_1",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="snap1",
+        page_id="7",
+        evidence_ids=("ev_room",),
+        polygon_pdf_pts=((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
+        viewport_id="vp7",
+    )
+
+    # 1. Exact reproduction from GPT MAX review 5837411122: wrong family + wrong unit + blockers + foreign snapshot
+    adv_evidence = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+        evidence_id="foreign-unissued-evidence",
+        family="opening_count",
+        unit="each",
+        blocking_reasons=("unresolved_metric",),
+        metadata={"snapshot_id": "FOREIGN"},
+    )
+    with pytest.raises(ValueError, match="invalid room area evidence family"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            area_evidence=adv_evidence,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 2. Wrong unit ("each")
+    adv_unit = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+        family="floor_area",
+        unit="each",
+    )
+    with pytest.raises(ValueError, match="invalid room area evidence unit"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            area_evidence=adv_unit,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 3. Unresolved blockers
+    adv_blocked = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+        family="floor_area",
+        unit="m2",
+        blocking_reasons=("unresolved_metric",),
+    )
+    with pytest.raises(ValueError, match="unresolved authority blockers"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            area_evidence=adv_blocked,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 4. Foreign snapshot in metadata
+    adv_foreign = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+        family="floor_area",
+        unit="m2",
+        metadata={"snapshot_id": "FOREIGN_SNAP_XYZ"},
+    )
+    with pytest.raises(ValueError, match="snapshot_id FOREIGN_SNAP_XYZ does not match"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            area_evidence=adv_foreign,
+            room_area_qty_id="area_qty_1",
+        )
+

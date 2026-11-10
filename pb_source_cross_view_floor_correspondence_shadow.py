@@ -2389,6 +2389,13 @@ def compose_authenticated_cross_sheet_room_and_floor(
     if f"page:{correspondence.target_page_id}" not in getattr(published.revision, "partition_ids", ()):
         raise ValueError(f"target page {correspondence.target_page_id} not in published source partitions")
 
+    # Published source must contain authentic visible wall observations; a blank or ink-free publication must fail closed
+    visible_obs = getattr(published, "visible_observation_ids", None)
+    if visible_obs is None or len(visible_obs) == 0:
+        raise ValueError(
+            f"published source contains no visible ink observations on target page {correspondence.target_page_id}"
+        )
+
 
     tx0, ty0, tx1, ty1 = (float(v) for v in correspondence.target_box_pdf_pts)
     if tx1 <= tx0 or ty1 <= ty0:
@@ -3565,6 +3572,73 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
     area_status = getattr(area_evidence, "status", None)
     if area_status not in ("firm", EvidenceResolutionStatus.CORROBORATED):
         raise ValueError("room area evidence must be firm/corroborated")
+
+    # Family must be an authentic floor/room area family (not opening_count, wall_net_area, etc.)
+    area_family = getattr(area_evidence, "family", None)
+    if area_family is not None and str(area_family).lower() not in (
+        "floor_area",
+        "room_area",
+        "floor_surface_area",
+    ):
+        raise ValueError(
+            f"invalid room area evidence family: {area_family}; expected floor_area or room_area"
+        )
+
+    # Unit must be m2
+    area_unit = getattr(area_evidence, "unit", None)
+    if area_unit is not None and str(area_unit).lower() not in ("m2", "m²", "sqm"):
+        raise ValueError(f"invalid room area evidence unit: {area_unit}; expected m2")
+
+    # Blocking reasons or abstained status must reject
+    blocking_reasons = (
+        getattr(area_evidence, "blocking_reasons", ())
+        or getattr(area_evidence, "authority_blockers", ())
+    )
+    if blocking_reasons:
+        raise ValueError(
+            f"room area evidence has unresolved authority blockers: {blocking_reasons}"
+        )
+    if getattr(area_evidence, "abstained", False):
+        raise ValueError("abstained room area evidence cannot create firm ceiling authority")
+
+    # Upstream source and entity lineage validation
+    metadata = getattr(area_evidence, "metadata", None)
+    meta_snap = (
+        getattr(area_evidence, "snapshot_id", None)
+        or (metadata.get("snapshot_id") if isinstance(metadata, Mapping) else None)
+    )
+    if meta_snap and str(meta_snap) != str(correspondence.snapshot_id):
+        raise ValueError(
+            f"room area evidence snapshot_id {meta_snap} does not match correspondence snapshot {correspondence.snapshot_id}"
+        )
+
+    meta_doc = (
+        getattr(area_evidence, "document_id", None)
+        or (metadata.get("document_id") if isinstance(metadata, Mapping) else None)
+    )
+    if meta_doc and str(meta_doc) != str(correspondence.document_id):
+        raise ValueError(
+            f"room area evidence document_id {meta_doc} does not match correspondence document {correspondence.document_id}"
+        )
+
+    meta_sha = (
+        getattr(area_evidence, "source_sha256", None)
+        or (metadata.get("source_sha256") if isinstance(metadata, Mapping) else None)
+    )
+    if meta_sha and str(meta_sha).lower() != str(correspondence.source_sha256).lower():
+        raise ValueError(
+            f"room area evidence source_sha256 {meta_sha} does not match correspondence SHA {correspondence.source_sha256}"
+        )
+
+    meta_entity = (
+        getattr(area_evidence, "entity_id", None)
+        or (metadata.get("entity_id") if isinstance(metadata, Mapping) else None)
+    )
+    if meta_entity and str(meta_entity) not in (
+        str(correspondence.canonical_room_id),
+        str(correspondence.physical_room_id),
+    ):
+        raise ValueError(f"room area evidence entity_id {meta_entity} does not match room")
 
     canonical_ceiling_id = correspondence.canonical_ceiling_id
     ceiling_qty_id = stable_contract_id(

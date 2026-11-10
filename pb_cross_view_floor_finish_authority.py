@@ -491,6 +491,8 @@ def _source_owned_floor_finish_viewports(
     grouped = {}
     views = producer.published_plan_viewports()
     for view in views:
+        if view.view_type != DrawingViewType.FLOOR_FINISH_PLAN.value:
+            continue
         page_id = str(view.page_number)
         if (
             page_id not in allowed
