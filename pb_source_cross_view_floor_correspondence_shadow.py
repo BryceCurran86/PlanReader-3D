@@ -26,6 +26,7 @@ import random
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
+from weakref import WeakValueDictionary
 
 import fitz
 
@@ -600,7 +601,21 @@ class SourceCrossViewFloorCorrespondenceRecord:
     snapshot_id: str = ""
 
 
-_REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT: dict[tuple[str, str], "SourceCrossViewFloorCorrespondenceRecord"] = {}
+class _UniqueWeakValueDictionary(WeakValueDictionary):
+    """WeakValueDictionary that prevents overwriting an existing key with conflicting authority."""
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        existing = self.get(key)
+        if existing is not None and existing is not value and existing != value:
+            raise ValueError(
+                f"duplicate authority for key {key}: cannot overwrite existing {existing} with {value}"
+            )
+        super().__setitem__(key, value)
+
+
+_REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT: _UniqueWeakValueDictionary[
+    tuple[str, str], "SourceCrossViewFloorCorrespondenceRecord"
+] = _UniqueWeakValueDictionary()
 
 
 def get_authenticated_floor_correspondence(
@@ -610,7 +625,9 @@ def get_authenticated_floor_correspondence(
     return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.get((str(snapshot_id), str(record_id)))
 
 
-_REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT: dict[tuple[str, str], "SourceCrossViewCeilingCorrespondenceRecord"] = {}
+_REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT: _UniqueWeakValueDictionary[
+    tuple[str, str], "SourceCrossViewCeilingCorrespondenceRecord"
+] = _UniqueWeakValueDictionary()
 
 
 def get_authenticated_ceiling_correspondence(

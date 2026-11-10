@@ -704,3 +704,134 @@ def test_invalid_competing_measured_box_does_not_disappear_before_ft3_selection(
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert OVERLAPPING_MEASURED_BOXES in result.reason_codes
     assert result.records==()
+
+
+def test_correspondence_registries_lifecycle_and_duplicate_key_rejection() -> None:
+    import gc
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        SourceCrossViewFloorCorrespondenceRecord,
+        SourceCrossViewCeilingCorrespondenceRecord,
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT,
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+        get_authenticated_floor_correspondence,
+        get_authenticated_ceiling_correspondence,
+    )
+    from pb_migration_contracts import EvidenceResolutionStatus
+
+    floor_rec1 = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="floor-1",
+        canonical_floor_id="cfloor-1",
+        physical_room_id="room-1",
+        source_room_face_record_id="face-1",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        target_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        registration_orientation="0",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(0.0, 0.0),
+        registration_support_pt=100.0,
+        registration_runner_up_support_pt=50.0,
+        registration_null_support_pt=10.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={},
+        finish_codes_in_box={},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+    floor_rec2 = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="floor-2",
+        canonical_floor_id="cfloor-2",
+        physical_room_id="room-2",
+        source_room_face_record_id="face-2",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        target_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        registration_orientation="0",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(0.0, 0.0),
+        registration_support_pt=100.0,
+        registration_runner_up_support_pt=50.0,
+        registration_null_support_pt=10.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={},
+        finish_codes_in_box={},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+
+    snap = "snap-test-corr"
+    key = (snap, "rec-common")
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[key] = floor_rec1
+    assert get_authenticated_floor_correspondence(snap, "rec-common") is floor_rec1
+
+    # Idempotent re-set succeeds
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[key] = floor_rec1
+
+    # Conflicting duplicate key raises
+    import pytest
+    with pytest.raises(ValueError, match="duplicate.*authority"):
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[key] = floor_rec2
+
+    # Ceiling correspondence duplicate key
+    ceil_rec1 = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="ceil-1",
+        canonical_ceiling_id="cceil-1",
+        physical_room_id="room-1",
+        canonical_room_id="croom-1",
+        source_room_face_record_id="face-1",
+        support_page_id="9",
+        support_viewport_id="rcp",
+        target_page_id="7",
+        target_viewport_id="ga",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        target_box_pdf_pts=(0.0, 0.0, 10.0, 10.0),
+        registration_translation_pdf_pts=(0.0, 0.0),
+        finish_code="GRID",
+        semantic_finish="grid_ceiling",
+        ceiling_height_mm=2700.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim1", "dim2"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+    ceil_rec2 = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="ceil-2",
+        canonical_ceiling_id="cceil-2",
+        physical_room_id="room-2",
+        canonical_room_id="croom-2",
+        source_room_face_record_id="face-2",
+        support_page_id="9",
+        support_viewport_id="rcp",
+        target_page_id="7",
+        target_viewport_id="ga",
+        support_dimension_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        target_box_pdf_pts=(0.0, 0.0, 20.0, 20.0),
+        registration_translation_pdf_pts=(0.0, 0.0),
+        finish_code="GRID",
+        semantic_finish="grid_ceiling",
+        ceiling_height_mm=2700.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim1", "dim2"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[key] = ceil_rec1
+    assert get_authenticated_ceiling_correspondence(snap, "rec-common") is ceil_rec1
+
+    # Idempotent re-set succeeds
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[key] = ceil_rec1
+
+    with pytest.raises(ValueError, match="duplicate.*authority"):
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[key] = ceil_rec2
+
+    # Lifecycle / garbage collection
+    del floor_rec1, floor_rec2, ceil_rec1, ceil_rec2
+    gc.collect()
+    assert (snap, "rec-common") not in _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT
+    assert (snap, "rec-common") not in _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT

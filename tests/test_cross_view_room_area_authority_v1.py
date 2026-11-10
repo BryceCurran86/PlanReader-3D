@@ -1197,3 +1197,57 @@ def test_nonfinite_or_malformed_source_witness_is_not_a_junction() -> None:
     for invalid in malformed:
         assert not intersect(invalid, genuine)
         assert not intersect(genuine, invalid)
+
+
+def test_cross_view_room_area_registry_lifecycle_and_bounded_cardinality() -> None:
+    import gc
+    from pb_cross_view_room_area_authority import _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT
+
+    initial_len = len(_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT)
+
+    def _register_isolated_batch():
+        records = []
+        for i in range(10):
+            rec = _source_area_owner_record(f"room-{i}", "9", f"h-{i}", f"v-{i}")
+            records.append(rec)
+            snap_id = f"snap-lifecycle-{i}"
+            rev_id = f"rev-lifecycle-{i}"
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, rec.area_evidence.evidence_id)] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(rev_id, rec.area_evidence.evidence_id)] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, rec.physical_room_id)] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(rev_id, rec.physical_room_id)] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, rec.source_room_face_record_id)] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(rev_id, rec.source_room_face_record_id)] = rec
+        assert len(_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT) == initial_len + 60
+        return records
+
+    held = _register_isolated_batch()
+    assert len(_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT) == initial_len + 60
+    del held
+    gc.collect()
+    assert len(_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT) == initial_len
+
+
+def test_cross_view_room_area_registry_duplicate_key_rejection() -> None:
+    from pb_cross_view_room_area_authority import (
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT,
+        get_authenticated_room_area_record,
+    )
+
+    rec1 = _source_area_owner_record("room-dup-1", "9", "h1", "v1")
+    rec2 = _source_area_owner_record("room-dup-2", "9", "h2", "v2")
+
+    snap_id = "test-snap-dup-rejection"
+    key = (snap_id, "shared-authority-key")
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[key] = rec1
+    assert get_authenticated_room_area_record(snap_id, "shared-authority-key") is rec1
+
+    # Idempotent re-assignment of identical record succeeds
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[key] = rec1
+
+    # Conflicting assignment of different record raises ValueError rather than silently replacing
+    with pytest.raises(ValueError, match="duplicate.*authority"):
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[key] = rec2
+
+    # Earlier authority remains intact and was not overwritten
+    assert get_authenticated_room_area_record(snap_id, "shared-authority-key") is rec1

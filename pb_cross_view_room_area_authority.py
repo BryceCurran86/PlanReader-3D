@@ -19,11 +19,11 @@ import io
 import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
-from weakref import WeakKeyDictionary
+from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import fitz
 from PIL import Image, ImageOps
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
 from pb_drawing_evidence_binding import DrawingViewType
@@ -172,7 +172,21 @@ class CrossViewRoomAreaRecord:
             raise TypeError("CrossViewRoomAreaRecord is producer-owned")
 
 
-_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: dict[tuple[str, str], "CrossViewRoomAreaRecord"] = {}
+class _UniqueWeakValueDictionary(WeakValueDictionary):
+    """WeakValueDictionary that prevents overwriting an existing key with conflicting authority."""
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        existing = self.get(key)
+        if existing is not None and existing is not value and existing != value:
+            raise ValueError(
+                f"duplicate authority for key {key}: cannot overwrite existing {existing} with {value}"
+            )
+        super().__setitem__(key, value)
+
+
+_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: _UniqueWeakValueDictionary[
+    tuple[str, str], "CrossViewRoomAreaRecord"
+] = _UniqueWeakValueDictionary()
 
 
 def get_authenticated_room_area_record(
@@ -2053,4 +2067,6 @@ __all__ = [
     "get_authenticated_room_area_record",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
+    "_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT",
+    "_UniqueWeakValueDictionary",
 ]
