@@ -39,18 +39,24 @@ def _contract(document):
     assert any("python -m compileall -q ." in script for script in scripts)
     assert any("check_full_plan_v2_integrity.py" in script for script in scripts)
     assert any("check_provider_gold_isolation.py" in script for script in scripts)
-    # An unavailable-source policy is only for public regressions. Original
-    # source jobs must still actually run and fail when originals are missing.
+    # An unavailable-source policy is only for public regressions. Public
+    # original-source jobs stay source-neutral: explicit NOT RUN, no private
+    # PDF path, no ORIGINAL_SOURCES_TOKEN. That is not original verification.
     assert POLICY not in document.get("env", {})
     assert "source-proof" in jobs
-    assert any("tools/diag_" in step.get("run", "")
-               for step in jobs["source-proof"]["steps"])
     for name, job in jobs.items():
         if name == "full-regressions":
             continue
         assert POLICY not in job.get("env", {})
         for step in job.get("steps", ()):
             assert POLICY not in step.get("env", {})
+        dumped = yaml.dump(job)
+        assert "ORIGINAL_SOURCES_TOKEN" not in dumped
+        assert "provision-original-sources" not in dumped
+        runs = "\n".join(step.get("run") or "" for step in job.get("steps", ()))
+        assert "NOT RUN" in runs
+        assert "documents/sources/" not in runs
+        assert "tools/diag_" not in runs
 
 
 @pytest.mark.parametrize("workflow", WORKFLOWS)
@@ -62,7 +68,7 @@ def test_public_regressions_match_required_ci_without_skipping_source_jobs(workf
 def test_every_duplicate_full_regression_job_is_discovered_without_a_stale_allowlist():
     discovered=set()
     for path in sorted((ROOT / '.github/workflows').glob('*.y*ml')):
-        document=yaml.safe_load(path.read_text())
+        document=yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(document,dict) and 'full-regressions' in (document.get('jobs') or {}):
             discovered.add(path.name)
             _contract(document)
@@ -89,7 +95,7 @@ def test_actual_compileall_keeps_indexed_source_tree_unchanged(tmp_path):
     assert list(external_cache.rglob('receipt_verifier.*.pyc'))
 
 
-@pytest.mark.parametrize("damage", ("local_cache", "bytecode", "source_policy", "narrow_tests", "job_runner_context", "missing_test_cache"))
+@pytest.mark.parametrize("damage", ("local_cache", "bytecode", "source_policy", "source_pdf", "narrow_tests", "job_runner_context", "missing_test_cache"))
 def test_regression_contract_rejects_archive_pollution_and_false_source_pass(damage):
     document = yaml.safe_load((ROOT / ".github/workflows" / WORKFLOWS[0]).read_text())
     damaged = deepcopy(document)
@@ -100,6 +106,10 @@ def test_regression_contract_rejects_archive_pollution_and_false_source_pass(dam
         public["env"].pop("PYTHONDONTWRITEBYTECODE")
     elif damage == "source_policy":
         damaged["jobs"]["source-proof"].setdefault("env", {})[POLICY] = "skip_missing_in_public_ci"
+    elif damage == "source_pdf":
+        damaged["jobs"]["source-proof"]["steps"] = [{
+            "run": "python tools/diag_opening_wall_face_preservation.py --pdf documents/sources/example.pdf",
+        }]
     elif damage == "job_runner_context":
         public["env"]["PYTHONPYCACHEPREFIX"] = "${{ runner.temp }}/planreader-pycache"
     elif damage == "missing_test_cache":
