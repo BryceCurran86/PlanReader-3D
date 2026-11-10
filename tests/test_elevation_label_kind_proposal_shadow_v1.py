@@ -150,10 +150,16 @@ def test_a_fork_into_two_instances_abstains():
     assert r.status is ABST and r.reason_codes == (kp.AMBIGUOUS_LEADERS,)
 
 
-def test_too_many_routes_make_the_label_unusable():
+def test_too_many_routes_that_reach_the_instance_make_it_unresolvable():
     fan = [StrokeSegment(217.0, 308.0, 217.0 + 3.0 * (i + 1), 308.0) for i in range(kp.MAX_ROUTES + 2)]
-    r = run(strokes=[leader()[0]] + fan)
+    r = run(strokes=leader() + fan)                                    # the fan sits at the corner of a leader that enters the leaf
     assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,)
+
+
+def test_too_many_routes_that_never_reach_the_instance_change_nothing():
+    fan = [StrokeSegment(217.0, 308.0, 217.0 + 3.0 * (i + 1), 308.0) for i in range(kp.MAX_ROUTES + 2)]
+    r = run(strokes=[leader()[0]] + fan)                               # the same fan, but no stroke ever enters an outline
+    assert r.status is ABST and r.reason_codes == (kp.NO_LEADER,)
 
 
 def test_a_diagonal_stroke_is_not_a_leader():
@@ -296,6 +302,103 @@ def test_the_order_of_two_same_kind_labels_does_not_change_the_proposal():
     a = run(blocks=[label(), second], strokes=s)
     b = run(blocks=[second, label()], strokes=s)
     assert a == b and a.result_id == b.result_id and a.label_block_id == "L1+L2"
+
+
+# ------------------------------------------------------------------------------------------------ ambiguity beside a usable label (review 5834419211)
+A_BOX = OutlineBox("A", 20.0, 20.0, 40.0, 40.0, ("rcpt-A",))
+B_BOX = OutlineBox("B", 30.0, 30.0, 50.0, 50.0, ("rcpt-B",))
+DOOR_LABEL = LabelBlock("DOOR", "DOOR", (0.0, 21.0, 5.0, 23.0), ("rcpt-door",), "corroborated")
+DOOR_LEADER = StrokeSegment(5.0, 22.0, 25.0, 22.0, "rcpt-door-stroke")
+WINDOW_LABEL = LabelBlock("WINDOW", "WINDOW", (0.0, 34.0, 5.0, 36.0), ("rcpt-window",), "corroborated")
+WINDOW_LEADER = StrokeSegment(5.0, 35.0, 35.0, 35.0, "rcpt-window-stroke")       # its tip lies inside A and B, which do not nest
+
+
+def review(blocks, strokes, outlines=(A_BOX, B_BOX), witnessed="A"):
+    return propose_kind_from_leader("rec", witnessed, list(outlines), list(blocks), list(strokes))
+
+
+def test_review_counterexample_each_label_alone():
+    assert review([WINDOW_LABEL], [WINDOW_LEADER]).reason_codes == (kp.NOT_NESTED,)
+    door = review([DOOR_LABEL], [DOOR_LEADER])
+    assert door.status is CAND and door.kind == "door"
+
+
+def test_review_counterexample_an_ambiguous_window_leader_survives_beside_a_clean_door_label_in_both_orders():
+    blocks, strokes = [DOOR_LABEL, WINDOW_LABEL], [DOOR_LEADER, WINDOW_LEADER]
+    for bs, ss in ((blocks, strokes), (blocks[::-1], strokes[::-1]), (blocks, strokes[::-1]), (blocks[::-1], strokes)):
+        r = review(bs, ss)
+        assert r.status is ABST and r.reason_codes == (kp.NOT_NESTED,) and r.kind is None and r.source_observation_ids == ()
+    rng = random.Random(3)
+    for _ in range(20):
+        bs, ss, os_ = blocks[:], strokes[:], [A_BOX, B_BOX]
+        rng.shuffle(bs), rng.shuffle(ss), rng.shuffle(os_)
+        assert review(bs, ss, os_).reason_codes == (kp.NOT_NESTED,)
+
+
+def test_an_ambiguous_label_that_does_not_reach_this_instance_is_harmless():
+    far = LabelBlock("FAR", "WINDOW", (200.0, 200.0, 205.0, 202.0), ("rcpt-far",), "corroborated")
+    far_leader = StrokeSegment(205.0, 201.0, 235.0, 201.0, "rcpt-far-stroke")
+    far_a, far_b = OutlineBox("FA", 220.0, 190.0, 240.0, 210.0), OutlineBox("FB", 230.0, 195.0, 250.0, 215.0)       # a non-nested pair elsewhere
+    assert review([far], [far_leader], (far_a, far_b), "FA").reason_codes == (kp.NOT_NESTED,)                      # ambiguous for ITS instance
+    r = review([DOOR_LABEL, far], [DOOR_LEADER, far_leader], (A_BOX, B_BOX, far_a, far_b))
+    assert r.status is CAND and r.kind == "door" and r.source_observation_ids and "rcpt-far" not in r.source_observation_ids
+
+
+def test_an_overflowing_label_that_reaches_the_instance_survives_beside_a_clean_door_label():
+    window = LabelBlock("WINDOW", "WINDOW", (0.0, 34.0, 5.0, 36.0), ("rcpt-window",), "corroborated")
+    wleader = StrokeSegment(5.0, 35.0, 25.0, 35.0)                                                     # enters A (not B) and ends in a fan
+    fan = [StrokeSegment(25.0, 35.0, 25.0 + 2.0 * (i + 1), 35.0) for i in range(kp.MAX_ROUTES + 2)]
+    assert review([DOOR_LABEL], [DOOR_LEADER]).status is CAND
+    r = review([DOOR_LABEL, window], [DOOR_LEADER, wleader, *fan])
+    assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,) and r.kind is None
+    r2 = review([window, DOOR_LABEL], [*fan, wleader, DOOR_LEADER])
+    assert r2.reason_codes == (kp.LEADER_BRANCHES,)
+    far_window = LabelBlock("FW", "WINDOW", (300.0, 300.0, 305.0, 302.0))
+    far_fan = [StrokeSegment(305.0, 301.0, 305.0 + 2.0 * (i + 1), 301.0) for i in range(kp.MAX_ROUTES + 2)]
+    ok = review([DOOR_LABEL, far_window], [DOOR_LEADER, *far_fan])
+    assert ok.status is CAND and ok.kind == "door"                                                       # an overflowing label elsewhere is harmless
+
+
+def test_a_mixed_token_label_reaching_the_instance_vetoes_but_a_token_less_one_does_not():
+    mixed = LabelBlock("MIX", "DOOR WINDOW", (0.0, 28.0, 5.0, 30.0), ("rcpt-mix",), "corroborated")
+    mixed_leader = StrokeSegment(5.0, 29.0, 25.0, 29.0)
+    r = review([DOOR_LABEL, mixed], [DOOR_LEADER, mixed_leader])
+    assert r.status is ABST and r.reason_codes == (kp.MIXED_KIND_TOKENS,)
+    plain = LabelBlock("TAG", "2100", (0.0, 28.0, 5.0, 30.0), ("rcpt-tag",), "corroborated")
+    ok = review([DOOR_LABEL, plain], [DOOR_LEADER, mixed_leader])
+    assert ok.status is CAND and ok.kind == "door" and "rcpt-tag" not in ok.source_observation_ids
+
+
+def test_vetoes_follow_a_fixed_order_whatever_the_input_order():
+    # wide outlines so the three labels sit far apart and cannot start each other's leaders
+    a = OutlineBox("A", 20.0, 20.0, 200.0, 40.0)
+    b = OutlineBox("B", 30.0, 30.0, 210.0, 50.0)
+    door = LabelBlock("DOOR", "DOOR", (0.0, 21.0, 5.0, 23.0), ("r-door",), "corroborated")
+    door_leader = StrokeSegment(5.0, 22.0, 25.0, 22.0)                                  # clean, inside A only
+    window = LabelBlock("WINDOW", "WINDOW", (0.0, 34.0, 5.0, 36.0), ("r-window",), "corroborated")
+    window_leader = StrokeSegment(5.0, 35.0, 35.0, 35.0)                                # ends inside A and B (not nested)
+    mixed = LabelBlock("MIX", "DOOR WINDOW", (100.0, 5.0, 105.0, 7.0), ("r-mix",), "corroborated")
+    mixed_leader = StrokeSegment(102.0, 7.0, 102.0, 25.0)                               # clean, inside A only: mixed kind evidence
+    blocks, strokes = [door, window, mixed], [door_leader, window_leader, mixed_leader]
+    only_mixed = propose_kind_from_leader("rec", "A", [a, b], [door, mixed], [door_leader, mixed_leader])
+    assert only_mixed.status is ABST and only_mixed.reason_codes == (kp.MIXED_KIND_TOKENS,)
+    only_window = propose_kind_from_leader("rec", "A", [a, b], [door, window], [door_leader, window_leader])
+    assert only_window.reason_codes == (kp.NOT_NESTED,)
+    for bs, ss in ((blocks, strokes), (blocks[::-1], strokes[::-1]), (blocks, strokes[::-1])):
+        r = propose_kind_from_leader("rec", "A", [a, b], bs, ss)
+        assert r.reason_codes == (kp.NOT_NESTED,)                                       # NOT_NESTED outranks MIXED_KIND_TOKENS
+
+
+def test_a_label_network_too_large_to_follow_is_assumed_to_reach():
+    # an overflowing label whose connected stroke network exceeds the cap is a veto even where it visibly reaches nothing
+    window = LabelBlock("WINDOW", "WINDOW", (300.0, 300.0, 305.0, 302.0), ("r-window",), "corroborated")
+    fan = [StrokeSegment(305.0, 301.0, 305.0 + 2.0 * (i + 1), 301.0) for i in range(kp.MAX_ROUTES + 2)]
+    chain = [StrokeSegment(400.0 + 3.0 * i, 500.0, 403.0 + 3.0 * i, 500.0) for i in range(kp.COMPONENT_CAP + 20)]
+    joiner = [StrokeSegment(305.0, 301.0, 305.0, 500.0), StrokeSegment(305.0, 500.0, 400.0, 500.0)]
+    small = review([DOOR_LABEL, window], [DOOR_LEADER, *fan])
+    assert small.status is CAND                                                         # a small overflowing network elsewhere is harmless
+    big = review([DOOR_LABEL, window], [DOOR_LEADER, *fan, *joiner, *chain])
+    assert big.status is ABST and big.reason_codes == (kp.LEADER_BRANCHES,)
 
 
 # ------------------------------------------------------------------------------------------------ input safety

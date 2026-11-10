@@ -105,17 +105,9 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
             if fact.fill is not None and fact.kind == "line":
                 by_path.setdefault(fact.path_index, []).append(fact)
         for path_index in sorted(by_path):
-            edges = by_path[path_index]
-            if any(abs(f.geometry[0] - f.geometry[2]) > AXIS_TOL and abs(f.geometry[1] - f.geometry[3]) > AXIS_TOL
-                   for f in edges):
-                continue                       # not an axis-aligned rectangle path
-            xs = [v for f in edges for v in (f.geometry[0], f.geometry[2])]
-            ys = [v for f in edges for v in (f.geometry[1], f.geometry[3])]
-            fills = {tuple(round(c, 2) for c in f.fill) for f in edges}
-            if len(fills) != 1:
-                continue
-            rects.append((min(xs), min(ys), max(xs), max(ys), next(iter(fills)),
-                          tuple(sorted({f.observation_id for f in edges}))))
+            rects.extend(rectangle_components([
+                (*(float(v) for v in f.geometry), tuple(round(c, 2) for c in f.fill), f.observation_id)
+                for f in by_path[path_index]]))
     words = []
     integrity = source.text_integrity_authority()
     for observation_id in published.text_observation_ids:
@@ -139,6 +131,89 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
         g = tuple(float(v) for v in receipt.geometry)
         words.append((*g, text, str(receipt.parent_observation_id or observation_id), trust))
     return SourceOwnedPage(scope, str(page_id), tuple(lines), tuple(rects), tuple(words), tuple(sorted(strokes)))
+
+
+POINT_TOL = 0.01      # two edge ends are the same corner when they agree to this (pt)
+
+
+def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
+    """The closed axis-aligned rectangles actually drawn by the edges of ONE filled path.
+
+    ``edges`` are ``(x0, y0, x1, y1, fill, observation_id)``. A path may hold several subpaths (a compound path), so edges are
+    grouped by exact shared corners into connected components, and a component is a rectangle only when it is exactly the four
+    sides of one box: one simple closed loop of axis-aligned edges (a side may be split into collinear pieces) with exactly four
+    corners on two distinct x and two distinct y values, one fill. Disjoint components stay separate rectangles; any other cycle
+    (an L-shaped or concave outline, a figure eight, rectangles touching at a corner) is NOT a rectangle and yields nothing. Each rectangle carries only the observation
+    ids of its own four edges. Duplicate edges (a closing edge drawn twice) are one edge.
+    """
+    def key(x, y):
+        return (round(x / POINT_TOL), round(y / POINT_TOL))
+
+    unique: dict[tuple, dict] = {}
+    for x0, y0, x1, y1, fill, oid in edges:
+        a, b = key(x0, y0), key(x1, y1)
+        if a == b:
+            continue                                   # a zero-length edge draws nothing
+        entry = unique.setdefault((min(a, b), max(a, b)), {"geom": (x0, y0, x1, y1), "fills": set(), "ids": set()})
+        entry["fills"].add(fill)
+        entry["ids"].add(oid)
+    items = list(unique.items())
+    parent = list(range(len(items)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict[tuple, int] = {}
+    for i, ((a, b), _entry) in enumerate(items):
+        for point in (a, b):
+            if point in owner:
+                parent[find(i)] = find(owner[point])
+            else:
+                owner[point] = i
+    groups: dict[int, list] = {}
+    for i, item in enumerate(items):
+        groups.setdefault(find(i), []).append(item)
+    rects = []
+    for group in groups.values():
+        adjacency: dict[tuple, list] = {}
+        axis_ok = True
+        for (a, b), _entry in group:
+            if a[0] != b[0] and a[1] != b[1]:
+                axis_ok = False                        # a diagonal edge: not a rectangle
+            adjacency.setdefault(a, []).append(b)
+            adjacency.setdefault(b, []).append(a)
+        if not axis_ok or any(len(n) != 2 for n in adjacency.values()):
+            continue                                   # a diagonal edge, an open end or a junction: not one simple closed loop
+        start = min(adjacency)
+        cycle, previous, here = [start], None, start
+        while True:
+            nxt = [n for n in adjacency[here] if n != previous] or adjacency[here]
+            step = nxt[0] if previous is not None or len(nxt) == 1 else min(nxt)
+            if step == start:
+                break
+            cycle.append(step)
+            previous, here = here, step
+            if len(cycle) > len(group):
+                break
+        if len(cycle) != len(group):
+            continue                                   # two loops or a figure eight
+        def heading(p, q):
+            return ((q[0] > p[0]) - (q[0] < p[0]), (q[1] > p[1]) - (q[1] < p[1]))
+        corners = [cycle[i] for i in range(len(cycle))
+                   if heading(cycle[i - 1], cycle[i]) != heading(cycle[i], cycle[(i + 1) % len(cycle)])]
+        if len(corners) != 4 or len({c[0] for c in corners}) != 2 or len({c[1] for c in corners}) != 2:
+            continue                                   # an L-shaped or other concave loop
+        fills = {f for _pair, entry in group for f in entry["fills"]}
+        if len(fills) != 1:
+            continue
+        gx = [v for _pair, entry in group for v in (entry["geom"][0], entry["geom"][2])]
+        gy = [v for _pair, entry in group for v in (entry["geom"][1], entry["geom"][3])]
+        rects.append((min(gx), min(gy), max(gx), max(gy), next(iter(fills)),
+                      tuple(sorted({i for _pair, entry in group for i in entry["ids"]}))))
+    return sorted(rects)
 
 
 def source_owned_views(page: SourceOwnedPage) -> list[dict]:

@@ -41,6 +41,7 @@ INSIDE_MARGIN_PT = 0.2
 MIN_LEADER_SEGMENT_PT = 1.0
 MAX_CHAIN_SEGMENTS = 6
 MAX_ROUTES = 16
+COMPONENT_CAP = 512     # an overflowing label's connected stroke network is followed this far; beyond it the label is assumed to reach
 AXIS_TOL_PT = 0.05     # leaders are drawn orthogonally; a diagonal stroke (hatching, a brick course) is not a leader
 
 KIND_PROPOSAL = "elevation_label_kind_proposal_candidate_shadow"
@@ -206,6 +207,36 @@ def _chains(block: LabelBlock, strokes: Sequence[StrokeSegment]):
     return routes, overflow
 
 
+def _network_reaches(block: LabelBlock, strokes: Sequence[StrokeSegment], target: OutlineBox) -> bool:
+    """Does ANY point of the stroke network connected to the label (exact end-to-end contacts) lie strictly inside ``target``?
+
+    Used only for a label whose routes overflow (too many or too long): its routes were not enumerated, so whether it reaches the
+    witnessed instance is decided by the whole connected network. A network larger than ``COMPONENT_CAP`` segments is assumed to
+    reach (fail closed)."""
+    usable = [s for s in strokes if math.hypot(s.x1 - s.x0, s.y1 - s.y0) >= MIN_LEADER_SEGMENT_PT
+              and (abs(s.x1 - s.x0) <= AXIS_TOL_PT or abs(s.y1 - s.y0) <= AXIS_TOL_PT)]
+    frontier, seen = [], set()
+    for i, first in enumerate(usable):
+        for start, far in (((first.x0, first.y0), (first.x1, first.y1)), ((first.x1, first.y1), (first.x0, first.y0))):
+            if _dist_to_bbox(start, block.bbox) <= START_TOL_PT and _dist_to_bbox(far, block.bbox) > _dist_to_bbox(start, block.bbox):
+                if i not in seen:
+                    seen.add(i)
+                    frontier.append(i)
+    while frontier:
+        i = frontier.pop()
+        seg = usable[i]
+        for point in ((seg.x0, seg.y0), (seg.x1, seg.y1)):
+            if _inside(point, target):
+                return True
+            for j, other in enumerate(usable):
+                if j not in seen and (_same((other.x0, other.y0), point) or _same((other.x1, other.y1), point)):
+                    seen.add(j)
+                    frontier.append(j)
+        if len(seen) > COMPONENT_CAP:
+            return True
+    return False
+
+
 def _inside(point, o: OutlineBox) -> bool:
     return (o.x0 + INSIDE_MARGIN_PT < point[0] < o.x1 - INSIDE_MARGIN_PT
             and o.y0 + INSIDE_MARGIN_PT < point[1] < o.y1 - INSIDE_MARGIN_PT)
@@ -240,11 +271,12 @@ def propose_kind_from_leader(
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (WITNESSED_MISSING,))
     by_id = {o.outline_id: o for o in outlines}
     reached = []          # (block, kind, problem, holder ids, receipts)
-    seen = set()
+    vetoes = set()        # ambiguity that reaches THIS instance: it survives next to any usable label
     for block in sorted(blocks, key=lambda b: b.block_id):
         routes, overflow = _chains(block, strokes)
-        if overflow:                            # too many or too long routes: not a clean leader, whatever they reach
-            seen.add(LEADER_BRANCHES)
+        if overflow:                            # too many or too long routes: not a clean leader
+            if _network_reaches(block, strokes, witnessed):
+                vetoes.add(LEADER_BRANCHES)     # ...and its network reaches this instance, so it cannot be ignored
             continue
         tips = []
         for end, segs in routes:
@@ -253,19 +285,23 @@ def propose_kind_from_leader(
         if not any(witnessed.outline_id in {o.outline_id for o in holders} for _, holders in tips):
             continue                            # this label does not reach the witnessed instance
         if any(not _nested(holders) for _, holders in tips):
-            seen.add(NOT_NESTED)
+            vetoes.add(NOT_NESTED)
             continue
         union = sorted({o.outline_id for _, holders in tips for o in holders})
         kind, problem = label_kind(block.text)
+        if problem == MIXED_KIND_TOKENS:
+            vetoes.add(MIXED_KIND_TOKENS)       # a label naming both kinds that reaches this instance is conflicting kind evidence
+            continue
         receipts = set(block.receipt_ids) | {s.receipt_id for segs, holders in tips if holders for s in segs if s.receipt_id}
         receipts |= {i for u in union for i in by_id[u].receipt_ids}
         reached.append((block, kind, problem, tuple(union), tuple(sorted(receipts))))
+    for reason in (NOT_NESTED, LEADER_BRANCHES, MIXED_KIND_TOKENS):
+        if reason in vetoes:                    # first in a fixed order; a usable label beside it does not clear it
+            return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (reason,), outline_id=witnessed.outline_id)
     usable = [r for r in reached if r[2] is None]
     if not usable:
-        problems = {r[2] for r in reached}
-        for reason in (NOT_NESTED, LEADER_BRANCHES, MIXED_KIND_TOKENS, NO_KIND_TOKEN):
-            if reason in seen or reason in problems:
-                return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (reason,))
+        if any(r[2] == NO_KIND_TOKEN for r in reached):
+            return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (NO_KIND_TOKEN,))
         return _result(record_id, EvidenceResolutionStatus.ABSTAINED, (NO_LEADER,))
     kinds = {r[1] for r in usable}
     union_ids = tuple(sorted({i for r in usable for i in r[3]}))
