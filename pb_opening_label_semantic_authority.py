@@ -10,8 +10,8 @@ from pb_opening_label_dimension_authority import (
     _TrustedTextLine,
     _bbox_overlap_fraction,
     _bbox_union,
-    _gap_span_for_opening,
-    _label_matches_gap,
+    _label_matches_owned_opening,
+    _label_ownership_gaps,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_source_observation_authority import ObservationSelector
@@ -29,7 +29,7 @@ _LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.I)
 _EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.I)
 _EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.I)
 _EXPLICIT_DOOR_PHRASE_RE = re.compile(
-    r"\b(?:STACKER|STACKING\s+DOOR|PANEL[\s-]+LIFT(?:\s+DOOR)?)\b",
+    r"\b(?:STACKER|CRNR\s+STACK(?:ER)?|STACKING\s+DOOR|PANEL[\s-]+LIFT(?:\s+DOOR)?)\b",
     re.I,
 )
 
@@ -241,15 +241,15 @@ class OpeningLabelSemanticProducer:
                 EvidenceResolutionStatus.ABSTAINED,
                 (OPENING_LABEL_SEMANTIC_UNAVAILABLE,),
             )
-        gap = _gap_span_for_opening(self._source, opening)
-        if gap is None:
+        primaries, siblings = _label_ownership_gaps(self._source, opening)
+        if not primaries:
             return OpeningLabelSemanticResult(EvidenceResolutionStatus.ABSTAINED, (OPENING_LABEL_SEMANTIC_UNAVAILABLE,))
 
         lines = _trusted_native_lines(self._source, opening)
         legend, legend_conflicts = _legend_semantics(lines)
         candidates = []
         for _block_no, _line_no, line in lines:
-            if not _label_matches_gap(line, gap):
+            if not _label_matches_owned_opening(line, primaries, siblings):
                 continue
             direct_kind, direct_conflict = _explicit_word_kind(line.text)
             compact_kind, compact_conflict = classify_compact_source_opening_text(
