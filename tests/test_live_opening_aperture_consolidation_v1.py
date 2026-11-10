@@ -338,3 +338,78 @@ def test_a_members_receipts_are_only_those_of_pairs_inside_its_own_class():
     classes = resolve_aperture_equivalence(records, [PairVerdict("a", "b", OVERLAPPING), PairVerdict("a", "c", DISTINCT), PairVerdict("b", "c", DISTINCT)], enabled=True)
     planned, _ = plan_consolidation(classes, {o.physical_opening_id: o for o in comp.canonical_openings}, quantities, receipts)
     assert [m.partition_receipt_ids for m in planned[0].members] == [("r-ab",), ("r-ab",)]
+
+
+# ------------------------------------------------------------------------------------------------ sealed / customer bijection
+def _claim(comp):
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    return LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.ABSTAINED, reason_codes=(), quantity_m2=None, source_pages=(), canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.ABSTAINED, canonical_wall_reason_codes=(), canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(), canonical_openings=comp.canonical_openings, canonical_rooms=(), canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED, canonical_floor_reason_codes=(), canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.ABSTAINED, canonical_room_reason_codes=(), canonical_room_source_pages=(),
+        external_wall_ids=(), evidence_ids=(), quantity_id=None, confidence=0.0, publication=None,
+        opening_quantity_evidence=publish_live_opening_area_quantities(comp),
+        opening_dimension_quantity_evidence=comp.physical_opening_dimension_quantities)
+
+
+def _sealed(comp):
+    from pb_live_opening_source_closed_export import seal_live_opening_area_claim_run
+    return seal_live_opening_area_claim_run(_claim(comp), workspace_id=7, project_id="synthetic-project")
+
+
+def _customer_rows(comp):
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+    return project_live_opening_customer_rows(_claim(comp), workspace_id=7, project_id="synthetic-project")
+
+
+def test_off_leaves_the_sealed_run_and_the_customer_rows_byte_identical():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
+    baseline_run, baseline_rows = _sealed(comp), _customer_rows(comp)
+    result = run(comp, FakeProvider(overlapping("a", "b")), enabled=False)
+    assert result.composition is comp
+    assert _sealed(result.composition).fingerprint == baseline_run.fingerprint
+    assert _customer_rows(result.composition) == baseline_rows
+    assert len(baseline_run.quantities) == 2                                                          # the duplicate sale OFF still has
+
+
+def test_on_seals_and_projects_exactly_one_row_for_the_one_aperture_and_it_is_the_owners_own_row():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
+    baseline_run, baseline_rows = _sealed(comp), _customer_rows(comp)
+    consolidated = run(comp, FakeProvider(overlapping("a", "b"))).composition
+    sealed, rows = _sealed(consolidated), _customer_rows(consolidated)
+    assert [q.object_identity_refs for q in sealed.quantities] == [("a",)] and all(q.lineage_ok for q in sealed.quantities)
+    owner_before = next(q for q in baseline_run.quantities if q.object_identity_refs == ("a",))
+    assert sealed.quantities[0] == owner_before and sealed.quantities[0].to_dict() == owner_before.to_dict()          # the owner's sealed row, unchanged
+    assert [r["canonical_entity_ids"] for r in rows] == [["a"]]
+    assert tuple(rows) == tuple(r for r in baseline_rows if r["canonical_entity_ids"] == ["a"])                      # the owner's customer row, unchanged
+    assert {r["quantity_id"] for r in rows} == {q.quantity_id for q in sealed.quantities} == {q.quantity_id for q in publish_live_opening_area_quantities(consolidated)}
+
+
+def test_the_sealed_run_and_customer_rows_stay_one_to_one_with_the_published_quantities_after_consolidation():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)), opening("c", ("p1", "p2"), figured="figured-2"),
+                       opening("d", ("p1",), figured="figured-2"), opening("lone", ("q1",), figured="figured-3"))
+    provider = FakeProvider({**overlapping("a", "b"), **overlapping("c", "d")}, figures={"c": ("fig-2",), "d": ("fig-2",), "lone": ("fig-3",)},
+                            hosts={"c": "host-B", "d": "host-B", "lone": "host-C"})
+    consolidated = run(comp, provider).composition
+    published = publish_live_opening_area_quantities(consolidated)
+    sealed, rows = _sealed(consolidated), _customer_rows(consolidated)
+    assert sorted(q.object_identity_refs[0] for q in sealed.quantities) == sorted(r["canonical_entity_ids"][0] for r in rows) == ["a", "c", "lone"]
+    assert {q.quantity_id for q in published} == {q.quantity_id for q in sealed.quantities} == {r["quantity_id"] for r in rows}
+    assert all(q.lineage_ok and not q.abstained for q in sealed.quantities)
+
+
+def test_a_distinct_aperture_keeps_its_own_sealed_row_and_customer_row():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
+    consolidated = run(comp, FakeProvider({("a", "b"): DISTINCT})).composition                          # the authority proves them apart
+    assert consolidated is comp
+    assert sorted(q.object_identity_refs[0] for q in _sealed(consolidated).quantities) == ["a", "b"]
+    assert sorted(r["canonical_entity_ids"][0] for r in _customer_rows(consolidated)) == ["a", "b"]
+
+
+def test_a_conflicting_physical_host_keeps_both_rows():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
+    result = run(comp, FakeProvider(overlapping("a", "b"), hosts={"a": "host-A", "b": "host-B"}))          # overlapping, but resting on different walls
+    assert result.consolidated == () and result.composition is comp
+    assert sorted(q.object_identity_refs[0] for q in _sealed(result.composition).quantities) == ["a", "b"]
