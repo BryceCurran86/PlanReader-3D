@@ -322,19 +322,13 @@ ORIGINAL_SHA256 = "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9
 
 
 def _original_pdf():
-    for candidate in (os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF"),
-                      "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"):
-        if candidate and Path(candidate).is_file():
-            return Path(candidate)
-    return None
+    from tests.original_source_3laurel import require_original_3laurel
+
+    return require_original_3laurel()          # absent: NOT_RUN in public CI, FAIL otherwise; wrong bytes always FAIL
 
 
 def test_original_source_witness_is_read_only_unique_and_keeps_interior_doors_out():
     pdf = _original_pdf()
-    if pdf is None:
-        pytest.skip("private original PDF not available")
-    if hashlib.sha256(pdf.read_bytes()).hexdigest() != ORIGINAL_SHA256:
-        pytest.skip("original PDF hash differs")
     from tools.diag_elevation_door_vertical_witness_shadow import run as run_tool
 
     report = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=("22e7e155", "1cd959cc", "be1e67bf", "9d4dc1b3", "a93486dc"))

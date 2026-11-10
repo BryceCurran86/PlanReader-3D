@@ -1,4 +1,4 @@
-name: GPT2 FT3 Source Owned Floor Finish Consumer
+name: GPT2 FT3 Source-Neutral Floor Finish Consumer
 
 on:
   pull_request:
@@ -41,56 +41,9 @@ jobs:
           python -m pytest -q tests/test_source_plan_material_occurrences.py tests/test_cross_view_floor_finish_authority_v1.py tests/test_source_owned_physical_plan_view.py tests/test_source_material_semantic_authority_v1.py tests/test_live_floor_area_quantity_publication_integrity.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
-      - name: Immutable original Maryborough FT3 source first gate
-        env:
-          PYTHONPATH: .
+      - name: Original-source test is NOT RUN on public PRs
+        shell: bash
         run: |
-          git rev-parse HEAD
-          python - <<'PY'
-          import hashlib, json
-          from pathlib import Path
-          from tools.diag_source_plan_material_occurrences import replay
-          source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
-          sha = hashlib.sha256(source).hexdigest()
-          assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-          result = replay(
-              source, page_number=11, raster_supports=False,
-              source_native_finish_text_shadow=True,
-          )
-          definition = result["unchanged_nominated_definition_results"]["FT3"]
-          occurrences = [
-              item for scope in result["material_occurrence_scopes"]
-              for item in scope["records"] if item["code"] == "FT3"
-          ]
-          report = {
-              "original_source_sha_verified": True,
-              "original_bounded_plan_view_count": result["bounded_plan_view_count"],
-              "material_definition_status": definition["status"],
-              "ft3_individually_owned_positive_record_count": len(occurrences),
-              "material_scope_complete_count": result["scope_complete_count"],
-              "new_authenticated_room_floor_correspondence": False,
-              "new_verified_floor_finish_quantities": 0,
-              "benchmark_truth_changed": False,
-          }
-          assert result["published_snapshot_unchanged"]
-          assert result["source_native_finish_text_shadow"] is True
-          assert result["default_segmentation_unchanged"]
-          assert result["default_occurrence_results_unchanged"]
-          assert result["incomplete_scopes_rejected_by_existing_floor_consumer"]
-          assert result["bounded_plan_view_count"] == 1
-          assert not result["physical_floor_identity_granted"]
-          assert not result["metric_authority_granted"]
-          assert not result["whole_sheet_plan_universe_proven"]
-          assert result["scope_complete_count"] == 1
-          assert len(result["material_occurrence_scopes"]) == 1
-          scope = result["material_occurrence_scopes"][0]
-          assert scope["status"] == "corroborated" and scope["scope_complete"] is True
-          assert scope["source_viewport_ownership_id"]
-          assert not scope["unresolved_source_text_observation_ids"]
-          assert definition["status"] == "corroborated" and definition["record"]
-          assert len(occurrences) == 5
-          assert all(item["source_text_observation_ids"] and item["source_evidence_id"] for item in occurrences)
-          assert not result["commercial_projection_allowed"]
-          assert result["published_quantities"] == []
-          print("GPT2_ORIGINAL_FT3_SOURCE_OWNED_CONSUMER_GATE", json.dumps(report))
-          PY
+          set -euo pipefail
+          echo '::notice::Original Maryborough tests NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source tests NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"

@@ -6,12 +6,8 @@ name: DIAG Claude W2 lineage attach on complete original-source handoffs (3Laure
 # wall time and sampled peak RSS are recorded per run, and every handoff output file of every variant is compared byte for byte with
 # unchanged main; a variant that exits non-zero or changes any output fails. No quantity or score is claimed.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/diag-claude-lineage-attach-original-source.yml"
-      - "tools/diag_claude_variant_compare.py"
-      - "pb_wall_room_topology_primitive_lineage.py"
-      - "tests/test_lineage_attach_prefilter_equivalence.py"
+  # No pull_request trigger: this measurement needs the private original, which public PR CI never has (owner priority
+  # 2026-11-10, #4135 comment 6759058490). Run it by hand on main with the original provisioned.
   workflow_dispatch:
 
 permissions:
@@ -19,6 +15,7 @@ permissions:
 
 jobs:
   full-handoff:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:

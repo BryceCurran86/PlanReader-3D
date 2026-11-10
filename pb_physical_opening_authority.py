@@ -102,6 +102,7 @@ RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
 RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION = (
     "raster_door_swing_wall_band_interruption"
 )
+RASTER_CORNER_FRAMED_OPENING_LEG = "raster_corner_framed_opening_leg"
 RASTER_DOOR_SWING_AMBIGUOUS = "raster_door_swing_ambiguous"
 
 # Reviewed raster framed-opening authority constants. These are generic paper
@@ -149,6 +150,36 @@ _PARALLEL_REL_TOL = 1e-9
 _VIEWPORT_SCOPED_PRODUCER_SEAL = object()
 OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE = "opening_candidate_outside_floor_plan_scope"
 OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED = "opening_candidate_viewport_scope_unresolved"
+
+
+def _raster_corner_leg_sibling_scope(record) -> Optional[tuple[str, str, str, str, str]]:
+    """Immutable source identity for one corner-leg sibling lookup."""
+    scope = (
+        str(getattr(record, "document_id", "") or ""),
+        str(getattr(record, "revision_id", "") or ""),
+        str(getattr(record, "source_sha256", "") or ""),
+        str(getattr(record, "snapshot_id", "") or ""),
+        str(getattr(record, "page_id", "") or ""),
+    )
+    if any(not part.strip() for part in scope):
+        return None
+    return scope
+
+
+def _raster_corner_leg_existence_record_id(seed, aperture) -> str:
+    """Reproduce the existence-record identity used when this leg is issued."""
+    return stable_contract_id(
+        "physical_opening_existence",
+        {
+            "document_id": seed.document_id,
+            "revision_id": seed.revision_id,
+            "source_sha256": seed.source_sha256,
+            "page_id": seed.page_id,
+            "semantic_class": "opening",
+            "gap_box_pt": aperture,
+        },
+        digest_chars=32,
+    )
 
 
 @dataclass(frozen=True)
@@ -1134,6 +1165,16 @@ def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
     return max(int(minimum), int(round(float(value_pt) * float(dpi) / 72.0)))
 
 
+def _raster_aperture_boxes_overlap(
+    left: Sequence[float],
+    right: Sequence[float],
+) -> bool:
+    return (
+        min(left[2], right[2]) - max(left[0], right[0]) > _COORD_EQ_ABS_TOL
+        and min(left[3], right[3]) - max(left[1], right[1]) > _COORD_EQ_ABS_TOL
+    )
+
+
 def _raster_odd(value: int) -> int:
     value = int(value)
     return value if value % 2 == 1 else value + 1
@@ -1771,6 +1812,8 @@ class PhysicalOpeningAuthority:
             _source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
         self._raster_double_face_negative_shadow = getattr(
             _source_visibility_producer, "_raster_double_face_negative_shadow", False)
+        self._raster_corner_framed_opening_shadow = getattr(
+            _source_visibility_producer, "_raster_corner_framed_opening_shadow", False)
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
@@ -1870,6 +1913,10 @@ class PhysicalOpeningAuthority:
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
         ] = {}
+        self._raster_corner_leg_sibling_aperture_cache: dict[
+            tuple[tuple[str, str, str, str, str], str],
+            tuple[float, float, float, float],
+        ] = {}
         self._raster_swing_ambiguous_support_cache: dict[
             tuple[str, str, str, str, str], frozenset[str]
         ] = {}
@@ -1924,6 +1971,7 @@ class PhysicalOpeningAuthority:
         # clearing it is safer than retaining boxes derived from corrupted
         # source. It cannot create physical opening evidence.
         self._raster_candidate_gap_box_cache.clear()
+        self._raster_corner_leg_sibling_aperture_cache.clear()
 
     @classmethod
     def from_source_visibility_producer(cls, source_visibility_producer, *, raster_paired_outer_faces_shadow: Optional[bool] = None):
@@ -1947,6 +1995,35 @@ class PhysicalOpeningAuthority:
         reaching through this class's private storage.
         """
         return self._source_visibility_authority
+
+    def raster_corner_leg_sibling_aperture(
+        self,
+        opening: PhysicalOpeningExistenceRecord,
+    ) -> Optional[tuple[float, float, float, float]]:
+        """Return the other leg's sealed aperture for one corner nomination.
+
+        Owner rule: a CRNR STACK compact code names both meeting leaves.
+        Pairing is keyed by immutable source scope plus the nominated existence
+        record. It is not host, quantity, nearest-label or cross-page fallback.
+        """
+        if opening.structural_pattern != RASTER_CORNER_FRAMED_OPENING_LEG:
+            return None
+        if not str(opening.record_id or "").strip():
+            return None
+        scope = _raster_corner_leg_sibling_scope(opening)
+        if scope is None:
+            return None
+        sibling = self._raster_corner_leg_sibling_aperture_cache.get(
+            (scope, opening.record_id)
+        )
+        if sibling is None:
+            return None
+        own = opening.aperture_bbox_pt
+        if own is not None and len(own) == 4:
+            own_key = tuple(round(float(value), 6) for value in own)
+            if sibling == own_key:
+                return None
+        return sibling
 
     def native_unstroked_fill_evidence(
         self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
@@ -2272,7 +2349,9 @@ class PhysicalOpeningAuthority:
                 and (self._raster_source_policy_at_creation != getattr(
                     self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
                     or self._raster_double_face_negative_shadow != getattr(
-                        self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
+                        self._source_visibility_producer, "_raster_double_face_negative_shadow", False)
+                    or self._raster_corner_framed_opening_shadow != getattr(
+                        self._source_visibility_producer, "_raster_corner_framed_opening_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         cache_key = self._visible_page_candidate_key(seed)
         cached = self._raster_framed_candidate_cache.get(cache_key)
@@ -2806,6 +2885,16 @@ class PhysicalOpeningAuthority:
                 candidate_patterns.pop(candidate_id, None)
                 self._raster_candidate_gap_box_cache.pop(candidate_id, None)
 
+        if self._raster_corner_framed_opening_shadow:
+            self._register_raster_corner_leg_candidates(
+                seed,
+                scoped,
+                discovered,
+                candidate_patterns,
+                framed_gap_boxes,
+                gap_audit,
+            )
+
         candidates: list[CandidateSemanticOpening] = []
         for candidate_id in sorted(discovered):
             support = tuple(
@@ -2854,6 +2943,79 @@ class PhysicalOpeningAuthority:
         self._raster_framed_candidate_cache[cache_key] = result
         self._raster_outer_face_comparison_cache[cache_key] = tuple(face_comparisons)
         return result
+
+    def _register_raster_corner_leg_candidates(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+        discovered: dict[str, dict[str, SourceObservationRecord]],
+        candidate_patterns: dict[str, str],
+        framed_gap_boxes: set[tuple[float, float, float, float]],
+        gap_audit: dict[str, tuple[str, frozenset[str], tuple[float, float, float, float]]],
+    ) -> None:
+        """Opt-in: one physical-opening candidate per CANDIDATE corner leg.
+
+        Default-off. Does not invent an opening from an abstained nomination,
+        a collinear framed gap, or a leg whose support is already owned.
+        """
+        producer = self._source_visibility_producer
+        if producer is None:
+            return
+        from pb_raster_corner_framed_opening_shadow import (
+            detect_raster_corner_framed_openings_shadow,
+        )
+
+        result = detect_raster_corner_framed_openings_shadow(
+            producer, revision_id=seed.revision_id, page_id=seed.page_id)
+        by_id = {record.observation_id: record for record in records}
+        for nomination in result.candidates:
+            nominated_apertures: list[tuple[str, tuple[float, float, float, float]]] = []
+            for leg in (nomination.horizontal_leg, nomination.vertical_leg):
+                support_ids = leg.support_observation_ids()
+                aperture = tuple(round(float(value), 6) for value in leg.aperture_bbox_pt())
+                support = {
+                    observation_id: by_id[observation_id]
+                    for observation_id in support_ids
+                    if observation_id in by_id
+                }
+                if len(support) != len(support_ids) or len(support) < 5:
+                    continue
+                if any(_raster_aperture_boxes_overlap(aperture, other) for other in framed_gap_boxes):
+                    continue
+                payload = {
+                    "document_id": seed.document_id,
+                    "revision_id": seed.revision_id,
+                    "source_sha256": seed.source_sha256,
+                    "page_id": seed.page_id,
+                    "structural_pattern": RASTER_CORNER_FRAMED_OPENING_LEG,
+                    "gap_box_pt": aperture,
+                }
+                candidate_id = stable_contract_id(
+                    "physical_opening_candidate", payload, digest_chars=32)
+                discovered.setdefault(candidate_id, {}).update(support)
+                candidate_patterns[candidate_id] = RASTER_CORNER_FRAMED_OPENING_LEG
+                self._raster_candidate_gap_box_cache[candidate_id] = aperture
+                nominated_apertures.append(
+                    (_raster_corner_leg_existence_record_id(seed, aperture), aperture)
+                )
+                gap_id = stable_contract_id("physical_opening_raw_candidate", {
+                    "document_id": seed.document_id,
+                    "revision_id": seed.revision_id,
+                    "source_sha256": seed.source_sha256,
+                    "snapshot_id": seed.snapshot_id,
+                    "page_id": seed.page_id,
+                    "pattern": "raster_corner_framed_opening_leg",
+                    "gap_box_pt": aperture,
+                    "source_observation_ids": tuple(sorted(support_ids)),
+                }, digest_chars=32)
+                gap_audit[gap_id] = (gap_id, frozenset(support_ids), aperture)
+            if len(nominated_apertures) == 2:
+                scope = _raster_corner_leg_sibling_scope(seed)
+                if scope is None:
+                    continue
+                (left_id, left), (right_id, right) = nominated_apertures
+                self._raster_corner_leg_sibling_aperture_cache[(scope, left_id)] = right
+                self._raster_corner_leg_sibling_aperture_cache[(scope, right_id)] = left
 
     def _viewport_scoped_raster_candidates_for(
         self,
@@ -4635,7 +4797,9 @@ class PhysicalOpeningAuthority:
                 self._raster_source_policy_at_creation != getattr(
                     self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
                 or self._raster_double_face_negative_shadow != getattr(
-                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
+                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False)
+                or self._raster_corner_framed_opening_shadow != getattr(
+                    self._source_visibility_producer, "_raster_corner_framed_opening_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         if isinstance(accounted_observation_ids, (str, bytes)):
             raise TypeError("accounted_observation_ids must be a sequence of observation ids")
@@ -4962,7 +5126,9 @@ class PhysicalOpeningAuthority:
                 self._raster_source_policy_at_creation != getattr(
                     self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
                 or self._raster_double_face_negative_shadow != getattr(
-                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
+                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False)
+                or self._raster_corner_framed_opening_shadow != getattr(
+                    self._source_visibility_producer, "_raster_corner_framed_opening_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")

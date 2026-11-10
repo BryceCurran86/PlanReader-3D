@@ -12,6 +12,7 @@ from pb_physical_wall_identity import PhysicalWallEquivalenceResolution, Physica
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_CORNER_FRAMED_OPENING_LEG,
     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
@@ -64,6 +65,21 @@ def test_horizontal_raster_aperture_reconstructs_host_geometry_from_sealed_bbox(
     assert geometry.origin == pytest.approx((120.0, 90.0))
     assert geometry.axis == pytest.approx((1.0, 0.0))
     assert geometry.normal == pytest.approx((0.0, 1.0))
+    assert geometry.length == pytest.approx(40.0)
+    assert geometry.thickness == pytest.approx(20.0)
+
+
+def test_raster_corner_leg_aperture_reuses_same_sealed_wall_band_geometry() -> None:
+    geometry = host._opening_geometry(
+        _NoVisibleAuthority(),
+        _opening(
+            (120.0, 80.0, 160.0, 100.0),
+            pattern=RASTER_CORNER_FRAMED_OPENING_LEG,
+        ),
+    )
+    assert geometry is not None
+    assert geometry.origin == pytest.approx((120.0, 90.0))
+    assert geometry.axis == pytest.approx((1.0, 0.0))
     assert geometry.length == pytest.approx(40.0)
     assert geometry.thickness == pytest.approx(20.0)
 
