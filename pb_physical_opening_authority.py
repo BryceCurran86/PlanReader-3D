@@ -1883,6 +1883,10 @@ class PhysicalOpeningAuthority:
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
         ] = {}
+        self._raster_corner_leg_sibling_aperture_cache: dict[
+            tuple[float, float, float, float],
+            tuple[float, float, float, float],
+        ] = {}
         self._raster_swing_ambiguous_support_cache: dict[
             tuple[str, str, str, str, str], frozenset[str]
         ] = {}
@@ -1937,6 +1941,7 @@ class PhysicalOpeningAuthority:
         # clearing it is safer than retaining boxes derived from corrupted
         # source. It cannot create physical opening evidence.
         self._raster_candidate_gap_box_cache.clear()
+        self._raster_corner_leg_sibling_aperture_cache.clear()
 
     @classmethod
     def from_source_visibility_producer(cls, source_visibility_producer, *, raster_paired_outer_faces_shadow: Optional[bool] = None):
@@ -1960,6 +1965,25 @@ class PhysicalOpeningAuthority:
         reaching through this class's private storage.
         """
         return self._source_visibility_authority
+
+    def raster_corner_leg_sibling_aperture(
+        self,
+        opening: PhysicalOpeningExistenceRecord,
+    ) -> Optional[tuple[float, float, float, float]]:
+        """Return the other leg's sealed aperture for one corner nomination.
+
+        Owner rule: a CRNR STACK compact code names both meeting leaves.
+        This lookup is nomination pairing only. It is not host, quantity or
+        nearest-label authority.
+        """
+        if opening.structural_pattern != RASTER_CORNER_FRAMED_OPENING_LEG:
+            return None
+        bbox = opening.aperture_bbox_pt
+        if bbox is None or len(bbox) != 4:
+            return None
+        key = tuple(round(float(value), 6) for value in bbox)
+        sibling = self._raster_corner_leg_sibling_aperture_cache.get(key)
+        return None if sibling is None or sibling == key else sibling
 
     def native_unstroked_fill_evidence(
         self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
@@ -2905,6 +2929,7 @@ class PhysicalOpeningAuthority:
             producer, revision_id=seed.revision_id, page_id=seed.page_id)
         by_id = {record.observation_id: record for record in records}
         for nomination in result.candidates:
+            nominated_apertures: list[tuple[float, float, float, float]] = []
             for leg in (nomination.horizontal_leg, nomination.vertical_leg):
                 support_ids = leg.support_observation_ids()
                 aperture = tuple(round(float(value), 6) for value in leg.aperture_bbox_pt())
@@ -2930,6 +2955,7 @@ class PhysicalOpeningAuthority:
                 discovered.setdefault(candidate_id, {}).update(support)
                 candidate_patterns[candidate_id] = RASTER_CORNER_FRAMED_OPENING_LEG
                 self._raster_candidate_gap_box_cache[candidate_id] = aperture
+                nominated_apertures.append(aperture)
                 gap_id = stable_contract_id("physical_opening_raw_candidate", {
                     "document_id": seed.document_id,
                     "revision_id": seed.revision_id,
@@ -2941,6 +2967,10 @@ class PhysicalOpeningAuthority:
                     "source_observation_ids": tuple(sorted(support_ids)),
                 }, digest_chars=32)
                 gap_audit[gap_id] = (gap_id, frozenset(support_ids), aperture)
+            if len(nominated_apertures) == 2:
+                left, right = nominated_apertures
+                self._raster_corner_leg_sibling_aperture_cache[left] = right
+                self._raster_corner_leg_sibling_aperture_cache[right] = left
 
     def _viewport_scoped_raster_candidates_for(
         self,

@@ -470,6 +470,64 @@ def _gap_span(records: Sequence[SourceObservationRecord]) -> Optional[_GapSpan]:
     )
 
 
+def _gap_span_from_bbox(bbox) -> Optional[_GapSpan]:
+    if bbox is None or len(bbox) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(value) for value in bbox)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+        return None
+    width = x1 - x0
+    height = y1 - y0
+    if width <= _COORD_TOL or height <= _COORD_TOL:
+        return None
+    if width > height + _COORD_TOL:
+        if width + _COORD_TOL < 2.0 * height:
+            return None
+        return _GapSpan(
+            axis=(1.0, 0.0),
+            normal=(0.0, 1.0),
+            along_min=x0,
+            along_max=x1,
+            cross_center=(y0 + y1) / 2.0,
+            cross_spread=height,
+        )
+    if height > width + _COORD_TOL:
+        if height + _COORD_TOL < 2.0 * width:
+            return None
+        return _GapSpan(
+            axis=(0.0, 1.0),
+            normal=(-1.0, 0.0),
+            along_min=y0,
+            along_max=y1,
+            cross_center=-(x0 + x1) / 2.0,
+            cross_spread=width,
+        )
+    return None
+
+
+def _label_ownership_gaps(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+) -> tuple[_GapSpan, ...]:
+    """Own labels on this opening, plus the sibling corner-stacker leaf.
+
+    Owner rule: a CRNR STACK compact code names both meeting leaves. The
+    sibling aperture comes from the same nomination, not nearest geometry.
+    """
+    primary = _gap_span_for_opening(source, opening)
+    gaps: list[_GapSpan] = [] if primary is None else [primary]
+    if opening.structural_pattern != RASTER_CORNER_FRAMED_OPENING_LEG:
+        return tuple(gaps)
+    sibling_box = source.physical_opening_authority().raster_corner_leg_sibling_aperture(opening)
+    sibling = _gap_span_from_bbox(sibling_box)
+    if sibling is not None and sibling != primary:
+        gaps.append(sibling)
+    return tuple(gaps)
+
+
 def _gap_span_for_opening(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
@@ -489,45 +547,7 @@ def _gap_span_for_opening(
         RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
         RASTER_CORNER_FRAMED_OPENING_LEG,
     }:
-        bbox = opening.aperture_bbox_pt
-        if bbox is None or len(bbox) != 4:
-            return None
-        try:
-            x0, y0, x1, y1 = (float(value) for value in bbox)
-        except (TypeError, ValueError):
-            return None
-        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
-            return None
-        width = x1 - x0
-        height = y1 - y0
-        if width <= _COORD_TOL or height <= _COORD_TOL:
-            return None
-
-        # Mirror the G17/host geometry invariant. This is only an orientation
-        # proof over already-authenticated page-point geometry; it is not scale.
-        if width > height + _COORD_TOL:
-            if width + _COORD_TOL < 2.0 * height:
-                return None
-            return _GapSpan(
-                axis=(1.0, 0.0),
-                normal=(0.0, 1.0),
-                along_min=x0,
-                along_max=x1,
-                cross_center=(y0 + y1) / 2.0,
-                cross_spread=height,
-            )
-        if height > width + _COORD_TOL:
-            if height + _COORD_TOL < 2.0 * width:
-                return None
-            return _GapSpan(
-                axis=(0.0, 1.0),
-                normal=(-1.0, 0.0),
-                along_min=y0,
-                along_max=y1,
-                cross_center=-(x0 + x1) / 2.0,
-                cross_spread=width,
-            )
-        return None
+        return _gap_span_from_bbox(opening.aperture_bbox_pt)
 
     visibility = source.authority()
     source_records: list[SourceObservationRecord] = []
@@ -1124,8 +1144,8 @@ class OpeningLabelDimensionProducer:
         if prior is not None:
             return prior
 
-        gap = _gap_span_for_opening(self._source, opening)
-        if gap is None:
+        gaps = _label_ownership_gaps(self._source, opening)
+        if not gaps:
             return self._store(
                 key,
                 _blocked(
@@ -1188,7 +1208,7 @@ class OpeningLabelDimensionProducer:
         ] = {}
         for line in self._trusted_text_lines_for_opening(opening):
             parsed = parse_opening_label_dimensions(line.text)
-            if parsed is None or not _label_matches_gap(line, gap):
+            if parsed is None or not any(_label_matches_gap(line, gap) for gap in gaps):
                 continue
             if not all(self._authenticate_word_observation(opening, oid) for oid in line.observation_ids):
                 continue
