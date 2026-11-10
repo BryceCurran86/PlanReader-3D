@@ -478,12 +478,26 @@ def _opening_quantity(
 
 def publish_live_opening_area_quantities(
     composition: LivePhysicalOpeningVoidComposition,
+    *,
+    aperture_equivalence_publication_shadow: bool = False,
+    aperture_records: tuple[object, ...] = (),
+    aperture_verdicts: tuple[object, ...] = (),
 ) -> tuple[QuantityEvidence, ...]:
-    """Publish one deterministic area quantity per source-proven opening."""
+    """Publish one deterministic area quantity per source-proven opening.
+
+    Aperture-equivalence collapse is default-off. When explicitly enabled it
+    consumes caller-supplied producer pair verdicts and never ranks nearest.
+    """
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError(
             "composition must be LivePhysicalOpeningVoidComposition"
         )
+    if type(aperture_equivalence_publication_shadow) is not bool:
+        raise TypeError("aperture equivalence publication must be an explicit boolean")
+    if aperture_equivalence_publication_shadow and (
+        type(aperture_records) is not tuple or type(aperture_verdicts) is not tuple
+    ):
+        raise TypeError("enabled aperture publication requires tuple records and verdicts")
 
     # Check the *whole producer-owned canonical inventory* before narrowing
     # it to quantities. If an unsupported/ABSTAIN opening reuses the physical
@@ -548,7 +562,19 @@ def publish_live_opening_area_quantities(
             )
         seen_quantity_ids.add(quantity.quantity_id)
         quantities.append(quantity)
-    return tuple(quantities)
+    published = tuple(quantities)
+    if not aperture_equivalence_publication_shadow:
+        return published
+    from pb_live_opening_aperture_equivalence_publication import (
+        apply_aperture_equivalence_publication,
+    )
+
+    return apply_aperture_equivalence_publication(
+        published,
+        aperture_records,
+        aperture_verdicts,
+        enabled=True,
+    )
 
 
 __all__ = [

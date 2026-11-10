@@ -237,4 +237,4 @@ def test_module_is_isolated_from_authority_modules():
     root = pathlib.Path(ae.__file__).parent
     importers = sorted(p.name for p in root.glob("pb_*.py") if p.name != pathlib.Path(ae.__file__).name
                        and "pb_opening_aperture_equivalence_shadow" in p.read_text(encoding="utf-8", errors="ignore"))
-    assert importers == [], importers
+    assert importers == ["pb_live_opening_aperture_equivalence_publication.py"], importers
