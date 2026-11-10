@@ -33,14 +33,16 @@ def test_producer_and_dependency_trees_are_fixed_before_source_access():
         assert re.fullmatch("[0-9a-f]{40}", job["env"][key])
     steps = job["steps"]
     checkouts = [s for s in steps if s.get("uses") == "actions/checkout@v4"]
-    assert len(checkouts) == 2
-    assert {s["with"]["ref"] for s in checkouts} == {job["env"]["TRUSTED_SHA"], job["env"]["CANDIDATE_SHA"]}
+    assert len(checkouts) == 1
+    assert checkouts[0]["with"]["ref"] == "${{ github.sha }}"
     assert all(s["with"]["persist-credentials"] == "false" for s in checkouts)
     first_secret = next(i for i, s in enumerate(steps) if "ORIGINAL_SOURCES_TOKEN" in s.get("env", {}))
     for name in ("Verify fixed reviewed tree, allowed paths and frozen input identity",
                  "Build isolated dependencies before receiving private inputs"):
         assert next(i for i, s in enumerate(steps) if s.get("name") == name) < first_secret
-    proof = steps[2]["run"]
+    proof = next(s["run"] for s in steps if s.get("name") == "Verify fixed reviewed tree, allowed paths and frozen input identity")
+    assert 'git archive "$CANDIDATE_SHA"' in proof
+    assert 'git archive "$TRUSTED_SHA"' in proof
     assert "git('diff', '--name-only', base, candidate)" in proof
     assert "72937edeae5874321862e93b05056f67ea3aadba" in proof
     assert "requirements-ci-v1228.txt" in proof
@@ -50,13 +52,13 @@ def test_producer_and_dependency_trees_are_fixed_before_source_access():
 def test_private_credentials_only_reach_inert_staging_and_trusted_provisioner():
     steps = workflow()["jobs"]["acceptance"]["steps"]
     secret_steps = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in s.get("env", {})]
-    assert len(secret_steps) == 2
-    stage, provision = secret_steps
+    assert len(secret_steps) == 1
+    stage = provision = secret_steps[0]
     assert "git/blobs/" in stage["run"]
     assert "hashlib.sha1" in stage["run"]
     assert "os.O_EXCL" in stage["run"]
-    assert "trusted/.github/actions/provision-original-sources/provision.py" in provision["run"]
-    assert "--manifest-root trusted/benchmarks/" in provision["run"]
+    assert "lot16-fixed-trusted/.github/actions/provision-original-sources/provision.py" in provision["run"]
+    assert '--manifest-root "$RUNNER_TEMP/lot16-fixed-trusted/benchmarks/' in provision["run"]
     assert "--allow-missing false" in provision["run"]
     assert "--ref 387a0792c25de7d67d34540cea52ac2228a09cbd" in provision["run"]
     for step in secret_steps:
@@ -97,7 +99,8 @@ def test_private_logs_are_filtered_and_unconditionally_removed():
     assert not any(s.get("uses", "").startswith("actions/upload-artifact") for s in steps)
     cleanup = steps[-1]
     assert cleanup["if"] == "always()"
-    for folder in ("lot16-fixed-sources", "lot16-fixed-harness", "lot16-fixed-output"):
+    assert "test ! -e documents/sources" in cleanup["run"]
+    for folder in ("lot16-fixed-harness", "lot16-fixed-output"):
         assert folder in cleanup["run"]
         assert 'test ! -e "$RUNNER_TEMP/' + folder + '"' in cleanup["run"]
 

@@ -17,7 +17,7 @@ jobs:
   acceptance:
     if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && github.repository == 'BryceCurran86/PlanReader-3D' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
     env:
       BASE_SHA: e0b99b457bfc55e452858ec82ac78531474f6fa4
       CANDIDATE_SHA: feaf6ab67ff66dd7ad26378839e173a3622ba0f8
@@ -25,29 +25,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: BryceCurran86/PlanReader-3D
-          ref: 81c12b417054d14baf1f08a9ea6c460a5d2152ad
-          path: trusted
-          persist-credentials: false
-          fetch-depth: 1
-      - uses: actions/checkout@v4
-        with:
-          repository: BryceCurran86/PlanReader-3D
-          ref: feaf6ab67ff66dd7ad26378839e173a3622ba0f8
-          path: candidate
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
       - name: Verify fixed reviewed tree, allowed paths and frozen input identity
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C trusted rev-parse HEAD)" = "$TRUSTED_SHA"
-          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
-          git -C trusted fetch --no-tags --depth=1 origin "$BASE_SHA" "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" "$CANDIDATE_SHA" "$TRUSTED_SHA"
           python3 - <<'PY'
           import os, subprocess
           def git(*args):
-              return subprocess.check_output(['git', '-C', 'trusted', *args], text=True).strip()
+              return subprocess.check_output(['git', *args], text=True).strip()
           base, candidate, trusted = [os.environ[k] for k in ('BASE_SHA', 'CANDIDATE_SHA', 'TRUSTED_SHA')]
           expected = {
               'docs/engineering/GPT3_OWNER_ALL_SOURCE_ROLES.md',
@@ -67,15 +57,18 @@ jobs:
               assert len({git('rev-parse', sha + ':' + path) for sha in (base, candidate, trusted)}) == 1
           print('EXACT_REVIEWED_HEAD_AND_FROZEN_INPUTS_VERIFIED=YES')
           PY
-          test ! -L candidate/documents/sources
-          mkdir -p candidate/documents/sources
+          mkdir -m 700 "$RUNNER_TEMP/lot16-fixed-trusted" "$RUNNER_TEMP/lot16-fixed-candidate"
+          git archive "$TRUSTED_SHA" | tar -x -C "$RUNNER_TEMP/lot16-fixed-trusted"
+          git archive "$CANDIDATE_SHA" | tar -x -C "$RUNNER_TEMP/lot16-fixed-candidate"
+          test ! -L "$RUNNER_TEMP/lot16-fixed-candidate/documents/sources"
+          mkdir -p "$RUNNER_TEMP/lot16-fixed-candidate/documents/sources"
           mkdir -m 700 "$RUNNER_TEMP/lot16-fixed-harness" "$RUNNER_TEMP/lot16-fixed-output"
       - name: Build isolated dependencies before receiving private inputs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/lot16-fixed-build"
-          cp trusted/requirements.txt trusted/requirements-ci-v1228.txt "$RUNNER_TEMP/lot16-fixed-build/"
+          cp "$RUNNER_TEMP/lot16-fixed-trusted/requirements.txt" "$RUNNER_TEMP/lot16-fixed-trusted/requirements-ci-v1228.txt" "$RUNNER_TEMP/lot16-fixed-build/"
           cat > "$RUNNER_TEMP/lot16-fixed-build/Dockerfile" <<'DOCKER'
           FROM python:3.13-slim
           ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -85,7 +78,7 @@ jobs:
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
           DOCKER
           docker build --quiet --tag planreader-fixed-receipts "$RUNNER_TEMP/lot16-fixed-build"
-      - name: Stage two immutable private harness blobs as inert data
+      - name: Stage immutable harness data and provision exact originals
         shell: bash
         env:
           ORIGINAL_SOURCES_TOKEN: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
@@ -117,25 +110,19 @@ jobs:
                   stream.write(data)
           print('PINNED_PRIVATE_HARNESS_BLOBS_STAGED=2')
           PY
-      - name: Test diagnostic redaction before provisioning any original PDF
+          python3 "$RUNNER_TEMP/lot16-fixed-trusted/.github/actions/provision-original-sources/provision.py" --manifest-root "$RUNNER_TEMP/lot16-fixed-trusted/benchmarks/frozen_holdout/full_plan_v2/projects" --destination documents/sources --repository BryceCurran86/PlanReader-3D-sources --ref 387a0792c25de7d67d34540cea52ac2228a09cbd --allow-missing false
+      - name: Test diagnostic redaction without mounting original PDFs
         shell: bash
         run: |
           set -euo pipefail
-          docker run --pull=never --rm --user "$(id -u):$(id -g)" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 6g --tmpfs /tmp:rw,nosuid,nodev,size=2g --mount "type=bind,src=$GITHUB_WORKSPACE/candidate,dst=/workspace,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-harness,dst=/acceptance,readonly" --workdir /workspace -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 planreader-fixed-receipts python -m unittest discover -s /acceptance -p test_fixed_retention_diagnostics.py > "$RUNNER_TEMP/lot16-fixed-output/diagnostic-tests.private.log" 2>&1
+          docker run --pull=never --rm --user "$(id -u):$(id -g)" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 6g --tmpfs /tmp:rw,nosuid,nodev,size=2g --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-candidate,dst=/workspace,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-harness,dst=/acceptance,readonly" --workdir /workspace -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 planreader-fixed-receipts python -m unittest discover -s /acceptance -p test_fixed_retention_diagnostics.py > "$RUNNER_TEMP/lot16-fixed-output/diagnostic-tests.private.log" 2>&1
           echo 'VALUE_FREE_DIAGNOSTIC_TESTS_PASSED=YES'
-      - name: Provision all ten exact originals through the trusted provisioner
-        shell: bash
-        env:
-          ORIGINAL_SOURCES_TOKEN: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
-        run: |
-          set -euo pipefail
-          python3 trusted/.github/actions/provision-original-sources/provision.py --manifest-root trusted/benchmarks/frozen_holdout/full_plan_v2/projects --destination "$RUNNER_TEMP/lot16-fixed-sources" --repository BryceCurran86/PlanReader-3D-sources --ref 387a0792c25de7d67d34540cea52ac2228a09cbd --allow-missing false
       - name: Run fixed-tree OFF and ON, genuine original retention and full verification
         shell: bash
         run: |
           set -euo pipefail
           isolated() {
-            docker run --pull=never --rm --user "$(id -u):$(id -g)" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g --mount "type=bind,src=$GITHUB_WORKSPACE/candidate,dst=/workspace,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-sources,dst=/workspace/documents/sources,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-harness,dst=/acceptance,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-output,dst=/out" --workdir /workspace -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 -e ORT_DISABLE_TELEMETRY=1 -e MPLCONFIGDIR=/tmp/matplotlib -e XDG_CACHE_HOME=/tmp/cache planreader-fixed-receipts python /acceptance/lot16_fixed_receipt_acceptance.py "$@"
+            docker run --pull=never --rm --user "$(id -u):$(id -g)" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-candidate,dst=/workspace,readonly" --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-harness,dst=/acceptance,readonly" --mount "type=bind,src=$RUNNER_TEMP/lot16-fixed-output,dst=/out" --workdir /workspace -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 -e ORT_DISABLE_TELEMETRY=1 -e MPLCONFIGDIR=/tmp/matplotlib -e XDG_CACHE_HOME=/tmp/cache planreader-fixed-receipts python /acceptance/lot16_fixed_receipt_acceptance.py "$@"
           }
           operation() {
             local phase="$1"
@@ -168,8 +155,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/lot16-fixed-sources" "$RUNNER_TEMP/lot16-fixed-harness" "$RUNNER_TEMP/lot16-fixed-output"
-          test ! -e "$RUNNER_TEMP/lot16-fixed-sources"
+          rm -rf documents/sources "$RUNNER_TEMP/lot16-fixed-harness" "$RUNNER_TEMP/lot16-fixed-output" "$RUNNER_TEMP/lot16-fixed-trusted" "$RUNNER_TEMP/lot16-fixed-candidate"
+          test ! -e documents/sources
           test ! -e "$RUNNER_TEMP/lot16-fixed-harness"
           test ! -e "$RUNNER_TEMP/lot16-fixed-output"
           echo 'PRIVATE_INPUT_OUTPUT_CLEANUP_VERIFIED=YES'

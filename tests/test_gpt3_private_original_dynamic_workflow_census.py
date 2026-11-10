@@ -40,6 +40,13 @@ RERUN_REPOSITORY_OWNER_GUARD = (
     RERUN_OWNER_GUARD.removesuffix(" }}")
     + " && github.repository == 'BryceCurran86/PlanReader-3D' }}"
 )
+# Only this reviewed immutable source acceptance may run on an owner main push.
+# It retains the manual job's checkout/credential/cleanup controls and adds exact
+# event path, producer, dependency and private harness pins. Other OR clauses
+# and other automatic secret jobs remain rejected.
+PINNED_OWNER_MAIN_SOURCE_GUARD = "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && github.repository == 'BryceCurran86/PlanReader-3D' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}"
+PINNED_OWNER_MAIN_SOURCE_PATH = ".github/workflows/gptmax-protected-lot16-fixed-receipts-public.yml"
+PINNED_OWNER_MAIN_SOURCE_HEAD = "feaf6ab67ff66dd7ad26378839e173a3622ba0f8"
 TRUSTED_SHA = SECURITY["TRUSTED_SHA"]
 TOKEN = "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
 
@@ -81,6 +88,7 @@ def _trusted_original_job_guard(value: object) -> bool:
         RERUN_OWNER_GUARD,
         REPOSITORY_RERUN_OWNER_GUARD,
         RERUN_REPOSITORY_OWNER_GUARD,
+        PINNED_OWNER_MAIN_SOURCE_GUARD,
     )
 
 
@@ -91,6 +99,22 @@ def check_original_token_boundary(raw: str) -> int:
     assert "pull_request_target" not in document["on"]
     for name, job in matches:
         assert _trusted_original_job_guard(job.get("if")), name
+        if job.get("if") == PINNED_OWNER_MAIN_SOURCE_GUARD:
+            assert set(document["on"]) == {"workflow_dispatch", "push"}
+            assert document["on"]["workflow_dispatch"] in (None, "")
+            assert document["on"]["push"] == {
+                "branches": ["main"], "paths": [PINNED_OWNER_MAIN_SOURCE_PATH],
+            }
+            assert document.get("permissions") == {"contents": "read"}
+            assert job.get("env", {}).get("CANDIDATE_SHA") == PINNED_OWNER_MAIN_SOURCE_HEAD
+            assert job.get("env", {}).get("TRUSTED_SHA") == "81c12b417054d14baf1f08a9ea6c460a5d2152ad"
+            body = str(job)
+            for required in ("--network none", "--read-only", "--cap-drop ALL",
+                             "--security-opt no-new-privileges", "--pids-limit 256",
+                             "dst=/workspace/documents/sources,readonly",
+                             "operation off run off", "operation on run on",
+                             "operation retention retention", "operation verification verify"):
+                assert required in body
         steps = job.get("steps")
         assert type(steps) is list and steps
         checkouts = [
@@ -319,3 +343,41 @@ def test_rerun_owner_boolean_matrix_requires_both_actor_identities():
         }
         assert all(values[key] == literal[1:-1] for key, literal in
                    (clause.split(" == ", 1) for clause in clauses)) is expected
+
+
+def _pinned_owner_main_source_workflow():
+    return (WORKFLOWS / "gptmax-protected-lot16-fixed-receipts-public.yml").read_text(encoding="utf-8")
+
+
+def test_reviewed_pinned_owner_main_push_preserves_all_secret_controls():
+    assert check_original_token_boundary(_pinned_owner_main_source_workflow()) == 1
+
+
+@pytest.mark.parametrize("damage", (
+    "foreign_actor", "foreign_rerunner", "foreign_repository", "feature_ref",
+    "pr_event", "push_any_branch", "push_any_path", "new_candidate", "new_trusted",
+    "no_network_guard", "writable_source", "missing_retention", "write_permission",
+))
+def test_pinned_owner_main_push_rejects_any_unreviewed_context_or_weaker_source_gate(damage):
+    raw = _pinned_owner_main_source_workflow()
+    mutations = {
+        "foreign_actor": ("github.actor == 'BryceCurran86'", "github.actor == 'foreign'"),
+        "foreign_rerunner": ("github.triggering_actor == 'BryceCurran86'", "github.triggering_actor == 'foreign'"),
+        "foreign_repository": ("github.repository == 'BryceCurran86/PlanReader-3D'", "github.repository == 'foreign/repo'"),
+        "feature_ref": ("refs/heads/main", "refs/heads/feature"),
+        "pr_event": ("github.event_name == 'push'", "github.event_name == 'pull_request'"),
+        "push_any_branch": ("branches: [main]", "branches: ['*']"),
+        "push_any_path": ("paths: [.github/workflows/gptmax-protected-lot16-fixed-receipts-public.yml]", "paths: ['**']"),
+        "new_candidate": (PINNED_OWNER_MAIN_SOURCE_HEAD, "f" * 40),
+        "new_trusted": ("81c12b417054d14baf1f08a9ea6c460a5d2152ad", "e" * 40),
+        "no_network_guard": ("--network none", "--network host"),
+        "writable_source": ("dst=/workspace/documents/sources,readonly", "dst=/workspace/documents/sources"),
+        "missing_retention": ("operation retention retention", "echo retention-not-run"),
+        "write_permission": ("contents: read", "contents: write"),
+    }
+    old, new = mutations[damage]
+    assert old in raw
+    # Global replacement also tests duplicated Docker commands, not a mutation
+    # hidden by a second intact command elsewhere in the job.
+    with pytest.raises(AssertionError):
+        check_original_token_boundary(raw.replace(old, new))
