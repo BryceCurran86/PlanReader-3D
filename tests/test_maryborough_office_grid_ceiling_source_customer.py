@@ -1229,3 +1229,266 @@ def test_caller_created_ceiling_correspondence_raises():
             room_area_qty_id="area_qty_1",
             area_evidence=forged_atom,
         )
+
+
+def test_fabricated_quantity_id_with_registered_room_area_raises():
+    """GPT MAX P1 review: caller's fabricated quantity_id must not self-authorize; must reject."""
+    from pb_migration_contracts import QuantityEvidence, EvidenceAtom, EvidenceResolutionStatus
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        SourceCrossViewCeilingCorrespondenceRecord,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+    )
+    from pb_cross_view_room_area_authority import (
+        CrossViewRoomAreaRecord,
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT,
+    )
+    from types import SimpleNamespace
+
+    doc_id = "doc_auth_1"
+    sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    rev_id = "rev_auth_1"
+    snap_id = "snap_auth_1"
+    room_id = "room_office_1"
+    face_id = "face_1"
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_auth_1",
+        canonical_ceiling_id="c_1",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        support_page_id="9",
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="SUSPENDED ACOUSTIC GRID CEILING",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(snap_id, corr.record_id)] = corr
+
+    atom = EvidenceAtom(
+        evidence_id="authentic_atom_1",
+        document_id=doc_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimension",
+        normalized_value=9.05352,
+        unit="m2",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+            "horizontal_dimension_id": "dim_2536",
+            "vertical_dimension_id": "dim_3570",
+        },
+    )
+    from pb_cross_view_room_area_authority import _RECORD_SEAL
+    area_rec = CrossViewRoomAreaRecord(
+        physical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        room_label="OFFICE",
+        source_dimension_page_id="11",
+        source_label_observation_ids=(),
+        source_label_receipt_ids=(),
+        horizontal_dimension_id="dim_2536",
+        vertical_dimension_id="dim_3570",
+        area_evidence=atom,
+        _seal=_RECORD_SEAL,
+    )
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, atom.evidence_id)] = area_rec
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, room_id)] = area_rec
+
+    room = SimpleNamespace(
+        canonical_room_id=room_id,
+        physical_room_id=room_id,
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+        source_room_face_record_id=face_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        polygon_pdf_pts=((173.04, 1382.72), (316.80, 1382.72), (316.80, 1585.04), (173.04, 1585.04)),
+        evidence_ids=("ev_room",),
+    )
+
+    # Fabricate a quantity ID that the caller passes as area_evidence.quantity_id
+    # Caller attempts to self-authorize with fabricated_qty_self_authorized
+    fabricated_qty = QuantityEvidence(
+        quantity_id="fabricated_qty_self_authorized",
+        family="floor_area",
+        semantic_key="floor_area:room_office_1",
+        value=9.05352,
+        unit="m2",
+        status="firm",
+        evidence_ids=(atom.evidence_id,),
+        authority="documented_dimension",
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+            "horizontal_dimension_id": "dim_2536",
+            "vertical_dimension_id": "dim_3570",
+        },
+    )
+
+    with pytest.raises(ValueError, match="unauthorized quantity evidence id|unissued or mismatched"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            room_area_qty_id="fabricated_qty_self_authorized",
+            area_evidence=fabricated_qty,
+        )
+
+
+def test_untyped_room_area_evidence_raises():
+    """GPT MAX P1 review: untyped area object must be rejected in else branch."""
+    from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        SourceCrossViewCeilingCorrespondenceRecord,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+    )
+    from pb_cross_view_room_area_authority import (
+        CrossViewRoomAreaRecord,
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT,
+    )
+    from types import SimpleNamespace
+
+    doc_id = "doc_auth_2"
+    sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    rev_id = "rev_auth_2"
+    snap_id = "snap_auth_2"
+    room_id = "room_office_1"
+    face_id = "face_1"
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_auth_2",
+        canonical_ceiling_id="c_2",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        support_page_id="9",
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="SUSPENDED ACOUSTIC GRID CEILING",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(snap_id, corr.record_id)] = corr
+
+    atom = EvidenceAtom(
+        evidence_id="authentic_atom_2",
+        document_id=doc_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimension",
+        normalized_value=9.05352,
+        unit="m2",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+            "horizontal_dimension_id": "dim_2536",
+            "vertical_dimension_id": "dim_3570",
+        },
+    )
+    from pb_cross_view_room_area_authority import _RECORD_SEAL
+    area_rec = CrossViewRoomAreaRecord(
+        physical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        room_label="OFFICE",
+        source_dimension_page_id="11",
+        source_label_observation_ids=(),
+        source_label_receipt_ids=(),
+        horizontal_dimension_id="dim_2536",
+        vertical_dimension_id="dim_3570",
+        area_evidence=atom,
+        _seal=_RECORD_SEAL,
+    )
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, atom.evidence_id)] = area_rec
+
+    room = SimpleNamespace(
+        canonical_room_id=room_id,
+        physical_room_id=room_id,
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+        source_room_face_record_id=face_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        polygon_pdf_pts=((173.04, 1382.72), (316.80, 1382.72), (316.80, 1585.04), (173.04, 1585.04)),
+        evidence_ids=("ev_room",),
+    )
+
+    untyped_area = SimpleNamespace(
+        quantity_id="authentic_atom_2",
+        evidence_id="authentic_atom_2",
+        value=9.05352,
+        unit="m2",
+        status="firm",
+        family="floor_area",
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+            "horizontal_dimension_id": "dim_2536",
+            "vertical_dimension_id": "dim_3570",
+        },
+    )
+
+    with pytest.raises(ValueError, match="unauthorized room area evidence type"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=room,
+            room_area_qty_id="authentic_atom_2",
+            area_evidence=untyped_area,
+        )

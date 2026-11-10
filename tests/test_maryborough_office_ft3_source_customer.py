@@ -1314,3 +1314,98 @@ def test_off_target_page_ink_does_not_resolve_walls_raises():
             correspondence=corr,
             room_label="OFFICE",
         )
+
+
+def test_plain_collinear_rectangle_without_room_or_doorway_witnesses_raises():
+    """Negative authority: four plain native draw_line strokes on p7 around target_box_pdf_pts with no room labels,
+
+    dimensions, finish marks, or doorway witnesses must fail closed and not resolve physical walls.
+    """
+    import fitz
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        CrossSheetWallEquivalenceRecord,
+        DoorwayTransitionEvidence,
+        SourceCrossViewFloorCorrespondenceRecord,
+        compose_authenticated_cross_sheet_room_and_floor,
+    )
+
+    pdf = fitz.open()
+    p1 = pdf.new_page()
+    p1.draw_line((10, 10), (100, 10))  # 90 pt unrelated line on page 1
+    for page_num in range(2, 12):
+        p = pdf.new_page()
+        if page_num == 7:
+            # Four plain native draw_line strokes around target_box_pdf_pts
+            tx0, ty0, tx1, ty1 = (173.04, 1382.72, 316.80, 1585.04)
+            p.draw_line((tx0, ty0), (tx0, ty1))
+            p.draw_line((tx1, ty0), (tx1, ty1))
+            p.draw_line((tx0, ty0), (tx1, ty0))
+            p.draw_line((tx0, ty1), (tx1, ty1))
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+
+    producer = SourceVisibilityProducer(
+        producer_method="test",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="synthetic_rect_doc",
+        source_bytes=pdf_bytes,
+        source_locator="memory://synthetic_rect.pdf",
+        page_ids=[str(i) for i in range(1, 12)],
+    )
+
+    d15 = DoorwayTransitionEvidence(
+        door_callout="D15",
+        page_id="7",
+        wall_side="y0",
+        schedule_page_id="16",
+        door_width_mm=920.0,
+    )
+    equivs = (
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x0", support_face_coord=250.0, target_face_coord=173.04, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x1", support_face_coord=394.0, target_face_coord=316.80, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y0", support_face_coord=1383.2, target_face_coord=1382.72, covered_interval_iou=1.0, doorway_transition=d15),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y1", support_face_coord=1584.56, target_face_coord=1585.04, covered_interval_iou=1.0),
+    )
+
+    corr = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="corr_rect_1",
+        canonical_floor_id="floor_1",
+        physical_room_id="room_1",
+        source_room_face_record_id="face_1",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(250.0, 1383.2, 394.0, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_orientation="HORIZONTAL",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(77.0, 0.0),
+        registration_support_pt=250.0,
+        registration_runner_up_support_pt=250.0,
+        registration_null_support_pt=0.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={"x0": "SOLID", "x1": "SOLID", "y0": "SOLID", "y1": "SOLID"},
+        finish_codes_in_box={"FT3": 1},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        cross_sheet_wall_equivalences=equivs,
+        doorway_transitions=(d15,),
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+
+    with pytest.raises(ValueError, match="not observed|unissued|caller-created|not issued"):
+        compose_authenticated_cross_sheet_room_and_floor(
+            published=published,
+            correspondence=corr,
+            room_label="OFFICE",
+        )

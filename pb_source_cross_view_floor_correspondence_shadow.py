@@ -600,6 +600,16 @@ class SourceCrossViewFloorCorrespondenceRecord:
     snapshot_id: str = ""
 
 
+_REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT: dict[tuple[str, str], "SourceCrossViewFloorCorrespondenceRecord"] = {}
+
+
+def get_authenticated_floor_correspondence(
+    snapshot_id: str, record_id: str
+) -> Optional["SourceCrossViewFloorCorrespondenceRecord"]:
+    """Retrieve authentic producer-issued SourceCrossViewFloorCorrespondenceRecord by snapshot_id and record_id."""
+    return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.get((str(snapshot_id), str(record_id)))
+
+
 _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT: dict[tuple[str, str], "SourceCrossViewCeilingCorrespondenceRecord"] = {}
 
 
@@ -1972,7 +1982,7 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         },
     )
 
-    return SourceCrossViewFloorCorrespondenceRecord(
+    res = SourceCrossViewFloorCorrespondenceRecord(
         record_id=rec_id,
         canonical_floor_id=canonical_floor_id,
         physical_room_id=physical_room_id,
@@ -2004,6 +2014,9 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
+    return res
 
 
 
@@ -2306,7 +2319,7 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
                 "reasons": ["authenticated_cross_sheet_correspondence_resolved"],
             },
         )
-        return SourceCrossViewFloorCorrespondenceRecord(
+        res = SourceCrossViewFloorCorrespondenceRecord(
             record_id=rec_id,
             canonical_floor_id=canonical_floor_id,
             physical_room_id=physical_room_id,
@@ -2338,6 +2351,9 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
+        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -2437,6 +2453,37 @@ def compose_authenticated_cross_sheet_room_and_floor(
     tx0, ty0, tx1, ty1 = (float(v) for v in correspondence.target_box_pdf_pts)
     if tx1 <= tx0 or ty1 <= ty0:
         raise ValueError("invalid target room boundary box")
+
+    # 1. Authenticate floor correspondence against authentic producer issuance
+    auth_corr = get_authenticated_floor_correspondence(correspondence.snapshot_id, correspondence.record_id)
+    if auth_corr is None or auth_corr is not correspondence:
+        raise ValueError(
+            f"unissued or caller-created floor correspondence record: record {correspondence.record_id} was not issued by an authentic floor correspondence producer"
+        )
+
+    # 2. Verify authentic room label witness on target page
+    target_words = [
+        rec for rec in flat.values()
+        if str(getattr(rec, "page_id", "")) == target_page_str
+        and getattr(rec, "observation_kind", "") == "native_pdf_word"
+    ]
+    raw_texts = [str(getattr(wrd, "raw_text", "")).strip().upper() for wrd in target_words]
+    label_tokens = [tok.strip().upper() for tok in room_label.split() if len(tok.strip()) >= 3]
+    has_room_label = any(tok in raw_texts or any(tok in txt for txt in raw_texts) for tok in label_tokens)
+    if not has_room_label:
+        raise ValueError(
+            f"room label '{room_label}' not observed in published source on target page {target_page_str}"
+        )
+
+    # 3. Verify authentic doorway opening witness on target page for all doorway transitions
+    for w in correspondence.cross_sheet_wall_equivalences:
+        if w.doorway_transition is not None:
+            door_callout = str(w.doorway_transition.door_callout).strip().upper()
+            has_door = any(door_callout in txt for txt in raw_texts)
+            if not has_door:
+                raise ValueError(
+                    f"doorway transition '{door_callout}' not observed in published source on target page {target_page_str}"
+                )
 
     polygon_pts = (
         (tx0, ty0),
@@ -2641,6 +2688,7 @@ def compose_authenticated_cross_sheet_physical_claim(
             or not ceiling_lining_quantity_evidence
             or any(getattr(q, "blocking_reasons", ()) for q in ceiling_lining_quantity_evidence)
             or any(getattr(q, "abstained", False) for q in ceiling_lining_quantity_evidence)
+            or get_authenticated_ceiling_correspondence(correspondence.snapshot_id, correspondence.record_id) is not correspondence
         ):
             return LivePhysicalNetWallClaim(
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -2750,6 +2798,7 @@ def compose_authenticated_cross_sheet_physical_claim(
         or getattr(finish_result, "status", None) is not EvidenceResolutionStatus.CORROBORATED
         or not getattr(finish_result, "quantities", ())
         or any(getattr(q, "blocking_reasons", ()) for q in finish_result.quantities)
+        or get_authenticated_floor_correspondence(correspondence.snapshot_id, correspondence.record_id) is not correspondence
     ):
         return LivePhysicalNetWallClaim(
             status=EvidenceResolutionStatus.ABSTAINED,
@@ -3755,6 +3804,10 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
             and area_evidence.quantity_id != auth_area_rec.area_evidence.evidence_id
         ):
             raise ValueError("unauthorized quantity evidence object: does not reference authentic producer-issued room area evidence")
+    else:
+        raise ValueError(
+            f"unauthorized room area evidence type: {type(area_evidence).__name__}; expected EvidenceAtom or QuantityEvidence"
+        )
 
     # 3. Verify figured dimension lineage
     if not auth_area_rec.horizontal_dimension_id or not auth_area_rec.vertical_dimension_id:
@@ -3772,12 +3825,10 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     else:
         raise ValueError("area_evidence missing metadata mapping with dimension lineage")
 
-    # 4. Bind and validate room_area_qty_id
+    # 4. Bind and validate room_area_qty_id strictly through authentic issuer contracts
     valid_qty_ids = {
         str(auth_area_rec.area_evidence.evidence_id),
     }
-    if qty_evidence_id:
-        valid_qty_ids.add(str(qty_evidence_id))
 
     cand_floors = {
         stable_contract_id(
@@ -3831,6 +3882,16 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
                     },
                     digest_chars=20,
                 )
+            )
+
+    if isinstance(area_evidence, QuantityEvidence):
+        if str(area_evidence.quantity_id) not in valid_qty_ids:
+            raise ValueError(
+                f"unauthorized quantity evidence id: {area_evidence.quantity_id} was not issued by an authentic room area quantity producer"
+            )
+        if str(area_evidence.quantity_id) != str(room_area_qty_id):
+            raise ValueError(
+                f"room area quantity id mismatch: {room_area_qty_id} does not match area evidence quantity id {area_evidence.quantity_id}"
             )
 
     if not room_area_qty_id or str(room_area_qty_id) not in valid_qty_ids:
