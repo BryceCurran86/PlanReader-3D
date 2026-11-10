@@ -1025,3 +1025,123 @@ def test_consumer_authored_corroborated_cannot_override_upstream_unresolved_evid
     assert unresolved_claim.confidence == 0.0
     assert unresolved_claim.floor_finish_quantity_evidence == ()
 
+
+
+def test_foreign_snapshot_in_compose_cross_sheet_room_and_floor_raises():
+    """Defect 1 regression: passing synthetic or foreign snapshot to compose must raise ValueError."""
+    from types import SimpleNamespace
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        CrossSheetWallEquivalenceRecord,
+        DoorwayTransitionEvidence,
+        SourceCrossViewFloorCorrespondenceRecord,
+        compose_authenticated_cross_sheet_room_and_floor,
+    )
+
+    published = SimpleNamespace(
+        revision=SimpleNamespace(
+            document_id="doc_valid",
+            revision_id="rev_valid",
+            source_sha256="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+            partition_ids=("page:7", "page:11"),
+        ),
+        snapshot=SimpleNamespace(snapshot_id="snap_valid"),
+        coverage=SimpleNamespace(decoded_pages=(11,)),
+    )
+
+    d15 = DoorwayTransitionEvidence(
+        door_callout="D15",
+        page_id="7",
+        wall_side="y0",
+        schedule_page_id="16",
+        door_width_mm=920.0,
+    )
+    equivs = (
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x0", support_face_coord=250.0, target_face_coord=173.04, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="x1", support_face_coord=394.0, target_face_coord=316.80, covered_interval_iou=1.0),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y0", support_face_coord=1383.2, target_face_coord=1382.72, covered_interval_iou=1.0, doorway_transition=d15),
+        CrossSheetWallEquivalenceRecord(support_page_id="11", target_page_id="7", side_name="y1", support_face_coord=1584.56, target_face_coord=1585.04, covered_interval_iou=1.0),
+    )
+
+    corr = SourceCrossViewFloorCorrespondenceRecord(
+        record_id="corr_1",
+        canonical_floor_id="floor_1",
+        physical_room_id="room_1",
+        source_room_face_record_id="face_1",
+        support_page_id="11",
+        target_page_id="7",
+        support_dimension_box_pdf_pts=(250.0, 1383.2, 394.0, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_orientation="HORIZONTAL",
+        registration_scale=1.0,
+        registration_translation_pdf_pts=(77.0, 0.0),
+        registration_support_pt=250.0,
+        registration_runner_up_support_pt=250.0,
+        registration_null_support_pt=0.0,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={"x0": "SOLID", "x1": "SOLID", "y0": "SOLID", "y1": "SOLID"},
+        finish_codes_in_box={"FT3": 1},
+        material_code="FT3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        cross_sheet_wall_equivalences=equivs,
+        doorway_transitions=(d15,),
+        document_id="doc_valid",
+        revision_id="rev_valid",
+        source_sha256="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+        snapshot_id="FOREIGN_SNAPSHOT_123",
+    )
+
+    with pytest.raises(ValueError, match="correspondence document/revision/source_sha/snapshot does not match published source"):
+        compose_authenticated_cross_sheet_room_and_floor(
+            published=published,
+            correspondence=corr,
+            room_label="OFFICE",
+        )
+
+
+def test_correspondence_exception_fails_closed_and_instruments_diagnostics():
+    """Integration regression: verify correspondence_resolution_status and diagnostics on LivePhysicalNetWallClaim."""
+    from types import MappingProxyType
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    from pb_migration_contracts import EvidenceResolutionStatus
+
+    claim = LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("live_physical_net_wall_integration_unavailable", "correspondence_exception"),
+        quantity_m2=None,
+        source_pages=(),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_wall_reason_codes=(),
+        canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_floor_reason_codes=(),
+        canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_room_reason_codes=(),
+        canonical_room_source_pages=(),
+        external_wall_ids=(),
+        evidence_ids=(),
+        quantity_id=None,
+        confidence=0.0,
+        publication=None,
+        correspondence_resolution_status="correspondence_exception",
+        surface_pipeline_diagnostics=MappingProxyType({
+            "correspondence_status": "correspondence_exception",
+            "correspondence_records_count": 0,
+            "floor_finish_firm_quantities_count": 0,
+        }),
+    )
+    assert claim.correspondence_resolution_status == "correspondence_exception"
+    assert "correspondence_exception" in claim.reason_codes
+    assert claim.surface_pipeline_diagnostics["correspondence_status"] == "correspondence_exception"
+    assert claim.surface_pipeline_diagnostics["floor_finish_firm_quantities_count"] == 0

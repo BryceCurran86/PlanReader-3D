@@ -124,68 +124,6 @@ def issue_original_maryborough_ceiling_customer_quantities(
             target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
             target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
 
-            if is_food_prep:
-                cr = authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_ceiling_id=target_ceiling_id,
-                    physical_room_id=target_room_id,
-                    canonical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-            else:
-                cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_ceiling_id=target_ceiling_id,
-                    physical_room_id=target_room_id,
-                    canonical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-
-            if (
-                cr.status is not EvidenceResolutionStatus.CORROBORATED
-                or not cr.commercial_projection_allowed
-                or cr.authority_blockers
-            ):
-                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
-            # Also authenticate floor correspondence to establish canonical wall boundaries on Page 7
-            if is_food_prep:
-                cr_floor = authenticate_maryborough_food_prep_cross_sheet_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_floor_id=target_floor_id,
-                    physical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-            else:
-                cr_floor = authenticate_maryborough_office_cross_sheet_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_floor_id=target_floor_id,
-                    physical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-            if (
-                cr_floor.status is not EvidenceResolutionStatus.CORROBORATED
-                or not cr_floor.commercial_projection_allowed
-                or cr_floor.authority_blockers
-            ):
-                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
             hooks_unmodified = (
                 fitz.Page.get_text,
                 fitz.Page.get_drawings,
@@ -212,6 +150,71 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
                 if hooks_unmodified:
                     _SOURCE_CACHE[cache_key] = (source, published)
+
+            target_revision_id = published.revision.revision_id
+            target_snapshot_id = published.snapshot.snapshot_id
+
+            if is_food_prep:
+                cr = authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_ceiling_id=target_ceiling_id,
+                    physical_room_id=target_room_id,
+                    canonical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+            else:
+                cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_ceiling_id=target_ceiling_id,
+                    physical_room_id=target_room_id,
+                    canonical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+
+            if (
+                cr.status is not EvidenceResolutionStatus.CORROBORATED
+                or not cr.commercial_projection_allowed
+                or cr.authority_blockers
+            ):
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            # Also authenticate floor correspondence to establish canonical wall boundaries on Page 7
+            if is_food_prep:
+                cr_floor = authenticate_maryborough_food_prep_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+            else:
+                cr_floor = authenticate_maryborough_office_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+            if (
+                cr_floor.status is not EvidenceResolutionStatus.CORROBORATED
+                or not cr_floor.commercial_projection_allowed
+                or cr_floor.authority_blockers
+            ):
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
     except (ValueError, RuntimeError):
         return _blocked("source_pdf_unreadable")

@@ -145,41 +145,6 @@ def issue_all_original_maryborough_customer_quantities(
             except Exception:
                 pass
 
-            is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
-            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
-            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
-
-            if is_food_prep:
-                cr = authenticate_maryborough_food_prep_cross_sheet_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_floor_id=target_floor_id,
-                    physical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-            else:
-                cr = authenticate_maryborough_office_cross_sheet_correspondence(
-                    document_id=MARYBOROUGH_DOCUMENT_ID,
-                    revision_id=MARYBOROUGH_REVISION_ID,
-                    source_sha256=source_sha,
-                    snapshot_id=f"snap_{source_sha[:16]}",
-                    canonical_floor_id=target_floor_id,
-                    physical_room_id=target_room_id,
-                    source_room_face_record_id=target_face_id,
-                    doc=document,
-                )
-
-            if (
-                cr.status is not EvidenceResolutionStatus.CORROBORATED
-                or not cr.commercial_projection_allowed
-                or cr.authority_blockers
-            ):
-                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-
             hooks_unmodified = (
                 fitz.Page.get_text,
                 fitz.Page.get_drawings,
@@ -206,6 +171,44 @@ def issue_all_original_maryborough_customer_quantities(
                     return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
                 if hooks_unmodified:
                     _SOURCE_CACHE[cache_key] = (source, published)
+
+            target_revision_id = published.revision.revision_id
+            target_snapshot_id = published.snapshot.snapshot_id
+
+            is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
+            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
+            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
+            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
+
+            if is_food_prep:
+                cr = authenticate_maryborough_food_prep_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+            else:
+                cr = authenticate_maryborough_office_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                )
+
+            if (
+                cr.status is not EvidenceResolutionStatus.CORROBORATED
+                or not cr.commercial_projection_allowed
+                or cr.authority_blockers
+            ):
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
     except (ValueError, RuntimeError):
         return _blocked("source_pdf_unreadable")

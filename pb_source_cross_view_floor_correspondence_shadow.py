@@ -594,6 +594,10 @@ class SourceCrossViewFloorCorrespondenceRecord:
     takeoff_eligible: bool = False
     cross_sheet_wall_equivalences: tuple[CrossSheetWallEquivalenceRecord, ...] = ()
     doorway_transitions: tuple[DoorwayTransitionEvidence, ...] = ()
+    document_id: str = ""
+    revision_id: str = ""
+    source_sha256: str = ""
+    snapshot_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -623,6 +627,10 @@ class SourceCrossViewCeilingCorrespondenceRecord:
     definition_record_id: str = ""
     occurrence_record_id: str = ""
     occurrence_evidence_id: str = ""
+    document_id: str = ""
+    revision_id: str = ""
+    source_sha256: str = ""
+    snapshot_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -1657,6 +1665,10 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
             takeoff_eligible=False,
             cross_sheet_wall_equivalences=(),
             doorway_transitions=(),
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
 
     # 1. Resolve geometry input: either directly passed segments or extracted from doc/bytes/pdf_path
@@ -1977,6 +1989,10 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         takeoff_eligible=True,
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d15_evidence,),
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -2077,6 +2093,10 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             takeoff_eligible=False,
             cross_sheet_wall_equivalences=(),
             doorway_transitions=(),
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
 
     opened_doc = None
@@ -2303,6 +2323,10 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             takeoff_eligible=True,
             cross_sheet_wall_equivalences=tuple(equiv_records),
             doorway_transitions=(d28_evidence,),
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
     finally:
         if opened_doc is not None:
@@ -2341,6 +2365,30 @@ def compose_authenticated_cross_sheet_room_and_floor(
         or not correspondence.doorway_transitions
     ):
         raise ValueError("correspondence must be a CORROBORATED cross-sheet floor correspondence record")
+
+    # Validate published source lineage and exact snapshot binding
+    if (
+        published is None
+        or not hasattr(published, "revision")
+        or not hasattr(published, "snapshot")
+        or not hasattr(published, "coverage")
+        or not correspondence.document_id
+        or not correspondence.source_sha256
+        or not correspondence.snapshot_id
+        or correspondence.document_id != published.revision.document_id
+        or correspondence.revision_id != published.revision.revision_id
+        or correspondence.source_sha256.lower() != published.revision.source_sha256.lower()
+        or correspondence.snapshot_id != published.snapshot.snapshot_id
+    ):
+        raise ValueError("correspondence document/revision/source_sha/snapshot does not match published source")
+
+    support_page_int = int(correspondence.support_page_id)
+    if support_page_int not in getattr(published.coverage, "decoded_pages", ()):
+        raise ValueError(f"support page {correspondence.support_page_id} not in published source coverage")
+
+    if f"page:{correspondence.target_page_id}" not in getattr(published.revision, "partition_ids", ()):
+        raise ValueError(f"target page {correspondence.target_page_id} not in published source partitions")
+
 
     tx0, ty0, tx1, ty1 = (float(v) for v in correspondence.target_box_pdf_pts)
     if tx1 <= tx0 or ty1 <= ty0:
@@ -2954,6 +3002,10 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
             authority_blockers=authority_blockers,
             commercial_projection_allowed=False,
             takeoff_eligible=False,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
 
     # 1. Registration translation check
@@ -3031,13 +3083,23 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
                     legend_observations = []
 
             if dimension_witness_observations is None:
-                p11_full_text = doc_obj[10].get_text()
-                dw = []
-                if "3570" in p11_full_text:
-                    dw.append({"code": "3570"})
-                if "2536" in p11_full_text:
-                    dw.append({"code": "2536"})
-                dimension_witness_observations = dw
+                p11 = doc_obj[10]
+                w_sup = p11.get_text("words") or []
+                d_sup = p11.get_drawings() or []
+                segs_sup = _extract_segments_from_drawings(d_sup)
+                box_wit = _authenticate_p11_office_dimension_witness_box(
+                    segs_sup,
+                    w_sup,
+                    dim_h_val_mm=dim_h_val_mm,
+                    dim_v_val_mm=dim_v_val_mm,
+                )
+                if box_wit is not None:
+                    dimension_witness_observations = [
+                        {"code": "3570", "witness_bound": True},
+                        {"code": "2536", "witness_bound": True},
+                    ]
+                else:
+                    dimension_witness_observations = []
     finally:
         if owns_doc and doc_obj is not None:
             doc_obj.close()
@@ -3079,38 +3141,55 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
             authority_blockers=("grid_legend_definition_missing",),
         )
 
-    # 9. Verify figured dimension witnesses
-    dim_codes = {obs.get("code") for obs in (dimension_witness_observations or ())}
+    # 9. Verify figured dimension witnesses with strict locality
+    dim_codes = {
+        obs.get("code")
+        for obs in (dimension_witness_observations or ())
+        if obs.get("witness_bound", True) is True
+    }
     if not {"3570", "2536"}.issubset(dim_codes):
         return _abstained(
             reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
             authority_blockers=("figured_dimensions_missing",),
         )
 
-    # 10. Verify drawing boundary enclosure on RCP Page 9
+    # 10. Verify drawing boundary enclosure on RCP Page 9 forming a closed rectangular loop
     segs = list(rcp_segments or ())
-    has_left = any(
-        abs(s["x1"] - 279.84) < 2.0 and abs(s["x2"] - 279.84) < 2.0
-        and min(s["y1"], s["y2"]) <= 1390.0 and max(s["y1"], s["y2"]) >= 1580.0
-        for s in segs
-    )
-    has_right = any(
-        abs(s["x1"] - 422.64) < 2.0 and abs(s["x2"] - 422.64) < 2.0
-        and min(s["y1"], s["y2"]) <= 1390.0 and max(s["y1"], s["y2"]) >= 1580.0
-        for s in segs
-    )
-    has_top = any(
-        abs(s["y1"] - 1383.20) < 2.0 and abs(s["y2"] - 1383.20) < 2.0
-        and min(s["x1"], s["x2"]) <= 285.0 and max(s["x1"], s["x2"]) >= 415.0
-        for s in segs
-    )
-    has_bottom = any(
-        abs(s["y1"] - 1584.56) < 2.0 and abs(s["y2"] - 1584.56) < 2.0
-        and min(s["x1"], s["x2"]) <= 285.0 and max(s["x1"], s["x2"]) >= 415.0
-        for s in segs
-    )
+    left_segs = [
+        s for s in segs
+        if abs(s["x1"] - 279.84) < 1.5 and abs(s["x2"] - 279.84) < 1.5
+    ]
+    right_segs = [
+        s for s in segs
+        if abs(s["x1"] - 422.64) < 1.5 and abs(s["x2"] - 422.64) < 1.5
+    ]
+    top_segs = [
+        s for s in segs
+        if abs(s["y1"] - 1383.20) < 1.5 and abs(s["y2"] - 1383.20) < 1.5
+    ]
+    bottom_segs = [
+        s for s in segs
+        if abs(s["y1"] - 1584.56) < 1.5 and abs(s["y2"] - 1584.56) < 1.5
+    ]
 
-    if not (has_left and has_right and has_top and has_bottom):
+    # Require complete span coverage along all four sides
+    has_left_span = any(min(s["y1"], s["y2"]) <= 1384.5 and max(s["y1"], s["y2"]) >= 1583.0 for s in left_segs)
+    has_right_span = any(min(s["y1"], s["y2"]) <= 1384.5 and max(s["y1"], s["y2"]) >= 1583.0 for s in right_segs)
+    has_top_span = any(min(s["x1"], s["x2"]) <= 281.5 and max(s["x1"], s["x2"]) >= 421.0 for s in top_segs)
+    has_bottom_span = any(min(s["x1"], s["x2"]) <= 281.5 and max(s["x1"], s["x2"]) >= 421.0 for s in bottom_segs)
+
+    # Require closed corners (horizontal and vertical segments meeting within tolerance < 1.5 pt)
+    tl_closed = any(abs(s["y1"] - 1383.20) < 1.5 or abs(s["y2"] - 1383.20) < 1.5 for s in left_segs) and \
+                any(abs(s["x1"] - 279.84) < 1.5 or abs(s["x2"] - 279.84) < 1.5 for s in top_segs)
+    tr_closed = any(abs(s["y1"] - 1383.20) < 1.5 or abs(s["y2"] - 1383.20) < 1.5 for s in right_segs) and \
+                any(abs(s["x1"] - 422.64) < 1.5 or abs(s["x2"] - 422.64) < 1.5 for s in top_segs)
+    br_closed = any(abs(s["y1"] - 1584.56) < 1.5 or abs(s["y2"] - 1584.56) < 1.5 for s in right_segs) and \
+                any(abs(s["x1"] - 422.64) < 1.5 or abs(s["x2"] - 422.64) < 1.5 for s in bottom_segs)
+    bl_closed = any(abs(s["y1"] - 1584.56) < 1.5 or abs(s["y2"] - 1584.56) < 1.5 for s in left_segs) and \
+                any(abs(s["x1"] - 279.84) < 1.5 or abs(s["x2"] - 279.84) < 1.5 for s in bottom_segs)
+
+    if not (has_left_span and has_right_span and has_top_span and has_bottom_span and
+            tl_closed and tr_closed and br_closed and bl_closed):
         return _abstained(
             reason_codes=(BOX_NOT_WALL_BOUNDED,),
             authority_blockers=("rcp_enclosure_unclosed",),
@@ -3188,6 +3267,10 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         definition_record_id=def_id,
         occurrence_record_id=occ_id,
         occurrence_evidence_id=ev_id,
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -3274,6 +3357,10 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             definition_record_id="",
             occurrence_record_id="",
             occurrence_evidence_id="",
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
 
     opened_doc = None
@@ -3421,6 +3508,10 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             definition_record_id=def_id,
             occurrence_record_id=occ_id,
             occurrence_evidence_id=ev_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
         )
     finally:
         if opened_doc is not None:
@@ -3445,6 +3536,35 @@ def compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
         or correspondence.authority_blockers
     ):
         raise ValueError("corroborated ceiling correspondence required")
+
+    # Validate room lineage and exact snapshot binding
+    if (
+        correspondence.document_id != room.document_id
+        or correspondence.revision_id != room.revision_id
+        or correspondence.source_sha256.lower() != room.source_sha256.lower()
+        or correspondence.snapshot_id != room.snapshot_id
+    ):
+        raise ValueError("room and ceiling correspondence document/revision/snapshot mismatch")
+
+    if (
+        correspondence.canonical_room_id != room.canonical_room_id
+        or correspondence.physical_room_id != room.physical_room_id
+    ):
+        raise ValueError("room entity mismatch between ceiling correspondence and canonical room")
+
+    if str(room.page_id) != str(correspondence.target_page_id):
+        raise ValueError("room page mismatch between ceiling correspondence and canonical room")
+
+    # Authenticate upstream room area quantity evidence
+    area_ev_id = getattr(area_evidence, "quantity_id", getattr(area_evidence, "evidence_id", None))
+    if not area_ev_id or area_ev_id != room_area_qty_id:
+        raise ValueError("unissued or mismatched room area quantity evidence")
+    area_val = getattr(area_evidence, "value", None)
+    if area_val is None or abs(float(area_val) - correspondence.area_m2) > 1e-4:
+        raise ValueError("room area value mismatch with ceiling area")
+    area_status = getattr(area_evidence, "status", None)
+    if area_status not in ("firm", EvidenceResolutionStatus.CORROBORATED):
+        raise ValueError("room area evidence must be firm/corroborated")
 
     canonical_ceiling_id = correspondence.canonical_ceiling_id
     ceiling_qty_id = stable_contract_id(

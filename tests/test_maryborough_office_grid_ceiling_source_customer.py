@@ -509,3 +509,158 @@ def test_foreign_pdf_sha_mismatch_abstains(tmp_path):
     result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(foreign_pdf)
     assert result.status == "ABSTAIN"
     assert result.reason_codes == ("maryborough_source_sha_mismatch",)
+
+
+
+def test_rcp_segments_with_corner_gaps_abstain():
+    """Defect 2 regression: synthetic RCP segments with corner gaps must fail closed with rcp_enclosure_unclosed."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        BOX_NOT_WALL_BOUNDED,
+        EvidenceResolutionStatus,
+        authenticate_maryborough_office_rcp_ceiling_correspondence,
+    )
+
+    # Segments that cover spans but leave gaps at all 4 corners (e.g. y starts at 1390 instead of 1383.20)
+    gap_segments = [
+        {"x1": 279.84, "y1": 1390.0, "x2": 279.84, "y2": 1580.0},  # left
+        {"x1": 422.64, "y1": 1390.0, "x2": 422.64, "y2": 1580.0},  # right
+        {"x1": 285.0, "y1": 1383.20, "x2": 415.0, "y2": 1383.20},  # top
+        {"x1": 285.0, "y1": 1584.56, "x2": 415.0, "y2": 1584.56},  # bottom
+    ]
+
+    cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256=ceiling_authority.MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap1",
+        canonical_ceiling_id=ceiling_authority.OFFICE_PHYSICAL_CEILING_ID,
+        physical_room_id=ceiling_authority.OFFICE_PHYSICAL_ROOM_ID,
+        canonical_room_id=ceiling_authority.OFFICE_PHYSICAL_ROOM_ID,
+        source_room_face_record_id=ceiling_authority.OFFICE_SOURCE_ROOM_FACE_ID,
+        rcp_segments=gap_segments,
+        marks=[{"code": "GRID"}],
+        room_label_observations=[{"label": "OFFICE"}],
+        legend_observations=[{"code": "GRID", "desc": "VINYL FACED PLASTER TILE"}],
+        dimension_witness_observations=[{"code": "3570", "witness_bound": True}, {"code": "2536", "witness_bound": True}],
+    )
+    assert cr.status is EvidenceResolutionStatus.ABSTAINED
+    assert BOX_NOT_WALL_BOUNDED in cr.reason_codes
+    assert "rcp_enclosure_unclosed" in cr.authority_blockers
+    assert cr.commercial_projection_allowed is False
+
+
+def test_compose_office_ceiling_with_mismatched_room_or_unissued_area_raises():
+    """Defect 2 regression: compose ceiling with mismatched room entity or unissued area evidence must raise ValueError."""
+    from types import SimpleNamespace
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        EvidenceResolutionStatus,
+        SourceCrossViewCeilingCorrespondenceRecord,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+    )
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_1",
+        canonical_ceiling_id="c_1",
+        physical_room_id="room_office_1",
+        canonical_room_id="room_office_1",
+        source_room_face_record_id="f_1",
+        support_page_id="9",
+        support_viewport_id="vp9",
+        target_page_id="7",
+        target_viewport_id="vp7",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="snap1",
+    )
+
+    # 1. Mismatched room physical ID
+    bad_room = SimpleNamespace(
+        canonical_room_id="wrong_room",
+        physical_room_id="wrong_room",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="snap1",
+        page_id="7",
+    )
+    good_evidence = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=9.05352,
+        status="firm",
+    )
+    with pytest.raises(ValueError, match="room entity mismatch"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=bad_room,
+            area_evidence=good_evidence,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 2. Mismatched snapshot ID
+    bad_snap_room = SimpleNamespace(
+        canonical_room_id="room_office_1",
+        physical_room_id="room_office_1",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="FOREIGN_SNAP_999",
+        page_id="7",
+    )
+    with pytest.raises(ValueError, match="room and ceiling correspondence document/revision/snapshot mismatch"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=bad_snap_room,
+            area_evidence=good_evidence,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 3. Unissued / mismatched area quantity evidence ID
+    good_room = SimpleNamespace(
+        canonical_room_id="room_office_1",
+        physical_room_id="room_office_1",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="abc12345",
+        snapshot_id="snap1",
+        page_id="7",
+    )
+    bad_qty_evidence = SimpleNamespace(
+        quantity_id="fake_unissued_area_qty",
+        value=9.05352,
+        status="firm",
+    )
+    with pytest.raises(ValueError, match="unissued or mismatched room area quantity evidence"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=good_room,
+            area_evidence=bad_qty_evidence,
+            room_area_qty_id="area_qty_1",
+        )
+
+    # 4. Mismatched area value
+    bad_value_evidence = SimpleNamespace(
+        quantity_id="area_qty_1",
+        value=15.000,
+        status="firm",
+    )
+    with pytest.raises(ValueError, match="room area value mismatch with ceiling area"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=corr,
+            room=good_room,
+            area_evidence=bad_value_evidence,
+            room_area_qty_id="area_qty_1",
+        )
