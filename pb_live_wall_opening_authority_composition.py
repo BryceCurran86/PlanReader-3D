@@ -85,6 +85,7 @@ class LiveOpeningHostFrameTrace:
     record_id: Optional[str]
     host_wall_id: Optional[str]
     whole_wall_candidate_ids: tuple[str, ...]
+    whole_wall_frame_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -553,6 +554,9 @@ def compose_live_wall_opening_authority(
                     tuple(evidence.whole_wall_candidate_ids)
                     if evidence is not None
                     else ()
+                ),
+                whole_wall_frame_id=(
+                    evidence.whole_wall_frame_id if evidence is not None else None
                 ),
             )
         )
