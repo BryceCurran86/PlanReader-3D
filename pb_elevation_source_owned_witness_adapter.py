@@ -134,6 +134,7 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
 
 
 POINT_TOL = 0.01      # two edge ends are the same corner when they agree to this (pt)
+SUB_FLOOR_PT = 0.5    # the producer drops native line edges shorter than this (pb_vector_geometry_v130), so a thinner strip loses its short sides
 
 
 def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
@@ -145,6 +146,12 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
     corners on two distinct x and two distinct y values, one fill. Disjoint components stay separate rectangles; any other cycle
     (an L-shaped or concave outline, a figure eight, rectangles touching at a corner) is NOT a rectangle and yields nothing. Each rectangle carries only the observation
     ids of its own four edges. Duplicate edges (a closing edge drawn twice) are one edge.
+
+    One exception follows from the producer, not from geometry: it drops native line edges shorter than ``SUB_FLOOR_PT``, so a filled
+    strip thinner than that arrives as its two long sides only. Exactly two lone parallel sides of one fill with the same extent and
+    less than ``SUB_FLOOR_PT`` apart are read as that strip (a rectangle carrying those two observation ids). Three or more such
+    sides in one cluster are an ambiguous pairing and yield nothing; a lone side, sides of different extent or fill, and sides
+    ``SUB_FLOOR_PT`` or more apart (whose short sides the producer would have kept) are not rectangles.
     """
     def key(x, y):
         return (round(x / POINT_TOL), round(y / POINT_TOL))
@@ -177,6 +184,7 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
     for i, item in enumerate(items):
         groups.setdefault(find(i), []).append(item)
     rects = []
+    lone_sides: dict[tuple, list] = {}                 # (horizontal, lo, hi) -> [(across, entry)] of single axis-aligned edges
     for group in groups.values():
         adjacency: dict[tuple, list] = {}
         axis_ok = True
@@ -185,6 +193,11 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
                 axis_ok = False                        # a diagonal edge: not a rectangle
             adjacency.setdefault(a, []).append(b)
             adjacency.setdefault(b, []).append(a)
+        if axis_ok and len(group) == 1:
+            (a, b), entry = group[0]
+            horizontal = a[1] == b[1]
+            lo, hi = (a[0], b[0]) if horizontal else (a[1], b[1])          # (a, b) is already ordered: the key is (min, max)
+            lone_sides.setdefault((horizontal, lo, hi), []).append((a[1] if horizontal else a[0], entry))
         if not axis_ok or any(len(n) != 2 for n in adjacency.values()):
             continue                                   # a diagonal edge, an open end or a junction: not one simple closed loop
         start = min(adjacency)
@@ -213,6 +226,28 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
         gy = [v for _pair, entry in group for v in (entry["geom"][1], entry["geom"][3])]
         rects.append((min(gx), min(gy), max(gx), max(gy), next(iter(fills)),
                       tuple(sorted({i for _pair, entry in group for i in entry["ids"]}))))
+    # A filled strip thinner than the producer's edge floor arrives as its two long sides only (its short sides are dropped).
+    # Two lone parallel sides of one fill with the SAME extent and less than that floor apart are that strip; a cluster of three or
+    # more such sides is an ambiguous pairing and is never guessed, and a lone side is no rectangle.
+    for (horizontal, _lo, _hi), members in lone_sides.items():
+        members = sorted(members, key=lambda m: m[0])
+        clusters: list[list] = [[members[0]]]
+        for member in members[1:]:
+            if (member[0] - clusters[-1][-1][0]) * POINT_TOL < SUB_FLOOR_PT:
+                clusters[-1].append(member)
+            else:
+                clusters.append([member])
+        for cluster in clusters:
+            if len(cluster) != 2:
+                continue
+            (c0, e0), (c1, e1) = cluster
+            fills = e0["fills"] | e1["fills"]
+            if len(fills) != 1:
+                continue
+            gx = [v for e in (e0, e1) for v in (e["geom"][0], e["geom"][2])]
+            gy = [v for e in (e0, e1) for v in (e["geom"][1], e["geom"][3])]
+            rects.append((min(gx), min(gy), max(gx), max(gy), next(iter(fills)),
+                          tuple(sorted(e0["ids"] | e1["ids"]))))
     return sorted(rects)
 
 

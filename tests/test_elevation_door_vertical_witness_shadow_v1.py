@@ -599,7 +599,14 @@ def test_original_source_owned_path_reproduces_the_diagnostic_result_and_names_i
     owned = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=True)
     diagnostic = run_tool(pdf, 3, [4, 5], ORIGINAL_SHA256, focus=focus, source_owned=False)
     assert owned["input_path"] == "source_owned" and diagnostic["input_path"] == "pymupdf_diagnostic"
-    assert [c["record"] for c in owned["candidates"]] == [c["record"] for c in diagnostic["candidates"]] == ["22e7e155", "a93486dc"]
+    # Both paths read the same DRAWN rectangles (closed subpaths and thin strips; never a compound path's bounding box), so they agree. The
+    # list is the evidence-based one (docs/engineering/claude_3laurel_elevation_source_subpath_attribution_20261110.md): 22e7e155 and
+    # a93486dc are the two the bounding-box reading also found (same outlines, narrower receipts); 836b31c3 and b5091e15 are two more
+    # drawn door openings whose elevation views only register once the invented rectangles are gone. It is not a target value.
+    assert [c["record"] for c in owned["candidates"]] == [c["record"] for c in diagnostic["candidates"]] == [
+        "22e7e155", "836b31c3", "a93486dc", "b5091e15"]
+    by_record = lambda r: {c["record"]: (c["opening_height_mm"], c["leaf_height_mm"], c["head_level"]) for c in r["candidates"]}
+    assert by_record(owned) == by_record(diagnostic)                      # same heights, leaf heights and datum level on both paths
     assert all(c["receipt_count"] > 0 and c["opening_height_mm"] == 2100.0 for c in owned["candidates"])
     assert all(c["text_trust"] in ("corroborated", "raw_unverified_diagnostic_only") for c in owned["candidates"])   # trust is always stated
     assert all(c["text_trust"] == "" for c in diagnostic["candidates"])        # the PyMuPDF path claims no text trust

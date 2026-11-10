@@ -180,3 +180,121 @@ def test_an_l_shaped_filled_path_through_the_real_producer_is_no_rectangle():
 def test_a_single_filled_rectangle_through_the_real_producer_is_unchanged():
     rects = _page_rects(_compound_pdf([rect_pts(200.0, 200.0, 220.0, 250.0)]))
     assert [r[:4] for r in rects] == [(200.0, 200.0, 220.0, 250.0)] and len(rects[0][5]) == 4
+
+
+# ------------------------------------------------------------------------------------------------ thin strips (the producer drops short sides)
+def sides(x0, x1, y_a, y_b, fill=FILL, prefix="s"):
+    """The two long horizontal sides of a thin strip (its short sides are below the producer's edge floor)."""
+    return [(x0, y_a, x1, y_a, fill, f"{prefix}a"), (x1, y_b, x0, y_b, fill, f"{prefix}b")]
+
+
+def test_two_parallel_sides_closer_than_the_edge_floor_are_one_strip_with_their_own_receipts():
+    (rect,) = adapter.rectangle_components(sides(100.0, 134.0, 277.29, 277.57))
+    assert rect[:4] == (100.0, 277.29, 134.0, 277.57) and rect[4] == FILL and rect[5] == ("sa", "sb")
+
+
+def test_a_vertical_strip_is_read_the_same_way():
+    edges = [(648.7, 247.8, 648.7, 277.6, FILL, "va"), (649.13, 277.6, 649.13, 247.8, FILL, "vb")]
+    assert [r[:4] for r in adapter.rectangle_components(edges)] == [(648.7, 247.8, 649.13, 277.6)]
+
+
+def test_sides_at_or_beyond_the_edge_floor_are_not_a_strip():
+    assert adapter.rectangle_components(sides(100.0, 134.0, 277.0, 277.5)) == []       # exactly the floor: the producer keeps such short sides
+    assert adapter.rectangle_components(sides(100.0, 134.0, 277.0, 278.0)) == []
+
+
+def test_the_edge_floor_is_the_producers_edge_floor():
+    assert adapter.SUB_FLOOR_PT == 0.5
+
+
+def test_a_lone_side_and_sides_of_different_extent_or_fill_are_no_rectangle():
+    assert adapter.rectangle_components(sides(100.0, 134.0, 277.29, 277.57)[:1]) == []
+    other_extent = [(100.0, 277.29, 134.0, 277.29, FILL, "a"), (100.0, 277.57, 133.0, 277.57, FILL, "b")]
+    assert adapter.rectangle_components(other_extent) == []
+    other_fill = [(100.0, 277.29, 134.0, 277.29, FILL, "a"), (100.0, 277.57, 134.0, 277.57, (0.9, 0.9, 0.9), "b")]
+    assert adapter.rectangle_components(other_fill) == []
+
+
+def test_sides_that_share_only_one_end_of_their_extent_are_no_strip():
+    shifted_start = [(100.0, 277.29, 134.0, 277.29, FILL, "a"), (110.0, 277.57, 134.0, 277.57, FILL, "b")]
+    assert adapter.rectangle_components(shifted_start) == []
+    shifted_end = [(100.0, 277.29, 134.0, 277.29, FILL, "a"), (100.0, 277.57, 120.0, 277.57, FILL, "b")]
+    assert adapter.rectangle_components(shifted_end) == []
+
+
+def test_a_horizontal_and_a_vertical_side_of_the_same_extent_never_pair():
+    mixed = [(100.0, 277.0, 134.0, 277.0, FILL, "h"), (277.2, 100.0, 277.2, 134.0, FILL, "v")]
+    assert adapter.rectangle_components(mixed) == []
+    assert adapter.rectangle_components(list(reversed(mixed))) == []
+
+
+def test_three_sides_within_the_floor_are_an_ambiguous_pairing_and_yield_nothing():
+    three = sides(100.0, 134.0, 277.0, 277.2) + [(100.0, 277.4, 134.0, 277.4, FILL, "sc")]
+    assert adapter.rectangle_components(three) == []
+    assert adapter.rectangle_components(list(reversed(three))) == []
+
+
+def test_two_strips_of_the_same_extent_far_apart_are_two_strips():
+    both = sides(100.0, 134.0, 200.0, 200.3, prefix="t") + sides(100.0, 134.0, 277.29, 277.57, prefix="u")
+    assert [r[:4] for r in adapter.rectangle_components(both)] == [(100.0, 200.0, 134.0, 200.3), (100.0, 277.29, 134.0, 277.57)]
+    assert [r[5] for r in adapter.rectangle_components(both)] == [("ta", "tb"), ("ua", "ub")]       # receipts never cross strips
+
+
+def test_a_strip_beside_a_closed_rectangle_in_one_path_keeps_both():
+    mixed = edges_of(rect_pts(200.0, 200.0, 220.0, 250.0), prefix="r") + sides(100.0, 134.0, 277.29, 277.57)
+    assert sorted(r[:4] for r in adapter.rectangle_components(mixed)) == [(100.0, 277.29, 134.0, 277.57), (200.0, 200.0, 220.0, 250.0)]
+
+
+def test_strip_reading_is_order_translation_and_split_invariant():
+    base = sides(100.0, 134.0, 277.29, 277.57)
+    shifted = [(x0 + 37.0, y0 - 11.5, x1 + 37.0, y1 - 11.5, f, i) for x0, y0, x1, y1, f, i in base]
+    assert [tuple(round(v, 2) for v in r[:4]) for r in adapter.rectangle_components(shifted)] == [(137.0, 265.79, 171.0, 266.07)]
+    assert adapter.rectangle_components(list(reversed(base)))[0][:4] == adapter.rectangle_components(base)[0][:4]
+    assert adapter.rectangle_components(base + base) == adapter.rectangle_components(base)           # a duplicated side is one side
+
+
+def test_a_strip_never_borrows_a_side_of_a_closed_rectangle():
+    # the long side of a closed rectangle is not a lone side: it shares corners with its own loop
+    rect = edges_of(rect_pts(100.0, 277.0, 134.0, 290.0), prefix="r")
+    assert [r[:4] for r in adapter.rectangle_components(rect + [(100.0, 277.2, 134.0, 277.2, FILL, "x")])] == [(100.0, 277.0, 134.0, 290.0)]
+
+
+# ------------------------------------------------------------------------------------------------ the real producer's floor
+def _strip_pdf(thickness: float) -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=300)
+    shape = page.new_shape()
+    shape.draw_polyline(rect_pts(100.0, 200.0, 134.0, 200.0 + thickness) + [(100.0, 200.0)])       # m/l edges, as a CAD export draws them
+    shape.finish(fill=FILL, color=None, closePath=True)
+    shape.commit()
+    return doc.tobytes()
+
+
+def _line_facts(payload: bytes):
+    source = SourceVisibilityProducer(producer_method="live-physical-net-wall", producer_version="1")
+    sha = hashlib.sha256(payload).hexdigest()
+    initial = source.ingest_native_pdf_bytes(document_id=f"live-source:{sha[:32]}", source_bytes=payload,
+                                             source_locator="memory://strip.pdf", page_ids=(1,))
+    page = adapter.read_source_owned_page(source, revision_id=initial.revision.revision_id, page_id="1")
+    return page.rects, page.lines
+
+
+def test_the_real_producer_keeps_the_short_sides_of_a_thick_strip_and_drops_those_of_a_thin_one():
+    # pins SUB_FLOOR_PT to the producer: a drift in its 0.5 pt edge floor would break the strip rule silently
+    thick_rects, thick_lines = _line_facts(_strip_pdf(0.6))
+    thin_rects, thin_lines = _line_facts(_strip_pdf(0.4))
+    assert len(thick_lines) == 4 and len(thin_lines) == 2
+    assert [tuple(round(v, 2) for v in r[:4]) for r in thick_rects] == [(100.0, 200.0, 134.0, 200.6)]
+    assert [tuple(round(v, 2) for v in r[:4]) for r in thin_rects] == [(100.0, 200.0, 134.0, 200.4)]
+
+
+def test_a_compound_path_of_two_thin_strips_through_the_real_producer_gives_two_strips():
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=300)
+    shape = page.new_shape()
+    shape.draw_polyline(rect_pts(100.0, 200.0, 134.0, 200.3) + [(100.0, 200.0)])
+    shape.draw_polyline(rect_pts(100.0, 277.0, 134.0, 277.3) + [(100.0, 277.0)])
+    shape.finish(fill=FILL, color=None, closePath=True)
+    shape.commit()
+    rects, _lines = _line_facts(doc.tobytes())
+    assert [tuple(round(v, 2) for v in r[:4]) for r in rects] == [(100.0, 200.0, 134.0, 200.3), (100.0, 277.0, 134.0, 277.3)]

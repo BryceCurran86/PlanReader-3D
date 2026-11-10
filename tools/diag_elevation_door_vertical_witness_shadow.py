@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from pb_elevation_source_owned_witness_adapter import (  # noqa: F401
-    extract_views, kind_proposal_for_outline, plan_label_width, read_source_owned_page, source_owned_views,
+    extract_views, kind_proposal_for_outline, plan_label_width, read_source_owned_page, rectangle_components,
+    source_owned_views,
 )
 from pb_elevation_door_vertical_witness_shadow import (
     DatumLevel, ElevOutline, ElevationDatum, PlanSpan, Scope, aggregate_across_views, compose_opening_measurement,
@@ -29,16 +30,41 @@ from pb_elevation_door_vertical_witness_shadow import (
 
 
 
+def _drawn_edges(item) -> list[tuple]:
+    """The straight edges one PyMuPDF drawing item paints: a line, or the four sides of a ``re`` / ``qu`` item (curves paint none)."""
+    kind = item[0]
+    if kind == "l":
+        return [(item[1].x, item[1].y, item[2].x, item[2].y)]
+    if kind == "re":
+        r = item[1]
+        corners = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
+    elif kind == "qu":
+        q = item[1]
+        corners = [(q.ul.x, q.ul.y), (q.ur.x, q.ur.y), (q.lr.x, q.lr.y), (q.ll.x, q.ll.y)]
+    else:
+        return []
+    return [(*corners[i], *corners[(i + 1) % 4]) for i in range(4)]
+
+
 def page_primitives(page) -> tuple[list, list, list]:
+    """Plain lines, filled rectangles and words of one page through PyMuPDF (the diagnostic path, no receipts).
+
+    A filled rectangle is one the path actually DRAWS: the edges of a filled drawing go through the same
+    ``rectangle_components`` rule as the source-owned path, so a compound path never becomes the bounding box of its
+    parts and an L-shaped or open outline is no rectangle. (The old reading took ``drawing["rect"]``, the bounding box of the
+    whole path, which invents a rectangle across the gap between two subpaths.)
+    """
     lines, rects = [], []
     for d in page.get_drawings():
         fill = d.get("fill")
+        edges = [e for it in d["items"] for e in _drawn_edges(it)]
         for it in d["items"]:
             if it[0] == "l":
                 lines.append((it[1].x, it[1].y, it[2].x, it[2].y))
-        r = d.get("rect")
-        if fill is not None and r is not None:
-            rects.append((r.x0, r.y0, r.x1, r.y1, tuple(fill)))
+        if fill is not None and edges:
+            rounded = tuple(round(c, 2) for c in fill)
+            for x0, y0, x1, y1, f, _ids in rectangle_components([(*e, rounded, "") for e in edges]):
+                rects.append((x0, y0, x1, y1, f))
     words = [(w[0], w[1], w[2], w[3], w[4]) for w in page.get_text("words")]
     return lines, rects, words
 
