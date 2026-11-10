@@ -1492,3 +1492,205 @@ def test_untyped_room_area_evidence_raises():
             room_area_qty_id="authentic_atom_2",
             area_evidence=untyped_area,
         )
+
+
+def test_compose_office_ceiling_figured_dimension_linkage_and_foreign_dimension_rejection_raises():
+    """Verify that independent view dimension IDs link via authenticated physical axis correspondence,
+    and foreign/mismatched dimension IDs or areas fail closed with ValueError."""
+    from types import SimpleNamespace
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        EvidenceResolutionStatus,
+        SourceCrossViewCeilingCorrespondenceRecord,
+        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
+    )
+    from pb_cross_view_room_area_authority import (
+        CrossViewRoomAreaRecord,
+        _RECORD_SEAL,
+        _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT,
+    )
+    from pb_migration_contracts import EvidenceAtom, QuantityEvidence
+
+    doc_id = "doc_dim_test"
+    rev_id = "rev_dim_test"
+    sha = "sha_dim_test"
+    snap_id = "snap_dim_test"
+    room_id = "OFFICE"
+    face_id = "f_office"
+
+    corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_ceiling_dim",
+        canonical_ceiling_id="c_office",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        support_page_id="9",
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(snap_id, corr.record_id)] = corr
+
+    atom = EvidenceAtom(
+        evidence_id="authentic_atom_dim",
+        document_id=doc_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimension",
+        normalized_value=9.05352,
+        unit="m2",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        metadata={
+            "document_id": doc_id,
+            "source_sha256": sha,
+            "snapshot_id": snap_id,
+            "entity_id": room_id,
+            "horizontal_dimension_id": "cross_view_native_dimension_h1",
+            "vertical_dimension_id": "cross_view_native_dimension_v1",
+            "horizontal_value_mm": 2536,
+            "vertical_value_mm": 3570,
+        },
+    )
+
+    room_area_rec = CrossViewRoomAreaRecord(
+        physical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        room_label=room_id,
+        source_dimension_page_id="11",
+        source_label_observation_ids=(),
+        source_label_receipt_ids=(),
+        horizontal_dimension_id="cross_view_native_dimension_h1",
+        vertical_dimension_id="cross_view_native_dimension_v1",
+        area_evidence=atom,
+        _seal=_RECORD_SEAL,
+    )
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, atom.evidence_id)] = room_area_rec
+    _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(snap_id, room_id)] = room_area_rec
+
+    room = SimpleNamespace(
+        canonical_room_id=room_id,
+        physical_room_id=room_id,
+        room_label=room_id,
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+        source_room_face_record_id=face_id,
+        page_id="7",
+        viewport_id="VIEWPORT_P07_A110_PLAN",
+        polygon_pdf_pts=((173.04, 1382.72), (316.80, 1382.72), (316.80, 1585.04), (173.04, 1585.04)),
+        evidence_ids=("ev_room",),
+    )
+
+    # 1. Authentic physical axis linkage succeeds
+    ceil, qty = compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+        correspondence=corr,
+        room=room,
+        room_area_qty_id="authentic_atom_dim",
+        area_evidence=atom,
+    )
+    assert qty.value == 9.05352
+
+    # 2. Foreign / mismatched dimension IDs reject with ValueError
+    bad_dim_corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_bad_dim",
+        canonical_ceiling_id="c_office",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        support_page_id="9",
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=9.05352,
+        figured_dimension_ids=("dim_foreign_1", "dim_foreign_2"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(snap_id, bad_dim_corr.record_id)] = bad_dim_corr
+    import pytest
+    with pytest.raises(ValueError, match="do not match ceiling correspondence figured dimensions"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=bad_dim_corr,
+            room=room,
+            room_area_qty_id="authentic_atom_dim",
+            area_evidence=atom,
+        )
+
+    # 3. Mismatched area product rejects with ValueError
+    bad_area_corr = SourceCrossViewCeilingCorrespondenceRecord(
+        record_id="rec_bad_area",
+        canonical_ceiling_id="c_office",
+        physical_room_id=room_id,
+        canonical_room_id=room_id,
+        source_room_face_record_id=face_id,
+        support_page_id="9",
+        support_viewport_id="VIEWPORT_P09_A120_RCP",
+        target_page_id="7",
+        target_viewport_id="VIEWPORT_P07_A110_PLAN",
+        support_dimension_box_pdf_pts=(279.84, 1383.20, 422.64, 1584.56),
+        target_box_pdf_pts=(173.04, 1382.72, 316.80, 1585.04),
+        registration_translation_pdf_pts=(106.32, 0.0),
+        finish_code="GRID",
+        semantic_finish="GRID",
+        ceiling_height_mm=2400.0,
+        area_m2=15.00000,
+        figured_dimension_ids=("dim_2536", "dim_3570"),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("ok",),
+        authority_blockers=(),
+        commercial_projection_allowed=True,
+        takeoff_eligible=True,
+        definition_record_id="def_1",
+        occurrence_record_id="occ_1",
+        occurrence_evidence_id="ev_occ_1",
+        document_id=doc_id,
+        revision_id=rev_id,
+        source_sha256=sha,
+        snapshot_id=snap_id,
+    )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(snap_id, bad_area_corr.record_id)] = bad_area_corr
+    with pytest.raises(ValueError, match="room area value mismatch with ceiling area|does not match physical room area"):
+        compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
+            correspondence=bad_area_corr,
+            room=room,
+            room_area_qty_id="authentic_atom_dim",
+            area_evidence=atom,
+        )

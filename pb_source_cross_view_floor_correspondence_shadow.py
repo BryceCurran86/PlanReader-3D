@@ -3826,21 +3826,70 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
             f"unauthorized room area evidence type: {type(area_evidence).__name__}; expected EvidenceAtom or QuantityEvidence"
         )
 
-    # 3. Verify figured dimension lineage
+    # 3. Verify figured dimension lineage and physical axis correspondence
     if not auth_area_rec.horizontal_dimension_id or not auth_area_rec.vertical_dimension_id:
         raise ValueError("room area evidence missing figured dimension lineage")
-    if (auth_area_rec.horizontal_dimension_id, auth_area_rec.vertical_dimension_id) != tuple(correspondence.figured_dimension_ids):
-        raise ValueError(
-            f"room area figured dimensions ({auth_area_rec.horizontal_dimension_id}, {auth_area_rec.vertical_dimension_id}) "
-            f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
-        )
-    if isinstance(metadata, Mapping):
-        h_dim = metadata.get("horizontal_dimension_id")
-        v_dim = metadata.get("vertical_dimension_id")
-        if not h_dim or not v_dim or (h_dim, v_dim) != tuple(correspondence.figured_dimension_ids):
-            raise ValueError("area_evidence dimension IDs missing or do not match ceiling correspondence figured dimensions")
-    else:
+    if not isinstance(metadata, Mapping):
         raise ValueError("area_evidence missing metadata mapping with dimension lineage")
+
+    h_dim = metadata.get("horizontal_dimension_id") or auth_area_rec.horizontal_dimension_id
+    v_dim = metadata.get("vertical_dimension_id") or auth_area_rec.vertical_dimension_id
+    if not h_dim or not v_dim:
+        raise ValueError("area_evidence dimension IDs missing")
+
+    corr_dim_ids = tuple(correspondence.figured_dimension_ids)
+    if not corr_dim_ids:
+        raise ValueError("ceiling correspondence missing figured dimension IDs")
+
+    dim_id_exact_match = (
+        (auth_area_rec.horizontal_dimension_id, auth_area_rec.vertical_dimension_id) == corr_dim_ids
+        and (h_dim, v_dim) == corr_dim_ids
+    )
+    if not dim_id_exact_match:
+        # Verify authenticated physical relationship across independent view observations
+        h_val = metadata.get("horizontal_value_mm")
+        v_val = metadata.get("vertical_value_mm")
+        if h_val is None or v_val is None:
+            raise ValueError(
+                f"room area figured dimensions ({auth_area_rec.horizontal_dimension_id}, {auth_area_rec.vertical_dimension_id}) "
+                f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
+            )
+        try:
+            h_val_float = float(h_val)
+            v_val_float = float(v_val)
+        except (TypeError, ValueError):
+            raise ValueError("room area figured dimensions have non-numeric axis values")
+
+        if h_val_float <= 0.0 or v_val_float <= 0.0:
+            raise ValueError("room area figured dimensions must be strictly positive")
+
+        expected_area = round(h_val_float * v_val_float / 1_000_000.0, 5)
+        if abs(correspondence.area_m2 - expected_area) > 1e-4:
+            raise ValueError(
+                f"ceiling correspondence area {correspondence.area_m2} does not match "
+                f"physical room area derived from figured dimensions ({expected_area})"
+            )
+
+        valid_h_refs = {
+            auth_area_rec.horizontal_dimension_id,
+            h_dim,
+            f"dim_{int(round(h_val_float))}",
+            str(int(round(h_val_float))),
+        }
+        valid_v_refs = {
+            auth_area_rec.vertical_dimension_id,
+            v_dim,
+            f"dim_{int(round(v_val_float))}",
+            str(int(round(v_val_float))),
+        }
+        if not (
+            any(ref in corr_dim_ids for ref in valid_h_refs)
+            and any(ref in corr_dim_ids for ref in valid_v_refs)
+        ):
+            raise ValueError(
+                f"room area figured dimensions ({auth_area_rec.horizontal_dimension_id}, {auth_area_rec.vertical_dimension_id}) "
+                f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
+            )
 
     # 4. Bind and validate room_area_qty_id strictly through authentic issuer contracts
     valid_qty_ids = {
