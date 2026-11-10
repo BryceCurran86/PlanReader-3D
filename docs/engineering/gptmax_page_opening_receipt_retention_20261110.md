@@ -1,0 +1,13 @@
+# Preserve source-owned page opening receipts in expanded project runs
+
+Observed on pinned producer e7da6fb3b3adaf875c87787c59835101a1498838: the generic all-page Lot16 producer completes, but its eight pre-existing sealed quantities differ from the archived bodies only in evidence IDs and fingerprints. All eight IDs and values survive. Derived customer notes/provenance/fingerprints differ correspondingly. The source-positive single-page baseline remains exact. This is evidence scope drift, not a missing original or lost quantity.
+
+Trace: collect_live_physical_net_wall_claim -> _collect_live_physical_net_wall_claim -> SourceVisibilityProducer -> compose_live_wall_opening_authority -> compose_live_physical_opening_voids -> recover_source_opening_areas -> opening issuer -> source trace -> seal/customer verifier. Host and frame receipts include exact source snapshot/scope, so wider decoded source coverage may correctly reissue them. Deleting snapshot from IDs or weakening archive equality would alias different authorities.
+
+Inference tested by the source acceptance: retain independently re-proven original page receipts when broad source and narrow source agree on the measured and physical core. The same original bytes are processed by the existing collector over the one source-authenticated topology page. Only matching already-published quantities can retain their exact page-local canonical object/quantity. Missing broad positives are never filled. Measurement, source ownership or physical disagreement rejects the composition. Other families and unmeasured broad candidates remain intact.
+
+The existing append recovery still supplies actual source/host reproof, complete rival census and source-partition checks before new quantities. Reproof is requested only under existing explicit recovery, when decoded scope or text opt-ins expanded. Single-page default calls retain their previous path. A broad net-wall/count/dimension publication keeps its broader canonical source; this helper cannot rewrite a separate family receipt.
+
+This changes composition, not detection/geometry/measurement authority. No second scale resolver, new quantity schema, default dimension, archive-as-input, reference value, source PDF, frozen120 or tolerance is changed. Historical archives are read only AFTER prediction in the source retention test. Source-positive signed/customer equality and dual-Python CI remain release gates.
+
+Private Actions diagnostic run 42776245305 did not start because GitHub refused runner allocation for billing. The exact-head local diagnostic instead completed against a SHA-verified original in 302.44s. This repair is not evidence that four-project scoring is published.
