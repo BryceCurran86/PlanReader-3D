@@ -67,10 +67,28 @@ CASES = {
     "thin_vertical_strip_below_the_edge_floor": lambda p: _shape_path(p, [_box(648.7, 247.8, 649.13, 277.6)]),
     "compound_of_two_thin_strips_and_a_rectangle": lambda p: _shape_path(
         p, [_box(100, 200, 134, 200.3), _box(100, 277, 134, 277.3), _box(300, 200, 320, 250)]),
+    "implicitly_closed_strip_chain": lambda p: _open_chain(p, [(100, 200), (134, 200), (134, 200.3), (100, 200.3)]),
+    "two_open_strokes_same_fill": lambda p: _open_lines(p, [((100, 200), (134, 200)), ((100, 200.3), (134, 200.3))]),
+    "two_open_strokes_opposite_way": lambda p: _open_lines(p, [((100, 200), (134, 200)), ((134, 200.3), (100, 200.3))]),
     "strip_just_over_the_edge_floor": lambda p: _shape_path(p, [_box(100, 277.0, 134, 277.6)]),
     "two_fills_in_separate_paths": lambda p: (_shape_path(p, [_box(200, 200, 220, 250)], fill=(0.1, 0.1, 0.1)),
                                               _shape_path(p, [_box(200, 200, 220, 250)], fill=(0.9, 0.9, 0.9))),
 }
+
+
+def _open_lines(page, lines):
+    shape = page.new_shape()
+    for start, end in lines:
+        shape.draw_line(start, end)
+    shape.finish(fill=FILL, color=None, closePath=False)
+    shape.commit()
+
+
+def _open_chain(page, points):
+    shape = page.new_shape()
+    shape.draw_polyline(points)
+    shape.finish(fill=FILL, color=None, closePath=False)               # the fill closes it; no closing side is drawn
+    shape.commit()
 
 
 def _two_re_in_one_path(page):
@@ -114,3 +132,38 @@ def test_the_diagnostic_path_still_reports_no_receipts():
 def test_the_two_re_operators_in_one_path_are_two_rectangles_not_their_box():
     rects = _diagnostic_rects(_pdf(CASES["two_native_rect_operators_in_one_path"]))
     assert rects == [(200.0, 200.0, 220.0, 250.0), (250.0, 200.0, 270.0, 250.0)]
+
+
+class _StubPage:
+    """A page with hand-made drawings, to test how the diagnostic path reads items without a PDF round trip."""
+
+    def __init__(self, drawings):
+        self._drawings = drawings
+
+    def get_drawings(self):
+        return self._drawings
+
+    def get_text(self, _mode):
+        return []
+
+
+def _line(a, b):
+    return ("l", fitz.Point(*a), fitz.Point(*b))
+
+
+def test_the_diagnostic_path_carries_item_identity_into_strip_pairing():
+    sides = [_line((100.0, 200.0), (134.0, 200.0)), ("c", fitz.Point(134.0, 200.0), fitz.Point(134.1, 200.1), fitz.Point(134.1, 200.2), fitz.Point(134.0, 200.3)),
+             _line((134.0, 200.3), (100.0, 200.3))]                       # side, a curved end the edge reader skips, side: items 0 and 2
+    rects = page_primitives(_StubPage([{"fill": FILL, "items": sides}]))[1]
+    assert [tuple(round(v, 2) for v in r[:4]) for r in rects] == [(100.0, 200.0, 134.0, 200.3)]
+    adjacent = [_line((100.0, 200.0), (134.0, 200.0)), _line((134.0, 200.3), (100.0, 200.3))]       # items 0 and 1: two open strokes
+    assert page_primitives(_StubPage([{"fill": FILL, "items": adjacent}]))[1] == []
+
+
+def test_the_diagnostic_path_drops_line_edges_below_the_producer_floor_as_the_producer_does():
+    tiny_square = [_line((100.0, 200.0), (100.3, 200.0)), _line((100.3, 200.0), (100.3, 200.3)),
+                   _line((100.3, 200.3), (100.0, 200.3)), _line((100.0, 200.3), (100.0, 200.0))]
+    assert page_primitives(_StubPage([{"fill": FILL, "items": tiny_square}]))[1] == []          # every side is under the floor: nothing was drawn
+    at_floor = [_line((100.0, 200.0), (100.5, 200.0)), _line((100.5, 200.0), (100.5, 100.5)),
+                _line((100.5, 100.5), (100.0, 100.5)), _line((100.0, 100.5), (100.0, 200.0))]
+    assert len(page_primitives(_StubPage([{"fill": FILL, "items": at_floor}]))[1]) == 1       # a side of exactly the floor is kept

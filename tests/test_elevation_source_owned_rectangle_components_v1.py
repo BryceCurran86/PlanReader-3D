@@ -183,9 +183,12 @@ def test_a_single_filled_rectangle_through_the_real_producer_is_unchanged():
 
 
 # ------------------------------------------------------------------------------------------------ thin strips (the producer drops short sides)
-def sides(x0, x1, y_a, y_b, fill=FILL, prefix="s"):
-    """The two long horizontal sides of a thin strip (its short sides are below the producer's edge floor)."""
-    return [(x0, y_a, x1, y_a, fill, f"{prefix}a"), (x1, y_b, x0, y_b, fill, f"{prefix}b")]
+def sides(x0, x1, y_a, y_b, fill=FILL, prefix="s", item=0):
+    """The two long horizontal sides of a thin strip (its short sides are below the producer's edge floor).
+
+    As the producer reports a closed strip drawn side, short side, side, short side: the sides are items ``item`` and ``item + 2`` of
+    one drawing and run in opposite directions."""
+    return [(x0, y_a, x1, y_a, fill, f"{prefix}a", item), (x1, y_b, x0, y_b, fill, f"{prefix}b", item + 2)]
 
 
 def test_two_parallel_sides_closer_than_the_edge_floor_are_one_strip_with_their_own_receipts():
@@ -194,7 +197,7 @@ def test_two_parallel_sides_closer_than_the_edge_floor_are_one_strip_with_their_
 
 
 def test_a_vertical_strip_is_read_the_same_way():
-    edges = [(648.7, 247.8, 648.7, 277.6, FILL, "va"), (649.13, 277.6, 649.13, 247.8, FILL, "vb")]
+    edges = [(648.7, 247.8, 648.7, 277.6, FILL, "va", 0), (649.13, 277.6, 649.13, 247.8, FILL, "vb", 2)]
     assert [r[:4] for r in adapter.rectangle_components(edges)] == [(648.7, 247.8, 649.13, 277.6)]
 
 
@@ -235,7 +238,7 @@ def test_three_sides_within_the_floor_are_an_ambiguous_pairing_and_yield_nothing
 
 
 def test_two_strips_of_the_same_extent_far_apart_are_two_strips():
-    both = sides(100.0, 134.0, 200.0, 200.3, prefix="t") + sides(100.0, 134.0, 277.29, 277.57, prefix="u")
+    both = sides(100.0, 134.0, 200.0, 200.3, prefix="t") + sides(100.0, 134.0, 277.29, 277.57, prefix="u", item=4)
     assert [r[:4] for r in adapter.rectangle_components(both)] == [(100.0, 200.0, 134.0, 200.3), (100.0, 277.29, 134.0, 277.57)]
     assert [r[5] for r in adapter.rectangle_components(both)] == [("ta", "tb"), ("ua", "ub")]       # receipts never cross strips
 
@@ -247,7 +250,7 @@ def test_a_strip_beside_a_closed_rectangle_in_one_path_keeps_both():
 
 def test_strip_reading_is_order_translation_and_split_invariant():
     base = sides(100.0, 134.0, 277.29, 277.57)
-    shifted = [(x0 + 37.0, y0 - 11.5, x1 + 37.0, y1 - 11.5, f, i) for x0, y0, x1, y1, f, i in base]
+    shifted = [(x0 + 37.0, y0 - 11.5, x1 + 37.0, y1 - 11.5, f, i, k) for x0, y0, x1, y1, f, i, k in base]
     assert [tuple(round(v, 2) for v in r[:4]) for r in adapter.rectangle_components(shifted)] == [(137.0, 265.79, 171.0, 266.07)]
     assert adapter.rectangle_components(list(reversed(base)))[0][:4] == adapter.rectangle_components(base)[0][:4]
     assert adapter.rectangle_components(base + base) == adapter.rectangle_components(base)           # a duplicated side is one side
@@ -298,3 +301,85 @@ def test_a_compound_path_of_two_thin_strips_through_the_real_producer_gives_two_
     shape.commit()
     rects, _lines = _line_facts(doc.tobytes())
     assert [tuple(round(v, 2) for v in r[:4]) for r in rects] == [(100.0, 200.0, 134.0, 200.3), (100.0, 277.0, 134.0, 277.3)]
+
+
+# ------------------------------------------------------------------------------------------------ one closed subpath, not two open strokes (review of #4275, comment 6764661694)
+def test_two_independent_open_strokes_are_not_a_strip_whatever_their_geometry():
+    path_a, path_b = (100.0, 200.0, 134.0, 200.0, FILL, "pathA"), (100.0, 200.3, 134.0, 200.3, FILL, "pathB")
+    assert adapter.rectangle_components([path_a, path_b]) == []                       # the reviewer's exact call: no item identity, no strip
+    assert adapter.rectangle_components([path_b, path_a]) == []
+    same_dir = [(*path_a, 0), (*path_b, 1)]                                           # separate open subpaths are adjacent items
+    assert adapter.rectangle_components(same_dir) == [] and adapter.rectangle_components(same_dir[::-1]) == []
+    opposite_adjacent = [(*path_a, 0), (134.0, 200.3, 100.0, 200.3, FILL, "pathB", 1)]
+    assert adapter.rectangle_components(opposite_adjacent) == []
+    two_apart_same_dir = [(*path_a, 0), (*path_b, 2)]                                 # right items, but the second runs the same way
+    assert adapter.rectangle_components(two_apart_same_dir) == []
+    assert adapter.rectangle_components(two_apart_same_dir[::-1]) == []
+    far_items = [(*path_a, 0), (134.0, 200.3, 100.0, 200.3, FILL, "pathB", 3)]
+    assert adapter.rectangle_components(far_items) == [] and adapter.rectangle_components([(*path_a, 0), (134.0, 200.3, 100.0, 200.3, FILL, "pathB", 4)]) == []
+
+
+def test_the_closed_strip_pattern_needs_opposite_directions_and_is_order_independent():
+    a = (100.0, 200.0, 134.0, 200.0, FILL, "a", 0)
+    opposite = (134.0, 200.3, 100.0, 200.3, FILL, "b", 2)
+    same_way = (100.0, 200.3, 134.0, 200.3, FILL, "b", 2)
+    for pair in ([a, opposite], [opposite, a]):
+        assert [r[:4] for r in adapter.rectangle_components(pair)] == [(100.0, 200.0, 134.0, 200.3)]
+    for pair in ([a, same_way], [same_way, a]):
+        assert adapter.rectangle_components(pair) == []
+    a_back, same_back = (134.0, 200.0, 100.0, 200.0, FILL, "a", 0), (100.0, 200.3, 134.0, 200.3, FILL, "b", 2)
+    assert [r[:4] for r in adapter.rectangle_components([a_back, same_back])] == [(100.0, 200.0, 134.0, 200.3)]       # the mirror pair is a strip too
+    assert adapter.rectangle_components([a_back, (134.0, 200.3, 100.0, 200.3, FILL, "b", 2)]) == []
+
+
+def test_a_side_drawn_twice_or_with_several_items_is_not_trusted_as_a_strip_side():
+    for a, b in (((100.0, 200.0, 134.0, 200.0), (134.0, 200.3, 100.0, 200.3)),          # either side may be the doubled one,
+                 ((134.0, 200.0, 100.0, 200.0), (100.0, 200.3, 134.0, 200.3))):         # and in either orientation (set order never decides)
+        first, second = (*a, ), (*b, )
+        base = [(*first, FILL, "a", 0), (*second, FILL, "b", 2)]
+        assert len(adapter.rectangle_components(base)) == 1
+        for side, again_item in ((0, 5), (1, 7)):
+            src = first if side == 0 else second
+            twice_other_item = base + [(*src, FILL, "again", again_item)]                           # same side from another item
+            twice_reversed = base + [(src[2], src[3], src[0], src[1], FILL, "back", (0, 2)[side])]  # same side drawn both ways
+            assert adapter.rectangle_components(twice_other_item) == []
+            assert adapter.rectangle_components(twice_reversed) == []
+            assert adapter.rectangle_components(twice_other_item[::-1]) == []
+
+
+def test_a_missing_item_on_either_side_never_makes_a_strip():
+    a = (100.0, 200.0, 134.0, 200.0, FILL, "a")
+    b = (134.0, 200.3, 100.0, 200.3, FILL, "b")
+    assert adapter.rectangle_components([a, (*b, 2)]) == [] and adapter.rectangle_components([(*a, 0), b]) == []
+    assert adapter.rectangle_components([a, b]) == []
+    assert adapter.rectangle_components([(*a, None), (*b, 2)]) == [] and adapter.rectangle_components([(*a, 0), (*b, None)]) == []
+
+
+def _open_pdf(lines, *, close: bool = False) -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=300)
+    shape = page.new_shape()
+    for start, end in lines:
+        shape.draw_line(start, end)
+    shape.finish(fill=FILL, color=None, closePath=close)
+    shape.commit()
+    return doc.tobytes()
+
+
+def test_through_the_real_producer_two_open_subpaths_make_no_strip_and_a_closed_one_does():
+    two = [((100.0, 200.0), (134.0, 200.0)), ((100.0, 200.3), (134.0, 200.3))]
+    for lines in (two, two[::-1], [two[0], ((134.0, 200.3), (100.0, 200.3))], [((134.0, 200.3), (100.0, 200.3)), two[0]]):
+        rects, _lines = _line_facts(_open_pdf(lines))
+        assert list(rects) == [], lines                                              # a filled open two-point subpath draws nothing
+    closed = [(100.0, 200.0), (134.0, 200.0), (134.0, 200.3), (100.0, 200.3)]
+    chain = _open_pdf([(closed[i], closed[i + 1]) for i in range(3)])                 # side, short side, side; the fill closes it
+    rects, _lines = _line_facts(chain)
+    assert [tuple(round(v, 2) for v in r[:4]) for r in rects] == [(100.0, 200.0, 134.0, 200.3)]
+
+
+@pytest.mark.xfail(strict=True, reason="residual: a tiny segment that is NOT the connecting side, placed as the item between two sides that otherwise "
+                                       "form a strip, is dropped by the producer and cannot be told apart (documented in rectangle_components)")
+def test_residual_a_tiny_unrelated_item_between_two_matching_sides_is_indistinguishable():
+    lines = [((100.0, 200.0), (134.0, 200.0)), ((140.0, 250.0), (140.0, 250.3)), ((134.0, 200.3), (100.0, 200.3))]
+    rects, _lines = _line_facts(_open_pdf(lines))
+    assert list(rects) == []

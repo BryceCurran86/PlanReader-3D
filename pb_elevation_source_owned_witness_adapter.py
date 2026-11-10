@@ -106,7 +106,7 @@ def read_source_owned_page(source, *, revision_id: str, page_id: str) -> Optiona
                 by_path.setdefault(fact.path_index, []).append(fact)
         for path_index in sorted(by_path):
             rects.extend(rectangle_components([
-                (*(float(v) for v in f.geometry), tuple(round(c, 2) for c in f.fill), f.observation_id)
+                (*(float(v) for v in f.geometry), tuple(round(c, 2) for c in f.fill), f.observation_id, int(f.item_index))
                 for f in by_path[path_index]]))
     words = []
     integrity = source.text_integrity_authority()
@@ -137,6 +137,23 @@ POINT_TOL = 0.01      # two edge ends are the same corner when they agree to thi
 SUB_FLOOR_PT = 0.5    # the producer drops native line edges shorter than this (pb_vector_geometry_v130), so a thinner strip loses its short sides
 
 
+def _is_one_closed_strip(e0: dict, e1: dict, along: int) -> bool:
+    """Do two lone parallel sides (same extent, less than the floor apart) come from ONE closed subpath whose short sides the producer dropped?
+
+    Geometry alone cannot say: two independent open strokes of one fill and extent a hair apart look identical, yet an open two-point
+    subpath fills nothing. The producer's own facts can: a closed strip is drawn side, short side, side, so its two long sides are
+    items ``k`` and ``k + 2`` of one drawing (the dropped short side between them) and run in OPPOSITE directions. With equal extents
+    opposite directions is the same fact as "the first's end meets the second's start across the gap". Sides with no item index,
+    several indices, both directions, adjacent or distant items, or the same direction are NOT read as a strip."""
+    if len(e0["items"]) != 1 or len(e1["items"]) != 1 or len(e0["dirs"]) != 1 or len(e1["dirs"]) != 1:
+        return False
+    i0, i1 = next(iter(e0["items"])), next(iter(e1["items"]))
+    if i0 is None or i1 is None or abs(i0 - i1) != 2:
+        return False
+    (start0, _end0), (_start1, end1) = next(iter(e0["dirs"])), next(iter(e1["dirs"]))
+    return start0[along] == end1[along]
+
+
 def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
     """The closed axis-aligned rectangles actually drawn by the edges of ONE filled path.
 
@@ -149,21 +166,29 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
 
     One exception follows from the producer, not from geometry: it drops native line edges shorter than ``SUB_FLOOR_PT``, so a filled
     strip thinner than that arrives as its two long sides only. Exactly two lone parallel sides of one fill with the same extent and
-    less than ``SUB_FLOOR_PT`` apart are read as that strip (a rectangle carrying those two observation ids). Three or more such
-    sides in one cluster are an ambiguous pairing and yield nothing; a lone side, sides of different extent or fill, and sides
-    ``SUB_FLOOR_PT`` or more apart (whose short sides the producer would have kept) are not rectangles.
+    less than ``SUB_FLOOR_PT`` apart, that ``_is_one_closed_strip`` shows to be one closed subpath (optional 7th element of an edge:
+    its item index in the drawing), are read as that strip (a rectangle carrying those two observation ids). Three or more such
+    sides in one cluster are an ambiguous pairing and yield nothing; a lone side, sides of different extent or fill, sides with no
+    item identity or from separate subpaths, and sides ``SUB_FLOOR_PT`` or more apart (whose short sides the producer would have
+    kept) are not rectangles. Residual: a tiny (< ``SUB_FLOOR_PT``) segment that is not their connecting side, placed exactly
+    between two sides that otherwise form a strip, cannot be told apart because the producer drops it.
     """
     def key(x, y):
         return (round(x / POINT_TOL), round(y / POINT_TOL))
 
     unique: dict[tuple, dict] = {}
-    for x0, y0, x1, y1, fill, oid in edges:
+    for edge in edges:
+        x0, y0, x1, y1, fill, oid = edge[:6]
+        item = edge[6] if len(edge) > 6 else None      # the edge's index within its drawing, when the caller knows it
         a, b = key(x0, y0), key(x1, y1)
         if a == b:
             continue                                   # a zero-length edge draws nothing
-        entry = unique.setdefault((min(a, b), max(a, b)), {"geom": (x0, y0, x1, y1), "fills": set(), "ids": set()})
+        entry = unique.setdefault((min(a, b), max(a, b)),
+                                  {"geom": (x0, y0, x1, y1), "fills": set(), "ids": set(), "items": set(), "dirs": set()})
         entry["fills"].add(fill)
         entry["ids"].add(oid)
+        entry["items"].add(item)
+        entry["dirs"].add((a, b))                      # oriented as drawn: needed to tell a closed strip from two open strokes
     items = list(unique.items())
     parent = list(range(len(items)))
 
@@ -243,6 +268,8 @@ def rectangle_components(edges: Sequence[tuple]) -> list[tuple]:
             (c0, e0), (c1, e1) = cluster
             fills = e0["fills"] | e1["fills"]
             if len(fills) != 1:
+                continue
+            if not _is_one_closed_strip(e0, e1, 0 if horizontal else 1):
                 continue
             gx = [v for e in (e0, e1) for v in (e["geom"][0], e["geom"][2])]
             gy = [v for e in (e0, e1) for v in (e["geom"][1], e["geom"][3])]

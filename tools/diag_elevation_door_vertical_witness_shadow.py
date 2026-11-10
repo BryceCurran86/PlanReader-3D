@@ -15,12 +15,13 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Optional, Sequence
 
 from pb_elevation_source_owned_witness_adapter import (  # noqa: F401
-    extract_views, kind_proposal_for_outline, plan_label_width, read_source_owned_page, rectangle_components,
+    SUB_FLOOR_PT, extract_views, kind_proposal_for_outline, plan_label_width, read_source_owned_page, rectangle_components,
     source_owned_views,
 )
 from pb_elevation_door_vertical_witness_shadow import (
@@ -34,7 +35,9 @@ def _drawn_edges(item) -> list[tuple]:
     """The straight edges one PyMuPDF drawing item paints: a line, or the four sides of a ``re`` / ``qu`` item (curves paint none)."""
     kind = item[0]
     if kind == "l":
-        return [(item[1].x, item[1].y, item[2].x, item[2].y)]
+        edge = (item[1].x, item[1].y, item[2].x, item[2].y)
+        # the producer drops line edges shorter than SUB_FLOOR_PT; reading the same facts keeps the two paths comparable
+        return [edge] if math.hypot(edge[2] - edge[0], edge[3] - edge[1]) >= SUB_FLOOR_PT else []
     if kind == "re":
         r = item[1]
         corners = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
@@ -57,13 +60,13 @@ def page_primitives(page) -> tuple[list, list, list]:
     lines, rects = [], []
     for d in page.get_drawings():
         fill = d.get("fill")
-        edges = [e for it in d["items"] for e in _drawn_edges(it)]
+        edges = [(*e, index) for index, it in enumerate(d["items"]) for e in _drawn_edges(it)]
         for it in d["items"]:
             if it[0] == "l":
                 lines.append((it[1].x, it[1].y, it[2].x, it[2].y))
         if fill is not None and edges:
             rounded = tuple(round(c, 2) for c in fill)
-            for x0, y0, x1, y1, f, _ids in rectangle_components([(*e, rounded, "") for e in edges]):
+            for x0, y0, x1, y1, f, _ids in rectangle_components([(*e[:4], rounded, "", e[4]) for e in edges]):
                 rects.append((x0, y0, x1, y1, f))
     words = [(w[0], w[1], w[2], w[3], w[4]) for w in page.get_text("words")]
     return lines, rects, words
