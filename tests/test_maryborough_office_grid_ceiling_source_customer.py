@@ -41,6 +41,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SourceCrossViewCeilingCorrespondenceRecord,
     authenticate_maryborough_office_rcp_ceiling_correspondence,
     compose_authenticated_cross_sheet_physical_claim,
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
 )
 from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
 from pb_live_ceiling_lining_source_closed_export import (
@@ -239,10 +240,21 @@ def test_missing_dimension_witnesses_abstains(maryborough_pdf_path, monkeypatch)
     orig_get_text = fitz.Page.get_text
 
     def mock_get_text(page_self, *args, **kwargs):
-        text = orig_get_text(page_self, *args, **kwargs)
-        if page_self.number == 10 and isinstance(text, str):
-            return text.replace("3570", "0000")
-        return text
+        res = orig_get_text(page_self, *args, **kwargs)
+        if page_self.number == 10:
+            if isinstance(res, str):
+                return res.replace("3570", "0000")
+            elif isinstance(res, list):
+                out = []
+                for w in res:
+                    if len(w) >= 5 and "3570" in str(w[4]):
+                        w = list(w)
+                        w[4] = str(w[4]).replace("3570", "0000")
+                        out.append(tuple(w))
+                    else:
+                        out.append(w)
+                return out
+        return res
 
     monkeypatch.setattr(fitz.Page, "get_text", mock_get_text)
     result = ceiling_authority.issue_original_maryborough_ceiling_customer_quantities(
@@ -309,7 +321,8 @@ def test_missing_finished_wall_face_abstains_in_claim():
     from types import SimpleNamespace
 
     corr = SourceCrossViewCeilingCorrespondenceRecord(
-        record_id="rec_1",
+        record_id="rec_wall_test_1",
+        snapshot_id="snap_wall_test_1",
         canonical_ceiling_id="c_1",
         physical_room_id="r_1",
         canonical_room_id="r_1",
@@ -332,6 +345,7 @@ def test_missing_finished_wall_face_abstains_in_claim():
         commercial_projection_allowed=True,
         takeoff_eligible=True,
     )
+    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(corr.snapshot_id, corr.record_id)] = corr
     # Wall with generic role instead of internal_finished_wall_face
     bad_wall = SimpleNamespace(
         role="generic_partition",
