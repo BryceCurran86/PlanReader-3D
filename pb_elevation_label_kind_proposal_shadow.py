@@ -225,9 +225,9 @@ def _network_reaches(block: LabelBlock, strokes: Sequence[StrokeSegment], target
     while frontier:
         i = frontier.pop()
         seg = usable[i]
+        if _segment_enters(seg, target):
+            return True                         # ANY point of the segment, not only its ends
         for point in ((seg.x0, seg.y0), (seg.x1, seg.y1)):
-            if _inside(point, target):
-                return True
             for j, other in enumerate(usable):
                 if j not in seen and (_same((other.x0, other.y0), point) or _same((other.x1, other.y1), point)):
                     seen.add(j)
@@ -235,6 +235,25 @@ def _network_reaches(block: LabelBlock, strokes: Sequence[StrokeSegment], target
         if len(seen) > COMPONENT_CAP:
             return True
     return False
+
+
+def _segment_enters(seg: StrokeSegment, o: OutlineBox) -> bool:
+    """Does any point of the segment lie strictly inside ``o`` (shrunk by ``INSIDE_MARGIN_PT``, as ``_inside`` is)?
+
+    Clips the segment (parameter 0..1) against the open interior: an end inside counts, a crossing with both ends outside counts,
+    and touching or running along the margin boundary, or meeting only a corner point, does not."""
+    lo, hi = 0.0, 1.0
+    for p, d, a, b in ((seg.x0, seg.x1 - seg.x0, o.x0 + INSIDE_MARGIN_PT, o.x1 - INSIDE_MARGIN_PT),
+                       (seg.y0, seg.y1 - seg.y0, o.y0 + INSIDE_MARGIN_PT, o.y1 - INSIDE_MARGIN_PT)):
+        if not a < b:
+            return False                        # no interior left after the margin
+        if d == 0.0:
+            if not a < p < b:
+                return False
+            continue
+        t0, t1 = sorted(((a - p) / d, (b - p) / d))
+        lo, hi = max(lo, t0), min(hi, t1)
+    return lo < hi
 
 
 def _inside(point, o: OutlineBox) -> bool:

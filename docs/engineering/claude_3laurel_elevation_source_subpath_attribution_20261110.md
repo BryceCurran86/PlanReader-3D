@@ -37,6 +37,10 @@ Compound-path (two rectangles never span their gap), L-shaped and open outlines 
 
 `tests/test_elevation_source_owned_rectangle_components_v1.py` (strip rule: pure cases and the real producer's 0.5 pt floor pinned), `tests/test_elevation_diagnostic_rectangle_parity_v1.py` (the two paths agree on synthetic pages; native `re` fills are a strict expected failure), the original-source test updated from the proof above. 22/22 single-line mutants of the strip block are caught.
 
+## Second #4264 review finding: overflowing leader networks (comment 6760871581)
+
+`_network_reaches` (the veto for a label whose routes overflow) tested only segment endpoints against the witnessed outline although its contract is "any point of the connected network". A stroke that crosses the witnessed interior with both ends outside therefore dropped the `LEADER_BRANCHES` veto, and a separate clean DOOR leader could yield CANDIDATE (reproduced with the reviewer's counterexample, both block orders). The check is now a segment-versus-open-interior clip (`_segment_enters`: the same margin as `_inside`, strict at the boundary, an end inside or a crossing counts, touching the margin boundary or only a corner point does not). Unconnected strokes and strokes that only graze remain harmless. 31 of 32 single-line mutants of the helper and its call are caught; the survivor (`a <= b` for `a < b` in the no-interior guard) is equivalent because a zero-width interior leaves an empty parameter interval.
+
 ## Not done / separate gaps
 
 - The source-owned adapter reads native `line` facts only; a filled `re` operator arrives as `rect_edge` facts it ignores (none of the 3Laurel elevation pages uses them). Recorded as a strict expected failure, not changed here.

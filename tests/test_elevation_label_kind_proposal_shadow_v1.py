@@ -485,3 +485,127 @@ def test_module_is_isolated_from_authority_modules():
     importers = {p.name for p in root.glob("pb_*.py") if p.name != pathlib.Path(kp.__file__).name
                  and "pb_elevation_label_kind_proposal_shadow" in p.read_text(encoding="utf-8", errors="ignore")}
     assert importers <= {"pb_elevation_source_owned_witness_adapter.py"}, importers      # nothing in production reads it
+
+
+# ------------------------------------------------------------------------------------------------ overflowing network: ANY point inside (review of #4264, comment 6760871581)
+W_BOX = OutlineBox("W", 10.0, 10.0, 20.0, 20.0, ("rcpt-W",))
+CLEAN_DOOR = LabelBlock("DOOR", "DOOR", (11.0, 24.0, 19.0, 26.0), ("rcpt-door",), "corroborated")
+CLEAN_DOOR_LEADER = StrokeSegment(15.0, 24.0, 15.0, 18.0, "rcpt-door-stroke")                  # clean: its tip is inside W
+CROSSING_LABEL = LabelBlock("WINDOW", "WINDOW", (-12.0, 14.0, -2.0, 16.0), ("rcpt-window",), "corroborated")
+CROSSING_STROKE = StrokeSegment(0.0, 15.0, 30.0, 15.0, "rcpt-crossing")                        # crosses W's interior, both ends outside
+CROSSING_FAN = [StrokeSegment(30.0, 15.0, 30.0 + 2.0 * (i + 1), 15.0) for i in range(kp.MAX_ROUTES + 2)]       # makes the label overflow
+
+
+def crossing(blocks, strokes, outlines=(W_BOX,)):
+    return propose_kind_from_leader("rec", "W", list(outlines), list(blocks), list(strokes))
+
+
+def test_the_clean_door_leader_alone_is_a_candidate_and_the_crossing_label_alone_vetoes():
+    assert crossing([CLEAN_DOOR], [CLEAN_DOOR_LEADER]).status is CAND
+    r = crossing([CROSSING_LABEL], [CROSSING_STROKE, *CROSSING_FAN])
+    assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,)                      # its network crosses the witnessed interior
+
+
+def test_an_overflowing_network_that_crosses_the_interior_with_both_ends_outside_vetoes_in_every_order():
+    blocks, strokes = [CLEAN_DOOR, CROSSING_LABEL], [CLEAN_DOOR_LEADER, CROSSING_STROKE, *CROSSING_FAN]
+    for bs, ss in ((blocks, strokes), (blocks[::-1], strokes), (blocks, strokes[::-1]), (blocks[::-1], strokes[::-1])):
+        r = crossing(bs, ss)
+        assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,) and r.kind is None and r.source_observation_ids == ()
+    rng = random.Random(11)
+    for _ in range(20):
+        bs, ss = blocks[:], strokes[:]
+        rng.shuffle(bs), rng.shuffle(ss)
+        assert crossing(bs, ss).reason_codes == (kp.LEADER_BRANCHES,)
+
+
+def test_a_vertical_crossing_and_a_crossing_found_through_a_chain_of_contacts_also_veto():
+    label = LabelBlock("WINDOW", "WINDOW", (14.0, -12.0, 16.0, -2.0), ("rcpt-window",), "corroborated")
+    vertical = StrokeSegment(15.0, 0.0, 15.0, 30.0, "rcpt-v")                                  # top to bottom through W's interior
+    fan = [StrokeSegment(15.0, 30.0, 15.0 + 2.0 * (i + 1), 30.0) for i in range(kp.MAX_ROUTES + 2)]
+    r = crossing([CLEAN_DOOR, label], [CLEAN_DOOR_LEADER, vertical, *fan])
+    assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,)
+    # the crossing stroke is reachable ONLY through exact end-to-end contacts: the label is 30 pt away from it
+    far_label = LabelBlock("WINDOW", "WINDOW", (-40.0, 14.0, -30.0, 16.0), ("rcpt-window",), "corroborated")
+    hops = [StrokeSegment(-30.0, 15.0, -20.0, 15.0, "h1"), StrokeSegment(-20.0, 15.0, -10.0, 15.0, "h2"),
+            StrokeSegment(-10.0, 15.0, 0.0, 15.0, "h3")]
+    r2 = crossing([CLEAN_DOOR, far_label], [CLEAN_DOOR_LEADER, *hops, CROSSING_STROKE, *CROSSING_FAN])
+    assert r2.status is ABST and r2.reason_codes == (kp.LEADER_BRANCHES,)
+    broken = [hops[0], hops[1], StrokeSegment(-10.0, 15.0, -0.5, 15.0, "h3-short")]            # a 0.5 pt gap: no contact, no network
+    r3 = crossing([CLEAN_DOOR, far_label], [CLEAN_DOOR_LEADER, *broken, CROSSING_STROKE, *CROSSING_FAN])
+    assert r3.status is CAND and r3.kind == "door"
+
+
+def test_a_crossing_stroke_that_is_not_connected_to_the_overflowing_label_is_harmless():
+    far_label = LabelBlock("FAR", "WINDOW", (300.0, 300.0, 305.0, 302.0), ("rcpt-far",), "corroborated")
+    far_fan = [StrokeSegment(305.0, 301.0, 305.0 + 2.0 * (i + 1), 301.0) for i in range(kp.MAX_ROUTES + 2)]
+    r = crossing([CLEAN_DOOR, far_label], [CLEAN_DOOR_LEADER, CROSSING_STROKE, *far_fan])        # the crossing stroke belongs to no label
+    assert r.status is CAND and r.kind == "door"
+
+
+def test_a_network_that_only_grazes_or_misses_the_interior_is_harmless():
+    for y in (10.0, 10.1, 20.0, 9.0, 21.0):                      # on the boundary, inside the 0.2 pt margin, or outside
+        graze = StrokeSegment(0.0, y, 30.0, y, "rcpt-graze")
+        label = LabelBlock("WINDOW", "WINDOW", (-12.0, y - 1.0, -2.0, y + 1.0), ("rcpt-window",), "corroborated")
+        fan = [StrokeSegment(30.0, y, 30.0 + 2.0 * (i + 1), y) for i in range(kp.MAX_ROUTES + 2)]
+        r = crossing([CLEAN_DOOR, label], [CLEAN_DOOR_LEADER, graze, *fan])
+        assert r.status is CAND and r.kind == "door", y
+    # touching only at a corner point, then leaving
+    corner = StrokeSegment(0.0, 10.0, 10.0, 10.0, "rcpt-corner")
+    label = LabelBlock("WINDOW", "WINDOW", (-12.0, 9.0, -2.0, 11.0), ("rcpt-window",), "corroborated")
+    fan = [StrokeSegment(10.0, 10.0, 10.0, 10.0 - 2.0 * (i + 1), "rcpt-cfan") for i in range(kp.MAX_ROUTES + 2)]
+    assert crossing([CLEAN_DOOR, label], [CLEAN_DOOR_LEADER, corner, *fan]).status is CAND
+
+
+def test_a_segment_ending_inside_still_vetoes_as_before_and_a_slightly_slanted_crossing_is_not_missed():
+    ends_inside = StrokeSegment(0.0, 15.0, 15.0, 15.0, "rcpt-in")
+    inner_fan = [StrokeSegment(15.0, 15.0, 15.0, 15.0 + 0.4 * (i + 1)) for i in range(kp.MAX_ROUTES + 2)]
+    r = crossing([CLEAN_DOOR, CROSSING_LABEL], [CLEAN_DOOR_LEADER, ends_inside, *inner_fan])
+    assert r.status is ABST and r.reason_codes == (kp.LEADER_BRANCHES,)
+    slanted = StrokeSegment(0.0, 14.99, 30.0, 15.01, "rcpt-slant")                              # within the axis tolerance, y drifts 0.02 pt
+    slanted_fan = [StrokeSegment(30.0, 15.01, 30.0 + 2.0 * (i + 1), 15.01) for i in range(kp.MAX_ROUTES + 2)]
+    r2 = crossing([CLEAN_DOOR, CROSSING_LABEL], [CLEAN_DOOR_LEADER, slanted, *slanted_fan])
+    assert r2.status is ABST and r2.reason_codes == (kp.LEADER_BRANCHES,)
+
+
+@pytest.mark.parametrize("seg, expected", [
+    ((0.0, 15.0, 30.0, 15.0), True),            # horizontal crossing, both ends outside
+    ((15.0, 0.0, 15.0, 30.0), True),            # vertical crossing
+    ((0.0, 15.0, 15.0, 15.0), True),            # one end inside
+    ((12.0, 12.0, 18.0, 18.0), True),           # wholly inside
+    ((0.0, 0.0, 30.0, 30.0), True),             # diagonal through the interior
+    ((0.0, 15.0, 9.0, 15.0), False),            # stops short
+    ((21.0, 15.0, 30.0, 15.0), False),          # starts beyond
+    ((0.0, 9.0, 30.0, 9.0), False),             # passes outside
+    ((0.0, 10.2, 30.0, 10.2), False),           # runs exactly along the margin boundary
+    ((0.0, 10.3, 30.0, 10.3), True),            # just inside the margin
+    ((0.0, 19.8, 30.0, 19.8), False),
+    ((0.0, 19.7, 30.0, 19.7), True),
+    ((0.0, 15.0, 10.2, 15.0), False),           # ends exactly on the boundary: touches, does not enter
+    ((10.2, 15.0, 15.0, 15.0), True),           # starts on the boundary and goes in
+    ((0.0, 10.2, 10.2, 10.2), False),
+    ((10.2, 0.0, 10.2, 30.0), False),           # along the left margin boundary
+    ((0.0, 0.0, 10.2, 10.2), False),            # reaches only the corner point of the interior
+    ((0.0, 15.0, 15.0, 30.0), False),           # a diagonal that passes the box by missing its corner
+    ((0.0, 5.0, 15.0, 0.0), False),
+    ((25.0, 15.0, 10.0, 30.0), False),
+    ((15.0, 15.0, 15.0, 15.0), True),           # a point inside
+    ((5.0, 5.0, 5.0, 5.0), False),              # a point outside
+])
+def test_segment_enters_is_strict_about_the_open_interior(seg, expected):
+    assert kp._segment_enters(StrokeSegment(*seg), W_BOX) is expected
+    assert kp._segment_enters(StrokeSegment(seg[2], seg[3], seg[0], seg[1]), W_BOX) is expected         # direction does not matter
+
+
+def test_a_box_thinner_than_twice_the_margin_has_no_interior():
+    thin = OutlineBox("thin", 10.0, 10.0, 10.3, 20.0)
+    assert kp._segment_enters(StrokeSegment(0.0, 15.0, 30.0, 15.0), thin) is False
+    flat = OutlineBox("flat", 10.0, 10.0, 20.0, 10.3)
+    assert kp._segment_enters(StrokeSegment(15.0, 0.0, 15.0, 30.0), flat) is False
+
+
+def test_a_diagonal_that_touches_only_a_corner_point_of_the_interior_does_not_enter(monkeypatch):
+    monkeypatch.setattr(kp, "INSIDE_MARGIN_PT", 0.25)                       # binary-exact margin so the touching point is exact
+    box = OutlineBox("exact", 10.0, 10.0, 20.0, 20.0)
+    touching = StrokeSegment(5.25, 14.75, 15.25, 24.75)                      # passes (10.25, 19.75), the interior's corner, then leaves
+    assert kp._segment_enters(touching, box) is False
+    assert kp._segment_enters(StrokeSegment(5.25, 14.75, 15.25, 24.0), box) is True          # a hair lower it does cut the interior
