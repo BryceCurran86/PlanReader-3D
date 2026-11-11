@@ -166,3 +166,40 @@ FT codes, bind independent elevation/RCP height/zone ownership, and authenticate
 door/frame instances where no D-numbered schedule exists. Do not turn reviewer
 flags into autonomous positive evidence or count a missing measurement as a
 successful takeoff.
+
+## Temporary solid walls across door/window openings (11 Nov 2026)
+
+To find **room boundaries first**, use the source-backed **topology-only** wall
+completion pass. It temporarily paints each **authenticated** swing doorway,
+source-drawn glazed/window gap or sliding-leaf gap as a continuous wall-band
+footprint, then traces interior room polygons from the wall layer. It NEVER
+alters the original PDF, creates a physical wall, deducts a door, or issues an
+area. All opening source geometry remains available for the later
+wall/door/frame measurement stages.
+
+```powershell
+python -m planreader_next boundaries --pdf "<3Laurel original PDF>" --page 2 --output boundaries-preview.json
+python -m planreader_next suggest --pdf "<3Laurel original PDF>" --page 2 --project-id au_qld_3laurel --revision-id Rev3 --output proposed-rooms.json
+# --skip-sliding excludes sliding-leaf evidence in boundaries; suggest uses
+# the full supported topology unless --skip-opening-closures is requested.
+```
+
+`boundaries` writes `virtual_wall_fills` and `regions` (each source-owned
+polygon and per-edge wall/door closure owner IDs, original PDF point
+coordinates, nearby native room/finish words). `suggest` includes the
+same as `enclosure_preview` alongside existing independently source-figured
+rectangle candidates. A `single_room_shape_hint` is deliberately **not**
+a confirmed room ID, finish, internal finished face, metric area or trade row.
+Multi-room enclosures stay aggregated; uncovered gaps remain ABSTAIN.
+
+Original frozen-SHA 3Laurel page 3 (PDF index 2), this code:
+- 38 temporary fills (6 swing, 4 sliding, 28 source-stroke),
+- 8 candidate enclosed regions, **three BED/VINYL shape hints**,
+- 2 unresolved regions and 12 remaining source wall gaps,
+- **zero eligible measured/issued quantities**, no official score change.
+
+The source's real boundaries may still need room-specific internal-finished-face
+and numbered label review before any metric finish takeoff. Do not make
+unverified wall-to-wall connections or treat a preview as a signed wall/ceiling
+or doorway measurement. The original 20,000-primitive and 2.5-pt production
+controls and the frozen V2 denominator are not changed.

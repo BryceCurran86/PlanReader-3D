@@ -32,6 +32,14 @@ def main() -> int:
     suggest.add_argument("--project-id", required=True)
     suggest.add_argument("--revision-id", required=True)
     suggest.add_argument("--output", type=Path, required=True)
+    suggest.add_argument("--skip-opening-closures", action="store_true",
+                         help="Skip topology-only virtual wall closure preview")
+    boundaries = sub.add_parser("boundaries", help="Temporarily close verified openings to suggest room polygons")
+    boundaries.add_argument("--pdf", type=Path, required=True)
+    boundaries.add_argument("--page", type=int, default=0)
+    boundaries.add_argument("--output", type=Path, required=True)
+    boundaries.add_argument("--skip-sliding", action="store_true",
+                            help="Do not include source-attested sliding-leaf closures")
     measure = sub.add_parser("measure", help="Compute source-backed room draft")
     measure.add_argument("--pdf", type=Path, required=True)
     measure.add_argument("--selection", type=Path, required=True)
@@ -45,9 +53,19 @@ def main() -> int:
         if args.mode == "inspect":
             result = inspect_page(load_native_page(args.pdf, args.page), include_segments=args.include_segments)
         elif args.mode == "suggest":
-            result = suggest_room_bindings(load_native_page(args.pdf, args.page))
+            page = load_native_page(args.pdf, args.page)
+            result = suggest_room_bindings(page)
+            if not args.skip_opening_closures:
+                from .enclosure import propose_room_enclosures
+                result["enclosure_preview"] = propose_room_enclosures(page, args.pdf)
             result["project_id"] = args.project_id
             result["revision_id"] = args.revision_id
+        elif args.mode == "boundaries":
+            from .enclosure import propose_room_enclosures
+            page = load_native_page(args.pdf, args.page)
+            result = propose_room_enclosures(
+                page, args.pdf, include_sliding=not args.skip_sliding,
+            )
         elif args.mode == "takeoff":
             from .building import measure_building_components
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
@@ -79,7 +97,22 @@ def main() -> int:
                 print(json.dumps({
                     "proposals": len(result["rooms"]),
                     "abstentions": len(result["abstentions"]),
+                    "candidate_enclosed_regions": result.get("enclosure_preview", {}).get(
+                        "candidate_enclosed_regions", 0
+                    ),
+                    "virtual_wall_fills": result.get("enclosure_preview", {}).get(
+                        "virtual_fill_count", 0
+                    ),
                     "review_required": True,
+                }, sort_keys=True))
+            elif args.mode == "boundaries":
+                print(json.dumps({
+                    "candidate_enclosed_regions": result["candidate_enclosed_regions"],
+                    "single_room_shape_hints": result["single_room_shape_hints"],
+                    "unresolved_regions": result["unresolved_regions"],
+                    "virtual_wall_fills": result["virtual_fill_count"],
+                    "review_required": True,
+                    "commercial_publishable": False,
                 }, sort_keys=True))
             else:
                 print(json.dumps({
