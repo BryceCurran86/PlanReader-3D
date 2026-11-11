@@ -66,6 +66,7 @@ REASON_SOURCE_HASH = "source_sha256_mismatch"
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
+KIND_CAVITY_SLIDER = "cavity_slider_cs_closure"
 KIND_PANEL_LIFT = "panel_lift_door_topology_closure"
 
 _RECORD_SEAL = object()
@@ -749,6 +750,332 @@ def _panel_lift_word_evidence(
     return tuple(w[3] for w in label) + (figure_ref,)
 
 
+def _is_cs_token(text: str) -> bool:
+    token = str(text or "").strip().upper().replace(".", "")
+    return token in {"CS", "CSL"}
+
+
+def _paired_cavity_leaves(
+    drawings: Sequence[Mapping[str, Any]], gap: _Gap,
+) -> Optional[tuple[int, ...]]:
+    """Exactly two overlapping unfilled leaf strokes in a collinear wall interruption.
+
+    These strokes are the cavity-slider leaves, never physical walls. Missing,
+    extra, non-overlapping or perpendicular strokes abstain.
+    """
+    if not gap.collinear:
+        return None
+    thickness = gap.band[1] - gap.band[0]
+    reach = max(thickness * 4.0, 16.0)
+    span = max(gap.hi - gap.lo, NOISE_PT)
+    horizontal = gap.horizontal
+    leaves: list[tuple[float, float, float, int]] = []
+    for index, row in _wall_rows(drawings):
+        if row.get("fill") is not None:
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if horizontal:
+                if not _close(ay, by, 1e-3):
+                    continue
+                perp = ay
+                lo, hi = sorted((ax, bx))
+            else:
+                if not _close(ax, bx, 1e-3):
+                    continue
+                perp = ax
+                lo, hi = sorted((ay, by))
+            if not (gap.band[0] - reach <= perp <= gap.band[1] + reach):
+                continue
+            lo, hi = max(lo, gap.lo), min(hi, gap.hi)
+            if (hi - lo) / span >= 0.70:
+                leaves.append((lo, hi, perp, index))
+    unique: list[tuple[float, float, float, int]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for item in leaves:
+        key = (item[3], round(item[0], 2), round(item[1], 2), round(item[2], 2))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    if len(unique) != 2:
+        return None
+    unique.sort()
+    first, second = unique
+    if first[3] == second[3]:
+        return None
+    if not (second[0] < first[1] - NOISE_PT):
+        return None
+    return tuple(sorted({first[3], second[3]}))
+
+
+def _axis_aligned_wall_strokes(
+    drawings: Sequence[Mapping[str, Any]],
+) -> list[tuple[bool, float, float, float, int]]:
+    """Unfilled axis-aligned wall-layer strokes: (horizontal, perp, lo, hi, path_index)."""
+    strokes: list[tuple[bool, float, float, float, int]] = []
+    for index, row in _wall_rows(drawings):
+        if row.get("fill") is not None:
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if _close(ay, by, 1e-3) and not _close(ax, bx, 1e-3):
+                lo, hi = sorted((ax, bx))
+                if hi - lo >= 8.0:
+                    strokes.append((True, ay, lo, hi, index))
+            elif _close(ax, bx, 1e-3) and not _close(ay, by, 1e-3):
+                lo, hi = sorted((ay, by))
+                if hi - lo >= 8.0:
+                    strokes.append((False, ax, lo, hi, index))
+    return strokes
+
+
+def _exactly_two_overlapping_paths(
+    items: Sequence[tuple[float, float, float, int]],
+) -> Optional[tuple[int, ...]]:
+    unique: list[tuple[float, float, float, int]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for item in items:
+        key = (item[3], round(item[0], 2), round(item[1], 2), round(item[2], 2))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    if len(unique) != 2 or unique[0][3] == unique[1][3]:
+        return None
+    first, second = sorted(unique)
+    if not (second[0] < first[1] - NOISE_PT):
+        return None
+    return tuple(sorted({first[3], second[3]}))
+
+
+def _pocket_cavity_leaves(
+    drawings: Sequence[Mapping[str, Any]], gap: _Gap,
+) -> Optional[tuple[int, ...]]:
+    """Exactly two overlapping leaf/face strokes in the collinear pocket beside a gap.
+
+    Cavity sliders often draw the door inside the adjacent wall run, not across
+    the walk-through. Wall-face strokes of that pocket are not physical walls of
+    a second room. Extra unmatched strokes on a side abstain.
+    """
+    if not gap.collinear:
+        return None
+    thickness = gap.band[1] - gap.band[0]
+    span = max(gap.hi - gap.lo, NOISE_PT)
+    low_side: list[tuple[float, float, float, int]] = []
+    high_side: list[tuple[float, float, float, int]] = []
+    for horizontal, perp, lo, hi, index in _axis_aligned_wall_strokes(drawings):
+        if horizontal != gap.horizontal:
+            continue
+        if not (gap.band[0] - thickness <= perp <= gap.band[1] + thickness):
+            continue
+        length = hi - lo
+        if length < 0.80 * span or length > 1.50 * span:
+            continue
+        if hi <= gap.lo + NOISE_PT and gap.lo - hi <= 16.0:
+            low_side.append((lo, hi, perp, index))
+        elif lo >= gap.hi - NOISE_PT and lo - gap.hi <= 16.0:
+            high_side.append((lo, hi, perp, index))
+    pairs: list[tuple[int, ...]] = []
+    for side in (low_side, high_side):
+        if not side:
+            continue
+        pair = _exactly_two_overlapping_paths(side)
+        if pair is None:
+            return None
+        pairs.append(pair)
+    if not pairs:
+        return None
+    return tuple(sorted({index for pair in pairs for index in pair}))
+
+
+def _cs_face_interruption_gaps(
+    drawings: Sequence[Mapping[str, Any]],
+    known: Sequence[_Gap],
+    source_words: Sequence[Mapping[str, Any]],
+) -> list[_Gap]:
+    """Collinear CS openings recovered from paired wall-face interruptions.
+
+    A filled-strip gap finder misses cavity sliders whose jambs are chamfered or
+    whose faces are stroked without a strip-bounded interruption. Unique CS plus
+    two parallel wall faces that share one interruption still close topology only.
+    Two CS marks in one interruption abstain.
+    """
+    grouped: dict[tuple[bool, int], list[tuple[float, float, int]]] = {}
+    for horizontal, perp, lo, hi, index in _axis_aligned_wall_strokes(drawings):
+        grouped.setdefault((horizontal, round(perp / 0.02)), []).append((lo, hi, index))
+    interruptions: list[tuple[bool, float, float, float]] = []
+    for (horizontal, key), segs in grouped.items():
+        segs = sorted(segs)
+        merged: list[tuple[float, float]] = []
+        for lo, hi, _index in segs:
+            if merged and lo <= merged[-1][1] + 0.5:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+            else:
+                merged.append((lo, hi))
+        perp = key * 0.02
+        for left, right in zip(merged, merged[1:]):
+            glo, ghi = left[1], right[0]
+            if 10.0 < ghi - glo < 140.0:
+                interruptions.append((horizontal, perp, glo, ghi))
+    clustered: dict[tuple[bool, int, int], list[tuple[float, float, float]]] = {}
+    for horizontal, perp, lo, hi in interruptions:
+        clustered.setdefault((horizontal, round(lo * 2.0), round(hi * 2.0)), []).append((perp, lo, hi))
+    found: list[_Gap] = []
+    for (horizontal, _lo_key, _hi_key), items in clustered.items():
+        perps = sorted({round(item[0], 2) for item in items})
+        if len(perps) < 2:
+            continue
+        bands: list[list[float]] = [[perps[0]]]
+        for perp in perps[1:]:
+            if perp - bands[-1][-1] <= 8.0:
+                bands[-1].append(perp)
+            else:
+                bands.append([perp])
+        if len(bands) != 1 or not (2 <= len(bands[0]) <= 6):
+            continue
+        band_perps = bands[0]
+        band = (band_perps[0], band_perps[-1])
+        if not (1.0 <= band[1] - band[0] <= 8.0):
+            continue
+        gap_lo = max(item[1] for item in items)
+        gap_hi = min(item[2] for item in items)
+        if gap_hi - gap_lo < 10.0:
+            continue
+        gap = _Gap(horizontal, band, gap_lo, gap_hi, (), (), True)
+        if any(
+            known_gap.horizontal == horizontal
+            and _close(known_gap.band[0], band[0], 0.05)
+            and _close(known_gap.band[1], band[1], 0.05)
+            and _close(known_gap.lo, gap_lo, 0.5)
+            and _close(known_gap.hi, gap_hi, 0.5)
+            for known_gap in known
+        ):
+            continue
+        if _cavity_slider_word_evidence(gap, source_words) is None:
+            continue
+        found.append(gap)
+    return found
+
+
+def _prefer_prior_cs_gaps(
+    cavity_by_gap: Mapping[int, tuple[tuple[int, ...], tuple[str, ...]]],
+    prior_gap_count: int,
+) -> dict[int, tuple[tuple[int, ...], tuple[str, ...]]]:
+    """A strip/frame CS opening wins over a reconstructed face interruption of the same mark."""
+    by_words: dict[tuple[str, ...], list[int]] = {}
+    for gap_index, evidence in cavity_by_gap.items():
+        by_words.setdefault(evidence[1], []).append(gap_index)
+    drop: set[int] = set()
+    for members in by_words.values():
+        prior = [index for index in members if index < prior_gap_count]
+        later = [index for index in members if index >= prior_gap_count]
+        if prior:
+            drop.update(later)
+            continue
+        with_leaves = [index for index in members if cavity_by_gap[index][0]]
+        if with_leaves:
+            drop.update(index for index in members if not cavity_by_gap[index][0])
+    return {
+        gap_index: evidence
+        for gap_index, evidence in cavity_by_gap.items()
+        if gap_index not in drop
+    }
+
+
+def _keep_thickest_split_band_cs(
+    gaps: Sequence[_Gap],
+    cavity_by_gap: Mapping[int, tuple[tuple[int, ...], tuple[str, ...]]],
+) -> dict[int, tuple[tuple[int, ...], tuple[str, ...]]]:
+    """One CS opening drawn as two lining slivers is one interruption, not a conflict."""
+    by_words: dict[tuple[str, ...], list[int]] = {}
+    for gap_index, evidence in cavity_by_gap.items():
+        by_words.setdefault(evidence[1], []).append(gap_index)
+    drop: set[int] = set()
+    for members in by_words.values():
+        groups: dict[tuple[bool, int, int], list[int]] = {}
+        for gap_index in members:
+            gap = gaps[gap_index]
+            key = (gap.horizontal, round(gap.lo), round(gap.hi))
+            groups.setdefault(key, []).append(gap_index)
+        for clustered in groups.values():
+            if len(clustered) < 2:
+                continue
+            clustered.sort(key=lambda index: gaps[index].band[1] - gaps[index].band[0], reverse=True)
+            drop.update(clustered[1:])
+    return {
+        gap_index: evidence
+        for gap_index, evidence in cavity_by_gap.items()
+        if gap_index not in drop
+    }
+
+
+def _cavity_slider_word_evidence(
+    gap: _Gap, source_words: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...] | None:
+    """A unique CS mark beside one collinear wall interruption, with an optional unique width.
+
+    Paired leaf lines are required separately. A CS mark alone, or a double-line
+    gap without CS, does not close the opening.
+    """
+    if not gap.collinear or gap.hi - gap.lo < 10.0 or gap.hi - gap.lo > 140.0:
+        return None
+    horizontal = gap.horizontal
+    centre = (gap.band[0] + gap.band[1]) / 2.0
+    marks: list[tuple[float, float, float, str]] = []
+    widths: list[tuple[float, float, float, str, int]] = []
+    for word in source_words:
+        if not isinstance(word, Mapping):
+            continue
+        text = str(word.get("text", "")).strip()
+        bounds = word.get("bbox_pdf_pts")
+        ref = str(word.get("source_ref", ""))
+        if not ref or not isinstance(bounds, (tuple, list)) or len(bounds) != 4:
+            continue
+        try:
+            x0, y0, x1, y1 = (float(v) for v in bounds)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not all(math.isfinite(v) for v in (x0, y0, x1, y1)) or x1 < x0 or y1 < y0:
+            continue
+        along0, along1 = (x0, x1) if horizontal else (y0, y1)
+        cross = ((y0 + y1) / 2.0) if horizontal else ((x0 + x1) / 2.0)
+        along_mid = (along0 + along1) / 2.0
+        if along_mid < gap.lo - 22.0 or along_mid > gap.hi + 22.0:
+            continue
+        if abs(cross - centre) > 36.0:
+            continue
+        if _is_cs_token(text):
+            marks.append((along0, along1, cross, ref))
+            continue
+        digits = text.replace(",", "")
+        if digits.isdecimal() and 600 <= int(digits) <= 2400:
+            widths.append((along0, along1, cross, ref, int(digits)))
+    if len(marks) != 1:
+        return None
+    mark = marks[0]
+    mark_along = (mark[0] + mark[1]) / 2.0
+    nearby_widths = [
+        item for item in widths
+        if abs((item[0] + item[1]) / 2.0 - mark_along) <= 8.0
+        and min(
+            abs(item[1] - mark[0]),
+            abs(item[0] - mark[1]),
+            abs(item[2] - mark[2]),
+        ) <= 36.0
+    ]
+    if len(nearby_widths) > 1:
+        return None
+    refs = [mark[3]]
+    if len(nearby_widths) == 1:
+        refs.append(nearby_widths[0][3])
+    return tuple(refs)
+
+
 def _closed_union(polygons: Iterable[Polygon]) -> Any:
     merged = unary_union([p.buffer(_CLOSING_PT, join_style=2) for p in polygons])
     return merged.buffer(-_CLOSING_PT, join_style=2)
@@ -836,8 +1163,11 @@ def build_layered_wall_doorway_room_rings(
     union = _closed_union(polygons)
     domain = union.envelope.buffer(1.0, join_style=2)
     gaps = _gaps(strips, union, domain)
+    prior_gap_count = len(gaps)
     if sliding_leaf_frame_closure:
         gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
+        prior_gap_count = len(gaps)
+        gaps = gaps + _cs_face_interruption_gaps(drawings, gaps, source_words)
     arcs, _rejected_arcs = _swing_arcs(drawings)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
@@ -845,39 +1175,64 @@ def build_layered_wall_doorway_room_rings(
     unresolved: list[_Gap] = []
     closure_rects: list[tuple[str, Polygon]] = []
     sliding_by_gap: dict[int, tuple[int, ...]] = {}
+    cavity_by_gap: dict[int, tuple[tuple[int, ...], tuple[str, ...]]] = {}
     if sliding_leaf_frame_closure:
         for gap_index, gap in enumerate(gaps):
             evidence = _sliding_leaf_evidence(drawings, gap)
             if evidence is not None:
                 sliding_by_gap[gap_index] = evidence
+            cs_words = _cavity_slider_word_evidence(gap, source_words)
+            leaves = _paired_cavity_leaves(drawings, gap) or _pocket_cavity_leaves(drawings, gap)
+            # Face-reconstructed CS openings already required a unique CS mark;
+            # the paired wall faces are the leaf evidence of that interruption.
+            if cs_words is not None and (leaves is not None or gap_index >= prior_gap_count):
+                cavity_by_gap[gap_index] = (leaves or (), cs_words)
+        cavity_by_gap = _prefer_prior_cs_gaps(cavity_by_gap, prior_gap_count)
+        cavity_by_gap = _keep_thickest_split_band_cs(gaps, cavity_by_gap)
         # one native stroke or box may evidence only ONE interruption; a shared one is a one-to-many span
         uses = Counter(index for evidence in sliding_by_gap.values() for index in evidence)
         sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
+        cs_word_uses = Counter(ref for _leaves, words in cavity_by_gap.values() for ref in words)
+        cs_leaf_uses = Counter(index for leaves, _words in cavity_by_gap.values() for index in leaves)
+        cavity_by_gap = {
+            gap_index: evidence
+            for gap_index, evidence in cavity_by_gap.items()
+            if all(cs_word_uses[ref] == 1 for ref in evidence[1])
+            and all(cs_leaf_uses[index] == 1 for index in evidence[0])
+        }
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
         stroke = None if swing is not None else _stroke_closed(drawings, gap)
         sliding = sliding_by_gap.get(gap_index)
+        cavity = cavity_by_gap.get(gap_index)
         panel_words = (
             _panel_lift_word_evidence(gap, source_words)
             if panel_lift_label_closure else None
         )
-        if panel_words is not None and (swing is not None or stroke is not None or sliding is not None):
+        owners = sum(
+            1
+            for item in (swing, stroke, sliding, cavity, panel_words)
+            if item is not None
+        )
+        if owners > 1:
             unresolved.append(gap)  # Competing source owners; no arbitrary priority.
             continue
-        if sliding is not None and (swing is not None or stroke is not None):
-            unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
-            continue
-        if swing is None and stroke is None and sliding is None and panel_words is None:
+        if owners == 0:
             unresolved.append(gap)
             continue
+        word_refs: tuple[str, ...] = ()
         if swing is not None:
             kind, native = KIND_SWING, (swing["arc"], swing["leaf"])
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
         elif sliding is not None:
             kind, native = KIND_SLIDING_LEAF, tuple(sliding)
+        elif cavity is not None:
+            kind, native = KIND_CAVITY_SLIDER, tuple(cavity[0])
+            word_refs = tuple(cavity[1])
         else:
             kind, native = KIND_PANEL_LIFT, ()
+            word_refs = tuple(panel_words or ())
         closure_id = stable_contract_id(
             "layered_doorway_closure",
             {
@@ -888,7 +1243,7 @@ def build_layered_wall_doorway_room_rings(
                 "band": [round(v, 3) for v in gap.band],
                 "gap": [round(gap.lo, 3), round(gap.hi, 3)],
                 "native": list(native),
-                "native_word_refs": list(panel_words or ()),
+                "native_word_refs": list(word_refs),
             },
             digest_chars=24,
         )
@@ -896,7 +1251,7 @@ def build_layered_wall_doorway_room_rings(
             closure_id=closure_id, kind=kind, horizontal=gap.horizontal,
             band=gap.band, gap_interval=(gap.lo, gap.hi), native_path_indices=tuple(native),
             wall_path_indices=tuple(sorted(set(gap.left_path_indices) | set(gap.right_path_indices))),
-            native_word_refs=tuple(panel_words or ()),
+            native_word_refs=word_refs,
         ))
         closure_rects.append((closure_id, gap.rect()))
 
@@ -1005,6 +1360,7 @@ def build_from_pdf_bytes(
 __all__ = [
     "KIND_STROKE",
     "KIND_SLIDING_LEAF",
+    "KIND_CAVITY_SLIDER",
     "KIND_PANEL_LIFT",
     "KIND_SWING",
     "LAYERED_ROOM_RING_SCHEMA_VERSION",

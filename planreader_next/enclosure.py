@@ -18,9 +18,13 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 from .engine import NativePage, SourceConflict, _digest
 
 _ROOM_WORDS = frozenset({
-    "BED", "BEDROOM", "BATH", "BATHROOM", "ENSUITE", "WC", "LAUNDRY",
+    "BED", "BEDROOM", "BATH", "BATHROOM", "ENSUITE", "ENS", "WC", "LAUNDRY",
     "GARAGE", "LIVING", "DINING", "KITCHEN", "KIT", "ENTRY", "MEDIA", "HALL",
-    "STUDY", "ROBE", "ALFRESCO", "LOUNGE", "PANTRY", "OFFICE",
+    "STUDY", "ROBE", "WIR", "ALFRESCO", "LOUNGE", "PANTRY", "OFFICE", "MASTER",
+    "MEALS", "FAMILY",
+})
+_OPEN_PLAN_WORDS = frozenset({
+    "LIVING", "DINING", "KITCHEN", "KIT", "MEALS", "LOUNGE", "FAMILY",
 })
 _FINISH_WORDS = frozenset({
     "VINYL", "TILES", "CARPET", "CONCRETE", "EPOXY", "TIMBER", "LAMINATE",
@@ -113,10 +117,19 @@ def propose_room_enclosures(
         finish_words = _inside_words(page, polygon, _FINISH_WORDS)
         distinct_rooms = sorted({word["text"] for word in room_words})
         distinct_finishes = sorted({word["text"] for word in finish_words})
+        private_rooms = [name for name in distinct_rooms if name not in _OPEN_PLAN_WORDS]
+        open_plan_labels = [name for name in distinct_rooms if name in _OPEN_PLAN_WORDS]
+        open_plan_physical_area = bool(open_plan_labels) and not private_rooms
         may_be_single_room = (
             ring.status.value == "candidate"
-            and len(distinct_rooms) == 1
             and len(distinct_finishes) == 1
+            and (len(distinct_rooms) == 1 or open_plan_physical_area)
+        )
+        x0, y0, x1, y1 = ring.bbox_pdf_pts
+        likely_cavity_pocket = (
+            not room_words
+            and min(x1 - x0, y1 - y0) <= 16.0
+            and ring.area_pt2 < 2000.0
         )
         regions.append({
             "region_id": ring.record_id,
@@ -130,7 +143,10 @@ def propose_room_enclosures(
             "topology_closure_ids": list(ring.bounding_closure_ids),
             "room_label_words": room_words,
             "finish_marker_words": finish_words,
-            "single_room_shape_hint": may_be_single_room,
+            "finish_zones": [{"finish": name} for name in distinct_finishes],
+            "open_plan_physical_area": open_plan_physical_area,
+            "single_room_shape_hint": may_be_single_room and not likely_cavity_pocket,
+            "likely_cavity_pocket": likely_cavity_pocket,
             "room_identity_authenticated": False,
             "finished_face_authenticated": False,
             "metric_area_authenticated": False,
@@ -148,15 +164,64 @@ def propose_room_enclosures(
         "original_door_window_geometry_retained": True,
         "virtual_wall_fills": virtual_fills,
         "regions": regions,
-        "candidate_enclosed_regions": sum(r["status"] == "candidate" for r in regions),
+        "candidate_enclosed_regions": sum(
+            r["status"] == "candidate" and not r["likely_cavity_pocket"] for r in regions
+        ),
         "single_room_shape_hints": sum(r["single_room_shape_hint"] for r in regions),
         "unresolved_regions": sum(r["status"] != "candidate" for r in regions),
+        "cavity_pocket_regions": sum(r["likely_cavity_pocket"] for r in regions),
         "unresolved_wall_gap_count": result.unresolved_gap_count,
         "wall_strip_count": result.wall_strip_count,
         "wall_gap_count": result.wall_gap_count,
         "virtual_fill_count": len(virtual_fills),
+        "cavity_slider_closures": sum(f["kind"] == "cavity_slider_cs_closure" for f in virtual_fills),
         "reason_codes": list(result.reason_codes),
+        "draft_floor_candidates": _draft_floors(page, regions),
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
     }
+
+
+def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Existing figured-word takeoff against enclosure bboxes. Never a native face proof."""
+    from .engine import SourceConflict, _figured_mm
+
+    drafts: list[dict[str, Any]] = []
+    for region in regions:
+        if region["status"] != "candidate" or not region["single_room_shape_hint"]:
+            continue
+        if len(region["finish_zones"]) != 1 or not region["finish_marker_words"]:
+            continue
+        x0, y0, x1, y1 = (float(v) for v in region["bbox_pdf_pts"])
+        horizontal, vertical = [], []
+        for word in page.words:
+            try:
+                _figured_mm(word)
+            except SourceConflict:
+                continue
+            cx = (word.bbox[0] + word.bbox[2]) / 2.0
+            cy = (word.bbox[1] + word.bbox[3]) / 2.0
+            if x0 <= cx <= x1 and (abs(cy - y0) <= 32 or abs(cy - y1) <= 32):
+                horizontal.append(word)
+            if y0 <= cy <= y1 and (abs(cx - x0) <= 32 or abs(cx - x1) <= 32):
+                vertical.append(word)
+        if len(horizontal) != 1 or len(vertical) != 1 or horizontal[0].ref == vertical[0].ref:
+            continue
+        width_mm = _figured_mm(horizontal[0])
+        height_mm = _figured_mm(vertical[0])
+        labels = sorted({item["text"] for item in region["room_label_words"]})
+        drafts.append({
+            "region_id": region["region_id"],
+            "room_label": " / ".join(labels) if region["open_plan_physical_area"] else labels[0],
+            "finish_code": region["finish_zones"][0]["finish"],
+            "width_word_ref": horizontal[0].ref,
+            "height_word_ref": vertical[0].ref,
+            "quantity_m2": format((width_mm * height_mm / 1000000).normalize(), "f"),
+            "unit": "m2",
+            "boundary_basis": "enclosure_preview_bbox_review_required",
+            "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
+            "commercial_publishable": False,
+            "benchmark_credit": False,
+        })
+    return drafts
