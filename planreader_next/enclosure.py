@@ -184,8 +184,8 @@ def propose_room_enclosures(
 
 
 def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Existing figured-word takeoff against enclosure bboxes. Never a native face proof."""
-    from .engine import SourceConflict, _figured_mm
+    """Figured millimetres between unique outside hashes at each wall end."""
+    from .hash_chain import bind_room_hash_axes
 
     drafts: list[dict[str, Any]] = []
     for region in regions:
@@ -193,33 +193,23 @@ def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[
             continue
         if len(region["finish_zones"]) != 1 or not region["finish_marker_words"]:
             continue
-        x0, y0, x1, y1 = (float(v) for v in region["bbox_pdf_pts"])
-        horizontal, vertical = [], []
-        for word in page.words:
-            try:
-                _figured_mm(word)
-            except SourceConflict:
-                continue
-            cx = (word.bbox[0] + word.bbox[2]) / 2.0
-            cy = (word.bbox[1] + word.bbox[3]) / 2.0
-            if x0 <= cx <= x1 and (abs(cy - y0) <= 32 or abs(cy - y1) <= 32):
-                horizontal.append(word)
-            if y0 <= cy <= y1 and (abs(cx - x0) <= 32 or abs(cx - x1) <= 32):
-                vertical.append(word)
-        if len(horizontal) != 1 or len(vertical) != 1 or horizontal[0].ref == vertical[0].ref:
+        width, height = bind_room_hash_axes(page, region["bbox_pdf_pts"])
+        if width is None or height is None:
             continue
-        width_mm = _figured_mm(horizontal[0])
-        height_mm = _figured_mm(vertical[0])
+        if set(width.word_refs) & set(height.word_refs):
+            continue
         labels = sorted({item["text"] for item in region["room_label_words"]})
         drafts.append({
             "region_id": region["region_id"],
             "room_label": " / ".join(labels) if region["open_plan_physical_area"] else labels[0],
             "finish_code": region["finish_zones"][0]["finish"],
-            "width_word_ref": horizontal[0].ref,
-            "height_word_ref": vertical[0].ref,
-            "quantity_m2": format((width_mm * height_mm / 1000000).normalize(), "f"),
+            "width_word_refs": list(width.word_refs),
+            "height_word_refs": list(height.word_refs),
+            "width_hash_stations": list(width.hash_stations),
+            "height_hash_stations": list(height.hash_stations),
+            "quantity_m2": format((width.length_mm * height.length_mm / 1000000).normalize(), "f"),
             "unit": "m2",
-            "boundary_basis": "enclosure_preview_bbox_review_required",
+            "boundary_basis": "outside_hash_chain_internal_face_review_required",
             "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
             "commercial_publishable": False,
             "benchmark_credit": False,
