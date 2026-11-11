@@ -824,6 +824,7 @@ class RasterTextCorroborationProducer:
         *,
         _seal: object = None,
         _allow_clip_only_shadow: bool = False,
+        _recognize_native_words_shadow: bool = False,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
@@ -836,6 +837,9 @@ class RasterTextCorroborationProducer:
         self._text_authority: PdfTextIntegrityAuthority = source_visibility_producer.text_integrity_authority()
         self._backend = backend
         self._allow_clip_only_shadow = _allow_clip_only_shadow
+        if type(_recognize_native_words_shadow) is not bool:
+            raise ValueError("native_word_recognition_shadow_requires_explicit_bool")
+        self._recognize_native_words_shadow = _recognize_native_words_shadow
         self._glyph_cover_proofs = {}
         self._results: dict[tuple[str, str, str, str, str], RasterTextCorroborationResult] = {}
 
@@ -854,6 +858,21 @@ class RasterTextCorroborationProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         backend, _selection_reason = select_production_ocr_backend()
         return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_native_word_recognition_shadow(
+        cls, source_visibility_producer: SourceVisibilityProducer,
+    ) -> "RasterTextCorroborationProducer":
+        """Recognize an owned native word without admitting clip-only receipts.
+
+        This opt-in changes only RapidOCR crop inference configuration. The
+        ordinary glyph-integrity and all two-view source gates still apply.
+        """
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        backend, _selection_reason = select_production_ocr_backend()
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
+                   _recognize_native_words_shadow=True)
 
     @classmethod
     def for_physical_plan_view_shadow(
@@ -1077,9 +1096,10 @@ class RasterTextCorroborationProducer:
                 # crop. RapidOCR's page detector can reject that tight crop;
                 # use its existing recognition-only seam without retrying a
                 # failed reading or changing the ordinary production path.
+                # Legend word recognition is independent of clip admissibility.
                 from pb_portable_raster_ocr_authority import RapidOCRBackend
                 isolated_word_shadow = (
-                    self._allow_clip_only_shadow
+                    (self._allow_clip_only_shadow or self._recognize_native_words_shadow)
                     and type(self._backend) is RapidOCRBackend
                 )
                 if isolated_word_shadow:

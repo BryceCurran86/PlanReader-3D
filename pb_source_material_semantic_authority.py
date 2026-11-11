@@ -2179,40 +2179,50 @@ _PRODUCTION_ORDINARY_RASTER_CLASS = RasterTextCorroborationProducer
 
 def _ordinary_source_word_raster(
     source_visibility_producer: SourceVisibilityProducer,
+    *,
+    native_word_recognition_shadow: bool = False,
 ) -> RasterTextCorroborationProducer:
     """Reuse producer-owned exact-source ordinary OCR between material stages.
 
     The real raster publisher still reauthenticates cached selectors against
     immutable source SHA and bytes on every publish(). No material or physical
     authority is cached; clip-only physical-plan raster remains independent.
+    An opted-in plan can select native-word recognition through a separate
+    cache without changing the ordinary legend glyph-integrity policy.
     """
+    if type(native_word_recognition_shadow) is not bool:
+        raise ValueError("native_word_recognition_shadow_requires_explicit_bool")
     if RasterTextCorroborationProducer is not _PRODUCTION_ORDINARY_RASTER_CLASS:
         # Source-neutral tests use minimal fake word/line OCR publishers.
         # They cannot enter the original-source cache.
         return RasterTextCorroborationProducer.from_source_visibility_producer(
             source_visibility_producer
         )
+    cache_attr = (_ORDINARY_WORD_RASTER_CACHE_ATTR + "_native_word_recognition_shadow"
+                  if native_word_recognition_shadow else _ORDINARY_WORD_RASTER_CACHE_ATTR)
     with _ORDINARY_WORD_RASTER_LOCK:
         raster = getattr(
             source_visibility_producer,
-            _ORDINARY_WORD_RASTER_CACHE_ATTR,
+            cache_attr,
             _ORDINARY_WORD_RASTER_UNSET,
         )
         if raster is _ORDINARY_WORD_RASTER_UNSET:
-            raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-                source_visibility_producer
-            )
+            factory = (RasterTextCorroborationProducer.for_native_word_recognition_shadow
+                       if native_word_recognition_shadow
+                       else RasterTextCorroborationProducer.from_source_visibility_producer)
+            raster = factory(source_visibility_producer)
         if (
             type(raster) is not _PRODUCTION_ORDINARY_RASTER_CLASS
             or raster._source is not source_visibility_producer
             or raster._source_producer is not source_visibility_producer._producer
             or raster._allow_clip_only_shadow is not False
+            or raster._recognize_native_words_shadow is not native_word_recognition_shadow
         ):
             raise ValueError("ordinary_material_word_raster_source_policy_conflict")
         # A source -> raster -> source cycle is GC-managed and intentionally
         # retained while the source producer is live. It does not escape to
         # another source document, revision or process-wide global cache.
-        setattr(source_visibility_producer, _ORDINARY_WORD_RASTER_CACHE_ATTR, raster)
+        setattr(source_visibility_producer, cache_attr, raster)
         return raster
 
 
@@ -2235,7 +2245,10 @@ class SourceMaterialSemanticProducer:
             raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
         self._source_native_multirow_material_shadow = _source_native_multirow_material_shadow
         self._source = source_visibility_producer
-        self._raster = _ordinary_source_word_raster(source_visibility_producer)
+        self._raster = _ordinary_source_word_raster(
+            source_visibility_producer,
+            native_word_recognition_shadow=bool(_physical_plan_page_ids),
+        )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._source_connected_rcp_plan_page_ids = frozenset(
