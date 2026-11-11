@@ -12,7 +12,7 @@ from pb_live_floor_finish_area_source_closed_export import (
     build_live_floor_finish_area_source_traces,
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -96,6 +96,24 @@ def project_live_floor_finish_customer_rows(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
+
+    if getattr(claim, "status", None) is EvidenceResolutionStatus.CORROBORATED:
+        if getattr(claim, "canonical_wall_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+            raise SourceClosedRunConflictError(
+                "canonical_wall_status is not CORROBORATED in customer projection"
+            )
+        if getattr(claim, "unresolved_wall_candidate_ids", ()):
+            raise SourceClosedRunConflictError(
+                "unresolved_wall_candidate_ids present in customer projection"
+            )
+        if claim.canonical_rooms and getattr(claim, "canonical_room_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+            raise SourceClosedRunConflictError(
+                "canonical_room_status is not CORROBORATED in customer projection"
+            )
+        if claim.canonical_floors and getattr(claim, "canonical_floor_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+            raise SourceClosedRunConflictError(
+                "canonical_floor_status is not CORROBORATED in customer projection"
+            )
 
     # Inspect the ENTIRE original source inventory before customer selection.
     # A duplicate or foreign record must not vanish merely because every

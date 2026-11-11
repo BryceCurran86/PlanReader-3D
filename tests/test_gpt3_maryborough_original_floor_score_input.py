@@ -353,3 +353,73 @@ def test_source_runner_contains_no_reference_quantity_or_frozen_object_matching(
         "matched_within_tolerance",
     ):
         assert forbidden not in source
+
+def test_missing_maryborough_original_is_source_unavailable_not_filenotfound(tmp_path):
+    manifest_data = {
+        "project_id": module.PROJECT,
+        "source_documents": [
+            {
+                "role": "architectural_drawings",
+                "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+                "size_bytes": 100,
+                "sha256": "abc",
+            }
+        ],
+    }
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    missing_pdf = tmp_path / "Arch_Combined_Maryborough_Service_Station.pdf"
+    with pytest.raises(ValueError, match=module.SOURCE_UNAVAILABLE):
+        module._verify_original_source(missing_pdf, manifest_path)
+
+
+def test_wrong_sha_in_maryborough_original_source_raises(tmp_path):
+    manifest_data = {
+        "project_id": module.PROJECT,
+        "source_documents": [
+            {
+                "role": "architectural_drawings",
+                "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+                "size_bytes": 12,
+                "sha256": "expected_sha_12345",
+            }
+        ],
+    }
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    pdf = tmp_path / "Arch_Combined_Maryborough_Service_Station.pdf"
+    pdf.write_bytes(b"wrong bytes!")
+    with pytest.raises(ValueError, match="Maryborough original source SHA mismatch"):
+        module._verify_original_source(pdf, manifest_path)
+
+
+def test_wrong_scope_in_maryborough_manifest_raises(tmp_path):
+    manifest_data = {
+        "project_id": "wrong_project_scope",
+        "source_documents": [],
+    }
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    pdf = tmp_path / "Arch_Combined_Maryborough_Service_Station.pdf"
+    with pytest.raises(ValueError, match="incorrect Maryborough source manifest project"):
+        module._verify_original_source(pdf, manifest_path)
+
+
+def test_absent_nested_mount_or_role_in_maryborough_manifest_raises(tmp_path):
+    manifest_data = {
+        "project_id": module.PROJECT,
+        "source_documents": [
+            {
+                "role": "structural_drawings",
+                "name": "Struct_Maryborough.pdf",
+                "size_bytes": 100,
+                "sha256": "abc",
+            }
+        ],
+    }
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    pdf = tmp_path / "Struct_Maryborough.pdf"
+    with pytest.raises(ValueError, match="ambiguous or missing Maryborough architectural source"):
+        module._verify_original_source(pdf, manifest_path)
+

@@ -32,6 +32,7 @@ from pb_live_physical_net_wall_integration import (
 from tools.diag_gpt2_room_measurement_gates import inspect_room_measurement_gates
 
 PROJECT = "au_qld_maryborough_service_station"
+SOURCE_UNAVAILABLE = "source_unavailable"
 MANIFEST = (
     Path(__file__).resolve().parents[1]
     / "benchmarks/frozen_holdout/full_plan_v2/projects"
@@ -52,7 +53,9 @@ def _verify_original_source(pdf: Path, manifest_path: Path) -> str:
     if len(architectural) != 1:
         raise ValueError("ambiguous or missing Maryborough architectural source")
     original = architectural[0]
-    if not pdf.is_file() or pdf.name != original.get("name"):
+    if not pdf.is_file():
+        raise ValueError(SOURCE_UNAVAILABLE)
+    if pdf.name != original.get("name"):
         raise ValueError("wrong Maryborough architectural source filename")
     if pdf.stat().st_size != original.get("size_bytes"):
         raise ValueError("Maryborough original source size mismatch")

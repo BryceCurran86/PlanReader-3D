@@ -19,11 +19,11 @@ import io
 import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
-from weakref import WeakKeyDictionary
+from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import fitz
 from PIL import Image, ImageOps
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
 from pb_drawing_evidence_binding import DrawingViewType
@@ -89,6 +89,7 @@ CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT = "cross_view_room_area_lineage_conflict"
 CROSS_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = (
     "authenticated_cross_view_room_area"
 )
+DUPLICATE_AUTHORITY_CONFLICT = "duplicate_authority_conflict"
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -170,6 +171,28 @@ class CrossViewRoomAreaRecord:
     def __post_init__(self) -> None:
         if self._seal is not _RECORD_SEAL:
             raise TypeError("CrossViewRoomAreaRecord is producer-owned")
+
+
+class _UniqueWeakValueDictionary(WeakValueDictionary):
+    """WeakValueDictionary that prevents overwriting an existing key with conflicting authority."""
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        existing = self.get(key)
+        if existing is not None and existing is not value and existing != value:
+            raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+        super().__setitem__(key, value)
+
+
+_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: _UniqueWeakValueDictionary[
+    tuple[str, str], "CrossViewRoomAreaRecord"
+] = _UniqueWeakValueDictionary()
+
+
+def get_authenticated_room_area_record(
+    snapshot_id: str, evidence_id: str
+) -> Optional["CrossViewRoomAreaRecord"]:
+    """Retrieve authentic producer-issued CrossViewRoomAreaRecord by snapshot_id and area evidence_id."""
+    return _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.get((str(snapshot_id), str(evidence_id)))
 
 
 @dataclass(frozen=True)
@@ -1994,6 +2017,13 @@ class CrossViewRoomAreaProducer:
             conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
+        for rec in records:
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.area_evidence.evidence_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.area_evidence.evidence_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.physical_room_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.physical_room_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.source_room_face_record_id))] = rec
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.source_room_face_record_id))] = rec
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
             status = EvidenceResolutionStatus.CORROBORATED
@@ -2033,6 +2063,10 @@ __all__ = [
     "CROSS_VIEW_ROOM_AREA_SCHEMA_VERSION",
     "CROSS_VIEW_ROOM_AREA_UNAVAILABLE",
     "CrossViewRoomAreaProducer",
+    "get_authenticated_room_area_record",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
+    "DUPLICATE_AUTHORITY_CONFLICT",
+    "_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT",
+    "_UniqueWeakValueDictionary",
 ]

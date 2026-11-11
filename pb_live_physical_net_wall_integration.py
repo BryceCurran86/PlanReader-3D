@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
@@ -153,6 +154,8 @@ class LivePhysicalNetWallClaim:
     # Source-owned physical-scale failures are independent of documented area.
     # Each entry owns an exact physical-room ID and the scale producer's reasons.
     physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    correspondence_resolution_status: str = "correspondence_not_attempted"
+    surface_pipeline_diagnostics: Mapping[str, Any] = MappingProxyType({})
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -596,6 +599,8 @@ def _collect_live_physical_net_wall_claim(
             quantity_id=None,
             confidence=0.0,
             publication=publication,
+            correspondence_resolution_status="correspondence_not_attempted",
+            surface_pipeline_diagnostics=MappingProxyType({}),
         )
     canonical_wall_core = compose_live_canonical_walls(
         source_visibility_producer=source,
@@ -1051,16 +1056,58 @@ def _collect_live_physical_net_wall_claim(
 
     # Floor-finish authority is a downstream consumer of already-authenticated
     # documented room areas. It must not remeasure or infer a finish.
+    correspondence_status = "correspondence_not_attempted"
+    correspondence_records = ()
+    floor_finishes = None
+    ceiling_finishes = None
+
+    support_pids = tuple(
+        str(index + 1) for index in room_area_support_selected
+    ) if room_area_support_selected else (
+        tuple(str(index + 1) for index in surface_semantic_selected)
+        if surface_semantic_selected else None
+    )
+
     if (
         (same_view_area is not None and same_view_area.records)
         or (cross_view_area is not None and cross_view_area.records)
     ):
-        floor_finishes = CrossViewFloorFinishProducer.from_source(
-            source=surface_semantic_source,
-            room_areas=cross_view_area,
-            same_view_room_areas=same_view_area,
-            floors=canonical_floors,
-        ).publish()
+        if cross_view_area is not None and cross_view_area.records:
+            try:
+                from pb_source_cross_view_floor_correspondence_shadow import (
+                    resolve_cross_sheet_floor_correspondence_for_claim,
+                    enrich_cross_sheet_floor_with_documented_area,
+                )
+                correspondence_records = resolve_cross_sheet_floor_correspondence_for_claim(
+                    source=surface_semantic_source,
+                    cross_view_area=cross_view_area,
+                    canonical_floors=canonical_floors,
+                )
+                if correspondence_records:
+                    correspondence_status = "correspondence_resolved"
+                    canonical_floors = enrich_cross_sheet_floor_with_documented_area(
+                        floors=canonical_floors,
+                        room_areas=cross_view_area,
+                    )
+                else:
+                    correspondence_status = "correspondence_empty"
+            except Exception:
+                correspondence_records = ()
+                correspondence_status = "correspondence_exception"
+
+        floor_kwargs = {
+            "source": surface_semantic_source,
+            "room_areas": cross_view_area,
+            "same_view_room_areas": same_view_area,
+            "floors": canonical_floors,
+            "correspondence_records": correspondence_records,
+        }
+        if support_pids:
+            import inspect
+            sig = inspect.signature(CrossViewFloorFinishProducer.from_source)
+            if "page_ids" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                floor_kwargs["page_ids"] = support_pids
+        floor_finishes = CrossViewFloorFinishProducer.from_source(**floor_kwargs).publish()
         canonical_floors = enrich_live_canonical_floor_finishes(
             canonical_floors,
             floor_finishes,
@@ -1084,6 +1131,52 @@ def _collect_live_physical_net_wall_claim(
             ceiling_lining_quantity_evidence.extend(
                 ceiling_quantities.quantities
             )
+
+    surface_pipeline_diagnostics = {
+        "same_view_area_records_count": (
+            len(same_view_area.records)
+            if same_view_area is not None and same_view_area.records
+            else 0
+        ),
+        "cross_view_area_records_count": (
+            len(cross_view_area.records)
+            if cross_view_area is not None and cross_view_area.records
+            else 0
+        ),
+        "room_area_bridges_count": len(room_area_bridges),
+        "correspondence_status": correspondence_status,
+        "correspondence_records_count": len(correspondence_records),
+        "floor_finish_records_count": (
+            len(getattr(floor_finishes, "records", ()))
+            if floor_finishes is not None
+            else 0
+        ),
+        "floor_finish_firm_quantities_count": (
+            sum(
+                1
+                for q in floor_finish_quantity_evidence
+                if not q.abstained and str(q.status).lower() in ("firm", "corroborated")
+            )
+        ),
+        "floor_finish_abstain_quantities_count": (
+            sum(1 for q in floor_finish_quantity_evidence if q.abstained)
+        ),
+        "ceiling_finish_records_count": (
+            len(getattr(ceiling_finishes, "records", ()))
+            if ceiling_finishes is not None
+            else 0
+        ),
+        "ceiling_firm_quantities_count": (
+            sum(
+                1
+                for q in ceiling_lining_quantity_evidence
+                if not q.abstained and str(q.status).lower() in ("firm", "corroborated")
+            )
+        ),
+        "ceiling_abstain_quantities_count": (
+            sum(1 for q in ceiling_lining_quantity_evidence if q.abstained)
+        ),
+    }
 
     physical_void = compose_live_physical_opening_voids(
         single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
@@ -1159,6 +1252,7 @@ def _collect_live_physical_net_wall_claim(
             reason_codes=(
                 LIVE_PHYSICAL_NET_WALL_INTEGRATION_RESOLVED,
                 *publication.reason_codes,
+                *(("correspondence_exception",) if correspondence_status == "correspondence_exception" else ()),
             ),
             quantity_m2=float(evidence.value),
             source_pages=source_pages,
@@ -1208,6 +1302,8 @@ def _collect_live_physical_net_wall_claim(
             )),
             layered_finished_face_receipts=tuple(finished_face_receipts),
             layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
+            correspondence_resolution_status=correspondence_status,
+            surface_pipeline_diagnostics=MappingProxyType(surface_pipeline_diagnostics),
         )
 
     return LivePhysicalNetWallClaim(
@@ -1215,6 +1311,7 @@ def _collect_live_physical_net_wall_claim(
         reason_codes=(
             LIVE_PHYSICAL_NET_WALL_INTEGRATION_UNAVAILABLE,
             *publication.reason_codes,
+            *(("correspondence_exception",) if correspondence_status == "correspondence_exception" else ()),
         ),
         quantity_m2=None,
         source_pages=(),
@@ -1264,6 +1361,8 @@ def _collect_live_physical_net_wall_claim(
         )),
         layered_finished_face_receipts=tuple(finished_face_receipts),
         layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
+        correspondence_resolution_status=correspondence_status,
+        surface_pipeline_diagnostics=MappingProxyType(surface_pipeline_diagnostics),
     )
 
 
