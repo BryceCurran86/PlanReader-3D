@@ -141,7 +141,7 @@ def _json(path: Path) -> Any:
     if len(raw) != before.st_size or any(
         getattr(snapshot, field) != getattr(before, field)
         for snapshot in (opened, completed, after)
-        for field in _SOURCE_IDENTITY_FIELDS
+        for field in _cross_descriptor_identity_fields()
     ):
         raise ValueError("frozen JSON changed during verification")
     return json.loads(
@@ -170,6 +170,13 @@ _SOURCE_IDENTITY_FIELDS = (
     "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
     "st_mtime_ns", "st_ctime_ns",
 )
+
+
+def _cross_descriptor_identity_fields() -> tuple[str, ...]:
+    """Keep POSIX ctime; Windows cross-API NTFS ctime is not stable."""
+    if os.name == "nt":
+        return tuple(field for field in _SOURCE_IDENTITY_FIELDS if field != "st_ctime_ns")
+    return _SOURCE_IDENTITY_FIELDS
 
 
 def _present_source_digest(path: Path) -> tuple[str, int] | None:
@@ -205,7 +212,7 @@ def _present_source_digest(path: Path) -> tuple[str, int] | None:
     if size != before.st_size or any(
         getattr(snapshot, field) != getattr(before, field)
         for snapshot in (opened, completed, after)
-        for field in _SOURCE_IDENTITY_FIELDS
+        for field in _cross_descriptor_identity_fields()
     ):
         raise ValueError("changed during integrity verification")
     return digest.hexdigest(), size
