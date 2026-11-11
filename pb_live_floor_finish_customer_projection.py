@@ -127,7 +127,7 @@ def project_live_floor_finish_customer_rows(
         # completeness even if another independent FIRM member is valid.
         if not original.abstained and original.value is not None and original.blocking_reasons:
             raise SourceClosedRunConflictError(
-                "numeric_floor_finish_source_quantity_has_unresolved_blockers"
+                "numeric floor-finish source quantity retains unresolved blockers"
             )
 
     quantities = tuple(
