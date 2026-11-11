@@ -1073,7 +1073,21 @@ class RasterTextCorroborationProducer:
             except Exception:
                 return _abstain(RASTER_TEXT_RENDER_FAILED, "render_png_undecodable")
             try:
-                lines = tuple(self._backend.extract_lines(cropped, dpi=int(dpi)))
+                # This explicitly opt-in path already owns one native word
+                # crop. RapidOCR's page detector can reject that tight crop;
+                # use its existing recognition-only seam without retrying a
+                # failed reading or changing the ordinary production path.
+                from pb_portable_raster_ocr_authority import RapidOCRBackend
+                isolated_word_shadow = (
+                    self._allow_clip_only_shadow
+                    and type(self._backend) is RapidOCRBackend
+                )
+                if isolated_word_shadow:
+                    lines = tuple(self._backend.extract_lines(
+                        cropped, dpi=int(dpi), detect=False,
+                    ))
+                else:
+                    lines = tuple(self._backend.extract_lines(cropped, dpi=int(dpi)))
             except Exception:
                 return _abstain(RASTER_TEXT_BACKEND_ERROR)
 
@@ -1143,6 +1157,9 @@ class RasterTextCorroborationProducer:
         if glyph_covers:
             self._glyph_cover_proofs[selector.key] = tuple(glyph_covers)
 
+        backend_version = self._backend.version
+        if isolated_word_shadow:
+            backend_version += ";native-word-recognition-shadow:detect=False"
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
@@ -1157,7 +1174,7 @@ class RasterTextCorroborationProducer:
             "source_partition_id": partition_id,
             "render_dpis": tuple(RASTER_TEXT_CORROBORATION_DPIS),
             "backend_name": self._backend.name,
-            "backend_version": self._backend.version,
+            "backend_version": backend_version,
             "views": tuple(
                 (v.dpi, v.image_size_px, v.image_png_sha256, v.ocr_reading)
                 for v in views
@@ -1185,7 +1202,7 @@ class RasterTextCorroborationProducer:
             source_partition_id=partition_id,
             render_dpis=tuple(RASTER_TEXT_CORROBORATION_DPIS),
             backend_name=self._backend.name,
-            backend_version=self._backend.version,
+            backend_version=backend_version,
             views=tuple(views),
             corroborated_text=native_claim,
         )
