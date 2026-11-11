@@ -49,6 +49,8 @@ PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
+_NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES = 2
+_NATIVE_RENDER_METHODS = (fitz.Page.get_pixmap, fitz.Page.get_displaylist)
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
 # Representation cache only. Lookups stay the same above and below this size.
@@ -740,6 +742,7 @@ class SourceObservationProducer:
             "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]"
         ) = OrderedDict()
         self._native_image_scope_cache: "OrderedDict[tuple[str, str, str, int], tuple]" = OrderedDict()
+        self._native_clip_display_lists: "OrderedDict[tuple[str, int], fitz.DisplayList]" = OrderedDict()
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
@@ -821,6 +824,7 @@ class SourceObservationProducer:
         if cached is not None and cached[0] is source_bytes:
             return cached[1]
         if cached is not None:
+            self._native_clip_display_lists.clear()
             try:
                 cached[1].close()
             except Exception:
@@ -1094,11 +1098,34 @@ class SourceObservationProducer:
                         f"{INVALID_RENDER_CLIP}: transformed clip lies outside the display page"
                     )
 
-                pix = page.get_pixmap(
-                    matrix=fitz.Matrix(scale, scale),
-                    clip=render_clip,
-                    alpha=False,
-                )
+                # PyMuPDF's ordinary get_pixmap builds this same display list
+                # on every crop. Retain at most two immutable source pages;
+                # each DPI still renders its own exact validated clip. Custom
+                # renderer hooks and mutable pages keep the ordinary path.
+                if (
+                    not pdf.is_dirty
+                    and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
+                    and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
+                ):
+                    cache_key = (source_sha256, page_number)
+                    display_list = self._native_clip_display_lists.get(cache_key)
+                    if display_list is None:
+                        display_list = page.get_displaylist(annots=True)
+                        self._native_clip_display_lists[cache_key] = display_list
+                    self._native_clip_display_lists.move_to_end(cache_key)
+                    while len(self._native_clip_display_lists) > _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES:
+                        self._native_clip_display_lists.popitem(last=False)
+                    pix = display_list.get_pixmap(
+                        matrix=fitz.Matrix(scale, scale),
+                        clip=render_clip,
+                        alpha=False,
+                    )
+                else:
+                    pix = page.get_pixmap(
+                        matrix=fitz.Matrix(scale, scale),
+                        clip=render_clip,
+                        alpha=False,
+                    )
             png_bytes = pix.tobytes("png")
         finally:
             if "pix" in locals() and pix is not None:
