@@ -204,13 +204,20 @@ def min_axis_support(src: Lines, dst: LineIndex, dx: float, dy: float, tol: floa
 def _shift_votes(src: Lines, dst: LineIndex, topn: int, limit: float = 3000.0) -> tuple[list[float], list[float]]:
     votes = {"H": collections.Counter(), "V": collections.Counter()}
     for o in "HV":
+        # A destination line's interval total is invariant across all source
+        # coordinates in this invocation. Keep the original summation and key
+        # order, but do not sum those same intervals for every coordinate pair.
+        destination_totals: dict[float, float] = {}
         for k, ivs in src[o].items():
             t_src = sum(hi - lo for lo, hi in ivs)
             for k2 in dst.keys[o]:
                 d = k2 - k
                 if abs(d) > limit:
                     continue
-                t_dst = sum(hi - lo for lo, hi in dst.lines[o][k2])
+                t_dst = destination_totals.get(k2)
+                if t_dst is None:
+                    t_dst = sum(hi - lo for lo, hi in dst.lines[o][k2])
+                    destination_totals[k2] = t_dst
                 votes[o][round(d / 0.04) * 0.04] += min(t_src, t_dst)
     xs = [x for x, _ in sorted(votes["V"].items(), key=lambda kv: (-kv[1], kv[0]))[:topn]]
     ys = [y for y, _ in sorted(votes["H"].items(), key=lambda kv: (-kv[1], kv[0]))[:topn]]
