@@ -851,16 +851,21 @@ class SourceObservationProducer:
             and cached[1] == page_number
         ):
             return cached[2]
-        pdf = self._retained_source_pdf(source_bytes)
-        if page_number < 1 or page_number > int(pdf.page_count):
-            return None
-        page = pdf.load_page(page_number - 1)
-        rawdict = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS) or {}
-        traces = tuple(page.get_texttrace() or ())
-        matrix = page.rotation_matrix
-        rotation = fitz.Matrix(
-            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
-        )
+        # Native text extraction can mark a PDF dirty through library
+        # bookkeeping. Keep that temporary document separate from the retained
+        # exact-source renderer, whose dirty-document cache guard stays intact.
+        # Retain the existing byte-identity lifetime and one-page facts cache.
+        self._retained_source_pdf(source_bytes)
+        with fitz.open(stream=source_bytes, filetype="pdf") as pdf:
+            if page_number < 1 or page_number > int(pdf.page_count):
+                return None
+            page = pdf.load_page(page_number - 1)
+            rawdict = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS) or {}
+            traces = tuple(page.get_texttrace() or ())
+            matrix = page.rotation_matrix
+            rotation = fitz.Matrix(
+                matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
+            )
         facts = (rawdict, traces, rotation)
         self._source_page_text_facts = (source_bytes, page_number, facts)
         return facts
