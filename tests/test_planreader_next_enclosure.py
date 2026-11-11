@@ -9,8 +9,11 @@ import sys
 
 import pytest
 
+from decimal import Decimal
+
 from planreader_next.enclosure import propose_room_enclosures
 from planreader_next.engine import SourceConflict, load_native_page
+from planreader_next.hash_chain import bind_wall_hash_length
 from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 from tests.test_layered_wall_doorway_room_face_wiring_v1 import layered_room_pdf
 
@@ -169,6 +172,17 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
         and {x["text"] for x in r["finish_marker_words"]} == {"VINYL"}
     ]
     assert len(bedrooms) == 3
+    south_widths = []
+    for bedroom in bedrooms:
+        x0, _y0, x1, y1 = (float(v) for v in bedroom["bbox_pdf_pts"])
+        bound = bind_wall_hash_length(
+            page, horizontal_wall=True, face_perp=y1, lo=x0, hi=x1, outward=1.0,
+        )
+        if bound is not None:
+            south_widths.append(bound)
+    assert len(south_widths) == 2
+    assert all(item.length_mm == Decimal("3010") for item in south_widths)
+    assert all(len(item.word_refs) == 2 for item in south_widths)
     assert all(not r["room_identity_authenticated"] for r in result["regions"])
     assert result["commercial_publishable"] is False
     assert result["official_score"] is None

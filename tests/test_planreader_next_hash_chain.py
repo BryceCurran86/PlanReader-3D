@@ -68,6 +68,45 @@ def test_hash_chain_walks_end_to_end_across_intermediate_hashes(tmp_path):
     assert len(bound.hash_stations) == 3
 
 
+def test_shared_middle_figures_split_onto_side_and_centre_hashes(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 185, 160), color=(0, 0, 0), width=0.4)
+        for x in (100, 117, 168, 185):
+            page.draw_line(fitz.Point(x, 160), fitz.Point(x, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(195, 165.5))
+        page.insert_text((128, 176), "1200", fontsize=8)
+        page.insert_text((148, 176), "1810", fontsize=8)
+        page.draw_line(fitz.Point(185, 80), fitz.Point(191, 80))
+        page.draw_line(fitz.Point(185, 160), fitz.Point(191, 160))
+        page.draw_line(fitz.Point(191, 70), fitz.Point(191, 170))
+        page.insert_text((195, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=185.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 3010
+    assert len(bound.word_refs) == 2
+    assert len(bound.hash_stations) == 4
+
+
+def test_crowded_middle_figures_abstain_when_hash_spans_do_not_agree(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 160, 160), color=(0, 0, 0), width=0.4)
+        for x in (100, 110, 150, 160):
+            page.draw_line(fitz.Point(x, 160), fitz.Point(x, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(170, 165.5))
+        page.insert_text((118, 176), "1200", fontsize=8)
+        page.insert_text((132, 176), "1810", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=160.0, outward=1.0,
+    )
+    assert bound is None
+
+
 def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):
     def drawer(page):
         _room_with_hashes(page)

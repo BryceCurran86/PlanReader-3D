@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import product
 from typing import Sequence
 
 from .engine import NativePage, NativeSegment, NativeWord, SourceConflict, _figured_mm
@@ -105,47 +106,121 @@ def _complete_chain(
     chain = sorted({round(value, 2) for value in between})
     if abs(chain[0] - start) > _FACE_PT or abs(chain[-1] - end) > _FACE_PT:
         return None
-    words_by_interval: list[NativeWord] = []
-    spans: list[tuple[float, Decimal]] = []
-    for left, right in zip(chain, chain[1:]):
-        owned: list[NativeWord] = []
-        for word in page.words:
-            try:
-                millimetres = _figured_mm(word)
-            except SourceConflict:
-                continue
-            cx = (word.bbox[0] + word.bbox[2]) / 2.0
-            cy = (word.bbox[1] + word.bbox[3]) / 2.0
-            along, perp = _along_perp(horizontal_wall, cx, cy)
-            if not (left + _FACE_PT < along < right - _FACE_PT):
-                continue
-            if abs(perp - line_perp) > _WORD_LINE_PT:
-                continue
-            if (perp - face_perp) * (line_perp - face_perp) <= 0:
-                continue
-            owned.append(word)
-        if len(owned) != 1:
-            return None
-        words_by_interval.append(owned[0])
-        spans.append((Decimal(str(right - left)), _figured_mm(owned[0])))
-    if not words_by_interval:
+    figures = _chain_figures(
+        page, horizontal_wall=horizontal_wall, face_perp=face_perp,
+        line_perp=line_perp, start=chain[0], end=chain[-1],
+    )
+    if not figures:
         return None
-    if len(spans) > 1:
-        ratios = [span / millimetres for span, millimetres in spans if millimetres != 0]
-        if not ratios:
-            return None
-        first = ratios[0]
-        if any(abs(ratio / first - 1) > Decimal("0.05") for ratio in ratios[1:]):
-            return None
-    total = sum((item[1] for item in spans), Decimal("0"))
+    intervals = [
+        (left, right, Decimal(str(right - left)))
+        for left, right in zip(chain, chain[1:])
+    ]
+    owned = _unique_interval_words(intervals, figures, horizontal_wall)
+    if owned is None:
+        owned = _unique_ratio_cover(intervals, figures)
+    if owned is None:
+        return None
+    total = sum((_figured_mm(word) for word in owned), Decimal("0"))
     side = "horizontal" if horizontal_wall else "vertical"
     return HashBoundLength(
         length_mm=total,
-        word_refs=tuple(word.ref for word in words_by_interval),
+        word_refs=tuple(word.ref for word in owned),
         hash_stations=tuple(chain),
         dimension_line_perp=line_perp,
         side=side,
     )
+
+
+def _chain_figures(
+    page: NativePage, *, horizontal_wall: bool, face_perp: float,
+    line_perp: float, start: float, end: float,
+) -> list[NativeWord]:
+    found: list[NativeWord] = []
+    for word in page.words:
+        try:
+            _figured_mm(word)
+        except SourceConflict:
+            continue
+        cx = (word.bbox[0] + word.bbox[2]) / 2.0
+        cy = (word.bbox[1] + word.bbox[3]) / 2.0
+        along, perp = _along_perp(horizontal_wall, cx, cy)
+        if not (start + _FACE_PT < along < end - _FACE_PT):
+            continue
+        if abs(perp - line_perp) > _WORD_LINE_PT:
+            continue
+        if (perp - face_perp) * (line_perp - face_perp) <= 0:
+            continue
+        found.append(word)
+    return found
+
+
+def _word_along(word: NativeWord, horizontal_wall: bool) -> float:
+    cx = (word.bbox[0] + word.bbox[2]) / 2.0
+    cy = (word.bbox[1] + word.bbox[3]) / 2.0
+    along, _perp = _along_perp(horizontal_wall, cx, cy)
+    return along
+
+
+def _unique_interval_words(
+    intervals: Sequence[tuple[float, float, Decimal]],
+    figures: Sequence[NativeWord],
+    horizontal_wall: bool,
+) -> list[NativeWord] | None:
+    owned: list[NativeWord] = []
+    spans: list[tuple[Decimal, Decimal]] = []
+    for left, right, span in intervals:
+        inside = [
+            word for word in figures
+            if left + _FACE_PT < _word_along(word, horizontal_wall) < right - _FACE_PT
+        ]
+        if len(inside) != 1:
+            return None
+        millimetres = _figured_mm(inside[0])
+        if millimetres == 0:
+            return None
+        owned.append(inside[0])
+        spans.append((span, millimetres))
+    if len(spans) > 1:
+        ratios = [span / millimetres for span, millimetres in spans]
+        first = ratios[0]
+        if any(abs(ratio / first - 1) > Decimal("0.05") for ratio in ratios[1:]):
+            return None
+    return owned
+
+
+def _unique_ratio_cover(
+    intervals: Sequence[tuple[float, float, Decimal]],
+    figures: Sequence[NativeWord],
+) -> list[NativeWord] | None:
+    """Split a crowded hash run when exactly one interval-to-figure cover has one pt/mm.
+
+    Geometric PDF wall length is not an input. The only comparison is hash-interval
+    span versus the printed millimetres already on this same dimension chain.
+    """
+    count_intervals = len(intervals)
+    count_figures = len(figures)
+    if count_intervals < 2 or count_figures < 2 or count_intervals > 8 or count_figures > 6:
+        return None
+    millimetres = [_figured_mm(word) for word in figures]
+    if any(value == 0 for value in millimetres):
+        return None
+    signatures: dict[tuple[Decimal, ...], list[tuple[int, ...]]] = {}
+    for assignment in product(range(count_figures), repeat=count_intervals):
+        if len(set(assignment)) != count_figures:
+            continue
+        spans = [Decimal("0")] * count_figures
+        for index, figure_index in enumerate(assignment):
+            spans[figure_index] += intervals[index][2]
+        ratios = [spans[index] / millimetres[index] for index in range(count_figures)]
+        first = ratios[0]
+        if any(abs(ratio / first - 1) > Decimal("0.05") for ratio in ratios[1:]):
+            continue
+        signature = tuple(millimetres[figure_index] for figure_index in assignment)
+        signatures.setdefault(signature, []).append(assignment)
+    if len(signatures) != 1:
+        return None
+    return list(figures)
 
 
 def bind_wall_hash_length(
