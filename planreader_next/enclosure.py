@@ -19,7 +19,7 @@ from .engine import NativePage, SourceConflict, _digest
 
 _ROOM_WORDS = frozenset({
     "BED", "BEDROOM", "BATH", "BATHROOM", "ENSUITE", "WC", "LAUNDRY",
-    "GARAGE", "LIVING", "DINING", "KITCHEN", "ENTRY", "MEDIA", "HALL",
+    "GARAGE", "LIVING", "DINING", "KITCHEN", "KIT", "ENTRY", "MEDIA", "HALL",
     "STUDY", "ROBE", "ALFRESCO", "LOUNGE", "PANTRY", "OFFICE",
 })
 _FINISH_WORDS = frozenset({
@@ -81,6 +81,11 @@ def propose_room_enclosures(
         source_sha256=page.source_sha256,
         page_index=page.page_index,
         sliding_leaf_frame_closure=include_sliding,
+        panel_lift_label_closure=True,
+        source_words=[
+            {"text": w.text, "bbox_pdf_pts": w.bbox, "source_ref": w.ref}
+            for w in page.words
+        ],
     )
     virtual_fills = [
         {
@@ -89,6 +94,9 @@ def propose_room_enclosures(
             "bbox_pdf_pts": _fill_bbox(item),
             "native_opening_path_indices": list(item.native_path_indices),
             "native_wall_path_indices": list(item.wall_path_indices),
+            "native_opening_word_refs": list(item.native_word_refs),
+            "physical_header_and_jamb_walls_preserved": True,
+            "door_panel_is_not_wall": True,
             "physical_wall": False,
             "topology_only": True,
             "retain_source_opening": True,

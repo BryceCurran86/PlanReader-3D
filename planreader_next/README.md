@@ -179,9 +179,10 @@ wall/door/frame measurement stages.
 
 ```powershell
 python -m planreader_next boundaries --pdf "<3Laurel original PDF>" --page 2 --output boundaries-preview.json
-python -m planreader_next suggest --pdf "<3Laurel original PDF>" --page 2 --project-id au_qld_3laurel --revision-id Rev3 --output proposed-rooms.json
+python -m planreader_next suggest --pdf "<3Laurel original PDF>" --page 2 --project-id au_qld_3laurel --revision-id Rev3 --output proposed-rooms.json --with-boundaries
 # --skip-sliding excludes sliding-leaf evidence in boundaries; suggest uses
-# the full supported topology unless --skip-opening-closures is requested.
+# the full supported topology only when --with-boundaries is set, so the
+original fast Cursor source-reading path remains unchanged by default.
 ```
 
 `boundaries` writes `virtual_wall_fills` and `regions` (each source-owned
@@ -203,3 +204,21 @@ and numbered label review before any metric finish takeoff. Do not make
 unverified wall-to-wall connections or treat a preview as a signed wall/ceiling
 or doorway measurement. The original 20,000-primitive and 2.5-pt production
 controls and the frozen V2 denominator are not changed.
+
+### Garage panel-lift door / full enclosed footprint
+
+A source-labelled **Panel Lift Door** is a real opening: structural side
+jambs and the **wall above the door** remain physically measurable, while the
+door leaf/panel is **never solid wall**. On the *floor plan only*, the engine
+places a **topology-only closing barrier** across the long garage entrance
+when there is an original bounded wall-layer interruption, adjacent printed
+"Door / Lift / Panel" words on the same axis, and an original opening size
+word. It does **not** write a wall polygon, door height or frame quantity.
+The labelled opening, word refs and source wall path indices remain inspectable.
+
+On original frozen-SHA 3Laurel page index 2, this adds the 4,800 mm labelled
+panel-lift door to the 38 prior closures: 39 virtual closures, 9 candidate
+enclosed regions, 4 single-room hints (including GARAGE / CONCRETE), 2 still
+unresolved regions, 11 unowned collinear gaps. No signed/customer quantities
+or official benchmark changes. The 4,800 mm annotation is corroborative
+**label evidence only**; it is not used to derive area from PDF points.

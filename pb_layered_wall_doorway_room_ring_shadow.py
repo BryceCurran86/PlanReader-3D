@@ -66,6 +66,7 @@ REASON_SOURCE_HASH = "source_sha256_mismatch"
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
+KIND_PANEL_LIFT = "panel_lift_door_topology_closure"
 
 _RECORD_SEAL = object()
 
@@ -174,6 +175,8 @@ class LayeredDoorwayClosure:
     gap_interval: tuple[float, float]
     native_path_indices: tuple[int, ...]
     wall_path_indices: tuple[int, ...]
+    # Original native text witnesses for a panel door; these are not wall geometry.
+    native_word_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -687,6 +690,65 @@ def _sliding_leaf_evidence(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> 
     return tuple(sorted({low[0][2], high[0][2], first[3], second[3]}))
 
 
+def _panel_lift_word_evidence(
+    gap: _Gap, source_words: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...] | None:
+    """A printed 'Panel Lift Door' beside ONE bounded wall interruption.
+
+    The word coordinates come from the SHA-verified source page. Require the
+    three adjacent words on one baseline, a source-drawn large numeric opening
+    figure, and a real original wall band. No inferred garage shape or solid
+    wall is created. The evidence permits only a temporary 2D barrier.
+    """
+    if not gap.collinear or gap.hi - gap.lo < 10.0:
+        return None
+    if not gap.left_path_indices and not gap.right_path_indices:
+        return None
+    horizontal = gap.horizontal
+    centre = (gap.band[0] + gap.band[1]) / 2.0
+    near: dict[str, list[tuple[float, float, float, str]]] = {}
+    figured: list[tuple[int, str]] = []
+    for word in source_words:
+        if not isinstance(word, Mapping):
+            continue
+        t = str(word.get("text", "")).strip()
+        bounds = word.get("bbox_pdf_pts")
+        ref = str(word.get("source_ref", ""))
+        if not ref or not isinstance(bounds, (tuple, list)) or len(bounds) != 4:
+            continue
+        try:
+            x0, y0, x1, y1 = (float(v) for v in bounds)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not all(math.isfinite(v) for v in (x0, y0, x1, y1)) or x1 < x0 or y1 < y0:
+            continue
+        along0, along1 = (x0, x1) if horizontal else (y0, y1)
+        cross = ((y0 + y1) / 2.0) if horizontal else ((x0 + x1) / 2.0)
+        if abs(cross - centre) > 12.0 or along0 < gap.lo - 1.0 or along1 > gap.hi + 1.0:
+            continue
+        name = t.upper()
+        near.setdefault(name, []).append((along0, along1, cross, ref))
+        digits = t.replace(",", "")
+        if digits.isdecimal() and 2000 <= int(digits) <= 12000:
+            figured.append((int(digits), ref))
+    if any(len(near.get(term, [])) != 1 for term in ("DOOR", "LIFT", "PANEL")) or not figured:
+        return None
+    # A real contiguous annotation reading "Door Lift Panel" in page-axis order
+    # for this orientation. A random collection of distant text must not
+    # authorize an opening.
+    label = sorted([near[t][0] for t in ("DOOR", "LIFT", "PANEL")])
+    if any(label[i + 1][0] - label[i][1] > 7.0 for i in range(2)):
+        return None
+    if max(w[2] for w in label) - min(w[2] for w in label) > 2.5:
+        return None
+    if label[-1][1] - label[0][0] > 0.75 * (gap.hi - gap.lo):
+        return None
+    # Prefer the largest printed dimension (door width, not height) as a
+    # separate source witness, without converting the PDF span into metres.
+    _figure, figure_ref = max(figured)
+    return tuple(w[3] for w in label) + (figure_ref,)
+
+
 def _closed_union(polygons: Iterable[Polygon]) -> Any:
     merged = unary_union([p.buffer(_CLOSING_PT, join_style=2) for p in polygons])
     return merged.buffer(-_CLOSING_PT, join_style=2)
@@ -750,6 +812,8 @@ def build_layered_wall_doorway_room_rings(
     source_sha256: str,
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
+    panel_lift_label_closure: bool = False,
+    source_words: Sequence[Mapping[str, Any]] = (),
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -758,6 +822,8 @@ def build_layered_wall_doorway_room_rings(
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
+    if type(panel_lift_label_closure) is not bool:
+        raise ValueError("panel_lift_label_closure must be an explicit boolean")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -791,18 +857,27 @@ def build_layered_wall_doorway_room_rings(
         swing = swing_by_gap.get(gap_index)
         stroke = None if swing is not None else _stroke_closed(drawings, gap)
         sliding = sliding_by_gap.get(gap_index)
+        panel_words = (
+            _panel_lift_word_evidence(gap, source_words)
+            if panel_lift_label_closure else None
+        )
+        if panel_words is not None and (swing is not None or stroke is not None or sliding is not None):
+            unresolved.append(gap)  # Competing source owners; no arbitrary priority.
+            continue
         if sliding is not None and (swing is not None or stroke is not None):
             unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
             continue
-        if swing is None and stroke is None and sliding is None:
+        if swing is None and stroke is None and sliding is None and panel_words is None:
             unresolved.append(gap)
             continue
         if swing is not None:
             kind, native = KIND_SWING, (swing["arc"], swing["leaf"])
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
-        else:
+        elif sliding is not None:
             kind, native = KIND_SLIDING_LEAF, tuple(sliding)
+        else:
+            kind, native = KIND_PANEL_LIFT, ()
         closure_id = stable_contract_id(
             "layered_doorway_closure",
             {
@@ -813,6 +888,7 @@ def build_layered_wall_doorway_room_rings(
                 "band": [round(v, 3) for v in gap.band],
                 "gap": [round(gap.lo, 3), round(gap.hi, 3)],
                 "native": list(native),
+                "native_word_refs": list(panel_words or ()),
             },
             digest_chars=24,
         )
@@ -820,6 +896,7 @@ def build_layered_wall_doorway_room_rings(
             closure_id=closure_id, kind=kind, horizontal=gap.horizontal,
             band=gap.band, gap_interval=(gap.lo, gap.hi), native_path_indices=tuple(native),
             wall_path_indices=tuple(sorted(set(gap.left_path_indices) | set(gap.right_path_indices))),
+            native_word_refs=tuple(panel_words or ()),
         ))
         closure_rects.append((closure_id, gap.rect()))
 
@@ -928,6 +1005,7 @@ def build_from_pdf_bytes(
 __all__ = [
     "KIND_STROKE",
     "KIND_SLIDING_LEAF",
+    "KIND_PANEL_LIFT",
     "KIND_SWING",
     "LAYERED_ROOM_RING_SCHEMA_VERSION",
     "LayeredDoorwayClosure",

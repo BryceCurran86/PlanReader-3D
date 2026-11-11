@@ -32,8 +32,10 @@ def main() -> int:
     suggest.add_argument("--project-id", required=True)
     suggest.add_argument("--revision-id", required=True)
     suggest.add_argument("--output", type=Path, required=True)
+    suggest.add_argument("--with-boundaries", action="store_true",
+                         help="Opt in to slower source-attested door/window wall-closure room polygons")
     suggest.add_argument("--skip-opening-closures", action="store_true",
-                         help="Skip topology-only virtual wall closure preview")
+                         help="Legacy override: skip topology-only virtual wall closures")
     boundaries = sub.add_parser("boundaries", help="Temporarily close verified openings to suggest room polygons")
     boundaries.add_argument("--pdf", type=Path, required=True)
     boundaries.add_argument("--page", type=int, default=0)
@@ -55,7 +57,7 @@ def main() -> int:
         elif args.mode == "suggest":
             page = load_native_page(args.pdf, args.page)
             result = suggest_room_bindings(page)
-            if not args.skip_opening_closures:
+            if args.with_boundaries and not args.skip_opening_closures:
                 from .enclosure import propose_room_enclosures
                 result["enclosure_preview"] = propose_room_enclosures(page, args.pdf)
             result["project_id"] = args.project_id

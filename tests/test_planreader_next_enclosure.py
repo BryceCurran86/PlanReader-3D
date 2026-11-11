@@ -76,7 +76,7 @@ def test_suggest_command_includes_enclosure_preview_without_measuring(tmp_path):
     completed = subprocess.run([
         sys.executable, "-m", "planreader_next", "suggest",
         "--pdf", str(path), "--page", "0", "--project-id", "synthetic",
-        "--revision-id", "r1", "--output", str(out),
+        "--revision-id", "r1", "--output", str(out), "--with-boundaries",
     ], capture_output=True, text=True, check=True)
     assert json.loads(completed.stdout)["candidate_enclosed_regions"] == 1
     report = json.loads(out.read_text(encoding="utf-8"))
@@ -92,21 +92,45 @@ def test_suggest_command_includes_enclosure_preview_without_measuring(tmp_path):
         ], capture_output=True, text=True, check=True)
 
 
+def test_normal_suggest_stays_fast_without_opt_in(tmp_path):
+    path, _ = make_synthetic(tmp_path)
+    out = tmp_path / "cursor-fast-path.json"
+    completed = subprocess.run([
+        sys.executable, "-m", "planreader_next", "suggest",
+        "--pdf", str(path), "--page", "0", "--project-id", "synthetic",
+        "--revision-id", "r1", "--output", str(out),
+    ], capture_output=True, text=True, check=True)
+    packet = json.loads(out.read_text(encoding="utf8"))
+    assert "enclosure_preview" not in packet
+    assert json.loads(completed.stdout)["candidate_enclosed_regions"] == 0
+
+
 def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     original = require_original_3laurel()
     page = load_native_page(original, 2)
     assert page.source_sha256 == ORIGINAL_SHA256
     result = propose_room_enclosures(page, original, include_sliding=True)
-    assert result["virtual_fill_count"] == 38
-    assert result["candidate_enclosed_regions"] == 8
-    assert result["single_room_shape_hints"] == 3
+    assert result["virtual_fill_count"] == 39
+    assert result["candidate_enclosed_regions"] == 9
+    assert result["single_room_shape_hints"] == 4
     assert result["unresolved_regions"] == 2
-    assert result["unresolved_wall_gap_count"] == 12
+    assert result["unresolved_wall_gap_count"] == 11
     kinds = {f["kind"] for f in result["virtual_wall_fills"]}
     assert kinds == {
         "swing_doorway", "source_stroke_closure",
-        "sliding_leaf_frame_closure",
+        "sliding_leaf_frame_closure", "panel_lift_door_topology_closure",
     }
+    garage = [r for r in result["regions"]
+              if {w["text"] for w in r["room_label_words"]} == {"GARAGE"}
+              and {w["text"] for w in r["finish_marker_words"]} == {"CONCRETE"}]
+    assert len(garage) == 1
+    assert garage[0]["status"] == "candidate"
+    panel = [f for f in result["virtual_wall_fills"]
+             if f["kind"] == "panel_lift_door_topology_closure"]
+    assert len(panel) == 1 and len(panel[0]["native_opening_word_refs"]) == 4
+    assert panel[0]["topology_only"] is True
+    assert panel[0]["physical_wall"] is False
+    assert panel[0]["door_panel_is_not_wall"] is True
     bedrooms = [
         r for r in result["regions"]
         if r["single_room_shape_hint"]
