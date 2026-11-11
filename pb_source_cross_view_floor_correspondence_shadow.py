@@ -603,13 +603,28 @@ class SourceCrossViewFloorCorrespondenceRecord:
 
 
 class _UniqueWeakValueDictionary(WeakValueDictionary):
-    """WeakValueDictionary that prevents overwriting an existing key with conflicting authority."""
+    """Keep the first live producer instance at every authority key."""
 
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
-        if existing is not None and existing is not value and existing != value:
+        if existing is not None and existing is not value:
             raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
+
+    def register_issued(self, keys, value):
+        """Reuse an identical producer replay without replacing its first issuance."""
+        keys = tuple(keys)
+        issued = value
+        for key in keys:
+            existing = self.get(key)
+            if existing is None:
+                continue
+            if existing != value or (issued is not value and issued is not existing):
+                raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+            issued = existing
+        for key in keys:
+            self[key] = issued
+        return issued
 
 
 _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT: _UniqueWeakValueDictionary[
@@ -2030,9 +2045,9 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
-    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
-    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
-    return res
+    return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+    )
 
 
 
@@ -2367,9 +2382,9 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
-        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
-        _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
-        return res
+        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -3399,9 +3414,9 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
-    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
-    _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
-    return res
+    return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+    )
 
 
 
@@ -3643,9 +3658,9 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
-        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(snapshot_id), str(rec_id))] = res
-        _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[(str(revision_id), str(rec_id))] = res
-        return res
+        return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -3707,7 +3722,13 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         raise ValueError("unissued or mismatched room area quantity evidence")
 
     area_val = getattr(area_evidence, "value", getattr(area_evidence, "normalized_value", None))
-    if area_val is None or abs(float(area_val) - correspondence.area_m2) > 1e-4:
+    try:
+        numeric_area = float(area_val)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("room area value mismatch with ceiling area") from None
+    if not (
+        math.isfinite(numeric_area) and math.isfinite(correspondence.area_m2)
+    ) or abs(numeric_area - correspondence.area_m2) > 1e-4:
         raise ValueError("room area value mismatch with ceiling area")
     area_status = getattr(area_evidence, "status", None)
     if area_status not in ("firm", EvidenceResolutionStatus.CORROBORATED):
@@ -3722,13 +3743,13 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         "explicit_room_area",
     ):
         raise ValueError(
-            f"invalid room area evidence family: {area_family}; expected floor_area or room_area"
+            "invalid room area evidence family; expected floor_area or room_area"
         )
 
     # Unit must be m2
     area_unit = getattr(area_evidence, "unit", None)
     if area_unit is not None and str(area_unit).lower() not in ("m2", "m²", "sqm"):
-        raise ValueError(f"invalid room area evidence unit: {area_unit}; expected m2")
+        raise ValueError("invalid room area evidence unit; expected m2")
 
     # Blocking reasons or abstained status must reject
     blocking_reasons = (
@@ -3737,7 +3758,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     )
     if blocking_reasons:
         raise ValueError(
-            f"room area evidence has unresolved authority blockers: {blocking_reasons}"
+            "room area evidence has unresolved authority blockers"
         )
     if getattr(area_evidence, "abstained", False):
         raise ValueError("abstained room area evidence cannot create firm ceiling authority")
@@ -3750,7 +3771,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     )
     if meta_snap and str(meta_snap) != str(correspondence.snapshot_id):
         raise ValueError(
-            f"room area evidence snapshot_id {meta_snap} does not match correspondence snapshot {correspondence.snapshot_id}"
+            "room area evidence snapshot_id does not match correspondence snapshot"
         )
 
     meta_doc = (
@@ -3759,7 +3780,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     )
     if meta_doc and str(meta_doc) != str(correspondence.document_id):
         raise ValueError(
-            f"room area evidence document_id {meta_doc} does not match correspondence document {correspondence.document_id}"
+            "room area evidence document_id does not match correspondence document"
         )
 
     meta_sha = (
@@ -3768,7 +3789,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     )
     if meta_sha and str(meta_sha).lower() != str(correspondence.source_sha256).lower():
         raise ValueError(
-            f"room area evidence source_sha256 {meta_sha} does not match correspondence SHA {correspondence.source_sha256}"
+            "room area evidence source_sha256 does not match correspondence SHA"
         )
 
     meta_entity = (
@@ -3780,13 +3801,13 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         str(correspondence.physical_room_id),
         str(getattr(room, "source_room_face_record_id", "")),
     ):
-        raise ValueError(f"room area evidence entity_id {meta_entity} does not match room")
+        raise ValueError("room area evidence entity_id does not match room")
 
     # 1. Authenticate ceiling correspondence against authentic producer issuance
     auth_corr = get_authenticated_ceiling_correspondence(correspondence.snapshot_id, correspondence.record_id)
     if auth_corr is None or auth_corr is not correspondence:
         raise ValueError(
-            f"unissued or caller-created ceiling correspondence record: record {correspondence.record_id} was not issued by an authentic ceiling correspondence producer"
+            "unissued or caller-created ceiling correspondence record"
         )
     if not correspondence.definition_record_id or not correspondence.occurrence_record_id or not correspondence.occurrence_evidence_id:
         raise ValueError("ceiling correspondence missing definition or occurrence records")
@@ -3806,13 +3827,13 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         auth_area_rec = get_authenticated_room_area_record(correspondence.snapshot_id, str(correspondence.physical_room_id))
     if auth_area_rec is None:
         raise ValueError(
-            f"unissued or unauthorized room area evidence: {lookup_id or room_area_qty_id} was not issued by an authentic room area producer"
+            "unissued or unauthorized room area evidence"
         )
 
     if isinstance(area_evidence, EvidenceAtom):
         if auth_area_rec.area_evidence is not area_evidence:
             raise ValueError(
-                f"unauthorized room area evidence object: must be the exact authentic producer-issued EvidenceAtom for {lookup_id}"
+                "unauthorized room area evidence object: must be the exact authentic producer-issued EvidenceAtom"
             )
     elif isinstance(area_evidence, QuantityEvidence):
         if (
@@ -3822,7 +3843,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
             raise ValueError("unauthorized quantity evidence object: does not reference authentic producer-issued room area evidence")
     else:
         raise ValueError(
-            f"unauthorized room area evidence type: {type(area_evidence).__name__}; expected EvidenceAtom or QuantityEvidence"
+            "unauthorized room area evidence type; expected EvidenceAtom or QuantityEvidence"
         )
 
     # 3. Verify physical room identity, figured dimension lineage and physical axis correspondence
@@ -3831,8 +3852,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         or auth_area_rec.source_room_face_record_id != correspondence.source_room_face_record_id
     ):
         raise ValueError(
-            f"room area record physical room ({auth_area_rec.physical_room_id}, {auth_area_rec.source_room_face_record_id}) "
-            f"does not match ceiling correspondence physical room ({correspondence.physical_room_id}, {correspondence.source_room_face_record_id})"
+            "room area record physical room does not match ceiling correspondence physical room"
         )
 
     if not auth_area_rec.horizontal_dimension_id or not auth_area_rec.vertical_dimension_id:
@@ -3859,55 +3879,56 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
 
     if h_val is None or v_val is None:
         raise ValueError(
-            f"authenticated room area producer dimensions ({h_dim}, {v_dim}) missing numeric axis values"
+            "authenticated room area producer dimensions missing numeric axis values"
         )
 
     try:
         h_val_float = float(h_val)
         v_val_float = float(v_val)
-    except (TypeError, ValueError):
-        raise ValueError("authenticated room area producer dimensions have non-numeric axis values")
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("authenticated room area producer dimensions have non-numeric axis values") from None
 
+    if not (math.isfinite(h_val_float) and math.isfinite(v_val_float)):
+        raise ValueError("authenticated room area producer dimensions must be finite")
     if h_val_float <= 0.0 or v_val_float <= 0.0:
         raise ValueError("authenticated room area producer dimensions must be strictly positive")
 
     expected_area = round(h_val_float * v_val_float / 1_000_000.0, 5)
-    if abs(correspondence.area_m2 - expected_area) > 1e-4:
+    if not math.isfinite(expected_area) or abs(correspondence.area_m2 - expected_area) > 1e-4:
         raise ValueError(
-            f"ceiling correspondence area {correspondence.area_m2} does not match "
-            f"physical room area derived from figured dimensions ({expected_area})"
+            "ceiling correspondence area does not match physical room area derived from figured dimensions"
         )
 
     # Caller metadata must not conflict with producer-authenticated axis IDs or values
     meta_h_dim = metadata.get("horizontal_dimension_id")
     if meta_h_dim and meta_h_dim != h_dim and meta_h_dim != f"dim_{int(round(h_val_float))}":
         raise ValueError(
-            f"caller metadata horizontal_dimension_id '{meta_h_dim}' conflicts with authenticated producer dimension '{h_dim}'"
+            "caller metadata horizontal_dimension_id conflicts with authenticated producer dimension"
         )
     meta_v_dim = metadata.get("vertical_dimension_id")
     if meta_v_dim and meta_v_dim != v_dim and meta_v_dim != f"dim_{int(round(v_val_float))}":
         raise ValueError(
-            f"caller metadata vertical_dimension_id '{meta_v_dim}' conflicts with authenticated producer dimension '{v_dim}'"
+            "caller metadata vertical_dimension_id conflicts with authenticated producer dimension"
         )
     meta_h_val = metadata.get("horizontal_value_mm")
     if meta_h_val is not None:
         try:
             meta_h_val_float = float(meta_h_val)
-        except (TypeError, ValueError):
-            raise ValueError("caller metadata horizontal_value_mm is non-numeric")
-        if abs(meta_h_val_float - h_val_float) > 1e-3:
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("caller metadata horizontal_value_mm is non-numeric") from None
+        if not math.isfinite(meta_h_val_float) or abs(meta_h_val_float - h_val_float) > 1e-3:
             raise ValueError(
-                f"caller metadata horizontal_value_mm '{meta_h_val}' conflicts with authenticated producer value '{h_val_float}'"
+                "caller metadata horizontal_value_mm conflicts with authenticated producer value"
             )
     meta_v_val = metadata.get("vertical_value_mm")
     if meta_v_val is not None:
         try:
             meta_v_val_float = float(meta_v_val)
-        except (TypeError, ValueError):
-            raise ValueError("caller metadata vertical_value_mm is non-numeric")
-        if abs(meta_v_val_float - v_val_float) > 1e-3:
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("caller metadata vertical_value_mm is non-numeric") from None
+        if not math.isfinite(meta_v_val_float) or abs(meta_v_val_float - v_val_float) > 1e-3:
             raise ValueError(
-                f"caller metadata vertical_value_mm '{meta_v_val}' conflicts with authenticated producer value '{v_val_float}'"
+                "caller metadata vertical_value_mm conflicts with authenticated producer value"
             )
 
     corr_dim_ids = tuple(correspondence.figured_dimension_ids)
@@ -3928,16 +3949,17 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     for dim_id in corr_dim_ids:
         if dim_id not in allowed_refs:
             raise ValueError(
-                f"ceiling correspondence contains foreign figured dimension ID '{dim_id}' "
-                f"not owned by authenticated room area ({h_dim}, {v_dim})"
+                "ceiling correspondence contains foreign figured dimension ID not owned by authenticated room area"
             )
-    if not (
-        any(ref in corr_dim_ids for ref in valid_h_refs)
-        and any(ref in corr_dim_ids for ref in valid_v_refs)
+    # A numeric alias shared by equal axes identifies neither source witness.
+    # Each axis needs its own unambiguous producer-owned reference. Different
+    # numeric aliases remain supported for existing nonsquare source records.
+    if h_dim == v_dim or not (
+        set(corr_dim_ids) & (valid_h_refs - valid_v_refs)
+        and set(corr_dim_ids) & (valid_v_refs - valid_h_refs)
     ):
         raise ValueError(
-            f"room area figured dimensions ({h_dim}, {v_dim}) "
-            f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
+            "room area figured dimensions do not match ceiling correspondence figured dimensions: distinct axis witnesses required"
         )
 
     # 4. Bind and validate room_area_qty_id strictly through authentic issuer contracts
@@ -4002,11 +4024,11 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     if isinstance(area_evidence, QuantityEvidence):
         if str(area_evidence.quantity_id) not in valid_qty_ids:
             raise ValueError(
-                f"unauthorized quantity evidence id: {area_evidence.quantity_id} was not issued by an authentic room area quantity producer"
+                "unauthorized quantity evidence id"
             )
         if str(area_evidence.quantity_id) != str(room_area_qty_id):
             raise ValueError(
-                f"room area quantity id mismatch: {room_area_qty_id} does not match area evidence quantity id {area_evidence.quantity_id}"
+                "room area quantity id mismatch"
             )
 
     if not room_area_qty_id or str(room_area_qty_id) not in valid_qty_ids:
@@ -4015,14 +4037,14 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     # 5. RCP finish code, support page, and viewport verification
     if correspondence.finish_code != expected_finish_code:
         raise ValueError(
-            f"invalid ceiling correspondence finish code: {correspondence.finish_code}; expected {expected_finish_code}"
+            "invalid ceiling correspondence finish code"
         )
     if str(correspondence.support_page_id) not in expected_support_pages:
         raise ValueError(
-            f"invalid ceiling correspondence support page: {correspondence.support_page_id}; expected {expected_support_pages}"
+            "invalid ceiling correspondence support page"
         )
     if "RCP" not in str(correspondence.support_viewport_id):
-        raise ValueError(f"invalid ceiling correspondence viewport: {correspondence.support_viewport_id}; must be RCP")
+        raise ValueError("invalid ceiling correspondence viewport; must be RCP")
 
     canonical_ceiling_id = correspondence.canonical_ceiling_id
     ceiling_qty_id = stable_contract_id(
@@ -4033,7 +4055,7 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
         },
         digest_chars=32,
     )
-    area_ev_id = getattr(area_evidence, "evidence_id", str(area_evidence))
+    area_ev_id = auth_area_rec.area_evidence.evidence_id
     ceiling_evidence_ids = tuple(
         dict.fromkeys(
             (

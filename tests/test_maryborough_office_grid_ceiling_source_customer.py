@@ -792,13 +792,14 @@ def test_adversarial_wrong_family_foreign_snapshot_blocked_area_evidence_raises(
         unit="m2",
         metadata={"snapshot_id": "FOREIGN_SNAP_XYZ"},
     )
-    with pytest.raises(ValueError, match="snapshot_id FOREIGN_SNAP_XYZ does not match"):
+    with pytest.raises(ValueError, match="snapshot_id does not match") as exc:
         compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
             correspondence=corr,
             room=room,
             area_evidence=adv_foreign,
             room_area_qty_id="area_qty_1",
         )
+    assert "FOREIGN_SNAP_XYZ" not in str(exc.value)
 
 
 

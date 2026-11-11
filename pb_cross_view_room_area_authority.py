@@ -174,13 +174,32 @@ class CrossViewRoomAreaRecord:
 
 
 class _UniqueWeakValueDictionary(WeakValueDictionary):
-    """WeakValueDictionary that prevents overwriting an existing key with conflicting authority."""
+    """Keep the first live producer instance at every authority key."""
 
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
-        if existing is not None and existing is not value and existing != value:
+        if existing is not None and existing is not value:
             raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
+
+    def register_issued(self, keys, value):
+        """Reuse an identical producer replay without replacing its first issuance.
+
+        Only completed producer records use this seam. Direct registration
+        still requires object identity. Validate every alias before writing.
+        """
+        keys = tuple(keys)
+        issued = value
+        for key in keys:
+            existing = self.get(key)
+            if existing is None:
+                continue
+            if existing != value or (issued is not value and issued is not existing):
+                raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+            issued = existing
+        for key in keys:
+            self[key] = issued
+        return issued
 
 
 _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: _UniqueWeakValueDictionary[
@@ -2017,13 +2036,18 @@ class CrossViewRoomAreaProducer:
             conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
-        for rec in records:
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.area_evidence.evidence_id))] = rec
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.area_evidence.evidence_id))] = rec
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.physical_room_id))] = rec
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.physical_room_id))] = rec
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.source_room_face_record_id))] = rec
-            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.source_room_face_record_id))] = rec
+        records = [
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.register_issued(
+                (
+                    (str(scope), str(identity))
+                    for scope in (published.snapshot.snapshot_id, published.revision.revision_id)
+                    for identity in (rec.area_evidence.evidence_id, rec.physical_room_id,
+                                     rec.source_room_face_record_id)
+                ),
+                rec,
+            )
+            for rec in records
+        ]
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
             status = EvidenceResolutionStatus.CORROBORATED
