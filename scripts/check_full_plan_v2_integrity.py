@@ -177,6 +177,8 @@ def _cross_descriptor_identity_fields() -> tuple[str, ...]:
 
 def _stable_identity_snapshots(before: os.stat_result, opened: os.stat_result, completed: os.stat_result, after: os.stat_result) -> bool:
     """Preserve ctime within each Windows stat API, not across unlike APIs."""
+    if before.st_ino <= 0:
+        return False
     snapshots = (opened, completed, after)
     if any(getattr(snapshot, field) != getattr(before, field)
            for snapshot in snapshots for field in _cross_descriptor_identity_fields()):
