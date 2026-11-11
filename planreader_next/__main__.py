@@ -5,6 +5,7 @@
   # Inspect suggestions; confirm internal finished wall faces before changing
   # boundary_basis from REVIEW_REQUIRED to internal_finished_wall_face.
   python -m planreader_next measure --pdf drawing.pdf --selection reviewed.json --output takeoff-draft.json
+  python -m planreader_next takeoff --pdf combined.pdf --selection reviewed-building.json --output building-draft.json
 
 All file output is create-only. Drafts are NOT approved commercial quantities.
 """
@@ -35,6 +36,10 @@ def main() -> int:
     measure.add_argument("--pdf", type=Path, required=True)
     measure.add_argument("--selection", type=Path, required=True)
     measure.add_argument("--output", type=Path, required=True)
+    takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
+    takeoff.add_argument("--pdf", type=Path, required=True)
+    takeoff.add_argument("--selection", type=Path, required=True)
+    takeoff.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.mode == "inspect":
@@ -43,6 +48,22 @@ def main() -> int:
             result = suggest_room_bindings(load_native_page(args.pdf, args.page))
             result["project_id"] = args.project_id
             result["revision_id"] = args.revision_id
+        elif args.mode == "takeoff":
+            from .building import measure_building_components
+            selected = json.loads(args.selection.read_text(encoding="utf-8"))
+            required_pages: set[int] = set()
+            for kind in ("rooms", "ceilings", "walls"):
+                for claim in selected.get(kind, []):
+                    required_pages.add(claim["page_index"])
+                    if kind == "walls":
+                        required_pages.add(claim["height_source_page_index"])
+            for claim in selected.get("doors", []):
+                required_pages.add(claim["plan_page_index"])
+                required_pages.add(claim["schedule_page_index"])
+            if not required_pages:
+                raise SourceConflict("no_source_page_receipts_selected")
+            pages = {n: load_native_page(args.pdf, n) for n in sorted(required_pages)}
+            result = measure_building_components(pages, selected)
         else:
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
             result = measure_page(

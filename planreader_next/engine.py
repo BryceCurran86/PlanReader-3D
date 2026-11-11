@@ -146,11 +146,15 @@ def _required_text(row: Mapping[str, Any], key: str) -> str:
     return value.strip()
 
 
-def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
+def _measure_one(
+    page: NativePage, row: Mapping[str, Any], *,
+    expected_basis: str = "internal_finished_wall_face",
+    trade: str = "floor_finish",
+) -> dict[str, Any]:
     words = {w.ref: w for w in page.words}
     rects = {r.ref: r for r in page.rectangles}
-    if row.get("boundary_basis") != "internal_finished_wall_face":
-        raise SourceConflict("internal_finished_face_not_confirmed")
+    if row.get("boundary_basis") != expected_basis:
+        raise SourceConflict("reviewed_surface_boundary_not_confirmed") if trade != "floor_finish" else SourceConflict("internal_finished_face_not_confirmed")
     source_edges: tuple[str, ...] = ()
     if "boundary_segment_refs" in row:
         from .polygon import source_polygon
@@ -206,21 +210,21 @@ def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
     # Reviewer-authenticated binding creates a measurable draft, NOT source-
     # independent commercial/FIRM authority. Do not publish directly to JobHub.
     trace = "|".join((
-        page.source_sha256, str(page.page_index), geometry_ref, *refs.values(), room_id,
+        page.source_sha256, str(page.page_index), geometry_ref, *refs.values(), room_id, trade,
     ))
     return {
         "row_id": sha256(trace.encode("utf-8")).hexdigest()[:24],
         "room_id": room_id,
         "room_label": label_word.text.strip(),
         "finish_code": finish,
-        "trade": "floor_finish",
+        "trade": trade,
         "quantity": format(area.normalize(), "f"),
         "unit": "m2",
         "source_sha256": page.source_sha256,
         "page_index": page.page_index,
         "geometry_ref": geometry_ref,
         "evidence_refs": {**refs, **({"boundary_segment_refs": list(source_edges)} if source_edges else {})},
-        "boundary_basis": "internal_finished_wall_face",
+        "boundary_basis": expected_basis,
         "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
         "commercial_publishable": False,
         "benchmark_credit": False,
