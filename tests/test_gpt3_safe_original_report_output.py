@@ -248,3 +248,41 @@ def test_same_byte_report_replacement_after_descriptor_read_is_rejected(
     assert reads >= 2
     assert output.read_bytes() == payload.encode("utf-8")
     assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+def test_windows_ctime_only_descriptor_discrepancy_keeps_exact_report(tmp_path):
+    """Windows lstat/fstat creation-time divergence must not veto same inode."""
+    import os
+    if os.name != "nt":
+        pytest.skip("Windows-only creation-time discrepancy")
+    for index in range(20):
+        target = tmp_path / f"safe-{index}.json"
+        pub.write_new_diagnostic(target, '{"harmless":true}\n', protected_roots=())
+        assert target.read_bytes() == b'{"harmless":true}\n'
+
+
+def test_same_byte_hardlink_replacement_different_inode_is_rejected(tmp_path, monkeypatch):
+    """A second hard-linked inode with identical bytes must not pass publication."""
+    import os
+    output = tmp_path / "report.json"
+    other = tmp_path / "other.json"
+    replacement = tmp_path / "other-link.json"
+    payload = '{"safe":true}\n'
+    other.write_bytes(payload.encode("utf-8"))
+    os.link(other, replacement)
+    original_open = pub.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if Path(path) == output and not swapped:
+            swapped = True
+            replacement.replace(output)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(pub.os, "open", swap_before_open)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, payload, protected_roots=())
+    assert swapped
+    assert output.read_bytes() == payload.encode("utf-8")
+    assert output.samefile(other)
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))

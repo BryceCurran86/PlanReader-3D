@@ -44,8 +44,14 @@ def _assert_published_report_unchanged(
     path replacement between those operations to masquerade as our report.
     Do not follow a raced symlink or trust a byte match from another inode.
     """
+    # Windows may report different creation-time (st_ctime_ns) values for
+    # lstat(path) and fstat(descriptor) on the very same hard-linked inode.
+    # Keep POSIX ctime checking; never weaken inode, link, mode, size, mtime
+    # or exact-byte checks on either platform.
     fields = ("st_dev", "st_ino", "st_mode", "st_nlink",
-              "st_size", "st_mtime_ns", "st_ctime_ns")
+              "st_size", "st_mtime_ns")
+    if os.name != "nt":
+        fields += ("st_ctime_ns",)
     try:
         staged = staged_path.lstat()
         before = output.lstat()
