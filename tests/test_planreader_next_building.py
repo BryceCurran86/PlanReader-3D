@@ -292,3 +292,21 @@ def test_frame_schedule_label_from_different_row_does_not_authorize_frame(proof)
     packet = measure_building_components(pages, selection)
     assert get(packet, "door_count")["quantity"] == "1"
     assert missing(packet, "door_frame")[0]["reason_code"] == "frame_presence_not_verified_from_schedule"
+
+
+def test_same_ceiling_geometry_cannot_be_sold_under_new_zone_id(proof):
+    _, pages, selection = proof
+    other = deepcopy(selection["ceilings"][0])
+    other["ceiling_id"] = "different-zone-id"
+    selection["ceilings"].append(other)
+    with pytest.raises(SourceConflict, match="duplicate_ceilings_source_surface"):
+        measure_building_components(pages, selection)
+
+
+def test_same_floor_source_cannot_be_sold_under_new_room_id(proof):
+    _, pages, selection = proof
+    other = deepcopy(selection["rooms"][0])
+    other["room_id"] = "different-room-id"
+    selection["rooms"].append(other)
+    with pytest.raises(SourceConflict, match="duplicate_rooms_source_surface"):
+        measure_building_components(pages, selection)

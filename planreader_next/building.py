@@ -249,10 +249,22 @@ def measure_building_components(
     inputs = {name: selection.get(name, []) for name in ("rooms", "ceilings", "walls", "doors")}
     if any(not isinstance(value, list) for value in inputs.values()):
         raise SourceConflict("building_family_selection_invalid")
-    for family, key in (("ceilings", "ceiling_id"), ("walls", "wall_id"), ("doors", "door_id")):
+    for family, key in (
+        ("rooms", "room_id"), ("ceilings", "ceiling_id"),
+        ("walls", "wall_id"), ("doors", "door_id"),
+    ):
         ids = [_required_text(row, key) for row in inputs[family]]
         if len(ids) != len(set(ids)):
             raise SourceConflict(f"duplicate_{family}_physical_id")
+    for family in ("rooms", "ceilings"):
+        shapes = [
+            (row.get("page_index"), "polygon", tuple(sorted(row["boundary_segment_refs"])))
+            if "boundary_segment_refs" in row
+            else (row.get("page_index"), "rectangle", row.get("rectangle_ref"))
+            for row in inputs[family]
+        ]
+        if len(set(shapes)) != len(shapes):
+            raise SourceConflict(f"duplicate_{family}_source_surface")
     wall_refs: dict[str, tuple[NativePage, NativeSegment]] = {}
     for row in inputs["walls"]:
         wall_id = _required_text(row, "wall_id")
