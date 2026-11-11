@@ -57,8 +57,59 @@ def _inside_words(page: NativePage, polygon: Polygon, tokens: frozenset[str]) ->
     return found
 
 
+def _label_viewports(
+    page: NativePage, margin: float = 80.0,
+) -> list[tuple[float, float, float, float]]:
+    """One neighbourhood per overlapping cluster of room-word boxes, not the page hull.
+
+    The hull of every room word on a dense floor plan commonly exceeds the 20,000
+    primitive cap. Separate labelled clusters keep original path indices and stay
+    inside that cap. This is not a wall layer and not a quantity.
+    """
+    boxes = []
+    for word in page.words:
+        if word.text.strip().upper() not in _ROOM_WORDS:
+            continue
+        x0, y0, x1, y1 = word.bbox
+        boxes.append((x0 - margin, y0 - margin, x1 + margin, y1 + margin))
+    if not boxes:
+        return []
+    parent = list(range(len(boxes)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def overlaps(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
+        return not (
+            left[2] < right[0] or left[0] > right[2]
+            or left[3] < right[1] or left[1] > right[3]
+        )
+
+    for i, left in enumerate(boxes):
+        for j in range(i + 1, len(boxes)):
+            if overlaps(left, boxes[j]):
+                parent[find(i)] = find(j)
+    groups: dict[int, list[tuple[float, float, float, float]]] = {}
+    for i, box in enumerate(boxes):
+        groups.setdefault(find(i), []).append(box)
+    return [
+        (
+            min(item[0] for item in group),
+            min(item[1] for item in group),
+            max(item[2] for item in group),
+            max(item[3] for item in group),
+        )
+        for group in groups.values()
+    ]
+
+
 def propose_room_enclosures(
     page: NativePage, pdf_path: str | Path, *, include_sliding: bool = True,
+    stroke_pair_wall_faces: bool = False,
+    viewport_pdf_pts: tuple[float, float, float, float] | list[tuple[float, float, float, float]] | None = None,
 ) -> dict[str, Any]:
     """Candidate room polygons from wall ink plus temporary opening barriers.
 
@@ -77,8 +128,12 @@ def propose_room_enclosures(
             raise SourceConflict("source_page_mismatch")
         drawings = document[page.page_index].get_drawings()
     confirm_source_snapshot(path, digest, identity)
-    if len(drawings) > 20000 or len(page.segments) > 20000:
-        raise SourceConflict("page_primitive_cap_exceeded")
+    if viewport_pdf_pts is None and stroke_pair_wall_faces:
+        clustered = _label_viewports(page)
+        viewport_pdf_pts = clustered or None
+    if not stroke_pair_wall_faces and viewport_pdf_pts is None:
+        if len(drawings) > 20000 or len(page.segments) > 20000:
+            raise SourceConflict("page_primitive_cap_exceeded")
 
     result = build_layered_wall_doorway_room_rings(
         drawings,
@@ -90,6 +145,8 @@ def propose_room_enclosures(
             {"text": w.text, "bbox_pdf_pts": w.bbox, "source_ref": w.ref}
             for w in page.words
         ],
+        stroke_pair_wall_faces=stroke_pair_wall_faces,
+        viewport_pdf_pts=viewport_pdf_pts,
     )
     virtual_fills = [
         {

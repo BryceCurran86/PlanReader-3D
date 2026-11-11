@@ -19,6 +19,7 @@ _FACE_PT = 0.35
 _TICK_MIN_PT = 1.4
 _TICK_MAX_PT = 8.0
 _WORD_LINE_PT = 24.0
+_DIM_OFFSET_MAX_PT = 36.0
 
 
 @dataclass(frozen=True)
@@ -299,14 +300,111 @@ def bind_wall_hash_length(
     """Return the unique outside hash-chain length for one wall, or None."""
     if hi - lo < 8.0:
         return None
-    ticks = _tick_stations(
-        page.segments,
+    face = _bind_from_ticks(
+        page,
+        _tick_stations(
+            page.segments,
+            horizontal_wall=horizontal_wall,
+            face_perp=face_perp,
+            lo=lo,
+            hi=hi,
+            outward=outward,
+        ),
         horizontal_wall=horizontal_wall,
-        face_perp=face_perp,
         lo=lo,
         hi=hi,
-        outward=outward,
+        face_perp=face_perp,
     )
+    if face is not None:
+        return face
+    return _bind_from_ticks(
+        page,
+        _projected_tick_stations(
+            page.segments,
+            horizontal_wall=horizontal_wall,
+            face_perp=face_perp,
+            lo=lo,
+            hi=hi,
+            outward=outward,
+        ),
+        horizontal_wall=horizontal_wall,
+        lo=lo,
+        hi=hi,
+        face_perp=face_perp,
+    )
+
+
+def _projected_tick_stations(
+    segments: Sequence[NativeSegment],
+    *,
+    horizontal_wall: bool,
+    face_perp: float,
+    lo: float,
+    hi: float,
+    outward: float,
+) -> dict[float, list[float]]:
+    """Hashes on an outside dimension line whose stations line up with the wall ends.
+
+    The tick does not have to touch the wall face. The wall ends and the hashes
+    share the same along-station on a parallel dimension line further out.
+    """
+    dim_lines: list[float] = []
+    min_span = max(40.0, (hi - lo) * 0.5)
+    for seg in segments:
+        dx, dy = seg.x2 - seg.x1, seg.y2 - seg.y1
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < min_span:
+            continue
+        if horizontal_wall:
+            if abs(dy) > _FACE_PT or abs(dx) < min_span:
+                continue
+            line_perp = (seg.y1 + seg.y2) / 2.0
+            along_lo, along_hi = sorted((seg.x1, seg.x2))
+        else:
+            if abs(dx) > _FACE_PT or abs(dy) < min_span:
+                continue
+            line_perp = (seg.x1 + seg.x2) / 2.0
+            along_lo, along_hi = sorted((seg.y1, seg.y2))
+        offset = (line_perp - face_perp) * outward
+        if offset <= _FACE_PT or offset > _DIM_OFFSET_MAX_PT:
+            continue
+        if along_lo > lo + _FACE_PT or along_hi < hi - _FACE_PT:
+            continue
+        dim_lines.append(line_perp)
+    stations: dict[float, list[float]] = {}
+    for seg in segments:
+        dx, dy = seg.x2 - seg.x1, seg.y2 - seg.y1
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < _TICK_MIN_PT or length > _TICK_MAX_PT:
+            continue
+        if horizontal_wall:
+            if abs(dx) > _FACE_PT or abs(dy) < _TICK_MIN_PT:
+                continue
+            along = (seg.x1 + seg.x2) / 2.0
+            perps = (seg.y1, seg.y2)
+        else:
+            if abs(dy) > _FACE_PT or abs(dx) < _TICK_MIN_PT:
+                continue
+            along = (seg.y1 + seg.y2) / 2.0
+            perps = (seg.x1, seg.x2)
+        if along < lo - _FACE_PT or along > hi + _FACE_PT:
+            continue
+        for line_perp in dim_lines:
+            if min(perps) - _FACE_PT <= line_perp <= max(perps) + _FACE_PT:
+                stations.setdefault(round(along, 2), []).append(line_perp)
+                break
+    return _cluster_stations(stations)
+
+
+def _bind_from_ticks(
+    page: NativePage,
+    ticks: dict[float, list[float]],
+    *,
+    horizontal_wall: bool,
+    lo: float,
+    hi: float,
+    face_perp: float,
+) -> HashBoundLength | None:
     start = _unique_end_station(ticks, lo)
     finish = _unique_end_station(ticks, hi)
     if start is None or finish is None:

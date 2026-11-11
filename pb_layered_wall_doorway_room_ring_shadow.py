@@ -60,6 +60,10 @@ REASON_RING_CLOSED = "layered_wall_ring_closed_by_source_ink"
 REASON_OPEN_GAP = "open_wall_gap_unresolved"
 REASON_OPEN_EXTERIOR = "open_to_exterior"
 REASON_NO_WALL_INK = "no_wall_layer_strips"
+_STROKE_PAIR_THICK_MIN = 1.2
+_STROKE_PAIR_THICK_MAX = 8.0
+_STROKE_PAIR_MIN_SPAN = 12.0
+_STROKE_PAIR_FACE_PT = 0.35
 REASON_UNOWNED_EDGE = "ring_edge_without_source_owner"
 REASON_SOURCE_HASH = "source_sha256_mismatch"
 
@@ -227,10 +231,186 @@ class LayeredRoomRingResult:
     schema_version: str = LAYERED_ROOM_RING_SCHEMA_VERSION
 
 
-def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
+def _wall_rows(drawings: Sequence[Mapping[str, Any] | None]) -> Iterable[tuple[int, Mapping[str, Any]]]:
     for index, row in enumerate(drawings):
+        if row is None:
+            continue
         if is_explicit_wall_layer_name(str(row.get("layer") or "")):
             yield index, row
+
+
+def _source_rows(
+    drawings: Sequence[Mapping[str, Any] | None], *, all_ink: bool,
+) -> Iterable[tuple[int, Mapping[str, Any]]]:
+    if all_ink:
+        for index, row in enumerate(drawings):
+            if row is not None:
+                yield index, row
+        return
+    yield from _wall_rows(drawings)
+
+
+def _drawing_bbox(row: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
+    rect = row.get("rect")
+    try:
+        return float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _intersects_viewport(
+    row: Mapping[str, Any], viewport: tuple[float, float, float, float],
+) -> bool:
+    bbox = _drawing_bbox(row)
+    if bbox is None:
+        return False
+    x0, y0, x1, y1 = bbox
+    vx0, vy0, vx1, vy1 = viewport
+    return not (x1 < vx0 or x0 > vx1 or y1 < vy0 or y0 > vy1)
+
+
+def _as_viewports(
+    viewport: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None,
+) -> list[tuple[float, float, float, float]] | None:
+    if viewport is None:
+        return None
+    if len(viewport) == 4 and not isinstance(viewport[0], (tuple, list)):
+        x0, y0, x1, y1 = (float(value) for value in viewport)
+        return [(x0, y0, x1, y1)]
+    return [tuple(float(value) for value in item) for item in viewport]
+
+
+def _clip_drawings(
+    drawings: Sequence[Mapping[str, Any]],
+    viewport: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None,
+) -> list[Mapping[str, Any] | None]:
+    """Keep original path indices; drop out-of-viewport rows as None."""
+    viewports = _as_viewports(viewport)
+    if viewports is None:
+        return list(drawings)
+    clipped: list[Mapping[str, Any] | None] = []
+    for row in drawings:
+        clipped.append(row if any(_intersects_viewport(row, item) for item in viewports) else None)
+    return clipped
+
+
+def _axis_strokes(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[tuple[int, bool, float, float, float]]:
+    strokes: list[tuple[int, bool, float, float, float]] = []
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if _close(ay, by, 1e-3) and abs(bx - ax) >= _STROKE_PAIR_MIN_SPAN:
+                lo, hi = sorted((ax, bx))
+                strokes.append((index, True, (ay + by) / 2.0, lo, hi))
+            elif _close(ax, bx, 1e-3) and abs(by - ay) >= _STROKE_PAIR_MIN_SPAN:
+                lo, hi = sorted((ay, by))
+                strokes.append((index, False, (ax + bx) / 2.0, lo, hi))
+    return strokes
+
+
+def _stroke_partners(
+    stroke: tuple[int, bool, float, float, float],
+    pool: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[int, bool, float, float, float]]:
+    found: list[tuple[int, bool, float, float, float]] = []
+    _index, _horiz, perp, lo, hi = stroke
+    span = hi - lo
+    for other in pool:
+        if other == stroke or other[0] == _index:
+            continue
+        gap = abs(other[2] - perp)
+        if gap < _STROKE_PAIR_THICK_MIN or gap > _STROKE_PAIR_THICK_MAX:
+            continue
+        overlap = min(hi, other[4]) - max(lo, other[3])
+        shorter = min(span, other[4] - other[3])
+        if shorter > 0 and overlap >= 0.7 * shorter:
+            found.append(other)
+    return found
+
+
+def _cluster_strokes_by_perp(
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
+    grouped: list[tuple[float, list[tuple[int, bool, float, float, float]]]] = []
+    for stroke in sorted(strokes, key=lambda item: item[2]):
+        if grouped and abs(stroke[2] - grouped[-1][0]) <= _STROKE_PAIR_FACE_PT:
+            grouped[-1][1].append(stroke)
+            continue
+        grouped.append((stroke[2], [stroke]))
+    return grouped
+
+
+def _partner_face_clusters(
+    stroke: tuple[int, bool, float, float, float],
+    pool: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
+    return _cluster_strokes_by_perp(_stroke_partners(stroke, pool))
+
+
+def _merged_along_spans(
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[float, float]]:
+    ordered = sorted((stroke[3], stroke[4]) for stroke in strokes)
+    merged: list[tuple[float, float]] = []
+    for lo, hi in ordered:
+        if merged and lo <= merged[-1][1] + _STROKE_PAIR_FACE_PT:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _collect_stroke_pair_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Unlabelled parallel stroke pairs as topology-only wall-face candidates.
+
+    These are not an authenticated wall layer. Ambiguous three-line hatch and
+    over-thick furniture pairs are left unpaired. Split collinear ink on the
+    same opposite face is one face, not several rival partners.
+    """
+    strokes = _axis_strokes(drawings)
+    strips: list[_Strip] = []
+    used: set[tuple[int, bool, float, float, float]] = set()
+    by_dir = {True: [s for s in strokes if s[1]], False: [s for s in strokes if not s[1]]}
+    for horiz, pool in by_dir.items():
+        for stroke in pool:
+            if stroke in used:
+                continue
+            clusters = _partner_face_clusters(stroke, pool)
+            if len(clusters) != 1:
+                continue
+            _opp_perp, partners = clusters[0]
+            if any(len(_partner_face_clusters(other, pool)) != 1 for other in partners):
+                continue
+            members = (stroke,) + tuple(partners)
+            if any(item in used for item in members):
+                continue
+            used.update(members)
+            perps = sorted(item[2] for item in members)
+            low_perp, high_perp = perps[0], perps[-1]
+            if high_perp - low_perp < _STROKE_PAIR_THICK_MIN:
+                continue
+            low_face = [item for item in members if abs(item[2] - low_perp) <= _STROKE_PAIR_FACE_PT]
+            high_face = [item for item in members if abs(item[2] - high_perp) <= _STROKE_PAIR_FACE_PT]
+            for lo0, hi0 in _merged_along_spans(low_face):
+                for lo1, hi1 in _merged_along_spans(high_face):
+                    lo, hi = max(lo0, lo1), min(hi0, hi1)
+                    if hi - lo < _STROKE_PAIR_MIN_SPAN:
+                        continue
+                    if horiz:
+                        x0, x1, y0, y1 = lo, hi, low_perp, high_perp
+                    else:
+                        x0, x1, y0, y1 = low_perp, high_perp, lo, hi
+                    polygon = box(x0, y0, x1, y1)
+                    strips.append(_Strip(stroke[0], x0, y0, x1, y1, polygon))
+    return strips
 
 
 def _polygon_of_closed_line_path(items: Sequence[Sequence[Any]]) -> Optional[Polygon]:
@@ -382,17 +562,19 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     return list(found.values())
 
 
-def _swing_arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]:
+def _swing_arcs(
+    drawings: Sequence[Mapping[str, Any] | None], *, all_ink: bool = False,
+) -> tuple[list[dict], int]:
     arcs: list[dict] = []
     rejected = 0
     leaves: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
-    for index, row in _wall_rows(drawings):
+    for index, row in _source_rows(drawings, all_ink=all_ink):
         if row.get("fill") is not None:
             continue
         items = list(row.get("items", ()))
         if len(items) == 1 and items[0][0] == "l":
             leaves.append((index, _xy(items[0][1]), _xy(items[0][2])))
-    for index, row in _wall_rows(drawings):
+    for index, row in _source_rows(drawings, all_ink=all_ink):
         if row.get("fill") is not None:
             continue
         items = list(row.get("items", ()))
@@ -470,14 +652,16 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
-def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[tuple[int, ...]]:
+def _stroke_closed(
+    drawings: Sequence[Mapping[str, Any] | None], gap: _Gap, *, all_ink: bool = False,
+) -> Optional[tuple[int, ...]]:
     """Native path index of one unfilled wall-layer stroke parallel to the gap and spanning it end to end.
 
     The stroke may sit on a face line or on the wall's own lining line just outside the band (never
     farther than one wall thickness): CAD exports draw glazing and lining on either.
     """
     thickness = gap.band[1] - gap.band[0]
-    for index, row in _wall_rows(drawings):
+    for index, row in _source_rows(drawings, all_ink=all_ink):
         if row.get("fill") is not None:
             continue
         for item in row.get("items", ()):
@@ -1141,21 +1325,35 @@ def build_layered_wall_doorway_room_rings(
     sliding_leaf_frame_closure: bool = False,
     panel_lift_label_closure: bool = False,
     source_words: Sequence[Mapping[str, Any]] = (),
+    stroke_pair_wall_faces: bool = False,
+    viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
     ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    ``stroke_pair_wall_faces`` (default False) adds unlabelled parallel-stroke face candidates.
+    Those candidates are not an authenticated wall layer and never a quantity.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(panel_lift_label_closure) is not bool:
         raise ValueError("panel_lift_label_closure must be an explicit boolean")
+    if type(stroke_pair_wall_faces) is not bool:
+        raise ValueError("stroke_pair_wall_faces must be an explicit boolean")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("page_index must be a non-negative int")
-    strips, other_fills = _collect_strips(drawings)
+    indexed = _clip_drawings(drawings, viewport_pdf_pts)
+    consumed = sum(row is not None for row in indexed)
+    if consumed > 20000:
+        return LayeredRoomRingResult(
+            EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
+        )
+    strips, other_fills = _collect_strips(indexed)
+    if stroke_pair_wall_faces:
+        strips = strips + _collect_stroke_pair_strips(indexed)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -1165,10 +1363,10 @@ def build_layered_wall_doorway_room_rings(
     gaps = _gaps(strips, union, domain)
     prior_gap_count = len(gaps)
     if sliding_leaf_frame_closure:
-        gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
+        gaps = gaps + _frame_anchored_gaps(indexed, union, gaps)
         prior_gap_count = len(gaps)
-        gaps = gaps + _cs_face_interruption_gaps(drawings, gaps, source_words)
-    arcs, _rejected_arcs = _swing_arcs(drawings)
+        gaps = gaps + _cs_face_interruption_gaps(indexed, gaps, source_words)
+    arcs, _rejected_arcs = _swing_arcs(indexed, all_ink=stroke_pair_wall_faces)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
     closures: list[LayeredDoorwayClosure] = []
@@ -1178,11 +1376,11 @@ def build_layered_wall_doorway_room_rings(
     cavity_by_gap: dict[int, tuple[tuple[int, ...], tuple[str, ...]]] = {}
     if sliding_leaf_frame_closure:
         for gap_index, gap in enumerate(gaps):
-            evidence = _sliding_leaf_evidence(drawings, gap)
+            evidence = _sliding_leaf_evidence(indexed, gap)
             if evidence is not None:
                 sliding_by_gap[gap_index] = evidence
             cs_words = _cavity_slider_word_evidence(gap, source_words)
-            leaves = _paired_cavity_leaves(drawings, gap) or _pocket_cavity_leaves(drawings, gap)
+            leaves = _paired_cavity_leaves(indexed, gap) or _pocket_cavity_leaves(indexed, gap)
             # Face-reconstructed CS openings already required a unique CS mark;
             # the paired wall faces are the leaf evidence of that interruption.
             if cs_words is not None and (leaves is not None or gap_index >= prior_gap_count):
@@ -1202,7 +1400,9 @@ def build_layered_wall_doorway_room_rings(
         }
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
-        stroke = None if swing is not None else _stroke_closed(drawings, gap)
+        stroke = None if swing is not None else _stroke_closed(
+            indexed, gap, all_ink=stroke_pair_wall_faces,
+        )
         sliding = sliding_by_gap.get(gap_index)
         cavity = cavity_by_gap.get(gap_index)
         panel_words = (

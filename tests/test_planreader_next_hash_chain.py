@@ -144,6 +144,38 @@ def test_unique_1200_1810_leftover_cover_still_binds_by_word_ref():
     assert sum((_figured_mm(word) for word in owned), Decimal("0")) == Decimal("3010")
 
 
+def test_wall_ends_line_up_with_hashes_on_an_outside_dimension_line(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(90, 180), fitz.Point(210, 180))
+        page.draw_line(fitz.Point(100, 177), fitz.Point(100, 183))
+        page.draw_line(fitz.Point(200, 177), fitz.Point(200, 183))
+        page.insert_text((142, 190), "3600", fontsize=8)
+        page.draw_line(fitz.Point(220, 70), fitz.Point(220, 170))
+        page.draw_line(fitz.Point(217, 80), fitz.Point(223, 80))
+        page.draw_line(fitz.Point(217, 160), fitz.Point(223, 160))
+        page.insert_text((224, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    width, height = bind_room_hash_axes(native, (100, 80, 200, 160))
+    assert width is not None and width.length_mm == 3600
+    assert height is not None and height.length_mm == 2400
+
+
+def test_far_aligned_hashes_do_not_bind_a_room_face(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(90, 280), fitz.Point(210, 280))
+        page.draw_line(fitz.Point(100, 277), fitz.Point(100, 283))
+        page.draw_line(fitz.Point(200, 277), fitz.Point(200, 283))
+        page.insert_text((142, 290), "3600", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    width, height = bind_room_hash_axes(native, (100, 80, 200, 160))
+    assert width is None
+    assert height is None
+
+
 def test_polygon_faces_not_bbox_own_the_hash_chain(tmp_path):
     def drawer(page):
         # Finished face jogs north, so the east internal face is shorter than bbox.
