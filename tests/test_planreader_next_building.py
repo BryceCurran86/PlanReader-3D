@@ -310,3 +310,24 @@ def test_same_floor_source_cannot_be_sold_under_new_room_id(proof):
     selection["rooms"].append(other)
     with pytest.raises(SourceConflict, match="duplicate_rooms_source_surface"):
         measure_building_components(pages, selection)
+
+
+def test_generic_door_word_is_not_a_numbered_schedule_identity(proof):
+    # Independent lexical gate: a "DOOR" note is not numbered D1.
+    from dataclasses import replace
+
+    _, pages, selection = proof
+    altered = {
+        index: replace(
+            page,
+            words=tuple(replace(w, text="DOOR") if w.text == "D1" else w
+                        for w in page.words),
+        )
+        for index, page in pages.items()
+    }
+    packet = measure_building_components(altered, selection)
+    assert missing(packet, "door")[0]["reason_code"] == "door_code_not_source_identified"
+    assert missing(packet, "door_frame")[0]["reason_code"] == "door_source_authority_missing"
+    assert missing(packet, "wall_finish_net_area")[0]["reason_code"] == "door_opening_source_authority_missing"
+    assert not any(q["trade"] in {"door_count", "door_frame_count", "door_frame_length"}
+                   for q in packet["quantities"])

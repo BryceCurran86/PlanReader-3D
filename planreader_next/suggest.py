@@ -64,6 +64,14 @@ def suggest_room_bindings(page: NativePage) -> dict[str, Any]:
             "room_label_word_ref": labels[0].ref,
             "finish_word_ref": finishes[0].ref,
         })
+    # A real architect's drawing may contain thousands of native line segments
+    # but no PDF rectangle primitives. An empty proposal list on that page is
+    # a measured COVERAGE FAILURE, not evidence of zero rooms.
+    if not page.rectangles and page.segments:
+        abstentions.append({
+            "page_index": page.page_index,
+            "reason_code": "native_segment_faces_require_boundary_review",
+        })
     return {
         "schema_version": "0.1.0",
         "source_sha256": page.source_sha256,

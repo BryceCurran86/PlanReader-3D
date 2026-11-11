@@ -9,6 +9,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import math
+import re
 from typing import Any, Mapping
 
 from .engine import (
@@ -104,7 +105,9 @@ def _door(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
     sched_code = _word(schedule, row.get("schedule_code_word_ref"))
     if plan_code.text.strip().upper() != sched_code.text.strip().upper():
         raise SourceConflict("plan_schedule_door_code_mismatch")
-    if not plan_code.text.strip().upper().startswith("D"):
+    # The word "DOOR" occurs throughout original 3Laurel notes. It is NOT
+    # a unique numbered schedule/plan instance identity.
+    if not re.fullmatch(r"D[1-9][0-9]*[A-Z]?", plan_code.text.strip().upper()):
         raise SourceConflict("door_code_not_source_identified")
     if _distance_to_line(_centre(plan_code), aperture) > 85:
         raise SourceConflict("door_code_not_near_source_aperture")
@@ -320,6 +323,9 @@ def measure_building_components(
         except (SourceConflict, TypeError, ValueError, InvalidOperation, ZeroDivisionError) as exc:
             abstentions.append({"family": "door", "physical_id": door_id,
                                 "reason_code": str(exc) if isinstance(exc, SourceConflict) else "invalid_door_observation"})
+            if row.get("frame_reviewed") is True:
+                abstentions.append({"family": "door_frame", "physical_id": door_id,
+                                    "reason_code": "door_source_authority_missing"})
     for row in inputs["walls"]:
         wall_id = str(row.get("wall_id", ""))
         try:

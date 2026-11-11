@@ -128,3 +128,41 @@ must preserve that distinction and must not claim a source-signed frame area.
 This is not yet a substitute for the older commercial pipeline. Maintain the
 default-off isolation and preserve the frozen 120 denominator, eight signed
 Lot16 opening areas and three signed Maryborough floors.
+
+## Original 3Laurel page-3 acceptance probe (11 November 2026)
+
+**Real source verified** against frozen original SHA
+014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e.
+This is zero-based PDF page 2 (physical page 3), the genuine floor-plan
+drawing, NOT a synthetic fixture.
+
+- Native extraction: 1,215 words, 9,977 source line segments, **0 native
+  rectangle primitives**. The actual drawing contains labels such as VINYL,
+  TILES and CONCRETE; the rectangle-only FT-code suggestion path cannot
+  discover its rooms. It now emits the explicit reason
+  native_segment_faces_require_boundary_review rather than misleadingly
+  reporting zero suggestions and zero abstentions.
+- Actual reviewed-building CLI takeoff on this genuine page with all five
+  surface/opening families intentionally unreviewed: **0 draft quantities,
+  5 explicit ABSTAIN records**, one each for floor, ceiling, wall, door and
+  dependent door frame. official_score=null, no commercial output.
+- A generic DOOR note is not a numbered schedule ID. The experimental door
+  gate now requires an actual D-number source callout (optional trailing
+  letter). On 3Laurel, other schedule/callout patterns must be handled by
+  separate native authority; do not silently repurpose generic note words.
+- Original-source test:
+  PLANREADER_3LAUREL_ORIGINAL_PDF=<private path> python -m pytest -q
+  tests/test_planreader_next_3laurel_original_probe.py.
+  It uses tests.original_source_3laurel.require_original_3laurel, which
+  requires exact frozen SHA and fails on mismatches; a public-CI missing
+  source can only be an explicit ORIGINAL_SOURCE_NOT_RUN.
+- With the original explicitly provisioned, the two original-probe tests
+  plus synthetic measurement tests total **40 passed on Python 3.13**.
+  They prove fail-closed handling, NOT positive 3Laurel measurement.
+
+**Next engineering gate:** source-own segmented room interiors and perimeter
+faces, use printed VINYL/TILES/CONCRETE finish occurrences rather than assuming
+FT codes, bind independent elevation/RCP height/zone ownership, and authenticate
+door/frame instances where no D-numbered schedule exists. Do not turn reviewer
+flags into autonomous positive evidence or count a missing measurement as a
+successful takeoff.
