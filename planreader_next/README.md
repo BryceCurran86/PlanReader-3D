@@ -13,7 +13,7 @@ PlanReader/JobHub, compete with frozen V2 producers or change any signed rows.
 - Suggest conservative rectangle/room/FT floor-code/figured-axis matches without selecting tied dimensions.
 - Require review of **internal finished-wall-face** boundary ownership: suggestions always say `REVIEW_REQUIRED`; they are not auto-approved.
 - Bind two independent original figured dimension words, with proximity to the correct horizontal/vertical rectangle axis, a dimension ratio check and a native room label + finish code **inside** the same closed source rectangle.
-- Compute exact rectangular **floor-finish area** in square metres using Decimal integer-mm multiplication.
+- Compute exact rectangular **floor-finish area** in square metres using Decimal integer-mm multiplication. Manually reviewed **irregular polygons** may also be measured from a consecutive closed chain of actual native PDF line/rect-edge receipts, without joining gaps or inventing endpoints. Polygon area scales source geometry using two selected, nearby figured dimension words; this remains a review draft, NOT an independently proven source metric.
 - Emit one stable, source-traced **MEASURED_DRAFT_REVIEW_REQUIRED** quantity per unique physical rectangle; source conflicts produce explicit ABSTAIN instead of fabricated quantities.
 - Save the JSON output create-only. `commercial_publishable=false` and `benchmark_credit=false` always. No source PDFs are copied and no frozen gold is read.
 - Stop double-counting identical physical rectangle refs, cross-page words, incorrect source hashes, stale revisions and forged caller area metadata.
@@ -23,6 +23,8 @@ PlanReader/JobHub, compete with frozen V2 producers or change any signed rows.
 ```powershell
 cd C:\Users\bryce\PlanReader-3D-next-core
 python -m planreader_next inspect --pdf "<vector.pdf>" --page 0
+# For a nonrectangular manually traced boundary, list exact source line refs:
+python -m planreader_next inspect --pdf "<vector.pdf>" --page 0 --include-segments
 python -m planreader_next suggest --pdf "<vector.pdf>" --page 0 --project-id "<id>" --revision-id "r1" --output suggested.json
 # Inspect suggested.json and source page. Human must independently establish
 # whether the selected rectangle is the finished internal room perimeter.
@@ -34,8 +36,8 @@ python -m pytest -q tests/test_planreader_next_source_measurement.py
 
 ## Critical limitations
 
-- This proof handles only a **single native closed rectangular internal-face room per selection** (multiple independent rectangles are allowed). Most real building drawings have fragmented wall edges, doors, open passages, irregular rooms, walls above openings and overlapping annotation. Those cases **do not** get auto-resolved.
-- Native dimension proximity and aspect-ratio corroboration are not source producer proof of actual figured dimension witness lines. They are sufficient only for an explicitly reviewed **draft**, not FIRM or independent accuracy credit. A user-provided boundary assertion is not considered immutable source authority.
+- This proof supports native closed rectangles and manually selected exact **closed native line polygons** (multiple independent rooms are allowed), but **does not automatically resolve** fragmented wall edges, doors, open passages, irregular room ownership, walls above openings or overlapping annotation. A manually traced polygon requires an ordered list of `boundary_segment_refs`, source-backed axis words, and independent review of the interior-finished-face boundary. If any edge is missing, it ABSTAINS rather than closing it. Auto-suggestions currently cover native rectangles only.
+- Native dimension proximity and aspect-ratio corroboration are not source producer proof of actual figured dimension witness lines. They are sufficient only for an explicitly reviewed **draft**, not FIRM or independent accuracy credit. Polygon metric area additionally assumes its selected horizontal and vertical figured numbers span the full source polygon bounding extents; do not apply without independently checking both spans. A user-provided boundary assertion is not considered immutable source authority.
 - Does not yet authenticate FT2/FT3 definitions cross-sheet, doorway stops, wall/ceiling finishes, aperture hosts, physical W4 faces, measured openings, dynamic 3D, priced takeoffs, job estimates or a live production issuer.
 - Do not take a rectangle representing furniture, joinery or outer wall faces and call it an internal finished room boundary. Do not auto-inherit adjacent finish codes from doorway labels.
 - It is **not** accurate to claim that this package meets the current full PlanReader functionality, can extract real Maryborough or Lot16 room finishes automatically, raises the frozen-120 benchmark score, or has passed original-source regression. The unit tests use freshly generated **synthetic PDFs**, not private customer originals.

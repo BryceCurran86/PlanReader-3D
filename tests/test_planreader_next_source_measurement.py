@@ -195,3 +195,76 @@ def test_suggestion_does_not_use_frozen_truth_to_guess_a_room(tmp_path):
     doc.close()
     native = load_native_page(pdf_path, 0)
     assert suggest_room_bindings(native)["rooms"] == []
+
+
+def test_reviewed_l_shaped_native_segments_create_measured_draft(tmp_path):
+    from decimal import Decimal
+    pdf_path = tmp_path / "l_shaped_native.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=550, height=450)
+    vertices = [
+        (120, 120), (320, 120), (320, 200), (240, 200),
+        (240, 283.8260869565), (120, 283.8260869565), (120, 120),
+    ]
+    page.draw_polyline([fitz.Point(*p) for p in vertices])
+    page.insert_text((205, 111), "4025", fontsize=10)
+    page.insert_text((96, 206), "3297", fontsize=10)
+    page.insert_text((160, 175), "FOOD", fontsize=11)
+    page.insert_text((170, 208), "FT3", fontsize=11)
+    doc.save(pdf_path)
+    doc.close()
+    native = load_native_page(pdf_path, 0)
+    assert len(native.segments) >= 6
+    choices = [x.ref for x in native.segments if x.kind == "line"]
+    word = {x.text: x.ref for x in native.words}
+    selection = {
+        "project_id": "synthetic-l-shaped", "revision_id": "r1",
+        "source_sha256": native.source_sha256, "page_index": 0,
+        "rooms": [{
+            "room_id": "room-l", "boundary_segment_refs": choices,
+            "boundary_basis": "internal_finished_wall_face",
+            "width_word_ref": word["4025"], "height_word_ref": word["3297"],
+            "room_label_word_ref": word["FOOD"], "finish_word_ref": word["FT3"],
+        }],
+    }
+    result = measure_page(native, selection)
+    assert result["abstentions"] == []
+    area = Decimal(result["quantities"][0]["quantity"])
+    assert Decimal("10") < area < Decimal("11")
+    assert result["quantities"][0]["geometry_ref"].startswith("native-polygon:")
+    assert result["quantities"][0]["benchmark_credit"] is False
+
+
+def test_missing_native_segment_never_closes_doorway_or_room(tmp_path):
+    from planreader_next.polygon import source_polygon
+    doc = fitz.open()
+    page = doc.new_page()
+    points = [(100, 100), (260, 100), (260, 260), (100, 260), (100, 100)]
+    for start, end in zip(points, points[1:]):
+        page.draw_line(fitz.Point(*start), fitz.Point(*end))
+    file = tmp_path / "partial.pdf"
+    doc.save(file)
+    doc.close()
+    native = load_native_page(file, 0)
+    full = [x.ref for x in native.segments if x.kind in ("line", "rect_edge")]
+    from planreader_next import SourceConflict
+    assert len(full) == 4
+    assert source_polygon(native, full).area_pt2 == pytest.approx(25600)
+    with pytest.raises(SourceConflict, match="wall_cycle_open"):
+        source_polygon(native, full[:-1])
+
+
+def test_native_polygon_rejects_repeated_physical_edge_receipt(tmp_path):
+    from planreader_next.polygon import source_polygon
+    doc = fitz.open()
+    pg = doc.new_page()
+    corners = [(100,100),(200,100),(200,200),(100,200),(100,100)]
+    for start, end in zip(corners, corners[1:]):
+        pg.draw_line(fitz.Point(*start), fitz.Point(*end))
+    file=tmp_path/"native.pdf"
+    doc.save(file)
+    doc.close()
+    native = load_native_page(file,0)
+    refs=[x.ref for x in native.segments if x.kind in ("line", "rect_edge")]
+    with pytest.raises(SourceConflict, match="source_segment_reused"):
+        source_polygon(native, refs+[refs[0]])

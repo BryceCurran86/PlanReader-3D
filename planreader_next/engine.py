@@ -36,11 +36,22 @@ class NativeRectangle:
 
 
 @dataclass(frozen=True)
+class NativeSegment:
+    ref: str
+    kind: str
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+@dataclass(frozen=True)
 class NativePage:
     source_sha256: str
     page_index: int
     words: tuple[NativeWord, ...]
     rectangles: tuple[NativeRectangle, ...]
+    segments: tuple[NativeSegment, ...]
 
 
 def _digest(path: Path) -> str:
@@ -83,21 +94,34 @@ def load_native_page(pdf_path: str | Path, page_index: int) -> NativePage:
         )
         for r in extracted["rects"]
     )
+    segments = tuple(
+        NativeSegment(
+            ref=str(s["id"]), kind=str(s.get("kind", "")),
+            x1=float(s["x1"]), y1=float(s["y1"]),
+            x2=float(s["x2"]), y2=float(s["y2"]),
+        ) for s in extracted["segments"]
+    )
     if len(set(w.ref for w in words)) != len(words):
         raise SourceConflict("duplicate_native_word_identity")
     if len(set(r.ref for r in rectangles)) != len(rectangles):
         raise SourceConflict("duplicate_native_rectangle_identity")
-    return NativePage(digest, page_index, words, rectangles)
+    if len(set(s.ref for s in segments)) != len(segments):
+        raise SourceConflict("duplicate_native_segment_identity")
+    return NativePage(digest, page_index, words, rectangles, segments)
 
 
-def inspect_page(page: NativePage) -> dict[str, Any]:
-    """Reference inventory to help a reviewer select exact native evidence."""
-    return {
+def inspect_page(page: NativePage, *, include_segments: bool = False) -> dict[str, Any]:
+    """Native refs; segment detail opt-in for large plan drawings."""
+    data = {
         "source_sha256": page.source_sha256,
         "page_index": page.page_index,
         "rectangles": [asdict(r) for r in page.rectangles],
         "words": [asdict(w) for w in page.words],
+        "segment_count": len(page.segments),
     }
+    if include_segments:
+        data["segments"] = [asdict(s) for s in page.segments]
+    return data
 
 
 def _inside(inner: tuple[float, ...], outer: tuple[float, ...]) -> bool:
@@ -122,25 +146,29 @@ def _required_text(row: Mapping[str, Any], key: str) -> str:
     return value.strip()
 
 
-def _get(mapping: Mapping[str, Any], key: str, reason: str) -> Any:
-    ref = _required_text(mapping, key)
-    if ref not in mapping["_all_refs"]:
-        raise SourceConflict(reason)
-    return mapping["_all_refs"][ref]
-
-
 def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
     words = {w.ref: w for w in page.words}
     rects = {r.ref: r for r in page.rectangles}
-    rect_ref = _required_text(row, "rectangle_ref")
-    if rect_ref not in rects:
-        raise SourceConflict("native_finished_face_rectangle_missing")
     if row.get("boundary_basis") != "internal_finished_wall_face":
         raise SourceConflict("internal_finished_face_not_confirmed")
-    rect = rects[rect_ref]
-    x0, y0, x1, y1 = rect.bbox
-    if not all(math.isfinite(v) for v in rect.bbox) or x1 <= x0 or y1 <= y0:
-        raise SourceConflict("closed_native_room_rectangle_invalid")
+    source_edges: tuple[str, ...] = ()
+    if "boundary_segment_refs" in row:
+        from .polygon import source_polygon
+        polygon = source_polygon(page, row["boundary_segment_refs"])
+        geometry_ref = polygon.ref
+        source_edges = polygon.segment_refs
+        bbox = polygon.bbox
+        x0, y0, x1, y1 = bbox
+        fraction = Decimal(str(polygon.area_pt2 / ((x1 - x0) * (y1 - y0))))
+    else:
+        geometry_ref = _required_text(row, "rectangle_ref")
+        if geometry_ref not in rects:
+            raise SourceConflict("native_finished_face_rectangle_missing")
+        bbox = rects[geometry_ref].bbox
+        x0, y0, x1, y1 = bbox
+        fraction = Decimal("1")
+    if not all(math.isfinite(v) for v in bbox) or x1 <= x0 or y1 <= y0:
+        raise SourceConflict("closed_native_room_face_invalid")
     refs = {
         key: _required_text(row, key)
         for key in ("width_word_ref", "height_word_ref", "room_label_word_ref", "finish_word_ref")
@@ -151,7 +179,7 @@ def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
         raise SourceConflict("native_word_receipt_missing")
     width_word, height_word = words[refs["width_word_ref"]], words[refs["height_word_ref"]]
     label_word, finish_word = words[refs["room_label_word_ref"]], words[refs["finish_word_ref"]]
-    if not _inside(label_word.bbox, rect.bbox) or not _inside(finish_word.bbox, rect.bbox):
+    if not _inside(label_word.bbox, bbox) or not _inside(finish_word.bbox, bbox):
         raise SourceConflict("room_or_finish_not_inside_selected_face")
     # A word near the actual indicated axis is required; mere equal numeric
     # product or unattached project metadata cannot select an axis.
@@ -171,12 +199,14 @@ def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
     finish = finish_word.text.strip().upper()
     if not re.fullmatch(r"[A-Z][A-Z0-9-]{1,15}", finish):
         raise SourceConflict("finish_code_not_source_owned")
-    area = width_mm * height_mm / Decimal("1000000")
+    area = (width_mm * height_mm * fraction / Decimal("1000000"))
+    if source_edges:
+        area = area.quantize(Decimal("0.000001"))
     room_id = _required_text(row, "room_id")
     # Reviewer-authenticated binding creates a measurable draft, NOT source-
     # independent commercial/FIRM authority. Do not publish directly to JobHub.
     trace = "|".join((
-        page.source_sha256, str(page.page_index), rect_ref, *refs.values(), room_id,
+        page.source_sha256, str(page.page_index), geometry_ref, *refs.values(), room_id,
     ))
     return {
         "row_id": sha256(trace.encode("utf-8")).hexdigest()[:24],
@@ -188,8 +218,8 @@ def _measure_one(page: NativePage, row: Mapping[str, Any]) -> dict[str, Any]:
         "unit": "m2",
         "source_sha256": page.source_sha256,
         "page_index": page.page_index,
-        "geometry_ref": rect_ref,
-        "evidence_refs": refs,
+        "geometry_ref": geometry_ref,
+        "evidence_refs": {**refs, **({"boundary_segment_refs": list(source_edges)} if source_edges else {})},
         "boundary_basis": "internal_finished_wall_face",
         "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
         "commercial_publishable": False,
@@ -209,8 +239,12 @@ def measure_page(page: NativePage, selection: Mapping[str, Any]) -> dict[str, An
     if not isinstance(rows, list):
         raise SourceConflict("rooms_selection_invalid")
     ids = [_required_text(r, "room_id") for r in rows]
-    rectangles = [_required_text(r, "rectangle_ref") for r in rows]
-    if len(set(ids)) != len(ids) or len(set(rectangles)) != len(rectangles):
+    geometry_claims = [
+        ("polygon", tuple(sorted(str(ref) for ref in r["boundary_segment_refs"])))
+        if "boundary_segment_refs" in r else ("rectangle", _required_text(r, "rectangle_ref"))
+        for r in rows
+    ]
+    if len(set(ids)) != len(ids) or len(set(geometry_claims)) != len(geometry_claims):
         raise SourceConflict("duplicate_room_or_physical_face")
     quantities, abstentions = [], []
     for row in rows:

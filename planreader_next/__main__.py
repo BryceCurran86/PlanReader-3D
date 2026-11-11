@@ -24,6 +24,7 @@ def main() -> int:
     inspect = sub.add_parser("inspect", help="List native drawing references")
     inspect.add_argument("--pdf", type=Path, required=True)
     inspect.add_argument("--page", type=int, default=0)
+    inspect.add_argument("--include-segments", action="store_true", help="List source line refs for manual polygon review")
     suggest = sub.add_parser("suggest", help="Find conservative reviewed-room candidates")
     suggest.add_argument("--pdf", type=Path, required=True)
     suggest.add_argument("--page", type=int, default=0)
@@ -37,7 +38,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.mode == "inspect":
-            result = inspect_page(load_native_page(args.pdf, args.page))
+            result = inspect_page(load_native_page(args.pdf, args.page), include_segments=args.include_segments)
         elif args.mode == "suggest":
             result = suggest_room_bindings(load_native_page(args.pdf, args.page))
             result["project_id"] = args.project_id
