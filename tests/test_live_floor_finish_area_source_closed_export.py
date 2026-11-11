@@ -605,7 +605,7 @@ def test_floor_finish_customer_cannot_hide_duplicate_abstained_source_id():
     )
     claim = replace(_claim(), floor_finish_quantity_evidence=(original, original))
     with pytest.raises(
-        SourceClosedRunConflictError, match="duplicate original floor-finish quantity id"
+        SourceClosedRunConflictError, match="duplicate_original_floor_finish_quantity_id"
     ):
         project_live_floor_finish_customer_rows(
             claim, workspace_id=1, project_id="project-1"
