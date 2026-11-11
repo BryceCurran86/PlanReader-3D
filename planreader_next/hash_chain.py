@@ -363,22 +363,109 @@ def bind_wall_hash_length(
 def bind_room_hash_axes(page: NativePage, bbox: Sequence[float]) -> tuple[HashBoundLength | None, HashBoundLength | None]:
     """Unique width (horizontal wall) and height (vertical wall) hash chains."""
     x0, y0, x1, y1 = (float(value) for value in bbox)
-    widths = [
-        bind_wall_hash_length(
-            page, horizontal_wall=True, face_perp=y1, lo=x0, hi=x1, outward=1.0,
-        ),
-        bind_wall_hash_length(
-            page, horizontal_wall=True, face_perp=y0, lo=x0, hi=x1, outward=-1.0,
-        ),
-    ]
-    heights = [
-        bind_wall_hash_length(
-            page, horizontal_wall=False, face_perp=x1, lo=y0, hi=y1, outward=1.0,
-        ),
-        bind_wall_hash_length(
-            page, horizontal_wall=False, face_perp=x0, lo=y0, hi=y1, outward=-1.0,
-        ),
-    ]
+    return _bind_cardinal_axes(
+        page,
+        south=(y1, x0, x1),
+        north=(y0, x0, x1),
+        east=(x1, y0, y1),
+        west=(x0, y0, y1),
+    )
+
+
+def bind_polygon_hash_axes(
+    page: NativePage, coords: Sequence[Sequence[float]],
+) -> tuple[HashBoundLength | None, HashBoundLength | None]:
+    """Bind hashes to the ring's own internal faces, not the bounding rectangle."""
+    faces = _cardinal_internal_faces(coords)
+    if faces is None:
+        return None, None
+    return _bind_cardinal_axes(page, **faces)
+
+
+def _cardinal_internal_faces(
+    coords: Sequence[Sequence[float]],
+) -> dict[str, tuple[float, float, float]] | None:
+    """One merged axis-aligned edge on each extreme, or None if a side is split."""
+    points = [(float(x), float(y)) for x, y in coords]
+    if len(points) < 4:
+        return None
+    if points[0] == points[-1]:
+        points = points[:-1]
+    xs = [x for x, _y in points]
+    ys = [y for _x, y in points]
+    extremes = {"west": min(xs), "east": max(xs), "north": min(ys), "south": max(ys)}
+    buckets = {name: [] for name in extremes}
+    for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]):
+        if abs(y0 - y1) <= _FACE_PT and abs(x1 - x0) > _FACE_PT:
+            face = (y0 + y1) / 2.0
+            lo, hi = sorted((x0, x1))
+            if abs(face - extremes["south"]) <= _FACE_PT:
+                buckets["south"].append((lo, hi))
+            if abs(face - extremes["north"]) <= _FACE_PT:
+                buckets["north"].append((lo, hi))
+        elif abs(x0 - x1) <= _FACE_PT and abs(y1 - y0) > _FACE_PT:
+            face = (x0 + x1) / 2.0
+            lo, hi = sorted((y0, y1))
+            if abs(face - extremes["east"]) <= _FACE_PT:
+                buckets["east"].append((lo, hi))
+            if abs(face - extremes["west"]) <= _FACE_PT:
+                buckets["west"].append((lo, hi))
+    faces: dict[str, tuple[float, float, float]] = {}
+    for name, spans in buckets.items():
+        merged = _merge_along_spans(spans)
+        if len(merged) != 1:
+            continue
+        lo, hi = merged[0]
+        faces[name] = (extremes[name], lo, hi)
+    if len(faces) < 2:
+        return None
+    return faces
+
+
+def _merge_along_spans(spans: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    ordered = sorted(spans)
+    if not ordered:
+        return []
+    merged = [ordered[0]]
+    for lo, hi in ordered[1:]:
+        prev_lo, prev_hi = merged[-1]
+        if lo <= prev_hi + _FACE_PT:
+            merged[-1] = (prev_lo, max(prev_hi, hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _bind_cardinal_axes(
+    page: NativePage,
+    *,
+    south: tuple[float, float, float] | None = None,
+    north: tuple[float, float, float] | None = None,
+    east: tuple[float, float, float] | None = None,
+    west: tuple[float, float, float] | None = None,
+) -> tuple[HashBoundLength | None, HashBoundLength | None]:
+    widths = []
+    heights = []
+    if south is not None:
+        face, lo, hi = south
+        widths.append(bind_wall_hash_length(
+            page, horizontal_wall=True, face_perp=face, lo=lo, hi=hi, outward=1.0,
+        ))
+    if north is not None:
+        face, lo, hi = north
+        widths.append(bind_wall_hash_length(
+            page, horizontal_wall=True, face_perp=face, lo=lo, hi=hi, outward=-1.0,
+        ))
+    if east is not None:
+        face, lo, hi = east
+        heights.append(bind_wall_hash_length(
+            page, horizontal_wall=False, face_perp=face, lo=lo, hi=hi, outward=1.0,
+        ))
+    if west is not None:
+        face, lo, hi = west
+        heights.append(bind_wall_hash_length(
+            page, horizontal_wall=False, face_perp=face, lo=lo, hi=hi, outward=-1.0,
+        ))
     return _unique_length(widths), _unique_length(heights)
 
 

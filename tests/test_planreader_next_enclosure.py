@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from planreader_next.enclosure import _draft_floors, propose_room_enclosures
 from planreader_next.engine import NativePage, SourceConflict, load_native_page
-from planreader_next.hash_chain import bind_wall_hash_length
+from planreader_next.hash_chain import bind_polygon_hash_axes, bind_wall_hash_length
 from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 from tests.test_layered_wall_doorway_room_face_wiring_v1 import layered_room_pdf
 
@@ -84,8 +84,8 @@ def test_l_concave_and_holed_faces_do_not_publish_bbox_product_as_floor(monkeypa
     width = HashBoundLength(Decimal("10000"), ("word:w",), (0.0, 100.0), 0.0, "horizontal")
     height = HashBoundLength(Decimal("10000"), ("word:h",), (0.0, 100.0), 0.0, "vertical")
     monkeypatch.setattr(
-        "planreader_next.hash_chain.bind_room_hash_axes",
-        lambda page, bbox: (width, height),
+        "planreader_next.hash_chain.bind_polygon_hash_axes",
+        lambda page, coords: (width, height),
     )
     ell = [[0, 0], [100, 0], [100, 50], [50, 50], [50, 100], [0, 100]]
     concave = [[0, 0], [100, 0], [100, 100], [60, 100], [60, 40], [40, 40], [40, 100], [0, 100]]
@@ -212,15 +212,22 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     assert len(bedrooms) == 3
     south_widths = []
     for bedroom in bedrooms:
-        x0, _y0, x1, y1 = (float(v) for v in bedroom["bbox_pdf_pts"])
-        bound = bind_wall_hash_length(
-            page, horizontal_wall=True, face_perp=y1, lo=x0, hi=x1, outward=1.0,
-        )
-        if bound is not None:
-            south_widths.append(bound)
+        width, height = bind_polygon_hash_axes(page, bedroom["boundary_polygon_pdf_pts"])
+        if width is not None:
+            south_widths.append(width)
+        assert height is None
     assert len(south_widths) == 2
     assert all(item.length_mm == Decimal("3010") for item in south_widths)
     assert all(len(item.word_refs) == 2 for item in south_widths)
+    # Party-wall height hashes only carry opening figures (870). Floor m²
+    # abstains until a unique height figure owns that internal face.
+    assert result["draft_floor_candidates"] == []
+    invented = [
+        r for r in result["regions"]
+        if r["single_room_shape_hint"]
+        and {w["text"] for w in r["room_label_words"]} <= {"LIVING", "KITCHEN", "KIT", "DINING"}
+    ]
+    assert invented == []
     assert all(not r["room_identity_authenticated"] for r in result["regions"])
     assert result["commercial_publishable"] is False
     assert result["official_score"] is None

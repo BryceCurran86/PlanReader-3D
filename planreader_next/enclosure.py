@@ -15,7 +15,9 @@ from shapely.geometry import Point, Polygon
 from pb_layered_wall_doorway_room_ring_shadow import (
     build_layered_wall_doorway_room_rings,
 )
-from .engine import NativePage, SourceConflict, _digest
+from .engine import (
+    NativePage, SourceConflict, authenticated_pdf_snapshot, confirm_source_snapshot,
+)
 
 _ROOM_WORDS = frozenset({
     "BED", "BEDROOM", "BATH", "BATHROOM", "ENSUITE", "ENS", "WC", "LAUNDRY",
@@ -65,18 +67,16 @@ def propose_room_enclosures(
     Source window/door geometry is retained verbatim for later measurement.
     """
     path = Path(pdf_path)
-    if _digest(path) != page.source_sha256:
+    digest, source_bytes, identity = authenticated_pdf_snapshot(path)
+    if digest != page.source_sha256:
         raise SourceConflict("source_sha256_mismatch")
     import fitz
 
-    before = path.stat()
-    with fitz.open(path) as document:
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
         if page.page_index < 0 or page.page_index >= len(document):
             raise SourceConflict("source_page_mismatch")
         drawings = document[page.page_index].get_drawings()
-    after = path.stat()
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-        raise SourceConflict("source_changed_during_read")
+    confirm_source_snapshot(path, digest, identity)
     if len(drawings) > 20000 or len(page.segments) > 20000:
         raise SourceConflict("page_primitive_cap_exceeded")
 
@@ -150,6 +150,7 @@ def propose_room_enclosures(
             "hole_count": ring.hole_count,
             "room_identity_authenticated": False,
             "finished_face_authenticated": False,
+            "internal_face_basis": "layered_wall_ring_finished_face",
             "metric_area_authenticated": False,
             "topology_only": True,
             "review_required": True,
@@ -204,7 +205,7 @@ def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[
     Width×height is the room area only for a hole-free axis-aligned rectangle.
     L, concave and holed faces abstain; bbox product is not a floor quantity.
     """
-    from .hash_chain import bind_room_hash_axes
+    from .hash_chain import bind_polygon_hash_axes
 
     drafts: list[dict[str, Any]] = []
     for region in regions:
@@ -212,14 +213,14 @@ def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[
             continue
         if len(region["finish_zones"]) != 1 or not region["finish_marker_words"]:
             continue
-        if not _axis_aligned_rectangle_face(
-            region["boundary_polygon_pdf_pts"], int(region.get("hole_count") or 0),
-        ):
-            continue
-        width, height = bind_room_hash_axes(page, region["bbox_pdf_pts"])
+        polygon = region["boundary_polygon_pdf_pts"]
+        hole_count = int(region.get("hole_count") or 0)
+        width, height = bind_polygon_hash_axes(page, polygon)
         if width is None or height is None:
             continue
         if set(width.word_refs) & set(height.word_refs):
+            continue
+        if not _axis_aligned_rectangle_face(polygon, hole_count):
             continue
         labels = sorted({item["text"] for item in region["room_label_words"]})
         drafts.append({
@@ -232,7 +233,7 @@ def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[
             "height_hash_stations": list(height.hash_stations),
             "quantity_m2": format((width.length_mm * height.length_mm / 1000000).normalize(), "f"),
             "unit": "m2",
-            "boundary_basis": "outside_hash_chain_internal_face_review_required",
+            "boundary_basis": "internal_face_hash_chain_review_required",
             "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
             "commercial_publishable": False,
             "benchmark_credit": False,

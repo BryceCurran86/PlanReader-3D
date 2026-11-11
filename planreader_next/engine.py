@@ -15,6 +15,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
+from tools.gpt3_original_source_preflight import _stable_original_digest
 
 
 class SourceConflict(ValueError):
@@ -54,12 +55,30 @@ class NativePage:
     segments: tuple[NativeSegment, ...]
 
 
-def _digest(path: Path) -> str:
-    h = sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
+def authenticated_pdf_snapshot(pdf_path: str | Path) -> tuple[str, bytes, tuple[int, ...]]:
+    """Hash identity, then parse only the bytes that still match that digest."""
+    path = Path(pdf_path)
+    try:
+        digest, identity = _stable_original_digest(path)
+    except (OSError, ValueError) as exc:
+        raise SourceConflict("source_identity_unavailable") from exc
+    try:
+        source_bytes = path.read_bytes()
+    except OSError as exc:
+        raise SourceConflict("source_changed_during_read") from exc
+    if sha256(source_bytes).hexdigest() != digest:
+        raise SourceConflict("source_changed_during_read")
+    return digest, source_bytes, identity
+
+
+def confirm_source_snapshot(pdf_path: str | Path, digest: str, identity: tuple[int, ...]) -> None:
+    path = Path(pdf_path)
+    try:
+        unchanged = _stable_original_digest(path) == (digest, identity)
+    except (OSError, ValueError) as exc:
+        raise SourceConflict("source_changed_during_read") from exc
+    if not unchanged:
+        raise SourceConflict("source_changed_during_read")
 
 
 def load_native_page(pdf_path: str | Path, page_index: int) -> NativePage:
@@ -69,15 +88,14 @@ def load_native_page(pdf_path: str | Path, page_index: int) -> NativePage:
     path = Path(pdf_path)
     if type(page_index) is not int or page_index < 0:
         raise SourceConflict("page_index_invalid")
-    before = path.stat()
-    digest = _digest(path)
-    with fitz.open(path) as document:
+    digest, source_bytes, identity = authenticated_pdf_snapshot(path)
+    # The parser must consume the exact authenticated snapshot. A second
+    # pathname open can read a replacement with the same size and mtime.
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
         if page_index >= len(document):
             raise SourceConflict("page_not_in_source")
         extracted = extract_native_page(document[page_index])
-    after = path.stat()
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-        raise SourceConflict("source_changed_during_read")
+    confirm_source_snapshot(path, digest, identity)
     words = tuple(
         NativeWord(
             ref=native_word_primitive_ref(w),

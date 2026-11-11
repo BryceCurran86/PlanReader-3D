@@ -8,6 +8,7 @@ import fitz
 from planreader_next.engine import NativeWord, _figured_mm, load_native_page
 from planreader_next.hash_chain import (
     _unique_ratio_cover,
+    bind_polygon_hash_axes,
     bind_room_hash_axes,
     bind_wall_hash_length,
 )
@@ -141,6 +142,34 @@ def test_unique_1200_1810_leftover_cover_still_binds_by_word_ref():
     assert owned is not None
     assert {word.ref for word in owned} == {"word:1200", "word:1810"}
     assert sum((_figured_mm(word) for word in owned), Decimal("0")) == Decimal("3010")
+
+
+def test_polygon_faces_not_bbox_own_the_hash_chain(tmp_path):
+    def drawer(page):
+        # Finished face jogs north, so the east internal face is shorter than bbox.
+        for a, b in [
+            ((100, 160), (200, 160)), ((200, 160), (200, 100)),
+            ((200, 100), (150, 100)), ((150, 100), (150, 80)),
+            ((150, 80), (100, 80)), ((100, 80), (100, 160)),
+        ]:
+            page.draw_line(fitz.Point(*a), fitz.Point(*b), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(100, 160), fitz.Point(100, 165.5))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(200, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((142, 176), "3600", fontsize=8)
+        page.draw_line(fitz.Point(200, 100), fitz.Point(206, 100))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(206, 160))
+        page.draw_line(fitz.Point(206, 90), fitz.Point(206, 170))
+        page.insert_text((210, 128), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    polygon = [(100, 160), (200, 160), (200, 100), (150, 100), (150, 80), (100, 80)]
+    width, height = bind_polygon_hash_axes(native, polygon)
+    assert width is not None and width.length_mm == 3600
+    assert height is not None and height.length_mm == 2400
+    bbox_width, bbox_height = bind_room_hash_axes(native, (100, 80, 200, 160))
+    assert bbox_width is not None and bbox_width.length_mm == 3600
+    assert bbox_height is None
 
 
 def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):
