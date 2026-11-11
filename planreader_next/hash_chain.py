@@ -118,7 +118,9 @@ def _complete_chain(
     ]
     owned = _unique_interval_words(intervals, figures, horizontal_wall)
     if owned is None:
-        owned = _unique_ratio_cover(intervals, figures)
+        owned = _unique_ratio_cover(
+            intervals, figures, horizontal_wall=horizontal_wall,
+        )
     if owned is None:
         return None
     total = sum((_figured_mm(word) for word in owned), Decimal("0"))
@@ -189,14 +191,58 @@ def _unique_interval_words(
     return owned
 
 
+def _contiguous_runs(owned: Sequence[int]) -> list[list[int]]:
+    ordered = sorted(owned)
+    runs: list[list[int]] = [[ordered[0]]]
+    for index in ordered[1:]:
+        if index == runs[-1][-1] + 1:
+            runs[-1].append(index)
+        else:
+            runs.append([index])
+    return runs
+
+
+def _equal_leftover_runs(
+    runs: Sequence[Sequence[int]],
+    intervals: Sequence[tuple[float, float, Decimal]],
+) -> bool:
+    if len(runs) < 2:
+        return True
+    spans = [sum((intervals[index][2] for index in run), Decimal("0")) for run in runs]
+    if any(span == 0 for span in spans):
+        return False
+    first = spans[0]
+    return all(abs(span / first - 1) <= Decimal("0.05") for span in spans[1:])
+
+
+def _word_in_owned_span(
+    along: float,
+    owned: Sequence[int],
+    intervals: Sequence[tuple[float, float, Decimal]],
+) -> bool:
+    """Word must sit in an owned run, or in the gap between equal leftover runs."""
+    runs = _contiguous_runs(owned)
+    for run in runs:
+        lo, hi = intervals[run[0]][0], intervals[run[-1]][1]
+        if lo + _FACE_PT < along < hi - _FACE_PT:
+            return True
+    if len(runs) >= 2 and _equal_leftover_runs(runs, intervals):
+        lo, hi = intervals[min(owned)][0], intervals[max(owned)][1]
+        return lo + _FACE_PT < along < hi - _FACE_PT
+    return False
+
+
 def _unique_ratio_cover(
     intervals: Sequence[tuple[float, float, Decimal]],
     figures: Sequence[NativeWord],
+    *,
+    horizontal_wall: bool | None = None,
 ) -> list[NativeWord] | None:
-    """Split a crowded hash run when exactly one interval-to-figure cover has one pt/mm.
+    """Split a crowded hash run when exactly one interval-to-word cover has one pt/mm.
 
-    Geometric PDF wall length is not an input. The only comparison is hash-interval
-    span versus the printed millimetres already on this same dimension chain.
+    Ownership is the native word ref, not the printed millimetres. Equal figures
+    on separated intervals are ambiguous. A word may own equal leftover side
+    runs only when that cover is unique. Geometric PDF wall length is not used.
     """
     count_intervals = len(intervals)
     count_figures = len(figures)
@@ -205,10 +251,29 @@ def _unique_ratio_cover(
     millimetres = [_figured_mm(word) for word in figures]
     if any(value == 0 for value in millimetres):
         return None
-    signatures: dict[tuple[Decimal, ...], list[tuple[int, ...]]] = {}
+    along_values = (
+        None if horizontal_wall is None
+        else [_word_along(word, horizontal_wall) for word in figures]
+    )
+    mappings: set[tuple[str, ...]] = set()
     for assignment in product(range(count_figures), repeat=count_intervals):
         if len(set(assignment)) != count_figures:
             continue
+        owned_by_figure = [
+            [index for index, figure_index in enumerate(assignment) if figure_index == figure]
+            for figure in range(count_figures)
+        ]
+        if any(
+            not _equal_leftover_runs(_contiguous_runs(owned), intervals)
+            for owned in owned_by_figure
+        ):
+            continue
+        if along_values is not None:
+            if any(
+                not _word_in_owned_span(along_values[figure], owned_by_figure[figure], intervals)
+                for figure in range(count_figures)
+            ):
+                continue
         spans = [Decimal("0")] * count_figures
         for index, figure_index in enumerate(assignment):
             spans[figure_index] += intervals[index][2]
@@ -216,9 +281,8 @@ def _unique_ratio_cover(
         first = ratios[0]
         if any(abs(ratio / first - 1) > Decimal("0.05") for ratio in ratios[1:]):
             continue
-        signature = tuple(millimetres[figure_index] for figure_index in assignment)
-        signatures.setdefault(signature, []).append(assignment)
-    if len(signatures) != 1:
+        mappings.add(tuple(figures[figure_index].ref for figure_index in assignment))
+    if len(mappings) != 1:
         return None
     return list(figures)
 

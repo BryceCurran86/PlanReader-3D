@@ -1,10 +1,16 @@
 """Outside wall-end hashes own the unique figured length between them."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 import fitz
 
-from planreader_next.engine import load_native_page
-from planreader_next.hash_chain import bind_room_hash_axes, bind_wall_hash_length
+from planreader_next.engine import NativeWord, _figured_mm, load_native_page
+from planreader_next.hash_chain import (
+    _unique_ratio_cover,
+    bind_room_hash_axes,
+    bind_wall_hash_length,
+)
 
 
 def _page(tmp_path, drawer):
@@ -105,6 +111,36 @@ def test_crowded_middle_figures_abstain_when_hash_spans_do_not_agree(tmp_path):
         native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=160.0, outward=1.0,
     )
     assert bound is None
+
+
+def test_equal_millimetre_words_on_separated_intervals_abstain():
+    intervals = [
+        (0.0, 10.0, Decimal("10")),
+        (10.0, 30.0, Decimal("20")),
+        (30.0, 40.0, Decimal("10")),
+    ]
+    figures = [
+        NativeWord("left", "2000", (12, 10, 15, 14)),
+        NativeWord("right", "2000", (22, 10, 25, 14)),
+    ]
+    assert _unique_ratio_cover(intervals, figures) is None
+    assert _unique_ratio_cover(intervals, figures, horizontal_wall=True) is None
+
+
+def test_unique_1200_1810_leftover_cover_still_binds_by_word_ref():
+    intervals = [
+        (0.0, 16.9, Decimal("16.9")),
+        (16.9, 68.2, Decimal("51.3")),
+        (68.2, 85.1, Decimal("16.9")),
+    ]
+    figures = [
+        NativeWord("word:1200", "1,200", (40, 10, 48, 14)),
+        NativeWord("word:1810", "1,810", (42, 10, 50, 14)),
+    ]
+    owned = _unique_ratio_cover(intervals, figures, horizontal_wall=True)
+    assert owned is not None
+    assert {word.ref for word in owned} == {"word:1200", "word:1810"}
+    assert sum((_figured_mm(word) for word in owned), Decimal("0")) == Decimal("3010")
 
 
 def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):

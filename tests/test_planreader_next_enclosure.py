@@ -11,8 +11,8 @@ import pytest
 
 from decimal import Decimal
 
-from planreader_next.enclosure import propose_room_enclosures
-from planreader_next.engine import SourceConflict, load_native_page
+from planreader_next.enclosure import _draft_floors, propose_room_enclosures
+from planreader_next.engine import NativePage, SourceConflict, load_native_page
 from planreader_next.hash_chain import bind_wall_hash_length
 from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 from tests.test_layered_wall_doorway_room_face_wiring_v1 import layered_room_pdf
@@ -58,6 +58,44 @@ def test_unwitnessed_opening_is_not_filled_or_marked_as_room(tmp_path):
     assert packet["virtual_fill_count"] == 0
     assert packet["candidate_enclosed_regions"] == 0
     assert packet["unresolved_wall_gap_count"] >= 1
+
+
+def _draft_region(polygon, *, hole_count=0, bbox=None):
+    xs = [pt[0] for pt in polygon]
+    ys = [pt[1] for pt in polygon]
+    return {
+        "region_id": "draft-shape",
+        "status": "candidate",
+        "single_room_shape_hint": True,
+        "finish_zones": [{"finish": "VINYL"}],
+        "finish_marker_words": [{"text": "VINYL", "native_word_ref": "word:vinyl"}],
+        "room_label_words": [{"text": "BED", "native_word_ref": "word:bed"}],
+        "open_plan_physical_area": False,
+        "bbox_pdf_pts": bbox or [min(xs), min(ys), max(xs), max(ys)],
+        "boundary_polygon_pdf_pts": polygon,
+        "hole_count": hole_count,
+    }
+
+
+def test_l_concave_and_holed_faces_do_not_publish_bbox_product_as_floor(monkeypatch):
+    from planreader_next.hash_chain import HashBoundLength
+
+    page = NativePage("a" * 64, 0, (), (), ())
+    width = HashBoundLength(Decimal("10000"), ("word:w",), (0.0, 100.0), 0.0, "horizontal")
+    height = HashBoundLength(Decimal("10000"), ("word:h",), (0.0, 100.0), 0.0, "vertical")
+    monkeypatch.setattr(
+        "planreader_next.hash_chain.bind_room_hash_axes",
+        lambda page, bbox: (width, height),
+    )
+    ell = [[0, 0], [100, 0], [100, 50], [50, 50], [50, 100], [0, 100]]
+    concave = [[0, 0], [100, 0], [100, 100], [60, 100], [60, 40], [40, 40], [40, 100], [0, 100]]
+    rectangle = [[0, 0], [100, 0], [100, 100], [0, 100]]
+    assert _draft_floors(page, [_draft_region(ell)]) == []
+    assert _draft_floors(page, [_draft_region(concave)]) == []
+    assert _draft_floors(page, [_draft_region(rectangle, hole_count=1)]) == []
+    drafts = _draft_floors(page, [_draft_region(rectangle)])
+    assert len(drafts) == 1
+    assert drafts[0]["quantity_m2"] == "100"
 
 
 def test_open_plan_living_and_kitchen_stay_one_physical_area(tmp_path):

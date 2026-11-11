@@ -104,6 +104,26 @@ def bbox_size(r):
     return round(x1 - x0, 3), round(y1 - y0, 3)
 
 
+# Frozen at 705a4cb3c before CS/panel-lift word-ref payload. Default-off
+# swing IDs must stay byte-identical when the new kinds are disabled.
+_FROZEN_SWING_CLOSURE_ID = "layered_doorway_closure_859661141acf057d0becc8f2"
+_FROZEN_SWING_RING_ID = "layered_wall_doorway_room_ring_185c6bb221f911462fe66ad01b01e203"
+
+
+def test_default_off_swing_closure_and_ring_ids_match_pre_feature_baseline():
+    result = build_layered_wall_doorway_room_rings(room(), source_sha256=SHA, page_index=0)
+    assert result.closures[0].kind == KIND_SWING
+    assert result.closures[0].closure_id == _FROZEN_SWING_CLOSURE_ID
+    assert result.closures[0].native_word_refs == ()
+    assert candidates(result)[0].record_id == _FROZEN_SWING_RING_ID
+    enabled = build_layered_wall_doorway_room_rings(
+        room(), source_sha256=SHA, page_index=0,
+        sliding_leaf_frame_closure=True, panel_lift_label_closure=True,
+    )
+    swing = next(item for item in enabled.closures if item.kind == KIND_SWING)
+    assert swing.closure_id == _FROZEN_SWING_CLOSURE_ID
+
+
 def test_closed_room_with_swing_door_yields_one_candidate_ring_on_the_finished_faces():
     result = build_layered_wall_doorway_room_rings(room(), source_sha256=SHA, page_index=0)
     ring = candidates(result)

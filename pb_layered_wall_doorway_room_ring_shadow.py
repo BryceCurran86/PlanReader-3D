@@ -1233,18 +1233,22 @@ def build_layered_wall_doorway_room_rings(
         else:
             kind, native = KIND_PANEL_LIFT, ()
             word_refs = tuple(panel_words or ())
+        payload = {
+            "source_sha256": source_sha256,
+            "page_index": page_index,
+            "kind": kind,
+            "horizontal": gap.horizontal,
+            "band": [round(v, 3) for v in gap.band],
+            "gap": [round(gap.lo, 3), round(gap.hi, 3)],
+            "native": list(native),
+        }
+        # Historic swing/stroke/sliding IDs must stay byte-identical when new
+        # kinds are disabled. Word refs belong only to CS and panel-lift kinds.
+        if kind in (KIND_CAVITY_SLIDER, KIND_PANEL_LIFT):
+            payload["native_word_refs"] = list(word_refs)
         closure_id = stable_contract_id(
             "layered_doorway_closure",
-            {
-                "source_sha256": source_sha256,
-                "page_index": page_index,
-                "kind": kind,
-                "horizontal": gap.horizontal,
-                "band": [round(v, 3) for v in gap.band],
-                "gap": [round(gap.lo, 3), round(gap.hi, 3)],
-                "native": list(native),
-                "native_word_refs": list(word_refs),
-            },
+            payload,
             digest_chars=24,
         )
         closures.append(LayeredDoorwayClosure(

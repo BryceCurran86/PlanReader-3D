@@ -147,6 +147,7 @@ def propose_room_enclosures(
             "open_plan_physical_area": open_plan_physical_area,
             "single_room_shape_hint": may_be_single_room and not likely_cavity_pocket,
             "likely_cavity_pocket": likely_cavity_pocket,
+            "hole_count": ring.hole_count,
             "room_identity_authenticated": False,
             "finished_face_authenticated": False,
             "metric_area_authenticated": False,
@@ -183,8 +184,26 @@ def propose_room_enclosures(
     }
 
 
+def _axis_aligned_rectangle_face(coords: list[list[float]] | list[tuple[float, float]], hole_count: int) -> bool:
+    """True only for a hole-free face whose area fills its axis-aligned bbox."""
+    if hole_count:
+        return False
+    polygon = Polygon(coords)
+    if not polygon.is_valid or polygon.is_empty or polygon.interiors:
+        return False
+    minx, miny, maxx, maxy = polygon.bounds
+    bbox_area = (maxx - minx) * (maxy - miny)
+    if bbox_area <= 0:
+        return False
+    return abs(polygon.area / bbox_area - 1.0) <= 1e-6
+
+
 def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Figured millimetres between unique outside hashes at each wall end."""
+    """Figured millimetres between unique outside hashes at each wall end.
+
+    Width×height is the room area only for a hole-free axis-aligned rectangle.
+    L, concave and holed faces abstain; bbox product is not a floor quantity.
+    """
     from .hash_chain import bind_room_hash_axes
 
     drafts: list[dict[str, Any]] = []
@@ -192,6 +211,10 @@ def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[
         if region["status"] != "candidate" or not region["single_room_shape_hint"]:
             continue
         if len(region["finish_zones"]) != 1 or not region["finish_marker_words"]:
+            continue
+        if not _axis_aligned_rectangle_face(
+            region["boundary_polygon_pdf_pts"], int(region.get("hole_count") or 0),
+        ):
             continue
         width, height = bind_room_hash_axes(page, region["bbox_pdf_pts"])
         if width is None or height is None:
