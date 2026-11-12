@@ -67,3 +67,43 @@ height ABSTAINS while independently verified ceiling area is not removed.
 The private PDF originals and diagnostics stay on the owner's PC.
 Frozen 120, original customer outputs and signed quantities are unchanged.
 There is no new official score or customer release claim.
+
+## Optional source RCP rectangle proposals
+
+The --with-source-zone-rectangles option on heights --drawing-type rcp
+links each source-owned same-callout material/height text pair to the smallest
+uniquely containing source-native original PDF rectangle. If the nearest
+two candidate rectangles are within 10 percent of each other, the bubble
+ABSTAINS. Multiple same-value bubbles in a rectangle consolidate;
+conflicting material or height pairs ABSTAIN. A sheet-wide box alone does
+not authenticate a ceiling zone, room, wall or customer quantity.
+
+    python -m planreader_next heights --drawing-type rcp --page 8 --pdf original.pdf --with-source-zone-rectangles --output source-rectangles.json
+
+On real Maryborough page 9 RCP, 18 source height/material pairs produced
+13 rectangle candidates and one ambiguity. This is NOT 13 authenticated
+ceiling zones, and no m2 customer measure is added.
+
+associate_reviewed_rcp_zone_with_plan_face accepts only exact source refs
+and an explicit cross-sheet reviewer-approved relation. The result still has
+physical_ceiling_zone_authenticated, wall_finish_to_fcl_authenticated and
+commercial_publishable set to false. Applying RCP height to walls additionally
+requires proof the lining reaches that ceiling. A source-documented document-
+wide FFL/FCL figure does not prove applicability to every room;
+room_height_from_ffl_fcl now explicitly marks the room and ceiling-zone scope
+unresolved and height_applied_to_any_room false.
+
+## Keep room detection fast and cross-sheet height explicit
+
+The ordinary boundaries / suggest with-boundaries geometry path does NOT
+scan every elevation/section for FFL/FCL heights. It reports
+CROSS_SHEET_HEIGHT_SOURCE_SCAN_DEFERRED, length_mm=None and
+height_applied_to_any_room=false. The old eager cross-sheet scan parsed
+three large 3Laurel drawing pages and made a room-boundary regression
+take several minutes. The source document height remains extractable
+independently via the explicit heights --drawing-type section command.
+To attach a section preview during room detection, opt in using
+boundaries --with-cross-sheet-height or suggest --with-boundaries
+--with-cross-sheet-height, preserving the same source SHA and FFL/FCL
+scope-review flag. A document-wide unique FFL-to-FCL result must not
+become every room's height or a substitute for the missing plan axis.

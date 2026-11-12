@@ -111,6 +111,7 @@ def propose_room_enclosures(
     page: NativePage, pdf_path: str | Path, *, include_sliding: bool = True,
     stroke_pair_wall_faces: bool = False,
     viewport_pdf_pts: tuple[float, float, float, float] | list[tuple[float, float, float, float]] | None = None,
+    include_cross_sheet_height: bool = False,
 ) -> dict[str, Any]:
     """Candidate room polygons from wall ink plus temporary opening barriers.
 
@@ -242,7 +243,23 @@ def propose_room_enclosures(
         "draft_floor_candidates": _draft_floors(page, regions),
         "dimension_index": _page_dimension_index(page),
         "topology_face_receipts": _topology_face_receipts(page, regions),
-        "room_height_from_ffl_fcl": _document_ffl_fcl_height(path, page.source_sha256),
+        "room_height_from_ffl_fcl": (
+            _document_ffl_fcl_height(path, page.source_sha256)
+            if include_cross_sheet_height
+            else {
+                "source_sha256": page.source_sha256,
+                "status": "CROSS_SHEET_HEIGHT_SOURCE_SCAN_DEFERRED",
+                "length_mm": None,
+                "room_height_is_ffl_fcl": False,
+                "cut_room_identity_authenticated": False,
+                "applicable_room_ids": [],
+                "applicable_room_scope_authenticated": False,
+                "height_applied_to_any_room": False,
+                "commercial_publishable": False,
+                "benchmark_credit": False,
+                "official_score": None,
+            }
+        ),
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
@@ -300,6 +317,12 @@ def _document_ffl_fcl_height(pdf_path: Path, source_sha256: str) -> dict[str, An
         "room_height_is_ffl_fcl": True,
         "plan_axis_is_not_ceiling_height": True,
         "cut_room_identity_authenticated": False,
+        # A unique height in the source document does not prove this section
+        # cuts every room or establishes a uniform RCP height for that room.
+        "applicable_room_ids": [],
+        "applicable_room_scope_authenticated": False,
+        "ceiling_zone_scope_authenticated": False,
+        "height_applied_to_any_room": False,
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,

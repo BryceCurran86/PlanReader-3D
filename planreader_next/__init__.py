@@ -4,6 +4,7 @@ from .building import measure_building_components
 from .dimension_association import associate_dimension_inventory_to_native_faces
 from .dimension_index import inventory_page_dimensions
 from .height_evidence import height_evidence_inventory, validate_height_receipt
+from .rcp_zone_scope import propose_rcp_source_zone_rectangles, associate_reviewed_rcp_zone_with_plan_face
 from .topology_faces import native_finished_face_receipts
 from .engine import NativePage, SourceConflict, inspect_page, load_native_page, measure_page
 from .suggest import suggest_room_bindings
@@ -13,6 +14,7 @@ __all__ = [
     "measure_page", "suggest_room_bindings", "measure_building_components",
     "inventory_page_dimensions",
     "height_evidence_inventory", "validate_height_receipt",
+    "propose_rcp_source_zone_rectangles", "associate_reviewed_rcp_zone_with_plan_face",
     "associate_dimension_inventory_to_native_faces",
     "native_finished_face_receipts",
 ]

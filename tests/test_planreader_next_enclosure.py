@@ -190,7 +190,10 @@ def _plan_plus_section_ffl_fcl(tmp_path):
 def test_plan_page_uses_unique_section_ffl_fcl_as_room_height(tmp_path):
     path = _plan_plus_section_ffl_fcl(tmp_path)
     page = load_native_page(path, 0)
-    result = propose_room_enclosures(page, path)
+    default = propose_room_enclosures(page, path)
+    assert default["room_height_from_ffl_fcl"]["status"] == "CROSS_SHEET_HEIGHT_SOURCE_SCAN_DEFERRED"
+    assert default["room_height_from_ffl_fcl"]["height_applied_to_any_room"] is False
+    result = propose_room_enclosures(page, path, include_cross_sheet_height=True)
     ceiling = result["room_height_from_ffl_fcl"]
     assert ceiling["status"] == "SECTION_FFL_FCL_REVIEW_REQUIRED"
     assert ceiling["length_mm"] == "2700"
@@ -198,6 +201,10 @@ def test_plan_page_uses_unique_section_ffl_fcl_as_room_height(tmp_path):
     assert ceiling["room_height_is_ffl_fcl"] is True
     assert ceiling["plan_axis_is_not_ceiling_height"] is True
     assert ceiling["cut_room_identity_authenticated"] is False
+    assert ceiling["applicable_room_ids"] == []
+    assert ceiling["applicable_room_scope_authenticated"] is False
+    assert ceiling["ceiling_zone_scope_authenticated"] is False
+    assert ceiling["height_applied_to_any_room"] is False
     assert ceiling["commercial_publishable"] is False
     assert ceiling["official_score"] is None
     assert result["draft_floor_candidates"] == []
@@ -281,18 +288,15 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     # MEDIA south 870 is a CS opening, not the 4210 leftover width.
     assert result["draft_floor_candidates"] == []
     ceiling = result["room_height_from_ffl_fcl"]
+    assert ceiling["status"] == "CROSS_SHEET_HEIGHT_SOURCE_SCAN_DEFERRED"
+    assert ceiling["length_mm"] is None
+    assert ceiling["room_height_is_ffl_fcl"] is False
+    assert ceiling["cut_room_identity_authenticated"] is False
+    assert ceiling["height_applied_to_any_room"] is False
     assert ceiling["commercial_publishable"] is False
     assert ceiling["official_score"] is None
-    assert ceiling["room_height_is_ffl_fcl"] is True
-    assert ceiling["plan_axis_is_not_ceiling_height"] is True
-    assert ceiling["cut_room_identity_authenticated"] is False
-    assert ceiling["status"] == "SECTION_FFL_FCL_REVIEW_REQUIRED"
-    assert ceiling["length_mm"] == "2700"
-    assert 6 in ceiling["source_page_indexes"]
-    assert "d5955i0" in ceiling["dimension_segment_refs"]
-    assert ceiling["length_mm"] != "2740"
-    assert ceiling["length_mm"] != "2100"
-    assert ceiling["length_mm"] != "870"
+    # FFL-to-FCL evidence still exists on the real original section page 7;
+    # its separate source-owned height test covers the positive path.
     faces = result["topology_face_receipts"]
     assert faces["commercial_publishable"] is False
     assert faces["finished_face_authenticated"] is False

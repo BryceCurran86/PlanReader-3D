@@ -34,6 +34,8 @@ def main() -> int:
     suggest.add_argument("--output", type=Path, required=True)
     suggest.add_argument("--with-boundaries", action="store_true",
                          help="Opt in to slower source-attested door/window wall-closure room polygons")
+    suggest.add_argument("--with-cross-sheet-height", action="store_true",
+                         help="When boundaries enabled, opt in to section FFL/FCL source scan")
     suggest.add_argument("--skip-opening-closures", action="store_true",
                          help="Legacy override: skip topology-only virtual wall closures")
     boundaries = sub.add_parser("boundaries", help="Temporarily close verified openings to suggest room polygons")
@@ -42,6 +44,8 @@ def main() -> int:
     boundaries.add_argument("--output", type=Path, required=True)
     boundaries.add_argument("--skip-sliding", action="store_true",
                             help="Do not include source-attested sliding-leaf closures")
+    boundaries.add_argument("--with-cross-sheet-height", action="store_true",
+                            help="Opt in to slower section FFL/FCL source scan")
     measure = sub.add_parser("measure", help="Compute source-backed room draft")
     measure.add_argument("--pdf", type=Path, required=True)
     measure.add_argument("--selection", type=Path, required=True)
@@ -65,6 +69,10 @@ def main() -> int:
     heights.add_argument("--page", type=int, default=0)
     heights.add_argument("--drawing-type", choices=("section", "rcp"), required=True)
     heights.add_argument("--rcp-viewport", nargs=4, type=float, metavar=("X0","Y0","X1","Y1"))
+    heights.add_argument(
+        "--with-source-zone-rectangles", action="store_true",
+        help="Opt in to topology-only RCP material/height-to-source-rectangle candidates",
+    )
     heights.add_argument("--output", type=Path, required=True)
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
@@ -79,7 +87,9 @@ def main() -> int:
             result = suggest_room_bindings(page)
             if args.with_boundaries and not args.skip_opening_closures:
                 from .enclosure import propose_room_enclosures
-                result["enclosure_preview"] = propose_room_enclosures(page, args.pdf)
+                result["enclosure_preview"] = propose_room_enclosures(
+                    page, args.pdf, include_cross_sheet_height=args.with_cross_sheet_height,
+                )
             result["project_id"] = args.project_id
             result["revision_id"] = args.revision_id
         elif args.mode == "boundaries":
@@ -87,6 +97,7 @@ def main() -> int:
             page = load_native_page(args.pdf, args.page)
             result = propose_room_enclosures(
                 page, args.pdf, include_sliding=not args.skip_sliding,
+                include_cross_sheet_height=args.with_cross_sheet_height,
             )
         elif args.mode == "dimensions":
             from .dimension_index import dimension_index_payload, inventory_page_dimensions
@@ -117,6 +128,8 @@ def main() -> int:
             page = load_native_page(args.pdf, args.page)
             if args.drawing_type == "section" and args.rcp_viewport is not None:
                 raise SourceConflict("rcp_viewport_only_valid_for_rcp")
+            if args.drawing_type == "section" and args.with_source_zone_rectangles:
+                raise SourceConflict("source_zone_rectangles_only_valid_for_rcp")
             inventory = height_evidence_inventory(
                 page,
                 rcp_viewport_pdf_pts=(
@@ -136,6 +149,17 @@ def main() -> int:
                 "benchmark_credit": False,
                 "official_score": None,
             }
+            if args.with_source_zone_rectangles:
+                from .rcp_zone_scope import propose_rcp_source_zone_rectangles
+                zone_result = propose_rcp_source_zone_rectangles(
+                    page, viewport_pdf_pts=args.rcp_viewport,
+                )
+                result["source_zone_rectangle_candidates"] = zone_result[
+                    "source_zone_rectangle_candidates"
+                ]
+                result["source_zone_unresolved_callouts"] = zone_result[
+                    "unresolved_callouts"
+                ]
         elif args.mode == "takeoff":
             from .building import measure_building_components
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
@@ -204,6 +228,9 @@ def main() -> int:
                     "source_height_candidates": len(result["height_evidence"]),
                     "drawing_type_claimed": result["drawing_type_claimed"],
                     "physical_zone_association": "REVIEW_REQUIRED",
+                    "source_zone_rectangle_candidates": len(
+                        result.get("source_zone_rectangle_candidates", [])
+                    ),
                     "commercial_publishable": False,
                 }, sort_keys=True))
             else:
