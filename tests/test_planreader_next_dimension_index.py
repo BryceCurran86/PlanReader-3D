@@ -173,3 +173,25 @@ def test_translation_does_not_change_unique_millimetres(tmp_path):
     moved_width = next(item for item in moved.figures if item.millimetres == Decimal("3600"))
     assert origin_width.geometry_status == moved_width.geometry_status == STATUS_UNIQUE
     assert origin_width.millimetres == moved_width.millimetres
+
+
+def test_extension_refs_must_touch_the_owned_dimension_line():
+    """A distant segment at the same hash station is NOT source evidence."""
+    from planreader_next.dimension_index import _segments_at_stations
+    from planreader_next.engine import NativeSegment
+
+    horizontal_line = NativeSegment("h-line", "line", 90, 100, 210, 100)
+    near_h = NativeSegment("h-true-extension", "line", 100, 100, 100, 120)
+    far_h = NativeSegment("h-unrelated-remote", "line", 100, 250, 100, 260)
+    assert _segments_at_stations(
+        [near_h, far_h], horizontal_line, (100.0, 200.0),
+        max_length=44.0,
+    ) == ("h-true-extension",)
+
+    vertical_line = NativeSegment("v-line", "line", 100, 90, 100, 210)
+    near_v = NativeSegment("v-true-extension", "line", 100, 100, 120, 100)
+    far_v = NativeSegment("v-unrelated-remote", "line", 250, 100, 260, 100)
+    assert _segments_at_stations(
+        [near_v, far_v], vertical_line, (100.0, 200.0),
+        max_length=44.0,
+    ) == ("v-true-extension",)

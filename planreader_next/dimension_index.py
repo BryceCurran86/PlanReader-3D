@@ -350,6 +350,12 @@ def _segments_at_stations(
         if max_length is not None and length > max_length:
             continue
         along = (seg.x1 + seg.x2) / 2.0 if tick_axis == "v" else (seg.y1 + seg.y2) / 2.0
+        # A matching hash station is not sufficient source ownership: an
+        # unrelated distant tick/extension can share the same x or y station.
+        # Require the actual segment to touch/cross the specific dim line.
+        perps = (seg.y1, seg.y2) if tick_axis == "v" else (seg.x1, seg.x2)
+        if not (min(perps) - _FACE_PT <= line_perp <= max(perps) + _FACE_PT):
+            continue
         if any(abs(along - station) <= _FACE_PT for station in stations):
             found.append(seg.ref)
     return tuple(sorted(set(found)))
