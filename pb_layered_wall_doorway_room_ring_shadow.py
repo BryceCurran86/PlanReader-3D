@@ -451,7 +451,32 @@ def _collect_stroke_pair_strips(
                     paths = tuple(sorted({item[0] for item in covering} or {stroke[0]}))
                     polygon = box(x0, y0, x1, y1)
                     strips.append(_Strip(paths[0], x0, y0, x1, y1, polygon, path_indices=paths))
-    return strips
+    # Both face directions can propose the same wall, or a long face can
+    # propose a full span in addition to its individually paired collinear
+    # subspans. Keep only maximal, source-consistent spans on each band.
+    # Otherwise one real wall is reconstructed twice and may inflate counts
+    # or make the same edge carry mutually inconsistent source owners.
+    by_band: dict[tuple[bool, float, float], list[_Strip]] = {}
+    for strip in strips:
+        band = strip.band()
+        key = (strip.horizontal, round(band[0], 3), round(band[1], 3))
+        by_band.setdefault(key, []).append(strip)
+    maximal: list[_Strip] = []
+    for group in by_band.values():
+        accepted: list[_Strip] = []
+        for strip in sorted(group, key=lambda item: (-(item.span()[1] - item.span()[0]), item.span())):
+            span_lo, span_hi = strip.span()
+            refs = set(strip.native_path_indices())
+            if any(
+                (prior.span()[0] <= span_lo + _STROKE_PAIR_FACE_PT)
+                and (prior.span()[1] >= span_hi - _STROKE_PAIR_FACE_PT)
+                and refs.issubset(prior.native_path_indices())
+                for prior in accepted
+            ):
+                continue
+            accepted.append(strip)
+        maximal.extend(accepted)
+    return maximal
 
 
 def _polygon_of_closed_line_path(items: Sequence[Sequence[Any]]) -> Optional[Polygon]:

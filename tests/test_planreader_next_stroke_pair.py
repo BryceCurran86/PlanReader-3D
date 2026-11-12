@@ -95,6 +95,22 @@ def test_long_outer_face_pairs_each_unique_inner_span():
     assert all(not ring.takeoff_eligible for ring in result.rings)
 
 
+def test_adjacent_collinear_partner_spans_both_own_full_merged_strip():
+    # Adjacent source paths truly contribute to the same continuous strip.
+    # Their refs must BOTH be retained, unlike disjoint noncontributing paths.
+    from pb_layered_wall_doorway_room_ring_shadow import _collect_stroke_pair_strips
+
+    drawings = [
+        _line(0, 0, 100, 0),
+        _line(0, 2, 40, 2),
+        _line(40, 2, 100, 2),
+    ]
+    strips = _collect_stroke_pair_strips(drawings)
+    assert len(strips) == 1
+    assert strips[0].native_path_indices() == (0, 1, 2)
+    assert tuple(round(v, 2) for v in strips[0].polygon.bounds) == (0.0, 0.0, 100.0, 2.0)
+
+
 def test_split_collinear_opposite_face_is_one_wall_not_rival_partners():
     split = [
         _line(0, 0, 100, 0),
