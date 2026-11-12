@@ -229,14 +229,55 @@ class _CachedVisibilityPage:
     visible_segments: tuple[_CachedVisibleSegment, ...]
 
 
+def _native_word_integrity_for_receipt(
+    page: fitz.Page,
+    word: Mapping[str, Any],
+    *,
+    source_native_finish_text_shadow: bool,
+    source_raster_text_receipt_replay: bool,
+) -> Any:
+    """Reprove an original raster receipt without hiding newer native failures.
+
+    The optional embedded-symbol proof can turn an old glyph-unverified native
+    receipt into a trusted one. Those different receipt bodies have different
+    IDs. The replay policy keeps the original native proof stage so downstream
+    raster authorities can reissue its historical evidence. Current native
+    contradictions, clipping, paint and other failures always veto that path.
+    A returned glyph-unverified receipt is NOT text authority: the existing
+    independent raster corroboration still has to succeed.
+    """
+    decision = classify_native_word_integrity(
+        page, word,
+        **({
+            "source_symbol_font_chain_shadow": True,
+            "source_raw_no_active_text_clip_shadow": True,
+        } if source_native_finish_text_shadow else {}),
+    )
+    if (
+        source_raster_text_receipt_replay
+        and decision.trusted is True
+        and not decision.reason_codes
+    ):
+        return classify_native_word_integrity(
+            page, word,
+            source_raw_no_active_text_clip_shadow=True,
+        )
+    return decision
+
+
 def _derive_visibility_page(
     page: fitz.Page,
     *,
     native_page: Optional[Mapping[str, Any]] = None,
     source_native_finish_text_shadow: bool = False,
+    source_raster_text_receipt_replay: bool = False,
 ) -> _CachedVisibilityPage:
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("source_finish_text_shadow_requires_explicit_bool")
+    if type(source_raster_text_receipt_replay) is not bool:
+        raise ValueError("source_raster_receipt_replay_requires_explicit_bool")
+    if source_raster_text_receipt_replay and not source_native_finish_text_shadow:
+        raise ValueError("source_raster_receipt_replay_requires_native_source_scope")
     native = native_page if native_page is not None else extract_native_page(page)
     words: list[_CachedVisibilityWord] = []
     visible_segments: list[_CachedVisibleSegment] = []
@@ -248,12 +289,10 @@ def _derive_visibility_page(
                 raw_text=raw_text,
                 geometry=geometry,
                 primitive_ref=native_word_primitive_ref(word),
-                decision=classify_native_word_integrity(
+                decision=_native_word_integrity_for_receipt(
                     page, word,
-                    **({
-                        "source_symbol_font_chain_shadow": True,
-                        "source_raw_no_active_text_clip_shadow": True,
-                    } if source_native_finish_text_shadow else {}),
+                    source_native_finish_text_shadow=source_native_finish_text_shadow,
+                    source_raster_text_receipt_replay=source_raster_text_receipt_replay,
                 ),
                 block_no=word.get("block_no"),
                 line_no=word.get("line_no"),
@@ -1011,6 +1050,7 @@ class SourceVisibilityProducer:
                  raster_paired_outer_faces_shadow: bool = False,
                  exact_g17_nomination_shadow: bool = False,
                  source_native_finish_text_shadow: bool = False,
+                 source_raster_text_receipt_replay: bool = False,
                  raster_double_face_negative_shadow: bool = False,
                  source_glyph_ledger_text_trust: bool = False,
                  raster_corner_framed_opening_shadow: bool = False) -> None:
@@ -1029,6 +1069,11 @@ class SourceVisibilityProducer:
         if type(source_native_finish_text_shadow) is not bool:
             raise ValueError("source_finish_text_shadow_requires_explicit_bool")
         self._source_native_finish_text_shadow = source_native_finish_text_shadow
+        if type(source_raster_text_receipt_replay) is not bool:
+            raise ValueError("source_raster_receipt_replay_requires_explicit_bool")
+        if source_raster_text_receipt_replay and not source_native_finish_text_shadow:
+            raise ValueError("source_raster_receipt_replay_requires_native_source_scope")
+        self._source_raster_text_receipt_replay = source_raster_text_receipt_replay
         # Default-off: words whose ONLY text-integrity blocker is the glyph proof may be
         # trusted through sealed raster corroboration plus verified glyph mappings.
         if type(source_glyph_ledger_text_trust) is not bool:
@@ -1049,7 +1094,7 @@ class SourceVisibilityProducer:
             tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
         ] = {}
         self._visibility_page_cache: (
-            "OrderedDict[tuple[str, str, int], _CachedVisibilityPage]"
+            "OrderedDict[tuple[str, str, int, bool, bool], _CachedVisibilityPage]"
         ) = OrderedDict()
         # One source-bound physical-opening authority per producer.  The
         # visibility authority it wraps is a live read-only view over this
@@ -2383,6 +2428,7 @@ class SourceVisibilityProducer:
                     base.snapshot.snapshot_id,
                     int(page_number),
                     self._source_native_finish_text_shadow,
+                    self._source_raster_text_receipt_replay,
                 )
                 derived = self._visibility_page_cache.get(visibility_cache_key)
                 if derived is not None:
@@ -2404,6 +2450,9 @@ class SourceVisibilityProducer:
                         **({
                             "source_native_finish_text_shadow": True
                         } if self._source_native_finish_text_shadow else {}),
+                        **({
+                            "source_raster_text_receipt_replay": True
+                        } if self._source_raster_text_receipt_replay else {}),
                     )
                     self._visibility_page_cache[visibility_cache_key] = derived
                     self._visibility_page_cache.move_to_end(visibility_cache_key)

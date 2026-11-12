@@ -139,6 +139,11 @@ def issue_original_maryborough_ceiling_customer_quantities(
                         producer_method="maryborough-customer-authority",
                         producer_version="1.0",
                         source_native_finish_text_shadow=True,
+                        # Historical ceilings were issued through the original
+                        # dual-raster text proof. Reprove that same native
+                        # receipt stage even when symbol-font proof is now
+                        # installed; current native contradictions still veto.
+                        source_raster_text_receipt_replay=True,
                     )
                     published = source.ingest_native_pdf_bytes(
                         document_id=MARYBOROUGH_DOCUMENT_ID,
