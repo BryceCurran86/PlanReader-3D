@@ -1001,10 +1001,16 @@ def _trusted_native_dimensions_for_page(
         )
 
     visibility = source.authority()
-    page_visible_ids = visibility.visible_observation_ids_for_page(
-        published.snapshot.snapshot_id,
-        str(page_id),
-    )
+    try:
+        # Reuse the existing producer-owned, tamper-checked page read views.
+        # This proof still authenticates the whole visible source universe;
+        # it avoids rebuilding and hashing each alias for every room query.
+        page_visible_rows = visibility.authenticated_visible_observations(
+            published, bind_page_id=str(page_id),
+        )
+    except RuntimeError:
+        # A failed source/receipt/parent proof cannot supply figured geometry.
+        return ()
     source_ids_by_geometry: dict[
         tuple[float, float, float, float],
         list[str],
@@ -1013,22 +1019,9 @@ def _trusted_native_dimensions_for_page(
         str,
         tuple[float, float, float, float],
     ] = {}
-    for observation_id in published.visible_observation_ids:
-        if str(observation_id) not in page_visible_ids:
-            continue
-        resolved = visibility.resolve_visible(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
-            )
-        )
-        observation = resolved.observation
+    for observation_id, observation in page_visible_rows:
         if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or observation is None
+            observation is None
             or str(observation.page_id) != str(page_id)
             or observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
         ):
