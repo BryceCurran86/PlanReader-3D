@@ -226,8 +226,19 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     assert len(south_widths) == 2
     assert all(item.length_mm == Decimal("3010") for item in south_widths)
     assert all(len(item.word_refs) == 2 for item in south_widths)
+    media = [
+        r for r in result["regions"]
+        if r["single_room_shape_hint"]
+        and {w["text"] for w in r["room_label_words"]} == {"MEDIA"}
+    ]
+    assert len(media) == 1
+    media_width, media_height = bind_polygon_hash_axes(page, media[0]["boundary_polygon_pdf_pts"])
+    assert media_width is not None and media_width.length_mm == Decimal("4210")
+    assert len(media_width.word_refs) == 2
+    assert media_height is None
     # Party-wall height hashes only carry opening figures (870). Floor m²
     # abstains until a unique height figure owns that internal face.
+    # MEDIA south 870 is a CS opening, not the 4210 leftover width.
     assert result["draft_floor_candidates"] == []
     dim_index = result["dimension_index"]
     assert dim_index["commercial_publishable"] is False

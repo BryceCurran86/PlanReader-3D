@@ -19,7 +19,10 @@ _FACE_PT = 0.35
 # Duplicate hash ink is often two strokes ~0.5 pt apart. Still far below a
 # distinct neighbouring hash or the ~2 pt inner/outer wall pair.
 _HASH_PT = 0.8
-_TICK_MIN_PT = 1.4
+# Inner/outer wall faces are ~2 pt apart. A 2 pt corner nub that only
+# spans that band is wall thickness, not a dimension hash. Real hashes
+# leave the wall and reach the dim line (typically 3–8 pt).
+_TICK_MIN_PT = 2.5
 _TICK_MAX_PT = 8.0
 _WORD_LINE_PT = 24.0
 _DIM_OFFSET_MAX_PT = 36.0

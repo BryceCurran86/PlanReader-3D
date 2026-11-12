@@ -255,6 +255,20 @@ def test_opening_figure_does_not_own_the_wall_when_intermediate_hashes_exist(tmp
     assert bound is None
 
 
+def test_wall_thickness_nubs_do_not_let_an_opening_figure_own_the_wall(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 219, 160), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(100, 160), fitz.Point(100, 161.98))
+        page.draw_line(fitz.Point(219, 160), fitz.Point(219, 161.98))
+        page.insert_text((200, 176), "870", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=219.0, outward=1.0,
+    )
+    assert bound is None
+
+
 def test_leftover_side_runs_sum_two_figures_on_a_three_hash_interval(tmp_path):
     def drawer(page):
         page.draw_rect(fitz.Rect(100, 80, 219, 160), color=(0, 0, 0), width=0.4)
