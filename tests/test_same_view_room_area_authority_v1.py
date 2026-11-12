@@ -3,6 +3,8 @@ from __future__ import annotations
 import fitz
 from dataclasses import replace
 
+import pytest
+
 import pb_cross_view_room_area_authority as dimension_authority
 
 from pb_live_canonical_room_composition import (
@@ -17,9 +19,21 @@ from pb_same_view_room_area_authority import (
     SAME_VIEW_ROOM_AREA_CONFLICT,
     SAME_VIEW_ROOM_AREA_RESOLVED,
     SameViewRoomAreaProducer,
+    _face_polygon_area_m2_from_figured_pair,
     _figured_pair_span_identity,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+
+
+def test_face_polygon_area_uses_both_figured_axes_not_the_bounding_box_product():
+    rectangle = ((100.0, 80.0), (250.0, 80.0), (250.0, 180.0), (100.0, 180.0))
+    stub = ((100.0, 80.0), (250.0, 80.0), (250.0, 180.0), (100.0, 180.0), (100.0, 108.0), (102.0, 108.0), (102.0, 80.0))
+    h = SimpleNamespace(endpoints_pt=((100.0, 70.0), (250.0, 70.0)), value_mm=3600.0)
+    v = SimpleNamespace(endpoints_pt=((290.0, 80.0), (290.0, 180.0)), value_mm=2400.0)
+    box = _face_polygon_area_m2_from_figured_pair(rectangle, h, v)
+    face = _face_polygon_area_m2_from_figured_pair(stub, h, v)
+    assert box == pytest.approx(8.64)
+    assert face is not None and face < box
 
 
 def test_parallel_prints_of_the_same_figured_span_share_one_pair_identity():

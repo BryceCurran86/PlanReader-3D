@@ -428,16 +428,19 @@ def test_a_face_that_is_not_its_rectangle_loses_the_documented_route_but_a_true_
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert not any(code.startswith(RING_NOT_A_RECTANGLE_PREFIX) for code in scope.reason_codes)
     assert _area(source, rooms, selection=True).records[0].area_evidence.normalized_value == pytest.approx(8.64)
-    # the same room with a wall return inside it: the ring still matches its figured box, but the box is not its area
+    # the same room with a wall return inside it: width x depth is withdrawn; the face polygon is measured
     source, _p, _w, rooms = _chain(layered_room_pdf(vertical_pairs="both", stub=True), rings=True)
     room = rooms.rooms[0]
     scope = rooms.room_face_authority_binding_for(room).authority.resolve_scope(SourceRoomFaceSelector(
         document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
-    refused = _area(source, rooms, selection=True)
-    assert refused.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+    selected = _area(source, rooms, selection=True)
+    evidence = selected.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
 
 
 @pytest.mark.parametrize("depth", [10.0, 1.0])
@@ -450,9 +453,12 @@ def test_a_shallow_wall_return_is_spatial_content_and_withdraws_the_documented_a
         document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
-    refused = _area(source, rooms, selection=True)
-    assert refused.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+    selected = _area(source, rooms, selection=True)
+    evidence = selected.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
 
 
 def _notched(width, depth):
@@ -529,5 +535,8 @@ def test_wardrobe_front_splits_the_alcove_frees_the_label_and_withdraws_the_docu
     ys = [p[1] for p in room.polygon_pdf_pts]
     assert (min(xs), min(ys), max(xs), max(ys)) == (100.0, 80.0, 250.0, 180.0)
     area = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish(layered_ring_box_selection_shadow=True)
-    assert area.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in area.unresolved_first_failure_codes}
+    evidence = area.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
