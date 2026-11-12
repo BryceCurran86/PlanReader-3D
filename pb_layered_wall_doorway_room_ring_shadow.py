@@ -694,7 +694,12 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     minx, miny, maxx, maxy = domain.bounds
     found: dict[tuple[bool, int, int, int, int], _Gap] = {}
     for horizontal in (True, False):
-        for band, lo, hi, _paths in _runs(strips, horizontal):
+        # The run inventory is immutable during this pass. Rebuilding it for
+        # every possible doorway was quadratic on original CAD wall sheets.
+        # Reuse the *same* grouped runs for candidate and collinearity checks;
+        # never infer a closure from proximity alone.
+        orientation_runs = _runs(strips, horizontal)
+        for band, lo, hi, _paths in orientation_runs:
             band_rect = box(minx, band[0], maxx, band[1]) if horizontal else box(band[0], miny, band[1], maxy)
             for component in _polygon_parts(band_rect.difference(union)):
                 c0, c1, c2, c3 = component.bounds
@@ -722,7 +727,7 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                     continue
                 rect = box(a, band[0], b, band[1]) if horizontal else box(band[0], a, band[1], b)
                 touching = tuple(sorted({index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect) for index in s.native_path_indices()}))
-                same_band = [r for r in _runs(strips, horizontal) if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
+                same_band = [r for r in orientation_runs if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
                 found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
     return list(found.values())
