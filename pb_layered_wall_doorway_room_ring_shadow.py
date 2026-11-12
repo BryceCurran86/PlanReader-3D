@@ -699,9 +699,21 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
         # Reuse the *same* grouped runs for candidate and collinearity checks;
         # never infer a closure from proximity alone.
         orientation_runs = _runs(strips, horizontal)
+        # Collinear disconnected runs share an identical band rectangle. A
+        # geometry difference against the full wall union is expensive, so
+        # compute it once for each exact band and reuse it for all those runs.
+        # Keep the unrounded source coordinates to avoid merging distinct bands.
+        band_components: dict[tuple[float, float], list[Polygon]] = {}
+        band_runs: dict[tuple[float, float], list[tuple]] = {}
+        for run in orientation_runs:
+            band_runs.setdefault(run[0], []).append(run)
         for band, lo, hi, _paths in orientation_runs:
-            band_rect = box(minx, band[0], maxx, band[1]) if horizontal else box(band[0], miny, band[1], maxy)
-            for component in _polygon_parts(band_rect.difference(union)):
+            components = band_components.get(band)
+            if components is None:
+                band_rect = box(minx, band[0], maxx, band[1]) if horizontal else box(band[0], miny, band[1], maxy)
+                components = _polygon_parts(band_rect.difference(union))
+                band_components[band] = components
+            for component in components:
                 c0, c1, c2, c3 = component.bounds
                 a, b = (c0, c2) if horizontal else (c1, c3)
                 touches_run_end = _close(a, hi) or _close(b, lo)
@@ -727,7 +739,10 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                     continue
                 rect = box(a, band[0], b, band[1]) if horizontal else box(band[0], a, band[1], b)
                 touching = tuple(sorted({index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect) for index in s.native_path_indices()}))
-                same_band = [r for r in orientation_runs if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
+                same_band = [r for source_band, runs in band_runs.items()
+                             if _close(source_band[0], band[0], 0.02)
+                             and _close(source_band[1], band[1], 0.02)
+                             for r in runs]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
                 found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
     return list(found.values())
