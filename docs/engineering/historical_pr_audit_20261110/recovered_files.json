@@ -1,0 +1,61 @@
+{
+  "source_main_sha": "81c12b417054d14baf1f08a9ea6c460a5d2152ad",
+  "files": [
+    {
+      "pr": 3520,
+      "head_sha": "5a40f86b4ad4205f79c49567e6a138c5dbfbbba2",
+      "original_path": "docs/engineering/gptmax_b248_original_horizontal_raster_tile_seam_architecture_20261020.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_3520/gptmax_b248_original_horizontal_raster_tile_seam_architecture_20261020.md",
+      "sha256": "cdf914d5a3985ae053657c147727f266b984bab5c2ba150686a9abb78b904917",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 3890,
+      "head_sha": "b89cb2c0bf169e2b1457e5443466c162f84fbf45",
+      "original_path": "docs/engineering/claude_w01_strip_structural_assessment_architecture_20261026.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_3890/claude_w01_strip_structural_assessment_architecture_20261026.md",
+      "sha256": "deb0ceaf9985fed073042c49d32c494ed050efd10dde8f17d40b477308b65038",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 4171,
+      "head_sha": "f792b06be76a9b02d3c172dbadecdb44091bc7b6",
+      "original_path": "docs/engineering/claude_accuracy_gate_census_report_20261102.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_4171/claude_accuracy_gate_census_report_20261102.md",
+      "sha256": "fd4135ea6c83a38b14545c4b496f0320761093a0339078a10e84283deb111d0b",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 4171,
+      "head_sha": "f792b06be76a9b02d3c172dbadecdb44091bc7b6",
+      "original_path": "docs/engineering/claude_door_height_owner_decision_memo_20261102.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_4171/claude_door_height_owner_decision_memo_20261102.md",
+      "sha256": "b97662663b1ee861c38b9586b68926a4136db8fe0968141bbf3640e036d98c4a",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 4187,
+      "head_sha": "813fd2936a1dd3fad53e6e15f56d9c604317f52f",
+      "original_path": "docs/engineering/claude_opening_ownership_trace_20261102.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_4187/claude_opening_ownership_trace_20261102.md",
+      "sha256": "179edd193ac3833bd4984ca6ca77deab9a3ff81e34a7d8b6167014ce37c848a2",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 4191,
+      "head_sha": "822b21f2054db3baae7ab42e38ffe6776e97acdb",
+      "original_path": "docs/engineering/claude_maryborough_aperture_trace_20261102.md",
+      "recovered_path": "docs/engineering/historical_pr_audit_20261110/archived_reports/pr_4191/claude_maryborough_aperture_trace_20261102.md",
+      "sha256": "2bab751e2f513af526f7de522edad25f5e199a42f6a183b1a0c279a580aa62ba",
+      "purpose": "Historical diagnostic report; not current authority or instructions"
+    },
+    {
+      "pr": 1744,
+      "head_sha": "e7544db4c248d8e420c1a7f191ad0b18f4e697b2",
+      "original_path": "tests/test_raster_schedule_opening_binding.py",
+      "recovered_path": "tests/test_raster_schedule_opening_binding.py",
+      "sha256": "85458c801cb8b0ac97717bd7c5abd34f95c4d93b0b897cb6d71df0c19352e143",
+      "purpose": "Two real-producer synthetic integration regressions missing from main; existing production implementation retained through #1822"
+    }
+  ]
+}

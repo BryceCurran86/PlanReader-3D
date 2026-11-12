@@ -132,6 +132,10 @@ class LiveCanonicalOpeningObject:
     owner_approved_second_axis_record_id: Optional[str] = None
     owner_approved_width_mm: Optional[float] = None
     owner_approved_height_mm: Optional[float] = None
+    # One printed callout figure retained as width input for the owner 2100 mm
+    # external-door estimate. Never copied into width_m / height_m.
+    figured_single_axis_mm: Optional[float] = None
+    external_wall_role_record_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         result = {
@@ -194,6 +198,10 @@ class LiveCanonicalOpeningObject:
                 "owner_approved_width_mm": self.owner_approved_width_mm,
                 "owner_approved_height_mm": self.owner_approved_height_mm,
             })
+        if self.figured_single_axis_mm is not None:
+            result["figured_single_axis_mm"] = self.figured_single_axis_mm
+        if self.external_wall_role_record_id is not None:
+            result["external_wall_role_record_id"] = self.external_wall_role_record_id
         return result
 
 
@@ -264,6 +272,22 @@ def _canonical_provenance_ids(values) -> tuple[str, ...]:
             }
         )
     )
+
+
+def _figured_single_axis_mm(figured_label_evidence) -> Optional[float]:
+    """Retain a one-figure printed callout as a width input, never as area."""
+    if figured_label_evidence is None:
+        return None
+    values = getattr(figured_label_evidence, "dimension_values_mm", None)
+    if not isinstance(values, (tuple, list)) or len(values) != 1:
+        return None
+    value = values[0]
+    if type(value) not in (int, float):
+        return None
+    width_mm = float(value)
+    if not math.isfinite(width_mm) or width_mm <= 0.0:
+        return None
+    return width_mm
 
 
 def _canonical_opening_area(
@@ -993,7 +1017,16 @@ def compose_live_physical_opening_voids(
                     wall_local_frame_id=(
                         str(void_record.wall_local_frame_id)
                         if void_record is not None
-                        else None
+                        else (
+                            str(frame_trace.whole_wall_frame_id)
+                            if (
+                                frame_trace is not None
+                                and frame_trace.status
+                                is EvidenceResolutionStatus.CORROBORATED
+                                and frame_trace.whole_wall_frame_id
+                            )
+                            else None
+                        )
                     ),
                     profile_kind=(
                         str(void_record.profile_kind)
@@ -1051,10 +1084,13 @@ def compose_live_physical_opening_voids(
                     schedule_row_dimension_basis=schedule_row_dimension_basis,
                     schedule_row_basis_source=schedule_row_basis_source,
                     schedule_row_description=schedule_row_description,
-                    owner_approved_second_axis_record_id=owner_approval_id,
-                    owner_approved_width_mm=owner_width_mm,
-                    owner_approved_height_mm=owner_height_mm,
-                )
+                owner_approved_second_axis_record_id=owner_approval_id,
+                owner_approved_width_mm=owner_width_mm,
+                owner_approved_height_mm=owner_height_mm,
+                figured_single_axis_mm=_figured_single_axis_mm(
+                    figured_label_evidence
+                ),
+            )
             )
 
         traces.append(

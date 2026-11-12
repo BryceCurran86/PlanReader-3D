@@ -45,6 +45,33 @@ def _original_source_path_kind(pdf_path: Path) -> str:
     return "regular"
 
 
+
+def _source_identity_fields(platform_name: str | None = None) -> tuple[str, ...]:
+    """Comparable original-file identity/content fields for the platform.
+
+    Windows Python 3.13 sometimes reports a different st_ctime_ns when
+    inspecting the SAME unchanged NTFS file via lstat versus fstat (observed
+    on the owner machine). Keep the stable file ID, device, size and mtime;
+    always hash all bytes and reject swaps. POSIX retains ctime as before.
+    """
+    platform_name = os.name if platform_name is None else platform_name
+    core = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+    return core if platform_name == "nt" else core + ("st_ctime_ns",)
+
+
+def _same_original_file_stat(before: Any, current: Any, *, platform_name: str | None = None) -> bool:
+    """Refuse namespace swaps; a missing Windows file ID cannot authenticate."""
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt" and (
+        not getattr(before, "st_ino", 0) or not getattr(current, "st_ino", 0)
+    ):
+        return False
+    return all(
+        getattr(before, field) == getattr(current, field)
+        for field in _source_identity_fields(platform_name)
+    )
+
+
 def _stable_original_digest(pdf_path: Path) -> tuple[str, tuple[int, ...]]:
     """Hash one regular inode and retain its private identity for publication.
 
@@ -70,13 +97,12 @@ def _stable_original_digest(pdf_path: Path) -> tuple[str, tuple[int, ...]]:
         after = pdf_path.lstat()
     except OSError as exc:
         raise ValueError("original source changed or inaccessible during preflight") from exc
-    identity_and_content = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    identity_and_content = _source_identity_fields()
     if (
         not S_ISREG(after.st_mode)
         or any(
-            getattr(snapshot, field) != getattr(before, field)
+            not _same_original_file_stat(before, snapshot)
             for snapshot in (opened, completed, after)
-            for field in identity_and_content
         )
     ):
         raise ValueError("original source changed during preflight")

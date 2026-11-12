@@ -152,3 +152,14 @@ def test_neighbour_wall_that_does_not_reach_this_left_end_stays_unmapped():
     result = _resolve(records, lines)
     assert result.bands == ()
     assert result.reason_codes == ('raster_source_band_left_source_primitive_unmapped',)
+
+
+def test_ordinary_wall_past_an_11pt_gap_does_not_own_the_sealed_flank():
+    records, lines = _fixture()
+    records[1].wall_candidate.centerline_pts = ((151.0, 56.0), (220.0, 56.0))
+    lines["raw:right"] = (151.0, 56.0, 220.0, 56.0)
+    result = _resolve(records, lines)
+    assert result.bands == ()
+    assert result.reason_codes == (
+        "raster_source_band_right_source_primitive_unmapped",
+    )

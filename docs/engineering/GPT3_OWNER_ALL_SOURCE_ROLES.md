@@ -40,6 +40,43 @@ rather than forcing unsupported objects out of a siting, structural,
 inclusions or specification document. Do not increase memory guards just
 to mask a missing source family.
 
+### Opt-in source-owned ABSTAIN receipts
+
+`--source-role-abstention-receipts` (requires
+`--record-native-source-input-coverage` and family group `all`) lets such a
+supporting document close its role **without a seal**. A receipt is issued
+only when all of the following hold:
+
+- the generic producer `tools.run_source_closed_project_handoff` completed and
+  reported exactly `no_sealable_quantities`, not `source_complexity_blocked`
+  or any failure;
+- every page was in scope: complete project handoff, no partial page, all
+  seven family counts present and zero, and no family run, combined run or
+  customer rows;
+- native decode coverage of every original page was re-verified after the
+  child process exited.
+
+The receipt `source_role_abstention.sealed.json` is a deterministic signed run
+with one abstained row:
+
+| Field | Value |
+| --- | --- |
+| Family | `source_role_abstention` |
+| Value | null |
+| Unit | `document` |
+| Blocking reason | `source_role_no_sealable_quantity` |
+| Physical identity | none |
+| Lineage | document and revision from the verified decode receipt |
+
+It has no customer row. The frozen evaluator counts it only as an abstained
+output, never as a match or unsupported extra. The role row reports
+`sealed: false` and `source_role_abstained: true`.
+
+Combination happens only when at least one other role sealed a genuine,
+non-abstained quantity. The status is then
+`ALL_ROLES_CLOSED_WITH_SOURCE_ABSTENTION_*`. A project made only of receipts
+stays `SOURCE_ROLES_INCOMPLETE`. Receipts never apply to SHA-owned issuers.
+
 A role-complete signed run still needs actual FIRM quantities, independent
 frozen identity maps, customer projection, verified project source closure,
 and official suite reconciliation. The runner never invokes frozen truth or

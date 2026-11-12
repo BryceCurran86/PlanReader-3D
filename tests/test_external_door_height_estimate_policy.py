@@ -20,11 +20,12 @@ def estimate(**kwargs):
     return resolve_external_door_height_estimate(**args)
 
 
-def assert_review_only(result):
+def assert_review_only(result, *, labelled_provisional_customer=False):
     assert result.commercial_review_required is True
     assert result.can_issue_firm_quantity is False
     assert result.can_seal_source_closed_customer is False
     assert result.benchmark_score_granted is False
+    assert result.can_issue_labelled_provisional_customer is labelled_provisional_customer
 
 
 def test_default_for_authentic_external_door_without_specific_height():
@@ -34,7 +35,7 @@ def test_default_for_authentic_external_door_without_specific_height():
     assert result.source_authenticated_height is False
     assert result.assumption_used is True
     assert result.verify_on_site is True
-    assert_review_only(result)
+    assert_review_only(result, labelled_provisional_customer=True)
 
 
 def test_proven_elevation_height_overrides_default():
@@ -179,7 +180,9 @@ def test_read_only_and_stable_under_replay():
     assert a == b
     with pytest.raises(FrozenInstanceError):
         a.height_mm = 2040
-    # The policy has no path to promote its estimate to a signed or FIRM source quantity.
+    # The assumption may become a labelled provisional customer line, never FIRM.
     forged = replace(a, can_issue_firm_quantity=True)
     assert a.can_issue_firm_quantity is False
+    assert a.can_issue_labelled_provisional_customer is True
+    assert a.can_seal_source_closed_customer is False
     assert forged != a

@@ -58,178 +58,37 @@ jobs:
         run: python tests/ci_smoke.py
   source-proof:
     runs-on: ubuntu-latest
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Real Lot16 source, wall and host handoff
-        run: >-
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
-          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          --page-id 3 --output lot16-connected-frame-source-handoff.json
-      - name: Original Lot16 verified production prerequisite
+      - name: Original Lot16 source-proof NOT RUN on public CI
         run: |
-          # Compare against the exact current PR base; archive past source regressions separately.
-          git worktree add /tmp/gptmax-original-lot16-prerequisite ${{ github.event.pull_request.base.sha }}
-          # Execute the diagnostic from the checked-out base, not from the PR head.
-          (cd /tmp/gptmax-original-lot16-prerequisite && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
-            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
-            --page-id 3 --output "$GITHUB_WORKSPACE/lot16-connected-frame-prerequisite.json")
-      - name: Verify exact source ownership and safety cap
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
-          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['opening_bindings']
-          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
-          assert report['source_owned_wall_scope_results']
-          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
-          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
-          assert len(ids) == len(set(ids))
-          assert 'quantities' not in report
-          PY
-      - name: Reject lost or silently changed exact physical host/frame identities
-        run: |
-          PYTHONPATH=. python scripts/gptmax_source_opposition_retention.py \
-            --baseline lot16-connected-frame-prerequisite.json \
-            --candidate lot16-connected-frame-source-handoff.json \
-            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
-            --output lot16-connected-frame-identity-retention.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-connected-frame-source-handoff
-          path: |
-            lot16-connected-frame-source-handoff.json
-            lot16-connected-frame-prerequisite.json
-            lot16-connected-frame-identity-retention.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Lot16 source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Lot16 source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
   maryborough-source-baseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          # Same exact PR base as the candidate's current source code.
-          # Historical 180/3 versus current 183/1 is documented separately.
-          ref: ${{ github.event.pull_request.base.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Produce prerequisite Maryborough source report
+      - name: Original Maryborough source-proof NOT RUN on public CI
         run: |
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
-            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
-            --page-id 7 --page-id 30 --page-id 31 \
-            --output maryborough-source-baseline.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('maryborough-source-baseline.json').read_text())
-          assert report['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['opening_bindings']
-          assert report['source_owned_wall_scope_results']
-          assert 'quantities' not in report
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: maryborough-source-baseline
-          path: maryborough-source-baseline.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Maryborough source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
   maryborough-source-current:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
-    env:
-      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Produce current Maryborough source report
+      - name: Original Maryborough source-proof NOT RUN on public CI
         run: |
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
-            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
-            --page-id 7 --page-id 30 --page-id 31 \
-            --output maryborough-connected-frame-source-handoff.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          report = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
-          assert report['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          assert report['primitive_safety_cap'] == 20_000
-          assert report['opening_bindings']
-          assert report['source_owned_wall_scope_results']
-          assert 'quantities' not in report
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: maryborough-source-current
-          path: maryborough-connected-frame-source-handoff.json
-          retention-days: 14
+          set -euo pipefail
+          echo '::notice::Original Maryborough source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
   maryborough-source-parity:
     runs-on: ubuntu-latest
-    needs: [maryborough-source-baseline, maryborough-source-current]
-    timeout-minutes: 10
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/download-artifact@v4
-        with:
-          name: maryborough-source-baseline
-          path: artifacts/maryborough-source-baseline
-      - uses: actions/download-artifact@v4
-        with:
-          name: maryborough-source-current
-          path: artifacts/maryborough-source-current
-      - name: Compare exact opening hosts and preserved frames
+      - name: Original Maryborough source-proof NOT RUN on public CI
         run: |
-          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
-            --baseline artifacts/maryborough-source-baseline/maryborough-source-baseline.json \
-            --candidate artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json \
-            --output maryborough-source-retention.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          base = json.loads(Path("artifacts/maryborough-source-baseline/maryborough-source-baseline.json").read_text())
-          current = json.loads(Path("artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json").read_text())
-          assert current["source_sha256"] == base["source_sha256"] == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-          assert current["primitive_safety_cap"] == base["primitive_safety_cap"] == 20_000
-          assert "quantities" not in current
-          print(json.dumps({"base":base["summary"],"candidate":current["summary"],
-                            "source_ownership_retained":True},sort_keys=True))
-          PY
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maryborough-source-identity-retention
-          path: maryborough-source-retention.json
-          if-no-files-found: ignore
+          set -euo pipefail
+          echo '::notice::Original Maryborough source-proof NOT RUN on public CI; protected exact-head private replay required before release'
+          echo 'Original Maryborough source-proof NOT RUN. This source-neutral check does not validate PDF ownership, customer quantities, signed retention or the frozen120 score.' >> "$GITHUB_STEP_SUMMARY"
