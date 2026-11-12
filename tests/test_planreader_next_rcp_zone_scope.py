@@ -16,6 +16,15 @@ def _word(ref: str, text: str, x: float, y: float):
     return NativeWord(ref, text, (x, y, x + 11, y + 18))
 
 
+def _visible_rect(ref: str, bounds):
+    # Synthetic ceiling-border ink must actually be drawn/stroked.
+    return NativeRectangle(
+        ref, bounds, True,
+        stroke_present=True, stroke_color=(0.0, 0.0, 0.0),
+        stroke_width=1.0,
+    )
+
+
 def _rcp_fixture():
     words = (
         _word("word:b1:l0:w0:i0", "2400", 90, 70),
@@ -24,9 +33,9 @@ def _rcp_fixture():
         _word("word:b2:l1:w0:i3", "FPB", 274, 90),
     )
     rectangles = (
-        NativeRectangle("zone:grid", (60, 40, 160, 150), True),
-        NativeRectangle("zone:fpb", (255, 45, 375, 170), True),
-        NativeRectangle("whole-plan", (0, 0, 500, 300), True),
+        _visible_rect("zone:grid", (60, 40, 160, 150)),
+        _visible_rect("zone:fpb", (255, 45, 375, 170)),
+        _visible_rect("whole-plan", (0, 0, 500, 300)),
     )
     return NativePage("a" * 64, 8, words, rectangles, ())
 
@@ -100,7 +109,7 @@ def test_unowned_cross_sheet_plan_face_or_wrong_original_digest_rejected():
 
 def test_near_duplicate_source_rectangle_is_ambiguous():
     page = _rcp_fixture()
-    near = NativeRectangle("zone:almost-grid", (58, 38, 162, 152), True)
+    near = _visible_rect("zone:almost-grid", (58, 38, 162, 152))
     page = NativePage(page.source_sha256, page.page_index,
                       page.words, page.rectangles + (near,), page.segments)
     r = propose_rcp_source_zone_rectangles(page)
@@ -132,12 +141,26 @@ def test_real_maryborough_rcp_geometry_grouping_if_original_provisioned():
     assert page.source_sha256 == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
     out = propose_rcp_source_zone_rectangles(page)
     assert out["source_height_material_pairs"] == 18
-    assert len(out["source_zone_rectangle_candidates"]) == 13
-    assert len(out["unresolved_callouts"]) == 1
-    assert any(x["height_mm"] == "2400" and x["material_code_candidate"] == "GRID"
-               for x in out["source_zone_rectangle_candidates"])
-    assert any(x["height_mm"] == "3000" and x["material_code_candidate"] == "FPB"
-               for x in out["source_zone_rectangle_candidates"])
+    # Original p141 native rect is a white *fill* with NO stroked border.
+    # Previous 13 matches were invisible graphics, never ceiling zones.
+    assert len(out["source_zone_rectangle_candidates"]) == 0
+    assert len(out["unresolved_callouts"]) == 18
+    assert {x["reason_code"] for x in out["unresolved_callouts"]} == {
+        "no_source_zone_rectangle_around_rcp_callout"
+    }
+    white_mask = next(r for r in page.rectangles if r.ref == "rect:p141:i0")
+    assert white_mask.stroke_present is False
+    assert white_mask.stroke_color is None
+    assert white_mask.stroke_width == 0
+    # The extractor historically generated four imaginary rect_edge
+    # segments around that invisible white fill. Their paint status must
+    # remain visible to downstream physical wall/ceiling tracers.
+    mask_edges = [
+        s for s in page.segments if s.ref.startswith("d141i0e")
+    ]
+    assert len(mask_edges) == 4
+    assert all(s.kind == "rect_edge" and s.stroke_present is False
+               and s.stroke_color is None for s in mask_edges)
     assert not out["commercial_publishable"] and out["official_score"] is None
 
 
@@ -159,8 +182,8 @@ def test_real_rcp_zone_cli_optin_is_create_only(tmp_path):
     assert first.returncode == 0, first.stderr
     data = json.loads(output.read_text(encoding="utf8"))
     assert len(data["height_evidence"]) == 18
-    assert len(data["source_zone_rectangle_candidates"]) == 13
-    assert len(data["source_zone_unresolved_callouts"]) == 1
+    assert len(data["source_zone_rectangle_candidates"]) == 0
+    assert len(data["source_zone_unresolved_callouts"]) == 18
     assert not data["commercial_publishable"]
     second = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
     assert second.returncode == 2 and "FileExistsError" in second.stderr
@@ -183,3 +206,51 @@ def test_section_cannot_relabel_itself_as_an_rcp_zone(tmp_path):
     assert response.returncode == 2
     assert not output.exists()
     assert "source_zone_rectangles_only_valid_for_rcp" in response.stderr
+
+
+
+def test_white_fill_only_rectangle_cannot_claim_rcp_zone():
+    """PDF white-background rectangle bbox is NOT actual ceiling boundary."""
+    page = _rcp_fixture()
+    print_rect = NativeRectangle(
+        "white-fake", (60, 40, 160, 150), True,
+        stroke_present=False, stroke_color=None, stroke_width=0,
+    )
+    # Competing fill-only rectangle should be ignored, not turn otherwise
+    # unique visible outline into an ambiguous different region.
+    page = NativePage(page.source_sha256, page.page_index, page.words,
+                      page.rectangles + (print_rect,), page.segments)
+    got = propose_rcp_source_zone_rectangles(page)
+    assert {x["source_rectangle_ref"] for x in got["source_zone_rectangle_candidates"]} == {
+        "zone:grid", "zone:fpb",
+    }
+
+
+def test_only_invisible_rectangles_cannot_claim_a_material_height():
+    page = _rcp_fixture()
+    invisible = tuple(
+        NativeRectangle(
+            item.ref, item.bbox, True, stroke_present=False,
+            stroke_color=None, stroke_width=0,
+        ) for item in page.rectangles
+    )
+    page = NativePage(page.source_sha256, page.page_index, page.words,
+                      invisible, page.segments)
+    got = propose_rcp_source_zone_rectangles(page)
+    assert got["source_height_material_pairs"] == 2
+    assert not got["source_zone_rectangle_candidates"]
+    assert len(got["unresolved_callouts"]) == 2
+
+
+def test_unproven_or_white_stroked_rectangle_cannot_claim_ceiling():
+    page = _rcp_fixture()
+    invisible = tuple(
+        NativeRectangle(
+            item.ref, item.bbox, True, stroke_present=True,
+            stroke_color=(1.0, 1.0, 1.0), stroke_width=0.5,
+        ) for item in page.rectangles
+    )
+    page = NativePage(page.source_sha256, page.page_index, page.words,
+                      invisible, page.segments)
+    got = propose_rcp_source_zone_rectangles(page)
+    assert not got["source_zone_rectangle_candidates"]

@@ -55,8 +55,12 @@ Review alone does not authenticate room geometry or ceiling area.
 - Maryborough source SHA b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007:
   PDF page 7 source-neighbourhood trace returned 0 physical room rings.
   PDF page 9 RCP yielded 18 source height/material pairs; all 18 remain
-  unassociated with room geometry. A separate RCP pass found 13 candidate
-  source rectangles, which ARE NOT finished ceiling-zone boundaries.
+  unassociated with room geometry. The 13 PDF white-mask rectangles
+  remain useful as LAYOUT SEEDS; ZERO have independently visible
+  stroked rectangle outlines. A120 contains real dark filled wall
+  strips: each proposed edge must be checked against those strips.
+  The owner identified rectangle 1 / 3's corner overlap and an
+  invented line through Sales. The 18 printed heights remain valid.
   Private result: maryborough_source_rcp_region_height_coverage_gpt1_20261112.json.
 
 ## Remaining dependency and separation of work
@@ -67,3 +71,35 @@ the 20k cap. GPT MAX owns ORIGINAL PlanReader production outputs and
 the frozen 120-item benchmark. This Next-engine height report does not
 produce any ceiling m2 or wall-finish m2 from topology-only regions.
 No private original plans or benchmark answer files are committed.
+
+
+### Owner correction: A120 layout-mask rectangles remain useful as SEEDS
+
+The owner reviewed the 13 outlined layout-mask bounding boxes on the
+actual A120 original. The principal mistakes were rectangle 1's
+bottom-left junction where rectangle 3's line crosses the real wall
+and a falsely extended line through Sales. We should not discard
+the remaining mask layout hints just because native PDF paint type is
+white fill-only. However a fill-only bbox does NOT have a drawn
+outline and cannot by itself authenticate a measured ceiling boundary.
+
+rcp_mask_wall_witnesses preserves the 13 original white fill-mask
+layout seeds in an opt-in separate review packet, checks each side
+against independently painted dark original wall strips and reports
+unsupported spans and source wall IDs. In the original A120 native
+coordinates the rectangle-1/3 mask overlap is
+[571.2, 1556.96, 693.6, 1584.56]; original real dark wall rect:p73:i0
+runs around source y1585..1590, supporting the stepped junction
+instead of the straight white bbox edge. Rectangle-3 top-left bbox
+edge lacks wall support over native x571.2..702.48; its real dark
+wall step is about 28.08 PDF points away. The large FPB mask
+rect:p141:i0 contains the fake line into Sales: its y_max=1376.72
+edge has wall ink over only source x279.84..694.08, while
+x694.08..1217.04 is UNSUPPORTED. Do NOT create a wall through Sales.
+
+Thus propose_rcp_source_zone_rectangles in strict-stroked mode still
+returns 0 confirmed visibly stroked rectangle outlines; the opt-in
+mask layout witness mode returns 13 helpful ceiling layout hints
+with independent wall evidence and unresolved edges. Neither counts
+as measured ceiling area or frozen120 customer output. Floor-plan room
+ring closure is not a prerequisite for tracing source A120 ceiling zones.

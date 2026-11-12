@@ -21,6 +21,43 @@ _RECT_FUZZ_PT = 0.35
 _MIN_RELATIVE_SIZE_SEPARATION = 0.10
 
 
+def _is_source_stroked_outline(rectangle: NativeRectangle) -> bool:
+    """Reject fill-only shapes, invisible white outlines and unknown paint.
+
+    A native PDF rectangle operation is not necessarily drawn as a border.
+    Its coordinates may only paint a white masking/background fill. It is
+    NOT a ceiling border without its own visibly stroked perimeter.
+    Even a stroked rectangle is only a zone CANDIDATE, never physical proof.
+    """
+    if rectangle.stroke_present is not True:
+        return False
+    rgb = rectangle.stroke_color
+    if (
+        rgb is None or len(rgb) not in (1, 3, 4)
+        or not all(math.isfinite(v) and 0 <= v <= 1 for v in rgb)
+    ):
+        return False
+    # Near-white stroke on the white PDF background is not a drawn border.
+    if min(rgb) >= .95:
+        return False
+    return (
+        rectangle.stroke_width is not None
+        and math.isfinite(rectangle.stroke_width)
+        and rectangle.stroke_width > 0
+    )
+
+
+def _is_white_layout_fill(rectangle: NativeRectangle) -> bool:
+    """PDF white mask: useful layout SEED, not its own drawn boundary."""
+    rgb = rectangle.fill_color
+    return (
+        rectangle.stroke_present is False
+        and rgb is not None
+        and len(rgb) in (1, 3, 4)
+        and all(math.isfinite(v) and .95 <= v <= 1 for v in rgb)
+    )
+
+
 def _native_rect_area(rectangle: NativeRectangle) -> float:
     x0, y0, x1, y1 = rectangle.bbox
     return (x1 - x0) * (y1 - y0)
@@ -46,9 +83,12 @@ def _combined_word_bounds(page_words: Mapping[str, Any], claim: Mapping[str, Any
 
 def propose_rcp_source_zone_rectangles(
     page: NativePage, *, viewport_pdf_pts: Sequence[float] | None = None,
+    include_fill_masks_as_layout_hints: bool = False,
 ) -> dict[str, Any]:
     """Associate each original height/material pair with an original rectangle.
 
+    Only original visibly STROKED rectangular perimeters qualify; PDF
+    fill-only white mask rectangles cannot be interpreted as drawn walls.
     Unique smallest rect is allowed only if the next containing source
     rectangle is at least 10% larger. Large plan-wide rectangles and close
     nested duplicates stay unmatched. Multiple same-value bubbles within
@@ -69,8 +109,12 @@ def propose_rcp_source_zone_rectangles(
     for receipt in receipts:
         box = _combined_word_bounds(words, receipt)
         containing = sorted(
-            (rect for rect in page.rectangles if rect.clip_known and _encloses(rect, box)
-             and _native_rect_area(rect) > 0),
+            (rect for rect in page.rectangles
+             if rect.clip_known
+             and (_is_source_stroked_outline(rect) or (
+                 include_fill_masks_as_layout_hints and _is_white_layout_fill(rect)
+             ))
+             and _encloses(rect, box) and _native_rect_area(rect) > 0),
             key=lambda rect: (_native_rect_area(rect), rect.ref),
         )
         if not containing:
@@ -122,7 +166,13 @@ def propose_rcp_source_zone_rectangles(
             "height_word_refs": sorted(receipt["height_word_ref"] for receipt in group),
             "material_word_refs": sorted(receipt["material_word_ref"] for receipt in group),
             "callout_receipts": group,
-            "candidate_scope": "SOURCE_RECTANGLE_NOT_AUTHENTICATED_RCP_ZONE",
+            "candidate_scope": (
+                "WHITE_FILL_LAYOUT_SEED_NOT_A_DRAWN_CEILING_BOUNDARY"
+                if _is_white_layout_fill(rect)
+                else "SOURCE_STROKED_RECTANGLE_STILL_NEEDS_PHYSICAL_VERIFICATION"
+            ),
+            "source_stroke_outline_visible": _is_source_stroked_outline(rect),
+            "source_white_fill_layout_mask": _is_white_layout_fill(rect),
             "ceiling_zone_authenticated": False,
             "room_correspondence_authenticated": False,
             "commercial_publishable": False,

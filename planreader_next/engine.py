@@ -34,6 +34,12 @@ class NativeRectangle:
     ref: str
     bbox: tuple[float, float, float, float]
     clip_known: bool
+    # Original native PDF paint metadata, NOT inferred by bounding box.
+    # None means unknown (e.g. an older synthetic fixture), never outlined.
+    stroke_present: bool | None = None
+    stroke_color: tuple[float, ...] | None = None
+    stroke_width: float | None = None
+    fill_color: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,11 @@ class NativeSegment:
     y1: float
     x2: float
     y2: float
+    # Fill-only native 'rect_edge' primitives are NOT drawn wall strokes.
+    # Preserve original PDF paint role for physical wall/ceiling tracers.
+    stroke_present: bool | None = None
+    stroke_color: tuple[float, ...] | None = None
+    stroke_width: float | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +120,20 @@ def load_native_page(pdf_path: str | Path, page_index: int) -> NativePage:
             ref=f"rect:p{r['path_index']}:i{r['item_index']}",
             bbox=tuple(float(x) for x in r["bbox"]),
             clip_known=bool(r.get("clip_known")),
+            stroke_present=(
+                bool(r["stroke_present"]) if "stroke_present" in r else None
+            ),
+            stroke_color=(
+                tuple(float(value) for value in r["stroke"])
+                if r.get("stroke") is not None else None
+            ),
+            stroke_width=(
+                float(r["width"]) if r.get("width") is not None else None
+            ),
+            fill_color=(
+                tuple(float(value) for value in r["fill"])
+                if r.get("fill") is not None else None
+            ),
         )
         for r in extracted["rects"]
     )
@@ -117,6 +142,16 @@ def load_native_page(pdf_path: str | Path, page_index: int) -> NativePage:
             ref=str(s["id"]), kind=str(s.get("kind", "")),
             x1=float(s["x1"]), y1=float(s["y1"]),
             x2=float(s["x2"]), y2=float(s["y2"]),
+            stroke_present=(
+                bool(s["stroke_present"]) if "stroke_present" in s else None
+            ),
+            stroke_color=(
+                tuple(float(value) for value in s["stroke"])
+                if s.get("stroke") is not None else None
+            ),
+            stroke_width=(
+                float(s["width"]) if s.get("width") is not None else None
+            ),
         ) for s in extracted["segments"]
     )
     if len(set(w.ref for w in words)) != len(words):
