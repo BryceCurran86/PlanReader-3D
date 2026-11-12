@@ -4,6 +4,7 @@ from __future__ import annotations
 from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_NO_WALL_INK,
     REASON_PRIMITIVE_CAP,
+    _collect_stroke_pair_strips,
     build_layered_wall_doorway_room_rings,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -67,6 +68,16 @@ def test_furniture_spacing_is_not_a_wall_face():
         far, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
     )
     assert result.wall_strip_count == 0
+
+
+def test_disjoint_inner_face_paths_do_not_own_the_other_substrip():
+    rows = [_line(0, 0, 100, 0), _line(0, 2, 40, 2), _line(60, 2, 100, 2)]
+    owned = {
+        tuple(round(value, 2) for value in strip.polygon.bounds): strip.native_path_indices()
+        for strip in _collect_stroke_pair_strips(rows)
+    }
+    assert owned[(0.0, 0.0, 40.0, 2.0)] == (0, 1)
+    assert owned[(60.0, 0.0, 100.0, 2.0)] == (0, 2)
 
 
 def test_long_outer_face_pairs_each_unique_inner_span():
