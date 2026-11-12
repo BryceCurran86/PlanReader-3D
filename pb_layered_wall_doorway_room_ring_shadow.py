@@ -377,6 +377,18 @@ def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Map
             yield index, row
 
 
+def _source_rows(
+    drawings: Sequence[Mapping[str, Any] | None], *, all_ink: bool = False,
+) -> Iterable[tuple[int, Mapping[str, Any]]]:
+    """Named wall-layer rows, or every remaining source-visible candidate path."""
+    if all_ink:
+        for index, row in enumerate(drawings):
+            if isinstance(row, Mapping) and row.get("items"):
+                yield index, row
+        return
+    yield from _wall_rows(drawings)
+
+
 def _polygon_of_closed_line_path(items: Sequence[Sequence[Any]]) -> Optional[Polygon]:
     """Exact outline of a closed straight-line path (any simple polygon), else None."""
     if len(items) < 3 or any(it[0] != "l" for it in items):
@@ -995,14 +1007,19 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
-def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional[tuple[int, ...]]:
+def _stroke_closed(
+    drawings: Sequence[Mapping[str, Any]], gap: _Gap, *, all_ink: bool = False,
+) -> Optional[tuple[int, ...]]:
     """Native path index of one unfilled wall-layer stroke parallel to the gap and spanning it end to end.
 
     The stroke may sit on a face line or on the wall's own lining line just outside the band (never
     farther than one wall thickness): CAD exports draw glazing and lining on either.
+    Face identity (0.35 pt) applies only to opening-sized interruptions.
     """
     thickness = gap.band[1] - gap.band[0]
-    for index, row in _wall_rows(drawings):
+    span = gap.hi - gap.lo
+    end_tol = _STROKE_PAIR_FACE_PT if 10.0 <= span <= 140.0 else NOISE_PT
+    for index, row in _source_rows(drawings, all_ink=all_ink):
         if row.get("fill") is not None:
             continue
         if not _visible_source_stroke_paint(row):
@@ -1022,9 +1039,58 @@ def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional
                 perp = ax
                 lo, hi = sorted((ay, by))
             near_band = gap.band[0] - thickness <= perp <= gap.band[1] + thickness
-            if near_band and _close(lo, gap.lo) and _close(hi, gap.hi):
+            if near_band and _close(lo, gap.lo, end_tol) and _close(hi, gap.hi, end_tol):
                 return (index,)
     return None
+
+
+def _jamb_cap_closed(
+    drawings: Sequence[Mapping[str, Any] | None], gap: _Gap, *, all_ink: bool = False,
+) -> Optional[tuple[int, ...]]:
+    """Unique perpendicular caps at both opening-sized gap ends spanning the wall band.
+
+    Competing caps abstain. Hall-length interruptions are not closed this way.
+    Representation noise / face identity only; never the 2.5 pt production snap.
+    """
+    thickness = gap.band[1] - gap.band[0]
+    span = gap.hi - gap.lo
+    if thickness <= NOISE_PT or not (10.0 <= span <= 140.0):
+        return None
+
+    def caps(station: float) -> list[int]:
+        hits: list[int] = []
+        for index, row in _source_rows(drawings, all_ink=all_ink):
+            if row.get("fill") is not None or not _visible_source_stroke_paint(row):
+                continue
+            for item in row.get("items", ()):
+                if item[0] != "l":
+                    continue
+                (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+                if gap.horizontal:
+                    if not _close(ax, bx, _STROKE_PAIR_FACE_PT):
+                        continue
+                    if abs(((ax + bx) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                        continue
+                    lo, hi = sorted((ay, by))
+                else:
+                    if not _close(ay, by, _STROKE_PAIR_FACE_PT):
+                        continue
+                    if abs(((ay + by) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                        continue
+                    lo, hi = sorted((ax, bx))
+                if lo - _STROKE_PAIR_FACE_PT > gap.band[0] or hi + _STROKE_PAIR_FACE_PT < gap.band[1]:
+                    continue
+                if (hi - lo) > thickness + 2.0 * _STROKE_PAIR_FACE_PT:
+                    continue
+                hits.append(index)
+        return list(dict.fromkeys(hits))
+
+    low, high = caps(gap.lo), caps(gap.hi)
+    if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
+        return None
+    if set(low) & set(high):
+        return None
+    return tuple(sorted(set(low) | set(high)))
 
 
 def _row_bounds(row: Mapping[str, Any]) -> tuple[float, float, float, float]:
@@ -1416,7 +1482,11 @@ def build_layered_wall_doorway_room_rings(
         sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
-        stroke = None if swing is not None else _stroke_closed(drawings, gap)
+        stroke = None if swing is not None else _stroke_closed(
+            drawings, gap, all_ink=dark_painted_wall_source,
+        )
+        if stroke is None and swing is None and dark_painted_wall_source:
+            stroke = _jamb_cap_closed(drawings, gap, all_ink=True)
         sliding = sliding_by_gap.get(gap_index)
         if sliding is not None and (swing is not None or stroke is not None):
             unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen

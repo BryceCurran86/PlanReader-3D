@@ -244,6 +244,52 @@ def test_white_overpaint_and_excluding_clip_hide_a_wall_end_closer():
         assert _collect_wall_end_closing_strips(_u_room_open_south() + [broken], supports) == []
 
 
+def _dark_room_window_gap():
+    dark = (0.195, 0.195, 0.195)
+    return [
+        _fill_rect(0, 20, 5, 120, dark),
+        _fill_rect(200, 20, 205, 120, dark),
+        _fill_rect(0, 115, 80, 120, dark),
+        _fill_rect(120, 115, 205, 120, dark),
+        _fill_rect(0, 20, 205, 25, dark),
+    ]
+
+
+def test_unlabelled_opening_stroke_closes_a_window_sized_gap():
+    stroke = _line(80, 117.5, 120, 117.5, color=(0.0, 0.0, 0.0))
+    stroke["stroke_opacity"] = 1.0
+    drawings = _dark_room_window_gap() + [stroke]
+    result = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=SHA, page_index=0,
+        dark_painted_wall_source=True, wall_end_stroke_closures=True,
+    )
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    assert any(item.kind == "source_stroke_closure" for item in result.closures)
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+    hidden = dict(stroke)
+    hidden["stroke_opacity"] = 0.0
+    invisible = build_layered_wall_doorway_room_rings(
+        _dark_room_window_gap() + [hidden], source_sha256=SHA, page_index=0,
+        dark_painted_wall_source=True, wall_end_stroke_closures=True,
+    )
+    assert not any(item.kind == "source_stroke_closure" for item in invisible.closures)
+
+
+def test_unique_jamb_caps_close_an_opening_sized_gap_without_a_leaf():
+    left = _line(80, 115, 80, 120, color=(0.0, 0.0, 0.0))
+    right = _line(120, 115, 120, 120, color=(0.0, 0.0, 0.0))
+    left["stroke_opacity"] = 1.0
+    right["stroke_opacity"] = 1.0
+    drawings = _dark_room_window_gap() + [left, right]
+    result = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=SHA, page_index=0,
+        dark_painted_wall_source=True, wall_end_stroke_closures=True,
+    )
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    assert any(item.kind == "source_stroke_closure" for item in result.closures)
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
 def test_green_aisle_ink_is_still_not_a_wall_end_support():
     green = (0.05, 0.55, 0.12)
     drawings = [
