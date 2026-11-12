@@ -53,6 +53,23 @@ SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = "authenticated_same_view_room_area"
 # below the 2.5 pt production snap, and a hard bound.
 _LAYERED_RING_BOX_TOLERANCE_PT = 0.5
 
+
+def _figured_pair_span_identity(horizontal: object, vertical: object) -> tuple:
+    """One physical (width, depth) pair: span plus millimetres, not observation id.
+
+    Two parallel prints of the same ticks are one pair. Distinct millimetre values
+    on the same ticks remain competing.
+    """
+    hx = tuple(sorted((
+        float(horizontal.endpoints_pt[0][0]),  # type: ignore[attr-defined]
+        float(horizontal.endpoints_pt[1][0]),  # type: ignore[attr-defined]
+    )))
+    vy = tuple(sorted((
+        float(vertical.endpoints_pt[0][1]),  # type: ignore[attr-defined]
+        float(vertical.endpoints_pt[1][1]),  # type: ignore[attr-defined]
+    )))
+    return (hx, vy, float(horizontal.value_mm), float(vertical.value_mm))  # type: ignore[attr-defined]
+
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
 
@@ -430,10 +447,9 @@ class SameViewRoomAreaProducer:
                             matches.append((line, horizontal, vertical))
 
             deduped = {
-                (
-                    horizontal.dimension_id,
-                    vertical.dimension_id,
-                ): (owned_line, horizontal, vertical)
+                _figured_pair_span_identity(horizontal, vertical): (
+                    owned_line, horizontal, vertical,
+                )
                 for owned_line, horizontal, vertical in matches
             }
             ring_face = (

@@ -250,6 +250,35 @@ def test_figured_box_pair_count_is_exact_equality_within_a_hard_tolerance():
     assert figured_box_pair_count(box_, [_dim("h3", "horizontal", (100.0, 70.0), (250.4, 70.0)), v]) == 1
 
 
+def test_parallel_prints_of_the_same_figured_span_are_one_pair_not_a_conflict():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    h1 = _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0))
+    h2 = _dim("h2", "horizontal", (100.0, 50.0), (250.0, 50.0))
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0))
+    assert figured_box_pair_count(box_, [h1, h2, v]) == 1
+    # disagreeing millimetres on those same ticks stay competing
+    left = SimpleNamespace(dimension_id="a", orientation="horizontal",
+                           endpoints_pt=((100.0, 70.0), (250.0, 70.0)), value_mm=3600.0)
+    right = SimpleNamespace(dimension_id="b", orientation="horizontal",
+                            endpoints_pt=((100.0, 50.0), (250.0, 50.0)), value_mm=3500.0)
+    assert figured_box_pair_count(box_, [left, right, v]) == 2
+
+
+def test_parallel_prints_still_corroborate_a_closed_ring_as_one_face():
+    data = layered_room_pdf(vertical_pairs="full_only")
+    sha = hashlib.sha256(data).hexdigest()
+    ring_result = build_from_pdf_bytes(data, source_sha256=sha, page_index=0)
+    kwargs = dict(document_id="d", revision_id="r", source_sha256=sha, snapshot_id="s", page_id="1",
+                  decision_scope_id="wall-source:page-1")
+    dims = [
+        _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0)),
+        _dim("h2", "horizontal", (100.0, 50.0), (250.0, 50.0)),
+        _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0)),
+    ]
+    scope = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims)
+    assert scope is not None and len(scope.records) == 1
+
+
 def test_ring_corroboration_tolerance_matches_the_same_view_selection_tolerance():
     assert RING_FIGURED_BOX_TOLERANCE_PT == same_view_module._LAYERED_RING_BOX_TOLERANCE_PT
 

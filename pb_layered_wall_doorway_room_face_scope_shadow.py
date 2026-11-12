@@ -93,25 +93,58 @@ def _boundary_edges(ring: LayeredRoomRingRecord) -> tuple[tuple[str, tuple], ...
     return tuple(pairs)
 
 
+def _figured_span_token(dimension: object, span: tuple[float, float]) -> object:
+    """Identity of one printed figure on a span: millimetres, else text, else the span itself.
+
+    Parallel copies of the same ticks are one figure. Distinct observation ids of that same
+    span are not competing pairs. Two different millimetre values on one span are a conflict.
+    """
+    value = getattr(dimension, "value_mm", None)
+    if value is not None:
+        try:
+            return ("mm", float(value))
+        except (TypeError, ValueError):
+            pass
+    text = getattr(dimension, "raw_text", None) or getattr(dimension, "text", None)
+    if text is not None:
+        return ("text", str(text))
+    return ("span", span)
+
+
 def figured_box_pair_count(
     bounding_box: Sequence[float], dimensions: Sequence[object], *,
     tolerance_pt: float = RING_FIGURED_BOX_TOLERANCE_PT,
 ) -> int:
-    """How many authenticated (horizontal, vertical) figured pairs have exactly this witness box."""
+    """How many authenticated (horizontal, vertical) figured pairs have exactly this witness box.
+
+    Uniqueness is the geometric span (and printed millimetres when present), not observation
+    id: two parallel prints of the same ticks are one figure. A span that carries two
+    disagreeing millimetre values is competing, not unique.
+    """
     x0, y0, x1, y1 = bounding_box
-    horizontal = set()
-    vertical = set()
+    horizontal: dict[tuple[float, float], set[object]] = {}
+    vertical: dict[tuple[float, float], set[object]] = {}
     for dimension in dimensions:
         (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
         if dimension.orientation == "horizontal":  # type: ignore[attr-defined]
             span = tuple(sorted((float(ax), float(bx))))
             if abs(span[0] - x0) <= tolerance_pt and abs(span[1] - x1) <= tolerance_pt:
-                horizontal.add(getattr(dimension, "dimension_id", span))
+                horizontal.setdefault(span, set()).add(_figured_span_token(dimension, span))
         elif dimension.orientation == "vertical":  # type: ignore[attr-defined]
             span = tuple(sorted((float(ay), float(by))))
             if abs(span[0] - y0) <= tolerance_pt and abs(span[1] - y1) <= tolerance_pt:
-                vertical.add(getattr(dimension, "dimension_id", span))
-    return len(horizontal) * len(vertical)
+                vertical.setdefault(span, set()).add(_figured_span_token(dimension, span))
+
+    def _unique_spans(store: Mapping[tuple[float, float], set[object]]) -> int | None:
+        if any(len(tokens) > 1 for tokens in store.values()):
+            return None
+        return len(store)
+
+    n_horizontal = _unique_spans(horizontal)
+    n_vertical = _unique_spans(vertical)
+    if n_horizontal is None or n_vertical is None:
+        return 2
+    return n_horizontal * n_vertical
 
 
 def _fills_its_bounding_rectangle(polygon: Sequence[Sequence[float]]) -> bool:
