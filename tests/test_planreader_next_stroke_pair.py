@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_NO_WALL_INK,
+    REASON_PRIMITIVE_CAP,
     build_layered_wall_doorway_room_rings,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -44,6 +45,11 @@ def test_opt_in_stroke_pairs_are_topology_only_not_a_wall_layer():
     assert result.wall_strip_count >= 4
     assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
     assert all(not ring.takeoff_eligible and ring.diagnostic_only for ring in result.rings)
+    closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
+    assert closed
+    assert closed[0].bounding_wall_path_indices == (0, 1, 2, 3, 4, 5, 6, 7)
+    owners = {owner for edge in closed[0].edge_owner_ids for owner in edge}
+    assert {f"layered_wall_strip:{index}" for index in range(8)} <= owners
 
 
 def test_three_line_hatch_does_not_invent_a_wall():
@@ -81,6 +87,8 @@ def test_split_collinear_opposite_face_is_one_wall_not_rival_partners():
     assert result.wall_strip_count >= 4
     assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
     assert all(not ring.takeoff_eligible and ring.diagnostic_only for ring in result.rings)
+    closed = next(ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE)
+    assert {0, 1, 2} <= set(closed.bounding_wall_path_indices)
 
 
 def test_multi_neighbourhood_clip_keeps_original_path_indices():
@@ -102,6 +110,24 @@ def test_stroke_pair_consumed_drawings_over_primitive_cap_abstain():
         drawings, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.reason_codes == (REASON_NO_WALL_INK,)
+    assert result.reason_codes == (REASON_PRIMITIVE_CAP,)
+    assert result.rings == ()
+    assert result.wall_strip_count == 0
+
+
+def test_one_path_with_over_cap_items_abstains_before_pairing():
+    import fitz
+    items = [("l", fitz.Point(i, i), fitz.Point(i + 1, i + 1)) for i in range(20001)]
+    fat = {
+        "layer": "",
+        "fill": None,
+        "rect": fitz.Rect(0, 0, 20002, 20002),
+        "items": items,
+    }
+    result = build_layered_wall_doorway_room_rings(
+        _stroke_room() + [fat], source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (REASON_PRIMITIVE_CAP,)
     assert result.rings == ()
     assert result.wall_strip_count == 0

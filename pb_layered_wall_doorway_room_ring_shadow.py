@@ -60,6 +60,8 @@ REASON_RING_CLOSED = "layered_wall_ring_closed_by_source_ink"
 REASON_OPEN_GAP = "open_wall_gap_unresolved"
 REASON_OPEN_EXTERIOR = "open_to_exterior"
 REASON_NO_WALL_INK = "no_wall_layer_strips"
+REASON_PRIMITIVE_CAP = "page_primitive_cap_exceeded"
+_PRIMITIVE_CAP = 20000
 _STROKE_PAIR_THICK_MIN = 1.2
 _STROKE_PAIR_THICK_MAX = 8.0
 _STROKE_PAIR_MIN_SPAN = 12.0
@@ -135,6 +137,12 @@ class _Strip:
     y1: float
     polygon: Any = None  # exact outline (mitred ends keep their shape); bbox drives run analysis only
     forced: Optional[str] = None  # "h"/"v": a jamb cap takes the orientation of the wall it ends
+    path_indices: tuple[int, ...] = ()
+
+    def native_path_indices(self) -> tuple[int, ...]:
+        if self.path_indices:
+            return tuple(sorted(set(self.path_indices)))
+        return (self.path_index,)
 
     @property
     def horizontal(self) -> bool:
@@ -267,6 +275,21 @@ def _intersects_viewport(
     x0, y0, x1, y1 = bbox
     vx0, vy0, vx1, vy1 = viewport
     return not (x1 < vx0 or x0 > vx1 or y1 < vy0 or y0 > vy1)
+
+
+def _selected_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> int:
+    """Count native items on selected drawings, not drawing-row count."""
+    total = 0
+    for row in drawings:
+        if row is None:
+            continue
+        items = row.get("items")
+        if not items:
+            continue
+        total += len(items)
+        if total > _PRIMITIVE_CAP:
+            return total
+    return total
 
 
 def _as_viewports(
@@ -409,7 +432,8 @@ def _collect_stroke_pair_strips(
                     else:
                         x0, x1, y0, y1 = low_perp, high_perp, lo, hi
                     polygon = box(x0, y0, x1, y1)
-                    strips.append(_Strip(stroke[0], x0, y0, x1, y1, polygon))
+                    paths = tuple(sorted({item[0] for item in members}))
+                    strips.append(_Strip(paths[0], x0, y0, x1, y1, polygon, path_indices=paths))
     return strips
 
 
@@ -477,7 +501,10 @@ def _attach_caps(strips: list[_Strip]) -> list[_Strip]:
                     forced = "h"
                 else:
                     continue
-                current[index] = _Strip(strip.path_index, strip.x0, strip.y0, strip.x1, strip.y1, strip.polygon, forced)
+                current[index] = _Strip(
+                    strip.path_index, strip.x0, strip.y0, strip.x1, strip.y1, strip.polygon,
+                    forced, strip.path_indices,
+                )
                 changed = True
                 break
         if not changed:
@@ -503,15 +530,15 @@ def _runs(strips: Sequence[_Strip], horizontal: bool) -> list[tuple[tuple[float,
         band = group[0].band()
         group.sort(key=lambda s: s.span()[0])
         lo, hi = group[0].span()
-        paths = [group[0].path_index]
+        paths = list(group[0].native_path_indices())
         for strip in group[1:]:
             s_lo, s_hi = strip.span()
             if s_lo <= hi + NOISE_PT:
                 hi = max(hi, s_hi)
-                paths.append(strip.path_index)
+                paths.extend(strip.native_path_indices())
             else:
                 out.append((band, lo, hi, tuple(sorted(set(paths)))))
-                lo, hi, paths = s_lo, s_hi, [strip.path_index]
+                lo, hi, paths = s_lo, s_hi, list(strip.native_path_indices())
         out.append((band, lo, hi, tuple(sorted(set(paths)))))
     return out
 
@@ -555,7 +582,11 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                 if key in found:
                     continue
                 rect = box(a, band[0], b, band[1]) if horizontal else box(band[0], a, band[1], b)
-                touching = tuple(sorted(s.path_index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect)))
+                touching = tuple(sorted({
+                    index
+                    for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect)
+                    for index in s.native_path_indices()
+                }))
                 same_band = [r for r in _runs(strips, horizontal) if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
                 found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
@@ -1346,10 +1377,9 @@ def build_layered_wall_doorway_room_rings(
     if type(page_index) is not int or page_index < 0:
         raise ValueError("page_index must be a non-negative int")
     indexed = _clip_drawings(drawings, viewport_pdf_pts)
-    consumed = sum(row is not None for row in indexed)
-    if consumed > 20000:
+    if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
         return LayeredRoomRingResult(
-            EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
+            EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
         )
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
@@ -1500,7 +1530,9 @@ def build_layered_wall_doorway_room_rings(
                 edge_owners.append((f"layered_doorway_closure:{owner}",))
                 continue
             owners = tuple(sorted(
-                [f"layered_wall_strip:{s.path_index}" for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2]
+                [f"layered_wall_strip:{index}"
+                 for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2
+                 for index in s.native_path_indices()]
                 + [f"layered_wall_fill:{index}" for index, polygon in other_fills if polygon.distance(mid) <= NOISE_PT * 2]
             ))
             if owners:
@@ -1510,7 +1542,11 @@ def build_layered_wall_doorway_room_rings(
             edge_owners.append(owners)
         if unowned_edges:
             reasons.append(REASON_UNOWNED_EDGE)
-        wall_paths = tuple(sorted({s.path_index for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon)}))
+        wall_paths = tuple(sorted({
+            index
+            for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon)
+            for index in s.native_path_indices()
+        }))
         status = EvidenceResolutionStatus.ABSTAINED if reasons else EvidenceResolutionStatus.CANDIDATE
         if not reasons:
             reasons.append(REASON_RING_CLOSED)
