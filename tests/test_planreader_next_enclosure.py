@@ -283,6 +283,7 @@ def test_original_maryborough_page7_stroke_pairs_stay_topology_only():
     assert result["benchmark_credit"] is False
     assert "quantities" not in result
     assert result["draft_floor_candidates"] == []
+    assert "page_primitive_cap_exceeded" not in result["reason_codes"]
     assert result["dimension_index"]["role"] == "UNMATCHED"
     assert all(not r["room_identity_authenticated"] for r in result["regions"])
     assert all(r["topology_only"] for r in result["regions"])

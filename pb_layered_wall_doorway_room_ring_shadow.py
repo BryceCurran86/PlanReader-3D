@@ -397,6 +397,49 @@ def _strips_touch(left: _Strip, right: _Strip) -> bool:
     )
 
 
+def _halo_box(
+    seed: tuple[float, float, float, float], pad: float,
+) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = seed
+    return (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+
+
+def _clip_if_under_cap(
+    drawings: Sequence[Mapping[str, Any]],
+    box: tuple[float, float, float, float],
+) -> list[Mapping[str, Any] | None] | None:
+    clipped = _clip_drawing_items(drawings, box)
+    if _selected_primitive_count(clipped) > _PRIMITIVE_CAP:
+        return None
+    return clipped
+
+
+def _largest_halo_under_cap(
+    drawings: Sequence[Mapping[str, Any]],
+    seed: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float, float], list[Mapping[str, Any] | None]] | None:
+    """Largest pad ≤ 160 pt whose item-clipped halo stays inside the 20k cap.
+
+    One extra primitive at the 160 pt rim must not discard the whole
+    neighbourhood. This does not raise the cap and is not a wall layer.
+    """
+    full = _clip_if_under_cap(drawings, _halo_box(seed, _STROKE_PAIR_HALO_PT))
+    if full is not None:
+        return _halo_box(seed, _STROKE_PAIR_HALO_PT), full
+    lo, hi = 0.0, _STROKE_PAIR_HALO_PT
+    best: tuple[tuple[float, float, float, float], list[Mapping[str, Any] | None]] | None = None
+    for _ in range(12):
+        pad = (lo + hi) / 2.0
+        box = _halo_box(seed, pad)
+        clipped = _clip_if_under_cap(drawings, box)
+        if clipped is None:
+            hi = pad
+            continue
+        best = (box, clipped)
+        lo = pad
+    return best
+
+
 def expand_labelled_stroke_pair_viewports(
     drawings: Sequence[Mapping[str, Any]],
     seeds: Sequence[tuple[float, float, float, float]],
@@ -411,11 +454,11 @@ def expand_labelled_stroke_pair_viewports(
     for seed in seeds:
         x0, y0, x1, y1 = (float(value) for value in seed)
         seed_box = (x0, y0, x1, y1)
-        halo = (x0 - _STROKE_PAIR_HALO_PT, y0 - _STROKE_PAIR_HALO_PT, x1 + _STROKE_PAIR_HALO_PT, y1 + _STROKE_PAIR_HALO_PT)
-        clipped = _clip_drawing_items(drawings, halo)
-        if _selected_primitive_count(clipped) > _PRIMITIVE_CAP:
+        halo_hit = _largest_halo_under_cap(drawings, seed_box)
+        if halo_hit is None:
             grown.append(seed_box)
             continue
+        halo, clipped = halo_hit
         strips = _collect_stroke_pair_strips(clipped)
         kept = [strip for strip in strips if _strip_intersects_box(strip, seed_box)]
         if not kept:
@@ -440,8 +483,15 @@ def expand_labelled_stroke_pair_viewports(
             max(y1, max(strip.y1 for strip in kept) + pad),
         )
         if _selected_primitive_count(_clip_drawing_items(drawings, expanded)) > _PRIMITIVE_CAP:
-            grown.append(seed_box)
-            continue
+            expanded = (
+                min(x0, min(strip.x0 for strip in kept)),
+                min(y0, min(strip.y0 for strip in kept)),
+                max(x1, max(strip.x1 for strip in kept)),
+                max(y1, max(strip.y1 for strip in kept)),
+            )
+            if _selected_primitive_count(_clip_drawing_items(drawings, expanded)) > _PRIMITIVE_CAP:
+                grown.append(seed_box)
+                continue
         grown.append(expanded)
     return grown
 
@@ -1519,6 +1569,53 @@ def _split_at_closures(
     return tuple(out)
 
 
+def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRingResult:
+    """Keep per-neighbourhood topology when the union of clips exceeds the 20k cap."""
+    if not parts:
+        return LayeredRoomRingResult(
+            EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
+        )
+    rings = tuple(sorted({ring.record_id: ring for part in parts for ring in part.rings}.values(), key=lambda r: r.record_id))
+    closures = tuple(sorted(
+        {item.closure_id: item for part in parts for item in part.closures}.values(),
+        key=lambda item: item.closure_id,
+    ))
+    reasons: list[str] = []
+    any_strips = any(part.wall_strip_count for part in parts)
+    for part in parts:
+        for reason in part.reason_codes:
+            if reason == REASON_PRIMITIVE_CAP:
+                continue
+            if reason == REASON_NO_WALL_INK and any_strips:
+                continue
+            if reason not in reasons:
+                reasons.append(reason)
+    if any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in rings):
+        status = EvidenceResolutionStatus.CANDIDATE
+        if REASON_RING_CLOSED not in reasons:
+            reasons.insert(0, REASON_RING_CLOSED)
+    elif all(part.reason_codes == (REASON_PRIMITIVE_CAP,) for part in parts):
+        status = EvidenceResolutionStatus.ABSTAINED
+        reasons = [REASON_PRIMITIVE_CAP]
+    else:
+        status = EvidenceResolutionStatus.ABSTAINED
+        if not reasons:
+            reasons = [REASON_OPEN_EXTERIOR]
+    return LayeredRoomRingResult(
+        status=status,
+        reason_codes=tuple(reasons),
+        rings=rings,
+        closures=closures,
+        wall_strip_count=sum(part.wall_strip_count for part in parts),
+        wall_gap_count=sum(part.wall_gap_count for part in parts),
+        unresolved_gap_count=sum(part.unresolved_gap_count for part in parts),
+        non_strip_wall_fill_count=sum(part.non_strip_wall_fill_count for part in parts),
+        unplaced_swing_count=sum(part.unplaced_swing_count for part in parts),
+        ambiguous_swing_count=sum(part.ambiguous_swing_count for part in parts),
+        sliver_region_count=sum(part.sliver_region_count for part in parts),
+    )
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -1549,12 +1646,31 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("page_index must be a non-negative int")
     if stroke_pair_wall_faces and viewport_pdf_pts is not None:
         indexed = _clip_drawing_items(drawings, viewport_pdf_pts)
+        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+            viewports = _as_viewports(viewport_pdf_pts) or []
+            if len(viewports) > 1:
+                return _merge_ring_results([
+                    build_layered_wall_doorway_room_rings(
+                        drawings,
+                        source_sha256=source_sha256,
+                        page_index=page_index,
+                        sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+                        panel_lift_label_closure=panel_lift_label_closure,
+                        source_words=source_words,
+                        stroke_pair_wall_faces=True,
+                        viewport_pdf_pts=box,
+                    )
+                    for box in viewports
+                ])
+            return LayeredRoomRingResult(
+                EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
+            )
     else:
         indexed = _clip_drawings(drawings, viewport_pdf_pts)
-    if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
-        return LayeredRoomRingResult(
-            EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
-        )
+        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+            return LayeredRoomRingResult(
+                EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
+            )
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
         strips = strips + _collect_stroke_pair_strips(indexed)

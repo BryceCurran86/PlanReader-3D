@@ -188,6 +188,25 @@ def test_far_fat_path_does_not_cap_a_local_stroke_pair_viewport():
     assert all(not ring.takeoff_eligible for ring in result.rings)
 
 
+def test_halo_shrinks_to_stay_under_the_primitive_cap():
+    import fitz
+    seed = (40.0, 40.0, 60.0, 60.0)
+    # 160 pt halo reaches x=-120; 150 pt stops at x=-110. Park the overflow
+    # primitives on that rim so a 160 pt halo exceeds the cap and a slightly
+    # smaller one still contains the room.
+    overflow = []
+    for index in range(20001):
+        y = float(index) * 0.01
+        overflow.append(_line(-115.0, y, -114.5, y))
+    grown = expand_labelled_stroke_pair_viewports(_stroke_room() + overflow, [seed])
+    x0, y0, x1, y1 = grown[0]
+    assert x0 <= 0.0
+    assert y0 <= 0.0
+    assert x1 >= 100.0
+    assert y1 >= 100.0
+    assert x0 > -160.0
+
+
 def test_labelled_halo_grows_along_connected_stroke_pairs():
     seed = (40.0, 40.0, 60.0, 60.0)
     grown = expand_labelled_stroke_pair_viewports(_stroke_room(), [seed])
