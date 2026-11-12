@@ -72,7 +72,7 @@ def _tick_stations(
                 continue
             along = (seg.y1 + seg.y2) / 2.0
             perps = (seg.x1, seg.x2)
-        if along < lo - _FACE_PT or along > hi + _FACE_PT:
+        if along < lo - _WALL_END_HASH_PT or along > hi + _WALL_END_HASH_PT:
             continue
         on_face = [value for value in perps if abs(value - face_perp) <= _FACE_PT]
         off_face = [value for value in perps if abs(value - face_perp) > _FACE_PT]
@@ -461,7 +461,7 @@ def _projected_tick_stations(
                 continue
             along = (seg.y1 + seg.y2) / 2.0
             perps = (seg.x1, seg.x2)
-        if along < lo - _FACE_PT or along > hi + _FACE_PT:
+        if along < lo - _WALL_END_HASH_PT or along > hi + _WALL_END_HASH_PT:
             continue
         for line_perp in dim_lines:
             if min(perps) - _FACE_PT <= line_perp <= max(perps) + _FACE_PT:
@@ -615,7 +615,7 @@ def _merge_along_spans(spans: Sequence[tuple[float, float]]) -> list[tuple[float
     merged = [ordered[0]]
     for lo, hi in ordered[1:]:
         prev_lo, prev_hi = merged[-1]
-        if lo <= prev_hi + _FACE_PT:
+        if lo <= prev_hi + _SAME_LINE_HASH_PT:
             merged[-1] = (prev_lo, max(prev_hi, hi))
         else:
             merged.append((lo, hi))

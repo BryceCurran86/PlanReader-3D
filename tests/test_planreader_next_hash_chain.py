@@ -204,6 +204,102 @@ def test_polygon_faces_not_bbox_own_the_hash_chain(tmp_path):
     assert bbox_height is None
 
 
+def test_cad_jog_under_two_points_still_owns_the_full_extreme_hash_chain(tmp_path):
+    def drawer(page):
+        for a, b in [
+            ((100, 160), (148.58, 160)), ((148.58, 160), (148.58, 159)),
+            ((148.58, 159), (150.0, 159)), ((150.0, 159), (150.0, 160)),
+            ((150.0, 160), (200, 160)), ((200, 160), (200, 80)),
+            ((200, 80), (100, 80)), ((100, 80), (100, 160)),
+        ]:
+            page.draw_line(fitz.Point(*a), fitz.Point(*b), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(100, 160), fitz.Point(100, 165.5))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(200, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((142, 176), "3600", fontsize=8)
+        page.draw_line(fitz.Point(200, 80), fitz.Point(206, 80))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(206, 160))
+        page.draw_line(fitz.Point(206, 70), fitz.Point(206, 170))
+        page.insert_text((210, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    polygon = [
+        (100, 160), (148.58, 160), (148.58, 159), (150.0, 159),
+        (150.0, 160), (200, 160), (200, 80), (100, 80),
+    ]
+    width, height = bind_polygon_hash_axes(native, polygon)
+    assert width is not None and width.length_mm == 3600
+    assert height is not None and height.length_mm == 2400
+
+
+def test_true_split_extreme_wider_than_inner_outer_faces_still_abstains(tmp_path):
+    def drawer(page):
+        _room_with_hashes(page)
+
+    native = _page(tmp_path, drawer)
+    polygon = [
+        (100, 160), (140, 160), (140, 150), (160, 150),
+        (160, 160), (200, 160), (200, 80), (100, 80),
+    ]
+    width, height = bind_polygon_hash_axes(native, polygon)
+    assert width is None
+    assert height is not None and height.length_mm == 2400
+
+
+def test_hash_just_past_the_inner_vertex_still_owns_the_wall(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(99.55, 160), fitz.Point(99.55, 165.5))
+        page.draw_line(fitz.Point(200.45, 160), fitz.Point(200.45, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((142, 176), "3600", fontsize=8)
+        page.draw_line(fitz.Point(200, 80), fitz.Point(206, 80))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(206, 160))
+        page.draw_line(fitz.Point(206, 70), fitz.Point(206, 170))
+        page.insert_text((210, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 3600
+    width, height = bind_polygon_hash_axes(
+        native, [(100, 160), (200, 160), (200, 80), (100, 80)],
+    )
+    assert width is not None and width.length_mm == 3600
+    assert height is not None and height.length_mm == 2400
+
+
+def test_opening_and_note_figures_do_not_become_the_full_south_wall(tmp_path):
+    def drawer(page):
+        for a, b in [
+            ((100, 160), (148.58, 160)), ((148.58, 160), (148.58, 159)),
+            ((148.58, 159), (150.0, 159)), ((150.0, 159), (150.0, 160)),
+            ((150.0, 160), (200, 160)), ((200, 160), (200, 80)),
+            ((200, 80), (100, 80)), ((100, 80), (100, 160)),
+        ]:
+            page.draw_line(fitz.Point(*a), fitz.Point(*b), color=(0, 0, 0), width=0.4)
+        for x in (99.65, 129.0, 146.3, 200.45):
+            page.draw_line(fitz.Point(x, 160), fitz.Point(x, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((118, 176), "1800", fontsize=8)
+        page.insert_text((148, 176), "610", fontsize=8)
+        page.draw_line(fitz.Point(200, 80), fitz.Point(206, 80))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(206, 160))
+        page.draw_line(fitz.Point(206, 70), fitz.Point(206, 170))
+        page.insert_text((210, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    polygon = [
+        (100, 160), (148.58, 160), (148.58, 159), (150.0, 159),
+        (150.0, 160), (200, 160), (200, 80), (100, 80),
+    ]
+    width, height = bind_polygon_hash_axes(native, polygon)
+    assert width is None
+    assert height is not None and height.length_mm == 2400
+
+
 def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):
     def drawer(page):
         _room_with_hashes(page)
