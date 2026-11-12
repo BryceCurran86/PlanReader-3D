@@ -1855,7 +1855,7 @@ class SourceVisibilityProducer:
         policy = (
             frozenset(str(page) for page in published.coverage.decoded_pages)
             if wanted is None else frozenset(wanted),
-            min_words, max_attempts,
+            min_words, max_attempts, self._source_native_finish_text_shadow,
         )
         if str(revision_id) in self._glyph_ledger_pass_policy:
             if self._glyph_ledger_pass_policy[str(revision_id)] != policy:
@@ -1918,8 +1918,16 @@ class SourceVisibilityProducer:
 
         def corroborate(observation_id: str) -> bool:
             if self._glyph_ledger_raster_producer is None:
+                # Both options are explicit and default off. The existing
+                # isolated-word mode still requires literal native equality;
+                # material quote comparison must never cast native glyph votes.
+                factory = (
+                    RasterTextCorroborationProducer.for_native_word_recognition_shadow
+                    if self._source_native_finish_text_shadow
+                    else RasterTextCorroborationProducer.from_source_visibility_producer
+                )
                 self._glyph_ledger_raster_producer = (
-                    RasterTextCorroborationProducer.from_source_visibility_producer(self))
+                    factory(self))
             outcome = self._glyph_ledger_raster_producer.publish(
                 RasterTextCorroborationSelector(
                     document_id=published.revision.document_id,

@@ -160,6 +160,7 @@ def issue_all_original_maryborough_customer_quantities(
                         producer_method="maryborough-customer-authority",
                         producer_version="1.0",
                         source_native_finish_text_shadow=True,
+                        source_glyph_ledger_text_trust=True,
                     )
                     published = source.ingest_native_pdf_bytes(
                         document_id=MARYBOROUGH_DOCUMENT_ID,

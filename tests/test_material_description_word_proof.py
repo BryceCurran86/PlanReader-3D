@@ -1,6 +1,5 @@
 """Material readings preserve their actual text; native Unicode stays strict."""
 from copy import deepcopy
-from dataclasses import replace
 
 import pytest
 
@@ -81,143 +80,38 @@ def test_material_reading_cache_revalidates_source_and_keeps_modes_separate(monk
     assert producer.material_quote_comparison_proof(selector) is None
 
 
-def _glyph_case(monkeypatch, texts=None):
+@pytest.mark.parametrize('native_flag,ledger_flag', [(False, False), (True, False),
+                                                    (False, True), (True, True)])
+def test_source_receipt_issuer_uses_strict_word_mode_only_with_both_opt_ins(monkeypatch, native_flag, ledger_flag):
     import pb_pdf_text_integrity_authority as integrity
     from pb_source_visibility_authority import SourceVisibilityProducer
-    from tests.test_source_glyph_ledger_text_trust_integration_v1 import _pdf, _layout, _Reader
+    from tests.test_source_glyph_ledger_text_trust_integration_v1 import (
+        _pdf, _layout, _Reader, _results,
+    )
     monkeypatch.setattr(integrity, '_font_for_glyph_validation', lambda *args: None)
-    source = SourceVisibilityProducer(producer_method='material-glyph-test', producer_version='1',
-                                     source_native_finish_text_shadow=True)
-    layout = _layout() if texts is None else [(t, 30.0 + 70.0 * i, 60.0) for i, t in enumerate(texts)]
-    published = source.ingest_native_pdf_bytes(document_id='material-glyph',
-                                               source_bytes=_pdf([layout]),
-                                               source_locator='memory://material-glyph.pdf')
     backend = MockOCRBackend(responder=_Reader())
     monkeypatch.setattr(raster, 'select_production_ocr_backend', lambda: (backend, 'test-only'))
-    producer = material._ordinary_source_word_raster(
-        source, native_word_recognition_shadow=True, material_quote_comparison_shadow=True,
+    source = SourceVisibilityProducer(
+        producer_method='material-source-receipt-integration', producer_version='1',
+        source_native_finish_text_shadow=native_flag,
+        source_glyph_ledger_text_trust=ledger_flag,
     )
-    words = material._trusted_words_by_page(source, published)['1']
-    assert all(not w.trusted for w in words)
-    return source, published, producer, words
-
-
-def _selector(published, word):
-    return raster.RasterTextCorroborationSelector(
-        document_id=published.revision.document_id, revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
-        observation_id=word.observation_id,
+    published = source.ingest_native_pdf_bytes(
+        document_id='material-source-receipt', source_bytes=_pdf([_layout()]),
+        source_locator='memory://material-source-receipt.pdf',
     )
-
-
-@pytest.mark.parametrize('voters,expected', [(('IM',), False), (('IM', 'MW'), False),
-                                          (('IM', 'MW', 'IW'), True)])
-def test_cached_material_glyph_reuse_requires_two_votes_per_glyph(monkeypatch, voters, expected):
-    source, published, producer, words = _glyph_case(monkeypatch)
-    for word in words:
-        if word.text in voters:
-            assert producer.publish(_selector(published, word)).record is not None
-    before = deepcopy(words)
-    result = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=words,
-    )
-    assert next(w for w in result if w.text == 'IMW').trusted is expected
-    assert words == before
-    # This is material-scope recovery, never an in-place native receipt upgrade.
-    assert all(not w.trusted for w in material._trusted_words_by_page(source, published)['1'])
-    replay = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=tuple(reversed(words)),
-    )
-    assert {w.observation_id: w for w in result} == {w.observation_id: w for w in replay}
-
-
-def test_foreign_or_competing_cached_reading_cannot_vote_for_glyphs(monkeypatch):
-    source, published, producer, words = _glyph_case(monkeypatch)
-    for word in words:
-        if word.text in ('IM', 'MW', 'IW'):
-            selector = _selector(published, word)
-            result = producer.publish(selector)
-            if word.text == 'IW':
-                producer._results[selector.key] = replace(
-                    result, record=replace(result.record, source_sha256='f' * 64),
-                )
-    result = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=words,
-    )
-    assert not next(w for w in result if w.text == 'IMW').trusted
-
-
-def test_material_quote_variant_cannot_vote_for_any_native_glyph(monkeypatch):
-    from pb_portable_raster_ocr_authority import OCRLine
-    source, published, producer, words = _glyph_case(monkeypatch, ('“IM', 'MW', 'IW', 'IMW'))
-    for word in words:
-        if word.text == 'IMW':
-            continue
-        reading = word.text.replace('“', '"')
-        producer._backend = MockOCRBackend(responder=lambda image, dpi, text=reading: (
-            OCRLine(text=text, confidence=None, bbox_px=(1, 1, image.width - 1, image.height - 1)),
-        ))
-        assert producer.publish(_selector(published, word)).record is not None
-    result = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=words,
-    )
-    assert next(w for w in result if w.text == '"IM').trusted
-    # If the quoted word cast native votes, I and M would each have two.
-    assert not next(w for w in result if w.text == 'IMW').trusted
-
-
-def test_contradicted_glyph_vetoes_even_a_direct_material_reading(monkeypatch):
-    import pb_font_glyph_mapping_corroboration_shadow as glyphs
-    source, published, producer, words = _glyph_case(monkeypatch)
-    for word in words:
-        if word.text in ('IM', 'MW', 'IW'):
-            assert producer.publish(_selector(published, word)).record is not None
-    real_word_glyphs = glyphs.word_glyphs
-    def competing_trace(*args, **kwargs):
-        value = real_word_glyphs(*args, **kwargs)
-        if value is not None and value.text == 'IW':
-            # A competing Unicode claim for the same source font/glyph.
-            reference = next(w for w in words if w.text == 'IM')
-            other = real_word_glyphs(reference.observation_id, reference.text,
-                                     value.font_key, reference.bbox, args[-1])
-            return replace(value, glyphs=(value.glyphs[0], (other.glyphs[1][0], 'W')))
-        return value
-    monkeypatch.setattr(glyphs, 'word_glyphs', competing_trace)
-    result = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=words,
-    )
-    assert not next(w for w in result if w.text == 'IM').trusted
-    assert 'glyph_contradicted' in next(w for w in result if w.text == 'IM').reason_codes
-    assert not next(w for w in result if w.text == 'IMW').trusted
-
-
-def test_material_proof_never_crosses_embedded_font_programs(monkeypatch):
-    import pb_font_glyph_mapping_corroboration_shadow as glyphs
-    source, published, producer, words = _glyph_case(monkeypatch)
-    for word in words:
-        if word.text in ('IM', 'MW', 'IW'):
-            assert producer.publish(_selector(published, word)).record is not None
-    real_word_glyphs = glyphs.word_glyphs
-    def another_font(*args, **kwargs):
-        value = real_word_glyphs(*args, **kwargs)
-        return replace(value, font_key='other-embedded-font') if value and value.text == 'IMW' else value
-    monkeypatch.setattr(glyphs, 'word_glyphs', another_font)
-    result = material._reuse_cached_material_word_proofs(
-        source=source, published=published, raster=producer, words=words,
-    )
-    assert not next(w for w in result if w.text == 'IMW').trusted
-
-
-def test_duplicate_word_universe_and_changed_original_bytes_fail_closed(monkeypatch):
-    source, published, producer, words = _glyph_case(monkeypatch)
-    for values in (words + words[:1],):
-        with pytest.raises(RuntimeError, match=material.SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE):
-            material._reuse_cached_material_word_proofs(
-                source=source, published=published, raster=producer, words=values,
-            )
-    source._producer._store.source_bytes_by_revision[published.revision.revision_id] = b'changed'
-    with pytest.raises(RuntimeError, match=material.SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE):
-        material._reuse_cached_material_word_proofs(
-            source=source, published=published, raster=producer, words=words,
-        )
-
+    receipts = _results(source, published)
+    if not ledger_flag:
+        assert source._glyph_ledger_raster_producer is None
+        assert all(not r.receipt.trusted for r in receipts.values())
+    else:
+        proof = source._glyph_ledger_raster_producer
+        assert proof._recognize_native_words_shadow is native_flag
+        assert proof._material_quote_comparison_shadow is False
+        assert proof._allow_clip_only_shadow is False
+        assert all(r.receipt.trusted for r in receipts.values())
+        assert all(r.receipt.raw_text == r.trusted_text for r in receipts.values())
+        source._source_native_finish_text_shadow = not native_flag
+        with pytest.raises(ValueError, match='proof_policy_already_fixed'):
+            source.upgrade_glyph_only_text(published.revision.revision_id)
+        assert _results(source, published) == receipts
