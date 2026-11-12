@@ -7,16 +7,20 @@ This module classifies every wall edge of a ring by what the source states about
 
 * ``lined_internal_frame_face``: the owning strip is on an internal-wall layer and its thickness at the page
   scale equals the frame thickness an authenticated build-up statement gives for internal walls. The drawn
-  face is the frame face; the statement gives the lining beyond it. This is the ONLY resolved class.
-* every other class is an explicit unresolved reason: a different thickness, a wall kind the set states
-  nothing about (for example an external wall), an unclassified fill or layer, a strip the facts do not know.
+  face is the frame face; the statement gives the lining beyond it.
+* ``external_drawn_inner_face``: the owning strip is on an external-wall layer. The set does not state an
+  internal lining for that kind, so the inner face of the DRAWN strip is the room face. No lining is inferred.
+* every other class is an explicit unresolved reason: a different thickness, an unclassified fill or layer, a
+  strip the facts do not know.
 * a doorway/threshold chord is not a wall and has no lining.
 
-A ring is ``resolved`` only when EVERY wall edge is a lined internal frame face and no other fact (a statement
-variant for wet areas, conflicting statements) leaves the lining open. Anything else is ``unresolved`` with the
-reason codes and the edge length in each class, so the missing source fact is precise.
+A ring is ``resolved`` only when EVERY wall edge is a lined internal frame face or an external drawn inner
+face, and no other fact (a statement variant for wet areas, conflicting statements) leaves the lining open.
+Anything else is ``unresolved`` with the reason codes and the edge length in each class, so the missing
+source fact is precise.
 
-It never infers a lining thickness: the lining comes only from an authenticated statement. It issues no scale
+It never infers a lining thickness: the lining comes only from an authenticated statement. External walls
+carry a zero offset. It issues no scale
 (the page scale is an input from the existing authority), area, length, host, deduction or finish, and it never
 promotes a ring to a measurement.
 """
@@ -38,6 +42,7 @@ VERDICT_RESOLVED = "resolved_internal_frame_face_with_stated_lining"
 VERDICT_UNRESOLVED = "unresolved"
 
 CLASS_LINED_INTERNAL_FRAME_FACE = "lined_internal_frame_face"
+CLASS_EXTERNAL_DRAWN_INNER_FACE = "external_drawn_inner_face"
 CLASS_INTERNAL_THICKNESS_MISMATCH = "internal_strip_thickness_not_the_stated_frame"
 CLASS_INTERNAL_STATEMENT_UNUSABLE = "internal_strip_without_a_usable_statement_or_scale"
 CLASS_EXTERNAL_LINING_NOT_STATED = "external_wall_internal_lining_not_stated"
@@ -136,7 +141,7 @@ def _edge_class(
             continue
         kind = _layer_kind(fact.layer)
         if kind == "external":
-            classes.add(CLASS_EXTERNAL_LINING_NOT_STATED)
+            classes.add(CLASS_EXTERNAL_DRAWN_INNER_FACE)
         elif kind == "other":
             classes.add(CLASS_LAYER_NOT_CLASSIFIED)
         elif frame_mm is None or mm_per_pt is None or fact.thickness_pt is None:
@@ -257,7 +262,12 @@ def _classify_edges(
             offsets.append((index, lining_mm))
     if wall_edges == 0:
         reasons.add(REASON_NO_WALL_EDGES)
-    unresolved_classes = {name for name in lengths if name not in (CLASS_LINED_INTERNAL_FRAME_FACE, CLASS_THRESHOLD_CHORD)}
+    unresolved_classes = {
+        name for name in lengths
+        if name not in (
+            CLASS_LINED_INTERNAL_FRAME_FACE, CLASS_EXTERNAL_DRAWN_INNER_FACE, CLASS_THRESHOLD_CHORD,
+        )
+    }
     reasons |= unresolved_classes
     resolved = not reasons
     return RingFaceIdentity(
@@ -271,7 +281,69 @@ def _classify_edges(
     )
 
 
+def apply_lined_finished_face_polygon(
+    polygon_pdf_pts: Sequence[Sequence[float]],
+    lined_edge_offsets_mm: Sequence[tuple[int, float]],
+    mm_per_pt: float,
+) -> Optional[tuple[tuple[float, float], ...]]:
+    """Inset only the wall edges that carry an authenticated lining, in page points.
+
+    External drawn inner faces and doorway chords are omitted from ``lined_edge_offsets_mm``
+    and stay put. A missing or non-finite scale, or a lining that eats the face, abstains.
+    """
+    from shapely.geometry import Point, Polygon
+
+    points = [(float(x), float(y)) for x, y in polygon_pdf_pts]
+    if len(points) < 3:
+        return None
+    if not isinstance(mm_per_pt, (int, float)) or not math.isfinite(mm_per_pt) or mm_per_pt <= 0.0:
+        return None
+    face = Polygon(points)
+    if not face.is_valid:
+        face = face.buffer(0)
+    if face.is_empty:
+        return None
+    offsets = {int(index): float(offset_mm) for index, offset_mm in lined_edge_offsets_mm}
+    if not offsets:
+        return tuple((float(x), float(y)) for x, y in points)
+    n = len(points)
+    for index in range(n):
+        offset_mm = offsets.get(index)
+        if offset_mm is None or not math.isfinite(offset_mm) or offset_mm <= 0.0:
+            continue
+        offset_pt = offset_mm / float(mm_per_pt)
+        if offset_pt <= 0.0:
+            continue
+        first, second = points[index], points[(index + 1) % n]
+        dx, dy = second[0] - first[0], second[1] - first[1]
+        length = math.hypot(dx, dy)
+        if length <= NOISE_PT:
+            continue
+        nx, ny = dy / length, -dx / length
+        mid = ((first[0] + second[0]) / 2.0, (first[1] + second[1]) / 2.0)
+        probe = Point(mid[0] + nx * (NOISE_PT * 2.0), mid[1] + ny * (NOISE_PT * 2.0))
+        if not face.covers(probe):
+            nx, ny = -nx, -ny
+        strip = Polygon((
+            first, second,
+            (second[0] + nx * offset_pt, second[1] + ny * offset_pt),
+            (first[0] + nx * offset_pt, first[1] + ny * offset_pt),
+        ))
+        if not strip.is_valid or strip.is_empty:
+            continue
+        face = face.difference(strip)
+        if face.geom_type == "MultiPolygon":
+            face = max(face.geoms, key=lambda geom: geom.area)
+        if face.is_empty:
+            return None
+    coords = tuple((float(x), float(y)) for x, y in face.exterior.coords[:-1])
+    if len(coords) < 3:
+        return None
+    return coords
+
+
 __all__ = [
+    "CLASS_EXTERNAL_DRAWN_INNER_FACE",
     "CLASS_EXTERNAL_LINING_NOT_STATED",
     "CLASS_FILL_NOT_CLASSIFIED",
     "CLASS_INTERNAL_STATEMENT_UNUSABLE",
@@ -290,6 +362,7 @@ __all__ = [
     "VERDICT_RESOLVED",
     "VERDICT_UNRESOLVED",
     "WallStripFact",
+    "apply_lined_finished_face_polygon",
     "classify_record_face_identity",
     "classify_ring_face_identity",
     "record_edge_owners",

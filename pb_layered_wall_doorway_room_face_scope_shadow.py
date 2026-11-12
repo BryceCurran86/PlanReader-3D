@@ -24,6 +24,7 @@ scale, area, finish or quantity.
 """
 from __future__ import annotations
 
+import math
 from typing import Mapping, Optional, Sequence
 
 from shapely.geometry import Polygon
@@ -145,6 +146,45 @@ def figured_box_pair_count(
     if n_horizontal is None or n_vertical is None:
         return 2
     return n_horizontal * n_vertical
+
+
+def unique_figured_box_mm_per_pt(
+    bounding_box: Sequence[float], dimensions: Sequence[object], *,
+    tolerance_pt: float = RING_FIGURED_BOX_TOLERANCE_PT,
+) -> Optional[float]:
+    """Millimetres per page-point of the unique figured pair that witnesses this box, or None."""
+    if figured_box_pair_count(bounding_box, dimensions, tolerance_pt=tolerance_pt) != 1:
+        return None
+    x0, y0, x1, y1 = bounding_box
+    width_mm = height_mm = None
+    width_pt = height_pt = None
+    for dimension in dimensions:
+        (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
+        value = getattr(dimension, "value_mm", None)
+        if value is None:
+            continue
+        try:
+            millimetres = float(value)
+        except (TypeError, ValueError):
+            continue
+        if dimension.orientation == "horizontal":  # type: ignore[attr-defined]
+            span = tuple(sorted((float(ax), float(bx))))
+            if abs(span[0] - x0) <= tolerance_pt and abs(span[1] - x1) <= tolerance_pt:
+                width_mm, width_pt = millimetres, span[1] - span[0]
+        elif dimension.orientation == "vertical":  # type: ignore[attr-defined]
+            span = tuple(sorted((float(ay), float(by))))
+            if abs(span[0] - y0) <= tolerance_pt and abs(span[1] - y1) <= tolerance_pt:
+                height_mm, height_pt = millimetres, span[1] - span[0]
+    if (
+        width_mm is None or height_mm is None or width_pt is None or height_pt is None
+        or width_pt <= 0.0 or height_pt <= 0.0
+    ):
+        return None
+    mm_per_pt_x = width_mm / width_pt
+    mm_per_pt_y = height_mm / height_pt
+    if not math.isfinite(mm_per_pt_x) or not math.isfinite(mm_per_pt_y) or mm_per_pt_x <= 0.0 or mm_per_pt_y <= 0.0:
+        return None
+    return (mm_per_pt_x + mm_per_pt_y) / 2.0
 
 
 def _fills_its_bounding_rectangle(polygon: Sequence[Sequence[float]]) -> bool:
@@ -370,6 +410,7 @@ __all__ = [
     "RING_NOT_A_RECTANGLE_PREFIX",
     "RING_PARTITION_PART_PREFIX",
     "figured_box_pair_count",
+    "unique_figured_box_mm_per_pt",
     "layered_ring_room_face_scope",
     "layered_ring_scope_overrides",
     "ring_face_bounding_box",

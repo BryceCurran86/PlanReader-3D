@@ -167,6 +167,7 @@ def build_source_room_area_bridge(
     scale_calibration: Optional[ScaleCalibration] = None,
     explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
     withheld_room_refs: Sequence[str] = (),
+    established_finished_face_ids: Sequence[str] = (),
 ) -> SourceRoomAreaBridgeResult:
     """Compose sealed room faces into existing room-area QuantityEvidence.
 
@@ -179,17 +180,23 @@ def build_source_room_area_bridge(
     measurement authority. This bridge never promotes it.
 
     A face the authenticated scope marks as lacking an established finished
-    face (its finished-face token) is withheld here, whatever the caller passes.
-    withheld_room_refs can only ADD removals to that set; omitting it never
-    reactivates a gated face. Neither carries geometry, value or authority, and
-    neither adds or changes a room. Documented-area evidence for a withheld
-    face is dropped before it can reach the document or the quantity issuer.
+    face (its finished-face token) is withheld here, whatever the caller passes,
+    unless ``established_finished_face_ids`` names that face after a lining
+    inset has been applied. withheld_room_refs can only ADD removals to that
+    set; omitting it never reactivates a gated face. Neither carries geometry,
+    value or authority, and neither adds or changes a room. Documented-area
+    evidence for a withheld face is dropped before it can reach the document
+    or the quantity issuer.
     """
 
     if isinstance(withheld_room_refs, (str, bytes)) or not all(
         isinstance(ref, str) for ref in withheld_room_refs
     ):
         raise TypeError("withheld_room_refs must be a sequence of room refs")
+    if isinstance(established_finished_face_ids, (str, bytes)) or not all(
+        isinstance(ref, str) for ref in established_finished_face_ids
+    ):
+        raise TypeError("established_finished_face_ids must be a sequence of face ids")
     room_index = build_owned_source_room_face_index(
         room_face_authority=room_face_authority,
         selector=selector,
@@ -236,10 +243,12 @@ def build_source_room_area_bridge(
     from pb_layered_wall_doorway_room_face_scope_shadow import RING_FINISHED_FACE_REQUIRED_PREFIX
 
     gated_scope = room_face_authority.resolve_scope(selector)
-    withheld = frozenset(withheld_room_refs) | frozenset(
-        record.face_id for record in gated_scope.records
-        if f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}" in gated_scope.reason_codes
-    )
+    withheld = (
+        frozenset(withheld_room_refs) | frozenset(
+            record.face_id for record in gated_scope.records
+            if f"{RING_FINISHED_FACE_REQUIRED_PREFIX}{record.record_id}" in gated_scope.reason_codes
+        )
+    ) - frozenset(established_finished_face_ids)
     explicit_area_evidence = {
         room_ref: evidence
         for room_ref, evidence in dict(explicit_area_evidence_by_room_id or {}).items()

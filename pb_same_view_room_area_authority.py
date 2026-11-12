@@ -15,7 +15,7 @@ import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
 from pb_repeated_room_label_source_shadow import uniquely_owned_repeated_label_lines
-from typing import Mapping, Sequence
+from typing import Mapping, Optional, Sequence
 
 from pb_cross_view_room_area_authority import (
     _dimension_is_immediate_label_annotation,
@@ -230,11 +230,16 @@ class SameViewRoomAreaProducer:
     def publish(
         self, *, repeated_label_source_ownership_shadow: bool = False,
         layered_ring_box_selection_shadow: bool = False,
+        finished_face_polygons_by_source_record_id: Optional[Mapping[str, Sequence[Sequence[float]]]] = None,
     ) -> SameViewRoomAreaResult:
         if type(repeated_label_source_ownership_shadow) is not bool:
             raise TypeError('repeated_label_source_ownership_shadow must be bool')
         if type(layered_ring_box_selection_shadow) is not bool:
             raise TypeError('layered_ring_box_selection_shadow must be bool')
+        if finished_face_polygons_by_source_record_id is not None and not isinstance(
+            finished_face_polygons_by_source_record_id, Mapping
+        ):
+            raise TypeError("finished_face_polygons_by_source_record_id must be a mapping")
         rooms = tuple(self._rooms.rooms)
         if not rooms:
             return SameViewRoomAreaResult(
@@ -499,8 +504,16 @@ class SameViewRoomAreaProducer:
             ring_not_rectangle = ring_face is not None and not ring_face[1]
             ring_partition_part = ring_face is not None and ring_face[2]
             ring_finished_face_required = self._finished_face_required(room)
+            finished_polygon = None
+            if finished_face_polygons_by_source_record_id is not None:
+                finished_polygon = finished_face_polygons_by_source_record_id.get(
+                    str(room.source_room_face_record_id)
+                )
             ring_box_rejected = False
-            if (ring_partition_part or ring_finished_face_required) and deduped:
+            if (
+                ring_partition_part
+                or (ring_finished_face_required and finished_polygon is None)
+            ) and deduped:
                 # A sliding-leaf part is corroborated by the UNION's pair, which is never a part's
                 # area. A gated frame face is not an established finished face. Both stay withdrawn.
                 # A non-rectangle with a unique pair keeps that pair: area is the face polygon below.
@@ -550,9 +563,10 @@ class SameViewRoomAreaProducer:
                 continue
 
             owned_line, horizontal, vertical = next(iter(deduped.values()))
-            if ring_not_rectangle:
+            area_polygon = finished_polygon if finished_polygon is not None else room.polygon_pdf_pts
+            if ring_not_rectangle or finished_polygon is not None:
                 area_m2 = _face_polygon_area_m2_from_figured_pair(
-                    room.polygon_pdf_pts, horizontal, vertical,
+                    area_polygon, horizontal, vertical,
                 )
                 if area_m2 is None:
                     unresolved.add(str(room.physical_room_id))
@@ -659,7 +673,7 @@ class SameViewRoomAreaProducer:
                     "room_revision_id": str(room.revision_id),
                     "room_snapshot_id": str(room.snapshot_id),
                     "source_sha256": str(room.source_sha256),
-                    "face_polygon_area": bool(ring_not_rectangle),
+                    "face_polygon_area": bool(ring_not_rectangle or finished_polygon is not None),
                 },
             )
             records.append(

@@ -11,6 +11,7 @@ import pytest
 
 from pb_layered_wall_doorway_room_ring_shadow import build_from_pdf_bytes
 from pb_layered_wall_face_identity_shadow import (
+    CLASS_EXTERNAL_DRAWN_INNER_FACE,
     CLASS_EXTERNAL_LINING_NOT_STATED,
     CLASS_FILL_NOT_CLASSIFIED,
     CLASS_INTERNAL_STATEMENT_UNUSABLE,
@@ -28,6 +29,7 @@ from pb_layered_wall_face_identity_shadow import (
     VERDICT_RESOLVED,
     VERDICT_UNRESOLVED,
     WallStripFact,
+    apply_lined_finished_face_polygon,
     classify_ring_face_identity,
     wall_strip_facts,
 )
@@ -94,13 +96,15 @@ def test_every_wall_edge_a_lined_internal_frame_face_resolves_with_the_stated_li
             identity.floor_finish_issued, identity.diagnostic_only) == (False, False, False, False, True)
 
 
-def test_an_external_wall_run_whose_lining_the_set_does_not_state_leaves_the_face_unresolved():
+def test_an_external_wall_run_whose_lining_the_set_does_not_state_is_the_drawn_inner_face():
     ring, facts = _ring_and_facts(identity_pdf(right_layer="Enclosure_WallExternal", right_pt=90.0 / MM_PER_PT))
     identity = classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT)
-    assert identity.verdict == VERDICT_UNRESOLVED and identity.reason_codes == (CLASS_EXTERNAL_LINING_NOT_STATED,)
+    assert identity.verdict == VERDICT_RESOLVED and identity.reason_codes == ()
     lengths = classes(identity)
-    assert lengths[CLASS_EXTERNAL_LINING_NOT_STATED] == pytest.approx(30.0 + 46.0, abs=0.01)  # the two wall pieces beside the doorway
-    assert lengths[CLASS_LINED_INTERNAL_FRAME_FACE] > 0 and identity.lined_edge_offsets_mm == ()
+    assert lengths[CLASS_EXTERNAL_DRAWN_INNER_FACE] == pytest.approx(30.0 + 46.0, abs=0.01)
+    assert lengths[CLASS_LINED_INTERNAL_FRAME_FACE] > 0
+    assert {offset for _edge, offset in identity.lined_edge_offsets_mm} == {10.0}
+    assert CLASS_EXTERNAL_LINING_NOT_STATED not in identity.reason_codes
 
 
 def test_an_internal_strip_that_is_not_the_stated_frame_thickness_is_not_resolved():
@@ -199,6 +203,23 @@ def test_replay_is_deterministic_statement_order_invariant_and_translation_invar
     assert moved.verdict == a.verdict and moved.class_lengths_pt == a.class_lengths_pt
     assert classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT).lined_edge_offsets_mm == \
         classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT).lined_edge_offsets_mm
+
+
+def test_finished_polygon_insets_only_authenticated_lining_edges(base):
+    ring, facts = base
+    identity = classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT)
+    finished = apply_lined_finished_face_polygon(
+        ring.polygon_pdf_pts, identity.lined_edge_offsets_mm, MM_PER_PT,
+    )
+    assert finished is not None
+    from shapely.geometry import Polygon
+    original = Polygon(ring.polygon_pdf_pts)
+    inset = Polygon(finished)
+    assert inset.is_valid and inset.area < original.area
+    assert apply_lined_finished_face_polygon(ring.polygon_pdf_pts, (), MM_PER_PT) == tuple(
+        (float(x), float(y)) for x, y in ring.polygon_pdf_pts
+    )
+    assert apply_lined_finished_face_polygon(ring.polygon_pdf_pts, identity.lined_edge_offsets_mm, 0.0) is None
 
 
 def test_strip_facts_carry_layer_and_thickness_and_never_mutate_the_drawings():
