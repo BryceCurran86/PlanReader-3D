@@ -1120,7 +1120,15 @@ def _stroke_closed(
                 perp = ax
                 lo, hi = sorted((ay, by))
             near_band = gap.band[0] - thickness <= perp <= gap.band[1] + thickness
-            if near_band and _close(lo, gap.lo) and _close(hi, gap.hi):
+            span = gap.hi - gap.lo
+            # Face identity (0.35) only on opening-sized interruptions. A hall-length
+            # band with a lining 0.28 pt short of the ends is not a window.
+            end_tol = (
+                _STROKE_PAIR_FACE_PT
+                if 10.0 <= span <= 140.0
+                else NOISE_PT
+            )
+            if near_band and _close(lo, gap.lo, end_tol) and _close(hi, gap.hi, end_tol):
                 return (index,)
     return None
 

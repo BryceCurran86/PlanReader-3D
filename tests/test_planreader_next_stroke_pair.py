@@ -71,6 +71,45 @@ def test_opt_in_stroke_pairs_are_topology_only_not_a_wall_layer():
     assert {f"layered_wall_strip:{index}" for index in range(8)} <= owners
 
 
+def _stroke_room_with_window(shorten: float):
+    return [
+        _line(0, 0, 100, 0), _line(0, 2, 100, 2),
+        _line(0, 98, 100, 98), _line(0, 100, 100, 100),
+        _line(0, 0, 0, 100), _line(2, 0, 2, 100),
+        _line(98, 0, 98, 40), _line(100, 0, 100, 40),
+        _line(98, 88, 98, 100), _line(100, 88, 100, 100),
+        _line(99, 40 + shorten, 99, 88 - shorten),
+    ]
+
+
+def test_face_identity_short_window_stroke_closes_the_gap():
+    result = build_layered_wall_doorway_room_rings(
+        _stroke_room_with_window(0.28), source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True,
+    )
+    closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
+    assert closed
+    assert result.unresolved_gap_count == 0
+    assert any(item.kind == "source_stroke_closure" for item in result.closures)
+
+
+def test_two_point_short_stroke_is_not_a_window_closure():
+    result = build_layered_wall_doorway_room_rings(
+        _stroke_room_with_window(2.0), source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True,
+    )
+    assert result.unresolved_gap_count >= 1
+    assert all(item.kind != "source_stroke_closure" for item in result.closures)
+
+
+def test_hall_length_stroke_short_of_the_ends_does_not_invent_a_wall():
+    from pb_layered_wall_doorway_room_ring_shadow import _Gap, _stroke_closed
+
+    gap = _Gap(True, (98.0, 100.0), 0.0, 141.0, (), (), True)
+    stroke = _line(0.28, 99.0, 140.72, 99.0)
+    assert _stroke_closed([stroke], gap, all_ink=True) is None
+
+
 def test_unique_jamb_caps_close_a_stroke_pair_door_gap():
     result = build_layered_wall_doorway_room_rings(
         _stroke_room_with_jamb_door(), source_sha256=SHA, page_index=0,
