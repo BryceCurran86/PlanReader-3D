@@ -183,6 +183,7 @@ def _measure_one(
     page: NativePage, row: Mapping[str, Any], *,
     expected_basis: str = "internal_finished_wall_face",
     trade: str = "floor_finish",
+    finish_page: NativePage | None = None,
 ) -> dict[str, Any]:
     words = {w.ref: w for w in page.words}
     rects = {r.ref: r for r in page.rectangles}
@@ -210,16 +211,65 @@ def _measure_one(
     height_refs = _axis_word_refs(row, "height_word_ref", "height_word_refs")
     label_ref = _required_text(row, "room_label_word_ref")
     finish_ref = _required_text(row, "finish_word_ref")
-    refs = (*width_refs, *height_refs, label_ref, finish_ref)
-    if len(set(refs)) != len(refs):
+    plan_refs = (*width_refs, *height_refs, label_ref)
+    if len(set(plan_refs)) != len(plan_refs):
         raise SourceConflict("source_word_receipt_reused")
-    if any(value not in words for value in refs):
+    if any(value not in words for value in plan_refs):
         raise SourceConflict("native_word_receipt_missing")
     width_chain = [words[ref] for ref in width_refs]
     height_chain = [words[ref] for ref in height_refs]
-    label_word, finish_word = words[label_ref], words[finish_ref]
-    if not _inside(label_word.bbox, bbox) or not _inside(finish_word.bbox, bbox):
-        raise SourceConflict("room_or_finish_not_inside_selected_face")
+    label_word = words[label_ref]
+    rcp_receipt: dict[str, Any] | None = None
+    if finish_page is None:
+        refs = (*plan_refs, finish_ref)
+        if len(set(refs)) != len(refs):
+            raise SourceConflict("source_word_receipt_reused")
+        if finish_ref not in words:
+            raise SourceConflict("native_word_receipt_missing")
+        finish_word = words[finish_ref]
+        if not _inside(label_word.bbox, bbox) or not _inside(finish_word.bbox, bbox):
+            raise SourceConflict("room_or_finish_not_inside_selected_face")
+    else:
+        if trade != "ceiling_finish" or expected_basis != "source_owned_ceiling_zone":
+            raise SourceConflict("cross_sheet_finish_only_valid_for_ceiling")
+        if (
+            finish_page.source_sha256 != page.source_sha256
+            or finish_page.page_index == page.page_index
+            or row.get("rcp_cross_sheet_correspondence_reviewed") is not True
+        ):
+            raise SourceConflict("cross_sheet_ceiling_source_or_review_missing")
+        if not _inside(label_word.bbox, bbox):
+            raise SourceConflict("room_label_not_inside_plan_ceiling_zone")
+        rcp_words = {word.ref: word for word in finish_page.words}
+        if finish_ref not in rcp_words:
+            raise SourceConflict("rcp_finish_word_not_owned_by_source_page")
+        finish_word = rcp_words[finish_ref]
+        from .rcp_zone_scope import propose_rcp_source_zone_rectangles
+        rcp_zones = propose_rcp_source_zone_rectangles(finish_page)[
+            "source_zone_rectangle_candidates"
+        ]
+        owning = [
+            zone for zone in rcp_zones
+            if zone["source_rectangle_ref"] == row.get("rcp_source_rectangle_ref")
+            and finish_ref in zone["material_word_refs"]
+        ]
+        if len(owning) != 1:
+            raise SourceConflict("cross_sheet_ceiling_rcp_zone_not_uniquely_source_owned")
+        from .height_evidence import validate_height_receipt
+        receipts = [
+            receipt for receipt in owning[0]["callout_receipts"]
+            if receipt["material_word_ref"] == finish_ref
+            and (
+                row.get("rcp_height_word_ref") is None
+                or receipt["height_word_ref"] == row.get("rcp_height_word_ref")
+            )
+        ]
+        if len(receipts) != 1:
+            raise SourceConflict("cross_sheet_ceiling_height_material_pair_not_unique")
+        rcp_receipt = validate_height_receipt(finish_page, receipts[0])
+        # Neither PDF-native coordinate position nor a reviewer flag proves
+        # the ceiling polygon. The plan's separately authenticated two axes
+        # and geometry below remain mandatory, and the output stays a draft.
     # Every chain word must sit on the actual indicated axis; mere equal numeric
     # product or unattached project metadata cannot select an axis.
     for width_word in width_chain:
@@ -249,6 +299,13 @@ def _measure_one(
         "room_label_word_ref": label_ref,
         "finish_word_ref": finish_ref,
     }
+    if finish_page is not None:
+        evidence.update({
+            "finish_source_page_index": finish_page.page_index,
+            "rcp_source_rectangle_ref": row["rcp_source_rectangle_ref"],
+            "rcp_height_source_receipt": rcp_receipt,
+            "cross_sheet_correspondence_reviewed": True,
+        })
     if len(width_refs) == 1:
         evidence["width_word_ref"] = width_refs[0]
     else:
@@ -259,9 +316,19 @@ def _measure_one(
         evidence["height_word_refs"] = list(height_refs)
     # Reviewer-authenticated binding creates a measurable draft, NOT source-
     # independent commercial/FIRM authority. Do not publish directly to JobHub.
-    trace = "|".join((
-        page.source_sha256, str(page.page_index), geometry_ref, *refs, room_id, trade,
-    ))
+    if finish_page is None:
+        # Preserve historical draft row identity byte-for-byte for
+        # existing single-page floors, ceilings and other measurements.
+        trace = "|".join((
+            page.source_sha256, str(page.page_index), geometry_ref,
+            *refs, room_id, trade,
+        ))
+    else:
+        trace = "|".join((
+            page.source_sha256, str(page.page_index), geometry_ref,
+            *plan_refs, str(finish_page.page_index), finish_ref,
+            str(row.get("rcp_source_rectangle_ref", "")), room_id, trade,
+        ))
     return {
         "row_id": sha256(trace.encode("utf-8")).hexdigest()[:24],
         "room_id": room_id,

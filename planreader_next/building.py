@@ -345,6 +345,14 @@ def measure_building_components(
         ids = [_required_text(row, key) for row in inputs[family]]
         if len(ids) != len(set(ids)):
             raise SourceConflict(f"duplicate_{family}_physical_id")
+    # One source-RCP candidate rectangle cannot be sold as multiple distinct
+    # ceiling zones merely by assigning different physical IDs to the rows.
+    selected_rcp = [
+        (row.get("rcp_page_index"), row.get("rcp_source_rectangle_ref"))
+        for row in inputs["ceilings"] if row.get("rcp_page_index") is not None
+    ]
+    if len(selected_rcp) != len(set(selected_rcp)):
+        raise SourceConflict("duplicate_ceiling_rcp_source_zone_claim")
     for family in ("rooms", "ceilings"):
         shapes = [
             (row.get("page_index"), "polygon", tuple(sorted(row["boundary_segment_refs"])))
@@ -396,8 +404,15 @@ def measure_building_components(
         ceiling_id = str(row.get("ceiling_id", ""))
         try:
             page = _page(pages, row.get("page_index"))
-            quantity = _measure_one(page, row, expected_basis="source_owned_ceiling_zone",
-                                    trade="ceiling_finish")
+            rcp_source_page = (
+                _page(pages, row.get("rcp_page_index"))
+                if row.get("rcp_page_index") is not None
+                else None
+            )
+            quantity = _measure_one(
+                page, row, expected_basis="source_owned_ceiling_zone",
+                trade="ceiling_finish", finish_page=rcp_source_page,
+            )
             quantity["ceiling_id"] = ceiling_id
             # Ceiling area and height are independent sources. A same-bubble
             # RCP material/height is a SPECIFIC local exception to a project
@@ -408,8 +423,14 @@ def measure_building_components(
             auto_owned_callout = False
             if local_claim is None:
                 local = [
-                    receipt for receipt in rcp_material_height_callouts(page)
+                    receipt for receipt in rcp_material_height_callouts(
+                        rcp_source_page or page
+                    )
                     if receipt["material_word_ref"] == row.get("finish_word_ref")
+                    and (
+                        row.get("rcp_height_word_ref") is None
+                        or receipt["height_word_ref"] == row["rcp_height_word_ref"]
+                    )
                 ]
                 if len(local) == 1:
                     local_claim = local[0]
@@ -428,7 +449,7 @@ def measure_building_components(
                     ):
                         raise SourceConflict("rcp_height_ceiling_zone_not_reviewed")
                     evidence = validate_height_receipt(
-                        page, local_claim,
+                        rcp_source_page or page, local_claim,
                         rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
                     )
                     if evidence["height_source_kind"] != RCP_MATERIAL_HEIGHT:
@@ -443,7 +464,9 @@ def measure_building_components(
                     quantity["height_policy_basis"] = "SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
                     if project_standard_height is not None:
                         quantity["project_standard_height_mm"] = project_standard_height["height_mm"]
-                    ceiling_zone_source_heights[ceiling_id] = (page.page_index, evidence)
+                    ceiling_zone_source_heights[ceiling_id] = (
+                        (rcp_source_page or page).page_index, evidence
+                    )
                 except SourceConflict as exc:
                     ceiling_zones_with_invalid_height.add(ceiling_id)
                     abstentions.append({

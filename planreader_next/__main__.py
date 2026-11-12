@@ -291,6 +291,8 @@ def main() -> int:
             for kind in ("rooms", "ceilings", "walls"):
                 for claim in selected.get(kind, []):
                     required_pages.add(claim["page_index"])
+                    if kind == "ceilings" and claim.get("rcp_page_index") is not None:
+                        required_pages.add(claim["rcp_page_index"])
                     if kind == "walls" and claim.get("height_source_page_index") is not None:
                         required_pages.add(claim["height_source_page_index"])
             policy = selected.get("project_standard_height_policy")
