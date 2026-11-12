@@ -14,6 +14,7 @@ from shapely.geometry import Point, Polygon
 
 from .engine import NativePage, NativeSegment, SourceConflict, authenticated_pdf_snapshot, confirm_source_snapshot
 from .height_evidence import rcp_material_height_callouts
+from pb_layered_wall_doorway_room_ring_shadow import _WALL_END_SUPPORT_SPAN
 
 
 def stroked_source_line_segments(page: NativePage) -> tuple[NativeSegment, ...]:
@@ -47,6 +48,30 @@ def _ceiling_topology_region(region: Mapping[str, Any]) -> bool:
         return True
     reasons = tuple(region.get("reason_codes") or ())
     return status == "abstained" and reasons == ("open_wall_gap_unresolved",)
+
+
+def _ring_blockers(region: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the source ring's ABSTAIN/ownership on the ceiling seed.
+
+    An unclosed doorway ring may seed topology, but it is not a measured
+    ceiling, wall identity or customer row.
+    """
+    reasons = [str(item) for item in (region.get("reason_codes") or ()) if item]
+    status = str(region.get("status") or "")
+    owners = region.get("edge_owner_ids") or ()
+    return {
+        "source_ring_status": status,
+        "source_ring_reason_codes": reasons,
+        "edge_owner_ids": [list(item) for item in owners],
+        "bounding_closure_ids": [str(item) for item in (region.get("bounding_closure_ids") or ())],
+        "opening_gap_unresolved": "open_wall_gap_unresolved" in reasons,
+        "ceiling_measurement_blocked": True,
+        "customer_row_blocked": True,
+        "physical_room_authenticated": False,
+        "physical_wall_identity_authenticated": False,
+        "finished_wall_face_authenticated": False,
+        "pdf_point_heuristic_only": True,
+    }
 
 
 def bind_callouts_to_stroked_rings(
@@ -88,6 +113,12 @@ def bind_callouts_to_stroked_rings(
         height_mm, material = next(iter(pairs))
         for item in hits:
             placed.add(item["height_word_ref"])
+        blockers = _ring_blockers(region)
+        scope = (
+            "ABSTAINED_OPEN_GAP_RING_NOT_MEASURED_CEILING"
+            if blockers["opening_gap_unresolved"]
+            else "STROKED_RING_NOT_AUTHENTICATED_RCP_ZONE"
+        )
         zones.append({
             "source_sha256": page.source_sha256,
             "page_index": page.page_index,
@@ -101,12 +132,13 @@ def bind_callouts_to_stroked_rings(
             "connected_same_finish_callout_count": len(hits),
             "source_rectangle_ref": None,
             "white_fill_rectangle_rejected": True,
-            "candidate_scope": "STROKED_RING_NOT_AUTHENTICATED_RCP_ZONE",
+            "candidate_scope": scope,
             "ceiling_zone_authenticated": False,
             "physical_ceiling_zone_authenticated": False,
             "commercial_publishable": False,
             "benchmark_credit": False,
             "topology_only": True,
+            **blockers,
         })
 
     for receipt in callouts:
@@ -130,6 +162,11 @@ def bind_callouts_to_stroked_rings(
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
+        "wall_end_support_span_pt_heuristic": _WALL_END_SUPPORT_SPAN,
+        "pdf_point_heuristic_only": True,
+        "physical_wall_identity_authenticated": False,
+        "customer_row_blocked": True,
+        "ceiling_measurement_blocked": True,
     }
 
 
@@ -179,6 +216,8 @@ def propose_rcp_stroked_ceiling_zones(
             "likely_cavity_pocket": likely_cavity,
             "boundary_polygon_pdf_pts": [list(pt) for pt in ring.polygon_pdf_pts],
             "wall_source_path_indices": list(ring.bounding_wall_path_indices),
+            "edge_owner_ids": [list(item) for item in ring.edge_owner_ids],
+            "bounding_closure_ids": list(ring.bounding_closure_ids),
         })
     packet = bind_callouts_to_stroked_rings(page, regions)
     packet["stroked_ring_count"] = len(result.rings)

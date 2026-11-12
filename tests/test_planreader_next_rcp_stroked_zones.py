@@ -111,6 +111,13 @@ def test_doorway_open_gap_ring_is_still_a_ceiling_zone_seed():
     assert zone["height_mm"] == "2400"
     assert zone["ceiling_zone_authenticated"] is False
     assert zone["commercial_publishable"] is False
+    assert zone["source_ring_status"] == "abstained"
+    assert zone["source_ring_reason_codes"] == ["open_wall_gap_unresolved"]
+    assert zone["opening_gap_unresolved"] is True
+    assert zone["ceiling_measurement_blocked"] is True
+    assert zone["customer_row_blocked"] is True
+    assert zone["candidate_scope"] == "ABSTAINED_OPEN_GAP_RING_NOT_MEASURED_CEILING"
+    assert packet["ceiling_measurement_blocked"] is True
 
 
 def test_exterior_leaking_open_plan_with_conflicting_finishes_does_not_invent_a_wall():
@@ -196,6 +203,14 @@ def test_original_maryborough_a120_keeps_callouts_and_rejects_white_fills():
     assert len(office) == 1
     assert office[0]["source_rectangle_ref"] is None
     assert office[0]["ceiling_zone_authenticated"] is False
+    assert office[0]["source_ring_status"] == "abstained"
+    assert "open_wall_gap_unresolved" in office[0]["source_ring_reason_codes"]
+    assert office[0]["opening_gap_unresolved"] is True
+    assert office[0]["ceiling_measurement_blocked"] is True
+    assert office[0]["customer_row_blocked"] is True
+    assert office[0]["physical_wall_identity_authenticated"] is False
+    assert packet["pdf_point_heuristic_only"] is True
+    assert packet["ceiling_measurement_blocked"] is True
     sales = [
         zone for zone in packet["source_zone_stroked_candidates"]
         if zone["material_code_candidate"] == "GRID" and zone["height_mm"] == "3000"

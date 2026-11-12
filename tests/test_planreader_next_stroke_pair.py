@@ -4,6 +4,7 @@ from __future__ import annotations
 from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_NO_WALL_INK,
     REASON_PRIMITIVE_CAP,
+    _WALL_END_SUPPORT_SPAN,
     _collect_dark_fill_strips,
     _collect_stroke_pair_strips,
     _collect_wall_end_closing_strips,
@@ -388,3 +389,115 @@ def test_wall_end_stroke_closes_only_when_both_native_ends_meet_major_walls():
     assert not any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in open_south.rings)
     assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in closed_south.rings)
     assert all(not ring.takeoff_eligible for ring in closed_south.rings)
+    assert all(not ring.physical_room_identity_issued for ring in closed_south.rings)
+
+
+def _scale_drawings(rows, factor: float):
+    import fitz
+    scaled = []
+    for row in rows:
+        items = []
+        for item in row["items"]:
+            if item[0] == "re":
+                r = item[1]
+                items.append(("re", fitz.Rect(r.x0 * factor, r.y0 * factor, r.x1 * factor, r.y1 * factor)))
+            elif item[0] == "l":
+                a, b = item[1], item[2]
+                items.append(("l", fitz.Point(a.x * factor, a.y * factor), fitz.Point(b.x * factor, b.y * factor)))
+            else:
+                items.append(item)
+        rect = row["rect"]
+        scaled.append({
+            **row,
+            "rect": fitz.Rect(rect.x0 * factor, rect.y0 * factor, rect.x1 * factor, rect.y1 * factor),
+            "items": items,
+        })
+    return scaled
+
+
+def _rotate_xy_drawings(rows):
+    """Swap x/y as a 90-degree metamorphic of axis-aligned ink."""
+    import fitz
+    rotated = []
+    for row in rows:
+        items = []
+        for item in row["items"]:
+            if item[0] == "re":
+                r = item[1]
+                items.append(("re", fitz.Rect(r.y0, r.x0, r.y1, r.x1)))
+            elif item[0] == "l":
+                a, b = item[1], item[2]
+                items.append(("l", fitz.Point(a.y, a.x), fitz.Point(b.y, b.x)))
+            else:
+                items.append(item)
+        rect = row["rect"]
+        rotated.append({
+            **row,
+            "rect": fitz.Rect(rect.y0, rect.x0, rect.y1, rect.x1),
+            "items": items,
+        })
+    return rotated
+
+
+def _lookalike_grid(module: float):
+    dark = (0.195, 0.195, 0.195)
+    thick = 4.0
+    rows = []
+    for i in range(4):
+        for j in range(3):
+            x = i * module
+            y0 = j * module
+            rows.append(_fill_rect(x, y0, x + thick, y0 + module, dark))
+            y = i * module
+            x0 = j * module
+            rows.append(_fill_rect(x0, y, x0 + module, y + thick, dark))
+    for i in range(4):
+        for j in range(3):
+            x = i * module + thick / 2.0
+            y0 = j * module
+            y1 = (j + 1) * module
+            rows.append(_line(x, y0, x, y1, color=(0.0, 0.0, 0.0)))
+            y = i * module + thick / 2.0
+            x0 = j * module
+            x1 = (j + 1) * module
+            rows.append(_line(x0, y, x1, y, color=(0.0, 0.0, 0.0)))
+    return rows
+
+
+def test_lookalike_grid_modules_are_not_major_wall_ends():
+    module = _WALL_END_SUPPORT_SPAN - 9.0
+    assert module == 71.0
+    grid = _lookalike_grid(module)
+    supports = _collect_dark_fill_strips(grid)
+    assert _collect_wall_end_closing_strips(grid, supports) == []
+
+
+def test_wall_end_closer_survives_axis_swap_rotation():
+    drawings = _rotate_xy_drawings(_u_room_open_south() + [_line(5, 20, 200, 20, color=(0.0, 0.0, 0.0))])
+    supports = _collect_dark_fill_strips(_rotate_xy_drawings(_u_room_open_south()))
+    assert len(_collect_wall_end_closing_strips(drawings, supports)) == 1
+    result = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True, wall_end_stroke_closures=True,
+    )
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+    assert all(not ring.physical_room_identity_issued for ring in result.rings)
+
+
+def test_wall_end_support_span_is_pdf_point_candidate_heuristic_only():
+    closed = _u_room_open_south() + [_line(5, 20, 200, 20, color=(0.0, 0.0, 0.0))]
+    small = _scale_drawings(closed, 0.4)
+    small_supports = _collect_dark_fill_strips(_scale_drawings(_u_room_open_south(), 0.4))
+    assert _collect_wall_end_closing_strips(small, small_supports) == []
+    large = _scale_drawings(closed, 2.0)
+    large_supports = _collect_dark_fill_strips(_scale_drawings(_u_room_open_south(), 2.0))
+    assert _collect_wall_end_closing_strips(large, large_supports)
+    result = build_layered_wall_doorway_room_rings(
+        large, source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True, wall_end_stroke_closures=True,
+    )
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+    assert all(not ring.physical_room_identity_issued for ring in result.rings)
+    assert all(not ring.metric_area_issued for ring in result.rings)
