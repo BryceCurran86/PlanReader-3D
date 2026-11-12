@@ -1660,12 +1660,18 @@ class CrossViewRoomAreaProducer:
             )
             if not page_candidate_labels:
                 continue
-            trusted_lines = _trusted_lines_for_page(
+            # A single source-authenticated page read supplies both exact
+            # labels and eligible compound annotations.  Exact room ownership
+            # is still checked below before dimension authority is attempted;
+            # compound-only labels can never independently mint room area.
+            source_label_lines = _trusted_lines_for_page(
                 self._source,
                 revision_id=revision_id,
                 page_id=page_id,
                 candidate_labels=page_candidate_labels,
+                allow_compound_annotations=True,
             )
+            trusted_lines = source_label_lines
             relevant_lines = tuple(
                 line
                 for line in trusted_lines
@@ -1691,13 +1697,8 @@ class CrossViewRoomAreaProducer:
             page_lines[page_id] = relevant_lines
             for line in relevant_lines:
                 support_dimension_pages.setdefault(_norm_label(line.text), set()).add(page_id)
-            annotation_lines = _trusted_lines_for_page(
-                self._source,
-                revision_id=revision_id,
-                page_id=page_id,
-                candidate_labels=page_candidate_labels,
-                allow_compound_annotations=True,
-            )
+            # Do not OCR the same native word receipts a second time.
+            annotation_lines = source_label_lines
             page_annotation_lines[page_id] = tuple(
                 line
                 for line in annotation_lines
