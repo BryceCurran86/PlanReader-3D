@@ -947,6 +947,59 @@ def _native_dimension_component_inputs_fingerprint(*, segments, words) -> str:
     ).hexdigest()[:20]
 
 
+def _source_attested_overprint_word_glyphs(*, page, receipt, font_key, spans):
+    """One logical glyph run from source-authenticated complementary paints.
+
+    The outer producer already authenticates immutable source bytes. Recheck
+    receipt sequence ownership and embedded font here. Keep every foreign span
+    in BOTH glyph checks; exclude only the attested opposite source paint.
+    Generic word_glyphs ambiguity rules remain unchanged.
+    """
+    from pb_font_glyph_mapping_corroboration_shadow import word_glyphs
+    from pb_pdf_text_integrity_authority import _matching_trace_spans
+    from pb_source_glyph_ledger_text_trust import is_glyph_only_untrusted
+
+    if not is_glyph_only_untrusted(receipt):
+        return None
+    try:
+        if (type(page) is not fitz.Page
+                or str(page.number + 1) != receipt.page_id
+                or type(font_key) is not str or len(font_key) != 64
+                or receipt.font_xref is None):
+            return None
+        program = page.parent.extract_font(int(receipt.font_xref))[3]
+        if not program or hashlib.sha256(program).hexdigest() != font_key:
+            return None
+        owned, _text, reasons = _matching_trace_spans(
+            page, {"text": receipt.raw_text, "bbox": receipt.geometry})
+        expected = tuple(receipt.trace_sequence_numbers)
+        actual = tuple(span.get("seqno") for span in owned)
+        if (reasons or len(owned) < 2 or len(set(actual)) != len(actual)
+                or any(type(seq) is not int or seq < 0 for seq in actual)
+                or tuple(sorted(actual)) != tuple(sorted(expected))):
+            return None
+        # Match each newly source-resolved span to EXACTLY one cached span.
+        # No seqno-only exclusion may conceal another span carrying that ID.
+        matched = []
+        for owner in owned:
+            matches = [span for span in spans if span == owner]
+            if len(matches) != 1:
+                return None
+            matched.append(matches[0])
+        fills = {id(span) for span in matched if span.get("type") == 0}
+        strokes = {id(span) for span in matched if span.get("type") == 1}
+        if (not fills or len(fills) != len(strokes)
+                or len(fills) + len(strokes) != len(matched)):
+            return None
+        args = (receipt.parent_observation_id, receipt.raw_text,
+                font_key, receipt.geometry)
+        fill_run = word_glyphs(*args, tuple(span for span in spans if id(span) not in strokes))
+        stroke_run = word_glyphs(*args, tuple(span for span in spans if id(span) not in fills))
+        return fill_run if fill_run is not None and fill_run == stroke_run else None
+    except (AttributeError, TypeError, ValueError, RuntimeError, IndexError, KeyError):
+        return None
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -1912,6 +1965,10 @@ class SourceVisibilityProducer:
                         word = word_glyphs(
                             observation_id, receipt.raw_text, program_key,
                             receipt.geometry, spans)
+                        if word is None and self._source_native_finish_text_shadow:
+                            word = _source_attested_overprint_word_glyphs(
+                                page=pdf.load_page(int(page_key) - 1),
+                                receipt=receipt, font_key=program_key, spans=spans)
                     candidates.append(GlyphTextCandidate(observation_id, word))
             finally:
                 pdf.close()
