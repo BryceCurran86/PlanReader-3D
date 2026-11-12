@@ -95,3 +95,32 @@ def test_original_3laurel_page3_inventory_is_not_authenticated_walls():
     if garage:
         assert garage[0]["room_identity_authenticated"] is False
         assert garage[0]["physical_zone_authenticated"] is False
+
+
+def test_original_3laurel_open_rings_keep_unique_south_hash_millimetres():
+    original = require_original_3laurel()
+    page = load_native_page(original, 2)
+    assert page.source_sha256 == ORIGINAL_SHA256
+    inventory = propose_room_enclosures(
+        page, original, include_sliding=True, stroke_pair_wall_faces=True,
+    )["source_wall_inventory"]
+    assert inventory["commercial_publishable"] is False
+    assert inventory["official_score"] is None
+    closed_ids = {locator["region_id"] for locator in inventory["region_locators"]}
+    measured = [
+        row for row in inventory["open_ring_hash_chains"]
+        if row["outer_length_hash"] is not None
+    ]
+    assert measured
+    assert all(row["region_id"] not in closed_ids for row in measured)
+    assert all(row["region_status"] == "abstained" for row in measured)
+    assert all(row["room_identity_authenticated"] is False for row in measured)
+    assert all(row["physical_zone_authenticated"] is False for row in measured)
+    assert all("open_wall_gap_unresolved" in row["unresolved"] for row in measured)
+    millimetres = {row["outer_length_hash"]["length_mm"] for row in measured}
+    assert "3010" in millimetres
+    beds = [row for row in measured if "BED" in row["room_label_texts"]]
+    assert beds
+    reserved = set(inventory["reserved_opening_figure_word_refs"])
+    for row in measured:
+        assert not reserved.intersection(row["outer_length_hash"]["word_refs"])

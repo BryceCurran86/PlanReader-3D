@@ -359,6 +359,7 @@ def main() -> int:
                     "face_count": result["face_count"],
                     "opening_count": result["opening_count"],
                     "region_locator_count": result["region_locator_count"],
+                    "open_ring_hash_chain_count": result.get("open_ring_hash_chain_count", 0),
                     "unique_jamb_hosted_opening_count": result.get(
                         "unique_jamb_hosted_opening_count", 0
                     ),

@@ -45,13 +45,33 @@ def _edge_midpoint(region: dict[str, Any], edge_index: int) -> tuple[float, floa
     return (float(x0) + float(x1)) / 2.0, (float(y0) + float(y1)) / 2.0
 
 
+def _region_polygon(region: dict[str, Any]) -> Polygon | None:
+    polygon = Polygon(region.get("boundary_polygon_pdf_pts") or [])
+    if not polygon.is_valid or polygon.is_empty:
+        return None
+    return polygon
+
+
 def _candidate_polygons(regions: Sequence[dict[str, Any]]) -> list[tuple[dict[str, Any], Polygon]]:
     found: list[tuple[dict[str, Any], Polygon]] = []
     for region in regions:
         if region.get("status") != "candidate" or region.get("likely_cavity_pocket"):
             continue
-        polygon = Polygon(region.get("boundary_polygon_pdf_pts") or [])
-        if not polygon.is_valid or polygon.is_empty:
+        polygon = _region_polygon(region)
+        if polygon is None:
+            continue
+        found.append((region, polygon))
+    return found
+
+
+def _open_ring_polygons(regions: Sequence[dict[str, Any]]) -> list[tuple[dict[str, Any], Polygon]]:
+    """Abstained rings keep unique hash millimetres. They are not closed locators."""
+    found: list[tuple[dict[str, Any], Polygon]] = []
+    for region in regions:
+        if region.get("status") != "abstained" or region.get("likely_cavity_pocket"):
+            continue
+        polygon = _region_polygon(region)
+        if polygon is None:
             continue
         found.append((region, polygon))
     return found
@@ -180,8 +200,7 @@ def inventory_source_walls(
             "retain_source_opening": True,
         })
 
-    locators: list[dict[str, Any]] = []
-    for region, _polygon in polygons:
+    def _locator_row(region: dict[str, Any]) -> dict[str, Any]:
         width, height = bind_polygon_hash_axes(page, region["boundary_polygon_pdf_pts"])
         width_payload = _hash_payload(width)
         height_payload = _hash_payload(height)
@@ -201,11 +220,16 @@ def inventory_source_walls(
             and region.get("private_room_label_texts")
         ):
             unresolved.append("mixed_private_labels_in_open_plan_ring")
+        reasons = [str(code) for code in (region.get("reason_codes") or [])]
+        if "open_wall_gap_unresolved" in reasons:
+            unresolved.append("open_wall_gap_unresolved")
         face_ids = [face["item_id"] for face in faces if face["region_id"] == region["region_id"]]
-        locators.append({
+        return {
             "source_sha256": page.source_sha256,
             "page_index": page.page_index,
             "region_id": region["region_id"],
+            "region_status": region.get("status"),
+            "region_reason_codes": reasons,
             "room_label_word_refs": [
                 word["native_word_ref"] for word in region.get("room_label_words") or []
             ],
@@ -226,7 +250,15 @@ def inventory_source_walls(
             "room_identity_authenticated": False,
             "physical_zone_authenticated": False,
             "topology_only": True,
-        })
+        }
+
+    locators = [_locator_row(region) for region, _polygon in polygons]
+    open_rings = []
+    for region, _polygon in _open_ring_polygons(regions):
+        row = _locator_row(region)
+        if row["outer_length_hash"] is None and row["inner_face_or_plan_height_hash"] is None:
+            continue
+        open_rings.append(row)
 
     return {
         "source_sha256": page.source_sha256,
@@ -244,6 +276,8 @@ def inventory_source_walls(
         ),
         "region_locators": locators,
         "region_locator_count": len(locators),
+        "open_ring_hash_chains": open_rings,
+        "open_ring_hash_chain_count": len(open_rings),
         "topology_face_receipts": receipts,
         "physical_wall_authenticated": False,
         "finished_face_authenticated": False,
