@@ -83,7 +83,7 @@ def _inner_outer_pair(
     return chosen
 
 
-def _jamb_cap(
+def _jamb_hits(
     segments: Sequence[NativeSegment],
     *,
     wall_horizontal: bool,
@@ -91,7 +91,7 @@ def _jamb_cap(
     band_lo: float,
     band_hi: float,
     paths: set[int] | None,
-) -> NativeSegment | None:
+) -> list[NativeSegment]:
     wanted = "vertical" if wall_horizontal else "horizontal"
     hits: list[NativeSegment] = []
     thickness = band_hi - band_lo
@@ -111,7 +111,23 @@ def _jamb_cap(
         if (hi - lo) > thickness + 2.0 * _FACE_PT:
             continue
         hits.append(segment)
-    return _unique_segment(hits)
+    refs = list(dict.fromkeys(item.ref for item in hits))
+    return [next(item for item in hits if item.ref == ref) for ref in refs]
+
+
+def _jamb_cap(
+    segments: Sequence[NativeSegment],
+    *,
+    wall_horizontal: bool,
+    station: float,
+    band_lo: float,
+    band_hi: float,
+    paths: set[int] | None,
+) -> NativeSegment | None:
+    return _unique_segment(_jamb_hits(
+        segments, wall_horizontal=wall_horizontal, station=station,
+        band_lo=band_lo, band_hi=band_hi, paths=paths,
+    ))
 
 
 def _wall_ends(
@@ -271,24 +287,33 @@ def pair_opening_hosts(
             int(index) for index in (fill.get("native_wall_path_indices") or [])
             if type(index) is int
         }
+        opening_paths = {
+            int(index) for index in (fill.get("native_opening_path_indices") or [])
+            if type(index) is int
+        }
         if gap is None or not wall_paths:
             pairs.append(payload)
             continue
         wall_horizontal, lo, hi, band_lo, band_hi = gap
-        cap_lo = _jamb_cap(
+        cap_paths = wall_paths | opening_paths
+        caps_lo = _jamb_hits(
             page.segments, wall_horizontal=wall_horizontal, station=lo,
-            band_lo=band_lo, band_hi=band_hi, paths=None,
+            band_lo=band_lo, band_hi=band_hi, paths=cap_paths,
         )
-        cap_hi = _jamb_cap(
+        caps_hi = _jamb_hits(
             page.segments, wall_horizontal=wall_horizontal, station=hi,
-            band_lo=band_lo, band_hi=band_hi, paths=None,
+            band_lo=band_lo, band_hi=band_hi, paths=cap_paths,
         )
-        if cap_lo is None or cap_hi is None or cap_lo.ref == cap_hi.ref:
-            payload["host_status"] = "ABSTAIN" if cap_lo or cap_hi else "NONE"
-            payload["host_reason"] = (
-                "competing_or_missing_jamb_caps"
-                if cap_lo or cap_hi else "no_unique_jamb_pair"
-            )
+        if len(caps_lo) > 1 or len(caps_hi) > 1:
+            payload["host_status"] = "ABSTAIN"
+            payload["host_reason"] = "competing_jamb_caps"
+            pairs.append(payload)
+            continue
+        cap_lo = caps_lo[0] if len(caps_lo) == 1 else None
+        cap_hi = caps_hi[0] if len(caps_hi) == 1 else None
+        if cap_lo is not None and cap_hi is not None and cap_lo.ref == cap_hi.ref:
+            payload["host_status"] = "ABSTAIN"
+            payload["host_reason"] = "competing_jamb_caps"
             pairs.append(payload)
             continue
         ends_lo = _wall_ends(
@@ -300,9 +325,13 @@ def pair_opening_hosts(
             band_lo=band_lo, band_hi=band_hi, paths=wall_paths, toward_lo=False,
         )
         if not ends_lo or not ends_hi:
-            payload["host_status"] = "ABSTAIN"
-            payload["host_reason"] = "wall_ends_not_unique_at_both_jambs"
-            payload["jamb_segment_refs"] = [cap_lo.ref, cap_hi.ref]
+            payload["host_status"] = "ABSTAIN" if cap_lo or cap_hi else "NONE"
+            payload["host_reason"] = (
+                "wall_ends_not_unique_at_both_jambs"
+                if cap_lo or cap_hi else "no_unique_wall_ends"
+            )
+            if cap_lo is not None and cap_hi is not None:
+                payload["jamb_segment_refs"] = [cap_lo.ref, cap_hi.ref]
             pairs.append(payload)
             continue
         end_refs = list(dict.fromkeys(
@@ -314,10 +343,13 @@ def pair_opening_hosts(
             if face.get("face_segment_ref") in end_refs
         ]
         payload["host_status"] = "UNIQUE"
-        payload["host_reason"] = "unique_jamb_pair_and_wall_ends"
-        payload["jamb_segment_refs"] = [cap_lo.ref, cap_hi.ref]
         payload["wall_end_segment_refs"] = end_refs
         payload["jamb_hosted_face_item_ids"] = hosted
         payload["jamb_stations_pdf_pts"] = [lo, hi]
+        if cap_lo is not None and cap_hi is not None:
+            payload["host_reason"] = "unique_jamb_pair_and_wall_ends"
+            payload["jamb_segment_refs"] = [cap_lo.ref, cap_hi.ref]
+        else:
+            payload["host_reason"] = "unique_wall_ends_at_gap_stations"
         pairs.append(payload)
     return pairs

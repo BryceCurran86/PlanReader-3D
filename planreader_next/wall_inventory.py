@@ -196,6 +196,11 @@ def inventory_source_walls(
         elif reserved_opening_figures.issuperset(height_payload["word_refs"]):
             height_payload = None
             unresolved.append("opening_figure_reserved")
+        if (
+            region.get("open_plan_room_label_texts")
+            and region.get("private_room_label_texts")
+        ):
+            unresolved.append("mixed_private_labels_in_open_plan_ring")
         face_ids = [face["item_id"] for face in faces if face["region_id"] == region["region_id"]]
         locators.append({
             "source_sha256": page.source_sha256,
@@ -207,6 +212,8 @@ def inventory_source_walls(
             "room_label_texts": [
                 word["text"] for word in region.get("room_label_words") or []
             ],
+            "open_plan_room_label_texts": list(region.get("open_plan_room_label_texts") or []),
+            "private_room_label_texts": list(region.get("private_room_label_texts") or []),
             "finish_word_refs": [
                 word["native_word_ref"] for word in region.get("finish_marker_words") or []
             ],

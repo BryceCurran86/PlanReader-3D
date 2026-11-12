@@ -210,6 +210,8 @@ def propose_room_enclosures(
             "finish_marker_words": finish_words,
             "finish_zones": [{"finish": name} for name in distinct_finishes],
             "open_plan_physical_area": open_plan_physical_area,
+            "open_plan_room_label_texts": open_plan_labels,
+            "private_room_label_texts": private_rooms,
             "single_room_shape_hint": may_be_single_room and not likely_cavity_pocket,
             "likely_cavity_pocket": likely_cavity_pocket,
             "hole_count": ring.hole_count,

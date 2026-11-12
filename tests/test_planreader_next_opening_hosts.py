@@ -8,8 +8,8 @@ import sys
 import fitz
 
 from planreader_next.enclosure import propose_room_enclosures
-from planreader_next.engine import load_native_page
-from planreader_next.opening_hosts import native_face_cut_witnesses
+from planreader_next.engine import NativePage, NativeSegment, load_native_page
+from planreader_next.opening_hosts import native_face_cut_witnesses, pair_opening_hosts
 from planreader_next.section_scope import source_section_cut
 from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 from tests.test_layered_wall_doorway_room_face_wiring_v1 import layered_room_pdf
@@ -44,22 +44,62 @@ def test_synthetic_door_hosts_to_unique_jambs_and_wall_ends(tmp_path):
     assert summary["commercial_publishable"] is False
 
 
-def test_competing_jamb_cap_abstains(tmp_path):
-    document = fitz.open(
-        stream=layered_room_pdf(door=True, swing=True, vertical_pairs="full_only"),
-        filetype="pdf",
+def test_unique_wall_ends_host_when_jamb_caps_are_absent():
+    page = NativePage(
+        source_sha256="0" * 64,
+        page_index=0,
+        words=(),
+        rectangles=(),
+        segments=(
+            NativeSegment("d1i0", "line", 100.0, 80.0, 100.0, 110.0),
+            NativeSegment("d1i1", "line", 104.0, 80.0, 104.0, 110.0),
+            NativeSegment("d2i0", "line", 100.0, 134.0, 100.0, 180.0),
+            NativeSegment("d2i1", "line", 104.0, 134.0, 104.0, 180.0),
+        ),
     )
-    # Second cap on the same wall band at the north jamb station.
-    document[0].draw_line((250, 110), (254, 110), color=(0, 0, 0), width=0.4)
-    path = tmp_path / "two-jambs.pdf"
-    path.write_bytes(document.tobytes())
-    document.close()
-    page = load_native_page(path, 0)
-    inventory = propose_room_enclosures(page, path)["source_wall_inventory"]
-    swing = [item for item in inventory["openings"] if item["kind"] == "swing_doorway"]
-    assert swing
-    assert all(item["host_status"] != "UNIQUE" for item in swing)
-    assert all(item["host_wall_authenticated"] is False for item in swing)
+    fill = {
+        "closure_id": "gap-no-cap",
+        "horizontal": False,
+        "gap_interval": [110.0, 134.0],
+        "band": [100.0, 104.0],
+        "native_wall_path_indices": [1, 2],
+    }
+    pair = pair_opening_hosts(page, [fill], [])[0]
+    assert pair["host_status"] == "UNIQUE"
+    assert pair["host_reason"] == "unique_wall_ends_at_gap_stations"
+    assert pair["jamb_segment_refs"] == []
+    assert len(pair["wall_end_segment_refs"]) == 4
+    assert pair["host_wall_authenticated"] is False
+    assert pair["commercial_publishable"] is False
+
+
+def test_competing_jamb_cap_abstains():
+    page = NativePage(
+        source_sha256="0" * 64,
+        page_index=0,
+        words=(),
+        rectangles=(),
+        segments=(
+            NativeSegment("d1i0", "line", 100.0, 80.0, 100.0, 110.0),
+            NativeSegment("d1i1", "line", 104.0, 80.0, 104.0, 110.0),
+            NativeSegment("d1i2", "line", 100.0, 110.0, 104.0, 110.0),
+            NativeSegment("d1i3", "line", 100.05, 110.0, 103.95, 110.0),
+            NativeSegment("d2i0", "line", 100.0, 134.0, 100.0, 180.0),
+            NativeSegment("d2i1", "line", 104.0, 134.0, 104.0, 180.0),
+            NativeSegment("d2i2", "line", 100.0, 134.0, 104.0, 134.0),
+        ),
+    )
+    fill = {
+        "closure_id": "gap-two-caps",
+        "horizontal": False,
+        "gap_interval": [110.0, 134.0],
+        "band": [100.0, 104.0],
+        "native_wall_path_indices": [1, 2],
+    }
+    pair = pair_opening_hosts(page, [fill], [])[0]
+    assert pair["host_status"] == "ABSTAIN"
+    assert pair["host_reason"] == "competing_jamb_caps"
+    assert pair["host_wall_authenticated"] is False
 
 
 def test_section_cut_uses_native_face_ink_not_the_room_polygon(tmp_path):
@@ -103,8 +143,20 @@ def test_original_3laurel_jambs_and_aa_cut_stay_unauthenticated():
     assert all(item["host_wall_authenticated"] is False for item in inventory["openings"])
     assert any(item["host_status"] == "UNIQUE" for item in inventory["openings"])
     unique = [item for item in inventory["openings"] if item["host_status"] == "UNIQUE"]
-    assert all(len(item["jamb_segment_refs"]) == 2 for item in unique)
+    assert all(item["wall_end_segment_refs"] for item in unique)
+    assert all(len(item["jamb_segment_refs"]) in {0, 2} for item in unique)
+    assert inventory["unique_jamb_hosted_opening_count"] == len(unique) >= 3
     assert all(item["physical_opening_authenticated"] is False for item in unique)
+    living = [
+        locator for locator in inventory["region_locators"]
+        if "LIVING" in locator["room_label_texts"]
+    ]
+    assert living
+    assert all(
+        "mixed_private_labels_in_open_plan_ring" in locator["unresolved"]
+        for locator in living
+        if locator["private_room_label_texts"]
+    )
     bed = [
         locator for locator in inventory["region_locators"]
         if locator["room_label_texts"] == ["BED"]
