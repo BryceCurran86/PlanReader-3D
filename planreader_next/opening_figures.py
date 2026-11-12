@@ -49,10 +49,17 @@ def _search_box(fill: dict[str, Any]) -> tuple[float, float, float, float] | Non
         return None
     thickness, gap = min(width, height), max(width, height)
     kind = str(fill.get("kind") or "")
-    pad = gap if kind == _SWING_KIND else max(_LABEL_PAD_PT, thickness * 3.0)
-    if width <= height:
-        return (min(x0, x1) - pad, min(y0, y1), max(x0, x1) + pad, max(y0, y1))
-    return (min(x0, x1), min(y0, y1) - pad, max(x0, x1), max(y0, y1) + pad)
+    if kind == _SWING_KIND:
+        pad = gap
+        if width <= height:
+            return (min(x0, x1) - pad, min(y0, y1), max(x0, x1) + pad, max(y0, y1))
+        return (min(x0, x1), min(y0, y1) - pad, max(x0, x1), max(y0, y1) + pad)
+    # Sliding/stroke closures: search along the leaf/pocket. Do not expand
+    # through the wall onto the outside dimension hashes of the host.
+    along_pad = max(_LABEL_PAD_PT, gap)
+    if width >= height:
+        return (min(x0, x1) - along_pad, min(y0, y1), max(x0, x1) + along_pad, max(y0, y1))
+    return (min(x0, x1), min(y0, y1) - along_pad, max(x0, x1), max(y0, y1) + along_pad)
 
 
 def _gap_length(fill: dict[str, Any]) -> float | None:

@@ -219,6 +219,62 @@ def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):
     assert bound.length_mm == 3600
 
 
+def test_neighbor_hashes_on_a_different_dimension_line_do_not_split_the_chain(tmp_path):
+    def drawer(page):
+        _room_with_hashes(page)
+        page.draw_line(fitz.Point(90, 200), fitz.Point(210, 200))
+        page.draw_line(fitz.Point(130, 197), fitz.Point(130, 203))
+        page.draw_line(fitz.Point(170, 197), fitz.Point(170, 203))
+        page.insert_text((142, 214), "9999", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 3600
+
+
+def test_same_line_double_hash_inside_an_inner_ring_still_reads_the_unique_figure(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        for x in (101.13, 102.26, 197.74, 198.87):
+            page.draw_line(fitz.Point(x, 160), fitz.Point(x, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((142, 176), "1800", fontsize=8)
+        page.draw_line(fitz.Point(200, 80), fitz.Point(206, 80))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(206, 160))
+        page.draw_line(fitz.Point(206, 70), fitz.Point(206, 170))
+        page.insert_text((210, 116), "2400", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 1800
+    width, height = bind_polygon_hash_axes(
+        native, [(100, 160), (200, 160), (200, 80), (100, 80)],
+    )
+    assert width is not None and width.length_mm == 1800
+    assert height is not None and height.length_mm == 2400
+
+
+def test_two_point_outer_face_hashes_still_do_not_steal_the_inner_wall(tmp_path):
+    def drawer(page):
+        _room_with_hashes(page)
+        page.draw_line(fitz.Point(98, 160), fitz.Point(98, 165.5))
+        page.draw_line(fitz.Point(202, 160), fitz.Point(202, 165.5))
+        page.insert_text((40, 176), "9999", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 3600
+
+
 def test_double_stroke_hashes_half_a_point_apart_are_one_station(tmp_path):
     def drawer(page):
         page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)

@@ -83,3 +83,32 @@ def test_original_3laurel_opening_figures_do_not_steal_media_wall():
     assert all(not item["physical_wall"] for item in paired)
     assert inventory["commercial_publishable"] is False
     assert any(item["paired_length_mm"] == "870" for item in paired)
+
+
+def test_original_3laurel_outside_robe_hashes_are_wall_length_not_slider_width():
+    clear_dimension_index_cache()
+    original = require_original_3laurel()
+    page = load_native_page(original, 2)
+    assert page.source_sha256 == ORIGINAL_SHA256
+    inventory = propose_room_enclosures(
+        page, original, include_sliding=True, stroke_pair_wall_faces=True,
+    )["source_wall_inventory"]
+    robes = [
+        locator for locator in inventory["region_locators"]
+        if locator["room_label_texts"] == ["ROBE"]
+    ]
+    measured = [
+        locator for locator in robes
+        if locator.get("outer_length_hash") or locator.get("inner_face_or_plan_height_hash")
+    ]
+    assert measured
+    reserved = set(inventory["reserved_opening_figure_word_refs"])
+    for locator in measured:
+        payload = locator.get("outer_length_hash") or locator.get("inner_face_or_plan_height_hash")
+        assert payload is not None
+        assert payload["length_mm"]
+        assert not set(payload["word_refs"]).intersection(reserved)
+    assert all(item["paired_length_mm"] != "1800" for item in inventory["openings"] if item["pair_status"] == "UNIQUE")
+    assert any(item["paired_length_mm"] == "870" for item in inventory["openings"] if item["pair_status"] == "UNIQUE")
+    assert inventory["commercial_publishable"] is False
+    assert inventory["official_score"] is None

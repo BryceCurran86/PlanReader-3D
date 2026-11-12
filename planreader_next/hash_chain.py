@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from itertools import product
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .engine import NativePage, NativeSegment, NativeWord, SourceConflict, _figured_mm
 
@@ -19,6 +19,11 @@ _FACE_PT = 0.35
 # Duplicate hash ink is often two strokes ~0.5 pt apart. Still far below a
 # distinct neighbouring hash or the ~2 pt inner/outer wall pair.
 _HASH_PT = 0.8
+# Inner/outer CAD of ONE wall-end hash on the same dim line is often ~1.1 pt.
+# Must stay strictly below the ~2 pt inner/outer wall-face gap and SNAP_PT=2.5.
+_SAME_LINE_HASH_PT = 1.6
+# Inner room-ring vertex to that same-line hash. Not the 2.5 pt production snap.
+_WALL_END_HASH_PT = 1.5
 # Inner/outer wall faces are ~2 pt apart. A 2 pt corner nub that only
 # spans that band is wall thickness, not a dimension hash. Real hashes
 # leave the wall and reach the dim line (typically 3–8 pt).
@@ -90,6 +95,47 @@ def _cluster_stations(stations: dict[float, list[float]]) -> dict[float, list[fl
     return grouped
 
 
+def _share_perp(left: Sequence[float], right: Sequence[float]) -> bool:
+    return any(abs(a - b) <= _FACE_PT for a in left for b in right)
+
+
+def _same_line_hash_clusters(
+    stations: dict[float, list[float]],
+) -> tuple[dict[float, list[float]], dict[float, float]]:
+    """Cluster same-dim-line hashes closer than the inner/outer wall-face gap.
+
+    Representative along-station maps to merged perps. Each original member
+    maps back to that representative so a wall end can hit either CAD stroke.
+    """
+    keys = sorted(stations)
+    used: set[float] = set()
+    reps: dict[float, list[float]] = {}
+    member_to_rep: dict[float, float] = {}
+    for along in keys:
+        if along in used:
+            continue
+        members = [along]
+        perps = list(stations[along])
+        for other in keys:
+            if other <= along or other in used:
+                continue
+            if other - members[-1] > _SAME_LINE_HASH_PT:
+                if other - along > _SAME_LINE_HASH_PT:
+                    break
+                continue
+            if not _share_perp(perps, stations[other]):
+                continue
+            members.append(other)
+            perps.extend(stations[other])
+            used.add(other)
+        rep = members[0]
+        reps[rep] = perps
+        for member in members:
+            member_to_rep[member] = rep
+            used.add(member)
+    return reps, member_to_rep
+
+
 def _merge_station_maps(
     maps: Sequence[dict[float, list[float]]],
 ) -> dict[float, list[float]]:
@@ -100,11 +146,26 @@ def _merge_station_maps(
     return _cluster_stations(combined)
 
 
-def _unique_end_station(stations: dict[float, list[float]], target: float) -> float | None:
-    hits = [key for key in stations if abs(key - target) <= _FACE_PT]
-    if len(hits) != 1:
+def _unique_end_station(
+    stations: dict[float, list[float]],
+    target: float,
+    *,
+    member_to_rep: Mapping[float, float] | None = None,
+    tol: float = _FACE_PT,
+) -> float | None:
+    if member_to_rep is None:
+        hits = [key for key in stations if abs(key - target) <= tol]
+        if len(hits) != 1:
+            return None
+        return hits[0]
+    hits: list[float] = []
+    for member, rep in member_to_rep.items():
+        if abs(member - target) <= tol:
+            hits.append(rep)
+    unique = list(dict.fromkeys(hits))
+    if len(unique) != 1:
         return None
-    return hits[0]
+    return unique[0]
 
 
 def _complete_chain(
@@ -418,28 +479,42 @@ def _bind_from_ticks(
     hi: float,
     face_perp: float,
 ) -> HashBoundLength | None:
-    start = _unique_end_station(ticks, lo)
-    finish = _unique_end_station(ticks, hi)
+    clustered, member_to_rep = _same_line_hash_clusters(ticks)
+    start = _unique_end_station(
+        clustered, lo, member_to_rep=member_to_rep, tol=_FACE_PT,
+    )
+    if start is None:
+        start = _unique_end_station(
+            clustered, lo, member_to_rep=member_to_rep, tol=_WALL_END_HASH_PT,
+        )
+    finish = _unique_end_station(
+        clustered, hi, member_to_rep=member_to_rep, tol=_FACE_PT,
+    )
+    if finish is None:
+        finish = _unique_end_station(
+            clustered, hi, member_to_rep=member_to_rep, tol=_WALL_END_HASH_PT,
+        )
     if start is None or finish is None:
         return None
     line_values = []
     for station in (start, finish):
-        line_values.extend(ticks[station])
+        line_values.extend(clustered[station])
     shared: list[float] = []
     for value in {round(item, 2) for item in line_values}:
-        if any(abs(item - value) <= _FACE_PT for item in ticks[start]) and any(
-            abs(item - value) <= _FACE_PT for item in ticks[finish]
+        if any(abs(item - value) <= _FACE_PT for item in clustered[start]) and any(
+            abs(item - value) <= _FACE_PT for item in clustered[finish]
         ):
             shared.append(value)
     if not shared:
         return None
     complete: list[HashBoundLength] = []
     lo_stat, hi_stat = min(start, finish), max(start, finish)
-    along_stations = [
-        station for station in ticks
-        if lo_stat - _FACE_PT <= station <= hi_stat + _FACE_PT
-    ]
     for line_perp in sorted(set(shared)):
+        along_stations = [
+            station for station, perps in clustered.items()
+            if lo_stat - _WALL_END_HASH_PT <= station <= hi_stat + _WALL_END_HASH_PT
+            and any(abs(p - line_perp) <= _FACE_PT for p in perps)
+        ]
         bound = _complete_chain(
             page,
             horizontal_wall=horizontal_wall,
