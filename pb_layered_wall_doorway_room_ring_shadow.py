@@ -43,7 +43,7 @@ import hashlib
 import math
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -1195,6 +1195,28 @@ def _split_at_closures(
     return tuple(out)
 
 
+def _unresolved_collinear_gap_breaches_outer_ring(part: Polygon, gap: _Gap) -> bool:
+    """Only veto THIS room when both source wall-gap ends meet its exterior.
+
+    Source-native collinear wall runs can be unrelated: a far-away wall may
+    extend a gap interval beyond the enclosed region, or a loose internal
+    partition may lie inside it. Mere intersection with the room free-space
+    polygon, or only one exterior endpoint, does not make an outside opening.
+    This is a CANDIDATE topology guard; it never proves a physical wall,
+    opening, area, finished face, or commercial room.
+    """
+    if not gap.collinear:
+        return False
+    if gap.horizontal:
+        first = LineString(((gap.lo, gap.band[0]), (gap.lo, gap.band[1])))
+        last = LineString(((gap.hi, gap.band[0]), (gap.hi, gap.band[1])))
+    else:
+        first = LineString(((gap.band[0], gap.lo), (gap.band[1], gap.lo)))
+        last = LineString(((gap.band[0], gap.hi), (gap.band[1], gap.hi)))
+    outer = part.exterior
+    return outer.distance(first) <= NOISE_PT and outer.distance(last) <= NOISE_PT
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -1371,11 +1393,15 @@ def build_layered_wall_doorway_room_rings(
         touches_domain = part.boundary.intersects(domain.boundary.buffer(NOISE_PT))
         if touches_domain:
             continue  # the exterior region: not a room
-        # Only a collinear interruption (a wall cut in two) is a defect of the ring. A free band
-        # interval that ends at a perpendicular wall is indistinguishable from a stub's open side
-        # without door evidence, so it is not asserted either way; the downstream figured-box
-        # corroboration decides whether the region is one room.
-        adjacent_open = any(gap.collinear and part.buffer(NOISE_PT).intersects(gap.rect()) for gap in unresolved)
+        # Only a collinear interruption bounded by TWO points on this very
+        # ring's outer face may invalidate it. Other wall runs can be aligned
+        # far outside the room, or be disconnected partial partitions within
+        # the room; neither is an opening in THIS enclosing perimeter.
+        # Keep all native ink and unresolved gaps for physical/source review.
+        adjacent_open = any(
+            _unresolved_collinear_gap_breaches_outer_ring(part, gap)
+            for gap in unresolved
+        )
         if adjacent_open:
             reasons.append(REASON_OPEN_GAP)
         base = _dedupe_ring(tuple((round(x, 4), round(y, 4)) for x, y in list(part.exterior.coords)[:-1]))
