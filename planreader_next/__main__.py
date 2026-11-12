@@ -68,6 +68,10 @@ def main() -> int:
     heights.add_argument("--pdf", type=Path, required=True)
     heights.add_argument("--page", type=int, default=0)
     heights.add_argument("--drawing-type", choices=("section", "rcp"), required=True)
+    heights.add_argument(
+        "--owner-standard-for-project", type=str,
+        help="For an owner-confirmed project, emit source-backed standard FFL/FCL selection (local explicit heights override)",
+    )
     heights.add_argument("--rcp-viewport", nargs=4, type=float, metavar=("X0","Y0","X1","Y1"))
     heights.add_argument(
         "--with-source-zone-rectangles", action="store_true",
@@ -76,6 +80,22 @@ def main() -> int:
     heights.add_argument(
         "--with-plan-section-cut-page", type=int,
         help="On a section sheet, opt in to source A-A cut and plan-region intersection from this plan page",
+    )
+    heights.add_argument(
+        "--with-plan-wall-face-candidates", action="store_true",
+        help="On a source section with --with-plan-section-cut-page, also link cut regions to native plan face refs (review only)",
+    )
+    heights.add_argument(
+        "--rcp-plan-page", type=int,
+        help="For a reviewed RCP correspondence, exact source page containing the floor plan",
+    )
+    heights.add_argument(
+        "--rcp-reviewed-face-selections", type=Path,
+        help="JSON with source_sha256, plan_page_index, rcp_page_index and reviewed links",
+    )
+    heights.add_argument(
+        "--rcp-plan-viewport", nargs=4, type=float, metavar=("X0","Y0","X1","Y1"),
+        help="Optional SOURCE-NATIVE viewport for dense RCP corresponding plan page",
     )
     heights.add_argument("--output", type=Path, required=True)
     walls = sub.add_parser(
@@ -150,10 +170,25 @@ def main() -> int:
             page = load_native_page(args.pdf, args.page)
             if args.drawing_type == "section" and args.rcp_viewport is not None:
                 raise SourceConflict("rcp_viewport_only_valid_for_rcp")
+            if args.owner_standard_for_project is not None and (
+                args.drawing_type != "section"
+                or not args.owner_standard_for_project.strip()
+                or args.owner_standard_for_project != args.owner_standard_for_project.strip()
+            ):
+                raise SourceConflict("owner_standard_height_only_valid_for_named_section_project")
             if args.drawing_type == "section" and args.with_source_zone_rectangles:
                 raise SourceConflict("source_zone_rectangles_only_valid_for_rcp")
             if args.drawing_type != "section" and args.with_plan_section_cut_page is not None:
                 raise SourceConflict("section_cut_plan_page_only_valid_for_section")
+            if args.with_plan_wall_face_candidates and args.with_plan_section_cut_page is None:
+                raise SourceConflict("plan_wall_face_height_scope_requires_source_cut")
+            if any(value is not None for value in (
+                args.rcp_plan_page, args.rcp_reviewed_face_selections, args.rcp_plan_viewport,
+            )):
+                if args.drawing_type != "rcp":
+                    raise SourceConflict("rcp_face_scope_only_valid_for_rcp")
+                if args.rcp_plan_page is None or args.rcp_reviewed_face_selections is None:
+                    raise SourceConflict("rcp_face_scope_selection_and_plan_required")
             inventory = height_evidence_inventory(
                 page,
                 rcp_viewport_pdf_pts=(
@@ -173,6 +208,17 @@ def main() -> int:
                 "benchmark_credit": False,
                 "official_score": None,
             }
+            if args.owner_standard_for_project is not None:
+                if len(inventory["section_ffl_fcl"]) != 1:
+                    raise SourceConflict("owner_project_standard_source_height_not_unique")
+                result["project_standard_height_policy"] = {
+                    "rule": "all_walls_and_ceilings_unless_otherwise_stated",
+                    "owner_authorized": True,
+                    "project_id": args.owner_standard_for_project,
+                    "source_sha256": page.source_sha256,
+                    "section_page_index": page.page_index,
+                    "source_height_receipt": inventory["section_ffl_fcl"][0],
+                }
             if args.with_source_zone_rectangles:
                 from .rcp_zone_scope import propose_rcp_source_zone_rectangles
                 zone_result = propose_rcp_source_zone_rectangles(
@@ -194,6 +240,36 @@ def main() -> int:
                 result["plan_section_cut_scope"] = section_cut_region_height_candidates(
                     plan, page, rings["regions"]
                 )
+                if args.with_plan_wall_face_candidates:
+                    from .height_face_scope import section_height_to_plan_face_candidates
+                    result["plan_wall_face_height_scope"] = (
+                        section_height_to_plan_face_candidates(plan, page, rings)
+                    )
+            if args.rcp_plan_page is not None:
+                from .enclosure import propose_room_enclosures
+                from .height_face_scope import reviewed_rcp_height_to_plan_face_candidates
+                reviewed = json.loads(
+                    args.rcp_reviewed_face_selections.read_text(encoding="utf-8")
+                )
+                if not isinstance(reviewed, dict):
+                    raise SourceConflict("rcp_height_face_review_selection_invalid")
+                plan = load_native_page(args.pdf, args.rcp_plan_page)
+                if (
+                    reviewed.get("source_sha256") != page.source_sha256
+                    or reviewed.get("plan_page_index") != plan.page_index
+                    or reviewed.get("rcp_page_index") != page.page_index
+                    or not isinstance(reviewed.get("links"), list)
+                ):
+                    raise SourceConflict("rcp_height_face_review_source_mismatch")
+                rings = propose_room_enclosures(
+                    plan, args.pdf, viewport_pdf_pts=args.rcp_plan_viewport,
+                    include_cross_sheet_height=False,
+                )
+                result["rcp_plan_wall_face_height_scope"] = (
+                    reviewed_rcp_height_to_plan_face_candidates(
+                        plan, page, rings, reviewed["links"]
+                    )
+                )
         elif args.mode == "takeoff":
             from .building import measure_building_components
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
@@ -201,8 +277,13 @@ def main() -> int:
             for kind in ("rooms", "ceilings", "walls"):
                 for claim in selected.get(kind, []):
                     required_pages.add(claim["page_index"])
-                    if kind == "walls":
+                    if kind == "walls" and claim.get("height_source_page_index") is not None:
                         required_pages.add(claim["height_source_page_index"])
+            policy = selected.get("project_standard_height_policy")
+            if policy is not None:
+                if not isinstance(policy, dict) or type(policy.get("section_page_index")) is not int:
+                    raise SourceConflict("project_height_policy_invalid")
+                required_pages.add(policy["section_page_index"])
             for claim in selected.get("doors", []):
                 required_pages.add(claim["plan_page_index"])
                 required_pages.add(claim["schedule_page_index"])
@@ -270,6 +351,10 @@ def main() -> int:
                 print(json.dumps({
                     "source_height_candidates": len(result["height_evidence"]),
                     "drawing_type_claimed": result["drawing_type_claimed"],
+                    "owner_project_standard_height_mm": (
+                        result.get("project_standard_height_policy", {})
+                        .get("source_height_receipt", {}).get("height_mm")
+                    ),
                     "physical_zone_association": "REVIEW_REQUIRED",
                     "source_zone_rectangle_candidates": len(
                         result.get("source_zone_rectangle_candidates", [])
@@ -278,6 +363,14 @@ def main() -> int:
                         result.get("plan_section_cut_scope", {}).get(
                             "cut_intersecting_region_candidates", []
                         )
+                    ),
+                    "source_wall_face_height_candidates": (
+                        len(result.get("plan_wall_face_height_scope", {}).get(
+                            "face_height_scope_candidates", []
+                        ))
+                        + len(result.get("rcp_plan_wall_face_height_scope", {}).get(
+                            "face_height_scope_candidates", []
+                        ))
                     ),
                     "commercial_publishable": False,
                 }, sort_keys=True))

@@ -424,3 +424,172 @@ def test_ceiling_height_callout_is_separate_optional_metadata_never_area_overrid
     assert get(output,"ceiling_finish")["quantity"]=="13.270425"
     assert "height_mm_source_candidate" not in get(output,"ceiling_finish")
     assert missing(output,"ceiling_height")[0]["reason_code"]=="height_receipt_value_mismatch"
+
+
+
+def _owner_policy_for_section(selection, pages, receipt):
+    return {
+        "rule": "all_walls_and_ceilings_unless_otherwise_stated",
+        "owner_authorized": True,
+        "project_id": selection["project_id"],
+        "source_sha256": selection["source_sha256"],
+        "section_page_index": 1,
+        "source_height_receipt": receipt,
+    }
+
+
+def test_owner_authorized_standard_height_applies_to_all_reviewed_walls_and_ceilings(proof):
+    _, pages, selection = proof
+    pages, receipt = _section_height_extended_proof(pages, selection)
+    selection["project_standard_height_policy"] = _owner_policy_for_section(
+        selection, pages, receipt
+    )
+    # No per-wall cut crossing or another manual "height applies" checkbox.
+    selection["walls"][0].pop("height_source_page_index", None)
+    selection["walls"][0].pop("height_word_ref", None)
+    result = measure_building_components(pages, selection)
+    gross = get(result, "wall_finish_gross_area")
+    assert gross["quantity"] == "9.6"
+    assert gross["evidence_refs"]["height_policy_basis"] == "OWNER_AUTHORIZED_PROJECT_FFL_FCL_STANDARD"
+    assert gross["evidence_refs"]["height_word_ref"] == receipt["height_word_ref"]
+    ceiling = get(result, "ceiling_finish")
+    assert ceiling["height_mm_source_candidate"] == "2400"
+    assert ceiling["height_policy_basis"] == "OWNER_AUTHORIZED_PROJECT_FFL_FCL_STANDARD"
+    assert ceiling["quantity"] == "13.270425"
+    assert result["commercial_publishable"] is False
+
+
+def test_local_rcp_wall_and_ceiling_height_overrides_user_project_default(proof):
+    from planreader_next.engine import NativePage, NativeWord
+    from planreader_next.height_evidence import rcp_material_height_callouts
+
+    _, pages, selection = proof
+    pages, standard_receipt = _section_height_extended_proof(pages, selection)
+    selection["project_standard_height_policy"] = _owner_policy_for_section(
+        selection, pages, standard_receipt
+    )
+    plan = pages[0]
+    finish_ref = selection["ceilings"][0]["finish_word_ref"]
+    finish = next(w for w in plan.words if w.ref == finish_ref)
+    new_finish = NativeWord("word:b760:l0:w0:i760", "IPF1", finish.bbox)
+    x0, y0, x1, y1 = finish.bbox
+    rcp_height = NativeWord("word:b760:l1:w0:i761", "2500", (x0,y0+17,x1,y1+17))
+    new_plan = NativePage(
+        plan.source_sha256,plan.page_index,
+        tuple(new_finish if w.ref == finish_ref else w for w in plan.words)
+        + (rcp_height,),plan.rectangles,plan.segments,
+    )
+    pages=dict(pages, **{})  # preserve integer-key page map
+    pages[0]=new_plan
+    rcp_receipt = rcp_material_height_callouts(new_plan)
+    assert len(rcp_receipt)==1 and rcp_receipt[0]["height_mm"]=="2500"
+    wall=selection["walls"][0]
+    wall.pop("height_word_ref",None)
+    wall["height_source_page_index"]=0
+    wall["height_source_receipt"]=rcp_receipt[0]
+    wall["height_applies_to_wall_reviewed"]=True
+    wall["height_ceiling_zone_id"]="ceiling-zone-IPF1"
+    ceiling=selection["ceilings"][0]
+    ceiling["finish_word_ref"]=new_finish.ref
+    ceiling["height_source_receipt"]=rcp_receipt[0]
+    ceiling["height_ceiling_zone_reviewed"]=True
+    result=measure_building_components(pages,selection)
+    gross=get(result,"wall_finish_gross_area")
+    assert gross["quantity"]=="10"
+    assert gross["evidence_refs"]["height_policy_basis"]=="SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
+    assert gross["evidence_refs"]["project_standard_height_mm"]=="2400"
+    ceiling_result=get(result,"ceiling_finish")
+    assert ceiling_result["height_mm_source_candidate"]=="2500"
+    assert ceiling_result["height_policy_basis"]=="SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
+    assert ceiling_result["quantity"]=="13.270425"
+    assert not result["commercial_publishable"]
+
+
+def test_unconfirmed_local_wall_override_does_not_erase_project_default_or_invent_height(proof):
+    _, pages, selection = proof
+    pages, receipt = _section_height_extended_proof(pages, selection)
+    selection["project_standard_height_policy"] = _owner_policy_for_section(
+        selection, pages, receipt
+    )
+    wall=selection["walls"][0]
+    wall["height_source_receipt"]=dict(receipt, height_mm="2740")
+    outcome=measure_building_components(pages,selection)
+    assert missing(outcome,"wall_finish")[0]["reason_code"]=="wall_standard_height_source_receipt_mismatch"
+    # Independently proven ceiling area still gets standard 2400.
+    assert get(outcome,"ceiling_finish")["height_mm_source_candidate"]=="2400"
+    assert not any(q["trade"]=="wall_finish_gross_area" for q in outcome["quantities"])
+
+
+
+def _source_owned_local_rcp_2500_bubble(pages, selection):
+    from planreader_next.engine import NativePage, NativeWord
+    from planreader_next.height_evidence import rcp_material_height_callouts
+    plan=pages[0]
+    ref=selection["ceilings"][0]["finish_word_ref"]
+    current=next(w for w in plan.words if w.ref==ref)
+    new_material=NativeWord("word:b870:l0:w0:i870","IPF1",current.bbox)
+    x0,y0,x1,y1=current.bbox
+    local=NativeWord("word:b870:l1:w0:i871","2500",(x0,y0+17,x1,y1+17))
+    revised=NativePage(
+        plan.source_sha256,plan.page_index,
+        tuple(new_material if w.ref==ref else w for w in plan.words)+(local,),
+        plan.rectangles,plan.segments,
+    )
+    updated=dict(pages)
+    updated[0]=revised
+    assert len(rcp_material_height_callouts(revised))==1
+    selection["ceilings"][0]["finish_word_ref"]=new_material.ref
+    return updated,rcp_material_height_callouts(revised)[0]
+
+
+def test_printed_same_bubble_rcp_2500_automatically_overrides_2400_standard_in_linked_zone(proof):
+    _,pages,selection=proof
+    pages,standard=_section_height_extended_proof(pages,selection)
+    selection["project_standard_height_policy"]=_owner_policy_for_section(selection,pages,standard)
+    pages,rcp=_source_owned_local_rcp_2500_bubble(pages,selection)
+    wall=selection["walls"][0]
+    wall["height_ceiling_zone_id"]="ceiling-zone-IPF1"
+    wall["height_applies_to_wall_reviewed"]=True
+    # RCP material and height are source-paired in the same PDF text bubble;
+    # no custom per-room height figure or arbitrary global 2500 setting.
+    packet=measure_building_components(pages,selection)
+    ceiling=get(packet,"ceiling_finish")
+    assert ceiling["height_mm_source_candidate"]=="2500"
+    assert ceiling["height_policy_basis"]=="SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
+    assert ceiling["height_source_receipt"]["height_word_ref"]==rcp["height_word_ref"]
+    gross=get(packet,"wall_finish_gross_area")
+    assert gross["quantity"]=="10"
+    assert gross["evidence_refs"]["height_policy_basis"]=="SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
+    assert gross["evidence_refs"]["height_word_ref"]==rcp["height_word_ref"]
+    assert get(packet,"wall_finish_net_area")["quantity"]=="8.1232"
+    assert not packet["commercial_publishable"]
+
+
+def test_unreviewed_wall_does_not_inherit_auto_rcp_override_from_nearby_ceiling(proof):
+    _,pages,selection=proof
+    pages,standard=_section_height_extended_proof(pages,selection)
+    selection["project_standard_height_policy"]=_owner_policy_for_section(selection,pages,standard)
+    pages,_=_source_owned_local_rcp_2500_bubble(pages,selection)
+    wall=selection["walls"][0]
+    wall["height_ceiling_zone_id"]="ceiling-zone-IPF1"
+    # Wall's actual membership in the lower-ceiling zone is NOT source-owned.
+    packet=measure_building_components(pages,selection)
+    assert get(packet,"ceiling_finish")["height_mm_source_candidate"]=="2500"
+    assert missing(packet,"wall_finish")[0]["reason_code"]=="local_ceiling_zone_wall_scope_not_reviewed"
+    assert not any(q["trade"]=="wall_finish_gross_area" for q in packet["quantities"])
+
+
+def test_invalid_explicit_rcp_height_cannot_silently_revert_linked_wall_to_standard(proof):
+    _,pages,selection=proof
+    pages,standard=_section_height_extended_proof(pages,selection)
+    selection["project_standard_height_policy"]=_owner_policy_for_section(selection,pages,standard)
+    pages,rcp=_source_owned_local_rcp_2500_bubble(pages,selection)
+    selection["ceilings"][0]["height_source_receipt"]=dict(rcp,height_mm="2600")
+    selection["ceilings"][0]["height_ceiling_zone_reviewed"]=True
+    selection["walls"][0]["height_ceiling_zone_id"]="ceiling-zone-IPF1"
+    selection["walls"][0]["height_applies_to_wall_reviewed"]=True
+    packet=measure_building_components(pages,selection)
+    assert missing(packet,"ceiling_height")[0]["reason_code"]=="height_receipt_value_mismatch"
+    assert missing(packet,"wall_finish")[0]["reason_code"]=="linked_ceiling_zone_height_unresolved"
+    assert "height_mm_source_candidate" not in get(packet,"ceiling_finish")
+    assert get(packet,"ceiling_finish")["quantity"]=="13.270425"

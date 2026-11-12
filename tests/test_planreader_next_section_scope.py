@@ -129,5 +129,6 @@ def test_actual_3laurel_section_cut_and_candidate_intersections_if_original_prov
     assert outcome["height_mm_source_candidate"]=="2700"
     assert len(outcome["cut_intersecting_region_candidates"])==3
     assert sorted(x["room_label_words"] for x in outcome["cut_intersecting_region_candidates"] if len(x["room_label_words"])==1)==[["BED"],["ROBE"]]
+    assert all(x["room_label_word_refs"] for x in outcome["cut_intersecting_region_candidates"] if len(x["room_label_words"])==1)
     assert not outcome["height_applied_to_any_room"]
     assert not outcome["commercial_publishable"]

@@ -173,7 +173,9 @@ def section_cut_region_height_candidates(
         candidates.append({
             "region_id": region_id,
             "room_label_word_refs": sorted(
-                word["ref"] for word in labels if isinstance(word, dict) and "ref" in word
+                word.get("native_word_ref", word.get("ref"))
+                for word in labels if isinstance(word, dict)
+                and type(word.get("native_word_ref", word.get("ref"))) is str
             ),
             "room_label_words": [word.get("text") for word in labels
                                  if isinstance(word, dict)],
