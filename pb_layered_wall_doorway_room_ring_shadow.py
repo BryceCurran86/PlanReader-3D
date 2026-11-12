@@ -43,7 +43,7 @@ import hashlib
 import math
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -97,6 +97,57 @@ def _is_black(color: Any) -> bool:
     )
 
 
+def _visible_source_stroke_paint(row: Mapping[str, Any]) -> bool:
+    """Finite positive stroke opacity only. Bool, NaN, zero and junk stay unresolved.
+
+    Missing paint defaults to opaque CAD (1.0), matching fill_opacity on dark
+    bars. An explicit False/True is not a PDF float and cannot close a room.
+    """
+    opacity = row.get("stroke_opacity", 1.0)
+    if type(opacity) is bool or type(opacity) not in (int, float):
+        return False
+    return math.isfinite(opacity) and opacity > 0.0
+
+
+def _clip_allows_point(row: Mapping[str, Any], x: float, y: float) -> bool:
+    """Fail closed when an active scissor is unknown or excludes the stroke."""
+    scissor = row.get("scissor")
+    if scissor is None:
+        return True
+    try:
+        if hasattr(scissor, "x0"):
+            x0, y0, x1, y1 = (
+                float(scissor.x0), float(scissor.y0),
+                float(scissor.x1), float(scissor.y1),
+            )
+        else:
+            x0, y0, x1, y1 = (float(value) for value in scissor)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+        return False
+    lo_x, hi_x = (x0, x1) if x0 <= x1 else (x1, x0)
+    lo_y, hi_y = (y0, y1) if y0 <= y1 else (y1, y0)
+    return lo_x - NOISE_PT <= x <= hi_x + NOISE_PT and lo_y - NOISE_PT <= y <= hi_y + NOISE_PT
+
+
+def _later_opaque_fill_covers(
+    drawings: Sequence[Mapping[str, Any] | None],
+    index: int,
+    x: float,
+    y: float,
+) -> bool:
+    """A later opaque fill that covers the stroke hides it. Paint order is source order."""
+    for later in range(index + 1, len(drawings)):
+        row = drawings[later]
+        if not isinstance(row, Mapping) or row.get("fill") is None or not _opaque(row):
+            continue
+        x0, y0, x1, y1 = _row_bounds(row)
+        if x0 - 1e-6 <= x <= x1 + 1e-6 and y0 - 1e-6 <= y <= y1 + 1e-6:
+            return True
+    return False
+
+
 def _owner_excluded_green_ink(color: Any) -> bool:
     """Owner: green aisle/equipment/cold-room details are NOT wall geometry.
 
@@ -148,7 +199,7 @@ def _source_wall_ink_candidate_drawings(
             continue
         candidate = (
             is_explicit_wall_layer_name(str(row.get("layer") or ""))
-            or (fill is None and _is_black(stroke))
+            or (fill is None and _is_black(stroke) and _visible_source_stroke_paint(row))
             or (
                 isinstance(fill, (tuple, list))
                 and len(fill) == 3
@@ -162,6 +213,9 @@ def _source_wall_ink_candidate_drawings(
         )
         if candidate:
             supported += 1
+            kept.append(row)
+        elif row.get("fill") is not None and _opaque(row):
+            # Keep later opaque fills so they can hide a stroke. Not a wall.
             kept.append(row)
         else:
             kept.append(blank)
@@ -460,6 +514,8 @@ def _collect_wall_end_closing_strips(
             continue
         if not _is_wall_stroke_color(row.get("color")):
             continue
+        if not _visible_source_stroke_paint(row):
+            continue
         for item in row.get("items", ()):
             if item[0] != "l":
                 continue
@@ -472,6 +528,10 @@ def _collect_wall_end_closing_strips(
             start = Point(ax, ay)
             end = Point(bx, by)
             mid = Point((ax + bx) / 2.0, (ay + by) / 2.0)
+            if not _clip_allows_point(row, mid.x, mid.y):
+                continue
+            if _later_opaque_fill_covers(drawings, index, mid.x, mid.y):
+                continue
             hits_a = [s for s in supports if s.polygon.distance(start) <= _STROKE_PAIR_FACE_PT]
             hits_b = [s for s in supports if s.polygon.distance(end) <= _STROKE_PAIR_FACE_PT]
             if not hits_a or not hits_b:
@@ -533,6 +593,8 @@ def _axis_strokes(
         if row is None or row.get("fill") is not None:
             continue
         if not _is_wall_stroke_color(row.get("color")):
+            continue
+        if not _visible_source_stroke_paint(row):
             continue
         for item in row.get("items", ()):
             if item[0] != "l":
@@ -785,9 +847,21 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     minx, miny, maxx, maxy = domain.bounds
     found: dict[tuple[bool, int, int, int, int], _Gap] = {}
     for horizontal in (True, False):
-        for band, lo, hi, _paths in _runs(strips, horizontal):
-            band_rect = box(minx, band[0], maxx, band[1]) if horizontal else box(band[0], miny, band[1], maxy)
-            for component in _polygon_parts(band_rect.difference(union)):
+        # Immutable run inventory for this orientation. Rebuilding it per
+        # doorway was quadratic on original CAD sheets. Same grouped runs
+        # for candidate and collinearity checks; never infer a closure.
+        orientation_runs = _runs(strips, horizontal)
+        band_components: dict[tuple[float, float], list[Polygon]] = {}
+        band_runs: dict[tuple[float, float], list[tuple]] = {}
+        for run in orientation_runs:
+            band_runs.setdefault(run[0], []).append(run)
+        for band, lo, hi, _paths in orientation_runs:
+            components = band_components.get(band)
+            if components is None:
+                band_rect = box(minx, band[0], maxx, band[1]) if horizontal else box(band[0], miny, band[1], maxy)
+                components = _polygon_parts(band_rect.difference(union))
+                band_components[band] = components
+            for component in components:
                 c0, c1, c2, c3 = component.bounds
                 a, b = (c0, c2) if horizontal else (c1, c3)
                 touches_run_end = _close(a, hi) or _close(b, lo)
@@ -813,7 +887,11 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                     continue
                 rect = box(a, band[0], b, band[1]) if horizontal else box(band[0], a, band[1], b)
                 touching = tuple(sorted({index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect) for index in s.native_path_indices()}))
-                same_band = [r for r in _runs(strips, horizontal) if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
+                same_band = [
+                    run for source_band, runs in band_runs.items()
+                    if _close(source_band[0], band[0], 0.02) and _close(source_band[1], band[1], 0.02)
+                    for run in runs
+                ]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
                 found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
     return list(found.values())
@@ -926,6 +1004,8 @@ def _stroke_closed(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> Optional
     thickness = gap.band[1] - gap.band[0]
     for index, row in _wall_rows(drawings):
         if row.get("fill") is not None:
+            continue
+        if not _visible_source_stroke_paint(row):
             continue
         for item in row.get("items", ()):
             if item[0] != "l":
@@ -1195,6 +1275,26 @@ def _split_at_closures(
     return tuple(out)
 
 
+def _unresolved_collinear_gap_breaches_outer_ring(part: Polygon, gap: _Gap) -> bool:
+    """Only veto THIS room when both source wall-gap ends meet its exterior.
+
+    A far-away collinear wall or an incomplete internal partition can share a
+    band with this ring. Mere intersection, or one endpoint on the exterior,
+    is not an opening in this enclosing perimeter. Topology-only; not a
+    physical wall, opening, area or commercial room.
+    """
+    if not gap.collinear:
+        return False
+    if gap.horizontal:
+        first = LineString(((gap.lo, gap.band[0]), (gap.lo, gap.band[1])))
+        last = LineString(((gap.hi, gap.band[0]), (gap.hi, gap.band[1])))
+    else:
+        first = LineString(((gap.band[0], gap.lo), (gap.band[1], gap.lo)))
+        last = LineString(((gap.band[0], gap.hi), (gap.band[1], gap.hi)))
+    outer = part.exterior
+    return outer.distance(first) <= NOISE_PT and outer.distance(last) <= NOISE_PT
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -1371,11 +1471,13 @@ def build_layered_wall_doorway_room_rings(
         touches_domain = part.boundary.intersects(domain.boundary.buffer(NOISE_PT))
         if touches_domain:
             continue  # the exterior region: not a room
-        # Only a collinear interruption (a wall cut in two) is a defect of the ring. A free band
-        # interval that ends at a perpendicular wall is indistinguishable from a stub's open side
-        # without door evidence, so it is not asserted either way; the downstream figured-box
-        # corroboration decides whether the region is one room.
-        adjacent_open = any(gap.collinear and part.buffer(NOISE_PT).intersects(gap.rect()) for gap in unresolved)
+        # Only a collinear interruption whose BOTH ends sit on this ring's
+        # outer face may invalidate it. Aligned walls outside the room, or
+        # disconnected partitions inside it, are not openings in THIS perimeter.
+        adjacent_open = any(
+            _unresolved_collinear_gap_breaches_outer_ring(part, gap)
+            for gap in unresolved
+        )
         if adjacent_open:
             reasons.append(REASON_OPEN_GAP)
         base = _dedupe_ring(tuple((round(x, 4), round(y, 4)) for x, y in list(part.exterior.coords)[:-1]))

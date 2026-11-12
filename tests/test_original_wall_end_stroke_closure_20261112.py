@@ -7,6 +7,8 @@ physical wall identity. Green exclusion and wall-above-door stay on #4298.
 """
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from pb_layered_wall_doorway_room_ring_shadow import (
@@ -192,6 +194,54 @@ def test_wall_end_support_span_is_pdf_point_candidate_heuristic_only():
     assert all(not ring.takeoff_eligible for ring in result.rings)
     assert all(not ring.physical_room_identity_issued for ring in result.rings)
     assert all(not ring.metric_area_issued for ring in result.rings)
+
+
+def test_invisible_and_invalid_stroke_opacity_cannot_close_a_room():
+    supports = _collect_dark_painted_source_wall_strips(_u_room_open_south())
+    opaque = _line(5, 20, 200, 20, color=(0.0, 0.0, 0.0))
+    opaque["stroke_opacity"] = 1.0
+    assert len(_collect_wall_end_closing_strips(_u_room_open_south() + [opaque], supports)) == 1
+    for opacity in (0.0, math.nan, False, True, "1", None):
+        hidden = dict(opaque)
+        hidden["stroke_opacity"] = opacity
+        assert _collect_wall_end_closing_strips(_u_room_open_south() + [hidden], supports) == []
+        result = build_layered_wall_doorway_room_rings(
+            _u_room_open_south() + [hidden], source_sha256=SHA, page_index=0,
+            dark_painted_wall_source=True, wall_end_stroke_closures=True,
+        )
+        assert not any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    visible = build_layered_wall_doorway_room_rings(
+        _u_room_open_south() + [opaque], source_sha256=SHA, page_index=0,
+        dark_painted_wall_source=True, wall_end_stroke_closures=True,
+    )
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in visible.rings)
+    assert all(not ring.takeoff_eligible for ring in visible.rings)
+
+
+def test_white_overpaint_and_excluding_clip_hide_a_wall_end_closer():
+    import fitz
+
+    supports = _collect_dark_painted_source_wall_strips(_u_room_open_south())
+    closer = _line(5, 20, 200, 20, color=(0.0, 0.0, 0.0))
+    closer["stroke_opacity"] = 1.0
+    mask = _fill_rect(0, 15, 205, 25, (1.0, 1.0, 1.0))
+    overpainted = _u_room_open_south() + [closer, mask]
+    assert _collect_wall_end_closing_strips(overpainted, supports) == []
+    result = build_layered_wall_doorway_room_rings(
+        overpainted, source_sha256=SHA, page_index=0,
+        dark_painted_wall_source=True, wall_end_stroke_closures=True,
+    )
+    assert not any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in result.rings)
+    clipped = dict(closer)
+    clipped["scissor"] = fitz.Rect(0, 80, 50, 120)
+    assert _collect_wall_end_closing_strips(_u_room_open_south() + [clipped], supports) == []
+    inside = dict(closer)
+    inside["scissor"] = fitz.Rect(0, 0, 220, 40)
+    assert len(_collect_wall_end_closing_strips(_u_room_open_south() + [inside], supports)) == 1
+    for scissor in ("not-a-rect", (math.nan, 0.0, 10.0, 10.0)):
+        broken = dict(closer)
+        broken["scissor"] = scissor
+        assert _collect_wall_end_closing_strips(_u_room_open_south() + [broken], supports) == []
 
 
 def test_green_aisle_ink_is_still_not_a_wall_end_support():
