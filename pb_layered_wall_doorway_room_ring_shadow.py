@@ -61,6 +61,10 @@ _STROKE_PAIR_THICK_MAX = 8.0
 _STROKE_PAIR_MIN_SPAN = 8.0
 _STROKE_PAIR_FACE_PT = 0.35
 _STROKE_PAIR_CLUSTER_PT = 0.8
+_DARK_FILL_THICK_MAX = 14.0
+# PDF-point candidate heuristic only. Not a physical wall identity or scale rule.
+_WALL_END_SUPPORT_SPAN = 80.0
+_WALL_END_CLOSER_SPAN = 20.0
 
 _ARC_CIRCULARITY = 0.002  # relative; a cubic Bezier quarter circle deviates by about 0.0003
 
@@ -412,7 +416,7 @@ def _collect_dark_painted_source_wall_strips(
                 continue
             thickness = min(width, height)
             span = max(width, height)
-            if not (1.2 <= thickness <= 14.0 and span >= 8.0):
+            if not (1.2 <= thickness <= _DARK_FILL_THICK_MAX and span >= 8.0):
                 continue
             # An independent long dark source fill is a wall hypothesis.
             # A square dark cabinet / label mask / furniture is not a wall.
@@ -422,6 +426,92 @@ def _collect_dark_painted_source_wall_strips(
                 _Strip(path_index, x0, y0, x1, y1, box(*bounds))
             )
     return _attach_caps(candidates)
+
+
+def _major_structural_strips(strips: Sequence[_Strip]) -> list[_Strip]:
+    """Long thick wall runs. Short ceiling-grid modules are not supports."""
+    major: list[_Strip] = []
+    for strip in strips:
+        thick = min(strip.x1 - strip.x0, strip.y1 - strip.y0)
+        span = max(strip.x1 - strip.x0, strip.y1 - strip.y0)
+        if span >= _WALL_END_SUPPORT_SPAN and _STROKE_PAIR_THICK_MIN <= thick <= _DARK_FILL_THICK_MAX:
+            major.append(strip)
+    return major
+
+
+def _collect_wall_end_closing_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+    strips: Sequence[_Strip],
+) -> list[_Strip]:
+    """Single black strokes that already meet two major walls at their native ends.
+
+    The stroke is not extended, snapped, or prolonged through an unsupported
+    field. A line that only meets one wall, or that rides a ceiling-grid
+    module, is not a closer. This is topology-only; it is not a wall quantity.
+    """
+    supports = _major_structural_strips(strips)
+    if len(supports) < 2:
+        return []
+    half = _STROKE_PAIR_THICK_MIN / 2.0
+    found: list[_Strip] = []
+    seen: set[tuple[float, float, float, float]] = set()
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _is_wall_stroke_color(row.get("color")):
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            ax, ay = _xy(item[1])
+            bx, by = _xy(item[2])
+            horizontal = _close(ay, by, 1e-3) and abs(bx - ax) >= _WALL_END_CLOSER_SPAN
+            vertical = _close(ax, bx, 1e-3) and abs(by - ay) >= _WALL_END_CLOSER_SPAN
+            if not horizontal and not vertical:
+                continue
+            start = Point(ax, ay)
+            end = Point(bx, by)
+            mid = Point((ax + bx) / 2.0, (ay + by) / 2.0)
+            hits_a = [s for s in supports if s.polygon.distance(start) <= _STROKE_PAIR_FACE_PT]
+            hits_b = [s for s in supports if s.polygon.distance(end) <= _STROKE_PAIR_FACE_PT]
+            if not hits_a or not hits_b:
+                continue
+            if set(id(s) for s in hits_a) & set(id(s) for s in hits_b):
+                continue
+            if any(s.polygon.distance(mid) <= _STROKE_PAIR_FACE_PT for s in supports):
+                continue
+            if horizontal:
+                if not any(s.vertical for s in hits_a) or not any(s.vertical for s in hits_b):
+                    continue
+                y = (ay + by) / 2.0
+                x0, x1 = sorted((ax, bx))
+                x0_b, y0_b, x1_b, y1_b = x0, y - half, x1, y + half
+                for strip in hits_a + hits_b:
+                    if not strip.vertical:
+                        continue
+                    if 0.0 < x0_b - strip.x1 <= _STROKE_PAIR_CLUSTER_PT:
+                        x0_b = strip.x1
+                    if 0.0 < strip.x0 - x1_b <= _STROKE_PAIR_CLUSTER_PT:
+                        x1_b = strip.x0
+            else:
+                if not any(s.horizontal for s in hits_a) or not any(s.horizontal for s in hits_b):
+                    continue
+                x = (ax + bx) / 2.0
+                y0, y1 = sorted((ay, by))
+                x0_b, y0_b, x1_b, y1_b = x - half, y0, x + half, y1
+                for strip in hits_a + hits_b:
+                    if not strip.horizontal:
+                        continue
+                    if 0.0 < y0_b - strip.y1 <= _STROKE_PAIR_CLUSTER_PT:
+                        y0_b = strip.y1
+                    if 0.0 < strip.y0 - y1_b <= _STROKE_PAIR_CLUSTER_PT:
+                        y1_b = strip.y0
+            key = (round(x0_b, 2), round(y0_b, 2), round(x1_b, 2), round(y1_b, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(_Strip(index, x0_b, y0_b, x1_b, y1_b, box(x0_b, y0_b, x1_b, y1_b)))
+    return found
 
 
 # Black source stroke-pair evidence adapted from PR #4284's Cursor
@@ -1112,16 +1202,24 @@ def build_layered_wall_doorway_room_rings(
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
+    wall_end_stroke_closures: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
     ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
+    its native endpoints already meet major structural strips. The stroke is not extended.
+    That flag is a PDF-point candidate heuristic, not physical wall identity.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(dark_painted_wall_source) is not bool:
         raise ValueError("dark_painted_wall_source must be an explicit boolean")
+    if type(wall_end_stroke_closures) is not bool:
+        raise ValueError("wall_end_stroke_closures must be an explicit boolean")
+    if wall_end_stroke_closures and not dark_painted_wall_source:
+        raise ValueError("wall_end_stroke_closures requires dark_painted_wall_source")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -1156,6 +1254,8 @@ def build_layered_wall_doorway_room_rings(
             + _collect_dark_painted_source_wall_strips(drawings)
             + _collect_stroke_pair_strips(drawings)
         )
+        if wall_end_stroke_closures:
+            strips = strips + _collect_wall_end_closing_strips(drawings, strips)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -1341,6 +1441,7 @@ def build_layered_wall_doorway_room_rings(
 def build_from_pdf_bytes(
     source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
+    wall_end_stroke_closures: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -1356,6 +1457,7 @@ def build_from_pdf_bytes(
         drawings, source_sha256=source_sha256, page_index=page_index,
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
+        wall_end_stroke_closures=wall_end_stroke_closures,
     )
 
 
