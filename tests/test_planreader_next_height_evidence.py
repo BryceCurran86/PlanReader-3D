@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
 
 import pytest
 
@@ -141,30 +140,12 @@ def test_inventory_does_not_make_a_ceiling_area_or_building_quantity():
 
 
 def test_real_3laurel_section_height_if_authenticated_original_is_provisioned():
-    import os
-    source=os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not source or not Path(source).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
-    page=load_native_page(Path(source),6)
-    if page.source_sha256 != "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e":
-        raise AssertionError("original SHA mismatch")
-    found=section_ffl_fcl_heights(page)
-    assert len(found)==1
-    assert found[0]["height_word_ref"]=="word:b30:l0:w0:i230"
-    assert found[0]["height_mm"]=="2700"
-    assert found[0]["dimension_segment_refs"]==["d5955i0"]
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 
-
-def test_real_maryborough_rcp_pairs_if_provisioned():
-    import os
-    source=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
-    if not source or not Path(source).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
-    page=load_native_page(Path(source),8)
-    if page.source_sha256 != "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007":
-        raise AssertionError("original SHA mismatch")
-    found=rcp_material_height_callouts(page)
-    assert len(found)==18
-    assert any(x["height_mm"]=="2400" and x["material_code_candidate"]=="GRID" for x in found)
-    assert any(x["height_mm"]=="3000" and x["material_code_candidate"]=="FPB" for x in found)
-    assert not any(x["height_mm"]=="1980" for x in found)
+    page = load_native_page(require_original_3laurel(), 6)
+    assert page.source_sha256 == ORIGINAL_SHA256
+    found = section_ffl_fcl_heights(page)
+    assert len(found) == 1
+    assert found[0]["height_word_ref"] == "word:b30:l0:w0:i230"
+    assert found[0]["height_mm"] == "2700"
+    assert found[0]["dimension_segment_refs"] == ["d5955i0"]

@@ -243,6 +243,7 @@ def propose_room_enclosures(
         "draft_floor_candidates": _draft_floors(page, regions),
         "dimension_index": _page_dimension_index(page),
         "topology_face_receipts": _topology_face_receipts(page, regions),
+        "source_wall_inventory": _source_wall_inventory(page, regions, virtual_fills),
         "room_height_from_ffl_fcl": (
             _document_ffl_fcl_height(path, page.source_sha256)
             if include_cross_sheet_height
@@ -276,6 +277,14 @@ def _topology_face_receipts(page: NativePage, regions: list[dict[str, Any]]) -> 
     from .topology_faces import native_finished_face_receipts
 
     return native_finished_face_receipts(page, regions)
+
+
+def _source_wall_inventory(
+    page: NativePage, regions: list[dict[str, Any]], fills: list[dict[str, Any]],
+) -> dict[str, Any]:
+    from .wall_inventory import inventory_source_walls
+
+    return inventory_source_walls(page, regions, fills)
 
 
 def _document_ffl_fcl_height(pdf_path: Path, source_sha256: str) -> dict[str, Any]:

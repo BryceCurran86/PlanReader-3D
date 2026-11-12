@@ -74,6 +74,17 @@ def main() -> int:
         help="Opt in to topology-only RCP material/height-to-source-rectangle candidates",
     )
     heights.add_argument("--output", type=Path, required=True)
+    walls = sub.add_parser(
+        "walls",
+        help="Topology-only native wall/opening/region inventory from existing rings",
+    )
+    walls.add_argument("--pdf", type=Path, required=True)
+    walls.add_argument("--page", type=int, default=0)
+    walls.add_argument("--output", type=Path, required=True)
+    walls.add_argument(
+        "--stroke-pairs", action="store_true",
+        help="Opt in to unlabelled stroke-pair wall faces (still topology-only)",
+    )
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
     takeoff.add_argument("--selection", type=Path, required=True)
@@ -123,6 +134,13 @@ def main() -> int:
             result = associate_dimension_inventory_to_native_faces(
                 page, inventory_page_dimensions(page), candidates,
             )
+        elif args.mode == "walls":
+            from .enclosure import propose_room_enclosures
+
+            page = load_native_page(args.pdf, args.page)
+            result = propose_room_enclosures(
+                page, args.pdf, stroke_pair_wall_faces=args.stroke_pairs,
+            )["source_wall_inventory"]
         elif args.mode == "heights":
             from .height_evidence import height_evidence_inventory
             page = load_native_page(args.pdf, args.page)
@@ -220,6 +238,15 @@ def main() -> int:
                 print(json.dumps({
                     "candidate_face_bindings": len(result["shadow_face_bindings"]),
                     "unmatched_unique_figures": len(result["abstentions"]),
+                    "commercial_publishable": False,
+                    "review_required": True,
+                }, sort_keys=True))
+            elif args.mode == "walls":
+                print(json.dumps({
+                    "face_count": result["face_count"],
+                    "opening_count": result["opening_count"],
+                    "region_locator_count": result["region_locator_count"],
+                    "topology_only": True,
                     "commercial_publishable": False,
                     "review_required": True,
                 }, sort_keys=True))
