@@ -107,3 +107,33 @@ boundaries --with-cross-sheet-height or suggest --with-boundaries
 --with-cross-sheet-height, preserving the same source SHA and FFL/FCL
 scope-review flag. A document-wide unique FFL-to-FCL result must not
 become every room's height or a substitute for the missing plan axis.
+
+## Original plan section-cut to section-height scope
+
+The cross-sheet section-height route now supports an explicit, create-only
+source-geometry probe:
+
+    python -m planreader_next heights --drawing-type section --pdf original.pdf --page 6 --with-plan-section-cut-page 2 --output section-cut-candidates.json
+
+This does NOT run during ordinary plan tracing or ordinary height extraction.
+It opens the authenticated original drawing for the plan and section sheet,
+requires two **same-source text-block** A/A0.7 plan markers, an A-A section
+title and twenty original native dashed line segments forming a continuous
+source cut. The cut must extend between the original marker endpoints;
+missing dashes, wrong section name, nonmatching PDF SHA or multiple markers
+ABSTAIN. The extra matching of candidate room-ring polygons to this cut
+outputs source-native nonmetric geometry intersections for manual review.
+
+Original pinned 3Laurel PDF plan page 3 / section page 7: A-A markers
+and 20 native dashed segments source-match the 2700mm FFL-to-FCL figure.
+This cut intersects THREE proposed region geometries: a BED candidate, a
+ROBE candidate and a larger abstained connected DINING/ENTRY/KIT/LIVING/WC/
+LAUNDRY region. The last is NOT a proven physical single room and neither
+BED nor ROBE is automatically assigned 2700mm. There is no proof of an
+applicable RCP zone, bulkhead, wall lining extent or finished face yet.
+
+Room scope remains physical_room_height_authenticated=false,
+height_applied_to_any_room=false and commercial_publishable=false.
+No source drawing geometry, private PDF or original plan screenshot is
+included in this public repository. Frozen120 and customer issuers are
+unchanged.

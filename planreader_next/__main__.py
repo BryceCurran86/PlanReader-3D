@@ -73,6 +73,10 @@ def main() -> int:
         "--with-source-zone-rectangles", action="store_true",
         help="Opt in to topology-only RCP material/height-to-source-rectangle candidates",
     )
+    heights.add_argument(
+        "--with-plan-section-cut-page", type=int,
+        help="On a section sheet, opt in to source A-A cut and plan-region intersection from this plan page",
+    )
     heights.add_argument("--output", type=Path, required=True)
     walls = sub.add_parser(
         "walls",
@@ -148,6 +152,8 @@ def main() -> int:
                 raise SourceConflict("rcp_viewport_only_valid_for_rcp")
             if args.drawing_type == "section" and args.with_source_zone_rectangles:
                 raise SourceConflict("source_zone_rectangles_only_valid_for_rcp")
+            if args.drawing_type != "section" and args.with_plan_section_cut_page is not None:
+                raise SourceConflict("section_cut_plan_page_only_valid_for_section")
             inventory = height_evidence_inventory(
                 page,
                 rcp_viewport_pdf_pts=(
@@ -178,6 +184,16 @@ def main() -> int:
                 result["source_zone_unresolved_callouts"] = zone_result[
                     "unresolved_callouts"
                 ]
+            if args.with_plan_section_cut_page is not None:
+                from .enclosure import propose_room_enclosures
+                from .section_scope import section_cut_region_height_candidates
+                plan = load_native_page(args.pdf, args.with_plan_section_cut_page)
+                rings = propose_room_enclosures(
+                    plan, args.pdf, include_cross_sheet_height=False
+                )
+                result["plan_section_cut_scope"] = section_cut_region_height_candidates(
+                    plan, page, rings["regions"]
+                )
         elif args.mode == "takeoff":
             from .building import measure_building_components
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
@@ -257,6 +273,11 @@ def main() -> int:
                     "physical_zone_association": "REVIEW_REQUIRED",
                     "source_zone_rectangle_candidates": len(
                         result.get("source_zone_rectangle_candidates", [])
+                    ),
+                    "section_cut_intersecting_region_candidates": len(
+                        result.get("plan_section_cut_scope", {}).get(
+                            "cut_intersecting_region_candidates", []
+                        )
                     ),
                     "commercial_publishable": False,
                 }, sort_keys=True))
