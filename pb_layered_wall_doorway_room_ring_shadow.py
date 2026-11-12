@@ -307,6 +307,10 @@ class LayeredRoomRingResult:
     ambiguous_swing_count: int
     sliver_region_count: int = 0
     schema_version: str = LAYERED_ROOM_RING_SCHEMA_VERSION
+    # Original PDF black segmented arcs + radial leaves, NOT sealed
+    # openings, hosted frames or customer wall geometry.
+    source_segmented_swing_witnesses: tuple[Mapping[str, Any], ...] = ()
+    source_owned_doorway_chords: tuple[Mapping[str, Any], ...] = ()
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -796,6 +800,16 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
             else:
                 on_line = _close(centre[0], tip[0], NOISE_PT) and gap.band[0] - thickness <= centre[0] <= gap.band[1] + thickness
                 seg = sorted((centre[1], tip[1]))
+            if arc.get("source_segmented_polyline"):
+                # A visible door swing cannot turn a 52pt doorway into
+                # a 1200pt fabricated wall or arbitrary closing chord.
+                # BOTH original painted wall ends must bound the chord
+                # at the real source door leaf's CLOSED position.
+                if not (
+                    _close(seg[0], gap.lo, 0.18)
+                    and _close(seg[1], gap.hi, 0.18)
+                ):
+                    continue
             if on_line and gap.lo - NOISE_PT <= seg[0] and seg[1] <= gap.hi + NOISE_PT:
                 candidates.append(gap_index)
         if len(candidates) == 1:
@@ -1152,6 +1166,40 @@ def build_layered_wall_doorway_room_rings(
     if sliding_leaf_frame_closure:
         gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
     arcs, _rejected_arcs = _swing_arcs(drawings)
+    segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
+    sourced_doorway_chords: tuple[Mapping[str, Any], ...] = ()
+    if dark_painted_wall_source:
+        from pb_source_segmented_door_swing_shadow import (
+            collect_source_black_segmented_door_swings,
+            propose_source_owned_doorway_chords,
+        )
+        segmented_witnesses = collect_source_black_segmented_door_swings(drawings)
+        # One shared wall-end and jamb rule for EVERY segmented source
+        # swing. Never close the whole oversized original _Gap.
+        sourced_doorway_chords = propose_source_owned_doorway_chords(
+            drawings, segmented_witnesses, gaps,
+        )
+        gaps.extend(
+            _Gap(
+                chord["horizontal"],
+                chord["wall_band_pdf_pts"],
+                chord["door_interval_pdf_pts"][0],
+                chord["door_interval_pdf_pts"][1],
+                chord["left_source_wall_path_indices"],
+                chord["right_source_wall_path_indices"],
+                True,
+            )
+            for chord in sourced_doorway_chords
+        )
+        arcs.extend({
+            "arc": witness["arc_native_path_indices"][0],
+            "arc_source_ids": witness["arc_native_path_indices"],
+            "leaf": witness["leaf_native_path_index"],
+            "centre": witness["source_hinge_point_pdf_pts"],
+            "closed_tip": witness["source_closed_leaf_tip_pdf_pts"],
+            "radius": witness["radius_pdf_pts"],
+            "source_segmented_polyline": True,
+        } for witness in segmented_witnesses)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
     closures: list[LayeredDoorwayClosure] = []
@@ -1177,7 +1225,10 @@ def build_layered_wall_doorway_room_rings(
             unresolved.append(gap)
             continue
         if swing is not None:
-            kind, native = KIND_SWING, (swing["arc"], swing["leaf"])
+            kind, native = KIND_SWING, tuple(sorted({
+                *swing.get("arc_source_ids", (swing["arc"],)),
+                swing["leaf"],
+            }))
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
         else:
@@ -1282,6 +1333,8 @@ def build_layered_wall_doorway_room_rings(
         wall_gap_count=len(gaps), unresolved_gap_count=len([g for g in unresolved if g.collinear]),
         non_strip_wall_fill_count=unsupported, unplaced_swing_count=unplaced, ambiguous_swing_count=ambiguous,
         sliver_region_count=sliver_count,
+        source_segmented_swing_witnesses=segmented_witnesses,
+        source_owned_doorway_chords=sourced_doorway_chords,
     )
 
 

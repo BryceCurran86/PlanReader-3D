@@ -210,7 +210,9 @@ def test_real_maryborough_green_exclusion_unblocks_bounded_original_floor_wall_t
     assert result.wall_strip_count==116
     assert len(result.rings)>0
     assert sum(r.status is EvidenceResolutionStatus.CANDIDATE for r in result.rings)==6
-    assert len(result.closures)==0  # doorways still await verified source witness
+    assert len(result.closures)==2  # bounded source-only doorway topology
+    assert all(closure.kind=="swing_doorway" for closure in result.closures)
+    assert all(not ring.metric_area_issued for ring in result.rings)
     assert all(not r.metric_area_issued and not r.commercial_projection_allowed
                for r in result.rings)
     assert all(all(0<=i<len(drawings) for i in r.bounding_wall_path_indices)

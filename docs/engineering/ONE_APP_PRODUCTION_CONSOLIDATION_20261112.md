@@ -151,3 +151,39 @@ At least **182 combined original room/wall/door/net-wall regression tests
 passed** with private original provisioning (prior to this wording update).
 No private PDF, original signed quantity, customer record or frozen120 gold
 was modified.
+
+## Generic segmented-door source witnesses and bounded topology chords
+
+Owner explicitly rejected programming D07/D08/D13 individually. The
+ORIGINAL room source pipeline now has ONE reusable source-native detector:
+`pb_source_segmented_door_swing_shadow.collect_source_black_segmented_door_swings`
+recognises a connected black quarter-swing drawn as consecutive original
+PDF line paths, with a UNIQUE separate radial leaf. It yields original
+path indices, hinge, OPEN tip and CLOSED leaf position. No door IDs or
+project-specific coordinates are embedded in that code.
+
+`propose_source_owned_doorway_chords` consumes those normalized source
+witnesses, original black wall-end and jamb strokes on BOTH sides and
+a bounded parent wall-band interruption to build ONLY the local actual
+door-width topology chord. The source proves the real closed endpoints;
+it is NOT the full large PDF gap and does NOT create a physical wall
+through a doorway. An existing source threshold line may be included
+but is **not required**, because architects differ in door symbols.
+The common gate works with horizontal and vertical swing openings and
+variable source door widths. A drawing missing a supporting wall end or
+with multiple competing band owners abstains instead of guessing.
+
+**Source replay, original Maryborough p7/A110**: 12 segmented swing-plus-leaf
+witnesses, **2** corroborated bounded topology-doorway closures, including
+PWD D13, other ten do not meet current source wall-end proof. 116 traced
+black wall strips; six prior provisional topology rings; no source FIRM
+room area, no customer-facing quantity and NO frozen120 score credit.
+These are source-topology observations, not 2 independently authenticated
+physical door/host/height quantities. Wall above the authenticated frame
+to actual ceiling height remains the separate original net-wall rule.
+
+The segmented black-line detector is one **input adapter** for a shared
+physical doorway source gate. Other CAD representations (native bezier
+swing, slider, stacker, fixed opening, door schedule/host) require their
+own source evidence adapters, NOT a bespoke hardcoded per-door fix.
+A single geometry/host/finished-face authority must decide promotion.
