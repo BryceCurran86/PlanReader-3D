@@ -26,7 +26,9 @@ def test_synthetic_inventory_keeps_fills_off_the_wall_list(tmp_path):
     assert inventory["hosted_opening_authenticated"] is False
     assert inventory["face_count"] == packet["topology_face_receipts"]["receipt_count"]
     assert inventory["opening_count"] == packet["virtual_fill_count"] >= 1
+    assert inventory["unique_jamb_hosted_opening_count"] >= 1
     assert all(not opening["physical_wall"] for opening in inventory["openings"])
+    assert all(face["endpoint_status"] == "UNIQUE" for face in inventory["faces"])
     assert all(opening["door_panel_is_not_wall"] for opening in inventory["openings"])
     face_ids = {face["item_id"] for face in inventory["faces"]}
     for fill in packet["virtual_wall_fills"]:

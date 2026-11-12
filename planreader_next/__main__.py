@@ -89,6 +89,10 @@ def main() -> int:
         "--stroke-pairs", action="store_true",
         help="Opt in to unlabelled stroke-pair wall faces (still topology-only)",
     )
+    walls.add_argument(
+        "--with-section-page", type=int,
+        help="Opt in: intersect GPT source A-A cut with native plan-face ink",
+    )
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
     takeoff.add_argument("--selection", type=Path, required=True)
@@ -145,6 +149,16 @@ def main() -> int:
             result = propose_room_enclosures(
                 page, args.pdf, stroke_pair_wall_faces=args.stroke_pairs,
             )["source_wall_inventory"]
+            if args.with_section_page is not None:
+                from .opening_hosts import native_face_cut_witnesses
+                from .section_scope import source_section_cut
+
+                cut = source_section_cut(
+                    page, load_native_page(args.pdf, args.with_section_page),
+                )
+                result["native_face_cut_witnesses"] = native_face_cut_witnesses(
+                    page, result["faces"], cut["cut_axis_pdf_pts"],
+                )
         elif args.mode == "heights":
             from .height_evidence import height_evidence_inventory
             page = load_native_page(args.pdf, args.page)
@@ -262,6 +276,12 @@ def main() -> int:
                     "face_count": result["face_count"],
                     "opening_count": result["opening_count"],
                     "region_locator_count": result["region_locator_count"],
+                    "unique_jamb_hosted_opening_count": result.get(
+                        "unique_jamb_hosted_opening_count", 0
+                    ),
+                    "native_face_cut_witness_count": (
+                        (result.get("native_face_cut_witnesses") or {}).get("witness_count")
+                    ),
                     "topology_only": True,
                     "commercial_publishable": False,
                     "review_required": True,

@@ -8,6 +8,7 @@ from .rcp_zone_scope import propose_rcp_source_zone_rectangles, associate_review
 from .section_scope import source_section_cut, section_cut_region_height_candidates
 from .topology_faces import native_finished_face_receipts
 from .opening_figures import pair_opening_figures
+from .opening_hosts import native_face_cut_witnesses, native_face_endpoints, pair_opening_hosts
 from .wall_inventory import inventory_source_walls
 from .engine import NativePage, SourceConflict, inspect_page, load_native_page, measure_page
 from .suggest import suggest_room_bindings
@@ -23,4 +24,7 @@ __all__ = [
     "native_finished_face_receipts",
     "inventory_source_walls",
     "pair_opening_figures",
+    "pair_opening_hosts",
+    "native_face_endpoints",
+    "native_face_cut_witnesses",
 ]

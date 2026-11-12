@@ -14,6 +14,7 @@ from shapely.ops import unary_union
 from .engine import NativePage
 from .hash_chain import _FACE_PT, bind_polygon_hash_axes
 from .opening_figures import pair_opening_figures
+from .opening_hosts import native_face_cut_witnesses, native_face_endpoints, pair_opening_hosts
 from .topology_faces import _path_index_from_segment_ref, native_finished_face_receipts
 
 
@@ -83,6 +84,8 @@ def inventory_source_walls(
     page: NativePage,
     regions: Sequence[dict[str, Any]],
     fills: Sequence[dict[str, Any]],
+    *,
+    cut_axis_pdf_pts: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Stable native wall/opening/region inventory, topology-only."""
     receipts = native_finished_face_receipts(page, regions)
@@ -105,6 +108,7 @@ def inventory_source_walls(
             role, reason = "ABSTAIN", "edge_geometry_missing"
         else:
             role, reason = _face_role(midpoint, item["region_id"], polygons, union)
+        ends = native_face_endpoints(page, item["face_segment_ref"])
         faces.append({
             "item_id": item["item_id"],
             "item_kind": item["item_kind"],
@@ -114,6 +118,9 @@ def inventory_source_walls(
             "face_role_hypothesis": role,
             "face_role_reason": reason,
             "interrupted_by_opening_ids": interrupting,
+            "endpoint_a_pdf_pts": ends["endpoint_a_pdf_pts"],
+            "endpoint_b_pdf_pts": ends["endpoint_b_pdf_pts"],
+            "endpoint_status": ends["endpoint_status"],
             "physical_wall_authenticated": False,
             "finished_face_authenticated": False,
             "topology_only": True,
@@ -121,6 +128,8 @@ def inventory_source_walls(
 
     figure_pairs = pair_opening_figures(page, fills)
     pair_by_id = {item["closure_id"]: item for item in figure_pairs}
+    host_pairs = pair_opening_hosts(page, fills, faces)
+    host_by_id = {item["closure_id"]: item for item in host_pairs}
     reserved_opening_figures = {
         ref
         for item in figure_pairs
@@ -142,6 +151,7 @@ def inventory_source_walls(
             and (not host_regions or face["region_id"] in host_regions)
         ]
         pair = pair_by_id.get(fill["closure_id"], {})
+        host = host_by_id.get(fill["closure_id"], {})
         openings.append({
             "closure_id": fill["closure_id"],
             "kind": fill.get("kind"),
@@ -156,6 +166,12 @@ def inventory_source_walls(
             "pair_status": pair.get("pair_status", "NONE"),
             "pair_reason": pair.get("pair_reason", "no_unique_opening_figure"),
             "opening_width_is_not_wall_length": True,
+            "jamb_segment_refs": list(host.get("jamb_segment_refs") or []),
+            "wall_end_segment_refs": list(host.get("wall_end_segment_refs") or []),
+            "jamb_hosted_face_item_ids": list(host.get("jamb_hosted_face_item_ids") or []),
+            "jamb_stations_pdf_pts": list(host.get("jamb_stations_pdf_pts") or []),
+            "host_status": host.get("host_status", "NONE"),
+            "host_reason": host.get("host_reason", "no_unique_jamb_pair"),
             "host_wall_authenticated": False,
             "physical_opening_authenticated": False,
             "physical_wall": False,
@@ -213,7 +229,12 @@ def inventory_source_walls(
         "openings": openings,
         "opening_count": len(openings),
         "paired_opening_figure_count": sum(item["pair_status"] == "UNIQUE" for item in openings),
+        "unique_jamb_hosted_opening_count": sum(item["host_status"] == "UNIQUE" for item in openings),
         "reserved_opening_figure_word_refs": sorted(reserved_opening_figures),
+        "native_face_cut_witnesses": (
+            native_face_cut_witnesses(page, faces, cut_axis_pdf_pts)
+            if cut_axis_pdf_pts is not None else None
+        ),
         "region_locators": locators,
         "region_locator_count": len(locators),
         "topology_face_receipts": receipts,
