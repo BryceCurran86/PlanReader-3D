@@ -81,3 +81,21 @@ def test_customer_veto_does_not_mutate_original_source_inventory():
             claim, workspace_id=1, project_id="project-1"
         )
     assert (claim.floor_finish_quantity_evidence, original.metadata) == before
+
+
+def test_blocked_source_identifier_is_not_disclosed_in_customer_error():
+    secret = "private-source-quantity-id-should-never-appear"
+    blocked = replace(_blocked_positive(), quantity_id=secret)
+    with pytest.raises(SourceClosedRunConflictError) as caught:
+        _project((blocked,))
+    assert "retains unresolved blockers" in str(caught.value)
+    assert secret not in str(caught.value)
+
+
+def test_duplicate_source_identifier_is_not_disclosed_in_customer_error():
+    secret = "private-duplicate-quantity-id-should-never-appear"
+    first = replace(_quantity(), quantity_id=secret)
+    with pytest.raises(SourceClosedRunConflictError) as caught:
+        _project((first, first))
+    assert "duplicate_original_floor_finish_quantity_id" in str(caught.value)
+    assert secret not in str(caught.value)

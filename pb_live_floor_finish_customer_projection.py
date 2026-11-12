@@ -135,7 +135,7 @@ def project_live_floor_finish_customer_rows(
             )
         if source_id in original_quantity_ids:
             raise SourceClosedRunConflictError(
-                f"duplicate original floor-finish quantity id in customer projection: {source_id}"
+                "duplicate_original_floor_finish_quantity_id"
             )
         original_quantity_ids.add(source_id)
         # A numeric original quantity retaining unresolved producer blockers
@@ -145,8 +145,7 @@ def project_live_floor_finish_customer_rows(
         # completeness even if another independent FIRM member is valid.
         if not original.abstained and original.value is not None and original.blocking_reasons:
             raise SourceClosedRunConflictError(
-                "numeric floor-finish source quantity retains unresolved blockers: "
-                f"{source_id}"
+                "numeric floor-finish source quantity retains unresolved blockers"
             )
 
     quantities = tuple(
