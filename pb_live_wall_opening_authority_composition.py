@@ -13,7 +13,7 @@ propositions remain independently fail-closed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -85,6 +85,7 @@ class LiveOpeningHostFrameTrace:
     record_id: Optional[str]
     host_wall_id: Optional[str]
     whole_wall_candidate_ids: tuple[str, ...]
+    whole_wall_frame_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -487,6 +488,33 @@ def compose_live_wall_opening_authority(
             opening_identity_id=opening_record.record_id,
         )
 
+    binding_producer.drop_borrowed_mixed_scope_hosts()
+    by_opening = {
+        key[-1]: result
+        for key, result in binding_producer.published_results().items()
+    }
+    refreshed_traces: list[LiveOpeningHostTrace] = []
+    for trace in opening_traces:
+        result = (
+            by_opening.get(trace.opening_identity_id)
+            if trace.opening_identity_id is not None else None
+        )
+        if result is None:
+            refreshed_traces.append(trace)
+            continue
+        record = result.record
+        refreshed_traces.append(replace(
+            trace,
+            status=result.status,
+            reason_codes=tuple(result.reason_codes),
+            record_id=None if record is None else record.record_id,
+            host_wall_id=None if record is None else record.host_wall_id,
+            member_wall_candidate_ids=(
+                () if record is None else tuple(record.member_wall_candidate_ids)
+            ),
+        ))
+    opening_traces = refreshed_traces
+
     binding_authority = binding_producer.authority()
     frame_producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical_opening_authority,
@@ -526,6 +554,9 @@ def compose_live_wall_opening_authority(
                     tuple(evidence.whole_wall_candidate_ids)
                     if evidence is not None
                     else ()
+                ),
+                whole_wall_frame_id=(
+                    evidence.whole_wall_frame_id if evidence is not None else None
                 ),
             )
         )

@@ -163,6 +163,34 @@ def test_unauthenticated_host_cannot_receive_the_2100_assumption():
     assert composition.canonical_openings[0].area_m2 is None
 
 
+def test_framed_whole_wall_identity_authenticates_external_role_when_host_id_is_opening_scoped():
+    composition = apply_live_external_door_height_estimates(
+        composition=_composition(
+            _bare_external_door(
+                host_wall_id="opening_host_binding_group_abc",
+                wall_local_frame_id="whole-wall-frame-1",
+            )
+        ),
+        whole_wall_role_composition=_roles("whole-wall-frame-1"),
+    )
+    opening = composition.canonical_openings[0]
+    assert opening.area_basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert opening.external_wall_role_record_id == "role-whole-wall-frame-1"
+
+
+def test_conflicting_host_and_frame_external_roles_abstain():
+    composition = apply_live_external_door_height_estimates(
+        composition=_composition(
+            _bare_external_door(
+                host_wall_id="wall-1",
+                wall_local_frame_id="wall-2",
+            )
+        ),
+        whole_wall_role_composition=_roles("wall-1", "wall-2"),
+    )
+    assert composition.canonical_openings[0].area_m2 is None
+
+
 def test_unverified_schedule_height_blocks_the_2100_fallback():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(

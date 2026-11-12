@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from stat import S_ISREG
+import sys
 import tempfile
 from typing import Callable, Iterable
 
@@ -43,9 +44,14 @@ def _assert_published_report_unchanged(
     A separate samefile() followed by Path.read_bytes() permits a same-byte
     path replacement between those operations to masquerade as our report.
     Do not follow a raced symlink or trust a byte match from another inode.
+
+    Windows can report different ctime values via path and handle APIs for
+    the same unchanged NTFS file. Keep each API's ctime stable independently;
+    all other identity/content fields must still agree across both APIs.
+    POSIX also retains cross-API ctime equality.
     """
     fields = ("st_dev", "st_ino", "st_mode", "st_nlink",
-              "st_size", "st_mtime_ns", "st_ctime_ns")
+              "st_size", "st_mtime_ns")
     try:
         staged = staged_path.lstat()
         before = output.lstat()
@@ -62,7 +68,17 @@ def _assert_published_report_unchanged(
         staged_after = staged_path.lstat()
     except OSError as exc:
         raise ValueError("original-source diagnostic output changed during publication") from exc
-    if actual != expected_bytes or any(
+    stable_path_ctime = all(
+        snapshot.st_ctime_ns == staged.st_ctime_ns
+        for snapshot in (before, after, staged_after)
+    )
+    stable_descriptor_ctime = opened.st_ctime_ns == completed.st_ctime_ns
+    comparable_ctime = (
+        sys.platform == "win32" or opened.st_ctime_ns == staged.st_ctime_ns
+    )
+    if not staged.st_ino or actual != expected_bytes or not (
+        stable_path_ctime and stable_descriptor_ctime and comparable_ctime
+    ) or any(
         getattr(snapshot, field) != getattr(staged, field)
         for snapshot in (before, opened, completed, after, staged_after)
         for field in fields

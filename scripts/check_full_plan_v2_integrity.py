@@ -138,11 +138,7 @@ def _json(path: Path) -> Any:
         after = path.lstat()
     except OSError as exc:
         raise ValueError("frozen JSON changed or became inaccessible") from exc
-    if len(raw) != before.st_size or any(
-        getattr(snapshot, field) != getattr(before, field)
-        for snapshot in (opened, completed, after)
-        for field in _SOURCE_IDENTITY_FIELDS
-    ):
+    if len(raw) != before.st_size or not _stable_identity_snapshots(before, opened, completed, after):
         raise ValueError("frozen JSON changed during verification")
     return json.loads(
         raw.decode("utf-8"),
@@ -170,6 +166,27 @@ _SOURCE_IDENTITY_FIELDS = (
     "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
     "st_mtime_ns", "st_ctime_ns",
 )
+
+
+def _cross_descriptor_identity_fields() -> tuple[str, ...]:
+    """Keep POSIX ctime; Windows cross-API NTFS ctime is not stable."""
+    if os.name == "nt":
+        return tuple(field for field in _SOURCE_IDENTITY_FIELDS if field != "st_ctime_ns")
+    return _SOURCE_IDENTITY_FIELDS
+
+
+def _stable_identity_snapshots(before: os.stat_result, opened: os.stat_result, completed: os.stat_result, after: os.stat_result) -> bool:
+    """Preserve ctime within each Windows stat API, not across unlike APIs."""
+    if before.st_ino <= 0:
+        return False
+    snapshots = (opened, completed, after)
+    if any(getattr(snapshot, field) != getattr(before, field)
+           for snapshot in snapshots for field in _cross_descriptor_identity_fields()):
+        return False
+    if os.name == "nt":
+        return (before.st_ctime_ns == after.st_ctime_ns
+                and opened.st_ctime_ns == completed.st_ctime_ns)
+    return True
 
 
 def _present_source_digest(path: Path) -> tuple[str, int] | None:
@@ -202,11 +219,7 @@ def _present_source_digest(path: Path) -> tuple[str, int] | None:
         after = path.lstat()
     except OSError as exc:
         raise ValueError("changed or became inaccessible during integrity verification") from exc
-    if size != before.st_size or any(
-        getattr(snapshot, field) != getattr(before, field)
-        for snapshot in (opened, completed, after)
-        for field in _SOURCE_IDENTITY_FIELDS
-    ):
+    if size != before.st_size or not _stable_identity_snapshots(before, opened, completed, after):
         raise ValueError("changed during integrity verification")
     return digest.hexdigest(), size
 

@@ -3854,6 +3854,11 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 )
+                # Keep the producer's complete finish inventory, including
+                # blocked or competing receipts, for read-only coverage.
+                _coverage_quantities.extend(
+                    getattr(physical_wall_result, "floor_finish_quantity_evidence", ())
+                )
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls

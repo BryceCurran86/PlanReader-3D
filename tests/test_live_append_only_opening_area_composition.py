@@ -1030,3 +1030,16 @@ def test_application_recovery_needs_a_positive_original_floor_plan_role(
     assert collect_live_physical_net_wall_claim(
         path, pages=(0,), recover_supported_opening_areas=True,
     ) == baseline
+
+
+def test_recover_source_opening_areas_keeps_g17_capture_and_figured_issuer():
+    """The recover producer is the live 2127 STACKER path; keep it explicit."""
+    import inspect
+
+    from pb_live_append_only_opening_area_composition import recover_source_opening_areas
+
+    body = inspect.getsource(recover_source_opening_areas)
+    assert "raster_paired_outer_faces_shadow=True" in body
+    assert "include_unmeasured_ink_closed_flanks_shadow=True" in body
+    assert "source_fragment_roles_shadow=True" in body
+    assert "publish_live_opening_area_quantities(voids)" in body

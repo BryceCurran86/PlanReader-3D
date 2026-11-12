@@ -89,6 +89,12 @@ RASTER_CORNER_LEG_HOST_RESOLVED = "raster_corner_leg_host_resolved"
 OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED = (
     "opening_local_supplemental_source_band_host_resolved"
 )
+OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER = (
+    "opening_local_supplemental_shared_host_member"
+)
+OPENING_LOCAL_SUPPLEMENTAL_WHOLE_CANDIDATE_ROLE_UNMAPPED = (
+    "opening_local_supplemental_whole_candidate_role_unmapped"
+)
 MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS = (
     "multiple_authenticated_raster_source_primitive_hosts"
 )
@@ -298,6 +304,51 @@ def _blocked_universe(
         reason_codes=tuple(dict.fromkeys(reasons or ("host_wall_universe_unavailable",))),
         equivalence=None,
     )
+
+
+def _physical_source_scope(record: OpeningHostBindingRecord) -> tuple[str, str, str, str, str]:
+    """Exact document/revision/SHA/snapshot/page universe for one host record."""
+    return (
+        str(record.document_id),
+        str(record.revision_id),
+        str(record.source_sha256),
+        str(record.snapshot_id),
+        str(record.page_id),
+    )
+
+
+def _exclusive_mixed_scope_host_results(
+    results: Mapping[_BindingKey, OpeningHostBindingResult],
+) -> dict[_BindingKey, OpeningHostBindingResult]:
+    """Keep mixed-scope hosts only when at least one same-source member is unshared."""
+    owners: dict[tuple[str, str, str, str, str, str], set[str]] = {}
+    for result in results.values():
+        record = result.record
+        if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                or record is None):
+            continue
+        opening_id = str(record.opening_identity_id)
+        scope = _physical_source_scope(record)
+        for member_id in record.member_wall_candidate_ids:
+            owners.setdefault((*scope, str(member_id)), set()).add(opening_id)
+    exclusive: dict[_BindingKey, OpeningHostBindingResult] = {}
+    for key, result in results.items():
+        record = result.record
+        if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                or record is None
+                or OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED
+                not in result.reason_codes
+                or not record.member_wall_candidate_ids
+                or any(
+                    len(owners.get((*_physical_source_scope(record), str(member_id)), ())) == 1
+                    for member_id in record.member_wall_candidate_ids
+                )):
+            exclusive[key] = result
+            continue
+        exclusive[key] = _blocked_binding(
+            OPENING_LOCAL_SUPPLEMENTAL_SHARED_HOST_MEMBER,
+        )
+    return exclusive
 
 
 def _blocked_binding(
@@ -948,7 +999,20 @@ class OpeningHostBindingProducer:
         self._results[key] = result
         return result
 
+    def drop_borrowed_mixed_scope_hosts(self) -> None:
+        """Demote mixed-scope hosts whose every member is already another host.
+
+        A shared pier may appear beside two openings. It cannot uniquely own
+        both missing flanks. Ordinary/default hosts that still have at least
+        one unshared member stay. No first/nearest ranking.
+        """
+        self._results = _exclusive_mixed_scope_host_results(self._results)
+
+    def published_results(self) -> Mapping[_BindingKey, OpeningHostBindingResult]:
+        return MappingProxyType(dict(self._results))
+
     def authority(self) -> "OpeningHostBindingAuthority":
+        self.drop_borrowed_mixed_scope_hosts()
         return OpeningHostBindingAuthority(
             MappingProxyType(dict(self._results)),
             _seal=_BINDING_AUTHORITY_SEAL,
@@ -3788,6 +3852,17 @@ def _resolve_opening_local_mixed_scope_source_band(
             EvidenceResolutionStatus.ABSTAINED, (),
             ("opening_local_supplemental_source_not_used",),
         )
+    if (resolution.status is EvidenceResolutionStatus.CORROBORATED
+            and resolution.bands):
+        member_ids = {member_id for band in resolution.bands for member_id in band.member_ids}
+        by_id = {str(record.wall_candidate_id): record for record in local}
+        for member_id in member_ids:
+            record = by_id.get(str(member_id))
+            if record is None or not _candidate_host_roles(record, opening):
+                return _HostBandResolution(
+                    EvidenceResolutionStatus.CORROBORATED, (),
+                    (OPENING_LOCAL_SUPPLEMENTAL_WHOLE_CANDIDATE_ROLE_UNMAPPED,),
+                )
     return resolution
 
 

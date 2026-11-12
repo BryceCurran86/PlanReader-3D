@@ -1017,7 +1017,16 @@ def compose_live_physical_opening_voids(
                     wall_local_frame_id=(
                         str(void_record.wall_local_frame_id)
                         if void_record is not None
-                        else None
+                        else (
+                            str(frame_trace.whole_wall_frame_id)
+                            if (
+                                frame_trace is not None
+                                and frame_trace.status
+                                is EvidenceResolutionStatus.CORROBORATED
+                                and frame_trace.whole_wall_frame_id
+                            )
+                            else None
+                        )
                     ),
                     profile_kind=(
                         str(void_record.profile_kind)

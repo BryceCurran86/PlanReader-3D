@@ -103,6 +103,23 @@ def test_original_source_recovery_reaches_workspace_customer_output(monkeypatch)
                    if o.canonical_opening_id == added[0].input_entity_ids[0])
     assert opening.host_binding_record_id in added[0].evidence_ids
     assert opening.figured_area_record_id == added[0].metadata["measurement_record_id"]
+    assert opening.area_basis == "figured_opening_label"
+    assert added[0].metadata["area_basis"] == "figured_opening_label"
+    assert added[0].metadata["commercial_projection_allowed"] is True
+    assert added[0].value == opening.area_m2
+    # Recover publishes the compact two-axis STACKER product. It must not mint
+    # the owner 2100 mm height assumption, including for internal 870 doors.
+    from pb_external_door_height_estimate_policy import (
+        OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
+    )
+    assert all(
+        str(item.metadata.get("area_basis") or "") != OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+        for item in claim.opening_quantity_evidence
+    )
+    assert all(
+        str(item.area_basis or "") != OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+        for item in claim.canonical_openings
+    )
 
     workspace_rows = [dict(zip(auto.TAKEOFF_ROW_FIELDS, row))
                       for row in app._live_opening_takeoff_rows_by_workspace[1]]

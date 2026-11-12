@@ -1,5 +1,6 @@
 """Original-source replay publication is strictly create-only and fail-closed."""
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from tools import gpt3_safe_original_report_output as pub
 
@@ -166,7 +167,7 @@ def test_competing_report_after_second_input_verification_keeps_other_writer(
 
 def test_uncontested_new_report_still_keeps_exact_original_utf8_bytes(tmp_path):
     output = tmp_path / "new.json"
-    payload = '{"state":"verified","note":"café"}\n'
+    payload = '{"state":"verified","note":"caf?"}\n'
     pub.write_new_diagnostic(output, payload, protected_roots=(None,))
     assert output.read_bytes() == payload.encode("utf-8")
 
@@ -181,7 +182,7 @@ def test_same_byte_report_replacement_between_identity_and_read_is_rejected(
     source = tmp_path / "original.pdf"
     payload = '{"verified":true}\n'
     source.write_bytes(b"%PDF-private-source-unchanged")
-    replacement.write_text(payload, encoding="utf-8")
+    replacement.write_bytes(payload.encode("utf-8"))
     real_samefile = Path.samefile
     real_open = pub.os.open
     swapped = False
@@ -230,21 +231,137 @@ def test_same_byte_report_replacement_after_descriptor_read_is_rejected(
     output = tmp_path / "report.json"
     replacement = tmp_path / "replacement.json"
     payload = '{"verified":"same-bytes"}\n'
-    replacement.write_text(payload, encoding="utf-8")
-    real_fstat = pub.os.fstat
-    reads = 0
+    replacement.write_bytes(payload.encode("utf-8"))
+    real_lstat = Path.lstat
+    checks = 0
 
-    def replace_on_completed_descriptor_stat(fd):
-        nonlocal reads
-        result = real_fstat(fd)
-        reads += 1
-        if reads == 2:
-            replacement.replace(output)
-        return result
+    def replace_before_post_read_path_stat(path, *args, **kwargs):
+        nonlocal checks
+        observed = real_lstat(path, *args, **kwargs)
+        if path == output:
+            checks += 1
+            if checks == 2:
+                # Windows refuses replacement while the descriptor is open.
+                # Race after it closes, before the required path recheck.
+                replacement.replace(output)
+                return real_lstat(path, *args, **kwargs)
+        return observed
 
-    monkeypatch.setattr(pub.os, "fstat", replace_on_completed_descriptor_stat)
+    monkeypatch.setattr(Path, "lstat", replace_before_post_read_path_stat)
     with pytest.raises(ValueError, match="output changed"):
         pub.write_new_diagnostic(output, payload, protected_roots=(None,))
-    assert reads >= 2
+    assert checks >= 2
     assert output.read_bytes() == payload.encode("utf-8")
     assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+class _StatView:
+    """Change one observed stat field without discarding nanosecond fields."""
+
+    def __init__(self, observed, **changes):
+        self.observed = observed
+        self.changes = changes
+
+    def __getattr__(self, field):
+        return self.changes.get(field, getattr(self.observed, field))
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_descriptor_ctime_offset_is_accepted_only_on_windows(
+    tmp_path, monkeypatch, platform,
+):
+    """NTFS path and handle ctime can disagree for an unchanged hard link."""
+    monkeypatch.setattr(pub, "sys", SimpleNamespace(platform=platform), raising=False)
+    real_fstat = pub.os.fstat
+    monkeypatch.setattr(
+        pub.os, "fstat",
+        lambda fd: _StatView(real_fstat(fd), st_ctime_ns=123456789),
+    )
+    output = tmp_path / "report.json"
+    payload = '{"diagnostic":"caf\u00e9"}\n'
+    if platform == "win32":
+        pub.write_new_diagnostic(output, payload, protected_roots=())
+        assert output.read_bytes() == payload.encode("utf-8")
+    else:
+        with pytest.raises(ValueError, match="output changed"):
+            pub.write_new_diagnostic(output, payload, protected_roots=())
+        assert not output.exists()
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+@pytest.mark.parametrize("field", [
+    "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns",
+])
+def test_windows_descriptor_identity_and_content_fields_still_reject_changes(
+    tmp_path, monkeypatch, field,
+):
+    monkeypatch.setattr(pub, "sys", SimpleNamespace(platform="win32"), raising=False)
+    real_fstat = pub.os.fstat
+
+    def different_field(fd):
+        observed = real_fstat(fd)
+        return _StatView(observed, **{field: getattr(observed, field) + 1})
+
+    monkeypatch.setattr(pub.os, "fstat", different_field)
+    output = tmp_path / "report.json"
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, "unchanged bytes", protected_roots=())
+    assert not output.exists()
+
+
+def test_windows_descriptor_ctime_change_during_read_still_rejects(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(pub, "sys", SimpleNamespace(platform="win32"), raising=False)
+    real_fstat = pub.os.fstat
+    calls = 0
+
+    def changing_ctime(fd):
+        nonlocal calls
+        calls += 1
+        return _StatView(real_fstat(fd), st_ctime_ns=1000 + calls)
+
+    monkeypatch.setattr(pub.os, "fstat", changing_ctime)
+    output = tmp_path / "report.json"
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, "unchanged bytes", protected_roots=())
+    assert calls == 2
+    assert not output.exists()
+
+
+def test_windows_path_ctime_change_during_read_still_rejects(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(pub, "sys", SimpleNamespace(platform="win32"), raising=False)
+    real_lstat = Path.lstat
+    output = tmp_path / "report.json"
+    calls = 0
+
+    def changing_path_ctime(path, *args, **kwargs):
+        nonlocal calls
+        observed = real_lstat(path, *args, **kwargs)
+        if path == output:
+            calls += 1
+            if calls == 2:
+                return _StatView(observed, st_ctime_ns=observed.st_ctime_ns + 1)
+        return observed
+
+    monkeypatch.setattr(Path, "lstat", changing_path_ctime)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, "unchanged bytes", protected_roots=())
+    assert calls >= 2
+    assert not output.exists()
+
+
+def test_windows_missing_inode_cannot_authenticate_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(pub, "sys", SimpleNamespace(platform="win32"), raising=False)
+    real_lstat = Path.lstat
+    real_fstat = pub.os.fstat
+    monkeypatch.setattr(
+        Path, "lstat", lambda path, *a, **kw: _StatView(real_lstat(path, *a, **kw), st_ino=0),
+    )
+    monkeypatch.setattr(pub.os, "fstat", lambda fd: _StatView(real_fstat(fd), st_ino=0))
+    output = tmp_path / "report.json"
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, "unchanged bytes", protected_roots=())
+    assert not output.exists()

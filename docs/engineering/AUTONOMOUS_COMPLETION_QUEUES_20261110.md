@@ -1,215 +1,98 @@
-# Autonomous completion queues — 10 November 2026
+# Autonomous completion queues — refreshed 11 November 2026 (Brisbane)
 
-Owner: Bryce. Execution owners: GPT MAX, Cursor, Claude and AntiGravity.
-Coordination: [#4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135).
-Read AGENTS.md and the engineering playbook alongside this queue. Live claims,
-commit heads and observed results supersede the checkpoints below. This is an
-execution directive, not evidence of completed work or a published score.
+Owner: Bryce. Available execution owners through 12 November: GPT MAX, GPT Integration Review and Cursor; Claude and AntiGravity return Friday 13 November.
+Claude **and AntiGravity** are unavailable until Friday 13 November 2026; preserve both agents' branches without assigning them new tasks before then.
+GPT1/GPT2/GPT3 remain retired. Coordination and latest exact-head claims: [#4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135).
+Read [AGENTS.md](../../AGENTS.md), the engineering playbook, and the latest #4135 comments before implementation. New authenticated observations supersede this dated checkpoint; a posted instruction does **not** start or maintain an external agent.
 
-## Execute continuously without waiting for optional review
+## Priority override — deliver the frozen 120 DEVELOPMENT score (11 November, after evidence audit)
 
-For each task, read the live claim, trace the actual source/authority/issuer/
-customer path, record the bounded architecture decision, implement, run meaningful
-focused positives/negatives, and validate against the original where applicable.
-Do not stop after the architecture report or ask MAX to authorize the next
-already-assigned implementation step.
+**Current available agents: THREE = GPT MAX, GPT Integration Review (a separate hourly GPT agent), and Cursor.** Claude and AntiGravity are offline until Friday 13 November; keep their branches unmodified. This section supersedes the older two-agent references and feature backlog below until the first genuine four-project development result and first-failing gates are reported.
 
-When a coherent change is ready, freeze its full head SHA and submit its tests,
-source evidence and first remaining gate. While full CI or protected replay is
-pending, immediately work on the next independent task in a separate branch or
-worktree. Do not mutate the head being verified. Follow-ups stack on that head;
-their combined tree needs its own applicable acceptance checks.
+**Verified scoring-code rule:** `tools/report_gpt3_four_project_evidence.py::build_four_project_evidence_ledger` produces `development_suite_result` if and only if **all four original-source PDFs/packages pass SHA, sealed production quantity or source-owned ABSTAIN receipts, independent identity-map and complete customer bijection**. The four frozen manifests can remain `INCOMPLETE` for this *development* output; `PUBLISHED` official accuracy is separately withheld. Do not try to finish every trade, whole building or source-inventory reason as a prerequisite to the development result. Never replace missing executions with zeroes or fabricated receipts.
 
-When one object lacks evidence, preserve ABSTAIN/CONFLICT, post the exact missing
-evidence and next code/source action, and move to another actionable item in the
-same queue. An unresolved source object must not halt all engineering. An actual
-source/access requirement is a real blocker; an optional reviewer response is not.
-Do not repeat expensive original replays unchanged after the first failure is
-known. Before runtime limits, save a precise next-task checkpoint and pushed head.
+**Actual 11-Nov owner-PC diagnostic:** all ten authorized original PDFs are available; the corrected newer-integrated source digest verified 27 frozen/source files. A genuinely existing **3Laurel** sealed/map/customer packet independently reconciled under the existing ledger. In the selected 3Laurel-only input assembly, **Lot16, Maryborough, and Q5446 triplets were absent from that folder**; this does NOT mean their independent source outputs were never run or are globally missing. The protected Lot16 run 42813836160 PASSED (old eight+ninth); Q5446 actual source envelope and diagnostic 1/6 were verified; Maryborough three signed floor values and AntiGravity's reported Office GRID/Food Prep FPB positives exist but need final independent common-packet integration. Source completeness remains distinct from score readiness.
 
-Keep one current implementation claim per function. Cross-lane editing is allowed
-end-to-end, but first check for an active claim and coordinate narrow shared-file
-changes rather than racing. Never overwrite unexplained branches, worktrees or
-commits. Use one concise RESULT/HANDOFF with exact source/test/head evidence and
-the next claimed function. Comments do not awaken another agent session.
+**Two real Windows executable blockers independently found:** the **old root checkout** fails `_stable_original_digest` due Windows `st_ctime_ns` changing between lstat/fstat (a newer integration worktree has the platform-aware fix and verified all 27 relevant inputs). Even on that newer worktree, running the report CLI failed writing its create-only output at `tools/gpt3_safe_original_report_output.py::_assert_published_report_unchanged`, whose platform-neutral stat comparison still includes Windows ctime. Treat this as a **reproducible report-publication gate requiring field-by-field diagnosis**, not proof that originals actually changed. Never bypass safe publication or weaken same-file/swap/bytes guards to obtain a green score. The underlying read-only ledger produced an honest first-failure inventory.
 
-## Cursor — Lot16
+### Strict three-way assignment, no duplicate source extraction
 
-1. **Finish the all-source-role handoff.** Keep #4257 `e7da6fb3b3adaf875c87787c59835101a1498838`
-   and evaluation-only #4258 `005536971fcb6dbe3aa4e484b0c312d506cb1c39` fixed for
-   MAX's protected acceptance. Supply the commands and sanitized original role
-   receipt/customer counts. The structural role stays `sealed:false`, value-free
-   and `source_role_abstained:true`; no structural quantity or match is invented.
-   Do not rewrite the already passing receipt merely while its replay is pending.
-2. **Repair current corner pairing before further promotion.** #4260 checkpoint
-   `5c1097985b11f9bde9413d7c4089a0ed4a4ed45d` implements the owner's correction that
-   BOTH 2124 stackers meet in the corner. Preserve this correction. In
-   `PhysicalOpeningAuthority.raster_corner_leg_sibling_aperture` and
-   `_register_raster_corner_leg_candidates`, bind sibling cache and lookup to the
-   complete document/revision/SHA/snapshot/page and authenticated opening/pair
-   identity, not an aperture bbox alone. Identical coordinates on a second page
-   must not alter the first page's sibling. Reject competing/missing pairs.
-   Test both page-processing orders and different revisions.
-3. **Constrain shared-callout inheritance.** Trace `_label_ownership_gaps` into
-   `OpeningLabelDimensionProducer` and `OpeningLabelSemanticProducer`. Primary-leg
-   ownership remains ordinary ownership. Sibling inheritance requires the
-   independently authenticated shared corner-assembly/CRNR STACK callout; a plain
-   DOOR, WINDOW or BIFOLD label on one leg must not become the other leg's label.
-   Test direct-label conflicts, unrelated labels on the sibling, third assemblies,
-   foreign scope, duplicate pairings and the genuine both-2124 positive. Keep
-   normal recovery/customer/seal default-off until actual authority acceptance.
-4. **While checks run, advance an existing Lot16 host/frame case.** Trace one
-   original source case through W4 equivalence, physical host, installed frame,
-   kind and two-axis metric authority to the actual opening issuer/customer
-   output. Preserve piers and existing signed rows. If a source gate genuinely
-   cannot close, retain it and advance another supported case or step 5; do not
-   promote merely to create a quantity or count.
-5. **Audit Lot16 source-inventory publication reasons.** Prepare the evidence
-   table described below for all seven existing manifest reason codes. Establish
-   the actual disposition of measure-on-site glazing and the referenced roof/
-   engineering/stormwater dependency; do not assert either is closed without
-   evidence. This audit can run while any production head is pinned.
+1. **GPT Integration Review (THIRD agent):** immediately claim the Windows output writer integrity bug in `_assert_published_report_unchanged` on a **new** current-main branch. Reproduce on harmless temp reports with per-field lstat/fstat evidence; if Windows ctime is the only discrepancy, implement a platform-aware comparison while retaining nonzero inode, device, size, mode, link count, mtime, exact bytes and swap/symlink race negatives. Add Python 3.13/3.14 tests, open bounded PR, report exact first gate and results. Second task: sanity check original 3Laurel triplet/read-only reconciliation and hand off existing packet to MAX. Do NOT edit other agents' branches, Cursor's Lot16/Q evidence assembly, or MAX's Maryborough/four-project ledger.
+2. **Cursor:** stop unrelated structural/member/ceiling feature work **as the immediate score gate**; collect the **already executed** protected Lot16 and Q5446 sealed-run, complete identity-map and customer rows from their SHA-verified private runs into one private scoring assembly using source-preserving verified copy/receipt checks. Preserve original signed eight plus ninth, Q one genuine match/five value-free source-role abstentions and full six-SHA envelope, and their customer bijections. Do NOT create inferred records, re-run the completed native extraction, reissue Q gold, or modify frozen 120. If an existing receipt is absent, post exact file role and first missing authority; do not disguise absence.
+3. **GPT MAX:** own the authentic **Maryborough** signed three-floor and applicable existing original source-positive sealed/map/customer triplet, protect absent AntiGravity #4253 head. Verify its final source/issuer/customer chain independently (no off-branch synthetic results as proof). Merge the two source-backed assemblies with verified 3Laurel packet on one immutable integration head and execute the unchanged `build_four_project_evidence_ledger`. Report actual development score only on 4/4 reconciliation; otherwise report project-by-project first failing stage and what single artifact/authority remains. Handle #4274/#4263 reviews after this scoring gate, not as prerequisite.
+4. **Everyone:** no private PDFs, words, geometry coords, secrets or personal file paths in public repo/issues; only sanitized source SHA/status/quantity counts. Keep denominator 120 (27/24/63/6), source rights, signed Lot16 eight/Maryborough three entire customer bodies, 20k cap and 2.5pt snap. `DIAGNOSTIC_UNPUBLISHED` ≠ official `PUBLISHED`; do not advertise stale 40/120 as latest. No waiting for optional reviewer or offline agents; log exact [CLAIM]/[RESULT]/[BLOCKED] and immutable head on #4135. Comments and automation prompts are instructions, not evidence that another desktop agent has started running.
 
-Exit packet: both original roles authenticated, actual verified customer union,
-signed eight retained, genuinely appended rows identified, exact source map,
-source-negative results and the reason-code audit. New corner matches are an
-accuracy improvement; they are not a reason to delay a valid existing baseline.
+## Temporary owner availability and live result update — 11 November 2026 afternoon Brisbane
 
-## Claude — 3Laurel and the shared rotated-word recovery fix
+**Effective until Friday 13 November:** Claude **and AntiGravity are both unavailable** by owner confirmation. The three available implementation/review owners are **GPT MAX, GPT Integration Review, and Cursor** (current score-priority override above). Protect Claude #4263/#4267 and AntiGravity #4253 branch heads; do not request new execution or mandatory review from either absent agent. This temporary assignment supersedes the older “AntiGravity active” and “Claude alone unavailable” lines below. GitHub posts are not desktop agent launches.
 
-1. **Implement the already reviewed rotated-word recovery proposal now.** The
-   report at `69142642ae2b5770d478b05ba756d3b8868fdb09` and #4135 comment
-   `6755123020` establish x-only sorting in
-   `pb_font_glyph_mapping_corroboration_shadow.word_glyphs` as the bounded
-   recovery defect. Order by the PDF trace span's own direction/projection;
-   mixed/invalid directions or ambiguous character/font membership abstain.
-   Do not try alternate orders until a desired string matches. Preserve exact
-   spelling, two independently corroborated words per glyph, contradiction veto,
-   source scope, horizontal baseline and existing default-off controls.
-   Tests: 0/90/180/270 degrees, translation, shuffled/split spans, mixed direction,
-   wrong text, same font/source membership, determinism and no mutation.
-2. **Measure actual text trust, then freeze the new head.** Original recovery
-   of a width word is not proof all its glyphs are trusted. Report the existing
-   ledger's exact reason-code outcome and the next host gate, not a candidate
-   width as a measured customer value. Hand MAX the immutable commands/head for
-   protected original and signed-retention verification.
-3. **While that head runs, repair both #4256 diagnostic defects in a separate
-   follow-up.** `pb_elevation_source_owned_witness_adapter.read_source_owned_page`
-   must preserve actual closed filled subpaths: two disjoint rectangles in one
-   path must not become their enclosing phantom rectangle. In
-   `pb_elevation_label_kind_proposal_shadow.propose_kind_from_leader`, ambiguity
-   or conflicting kind evidence reaching the witnessed instance must survive
-   alongside a usable DOOR label. Use the concrete real-producer and pure-core
-   counterexamples in review `5834419211`; test both input orders and unrelated
-   labels. Keep all diagnostic results candidate-only/default-off.
-4. **Advance the actual kind/host/frame chain.** Reuse the existing authorities;
-   do not enlarge snap/contact tolerances to bridge unowned face stubs or a wall
-   face continuing across the aperture. Trace the physical meaning through
-   original source evidence. If the selected opening remains unsupported,
-   retain ABSTAIN and take the next independently source-supported 3Laurel case
-   or step 5, without waiting for a review of the blocked one.
-5. **Audit 3Laurel source-inventory reasons while CI runs.** Cover all eight
-   recorded gaps: internal/external wall faces and cladding, roof, structural
-   members, secondary soffit/beam faces, tile niches/returns, wet-area tile scope
-   and internal openings. Supply source-backed dispositions, not blanket closure.
+- **Cursor MERGED #4281** at d7df62c6f and **#4282** at bcb80e97d. The latter carries Claude #4267's shadow code with preserved author lineage plus default-off, CANDIDATE-only publication consumer; #4267 itself remains an open draft and must be reconciled before closing. No new commercial FIRM/score from #4282.
+- **Cursor Lot16 ceiling/room-face first failing gate:** original page 3 W4/planar cycle extraction had 107 raw faces, 61 published, only LINEN and WC labels inside any raw face bounding box; the other labelled rooms have no enclosing authentic wall cycles. Missing face geometry prevents area/ceiling/wet-wall-tile issuance. Separate ordinary garage personnel 870 EXTERNAL flank remains ~11 pt disconnected, outside 2.5 pt snap; preserve ABSTAIN. Do not grow text boxes or fabricate closing faces. Next independent **Cursor** task: source-authenticated structural-member original-to-producer handoff (the structural source is present, but `StructuralMemberProducer.from_authenticated_evidence` has no live collect importer). Implement one bounded source-positive/negative only if its original scope/identity is proven; otherwise document first missing authority and advance another independent source-supported case. No merging candidate counts as new customer revenue.
+- **AntiGravity last head #4253 `042affde2`:** reported a local authenticated Office GRID ceiling 9.05352 m² and Food Prep FPB ceiling 13.270425 m², one customer row each; producer-owned dimension gate and duplicate-registry privacy repair pushed. These are **agent-reported local** source positives, not independent exact-head protected acceptance. GPT MAX may handle read-only code/retention and protected-original integration during absence; do not overwrite AntiGravity's branch. All **seven** failing exact-head source GitHub jobs 42901338637, 42901338078, 42901338464, 42901338343, 42901338452, 42901338169, 42901338182 were independently log-checked and show missing original PDF / SHA read in public runner. They are **provisioning failures**, not established quantity assertion regressions; generic Python CI succeeded. Protected source positive and immutable signed/customer retention are still required.
+- **GPT MAX priorities:** independent source/issuer/customer retention review of #4253 without editing the absent agent's branch, finish protected acceptance/rebase for #4274 (historic duplicate physical room seal veto), narrow #4263 glyph-retention check, and one fixed-head four-project sealed/identity/customer reconciliation. No official four-project score yet, and no repeat of already accepted protected Lot16 42813836160.
+- **Live PRs at this checkpoint:** four drafts only — #4253, #4263, #4267, #4274. No standalone current Cursor PR after merged #4282; independent work should be [CLAIM]ed in a new isolated branch. Preserve all old signed Lot16 eight and Maryborough three entire quantity/customer bodies, private PDFs, frozen120 and snap/primitive limits.
 
-Exit packet: reproducible 3Laurel source-role sealed/customer output and identity
-mapping, all newly promoted items backed by actual authorities, original source
-negatives, signed-retention proof and the reason-code audit. Do not wait for a
-formal MAX review to implement another authorized step.
+## Current integration checkpoint — do not rework completed gates
 
-## AntiGravity — Maryborough
+- **MERGED:** #4277 protected public-compute infrastructure, #4275 Claude corrected stack, #4276 source receipt/retention successor, #4265 scoped opening-host member guard, #4279 tests-only Lot16 retention and #4280 evaluation-only Q5446 six-source map. Related #4256/#4264 were incorporated via #4275. #4257/#4272/#4278 are closed/superseded. These are completed integration steps, not pending implementation work.
+- **Protected Lot16 run:** [42813836160](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/42813836160) PASSED at the pinned reviewed tree: 10 private originals SHA-verified, frozen 120 unchanged, 129 retention tests with 0 skips, old eight full signed quantity/customer bodies identical, default-OFF/ON identical, nine real opening quantities and nine verified customer rows, one separate value-free supporting abstention. **Not** a four-project official score; do not rerun the identical expensive gate.
+- **Q5446:** #4280 merged six-source identity-map envelope. The actual six-role diagnostic reconciled **1/6 matched, 5 missed, 5 value-free abstentions**, valid customer bijection and zero unsupported extras. Publication remains **DIAGNOSTIC_UNPUBLISHED**; all four inventory reasons remain. Do not report 1/6 as the official four-project score or re-extract unchanged inputs.
+- **Current open PRs:** four drafts — #4253 (AntiGravity Maryborough), #4263 (Claude rotated glyphs), #4267 (Claude aperture-equivalence candidate), #4274 (recovered duplicate-room seal veto) — plus **Cursor #4281**, open and non-draft, at head `72354ffc0`. Their current heads and CI must be rechecked before integration.
+- **Source access:** all ten original PDFs remain private and verified in the authorized original-source roster on Bryce's PC; partial public worktrees may omit them. A public workflow without provisioning that reports FileNotFoundError is not a production-source failure or permission to publish PDFs. Keep private provisioning, source hashes and runner isolation intact.
 
-1. **Close the two #4253 source-authority bypasses before wiring more promotion.**
-   Review `5834416588` at checkpoint `a3f68e53451feec698c9fa76ccd85ce223e02678`
-   reproduces synthetic correspondence plus a foreign published snapshot becoming
-   four resolved walls, and disconnected RCP fragments/unissued area evidence
-   becoming a commercially eligible ceiling quantity. In
-   `pb_source_cross_view_floor_correspondence_shadow`, consume exact-scope
-   producer-owned correspondence, physical W4 finished faces, closed RCP rings
-   and figured-dimension/area evidence. Resolve the real evidence rather than
-   attaching hardcoded primitive names or trusting status flags. Foreign
-   document/revision/SHA/snapshot/page, missing native face, disconnected ring,
-   unrelated dimension words and unissued metric evidence must fail closed.
-2. **Find the first actual live issuer failure once, using bounded diagnostics.**
-   Instrument the existing `_collect_live_physical_net_wall_claim` path with
-   sanitized counts and typed reason codes only: same/cross-view area records,
-   room-area bridges, floor-finish records/quantities, ceiling-finish records/
-   quantities, exported families and customer totals. Distinguish correspondence
-   exceptions from empty correspondence without dumping private exception text.
-   Protected run `42681178413` passed runtime/customer/cleanup but emitted
-   `floor_area=3`, `floor_finish_area=0`, `ceiling_area=0`. Do not rerun that
-   unchanged expensive job as evidence of a new result.
-3. **Repair the first demonstrated producer gate end-to-end.** Reuse the
-   `CrossViewFloorFinishProducer` and ceiling finish/quantity authorities through
-   actual source-closed export and customer projection. Authenticate internal
-   finished-face room boundaries, doorway thresholds, finish definition and
-   occurrence, independent metric axes and RCP zone ownership. Plain floor area
-   is not a finish or a ceiling. Add the negative reproductions first and preserve
-   ABSTAIN on unowned/ambiguous evidence. Finish one real case before duplicating
-   a helper across rooms.
-4. **Freeze and hand off the original-positive head.** Include actual full
-   producer family/customer counts and original source regression commands. While
-   MAX/CI verifies it, take the next source-supported Maryborough finish/ceiling
-   case in a separate follow-up, or do the audit below. Existing signed Food Prep,
-   Office and Cold Room rows remain immutable.
-5. **Audit Maryborough source-inventory reasons.** Cover remaining room census,
-   wall/ceiling finishes, W03/W04 windows and external surfaces. Distinguish actual
-   unavailable/ambiguous evidence from a stale status after documented closure.
+## Execution rules — independent progress, exact source authority
 
-Exit packet: genuine source-to-issuer-to-sealed-customer output, old signed three
-retained, exact identity map, negative source/authority results and all four
-existing manifest reason-code dispositions. A fixture/helper-only positive is
-not the whole-project application path.
+1. Trace source -> physical/semantic/metric authority -> existing issuer -> seal -> customer -> independent identity map/evaluator; implement and test the **first failing real gate** end-to-end. Architecture notes, shadow counts and synthetic tests alone do not finish a customer item.
+2. Before editing, inspect live #4135 claims and PR heads. One active owner per function; cross-lane editing is allowed in a **separate** branch/worktree when needed, but never overwrite another agent's head. Freeze an exact full SHA for CI or original-source replay; take the next independent task while it runs.
+3. Review votes are optional; genuine original-source positives, adversarial negatives, exact-head applicable full CI, frozen/source separation and signed/customer full-body retention are mandatory before a production release merge. Distinguish skipped/NOT RUN source checks from protected PASS. Keep ABSTAIN/CONFLICT for missing or contradictory proof.
+4. Do not repeat unchanged slow replays, block all work for a single missing witness, force estimated quantities into FIRM, use frozen answer/gold as prediction input, or fabricate measured area/width/height. Do not infer source unavailability from an incomplete local checkout.
+5. Do not change immutable benchmark 120 (Lot16 27 / Maryborough 24 / 3Laurel 63 / Q5446 6), source truth/IDs/tolerances, 20,000 primitive cap, 2.5-point snap or full signed Lot16 eight and Maryborough three quantity/customer bodies. Floor finishes stop at authenticated openings/doorways and measure to **internal finished wall faces**; do not tile under walls.
+6. An authenticated external door with no specific drawing/schedule/elevation height may receive an owner-authorized **provisional** “Assumed 2100 mm — verify on site” estimate, *not* a figured-original/FIRM quantity or frozen benchmark credit. Never apply to an unauthenticated opening, window, internal door or garage panel.
+7. Report [CLAIM], [RESULT], [BLOCKED] or [HANDOFF] with function, SHA, original-source validation (including skips), CI, issuer/customer counts, preserved rows and first remaining gate on #4135 and the relevant PR. Comments do not remotely launch Cursor/AntiGravity/Claude.
 
-## GPT MAX — integration, protected acceptance, Q5446 and publication
+## Cursor — Lot16 complete-scope opening, then optional Claude handoff
 
-1. **Complete the current official-run prerequisite before waiting for new
-   quantities.** Validate #4257/#4258 using the protected originals and exact
-   immutable heads; forward the receipt flag only in the intended Lot16 run.
-   Readiness must distinguish genuine `sealed` roles from verified explicit
-   `source_role_abstained` receipts while still requiring completed/exit0,
-   native coverage and customer bijection. Preserve the receipt-only project
-   veto. Verify existing eight, appended stacker, value-free structural receipt
-   and full source-envelope identity-map equality. Keep benchmark inputs and
-   production/workflow changes in separate PRs.
-2. **Make verification run concurrently with useful work.** Inspect actual
-   final-head 3.13/3.14 jobs and protected source results. Carry out the current
-   review or a Q5446/source-inventory task while another pinned run executes.
-   Review new agent heads, not stale parent successes. Do not overwrite claimed
-   source/issuer functions while another agent actively repairs them.
-3. **Own Q5446's six-source execution and publication audit.** Establish actual
-   original role seals/explicit permitted abstentions, customer bijection and
-   independent identity-map coverage. Audit all four existing manifest reasons:
-   sales estimate versus measured scope, ground/first/porch/garage area routes,
-   window/door universe and wall/ceiling finishes. Keep a genuinely missing
-   measurement absent; do not manufacture a role seal or reclassify defaults.
-4. **Build the smallest verified integration tree and retain every old row.**
-   Pin the selected tree, run applicable full dual-Python/source negative gates,
-   compare original Lot16-eight and Maryborough-three entire signed/customer
-   bodies, and append only source-authenticated new rows. Integrate eligible PRs
-   in tested dependency order with expected-head checks. Additional external
-   reviewer votes are optional.
-5. **Run unchanged four-project reconciliation and report both outcomes.**
-   `build_four_project_evidence_ledger` must independently verify every project's
-   originals, nonempty authentic sealed run/explicit permitted abstention,
-   customer bijection, complete source-SHA envelope, identity map, semantic
-   ownership, input immutability and cross-project uniqueness. Require all four
-   actual reconciliations; successful workflow shell jobs alone do not suffice.
-   Publish the verified development result when that existing path permits it,
-   and the official result only when the unchanged evaluator returns PUBLISHED.
-   Preserve the 120 items and 27/24/63/6 project split.
-6. **Resolve the source-inventory publication gate honestly.** All four current
-   manifests are INCOMPLETE despite complete source-package flags. The existing
-   reporter deliberately withholds official publication at that point. These
-   reasons include whole-plan scopes beyond frozen120. Combine lane audits into
-   an exact evidence ledger. Do not relabel manifests VERIFIED, delete unresolved
-   reasons or weaken the evaluator to obtain a green result. Under the existing
-   frozen-input contract this directive authorizes audit and supporting evidence,
-   not an automatic benchmark metadata edit. If genuine unavailable source scope
-   prevents closure, report the exact irreducible reason and required owner
-   decision while completing every other executable task. An official score
-   cannot be promised solely because the present PRs are repaired.
+**Primary live checkpoint:** Cursor has now opened **#4281** at `72354ffc0` (213 focused tests reported), protecting the garage-personnel 870 candidate `ba7f75a2` against unsupported complete-scope host promotion and matching the provisional 2100 issuer to unique EXTERNAL opening/framed whole-wall identity only. **Customer quantity remains BLOCKED**: original ordinary W4 left source flank is unmapped; the nearest ordinary on-band wall is approximately 11 pt beyond the sealed 6.48 pt flank, outside 2.5 pt snap. Supplemental G17 mixed-scope hosts do not authenticate complete EXTERNAL wall/frame. Preserve #4281 without claiming new physical closure. #4265 and #4279 already merged.
+
+1. Review #4281's actual final-head CI and original test packet; do not repeat the already reported 213 focused tests just to rediscover the gap. Trace any source-backed ordinary-W4 physical flank evidence from original Lot16 plan/elevations for the **specific 11-pt missing wall continuity**, without bridging the 2.5-pt snap limit or borrowing supplemental G17 identity. If no real receipt exists, keep `no_authenticated_host_wall_band` / `opening_host_frame_host_unavailable` ABSTAIN and take the next independently authenticated opening case or inventory audit.
+2. Prefer authenticated schedule or elevation height; only use the owner's 2100-mm estimate when applicable and label it as an estimate. Keep genuine eight full signed quantity/customer bodies and the verified ninth identical. No unsupported FIRM area, frame or benchmark match.
+3. Treat **#4281 as the existing bounded PR**, not an instruction to open a duplicate. Verify its final diff/CI and source-negative guards, report whether a new genuine host/issuer/customer positive exists (currently **no**). Do not merge any claim of complete external host/frame/FIRM quantity while its original physical evidence is absent. If a later real original witness closes the gap, build a separate incremental integration candidate with complete old-eight/ninth/customer retention; otherwise maintain ABSTAIN and advance another source-proven case.
+4. **After** the 870 vertical slice is bounded, Cursor may [CLAIM] the *production* duplicate-aperture consumer task from Claude's #4267 in a **different** current-main branch. Preserve original #4267 head/credits. Existing #4267 is shadow-only; require genuinely authenticated one-aperture equivalence, full member identities/receipts, abstention on ambiguous or distinct openings, default-off gating and old-eight/ninth/customer retention. Do not treat a shared printed figure alone as physical proof.
+5. Continue source-inventory audit for unresolved glazing, walls, ceilings, wet tile, structure and roof/engineering/stormwater; retain the owner's two-2124-corner-stacker shared-callout decision where genuinely authenticated, without borrowing identity between assemblies.
+
+Exit: #4281 exact-head disposition, original 870 ABSTAIN or authenticated external host/frame/issuer/customer receipt, old eight/ninth body retention, focused/applicable original and dual-Python CI evidence, and next independent claim.
+
+## AntiGravity — Maryborough genuine physical finished faces and customer quantity
+
+**Primary:** repair #4253 at its latest **fcb69d852** checkpoint before a merge. Earlier changes addressed weak observation/area/correspondence registry lifetime, forged typed evidence, plain-line room/doorway witnesses and FPB routing. These are not a genuine final-head original acceptance.
+
+1. **Known source-authority bypass, still present on fcb head:** in `pb_source_cross_view_floor_correspondence_shadow.py`, the ceiling composition fallback reads `horizontal_dimension_id`, `vertical_dimension_id` and mm values from `area_evidence.metadata` and adds those caller-provided values to the permitted horizontal/vertical axis sets. An attached QuantityEvidence referencing real area evidence can provide **foreign** axis IDs matching a different RCP correspondence plus a numerically matching product. Add this exact forged-cross-view negative FIRST and fail closed. Resolve axis ID, millimetres, orientation, snapshot and physical room/finished-face from issuer-owned dimension observations, **not** independent caller metadata or same-area equality.
+2. Authenticate Office FT3 finished-face/doorway D15, actual Office GRID and Food Prep FPB ceiling RCP ownership through the real current producer. Keep synthetic arbitrary lines, foreign snapshots, unissued area, invented doorway labels, missing figured axis and disconnected ceiling rings rejecting/abstaining. Keep weak store/registry GC and conflicting duplicate-key tests.
+3. Run the real SHA-verified original Office GRID and Food Prep FPB source -> issued quantity -> seal -> customer positives on the corrected **new** head; record actual family counts and reason codes. The earlier 2d4 and 4c original Office tests FAILED; passing local synthetic tests on fcb do not supersede them. Preserve all three Maryborough signed floor rows and eight Lot16 rows.
+4. Execute final-head Python 3.13/3.14 CI and classify any source-only failure: a checked public run #42867348293 failed in one job for missing private Lot16 PDF (FileNotFoundError), not algorithm output. Other failures must be checked individually, not blanket excused. Use the authorized SHA-verified private source runner for positive acceptance; never put PDFs in public.
+5. After one authentic case closes, advance the next supported Maryborough finish/ceiling/wall or W03/W04/external inventory reason in a separate branch while checks run. Work does not wait for Claude (away through Friday) or optional GPT MAX review.
+
+Exit: genuine source/issuer/customer packet, explicit positives/negatives, 3+8 old full bodies retained, and remaining manifest reason dispositions.
+
+## Claude — unavailable through Friday 13 November 2026
+
+**No implementation or review requests to Claude before Friday.** Preserve frozen draft branches/head histories without force-push, closure or unauthorised cherry-pick:
+- **#4263**, head `8f0dc33b9`: direction-aware rotated glyph recovery, source-neutral focused tests and dual-Python CI PASS; genuine 3Laurel read-only glyph sequence recovery exists. Still **not** source-backed text trust or commercial quantity. GPT MAX owns narrow original/signed/customer retention review during absence.
+- **#4267**, head `4f9ff7231`: default-off candidate-only equivalence of sealed openings. No production duplicate customer suppression yet; Cursor may later implement its production consumer in a new separate branch only after declaring overlap, while preserving Claude's original head.
+- The corrected Claude #4275 and parent #4256/#4264 work have merged. Do **not** reopen these completed integration gates or task Claude with them.
+
+On return, Claude should first re-read the live hub/PRs and check for Cursor's claimed downstream production branch. Continue the unclaimed next 3Laurel source-proven opening/host or original customer identity-map reconciliation without duplicating Cursor or AntiGravity; source inventory and retention remain required. No instruction claims that Claude is executing while unavailable.
+
+## GPT MAX — integration, protected tests, recovered historical PRs and full four-project score
+
+1. **Immediate current-code reviews:** own #4274 recovered #4100 same-room double-sale seal veto. Its original `32ad8ad0` branch is cleanly mergeable, full CI SUCCESS and 109 focused current-main integration tests passed, but the earlier 300-second Maryborough original probe was incomplete. Preserve branch/draft until a *bounded genuine original* signed/customer retention positive on current main + veto has completed; do not repeat that same timed-out invocation unchanged or alter AntiGravity's functions. Review/merge only when original source/customer and final-head checks truly pass.
+2. **Claude backup:** review #4263 exact-head opt-in glyph and signed/customer retention, with genuine 3Laurel original evidence where needed; never claim recovered glyph sequences alone increase measured customer items. Protect #4267, and review Cursor's separate consumer implementation after its 870 gate if claimed.
+3. **Four-project execution:** use one immutable integrated current-main tree and the existing `tools/report_gpt3_four_project_evidence.py::build_four_project_evidence_ledger` path. Require sealed original roles or permitted value-free source-role abstentions, exact input SHA envelope, signed/customer bijection, per-project identity map, semantic/physical authority, source/frozen immutability and cross-project uniqueness for all four. Report each project's executed coverage and first failing stage. A valid Q5446 1/6 diagnostic packet and the protected Lot16 run are **not** a published four-job result.
+4. **Q5446 subsequent scope:** six-source identity envelope and 1/6 diagnostic are already reconciled via merged #4280. Next source-closure work is one bounded original-supported outstanding family (e.g., garage finished-area convention or one door/window family) with two independent physical witnesses; record an evidence disposition without assuming sale/allowance values are measured geometry. Four existing Q5446 publication reasons stay unresolved.
+5. **Publication/inventory gate:** collect exact source-backed issue dispositions for Lot16, Maryborough, 3Laurel, Q5446. All four manifests are currently INCOMPLETE despite source-package-complete flags; never flip VERIFIED, edit frozen evaluator or infer official accuracy from successful CI, PR closure or a partial diagnostic.
+6. **PR discipline:** independently inspect final diff, CI 3.13/3.14, applicable real original positive/negative and full old eight/three signed customer bodies; merge only source-supported bounded code in safe dependency order. Existing mandatory checks remain even when an optional reviewer is offline. Avoid heavy duplicate replays on Bryce's 16-GB PC when another native run is occupying CPU/RAM.
+
+Exit: four project original sealed/map/customer identity receipts and unchanged evaluator result (development diagnostic and official publication stated separately), safe PR dispositions, real source inventory blockers, no inflated score.
 
 ## Source-inventory audit format
 

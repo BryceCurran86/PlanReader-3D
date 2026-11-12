@@ -443,7 +443,60 @@ def _append_reproved_areas(baseline, openings, quantities, *, physical_opening_a
     )
 
 
-def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version, single_width_uniform_page_door_height_shadow: bool = False):
+
+def _preserve_page_local_area_receipts(broad, local):
+    """Keep independently produced page receipts when the wider proof agrees.
+
+    This is composition, not evidence authentication. Both claims come from the
+    existing collector over the same original bytes. No local positive is added
+    if the wider source did not publish it, and a disagreement never picks one.
+    Other families and every unsupported broad-source candidate remain intact.
+    """
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if type(broad) is not LivePhysicalNetWallClaim or type(local) is not LivePhysicalNetWallClaim:
+        raise TypeError("typed source claims required for page receipt preservation")
+    if (broad.quantity_m2 is not None or broad.opening_count_quantity_evidence
+            or broad.opening_dimension_quantity_evidence):
+        # Independent totals/axes depend on the broader canonical source.
+        # Their receipts require their own composition, never a silent rewrite.
+        return broad
+    broad_objects = _indexed(broad.canonical_openings, "canonical_opening_id", LiveCanonicalOpeningObject)
+    local_objects = _indexed(local.canonical_openings, "canonical_opening_id", LiveCanonicalOpeningObject)
+    broad_quantities = _indexed(broad.opening_quantity_evidence, "quantity_id", QuantityEvidence)
+    local_quantities = _indexed(local.opening_quantity_evidence, "quantity_id", QuantityEvidence)
+    retained_objects = {}
+    retained_quantities = {}
+    for qid in broad_quantities.keys() & local_quantities.keys():
+        current, previous = broad_quantities[qid], local_quantities[qid]
+        for quantity, objects in ((current, broad_objects), (previous, local_objects)):
+            if quantity.family != "opening_area" or len(quantity.input_entity_ids) != 1:
+                raise SourceClosedRunConflictError("foreign page receipt family or physical identity")
+            opening = objects.get(quantity.input_entity_ids[0])
+            authentic = _opening_quantity(opening) if opening is not None else None
+            if authentic is None or authentic.to_dict() != quantity.to_dict():
+                raise SourceClosedRunConflictError("page receipt differs from canonical source issuer")
+        oid = current.input_entity_ids[0]
+        before, after = local_objects[previous.input_entity_ids[0]], broad_objects[oid]
+        if (_measurement_core(previous) != _measurement_core(current)
+                or _physical_core(before) != _physical_core(after)
+                or before.source_observation_ids != after.source_observation_ids
+                or before.source_lineage_root_ids != after.source_lineage_root_ids):
+            raise SourceClosedRunConflictError("wider source conflicts with page-local opening receipt")
+        retained_objects[oid] = before
+        retained_quantities[qid] = previous
+    if not retained_quantities:
+        return broad
+    return replace(
+        broad,
+        canonical_openings=tuple(retained_objects.get(o.canonical_opening_id, o)
+                                 for o in broad.canonical_openings),
+        opening_quantity_evidence=tuple(retained_quantities.get(q.quantity_id, q)
+                                        for q in broad.opening_quantity_evidence),
+    )
+
+
+def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version, single_width_uniform_page_door_height_shadow: bool = False, page_local_source_path=None):
     """Re-prove a single original topology page, then append only new areas."""
     digest = sha256(pdf_bytes).hexdigest()
     if not baseline.canonical_openings:
@@ -464,6 +517,20 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
         # An image-free native drawing keeps its independently valid native
         # claim; an empty raster universe never grants a new measurement.
         return baseline
+    if page_local_source_path is not None:
+        from pathlib import Path
+        from pb_live_physical_net_wall_integration import _collect_live_physical_net_wall_claim
+
+        path = Path(page_local_source_path)
+        if sha256(path.read_bytes()).hexdigest() != digest:
+            raise SourceClosedRunConflictError("page-local source bytes differ from opening replay")
+        local = _collect_live_physical_net_wall_claim(
+            path, pages=(int(page_id) - 1,),
+            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
+        )
+        if sha256(path.read_bytes()).hexdigest() != digest:
+            raise SourceClosedRunConflictError("page-local source changed during receipt reproof")
+        baseline = _preserve_page_local_area_receipts(baseline, local)
     composition = compose_live_wall_opening_authority(
         source_visibility_producer=source, revision_id=published.revision.revision_id,
         page_ids=(page_id,), include_unmeasured_ink_closed_flanks_shadow=True,

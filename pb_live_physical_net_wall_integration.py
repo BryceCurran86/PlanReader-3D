@@ -1437,6 +1437,12 @@ def collect_live_physical_net_wall_claim(
         claim, Path(pdf_path).read_bytes(), page_id=recovery_page_id,
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
         single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
+        **({"page_local_source_path": pdf_path} if (
+            len(selected) > 1
+            or bool(room_area_support_pages)
+            or source_native_finish_text_shadow
+            or source_glyph_ledger_text_trust
+        ) else {}),
     )
 
 
