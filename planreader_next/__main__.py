@@ -50,6 +50,14 @@ def main() -> int:
     dimensions.add_argument("--pdf", type=Path, required=True)
     dimensions.add_argument("--page", type=int, default=0)
     dimensions.add_argument("--output", type=Path, required=True)
+    match_dimensions = sub.add_parser(
+        "match-dimensions",
+        help="Shadow-only match source figures to reviewed native face-edge references",
+    )
+    match_dimensions.add_argument("--pdf", type=Path, required=True)
+    match_dimensions.add_argument("--page", type=int, default=0)
+    match_dimensions.add_argument("--faces", type=Path, required=True)
+    match_dimensions.add_argument("--output", type=Path, required=True)
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
     takeoff.add_argument("--selection", type=Path, required=True)
@@ -76,6 +84,25 @@ def main() -> int:
             from .dimension_index import dimension_index_payload, inventory_page_dimensions
             result = dimension_index_payload(
                 inventory_page_dimensions(load_native_page(args.pdf, args.page))
+            )
+        elif args.mode == "match-dimensions":
+            from .dimension_association import associate_dimension_inventory_to_native_faces
+            from .dimension_index import inventory_page_dimensions
+
+            page = load_native_page(args.pdf, args.page)
+            face_selection = json.loads(args.faces.read_text(encoding="utf-8"))
+            if not isinstance(face_selection, dict):
+                raise SourceConflict("face_selection_invalid")
+            if (
+                face_selection.get("source_sha256") != page.source_sha256
+                or face_selection.get("page_index") != page.page_index
+            ):
+                raise SourceConflict("face_selection_source_mismatch")
+            candidates = face_selection.get("item_faces")
+            if not isinstance(candidates, list):
+                raise SourceConflict("face_candidates_invalid")
+            result = associate_dimension_inventory_to_native_faces(
+                page, inventory_page_dimensions(page), candidates,
             )
         elif args.mode == "takeoff":
             from .building import measure_building_components
@@ -132,6 +159,13 @@ def main() -> int:
                     "unmatched_count": result["unmatched_count"],
                     "role": result["role"],
                     "commercial_publishable": False,
+                }, sort_keys=True))
+            elif args.mode == "match-dimensions":
+                print(json.dumps({
+                    "candidate_face_bindings": len(result["shadow_face_bindings"]),
+                    "unmatched_unique_figures": len(result["abstentions"]),
+                    "commercial_publishable": False,
+                    "review_required": True,
                 }, sort_keys=True))
             else:
                 print(json.dumps({
