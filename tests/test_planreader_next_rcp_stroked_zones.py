@@ -148,6 +148,79 @@ def test_exterior_leaking_open_plan_with_conflicting_finishes_does_not_invent_a_
     )
 
 
+def test_overlapping_rings_sharing_a_callout_abstain_instead_of_duplicating():
+    page = NativePage(
+        "a" * 64, 8,
+        (
+            _word("word:b1:l0:w0:i0", "2400", 100, 100),
+            _word("word:b1:l1:w0:i1", "GRID", 84, 100),
+        ),
+        (),
+        (),
+    )
+    regions = [
+        {
+            "region_id": "inner",
+            "status": "candidate",
+            "likely_cavity_pocket": False,
+            "boundary_polygon_pdf_pts": [(80, 80), (140, 80), (140, 140), (80, 140)],
+            "wall_source_path_indices": [1],
+        },
+        {
+            "region_id": "outer",
+            "status": "candidate",
+            "likely_cavity_pocket": False,
+            "boundary_polygon_pdf_pts": [(50, 50), (200, 50), (200, 180), (50, 180)],
+            "wall_source_path_indices": [2],
+        },
+    ]
+    packet = bind_callouts_to_stroked_rings(page, regions)
+    assert packet["source_zone_stroked_candidates"] == []
+    assert packet["commercial_publishable"] is False
+    reasons = [item["reason_code"] for item in packet["unresolved_callouts"]]
+    assert "rcp_callout_owned_by_multiple_stroked_rings" in reasons
+    assert reasons.count("rcp_callout_owned_by_multiple_stroked_rings") >= 1
+
+
+def test_overlapping_rings_keep_unique_callouts_and_drop_shared_ones():
+    page = NativePage(
+        "a" * 64, 8,
+        (
+            _word("word:b1:l0:w0:i0", "2400", 100, 100),
+            _word("word:b1:l1:w0:i1", "GRID", 84, 100),
+            _word("word:b2:l0:w0:i2", "3000", 60, 60),
+            _word("word:b2:l1:w0:i3", "FPB", 44, 60),
+        ),
+        (),
+        (),
+    )
+    regions = [
+        {
+            "region_id": "inner",
+            "status": "candidate",
+            "likely_cavity_pocket": False,
+            "boundary_polygon_pdf_pts": [(80, 80), (140, 80), (140, 140), (80, 140)],
+            "wall_source_path_indices": [1],
+        },
+        {
+            "region_id": "outer",
+            "status": "candidate",
+            "likely_cavity_pocket": False,
+            "boundary_polygon_pdf_pts": [(40, 40), (200, 40), (200, 180), (40, 180)],
+            "wall_source_path_indices": [2],
+        },
+    ]
+    packet = bind_callouts_to_stroked_rings(page, regions)
+    zones = packet["source_zone_stroked_candidates"]
+    assert len(zones) == 1
+    assert zones[0]["region_id"] == "outer"
+    assert zones[0]["material_code_candidate"] == "FPB"
+    assert zones[0]["height_mm"] == "3000"
+    assert zones[0]["height_word_refs"] == ["word:b2:l0:w0:i2"]
+    reasons = {item["reason_code"] for item in packet["unresolved_callouts"]}
+    assert "rcp_callout_owned_by_multiple_stroked_rings" in reasons
+
+
 def test_conflicting_finishes_in_one_ring_abstain():
     page = NativePage(
         "a" * 64, 8,

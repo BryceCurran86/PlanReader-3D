@@ -184,15 +184,13 @@ def test_local_claim_must_replay_original_height_and_material_word():
 
 
 def test_original_3laurel_source_pdf_region_height_coverage_if_available():
-    import os
     from planreader_next.enclosure import propose_room_enclosures
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
 
-    original = os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
-    plan = load_native_page(Path(original), 2)
-    section = load_native_page(Path(original), 6)
-    assert plan.source_sha256 == "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    original = require_original_3laurel()
+    plan = load_native_page(original, 2)
+    section = load_native_page(original, 6)
+    assert plan.source_sha256 == ORIGINAL_SHA256
     policy = {
         "rule": "all_walls_and_ceilings_unless_otherwise_stated",
         "owner_authorized": True,

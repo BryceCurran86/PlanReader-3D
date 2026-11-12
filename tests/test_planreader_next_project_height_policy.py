@@ -81,12 +81,10 @@ def test_local_rcp_callout_overrides_project_default_only_with_room_zone_scope()
 
 
 def test_real_3laurel_printed_2700_as_owner_standard_with_no_global_cross_cut_restriction():
-    import os
-    original=os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
-    page=load_native_page(Path(original),6)
-    assert page.source_sha256=="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    original=require_original_3laurel()
+    page=load_native_page(original,6)
+    assert page.source_sha256==ORIGINAL_SHA256
     rule=_3laurel_rule(page)
     standard=resolve_project_standard_height({6:page},"3Laurel",page.source_sha256,rule)
     assert standard["height_mm"]=="2700"
@@ -96,12 +94,10 @@ def test_real_3laurel_printed_2700_as_owner_standard_with_no_global_cross_cut_re
 
 def test_original_3laurel_owner_standard_cli_is_source_bound_and_create_only(tmp_path):
     import json
-    import os
     import subprocess
     import sys
-    original=os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
+    from tests.original_source_3laurel import require_original_3laurel
+    original=str(require_original_3laurel())
     output=tmp_path/"original-height-rule.json"
     cmd=[sys.executable,"-m","planreader_next","heights","--pdf",original,
          "--page","6","--drawing-type","section",

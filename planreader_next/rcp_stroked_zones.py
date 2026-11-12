@@ -7,6 +7,7 @@ This is not a ceiling m², room identity or customer row.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -82,7 +83,7 @@ def bind_callouts_to_stroked_rings(
     callouts = rcp_material_height_callouts(page)
     abstentions: list[dict[str, str]] = []
     zones: list[dict[str, Any]] = []
-    placed: set[str] = set()
+    eligible: list[tuple[Mapping[str, Any], list[dict[str, Any]], Any]] = []
 
     for region in regions:
         if not isinstance(region, Mapping):
@@ -95,15 +96,36 @@ def bind_callouts_to_stroked_rings(
         polygon = Polygon([(float(x), float(y)) for x, y in coords])
         if not polygon.is_valid or polygon.is_empty:
             continue
-        hits: list[dict[str, Any]] = []
-        for receipt in callouts:
-            point = _callout_point(page, receipt)
-            if point is None or not polygon.contains(point):
-                continue
-            hits.append(receipt)
-        if not hits:
+        hits = [
+            receipt for receipt in callouts
+            if (point := _callout_point(page, receipt)) is not None and polygon.contains(point)
+        ]
+        if hits:
+            eligible.append((region, hits, coords))
+
+    owners: dict[str, list[str]] = defaultdict(list)
+    for region, hits, _coords in eligible:
+        region_id = str(region.get("region_id") or "")
+        for receipt in hits:
+            owners[receipt["height_word_ref"]].append(region_id)
+
+    placed: set[str] = set()
+    for region, hits, coords in eligible:
+        unique_hits = [
+            item for item in hits if len(owners[item["height_word_ref"]]) == 1
+        ]
+        contested = [
+            item for item in hits if len(owners[item["height_word_ref"]]) > 1
+        ]
+        if contested and not unique_hits:
+            abstentions.append({
+                "region_id": str(region.get("region_id") or ""),
+                "reason_code": "rcp_callout_owned_by_multiple_stroked_rings",
+            })
             continue
-        pairs = {(item["height_mm"], item["material_code_candidate"]) for item in hits}
+        if not unique_hits:
+            continue
+        pairs = {(item["height_mm"], item["material_code_candidate"]) for item in unique_hits}
         if len(pairs) != 1:
             abstentions.append({
                 "region_id": str(region.get("region_id") or ""),
@@ -111,7 +133,7 @@ def bind_callouts_to_stroked_rings(
             })
             continue
         height_mm, material = next(iter(pairs))
-        for item in hits:
+        for item in unique_hits:
             placed.add(item["height_word_ref"])
         blockers = _ring_blockers(region)
         scope = (
@@ -125,11 +147,11 @@ def bind_callouts_to_stroked_rings(
             "region_id": region.get("region_id"),
             "height_mm": height_mm,
             "material_code_candidate": material,
-            "height_word_refs": sorted(item["height_word_ref"] for item in hits),
-            "material_word_refs": sorted(item["material_word_ref"] for item in hits),
+            "height_word_refs": sorted(item["height_word_ref"] for item in unique_hits),
+            "material_word_refs": sorted(item["material_word_ref"] for item in unique_hits),
             "wall_source_path_indices": list(region.get("wall_source_path_indices") or []),
             "boundary_polygon_pdf_pts": [list(pt) for pt in coords],
-            "connected_same_finish_callout_count": len(hits),
+            "connected_same_finish_callout_count": len(unique_hits),
             "source_rectangle_ref": None,
             "white_fill_rectangle_rejected": True,
             "candidate_scope": scope,
@@ -142,12 +164,18 @@ def bind_callouts_to_stroked_rings(
         })
 
     for receipt in callouts:
-        if receipt["height_word_ref"] in placed:
+        ref = receipt["height_word_ref"]
+        if ref in placed:
             continue
+        reason = (
+            "rcp_callout_owned_by_multiple_stroked_rings"
+            if len(owners[ref]) > 1
+            else "rcp_callout_not_inside_stroked_ring"
+        )
         abstentions.append({
-            "height_word_ref": receipt["height_word_ref"],
+            "height_word_ref": ref,
             "material_word_ref": receipt["material_word_ref"],
-            "reason_code": "rcp_callout_not_inside_stroked_ring",
+            "reason_code": reason,
         })
 
     return {

@@ -110,13 +110,11 @@ def test_polygon_duplicate_or_invalid_region_rejected_without_quantity():
 
 
 def test_actual_3laurel_section_cut_and_candidate_intersections_if_original_provisioned():
-    import os
-    original=os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
-    plan=load_native_page(Path(original),2)
-    section=load_native_page(Path(original),6)
-    assert plan.source_sha256 == "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    original=require_original_3laurel()
+    plan=load_native_page(original,2)
+    section=load_native_page(original,6)
+    assert plan.source_sha256 == ORIGINAL_SHA256
     found=source_section_cut(plan,section)
     assert len(found["plan_dashed_source_segment_refs"])==20
     assert found["plan_marker_word_refs"] == [

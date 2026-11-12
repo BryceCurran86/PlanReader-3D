@@ -190,13 +190,11 @@ def test_real_rcp_zone_cli_optin_is_create_only(tmp_path):
 
 
 def test_section_cannot_relabel_itself_as_an_rcp_zone(tmp_path):
-    import os
     import subprocess
     import sys
+    from tests.original_source_3laurel import require_original_3laurel
 
-    original = os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
+    original = str(require_original_3laurel())
     output = tmp_path / "not-rcp-zone.json"
     cmd = [sys.executable, "-m", "planreader_next", "heights",
            "--drawing-type", "section", "--pdf", original, "--page", "6",

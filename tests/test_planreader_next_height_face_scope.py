@@ -174,14 +174,12 @@ def test_rcp_review_flag_missing_wrong_room_or_competing_zone_abstains():
 
 
 def test_real_3laurel_native_wall_region_height_link_stays_noncommercial():
-    import os
-    original = os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("ORIGINAL_SOURCE_NOT_RUN")
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    original = require_original_3laurel()
     from planreader_next.enclosure import propose_room_enclosures
-    plan = load_native_page(Path(original), 2)
-    section = load_native_page(Path(original), 6)
-    assert plan.source_sha256 == "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    plan = load_native_page(original, 2)
+    section = load_native_page(original, 6)
+    assert plan.source_sha256 == ORIGINAL_SHA256
     enclosure = propose_room_enclosures(plan, Path(original))
     out = section_height_to_plan_face_candidates(plan, section, enclosure)
     print("REAL_SOURCE_SECTION_WALL_CANDIDATES", len(out["face_height_scope_candidates"]))
