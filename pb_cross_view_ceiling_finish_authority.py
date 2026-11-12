@@ -654,6 +654,19 @@ class CrossViewCeilingFinishProducer:
     ) -> "CrossViewCeilingFinishProducer":
         return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
 
+    def source_rcp_height_material_evidence(
+        self, *, revision_id: str, page_id: str,
+        viewport_bbox_pdf_pts: tuple[float, float, float, float] | None = None,
+    ):
+        """Opt-in trusted RCP height/finish words; does not issue ceiling area."""
+        from pb_source_rcp_height_material_evidence import (
+            collect_original_rcp_height_material_evidence,
+        )
+        return collect_original_rcp_height_material_evidence(
+            source=self._source, revision_id=revision_id, page_id=page_id,
+            viewport_bbox_pdf_pts=viewport_bbox_pdf_pts,
+        )
+
     def publish(self) -> CrossViewCeilingFinishResult:
         eligible_rooms = tuple(
             room
