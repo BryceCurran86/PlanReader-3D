@@ -164,6 +164,21 @@ def _required_text(row: Mapping[str, Any], key: str) -> str:
     return value.strip()
 
 
+def _axis_word_refs(row: Mapping[str, Any], singular: str, plural: str) -> tuple[str, ...]:
+    """One reviewed figure or an ordered unique hash-chain of figures on that axis."""
+    if plural in row:
+        raw = row[plural]
+        if type(raw) is not list or not raw or any(type(item) is not str or not item.strip() for item in raw):
+            raise SourceConflict("axis_word_refs_invalid")
+        if singular in row:
+            raise SourceConflict("duplicate_axis_word_receipt_form")
+        refs = tuple(item.strip() for item in raw)
+        if len(set(refs)) != len(refs):
+            raise SourceConflict("source_word_receipt_reused")
+        return refs
+    return (_required_text(row, singular),)
+
+
 def _measure_one(
     page: NativePage, row: Mapping[str, Any], *,
     expected_basis: str = "internal_finished_wall_face",
@@ -191,29 +206,34 @@ def _measure_one(
         fraction = Decimal("1")
     if not all(math.isfinite(v) for v in bbox) or x1 <= x0 or y1 <= y0:
         raise SourceConflict("closed_native_room_face_invalid")
-    refs = {
-        key: _required_text(row, key)
-        for key in ("width_word_ref", "height_word_ref", "room_label_word_ref", "finish_word_ref")
-    }
-    if len(set(refs.values())) != len(refs):
+    width_refs = _axis_word_refs(row, "width_word_ref", "width_word_refs")
+    height_refs = _axis_word_refs(row, "height_word_ref", "height_word_refs")
+    label_ref = _required_text(row, "room_label_word_ref")
+    finish_ref = _required_text(row, "finish_word_ref")
+    refs = (*width_refs, *height_refs, label_ref, finish_ref)
+    if len(set(refs)) != len(refs):
         raise SourceConflict("source_word_receipt_reused")
-    if any(value not in words for value in refs.values()):
+    if any(value not in words for value in refs):
         raise SourceConflict("native_word_receipt_missing")
-    width_word, height_word = words[refs["width_word_ref"]], words[refs["height_word_ref"]]
-    label_word, finish_word = words[refs["room_label_word_ref"]], words[refs["finish_word_ref"]]
+    width_chain = [words[ref] for ref in width_refs]
+    height_chain = [words[ref] for ref in height_refs]
+    label_word, finish_word = words[label_ref], words[finish_ref]
     if not _inside(label_word.bbox, bbox) or not _inside(finish_word.bbox, bbox):
         raise SourceConflict("room_or_finish_not_inside_selected_face")
-    # A word near the actual indicated axis is required; mere equal numeric
+    # Every chain word must sit on the actual indicated axis; mere equal numeric
     # product or unattached project metadata cannot select an axis.
-    hcx = (width_word.bbox[0] + width_word.bbox[2]) / 2
-    hcy = (width_word.bbox[1] + width_word.bbox[3]) / 2
-    vcx = (height_word.bbox[0] + height_word.bbox[2]) / 2
-    vcy = (height_word.bbox[1] + height_word.bbox[3]) / 2
-    if not (x0 <= hcx <= x1 and (abs(hcy - y0) <= 32 or abs(hcy - y1) <= 32)):
-        raise SourceConflict("horizontal_dimension_axis_unbound")
-    if not (y0 <= vcy <= y1 and (abs(vcx - x0) <= 32 or abs(vcx - x1) <= 32)):
-        raise SourceConflict("vertical_dimension_axis_unbound")
-    width_mm, height_mm = _figured_mm(width_word), _figured_mm(height_word)
+    for width_word in width_chain:
+        hcx = (width_word.bbox[0] + width_word.bbox[2]) / 2
+        hcy = (width_word.bbox[1] + width_word.bbox[3]) / 2
+        if not (x0 <= hcx <= x1 and (abs(hcy - y0) <= 32 or abs(hcy - y1) <= 32)):
+            raise SourceConflict("horizontal_dimension_axis_unbound")
+    for height_word in height_chain:
+        vcx = (height_word.bbox[0] + height_word.bbox[2]) / 2
+        vcy = (height_word.bbox[1] + height_word.bbox[3]) / 2
+        if not (y0 <= vcy <= y1 and (abs(vcx - x0) <= 32 or abs(vcx - x1) <= 32)):
+            raise SourceConflict("vertical_dimension_axis_unbound")
+    width_mm = sum((_figured_mm(word) for word in width_chain), Decimal("0"))
+    height_mm = sum((_figured_mm(word) for word in height_chain), Decimal("0"))
     shape_ratio = Decimal(str((x1 - x0) / (y1 - y0)))
     figure_ratio = width_mm / height_mm
     if abs(shape_ratio / figure_ratio - 1) > Decimal("0.05"):
@@ -225,10 +245,22 @@ def _measure_one(
     if source_edges:
         area = area.quantize(Decimal("0.000001"))
     room_id = _required_text(row, "room_id")
+    evidence = {
+        "room_label_word_ref": label_ref,
+        "finish_word_ref": finish_ref,
+    }
+    if len(width_refs) == 1:
+        evidence["width_word_ref"] = width_refs[0]
+    else:
+        evidence["width_word_refs"] = list(width_refs)
+    if len(height_refs) == 1:
+        evidence["height_word_ref"] = height_refs[0]
+    else:
+        evidence["height_word_refs"] = list(height_refs)
     # Reviewer-authenticated binding creates a measurable draft, NOT source-
     # independent commercial/FIRM authority. Do not publish directly to JobHub.
     trace = "|".join((
-        page.source_sha256, str(page.page_index), geometry_ref, *refs.values(), room_id, trade,
+        page.source_sha256, str(page.page_index), geometry_ref, *refs, room_id, trade,
     ))
     return {
         "row_id": sha256(trace.encode("utf-8")).hexdigest()[:24],
@@ -241,7 +273,7 @@ def _measure_one(
         "source_sha256": page.source_sha256,
         "page_index": page.page_index,
         "geometry_ref": geometry_ref,
-        "evidence_refs": {**refs, **({"boundary_segment_refs": list(source_edges)} if source_edges else {})},
+        "evidence_refs": {**evidence, **({"boundary_segment_refs": list(source_edges)} if source_edges else {})},
         "boundary_basis": expected_basis,
         "status": "MEASURED_DRAFT_REVIEW_REQUIRED",
         "commercial_publishable": False,

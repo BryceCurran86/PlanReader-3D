@@ -268,3 +268,41 @@ def test_native_polygon_rejects_repeated_physical_edge_receipt(tmp_path):
     refs=[x.ref for x in native.segments if x.kind in ("line", "rect_edge")]
     with pytest.raises(SourceConflict, match="source_segment_reused"):
         source_polygon(native, refs+[refs[0]])
+
+
+def test_reviewed_hash_chain_width_sums_on_the_same_axis(tmp_path):
+    path = tmp_path / "chain-floor.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page(width=400, height=320)
+    height = 200 * 2400 / 3010
+    page.draw_rect(fitz.Rect(80, 80, 280, 80 + height))
+    page.insert_text((110, 72), "1200", fontsize=9)
+    page.insert_text((190, 72), "1810", fontsize=9)
+    page.insert_text((286, 140), "2400", fontsize=9)
+    page.insert_text((140, 130), "BED", fontsize=11)
+    page.insert_text((150, 160), "VINYL", fontsize=11)
+    pdf.save(path)
+    pdf.close()
+    native = load_native_page(path, 0)
+    words = {w.text: w.ref for w in native.words}
+    result = measure_page(native, {
+        "project_id": "sample-source-not-benchmark",
+        "revision_id": "r1",
+        "source_sha256": native.source_sha256,
+        "page_index": 0,
+        "rooms": [{
+            "room_id": "chain-bed",
+            "rectangle_ref": native.rectangles[0].ref,
+            "boundary_basis": "internal_finished_wall_face",
+            "width_word_refs": [words["1200"], words["1810"]],
+            "height_word_ref": words["2400"],
+            "room_label_word_ref": words["BED"],
+            "finish_word_ref": words["VINYL"],
+        }],
+    })
+    assert result["abstentions"] == []
+    row = result["quantities"][0]
+    assert row["quantity"] == "7.224"
+    assert row["commercial_publishable"] is False
+    assert row["evidence_refs"]["width_word_refs"] == [words["1200"], words["1810"]]
+    assert "width_word_ref" not in row["evidence_refs"]
