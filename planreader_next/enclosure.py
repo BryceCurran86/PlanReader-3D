@@ -242,6 +242,7 @@ def propose_room_enclosures(
         "draft_floor_candidates": _draft_floors(page, regions),
         "dimension_index": _page_dimension_index(page),
         "topology_face_receipts": _topology_face_receipts(page, regions),
+        "room_height_from_ffl_fcl": _document_ffl_fcl_height(path, page.source_sha256),
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
@@ -258,6 +259,75 @@ def _topology_face_receipts(page: NativePage, regions: list[dict[str, Any]]) -> 
     from .topology_faces import native_finished_face_receipts
 
     return native_finished_face_receipts(page, regions)
+
+
+def _document_ffl_fcl_height(pdf_path: Path, source_sha256: str) -> dict[str, Any]:
+    """Attach the unique section FFL–FCL figure as room/ceiling height.
+
+    Owner rule for this 3Laurel set: the only printed ceiling height is the
+    FFL–FCL chain on the section sheet. Plan-view `height` remains the other
+    footprint axis. GPT1 owns the native FFL/FCL binder; this only consumes
+    that unique receipt across the same SHA. Not FIRM.
+    """
+    import fitz
+
+    from .engine import load_native_page
+    from .height_evidence import SECTION_FFL_FCL, section_ffl_fcl_heights
+
+    digest, source_bytes, identity = authenticated_pdf_snapshot(pdf_path)
+    if digest != source_sha256:
+        raise SourceConflict("source_sha256_mismatch")
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        candidate_pages = [
+            index for index, pdf_page in enumerate(document)
+            if {"FFL", "FCL"} <= {
+                token.strip().upper()
+                for token in (pdf_page.get_text("text") or "").split()
+            }
+        ]
+    confirm_source_snapshot(pdf_path, digest, identity)
+    found: list[dict[str, Any]] = []
+    for index in candidate_pages:
+        page = load_native_page(pdf_path, index)
+        if page.source_sha256 != source_sha256:
+            raise SourceConflict("source_sha256_mismatch")
+        found.extend(section_ffl_fcl_heights(page))
+    payload = {
+        "source_sha256": source_sha256,
+        "occurrences": found,
+        "status": "NO_FFL_FCL_DIMENSION",
+        "length_mm": None,
+        "room_height_is_ffl_fcl": True,
+        "plan_axis_is_not_ceiling_height": True,
+        "cut_room_identity_authenticated": False,
+        "commercial_publishable": False,
+        "benchmark_credit": False,
+        "official_score": None,
+    }
+    if not found:
+        return payload
+    millimetres = {item["height_mm"] for item in found}
+    if len(millimetres) != 1:
+        payload["status"] = "CONFLICTING_FFL_FCL_HEIGHTS"
+        return payload
+    if any(item.get("height_source_kind") != SECTION_FFL_FCL for item in found):
+        payload["status"] = "CONFLICTING_FFL_FCL_HEIGHTS"
+        return payload
+    first = found[0]
+    payload["status"] = "SECTION_FFL_FCL_REVIEW_REQUIRED"
+    payload["length_mm"] = first["height_mm"]
+    payload["source_page_indexes"] = [item["page_index"] for item in found]
+    payload["dimension_word_refs"] = [item["height_word_ref"] for item in found]
+    payload["dimension_segment_refs"] = [
+        ref for item in found for ref in item.get("dimension_segment_refs") or ()
+    ]
+    payload["ffl_word_refs"] = [
+        item["witness_word_refs"][0] for item in found if item.get("witness_word_refs")
+    ]
+    payload["fcl_word_refs"] = [
+        item["witness_word_refs"][1] for item in found if len(item.get("witness_word_refs") or ()) > 1
+    ]
+    return payload
 
 
 def _axis_aligned_rectangle_face(coords: list[list[float]] | list[tuple[float, float]], hole_count: int) -> bool:

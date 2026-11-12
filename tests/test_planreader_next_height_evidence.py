@@ -55,6 +55,24 @@ def _rcp():
     )
 
 
+def _elevation_with_shared_ffl_and_nearer_tp():
+    """Elevation neighbour: FCL is within 24 pt of the 2740/TP line, but TP is nearer."""
+    return NativePage(
+        "a"*64, 3,
+        (
+            _word("w2700","2700",386.93,221,7,18),
+            _word("w2740","2740",369.93,221,7,18),
+            _word("wffl","FFL",378.61,267.95,11,8),
+            _word("wfcl","FCL",394.86,203,12,10),
+            _word("wtp","TP",378.24,202.16,9,10),
+        ), (),
+        (
+            NativeSegment("dim_2700","line",394.26,208,394.26,272),
+            NativeSegment("dim_2740","line",377.26,208,377.26,272),
+        ),
+    )
+
+
 def test_ffl_to_fcl_owned_section_height_not_top_plate_or_joinery():
     found=section_ffl_fcl_heights(_section())
     assert len(found)==1
@@ -66,6 +84,14 @@ def test_ffl_to_fcl_owned_section_height_not_top_plate_or_joinery():
     assert not receipt["commercial_publishable"]
     assert not receipt["wall_or_room_scope_authenticated"]
     assert validate_height_receipt(_section(), receipt)==receipt
+
+
+def test_elevation_ffl_fcl_does_not_promote_nearer_top_plate():
+    found = section_ffl_fcl_heights(_elevation_with_shared_ffl_and_nearer_tp())
+    assert len(found) == 1
+    assert found[0]["height_mm"] == "2700"
+    assert found[0]["dimension_segment_refs"] == ["dim_2700"]
+    assert found[0]["height_word_ref"] == "w2700"
 
 
 def test_rcp_material_height_bubble_pairs_and_nearby_numbers_abstain():

@@ -75,6 +75,28 @@ def _receipt(
     }
 
 
+def _nearer_top_datum(page: NativePage, line: NativeSegment) -> str | None:
+    """FCL owns this line only when it is uniquely nearer the top than TP."""
+    lx = (line.x1 + line.x2) / 2
+    lo, _hi = sorted((line.y1, line.y2))
+    ranked: list[tuple[float, str]] = []
+    for word in page.words:
+        token = word.text.strip().upper()
+        if token not in {"FCL", "TP"}:
+            continue
+        mx, my = _middle(word)
+        if abs(my - lo) > 13:
+            continue
+        ranked.append((abs(mx - lx), token))
+    if not ranked:
+        return None
+    ranked.sort()
+    best_dist, best_token = ranked[0]
+    if len(ranked) > 1 and ranked[1][0] - best_dist <= 0.35:
+        return None
+    return best_token
+
+
 def section_ffl_fcl_heights(page: NativePage) -> list[dict[str, Any]]:
     """Require exact source vertical dimension ink whose ends have FCL/FFL text."""
     ffl = [word for word in page.words if word.text.strip().upper() == "FFL"]
@@ -97,6 +119,8 @@ def section_ffl_fcl_heights(page: NativePage) -> list[dict[str, Any]]:
             lx = (line.x1 + line.x2) / 2
             lo, hi = sorted((line.y1, line.y2))
             if abs(wx - lx) > 9 or not lo + 5 < wy < hi - 5:
+                continue
+            if _nearer_top_datum(page, line) != "FCL":
                 continue
             low_labels = [
                 a for a in ffl if abs(_middle(a)[0] - lx) <= 24

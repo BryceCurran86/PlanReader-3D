@@ -165,6 +165,46 @@ def test_suggest_command_includes_enclosure_preview_without_measuring(tmp_path):
         ], capture_output=True, text=True, check=True)
 
 
+def _plan_plus_section_ffl_fcl(tmp_path):
+    import fitz
+
+    document = fitz.open()
+    plan = document.new_page(width=200, height=200)
+    plan.insert_text((40, 40), "MEDIA", fontsize=10)
+    section = document.new_page(width=400, height=300)
+    section.draw_line(fitz.Point(120, 70), fitz.Point(120, 210))
+    section.insert_text((112, 140), "2700", fontsize=8)
+    section.insert_text((128, 68), "FCL", fontsize=7)
+    section.insert_text((128, 214), "FFL", fontsize=7)
+    section.draw_line(fitz.Point(150, 66), fitz.Point(150, 210))
+    section.insert_text((142, 136), "2740", fontsize=8)
+    section.insert_text((158, 64), "TP", fontsize=7)
+    section.draw_line(fitz.Point(180, 110), fitz.Point(180, 210))
+    section.insert_text((172, 158), "2100", fontsize=8)
+    path = tmp_path / "plan-plus-section-ffl-fcl.pdf"
+    path.write_bytes(document.tobytes())
+    document.close()
+    return path
+
+
+def test_plan_page_uses_unique_section_ffl_fcl_as_room_height(tmp_path):
+    path = _plan_plus_section_ffl_fcl(tmp_path)
+    page = load_native_page(path, 0)
+    result = propose_room_enclosures(page, path)
+    ceiling = result["room_height_from_ffl_fcl"]
+    assert ceiling["status"] == "SECTION_FFL_FCL_REVIEW_REQUIRED"
+    assert ceiling["length_mm"] == "2700"
+    assert ceiling["source_page_indexes"] == [1]
+    assert ceiling["room_height_is_ffl_fcl"] is True
+    assert ceiling["plan_axis_is_not_ceiling_height"] is True
+    assert ceiling["cut_room_identity_authenticated"] is False
+    assert ceiling["commercial_publishable"] is False
+    assert ceiling["official_score"] is None
+    assert result["draft_floor_candidates"] == []
+    assert ceiling["length_mm"] != "2740"
+    assert ceiling["length_mm"] != "2100"
+
+
 def test_normal_suggest_stays_fast_without_opt_in(tmp_path):
     path, _ = make_synthetic(tmp_path)
     out = tmp_path / "cursor-fast-path.json"
@@ -240,6 +280,19 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     # abstains until a unique height figure owns that internal face.
     # MEDIA south 870 is a CS opening, not the 4210 leftover width.
     assert result["draft_floor_candidates"] == []
+    ceiling = result["room_height_from_ffl_fcl"]
+    assert ceiling["commercial_publishable"] is False
+    assert ceiling["official_score"] is None
+    assert ceiling["room_height_is_ffl_fcl"] is True
+    assert ceiling["plan_axis_is_not_ceiling_height"] is True
+    assert ceiling["cut_room_identity_authenticated"] is False
+    assert ceiling["status"] == "SECTION_FFL_FCL_REVIEW_REQUIRED"
+    assert ceiling["length_mm"] == "2700"
+    assert 6 in ceiling["source_page_indexes"]
+    assert "d5955i0" in ceiling["dimension_segment_refs"]
+    assert ceiling["length_mm"] != "2740"
+    assert ceiling["length_mm"] != "2100"
+    assert ceiling["length_mm"] != "870"
     faces = result["topology_face_receipts"]
     assert faces["commercial_publishable"] is False
     assert faces["finished_face_authenticated"] is False
