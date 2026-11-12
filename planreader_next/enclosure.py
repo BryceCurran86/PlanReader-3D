@@ -241,6 +241,7 @@ def propose_room_enclosures(
         "reason_codes": list(result.reason_codes),
         "draft_floor_candidates": _draft_floors(page, regions),
         "dimension_index": _page_dimension_index(page),
+        "topology_face_receipts": _topology_face_receipts(page, regions),
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
@@ -251,6 +252,12 @@ def _page_dimension_index(page: NativePage) -> dict[str, Any]:
     from .dimension_index import dimension_index_payload, inventory_page_dimensions
 
     return dimension_index_payload(inventory_page_dimensions(page))
+
+
+def _topology_face_receipts(page: NativePage, regions: list[dict[str, Any]]) -> dict[str, Any]:
+    from .topology_faces import native_finished_face_receipts
+
+    return native_finished_face_receipts(page, regions)
 
 
 def _axis_aligned_rectangle_face(coords: list[list[float]] | list[tuple[float, float]], hole_count: int) -> bool:

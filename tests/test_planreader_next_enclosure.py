@@ -240,6 +240,11 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     # abstains until a unique height figure owns that internal face.
     # MEDIA south 870 is a CS opening, not the 4210 leftover width.
     assert result["draft_floor_candidates"] == []
+    faces = result["topology_face_receipts"]
+    assert faces["commercial_publishable"] is False
+    assert faces["finished_face_authenticated"] is False
+    assert faces["physical_item_authenticated"] is False
+    assert faces["topology_only"] is True
     dim_index = result["dimension_index"]
     assert dim_index["commercial_publishable"] is False
     assert dim_index["official_score"] is None
