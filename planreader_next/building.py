@@ -178,7 +178,8 @@ def _door(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
 
 def _wall(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
           successful_doors: Mapping[str, tuple[Decimal, str]],
-          requested_doors: Mapping[str, str]
+          requested_doors: Mapping[str, str],
+          project_standard_height: Mapping[str, Any] | None = None,
           ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     wall_id = _required_text(row, "wall_id")
     page = _page(page_map, row.get("page_index"))
@@ -189,38 +190,89 @@ def _wall(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
     if _distance_to_line(_centre(length_word), segment) > 32:
         raise SourceConflict("wall_figured_length_not_at_source_face")
     length_mm = _figured_mm(length_word)
-    source_height_page = _page(page_map, row.get("height_source_page_index"))
-    height_word = _word(source_height_page, row.get("height_word_ref"))
-    height_mm = _figured_mm(height_word)
-    # Optional stronger source height lane. Historical reviewed drafts remain
-    # unchanged when no such receipt is provided; new claims must prove
-    # FFL/FCL section-line or same-callout RCP material/height source ink.
-    height_claim = row.get("height_source_receipt")
     height_source_refs: dict[str, Any] = {}
-    if height_claim is not None:
-        from .height_evidence import (
-            RCP_MATERIAL_HEIGHT, validate_height_receipt,
+    if project_standard_height is not None:
+        from .project_height_policy import select_applicable_height
+        from .height_evidence import RCP_MATERIAL_HEIGHT
+        local_claim = row.get("height_source_receipt")
+        if local_claim is not None and (
+            not isinstance(local_claim, Mapping)
+            or local_claim.get("height_source_kind") not in (
+                RCP_MATERIAL_HEIGHT, "ffl_to_fcl_section"
+            )
+        ):
+            raise SourceConflict("wall_height_override_kind_invalid")
+        if (
+            local_claim is not None
+            and local_claim.get("height_source_kind") != RCP_MATERIAL_HEIGHT
+            and dict(local_claim) != project_standard_height["source_height_receipt"]
+        ):
+            raise SourceConflict("wall_standard_height_source_receipt_mismatch")
+        selected = select_applicable_height(
+            page_map, project_standard_height,
+            local_receipt=(
+                local_claim
+                if local_claim is not None
+                and local_claim.get("height_source_kind") == RCP_MATERIAL_HEIGHT
+                else None
+            ),
+            local_page_index=row.get("height_source_page_index"),
+            local_scope_reviewed=row.get("height_applies_to_wall_reviewed") is True,
+            local_zone_id=row.get("height_ceiling_zone_id"),
         )
-        if row.get("height_applies_to_wall_reviewed") is not True:
-            raise SourceConflict("wall_height_scope_not_reviewed")
-        proved = validate_height_receipt(
-            source_height_page, height_claim,
-            rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
+        source_height_page = _page(page_map, selected["source_page_index"])
+        height_word = _word(
+            source_height_page, selected["source_height_receipt"]["height_word_ref"]
         )
-        if proved["height_word_ref"] != height_word.ref:
-            raise SourceConflict("wall_height_word_receipt_mismatch")
-        if proved["height_source_kind"] == RCP_MATERIAL_HEIGHT:
-            ceiling_zone = row.get("height_ceiling_zone_id")
-            if type(ceiling_zone) is not str or not ceiling_zone.strip():
-                raise SourceConflict("rcp_height_wall_zone_scope_missing")
-            height_source_refs["height_ceiling_zone_id_claimed"] = ceiling_zone
+        height_mm = Decimal(selected["height_mm"])
+        # Conflicting independently typed height figures must not override a
+        # source-owned standard or a reviewed RCP local height receipt.
+        if row.get("height_word_ref") is not None and (
+            row["height_word_ref"] != height_word.ref
+        ):
+            raise SourceConflict("wall_height_word_conflicts_with_project_rule")
+        receipt = selected["source_height_receipt"]
         height_source_refs.update({
-            "height_source_kind": proved["height_source_kind"],
-            "height_witness_word_refs": tuple(proved["witness_word_refs"]),
-            "height_dimension_segment_refs": tuple(proved["dimension_segment_refs"]),
-            "height_material_word_ref": proved["material_word_ref"],
+            "height_source_kind": receipt["height_source_kind"],
+            "height_witness_word_refs": tuple(receipt["witness_word_refs"]),
+            "height_dimension_segment_refs": tuple(receipt["dimension_segment_refs"]),
+            "height_material_word_ref": receipt["material_word_ref"],
             "height_source_scope_reviewed": True,
+            "height_policy_basis": selected["basis"],
+            "project_standard_height_mm": project_standard_height["height_mm"],
+            "local_height_override": selected["local_override"],
         })
+        if selected["local_override"]:
+            height_source_refs["height_ceiling_zone_id_claimed"] = selected["local_zone_id"]
+    else:
+        source_height_page = _page(page_map, row.get("height_source_page_index"))
+        height_word = _word(source_height_page, row.get("height_word_ref"))
+        height_mm = _figured_mm(height_word)
+        height_claim = row.get("height_source_receipt")
+        if height_claim is not None:
+            from .height_evidence import (
+                RCP_MATERIAL_HEIGHT, validate_height_receipt,
+            )
+            if row.get("height_applies_to_wall_reviewed") is not True:
+                raise SourceConflict("wall_height_scope_not_reviewed")
+            proved = validate_height_receipt(
+                source_height_page, height_claim,
+                rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
+            )
+            if proved["height_word_ref"] != height_word.ref:
+                raise SourceConflict("wall_height_word_receipt_mismatch")
+            if proved["height_source_kind"] == RCP_MATERIAL_HEIGHT:
+                ceiling_zone = row.get("height_ceiling_zone_id")
+                if type(ceiling_zone) is not str or not ceiling_zone.strip():
+                    raise SourceConflict("rcp_height_wall_zone_scope_missing")
+                height_source_refs["height_ceiling_zone_id_claimed"] = ceiling_zone
+            height_source_refs.update({
+                "height_source_kind": proved["height_source_kind"],
+                "height_witness_word_refs": tuple(proved["witness_word_refs"]),
+                "height_dimension_segment_refs": tuple(proved["dimension_segment_refs"]),
+                "height_material_word_ref": proved["material_word_ref"],
+                "height_source_scope_reviewed": True,
+            })
     finish_word = _word(page, row.get("finish_word_ref"))
     if _distance_to_line(_centre(finish_word), segment) > 90:
         raise SourceConflict("wall_finish_not_at_source_face")
@@ -279,6 +331,10 @@ def measure_building_components(
     if any(page.source_sha256 != source_sha or index != page.page_index
            for index, page in pages.items()):
         raise SourceConflict("multi_page_source_sha_or_index_conflict")
+    from .project_height_policy import resolve_project_standard_height
+    project_standard_height = resolve_project_standard_height(
+        pages, project, source_sha, selection.get("project_standard_height_policy"),
+    )
     inputs = {name: selection.get(name, []) for name in ("rooms", "ceilings", "walls", "doors")}
     if any(not isinstance(value, list) for value in inputs.values()):
         raise SourceConflict("building_family_selection_invalid")
@@ -318,6 +374,11 @@ def measure_building_components(
 
     quantities: list[dict[str, Any]] = []
     abstentions: list[dict[str, str]] = []
+    # A reviewed ceiling zone can carry its own printed RCP height to walls
+    # that are explicitly reviewed as belonging to the SAME ceiling zone.
+    # The key is the ceiling's physical ID, not a nearest-word association.
+    ceiling_zone_source_heights: dict[str, tuple[int, dict[str, Any]]] = {}
+    ceiling_zones_with_invalid_height: set[str] = set()
     for row in inputs["rooms"]:
         try:
             page = _page(pages, row.get("page_index"))
@@ -338,15 +399,36 @@ def measure_building_components(
             quantity = _measure_one(page, row, expected_basis="source_owned_ceiling_zone",
                                     trade="ceiling_finish")
             quantity["ceiling_id"] = ceiling_id
-            # Ceiling area and height are independent sources. Invalid height
-            # evidence does not erase an otherwise valid, reviewed RCP area.
-            if "height_source_receipt" in row:
+            # Ceiling area and height are independent sources. A same-bubble
+            # RCP material/height is a SPECIFIC local exception to a project
+            # standard. Its material word must be the source word already
+            # authenticated as belonging to the reviewed ceiling zone.
+            from .height_evidence import RCP_MATERIAL_HEIGHT, rcp_material_height_callouts, validate_height_receipt
+            local_claim = row.get("height_source_receipt")
+            auto_owned_callout = False
+            if local_claim is None:
+                local = [
+                    receipt for receipt in rcp_material_height_callouts(page)
+                    if receipt["material_word_ref"] == row.get("finish_word_ref")
+                ]
+                if len(local) == 1:
+                    local_claim = local[0]
+                    auto_owned_callout = True
+                elif len(local) > 1:
+                    ceiling_zones_with_invalid_height.add(ceiling_id)
+                    abstentions.append({
+                        "family": "ceiling_height", "physical_id": ceiling_id,
+                        "reason_code": "multiple_explicit_rcp_heights_for_ceiling_material",
+                    })
+            if local_claim is not None:
                 try:
-                    from .height_evidence import RCP_MATERIAL_HEIGHT, validate_height_receipt
-                    if row.get("height_ceiling_zone_reviewed") is not True:
+                    if (
+                        row.get("height_ceiling_zone_reviewed") is not True
+                        and not auto_owned_callout
+                    ):
                         raise SourceConflict("rcp_height_ceiling_zone_not_reviewed")
                     evidence = validate_height_receipt(
-                        page, row["height_source_receipt"],
+                        page, local_claim,
                         rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
                     )
                     if evidence["height_source_kind"] != RCP_MATERIAL_HEIGHT:
@@ -356,12 +438,26 @@ def measure_building_components(
                     quantity["height_mm_source_candidate"] = evidence["height_mm"]
                     quantity["height_word_ref"] = evidence["height_word_ref"]
                     quantity["height_material_word_ref"] = evidence["material_word_ref"]
+                    quantity["height_source_receipt"] = evidence
                     quantity["height_zone_scope"] = "REVIEWED_DRAFT_NOT_AUTHENTICATED"
+                    quantity["height_policy_basis"] = "SOURCE_RCP_LOCAL_CEILING_ZONE_OVERRIDE"
+                    if project_standard_height is not None:
+                        quantity["project_standard_height_mm"] = project_standard_height["height_mm"]
+                    ceiling_zone_source_heights[ceiling_id] = (page.page_index, evidence)
                 except SourceConflict as exc:
+                    ceiling_zones_with_invalid_height.add(ceiling_id)
                     abstentions.append({
                         "family": "ceiling_height", "physical_id": ceiling_id,
                         "reason_code": str(exc),
                     })
+            elif project_standard_height is not None and len(local) == 0:
+                standard_receipt = project_standard_height["source_height_receipt"]
+                quantity["height_mm_source_candidate"] = project_standard_height["height_mm"]
+                quantity["height_word_ref"] = standard_receipt["height_word_ref"]
+                quantity["height_source_receipt"] = standard_receipt
+                quantity["height_policy_basis"] = "OWNER_AUTHORIZED_PROJECT_FFL_FCL_STANDARD"
+                quantity["height_source_page_index"] = project_standard_height["section_page_index"]
+                quantity["height_zone_scope"] = "OWNER_STANDARD_UNLESS_EXPLICIT_OVERRIDE"
             quantities.append(quantity)
         except (SourceConflict, TypeError, ValueError, InvalidOperation, ZeroDivisionError) as exc:
             abstentions.append({"family": "ceiling_finish", "physical_id": ceiling_id,
@@ -383,7 +479,34 @@ def measure_building_components(
     for row in inputs["walls"]:
         wall_id = str(row.get("wall_id", ""))
         try:
-            produced, failures = _wall(pages, row, successful_doors, requested_doors)
+            wall_row = row
+            zone_id = row.get("height_ceiling_zone_id")
+            if (
+                project_standard_height is not None
+                and type(zone_id) is str
+                and zone_id in ceiling_zones_with_invalid_height
+            ):
+                raise SourceConflict("linked_ceiling_zone_height_unresolved")
+            if (
+                project_standard_height is not None
+                and "height_source_receipt" not in row
+                and type(zone_id) is str
+                and zone_id in ceiling_zone_source_heights
+            ):
+                if row.get("height_applies_to_wall_reviewed") is not True:
+                    raise SourceConflict("local_ceiling_zone_wall_scope_not_reviewed")
+                zone_page, zone_receipt = ceiling_zone_source_heights[zone_id]
+                wall_row = {
+                    **row,
+                    "height_source_page_index": zone_page,
+                    "height_source_receipt": zone_receipt,
+                }
+                # The project standard cannot silently replace an RCP-local
+                # height already authenticated to this reviewed ceiling zone.
+                wall_row.pop("height_word_ref", None)
+            produced, failures = _wall(
+                pages, wall_row, successful_doors, requested_doors, project_standard_height,
+            )
             quantities.extend(produced)
             abstentions.extend(failures)
         except (SourceConflict, TypeError, ValueError, InvalidOperation, ZeroDivisionError) as exc:
@@ -396,6 +519,7 @@ def measure_building_components(
         "project_id": project, "revision_id": revision,
         "source_sha256": source_sha,
         "source_pages": sorted(pages),
+        "project_standard_height": project_standard_height,
         "quantities": quantities, "abstentions": abstentions,
         "commercial_publishable": False, "official_score": None,
     }
