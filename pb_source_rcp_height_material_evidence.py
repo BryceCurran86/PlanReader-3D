@@ -182,3 +182,123 @@ def collect_original_rcp_height_material_evidence(
     if not candidate_records:
         return SourceRcpHeightMaterialResult(**empty, reason_codes=(SOURCE_RCP_HEIGHT_UNAVAILABLE,))
     return SourceRcpHeightMaterialResult(**empty, candidate_records=tuple(candidate_records))
+
+
+@dataclass(frozen=True)
+class SourceRcpExistingCeilingHeightLink:
+    """Additional height witness on an *already issued* ceiling correspondence.
+
+    This is NOT a new commercial quantity or an assertion about neighbouring
+    walls. A caller cannot supply an arbitrary correspondence or native word.
+    """
+    status: str
+    reason_codes: tuple[str, ...]
+    canonical_ceiling_id: str = ""
+    correspondence_record_id: str = ""
+    source_height_record_id: str = ""
+    source_sha256: str = ""
+    height_mm: int | None = None
+    material_code: str = ""
+    physical_zone_area_reissued: bool = False
+    wall_finish_height_authenticated: bool = False
+    commercial_projection_allowed: bool = False
+    benchmark_credit: bool = False
+
+
+def _bbox_fully_in(inner: tuple[float, ...], outer: tuple[float, ...]) -> bool:
+    return (
+        len(inner) == 4 and len(outer) == 4
+        and all(math.isfinite(float(v)) for v in (*inner, *outer))
+        and inner[0] >= outer[0] and inner[1] >= outer[1]
+        and inner[2] <= outer[2] and inner[3] <= outer[3]
+        and inner[0] < inner[2] and inner[1] < inner[3]
+        and outer[0] < outer[2] and outer[1] < outer[3]
+    )
+
+
+def bind_original_rcp_height_to_issued_ceiling(
+    *,
+    source: SourceVisibilityProducer,
+    correspondence: Any,
+) -> SourceRcpExistingCeilingHeightLink:
+    """Cross-check one trusted RCP callout against a *registered*, existing ceiling.
+
+    Explicit opt-in adapter, never a substitute for the legacy original
+    ceiling customer issuer. All source words are re-resolved from current
+    original PDF source integrity; a forged caller-supplied candidate cannot
+    be used as a height receipt.
+    """
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        SourceCrossViewCeilingCorrespondenceRecord,
+        get_authenticated_ceiling_correspondence,
+    )
+    from pb_migration_contracts import EvidenceResolutionStatus
+
+    def blocked(code: str) -> SourceRcpExistingCeilingHeightLink:
+        return SourceRcpExistingCeilingHeightLink(status="ABSTAIN", reason_codes=(code,))
+
+    if type(source) is not SourceVisibilityProducer:
+        return blocked("original_rcp_height_source_unavailable")
+    if type(correspondence) is not SourceCrossViewCeilingCorrespondenceRecord:
+        return blocked("original_rcp_ceiling_correspondence_not_source_issued")
+    cr = correspondence
+    if (
+        get_authenticated_ceiling_correspondence(cr.snapshot_id, cr.record_id) is not cr
+        or cr.status is not EvidenceResolutionStatus.CORROBORATED
+        or cr.commercial_projection_allowed is not True
+        or cr.takeoff_eligible is not True
+        or cr.authority_blockers
+        or not cr.source_sha256 or not cr.document_id
+        or not cr.revision_id or not cr.snapshot_id
+        or not cr.canonical_ceiling_id or not cr.physical_room_id
+        or not cr.source_room_face_record_id
+        or type(cr.support_page_id) is not str
+        or type(cr.finish_code) is not str or not cr.finish_code
+        or type(cr.ceiling_height_mm) not in (int, float)
+        or not math.isfinite(cr.ceiling_height_mm)
+    ):
+        return blocked("original_rcp_ceiling_correspondence_not_source_issued")
+    published = source.published_snapshot_for_revision(cr.revision_id)
+    if (
+        published is None
+        or published.revision.document_id != cr.document_id
+        or published.revision.source_sha256 != cr.source_sha256
+        or published.snapshot.snapshot_id != cr.snapshot_id
+        or published.revision.revision_id != cr.revision_id
+    ):
+        return blocked("original_rcp_ceiling_source_snapshot_mismatch")
+    if (
+        len(cr.support_dimension_box_pdf_pts) != 4
+        or any(not math.isfinite(v) for v in cr.support_dimension_box_pdf_pts)
+        or cr.support_dimension_box_pdf_pts[0] >= cr.support_dimension_box_pdf_pts[2]
+        or cr.support_dimension_box_pdf_pts[1] >= cr.support_dimension_box_pdf_pts[3]
+    ):
+        return blocked("original_rcp_ceiling_region_geometry_unavailable")
+    receipt = collect_original_rcp_height_material_evidence(
+        source=source, revision_id=cr.revision_id, page_id=cr.support_page_id,
+    )
+    if receipt.reason_codes:
+        return blocked("original_rcp_ceiling_height_text_unavailable")
+    options = [
+        r for r in receipt.candidate_records
+        if _bbox_fully_in(r.material_bbox_pdf_pts, cr.support_dimension_box_pdf_pts)
+        and _bbox_fully_in(r.height_bbox_pdf_pts, cr.support_dimension_box_pdf_pts)
+    ]
+    if len(options) != 1:
+        return blocked("original_rcp_ceiling_height_zone_not_unique")
+    pair = options[0]
+    if (
+        pair.material_code != cr.finish_code.strip().upper()
+        or float(pair.height_mm) != float(cr.ceiling_height_mm)
+    ):
+        return blocked("original_rcp_ceiling_height_material_source_conflict")
+    return SourceRcpExistingCeilingHeightLink(
+        status="AUTHENTICATED_EXISTING_CEILING_RCP_HEIGHT_SOURCE",
+        reason_codes=("source_height_matched_issued_ceiling_region",),
+        canonical_ceiling_id=cr.canonical_ceiling_id,
+        correspondence_record_id=cr.record_id,
+        source_height_record_id=pair.record_id,
+        source_sha256=cr.source_sha256,
+        height_mm=pair.height_mm,
+        material_code=pair.material_code,
+    )

@@ -667,6 +667,15 @@ class CrossViewCeilingFinishProducer:
             viewport_bbox_pdf_pts=viewport_bbox_pdf_pts,
         )
 
+    def source_rcp_height_for_issued_ceiling(self, *, correspondence):
+        """Cross-check RCP height only against an already issued ceiling zone."""
+        from pb_source_rcp_height_material_evidence import (
+            bind_original_rcp_height_to_issued_ceiling,
+        )
+        return bind_original_rcp_height_to_issued_ceiling(
+            source=self._source, correspondence=correspondence,
+        )
+
     def publish(self) -> CrossViewCeilingFinishResult:
         eligible_rooms = tuple(
             room
