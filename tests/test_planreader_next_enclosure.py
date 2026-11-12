@@ -96,6 +96,13 @@ def test_l_concave_and_holed_faces_do_not_publish_bbox_product_as_floor(monkeypa
     drafts = _draft_floors(page, [_draft_region(rectangle)])
     assert len(drafts) == 1
     assert drafts[0]["quantity_m2"] == "100"
+    split_edge = [
+        [0, 0], [100, 0], [100, 40], [100.01, 40], [100.01, 70], [100, 70],
+        [100, 100], [0, 100],
+    ]
+    split_drafts = _draft_floors(page, [_draft_region(split_edge)])
+    assert len(split_drafts) == 1
+    assert split_drafts[0]["quantity_m2"] == "100"
 
 
 def test_open_plan_living_and_kitchen_stay_one_physical_area(tmp_path):

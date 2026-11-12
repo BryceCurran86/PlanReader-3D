@@ -63,6 +63,15 @@ def test_three_line_hatch_does_not_invent_a_wall():
     assert result.rings == ()
 
 
+def test_short_unique_stroke_pair_is_still_a_topology_wall():
+    short = [_line(0, 0, 10, 0), _line(0, 2, 10, 2)]
+    result = build_layered_wall_doorway_room_rings(
+        short, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    assert result.wall_strip_count == 1
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
 def test_furniture_spacing_is_not_a_wall_face():
     far = [_line(0, 0, 80, 0), _line(0, 20, 80, 20)]
     result = build_layered_wall_doorway_room_rings(

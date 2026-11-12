@@ -217,3 +217,57 @@ def test_inner_face_is_not_swapped_for_the_outer_face_two_points_away(tmp_path):
     )
     assert bound is not None
     assert bound.length_mm == 3600
+
+
+def test_double_stroke_hashes_half_a_point_apart_are_one_station(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        for x in (100.0, 100.54, 200.0, 200.54):
+            page.draw_line(fitz.Point(x, 160), fitz.Point(x, 165.5))
+        page.draw_line(fitz.Point(90, 165.5), fitz.Point(210, 165.5))
+        page.insert_text((142, 176), "3600", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 3600
+    assert len(bound.hash_stations) == 2
+
+
+def test_opening_figure_does_not_own_the_wall_when_intermediate_hashes_exist(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 200, 160), color=(0, 0, 0), width=0.4)
+        page.draw_line(fitz.Point(100, 160), fitz.Point(100, 165.5))
+        page.draw_line(fitz.Point(200, 160), fitz.Point(200, 165.5))
+        page.draw_line(fitz.Point(90, 180), fitz.Point(210, 180))
+        page.draw_line(fitz.Point(100, 177), fitz.Point(100, 183))
+        page.draw_line(fitz.Point(140, 177), fitz.Point(140, 183))
+        page.draw_line(fitz.Point(160, 177), fitz.Point(160, 183))
+        page.draw_line(fitz.Point(200, 177), fitz.Point(200, 183))
+        page.insert_text((145, 204), "600", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=160.0, lo=100.0, hi=200.0, outward=1.0,
+    )
+    assert bound is None
+
+
+def test_leftover_side_runs_sum_two_figures_on_a_three_hash_interval(tmp_path):
+    def drawer(page):
+        page.draw_rect(fitz.Rect(100, 80, 219, 160), color=(0, 0, 0), width=0.4)
+        for x in (100.0, 125.4, 193.7, 219.0):
+            page.draw_line(fitz.Point(x, 80), fitz.Point(x, 74.5))
+        page.draw_line(fitz.Point(90, 74.5), fitz.Point(229, 74.5))
+        page.insert_text((108, 70), "1800", fontsize=8)
+        page.insert_text((150, 70), "2410", fontsize=8)
+
+    native = _page(tmp_path, drawer)
+    bound = bind_wall_hash_length(
+        native, horizontal_wall=True, face_perp=80.0, lo=100.0, hi=219.0, outward=-1.0,
+    )
+    assert bound is not None
+    assert bound.length_mm == 4210
+    assert len(bound.word_refs) == 2

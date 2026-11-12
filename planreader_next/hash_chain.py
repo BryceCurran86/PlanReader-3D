@@ -16,6 +16,9 @@ from .engine import NativePage, NativeSegment, NativeWord, SourceConflict, _figu
 
 # Face identity only. Must stay below typical wall thickness (~2 pt).
 _FACE_PT = 0.35
+# Duplicate hash ink is often two strokes ~0.5 pt apart. Still far below a
+# distinct neighbouring hash or the ~2 pt inner/outer wall pair.
+_HASH_PT = 0.8
 _TICK_MIN_PT = 1.4
 _TICK_MAX_PT = 8.0
 _WORD_LINE_PT = 24.0
@@ -77,11 +80,21 @@ def _cluster_stations(stations: dict[float, list[float]]) -> dict[float, list[fl
     """Merge duplicate hash ink at one station. Does not pick among distinct faces."""
     grouped: dict[float, list[float]] = {}
     for along in sorted(stations):
-        if grouped and along - next(reversed(grouped)) <= _FACE_PT:
+        if grouped and along - next(reversed(grouped)) <= _HASH_PT:
             grouped[next(reversed(grouped))].extend(stations[along])
         else:
             grouped[along] = list(stations[along])
     return grouped
+
+
+def _merge_station_maps(
+    maps: Sequence[dict[float, list[float]]],
+) -> dict[float, list[float]]:
+    combined: dict[float, list[float]] = {}
+    for stations in maps:
+        for along, outers in stations.items():
+            combined.setdefault(along, []).extend(outers)
+    return _cluster_stations(combined)
 
 
 def _unique_end_station(stations: dict[float, list[float]], target: float) -> float | None:
@@ -300,8 +313,10 @@ def bind_wall_hash_length(
     """Return the unique outside hash-chain length for one wall, or None."""
     if hi - lo < 8.0:
         return None
-    face = _bind_from_ticks(
-        page,
+    # Face-touching hashes and hashes on a parallel outside dim line are one
+    # chain. Returning the face-only bind first would keep a lone opening
+    # figure (600, 870) between two end ticks and ignore intermediate hashes.
+    ticks = _merge_station_maps((
         _tick_stations(
             page.segments,
             horizontal_wall=horizontal_wall,
@@ -310,15 +325,6 @@ def bind_wall_hash_length(
             hi=hi,
             outward=outward,
         ),
-        horizontal_wall=horizontal_wall,
-        lo=lo,
-        hi=hi,
-        face_perp=face_perp,
-    )
-    if face is not None:
-        return face
-    return _bind_from_ticks(
-        page,
         _projected_tick_stations(
             page.segments,
             horizontal_wall=horizontal_wall,
@@ -327,6 +333,10 @@ def bind_wall_hash_length(
             hi=hi,
             outward=outward,
         ),
+    ))
+    return _bind_from_ticks(
+        page,
+        ticks,
         horizontal_wall=horizontal_wall,
         lo=lo,
         hi=hi,
@@ -421,12 +431,12 @@ def _bind_from_ticks(
     if not shared:
         return None
     complete: list[HashBoundLength] = []
+    lo_stat, hi_stat = min(start, finish), max(start, finish)
+    along_stations = [
+        station for station in ticks
+        if lo_stat - _FACE_PT <= station <= hi_stat + _FACE_PT
+    ]
     for line_perp in sorted(set(shared)):
-        stations = [
-            station
-            for station, outers in ticks.items()
-            if any(abs(outer - line_perp) <= _FACE_PT for outer in outers)
-        ]
         bound = _complete_chain(
             page,
             horizontal_wall=horizontal_wall,
@@ -436,7 +446,7 @@ def _bind_from_ticks(
             line_perp=line_perp,
             start=start,
             end=finish,
-            stations=stations,
+            stations=along_stations,
         )
         if bound is not None:
             complete.append(bound)

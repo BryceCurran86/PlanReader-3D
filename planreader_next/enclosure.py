@@ -260,11 +260,16 @@ def _axis_aligned_rectangle_face(coords: list[list[float]] | list[tuple[float, f
     polygon = Polygon(coords)
     if not polygon.is_valid or polygon.is_empty or polygon.interiors:
         return False
+    # Door fills split a straight wall into collinear edges; 0.05 pt is
+    # representation noise, not the 2.5 pt production snap.
+    polygon = polygon.simplify(0.05, preserve_topology=True)
+    if polygon.is_empty or polygon.interiors:
+        return False
     minx, miny, maxx, maxy = polygon.bounds
     bbox_area = (maxx - minx) * (maxy - miny)
     if bbox_area <= 0:
         return False
-    return abs(polygon.area / bbox_area - 1.0) <= 1e-6
+    return abs(polygon.area / bbox_area - 1.0) <= 1e-4
 
 
 def _draft_floors(page: NativePage, regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
