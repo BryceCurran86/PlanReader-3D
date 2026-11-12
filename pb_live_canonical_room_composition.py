@@ -818,6 +818,7 @@ def compose_live_canonical_rooms(
     layered_sliding_leaf_closure: bool = False,
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
+    layered_dark_painted_wall_source: bool = False,
 ) -> LiveCanonicalRoomComposition:
     """Project sealed room-face authority into persistent canonical room objects.
 
@@ -840,6 +841,15 @@ def compose_live_canonical_rooms(
         raise ValueError("layered_finished_face_gate must be an explicit boolean")
     if layered_finished_face_gate and not layered_doorway_room_rings:
         raise ValueError("layered_finished_face_gate needs layered_doorway_room_rings")
+    if type(layered_dark_painted_wall_source) is not bool:
+        raise ValueError("layered_dark_painted_wall_source must be an explicit boolean")
+    if layered_dark_painted_wall_source and not (
+        layered_doorway_room_rings and layered_finished_face_gate
+    ):
+        raise ValueError(
+            "layered_dark_painted_wall_source requires layered_doorway_room_rings"
+            " and layered_finished_face_gate"
+        )
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -869,6 +879,7 @@ def compose_live_canonical_rooms(
             sliding_leaf_frame_closure=layered_sliding_leaf_closure,
             partition_witness=layered_partition_witness,
             finished_face_gate=layered_finished_face_gate,
+            dark_painted_wall_source=layered_dark_painted_wall_source,
         )
     authority = build_source_room_face_authority(
         wall_opening_composition.physical_wall_candidate_authority,

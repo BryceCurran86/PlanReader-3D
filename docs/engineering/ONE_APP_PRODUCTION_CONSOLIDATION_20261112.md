@@ -77,3 +77,77 @@ remain mandatory.
 
 This document does not claim all Maryborough rooms or zones have been
 measured, or an increase to any official benchmark score.
+
+
+## Source-dark wall geometry wired to original canonical rooms
+
+The ORIGINAL pb_layered_wall_doorway_room_ring_shadow now optionally
+reads genuine source-native dark-gray, opaque, narrow PDF fill bars
+even without an explicit wall-layer name. It preserves original native
+path indices and uses the existing doorway-closure polygon builder.
+No second commercial quantity issuer is introduced.
+
+The option dark_painted_wall_source=False defaults OFF at the original
+ring builder, SHA-pinned PDF reader and room-face scope. Canonical room
+composition has layered_dark_painted_wall_source=False. To turn it on,
+live caller must also enable layered_doorway_room_rings and
+layered_finished_face_gate. The source room-face handoff independently
+requires finished_face_gate. Physical wall and metric area authority
+are NOT inferred from dark source paint alone.
+
+Dark source bar detection requires almost monochromatic channels above
+black threshold but no brighter than 0.25; opaque fill, no stroke,
+native source rect/quad, narrow 1.2..14 PDF point bar with span >=8
+PDF points and span / thickness >=4. Such source geometry is only a
+candidate; the thresholds are NOT globally source-authenticated wall
+dimensions. White background fills, translucent decoration, short
+symbols, broad cabinets and strokes with competing paint are excluded.
+
+## Owner-proven green exclusion and black wall-pair trace
+
+Maryborough original A110 floor page index 6 contains **109,354**
+PDF drawing PATHS, or 109,522 individual source primitives.
+The original drawing has **64,333 green-coloured source paths** showing
+equipment, aisle, shelving and cold-room *detail*. Owner confirms these
+green paths are EXCLUSIONS from STRUCTURAL wall tracing. They are never
+walls or fake closed-room boundaries. We do not erase the PDF, the
+actual black cold-room wall or the cold-room floor finish / room label.
+
+The opt-in ORIGINAL room-ring source mode now:
+1. Masks source-green strokes/fills and non-wall paint to inert placeholders
+   while retaining each path's original PDF index (so wall-source citations
+   can never be renumbered);
+2. Uses only **14,038 qualified black-stroked / dark-filled candidate paths**
+   containing **14,200 source primitives**, genuinely below the frozen
+   20,000-primitive cap with no truncated portion of the drawing;
+3. Applies Cursor's original-source reciprocal unique parallel wall-stroke
+   face detector, ported as internal helpers into the ORIGINAL room-ring
+   producer (not importing the Next commercial runtime);
+4. Retains both real stroke-pair source IDs on source wall owners and
+   structural line endpoints; GREEN source paths cannot be owners;
+5. Keeps the existing physical room-face and finished-face gate active
+   before any candidate can enter real customer quantity authority.
+
+Original-source A110 replay: **116 paired black-wall strip candidates,
+six preliminary closed topology rings, ZERO source-proven door closures,
+no m? and no customer / official score credits**. Thus room recovery still
+needs hosted doorway evidence, PWD/M-AMB/F-AMB physical subdivision,
+correct exterior footprint identity and finished-face authority. The
+six rings are NOT asserted to be all real rooms.
+
+A120 RCP index 8 has 15,496 source PDF paths and no matching green
+exclusion. The original source candidate mode yields 297 source wall-strip
+hypotheses, 13 provisional enclosed rings, zero confirmed doorway closures,
+and does not publish a ceiling area. No new quantity issuer.
+
+The opt-in source filter checks *individual primitive count* rather than
+only drawing path count. If more than 20,000 original eligible primitives
+remain, source tracing abstains and needs bounded source viewports rather
+than silently truncating the drawing.
+
+Original SHA256:
+b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007.
+At least **182 combined original room/wall/door/net-wall regression tests
+passed** with private original provisioning (prior to this wording update).
+No private PDF, original signed quantity, customer record or frozen120 gold
+was modified.
