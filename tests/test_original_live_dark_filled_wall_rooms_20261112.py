@@ -207,7 +207,8 @@ def test_real_maryborough_green_exclusion_unblocks_bounded_original_floor_wall_t
         drawings,source_sha256=SHA,page_index=6,
         dark_painted_wall_source=True,
     )
-    assert result.wall_strip_count==116
+    # Two anonymous opaque-black source bars now join the 116 existing strips.
+    assert result.wall_strip_count==118
     assert len(result.rings)>0
     assert sum(r.status is EvidenceResolutionStatus.CANDIDATE for r in result.rings)==6
     assert len(result.closures)==0  # doorways still await verified source witness

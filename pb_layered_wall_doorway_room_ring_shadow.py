@@ -384,9 +384,12 @@ def _collect_dark_painted_source_wall_strips(
                 type(v) in (float, int) and math.isfinite(v)
                 and 0 <= v <= 0.25 for v in color
             )
-            and max(color) > _BLACK_MAX
             and max(color) - min(color) <= 0.03
         ):
+            continue
+        # Named black wall polygons already enter through _collect_strips.
+        # Anonymous black bars need the same source-paint route as grey bars.
+        if _is_black(color) and is_explicit_wall_layer_name(str(row.get("layer") or "")):
             continue
         if row.get("color") is not None:
             continue
@@ -725,17 +728,39 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     return list(found.values())
 
 
-def _swing_arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]:
+def _swing_source_rows(drawings, *, unlabelled_source_ink=False):
+    """Keep legacy wall layers; optionally admit source-black anonymous strokes.
+
+    This selects door-symbol evidence, not wall barriers or white frame boxes.
+    Existing arc/leaf geometry, ambiguity and wall-gap checks still apply.
+    """
+    owned = dict(_wall_rows(drawings))
+    if unlabelled_source_ink:
+        for index, row in enumerate(drawings):
+            if index in owned or not isinstance(row, Mapping):
+                continue
+            opacity = row.get("stroke_opacity", 1.0)
+            if (
+                row.get("fill") is None and _is_black(row.get("color"))
+                and type(opacity) in (int, float) and math.isfinite(opacity)
+                and opacity >= 0.995
+            ):
+                owned[index] = row
+    return tuple(sorted(owned.items()))
+
+
+def _swing_arcs(drawings: Sequence[Mapping[str, Any]], *, unlabelled_source_ink: bool = False) -> tuple[list[dict], int]:
+    source_rows = _swing_source_rows(drawings, unlabelled_source_ink=unlabelled_source_ink)
     arcs: list[dict] = []
     rejected = 0
     leaves: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
-    for index, row in _wall_rows(drawings):
+    for index, row in source_rows:
         if row.get("fill") is not None:
             continue
         items = list(row.get("items", ()))
         if len(items) == 1 and items[0][0] == "l":
             leaves.append((index, _xy(items[0][1]), _xy(items[0][2])))
-    for index, row in _wall_rows(drawings):
+    for index, row in source_rows:
         if row.get("fill") is not None:
             continue
         items = list(row.get("items", ()))
@@ -1151,7 +1176,9 @@ def build_layered_wall_doorway_room_rings(
     gaps = _gaps(strips, union, domain)
     if sliding_leaf_frame_closure:
         gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
-    arcs, _rejected_arcs = _swing_arcs(drawings)
+    arcs, _rejected_arcs = _swing_arcs(
+        drawings, unlabelled_source_ink=dark_painted_wall_source,
+    )
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
     closures: list[LayeredDoorwayClosure] = []
