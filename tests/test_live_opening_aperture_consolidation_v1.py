@@ -78,7 +78,12 @@ def overlapping(*ids):
 
 
 def run(comp, provider, enabled=True):
-    return consolidate_live_opening_apertures(composition=comp, enabled=enabled, evidence_provider=provider)
+    # the PRIVATE core: the public entry points accept no provider, so tests substitute the authority's answers here
+    return consolidation._consolidate_with_provider(comp, provider, enabled)
+
+
+def run_publish(comp, provider, enabled=True):
+    return consolidation._publish_with_provider(comp, provider, enabled)
 
 
 def ids_of(quantities):
@@ -89,22 +94,37 @@ def ids_of(quantities):
 def test_disabled_by_default_returns_the_same_composition_and_asks_nothing():
     comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
     provider = FakeProvider(overlapping("a", "b"))
-    result = consolidate_live_opening_apertures(composition=comp, evidence_provider=provider)
+    result = consolidate_live_opening_apertures(composition=comp)             # the PUBLIC API, default off: no provider is even built
     assert result.enabled is False and result.composition is comp and result.consolidated == () and result.reason_codes == (DISABLED,)
-    assert provider.asked == []
-    quantities, record = publish_live_opening_area_quantities_with_aperture_consolidation(composition=comp, evidence_provider=provider)
+    assert run(comp, provider, enabled=False).composition is comp and provider.asked == []
+    quantities, record = publish_live_opening_area_quantities_with_aperture_consolidation(composition=comp)
     assert quantities == publish_live_opening_area_quantities(comp) and record.composition is comp
 
 
 @pytest.mark.parametrize("bad", [1, 0, "yes", None, 1.0])
 def test_enabled_must_be_a_strict_bool(bad):
     with pytest.raises(ValueError):
-        consolidate_live_opening_apertures(composition=composition(opening("a")), enabled=bad, evidence_provider=FakeProvider())
+        consolidate_live_opening_apertures(composition=composition(opening("a")), enabled=bad)
+    with pytest.raises(ValueError):
+        run(composition(opening("a")), FakeProvider(), enabled=bad)
 
 
 def test_a_non_composition_is_refused():
     with pytest.raises(TypeError):
-        consolidate_live_opening_apertures(composition=object(), enabled=True, evidence_provider=FakeProvider())
+        consolidate_live_opening_apertures(composition=object())
+    with pytest.raises(TypeError):
+        run(object(), FakeProvider())
+
+
+def test_an_enabled_call_without_the_producer_owned_objects_fails_closed():
+    comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
+    with pytest.raises(TypeError):                                              # no source producer, no wall-opening composition
+        consolidate_live_opening_apertures(composition=comp, enabled=True)
+    with pytest.raises(TypeError):                                              # stand-ins are refused by exact type
+        consolidate_live_opening_apertures(
+            source_visibility_producer=object(), wall_opening_composition=object(), composition=comp, enabled=True)
+    with pytest.raises(TypeError):
+        run(comp, None)                                                         # the private core also refuses a missing provider
 
 
 def test_the_result_grants_no_authority():
@@ -117,8 +137,7 @@ def test_an_equivalent_pair_with_an_evidence_owner_publishes_one_quantity_and_ke
     comp = composition(opening("a", ("o1", "o2")), opening("b", ("o1",)))
     baseline = publish_live_opening_area_quantities(comp)
     assert ids_of(baseline) == ["a", "b"]
-    quantities, result = publish_live_opening_area_quantities_with_aperture_consolidation(
-        composition=comp, enabled=True, evidence_provider=FakeProvider(overlapping("a", "b")))
+    quantities, result = run_publish(comp, FakeProvider(overlapping("a", "b")))
     assert ids_of(quantities) == ["a"]
     assert quantities == tuple(q for q in baseline if q.input_entity_ids[0] == "a")           # the owner's own row, byte for byte
     (aperture,) = result.consolidated
@@ -273,7 +292,7 @@ def test_the_publication_invariant_fails_closed_if_anything_else_would_disappear
     real = consolidation.derive_composition
     monkeypatch.setattr(consolidation, "derive_composition", lambda c, dropped: real(c, (*dropped, "c")))      # an extra member vanishes
     with pytest.raises(ApertureConsolidationInvariantError):
-        publish_live_opening_area_quantities_with_aperture_consolidation(composition=comp, enabled=True, evidence_provider=provider)
+        run_publish(comp, provider)
 
 
 # ------------------------------------------------------------------------------------------------ pure rules
@@ -300,9 +319,17 @@ def test_plan_consolidation_ignores_single_member_classes():
 
 # ------------------------------------------------------------------------------------------------ isolation
 def test_nothing_in_production_imports_the_consumer():
+    import ast
     root = Path(consolidation.__file__).parent
     me = Path(consolidation.__file__).name
-    importers = sorted(p.name for p in root.glob("pb_*.py") if p.name != me and "pb_live_opening_aperture_consolidation" in p.read_text(encoding="utf-8", errors="ignore"))
+
+    def imports_it(path):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        names = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+        names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        return "pb_live_opening_aperture_consolidation" in names
+
+    importers = sorted(p.name for p in root.glob("pb_*.py") if p.name != me and imports_it(p))
     assert importers == [], importers                                                               # wiring is a separate, reviewed step
 
 

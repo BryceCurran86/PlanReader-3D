@@ -21,6 +21,18 @@ never touches the identity map, scorer or frozen files, and publishes nothing by
 publication/export functions, so the seal and customer bijection see one consistent inventory. With ``enabled=False`` (the default)
 the input composition is returned unchanged.
 
+Authentication. Every pair verdict, printed-figure key and physical-host key comes from the producer-owned objects the public entry
+points are given (``SourceVisibilityProducer`` and ``LiveWallOpeningAuthorityComposition``, both checked by exact type). The public
+API has NO parameter through which a caller can supply a verdict, a record, a receipt or an evidence provider; the injectable core
+(``_consolidate_with_provider``) is private and exists so tests can substitute the authority's answers.
+
+This module replaces the quantity-level collapse that PR #4282 added inside ``publish_live_opening_area_quantities``. That collapse
+(1) kept the first sorted member, (2) rewrote ``input_entity_ids`` to every member (the seal refuses a quantity that is not exactly one
+canonical opening, and also any quantity that is not byte-identical to the owner's own recomputed one), (3) dropped every ambiguous or
+unclassified quantity, and (4) trusted caller-supplied pair verdicts. It could not be repaired in place: it receives only quantities,
+so it can neither authenticate a verdict nor keep the canonical inventory (which other publishers re-derive from the composition)
+consistent. It has been removed; ``publish_live_opening_area_quantities`` is byte-identical to its pre-#4282 form.
+
 Not wired into the live claim here: the integration publishes inside a function other lanes own (see the wiring note in the
 architecture report). A caller that has the source producer, the wall-opening composition and the physical-void composition can call
 ``publish_live_opening_area_quantities_with_aperture_consolidation`` instead of ``publish_live_opening_area_quantities``.
@@ -243,23 +255,19 @@ class AuthorityEvidenceProvider:
 
 
 # ------------------------------------------------------------------------------------------------------ the consumer
-def consolidate_live_opening_apertures(
-    *,
-    source_visibility_producer=None,
-    wall_opening_composition=None,
-    composition: LivePhysicalOpeningVoidComposition,
-    enabled: bool = False,
-    evidence_provider=None,
+def _consolidate_with_provider(
+    composition: LivePhysicalOpeningVoidComposition, provider, enabled: bool,
 ) -> ApertureConsolidationResult:
-    """See the module docstring. ``evidence_provider`` replaces the authority-backed provider (tests only)."""
+    """The consumer over an injected evidence provider. PRIVATE: the public entry points build the authority-backed provider
+    themselves, so a caller can never supply verdicts, records or receipts. Tests substitute the authority's answers here."""
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be a strict bool")
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
     if not enabled:
         return ApertureConsolidationResult(enabled=False, composition=composition, reason_codes=(DISABLED,))
-    provider = evidence_provider or AuthorityEvidenceProvider(
-        source_visibility_producer=source_visibility_producer, wall_opening_composition=wall_opening_composition)
+    if provider is None:
+        raise TypeError("an enabled aperture consolidation needs an authority-backed evidence provider")
     quantities = {q.input_entity_ids[0]: q for q in publish_live_opening_area_quantities(composition)}
     openings = {o.physical_opening_id: o for o in composition.canonical_openings}
     measured = sorted(i for i in quantities if i in openings)
@@ -285,21 +293,10 @@ def consolidate_live_opening_apertures(
         reason_codes=((CONSOLIDATED,) if consolidated else ()) + ((NOT_REPROVEN,) if not_reproven else ()))
 
 
-def publish_live_opening_area_quantities_with_aperture_consolidation(
-    *,
-    source_visibility_producer=None,
-    wall_opening_composition=None,
-    composition: LivePhysicalOpeningVoidComposition,
-    enabled: bool = False,
-    evidence_provider=None,
+def _publish_with_provider(
+    composition: LivePhysicalOpeningVoidComposition, provider, enabled: bool,
 ) -> tuple[tuple[QuantityEvidence, ...], ApertureConsolidationResult]:
-    """``publish_live_opening_area_quantities`` with the default-off consolidation; the pair (quantities, record).
-
-    Off: exactly the existing publication. On: the existing publication of the derived composition, which must equal the original
-    publication minus the dropped members' quantities (every surviving quantity byte-identical), or the call fails closed."""
-    result = consolidate_live_opening_apertures(
-        source_visibility_producer=source_visibility_producer, wall_opening_composition=wall_opening_composition,
-        composition=composition, enabled=enabled, evidence_provider=evidence_provider)
+    result = _consolidate_with_provider(composition, provider, enabled)
     published = publish_live_opening_area_quantities(result.composition)
     if result.enabled:
         dropped = set(result.dropped_physical_opening_ids)
@@ -307,6 +304,41 @@ def publish_live_opening_area_quantities_with_aperture_consolidation(
         if published != expected:
             raise ApertureConsolidationInvariantError(INVARIANT)
     return published, result
+
+
+def _authority_provider(source_visibility_producer, wall_opening_composition, enabled):
+    """The real, authority-backed provider, built only for ``enabled is True`` (a strict bool is checked by the core)."""
+    if enabled is not True:
+        return None
+    return AuthorityEvidenceProvider(
+        source_visibility_producer=source_visibility_producer, wall_opening_composition=wall_opening_composition)
+
+
+def consolidate_live_opening_apertures(
+    *,
+    source_visibility_producer=None,
+    wall_opening_composition=None,
+    composition: LivePhysicalOpeningVoidComposition,
+    enabled: bool = False,
+) -> ApertureConsolidationResult:
+    """See the module docstring. The only evidence is what the producer-owned objects prove; a caller supplies no verdicts."""
+    return _consolidate_with_provider(
+        composition, _authority_provider(source_visibility_producer, wall_opening_composition, enabled), enabled)
+
+
+def publish_live_opening_area_quantities_with_aperture_consolidation(
+    *,
+    source_visibility_producer=None,
+    wall_opening_composition=None,
+    composition: LivePhysicalOpeningVoidComposition,
+    enabled: bool = False,
+) -> tuple[tuple[QuantityEvidence, ...], ApertureConsolidationResult]:
+    """``publish_live_opening_area_quantities`` with the default-off consolidation; the pair (quantities, record).
+
+    Off: exactly the existing publication. On: the existing publication of the derived composition, which must equal the original
+    publication minus the dropped members' quantities (every surviving quantity byte-identical), or the call fails closed."""
+    return _publish_with_provider(
+        composition, _authority_provider(source_visibility_producer, wall_opening_composition, enabled), enabled)
 
 
 __all__ = [

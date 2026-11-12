@@ -20,8 +20,9 @@ records into aperture classes:
 A class of equivalent records must be a clique (every pair equivalent); otherwise it is ambiguous. A consolidated
 class names every member and carries the single shared area: no member is dropped or preferred. The module is pure and
 deterministic (independent of record, pair and side order), mutates nothing, is default off (``enabled`` must be a
-strict bool) and grants no quantity. The default-off publication consumer
-``pb_live_opening_aperture_equivalence_publication`` is the only production importer.
+strict bool) and grants no quantity. The default-off, authority-reproving consumer
+``pb_live_opening_aperture_consolidation`` is the only production importer: it builds every ``PairVerdict`` itself from
+the producer-owned ``PhysicalOpeningAuthority`` and never accepts verdicts or records from a caller.
 """
 from __future__ import annotations
 
