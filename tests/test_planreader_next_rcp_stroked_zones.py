@@ -201,6 +201,15 @@ def test_original_maryborough_a120_keeps_callouts_and_rejects_white_fills():
         if zone["material_code_candidate"] == "GRID" and zone["height_mm"] == "3000"
     ]
     assert sales == []
+    kitchen = [
+        zone for zone in packet["source_zone_stroked_candidates"]
+        if zone["material_code_candidate"] == "FPB" and zone["height_mm"] == "3000"
+        and zone["connected_same_finish_callout_count"] >= 3
+    ]
+    assert len(kitchen) == 1
+    xs = [pt[0] for pt in kitchen[0]["boundary_polygon_pdf_pts"]]
+    ys = [pt[1] for pt in kitchen[0]["boundary_polygon_pdf_pts"]]
+    assert max(ys) < 1550.0
     assert any(
         item.get("reason_code") == "rcp_conflicting_stroked_ring_finishes"
         for item in packet["unresolved_callouts"]

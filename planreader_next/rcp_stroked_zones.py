@@ -166,6 +166,7 @@ def propose_rcp_stroked_ceiling_zones(
             for word in page.words
         ],
         stroke_pair_wall_faces=True,
+        wall_end_stroke_closures=True,
     )
     regions = []
     for ring in result.rings:

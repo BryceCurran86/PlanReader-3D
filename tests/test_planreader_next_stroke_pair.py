@@ -6,6 +6,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_PRIMITIVE_CAP,
     _collect_dark_fill_strips,
     _collect_stroke_pair_strips,
+    _collect_wall_end_closing_strips,
     build_layered_wall_doorway_room_rings,
     expand_labelled_stroke_pair_viewports,
 )
@@ -358,3 +359,32 @@ def test_dark_filled_wall_strips_are_topology_walls_white_masks_are_not():
     closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
     assert closed
     assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
+def _u_room_open_south():
+    dark = (0.195, 0.195, 0.195)
+    return [
+        _fill_rect(0, 20, 5, 120, dark),
+        _fill_rect(200, 20, 205, 120, dark),
+        _fill_rect(0, 115, 205, 120, dark),
+    ]
+
+
+def test_wall_end_stroke_closes_only_when_both_native_ends_meet_major_walls():
+    closer = _line(5, 20, 200, 20, color=(0.0, 0.0, 0.0))
+    drawings = _u_room_open_south() + [closer]
+    supports = _collect_dark_fill_strips(_u_room_open_south())
+    assert len(_collect_wall_end_closing_strips(drawings, supports)) == 1
+    prolonged = _u_room_open_south() + [_line(5, 20, 400, 20, color=(0.0, 0.0, 0.0))]
+    assert _collect_wall_end_closing_strips(prolonged, supports) == []
+    open_south = build_layered_wall_doorway_room_rings(
+        _u_room_open_south(), source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True, wall_end_stroke_closures=True,
+    )
+    closed_south = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True, wall_end_stroke_closures=True,
+    )
+    assert not any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in open_south.rings)
+    assert any(ring.status is EvidenceResolutionStatus.CANDIDATE for ring in closed_south.rings)
+    assert all(not ring.takeoff_eligible for ring in closed_south.rings)

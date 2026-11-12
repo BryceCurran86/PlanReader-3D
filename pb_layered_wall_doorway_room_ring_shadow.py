@@ -67,6 +67,8 @@ _STROKE_PAIR_THICK_MAX = 8.0
 _DARK_FILL_THICK_MIN = 1.2
 _DARK_FILL_THICK_MAX = 14.0  # GPT A120 dark-wall witness band; not the 2.5 pt snap
 _STROKE_PAIR_MIN_SPAN = 8.0
+_WALL_END_SUPPORT_SPAN = 80.0  # major wall runs only; ceiling-grid modules are ~71 pt
+_WALL_END_CLOSER_SPAN = 20.0
 _STROKE_PAIR_FACE_PT = 0.35
 _STROKE_PAIR_CLUSTER_PT = 0.8  # CAD double-stroke faces; never the 2.5 pt snap
 REASON_UNOWNED_EDGE = "ring_edge_without_source_owner"
@@ -802,6 +804,93 @@ def _collect_dark_fill_strips(
                 continue
             strips.append(_Strip(index, x0, y0, x1, y1, box(x0, y0, x1, y1)))
     return _attach_caps(strips)
+
+
+def _major_structural_strips(strips: Sequence[_Strip]) -> list[_Strip]:
+    """Long thick wall runs. Short ceiling-grid modules are not supports."""
+    major: list[_Strip] = []
+    for strip in strips:
+        thick = min(strip.x1 - strip.x0, strip.y1 - strip.y0)
+        span = max(strip.x1 - strip.x0, strip.y1 - strip.y0)
+        if span >= _WALL_END_SUPPORT_SPAN and _STROKE_PAIR_THICK_MIN <= thick <= _DARK_FILL_THICK_MAX:
+            major.append(strip)
+    return major
+
+
+def _collect_wall_end_closing_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+    strips: Sequence[_Strip],
+) -> list[_Strip]:
+    """Single black strokes that already meet two major walls at their native ends.
+
+    The stroke is not extended, snapped, or prolonged through an unsupported
+    field. A line that only meets one wall, or that rides a ceiling-grid
+    module, is not a closer. This is topology-only; it is not a wall quantity.
+    """
+    supports = _major_structural_strips(strips)
+    if len(supports) < 2:
+        return []
+    half = _STROKE_PAIR_THICK_MIN / 2.0
+    found: list[_Strip] = []
+    seen: set[tuple[float, float, float, float]] = set()
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _is_wall_stroke_color(row.get("color")):
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            ax, ay = _xy(item[1])
+            bx, by = _xy(item[2])
+            horizontal = _close(ay, by, 1e-3) and abs(bx - ax) >= _WALL_END_CLOSER_SPAN
+            vertical = _close(ax, bx, 1e-3) and abs(by - ay) >= _WALL_END_CLOSER_SPAN
+            if not horizontal and not vertical:
+                continue
+            start = Point(ax, ay)
+            end = Point(bx, by)
+            mid = Point((ax + bx) / 2.0, (ay + by) / 2.0)
+            hits_a = [s for s in supports if s.polygon.distance(start) <= _STROKE_PAIR_FACE_PT]
+            hits_b = [s for s in supports if s.polygon.distance(end) <= _STROKE_PAIR_FACE_PT]
+            if not hits_a or not hits_b:
+                continue
+            if set(id(s) for s in hits_a) & set(id(s) for s in hits_b):
+                continue
+            if any(s.polygon.distance(mid) <= _STROKE_PAIR_FACE_PT for s in supports):
+                continue
+            if horizontal:
+                if not any(s.vertical for s in hits_a) or not any(s.vertical for s in hits_b):
+                    continue
+                y = (ay + by) / 2.0
+                x0, x1 = sorted((ax, bx))
+                x0_b, y0_b, x1_b, y1_b = x0, y - half, x1, y + half
+                # Close CAD double-stroke misalignment to the already-hit wall, never past 0.8 pt.
+                for strip in hits_a + hits_b:
+                    if not strip.vertical:
+                        continue
+                    if 0.0 < x0_b - strip.x1 <= _STROKE_PAIR_CLUSTER_PT:
+                        x0_b = strip.x1
+                    if 0.0 < strip.x0 - x1_b <= _STROKE_PAIR_CLUSTER_PT:
+                        x1_b = strip.x0
+            else:
+                if not any(s.horizontal for s in hits_a) or not any(s.horizontal for s in hits_b):
+                    continue
+                x = (ax + bx) / 2.0
+                y0, y1 = sorted((ay, by))
+                x0_b, y0_b, x1_b, y1_b = x - half, y0, x + half, y1
+                for strip in hits_a + hits_b:
+                    if not strip.horizontal:
+                        continue
+                    if 0.0 < y0_b - strip.y1 <= _STROKE_PAIR_CLUSTER_PT:
+                        y0_b = strip.y1
+                    if 0.0 < strip.y0 - y1_b <= _STROKE_PAIR_CLUSTER_PT:
+                        y1_b = strip.y0
+            key = (round(x0_b, 2), round(y0_b, 2), round(x1_b, 2), round(y1_b, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(_Strip(index, x0_b, y0_b, x1_b, y1_b, box(x0_b, y0_b, x1_b, y1_b)))
+    return found
 
 
 def _attach_caps(strips: list[_Strip]) -> list[_Strip]:
@@ -1773,6 +1862,7 @@ def build_layered_wall_doorway_room_rings(
     panel_lift_label_closure: bool = False,
     source_words: Sequence[Mapping[str, Any]] = (),
     stroke_pair_wall_faces: bool = False,
+    wall_end_stroke_closures: bool = False,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
@@ -1781,6 +1871,8 @@ def build_layered_wall_doorway_room_rings(
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
     ``stroke_pair_wall_faces`` (default False) adds unlabelled parallel-stroke face candidates.
     Those candidates are not an authenticated wall layer and never a quantity.
+    ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
+    its native endpoints already meet major structural strips. The stroke is not extended.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
@@ -1788,6 +1880,8 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("panel_lift_label_closure must be an explicit boolean")
     if type(stroke_pair_wall_faces) is not bool:
         raise ValueError("stroke_pair_wall_faces must be an explicit boolean")
+    if type(wall_end_stroke_closures) is not bool:
+        raise ValueError("wall_end_stroke_closures must be an explicit boolean")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -1806,6 +1900,7 @@ def build_layered_wall_doorway_room_rings(
                         panel_lift_label_closure=panel_lift_label_closure,
                         source_words=source_words,
                         stroke_pair_wall_faces=True,
+                        wall_end_stroke_closures=wall_end_stroke_closures,
                         viewport_pdf_pts=box,
                     )
                     for box in viewports
@@ -1822,6 +1917,8 @@ def build_layered_wall_doorway_room_rings(
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
         strips = strips + _collect_stroke_pair_strips(indexed) + _collect_dark_fill_strips(indexed)
+        if wall_end_stroke_closures:
+            strips = strips + _collect_wall_end_closing_strips(indexed, strips)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
