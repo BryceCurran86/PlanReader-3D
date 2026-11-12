@@ -64,8 +64,11 @@ REASON_PRIMITIVE_CAP = "page_primitive_cap_exceeded"
 _PRIMITIVE_CAP = 20000
 _STROKE_PAIR_THICK_MIN = 1.2
 _STROKE_PAIR_THICK_MAX = 8.0
+_DARK_FILL_THICK_MIN = 1.2
+_DARK_FILL_THICK_MAX = 14.0  # GPT A120 dark-wall witness band; not the 2.5 pt snap
 _STROKE_PAIR_MIN_SPAN = 8.0
 _STROKE_PAIR_FACE_PT = 0.35
+_STROKE_PAIR_CLUSTER_PT = 0.8  # CAD double-stroke faces; never the 2.5 pt snap
 REASON_UNOWNED_EDGE = "ring_edge_without_source_owner"
 REASON_SOURCE_HASH = "source_sha256_mismatch"
 
@@ -88,6 +91,20 @@ def _is_black(color: Any) -> bool:
         and len(color) == 3
         and all(type(v) in (int, float) and math.isfinite(v) and 0.0 <= v <= _BLACK_MAX for v in color)
     )
+
+
+_DARK_FILL_MAX = 0.25  # A120 structural fills are ~0.195 gray; white masks are 1.0
+
+
+def _is_dark_structural_fill(color: Any) -> bool:
+    """Opaque dark-gray/black fill, not a white layout mask and not a light hatch."""
+    if not (
+        isinstance(color, (tuple, list))
+        and len(color) == 3
+        and all(type(v) in (int, float) and math.isfinite(v) and 0.0 <= v <= _DARK_FILL_MAX for v in color)
+    ):
+        return False
+    return (max(color) - min(color)) <= _BLACK_MAX
 
 
 def _close(a: float, b: float, tol: float = NOISE_PT) -> bool:
@@ -454,66 +471,116 @@ def expand_labelled_stroke_pair_viewports(
     for seed in seeds:
         x0, y0, x1, y1 = (float(value) for value in seed)
         seed_box = (x0, y0, x1, y1)
-        halo_hit = _largest_halo_under_cap(drawings, seed_box)
-        if halo_hit is None:
-            grown.append(seed_box)
-            continue
-        halo, clipped = halo_hit
-        strips = _collect_stroke_pair_strips(clipped)
-        kept = [strip for strip in strips if _strip_intersects_box(strip, seed_box)]
-        if not kept:
-            kept = [strip for strip in strips if _strip_intersects_box(strip, halo)]
-        if not kept:
-            grown.append(seed_box)
-            continue
-        frontier = list(kept)
-        while frontier:
-            current = frontier.pop()
-            for candidate in strips:
-                if candidate in kept:
-                    continue
-                if _strips_touch(current, candidate):
-                    kept.append(candidate)
-                    frontier.append(candidate)
-        pad = _STROKE_PAIR_GROW_PAD_PT
-        expanded = (
-            min(x0, min(strip.x0 for strip in kept) - pad),
-            min(y0, min(strip.y0 for strip in kept) - pad),
-            max(x1, max(strip.x1 for strip in kept) + pad),
-            max(y1, max(strip.y1 for strip in kept) + pad),
-        )
-        if _selected_primitive_count(_clip_drawing_items(drawings, expanded)) > _PRIMITIVE_CAP:
-            expanded = (
-                min(x0, min(strip.x0 for strip in kept)),
-                min(y0, min(strip.y0 for strip in kept)),
-                max(x1, max(strip.x1 for strip in kept)),
-                max(y1, max(strip.y1 for strip in kept)),
+        current = seed_box
+        expanded = seed_box
+        for _ in range(12):
+            halo_hit = _largest_halo_under_cap(drawings, current)
+            if halo_hit is None:
+                break
+            halo, clipped = halo_hit
+            filled, _other = _collect_strips(clipped)
+            strips = (
+                _collect_stroke_pair_strips(clipped)
+                + list(filled)
+                + _collect_dark_fill_strips(clipped)
             )
-            if _selected_primitive_count(_clip_drawing_items(drawings, expanded)) > _PRIMITIVE_CAP:
-                grown.append(seed_box)
-                continue
+            kept = [strip for strip in strips if _strip_intersects_box(strip, current)]
+            if not kept:
+                kept = [strip for strip in strips if _strip_intersects_box(strip, halo)]
+            if not kept:
+                break
+            frontier = list(kept)
+            while frontier:
+                node = frontier.pop()
+                for candidate in strips:
+                    if candidate in kept:
+                        continue
+                    if _strips_touch(node, candidate):
+                        kept.append(candidate)
+                        frontier.append(candidate)
+            pad = _STROKE_PAIR_GROW_PAD_PT
+            nxt = (
+                min(x0, min(strip.x0 for strip in kept) - pad),
+                min(y0, min(strip.y0 for strip in kept) - pad),
+                max(x1, max(strip.x1 for strip in kept) + pad),
+                max(y1, max(strip.y1 for strip in kept) + pad),
+            )
+            if _selected_primitive_count(_clip_drawing_items(drawings, nxt)) > _PRIMITIVE_CAP:
+                nxt = (
+                    min(x0, min(strip.x0 for strip in kept)),
+                    min(y0, min(strip.y0 for strip in kept)),
+                    max(x1, max(strip.x1 for strip in kept)),
+                    max(y1, max(strip.y1 for strip in kept)),
+                )
+                if _selected_primitive_count(_clip_drawing_items(drawings, nxt)) > _PRIMITIVE_CAP:
+                    break
+            if max(abs(a - b) for a, b in zip(nxt, current)) <= NOISE_PT:
+                expanded = nxt
+                break
+            current = nxt
+            expanded = nxt
         grown.append(expanded)
     return grown
+
+
+def _is_wall_stroke_color(color: Any) -> bool:
+    """Default CAD stroke (None) or opaque black. Grey grid and green hatch are not walls."""
+    return color is None or _is_black(color)
 
 
 def _axis_strokes(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[tuple[int, bool, float, float, float]]:
-    strokes: list[tuple[int, bool, float, float, float]] = []
+    """Axis-aligned black wall strokes, shorts merged collinearly before the 8 pt span gate.
+
+    Double-drawn CAD faces (~0.48 pt) collapse to one perp. Door-sized gaps stay open.
+    """
+    raw: list[tuple[int, bool, float, float, float]] = []
     for index, row in enumerate(drawings):
         if row is None or row.get("fill") is not None:
+            continue
+        if not _is_wall_stroke_color(row.get("color")):
             continue
         for item in row.get("items", ()):
             if item[0] != "l":
                 continue
             (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
-            if _close(ay, by, 1e-3) and abs(bx - ax) >= _STROKE_PAIR_MIN_SPAN:
+            if _close(ay, by, 1e-3) and abs(bx - ax) > NOISE_PT:
                 lo, hi = sorted((ax, bx))
-                strokes.append((index, True, (ay + by) / 2.0, lo, hi))
-            elif _close(ax, bx, 1e-3) and abs(by - ay) >= _STROKE_PAIR_MIN_SPAN:
+                raw.append((index, True, (ay + by) / 2.0, lo, hi))
+            elif _close(ax, bx, 1e-3) and abs(by - ay) > NOISE_PT:
                 lo, hi = sorted((ay, by))
-                strokes.append((index, False, (ax + bx) / 2.0, lo, hi))
-    return strokes
+                raw.append((index, False, (ax + bx) / 2.0, lo, hi))
+    merged: list[tuple[int, bool, float, float, float]] = []
+    for horiz in (True, False):
+        members = [item for item in raw if item[1] is horiz]
+        members.sort(key=lambda item: (item[2], item[3], item[4]))
+        groups: list[list[tuple[int, bool, float, float, float]]] = []
+        for stroke in members:
+            if groups and abs(stroke[2] - groups[-1][0][2]) <= _STROKE_PAIR_CLUSTER_PT:
+                groups[-1].append(stroke)
+                continue
+            groups.append([stroke])
+        for group in groups:
+            ordered = sorted(group, key=lambda item: (item[3], item[4]))
+            run = [ordered[0]]
+            lo, hi = ordered[0][3], ordered[0][4]
+            for stroke in ordered[1:]:
+                if stroke[3] <= hi + _STROKE_PAIR_CLUSTER_PT:
+                    run.append(stroke)
+                    hi = max(hi, stroke[4])
+                    continue
+                if hi - lo >= _STROKE_PAIR_MIN_SPAN:
+                    perp = sum(item[2] for item in run) / len(run)
+                    for item in run:
+                        merged.append((item[0], horiz, perp, lo, hi))
+                run = [stroke]
+                lo, hi = stroke[3], stroke[4]
+            if hi - lo >= _STROKE_PAIR_MIN_SPAN:
+                perp = sum(item[2] for item in run) / len(run)
+                for item in run:
+                    merged.append((item[0], horiz, perp, lo, hi))
+    return merged
 
 
 def _stroke_partners(
@@ -548,7 +615,7 @@ def _cluster_strokes_by_perp(
 ) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
     grouped: list[tuple[float, list[tuple[int, bool, float, float, float]]]] = []
     for stroke in sorted(strokes, key=lambda item: item[2]):
-        if grouped and abs(stroke[2] - grouped[-1][0]) <= _STROKE_PAIR_FACE_PT:
+        if grouped and abs(stroke[2] - grouped[-1][0]) <= _STROKE_PAIR_CLUSTER_PT:
             grouped[-1][1].append(stroke)
             continue
         grouped.append((stroke[2], [stroke]))
@@ -571,7 +638,7 @@ def _merged_along_spans(
     ordered = sorted((stroke[3], stroke[4]) for stroke in strokes)
     merged: list[tuple[float, float]] = []
     for lo, hi in ordered:
-        if merged and lo <= merged[-1][1] + _STROKE_PAIR_FACE_PT:
+        if merged and lo <= merged[-1][1] + _STROKE_PAIR_CLUSTER_PT:
             merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
         else:
             merged.append((lo, hi))
@@ -608,8 +675,8 @@ def _collect_stroke_pair_strips(
             low_perp, high_perp = perps[0], perps[-1]
             if high_perp - low_perp < _STROKE_PAIR_THICK_MIN:
                 continue
-            low_face = [item for item in members if abs(item[2] - low_perp) <= _STROKE_PAIR_FACE_PT]
-            high_face = [item for item in members if abs(item[2] - high_perp) <= _STROKE_PAIR_FACE_PT]
+            low_face = [item for item in members if abs(item[2] - low_perp) <= _STROKE_PAIR_CLUSTER_PT]
+            high_face = [item for item in members if abs(item[2] - high_perp) <= _STROKE_PAIR_CLUSTER_PT]
             for lo0, hi0 in _merged_along_spans(low_face):
                 for lo1, hi1 in _merged_along_spans(high_face):
                     lo, hi = max(lo0, lo1), min(hi0, hi1)
@@ -702,6 +769,39 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
             else:
                 other.append((index, polygon))
     return _attach_caps(strips), other
+
+
+def _collect_dark_fill_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Unlabelled dark-filled thin rectangles as topology-only wall strips.
+
+    A120 paints structural walls as opaque ~0.195 gray ``re`` fills with no
+    wall layer and often no stroke. White layout masks stay out. This is not
+    a wall layer and not a finished-face quantity.
+    """
+    strips: list[_Strip] = []
+    for index, row in enumerate(drawings):
+        if row is None:
+            continue
+        fill = row.get("fill")
+        if fill is None or not _is_dark_structural_fill(fill) or not _opaque(row):
+            continue
+        if row.get("color") is not None:
+            continue
+        for item in row.get("items", ()):
+            rect = _rect_of_item(item)
+            if rect is None:
+                continue
+            x0, y0, x1, y1 = rect
+            width, height = x1 - x0, y1 - y0
+            thick, span = min(width, height), max(width, height)
+            if thick < _DARK_FILL_THICK_MIN or thick > _DARK_FILL_THICK_MAX:
+                continue
+            if span < _STROKE_PAIR_MIN_SPAN:
+                continue
+            strips.append(_Strip(index, x0, y0, x1, y1, box(x0, y0, x1, y1)))
+    return _attach_caps(strips)
 
 
 def _attach_caps(strips: list[_Strip]) -> list[_Strip]:
@@ -934,6 +1034,54 @@ def _stroke_closed(
             if near_band and _close(lo, gap.lo) and _close(hi, gap.hi):
                 return (index,)
     return None
+
+
+def _jamb_cap_closed(
+    drawings: Sequence[Mapping[str, Any] | None], gap: _Gap, *, all_ink: bool = False,
+) -> Optional[tuple[int, ...]]:
+    """Unique perpendicular caps at both gap ends spanning the wall band.
+
+    Stroke-pair walls often omit a leaf/swing. Both unique jambs still close the
+    interruption. Competing caps abstain. Representation noise only; never 2.5 pt snap.
+    """
+    thickness = gap.band[1] - gap.band[0]
+    if thickness <= NOISE_PT or gap.hi - gap.lo <= NOISE_PT:
+        return None
+
+    def caps(station: float) -> list[int]:
+        hits: list[int] = []
+        for index, row in _source_rows(drawings, all_ink=all_ink):
+            if row.get("fill") is not None:
+                continue
+            for item in row.get("items", ()):
+                if item[0] != "l":
+                    continue
+                (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+                if gap.horizontal:
+                    if not _close(ax, bx, _STROKE_PAIR_FACE_PT):
+                        continue
+                    if abs(((ax + bx) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                        continue
+                    lo, hi = sorted((ay, by))
+                else:
+                    if not _close(ay, by, _STROKE_PAIR_FACE_PT):
+                        continue
+                    if abs(((ay + by) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                        continue
+                    lo, hi = sorted((ax, bx))
+                if lo - _STROKE_PAIR_FACE_PT > gap.band[0] or hi + _STROKE_PAIR_FACE_PT < gap.band[1]:
+                    continue
+                if (hi - lo) > thickness + 2.0 * _STROKE_PAIR_FACE_PT:
+                    continue
+                hits.append(index)
+        return list(dict.fromkeys(hits))
+
+    low, high = caps(gap.lo), caps(gap.hi)
+    if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
+        return None
+    if set(low) & set(high):
+        return None
+    return tuple(sorted(set(low) | set(high)))
 
 
 def _row_bounds(row: Mapping[str, Any]) -> tuple[float, float, float, float]:
@@ -1673,7 +1821,7 @@ def build_layered_wall_doorway_room_rings(
             )
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
-        strips = strips + _collect_stroke_pair_strips(indexed)
+        strips = strips + _collect_stroke_pair_strips(indexed) + _collect_dark_fill_strips(indexed)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -1723,6 +1871,8 @@ def build_layered_wall_doorway_room_rings(
         stroke = None if swing is not None else _stroke_closed(
             indexed, gap, all_ink=stroke_pair_wall_faces,
         )
+        if stroke is None and swing is None and stroke_pair_wall_faces:
+            stroke = _jamb_cap_closed(indexed, gap, all_ink=True)
         sliding = sliding_by_gap.get(gap_index)
         cavity = cavity_by_gap.get(gap_index)
         panel_words = (

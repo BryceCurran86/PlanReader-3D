@@ -9,6 +9,12 @@ from .project_height_policy import (
     select_applicable_height,
 )
 from .rcp_zone_scope import propose_rcp_source_zone_rectangles, associate_reviewed_rcp_zone_with_plan_face
+from .rcp_stroked_zones import (
+    bind_callouts_to_stroked_rings,
+    propose_rcp_stroked_ceiling_zones,
+    stroked_source_line_segments,
+)
+from .rcp_room_link import unique_plan_rcp_room_label_links
 from .section_scope import source_section_cut, section_cut_region_height_candidates
 from .height_face_scope import (
     section_height_to_plan_face_candidates,
@@ -29,6 +35,9 @@ __all__ = [
     "height_evidence_inventory", "validate_height_receipt",
     "resolve_project_standard_height", "select_applicable_height",
     "propose_rcp_source_zone_rectangles", "associate_reviewed_rcp_zone_with_plan_face",
+    "bind_callouts_to_stroked_rings", "propose_rcp_stroked_ceiling_zones",
+    "stroked_source_line_segments",
+    "unique_plan_rcp_room_label_links",
     "source_section_cut", "section_cut_region_height_candidates",
     "section_height_to_plan_face_candidates",
     "reviewed_rcp_height_to_plan_face_candidates",

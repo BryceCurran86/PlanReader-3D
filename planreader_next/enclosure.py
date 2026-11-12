@@ -24,7 +24,15 @@ _ROOM_WORDS = frozenset({
     "BED", "BEDROOM", "BATH", "BATHROOM", "ENSUITE", "ENS", "WC", "LAUNDRY",
     "GARAGE", "LIVING", "DINING", "KITCHEN", "KIT", "ENTRY", "MEDIA", "HALL",
     "STUDY", "ROBE", "WIR", "ALFRESCO", "LOUNGE", "PANTRY", "OFFICE", "MASTER",
-    "MEALS", "FAMILY",
+    "MEALS", "FAMILY", "PWD", "AIRLOCK", "STORE", "TOILET", "SERVERY",
+    "COOLROOM", "AMENITIES", "REFUSE", "SALES",
+})
+_ROOM_PHRASES = frozenset({
+    ("FOOD", "PREP"), ("WASH", "UP"), ("COLD", "ROOM"), ("DRY", "STORE"),
+})
+_TITLE_BLOCK_WORDS = frozenset({
+    "LEVEL", "DRAWING", "DRAWINGS", "ISSUE", "SHEET", "REVISION", "SCALE",
+    "PROJECT", "CHECKED", "DRAWN", "DATE",
 })
 _OPEN_PLAN_WORDS = frozenset({
     "LIVING", "DINING", "KITCHEN", "KIT", "MEALS", "LOUNGE", "FAMILY",
@@ -45,6 +53,86 @@ def _fill_bbox(closure: Any) -> list[float]:
     )
 
 
+def _word_block(ref: str) -> str | None:
+    if not ref.startswith("word:"):
+        return None
+    parts = ref.split(":")
+    return parts[1] if len(parts) >= 2 else None
+
+
+def _title_block_ids(page: NativePage) -> set[str]:
+    found: set[str] = set()
+    for word in page.words:
+        if word.text.strip().upper() not in _TITLE_BLOCK_WORDS:
+            continue
+        block = _word_block(word.ref)
+        if block:
+            found.add(block)
+    return found
+
+
+def _padded_box(
+    bbox: tuple[float, float, float, float], margin: float,
+) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = bbox
+    return (x0 - margin, y0 - margin, x1 + margin, y1 + margin)
+
+
+def _phrase_labels(page: NativePage) -> list[dict[str, str]]:
+    title = _title_block_ids(page)
+    found: list[dict[str, str]] = []
+    words = list(page.words)
+    for left, right in zip(words, words[1:]):
+        a, b = left.text.strip().upper(), right.text.strip().upper()
+        block_a, block_b = _word_block(left.ref), _word_block(right.ref)
+        if block_a is None or block_a != block_b or block_a in title:
+            continue
+        if (a, b) not in _ROOM_PHRASES and (b, a) not in _ROOM_PHRASES:
+            continue
+        first, second = (left, right) if (a, b) in _ROOM_PHRASES else (right, left)
+        found.append({
+            "text": f"{first.text.strip().upper()} {second.text.strip().upper()}",
+            "native_word_ref": first.ref,
+        })
+    return found
+
+
+def _seed_label_boxes(page: NativePage) -> list[tuple[float, float, float, float]]:
+    title = _title_block_ids(page)
+    boxes: list[tuple[float, float, float, float]] = []
+    for word in page.words:
+        if word.text.strip().upper() not in _ROOM_WORDS:
+            continue
+        if _word_block(word.ref) in title:
+            continue
+        boxes.append(word.bbox)
+    by_ref = {word.ref: word for word in page.words}
+    for phrase in _phrase_labels(page):
+        first = by_ref.get(phrase["native_word_ref"])
+        if first is None:
+            continue
+        partner = None
+        token = phrase["text"].split()[-1]
+        for word in page.words:
+            if (
+                word.ref != first.ref
+                and _word_block(word.ref) == _word_block(first.ref)
+                and word.text.strip().upper() == token
+            ):
+                partner = word
+                break
+        if partner is None:
+            boxes.append(first.bbox)
+            continue
+        boxes.append((
+            min(first.bbox[0], partner.bbox[0]),
+            min(first.bbox[1], partner.bbox[1]),
+            max(first.bbox[2], partner.bbox[2]),
+            max(first.bbox[3], partner.bbox[3]),
+        ))
+    return boxes
+
+
 def _inside_words(page: NativePage, polygon: Polygon, tokens: frozenset[str]) -> list[dict[str, str]]:
     found = []
     for word in page.words:
@@ -58,6 +146,24 @@ def _inside_words(page: NativePage, polygon: Polygon, tokens: frozenset[str]) ->
     return found
 
 
+def _inside_room_labels(page: NativePage, polygon: Polygon) -> list[dict[str, str]]:
+    labels = _inside_words(page, polygon, _ROOM_WORDS)
+    title = _title_block_ids(page)
+    labels = [
+        item for item in labels
+        if _word_block(item["native_word_ref"]) not in title
+    ]
+    by_ref = {word.ref: word for word in page.words}
+    for phrase in _phrase_labels(page):
+        first = by_ref.get(phrase["native_word_ref"])
+        if first is None:
+            continue
+        x0, y0, x1, y1 = first.bbox
+        if polygon.contains(Point((x0 + x1) / 2, (y0 + y1) / 2)):
+            labels.append(phrase)
+    return labels
+
+
 def _label_viewports(
     page: NativePage, margin: float = 80.0,
 ) -> list[tuple[float, float, float, float]]:
@@ -67,12 +173,7 @@ def _label_viewports(
     primitive cap. Separate labelled clusters keep original path indices and stay
     inside that cap. This is not a wall layer and not a quantity.
     """
-    boxes = []
-    for word in page.words:
-        if word.text.strip().upper() not in _ROOM_WORDS:
-            continue
-        x0, y0, x1, y1 = word.bbox
-        boxes.append((x0 - margin, y0 - margin, x1 + margin, y1 + margin))
+    boxes = [_padded_box(box, margin) for box in _seed_label_boxes(page)]
     if not boxes:
         return []
     parent = list(range(len(boxes)))
@@ -131,7 +232,7 @@ def propose_room_enclosures(
         drawings = document[page.page_index].get_drawings()
     confirm_source_snapshot(path, digest, identity)
     if viewport_pdf_pts is None and stroke_pair_wall_faces:
-        clustered = _label_viewports(page)
+        clustered = _label_viewports(page, margin=80.0)
         viewport_pdf_pts = (
             expand_labelled_stroke_pair_viewports(drawings, clustered)
             if clustered else None
@@ -178,7 +279,7 @@ def propose_room_enclosures(
         polygon = Polygon(ring.polygon_pdf_pts)
         if not polygon.is_valid or polygon.is_empty or not math.isfinite(polygon.area):
             raise SourceConflict("source_ring_geometry_invalid")
-        room_words = _inside_words(page, polygon, _ROOM_WORDS)
+        room_words = _inside_room_labels(page, polygon)
         finish_words = _inside_words(page, polygon, _FINISH_WORDS)
         distinct_rooms = sorted({word["text"] for word in room_words})
         distinct_finishes = sorted({word["text"] for word in finish_words})

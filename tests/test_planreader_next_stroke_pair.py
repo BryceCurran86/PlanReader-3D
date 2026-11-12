@@ -4,6 +4,7 @@ from __future__ import annotations
 from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_NO_WALL_INK,
     REASON_PRIMITIVE_CAP,
+    _collect_dark_fill_strips,
     _collect_stroke_pair_strips,
     build_layered_wall_doorway_room_rings,
     expand_labelled_stroke_pair_viewports,
@@ -13,11 +14,12 @@ from pb_migration_contracts import EvidenceResolutionStatus
 SHA = "ab" * 32
 
 
-def _line(x0, y0, x1, y1):
+def _line(x0, y0, x1, y1, color=None):
     import fitz
     return {
         "layer": "",
         "fill": None,
+        "color": color,
         "rect": fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)),
         "items": [("l", fitz.Point(x0, y0), fitz.Point(x1, y1))],
     }
@@ -40,6 +42,19 @@ def test_stroke_pairs_stay_off_by_default():
     assert result.rings == ()
 
 
+def _stroke_room_with_jamb_door():
+    # East wall interrupted 40..64, closed only by unique jamb caps.
+    return [
+        _line(0, 0, 100, 0), _line(0, 2, 100, 2),
+        _line(0, 98, 100, 98), _line(0, 100, 100, 100),
+        _line(0, 0, 0, 100), _line(2, 0, 2, 100),
+        _line(98, 0, 98, 40), _line(100, 0, 100, 40),
+        _line(98, 64, 98, 100), _line(100, 64, 100, 100),
+        _line(98, 40, 100, 40),
+        _line(98, 64, 100, 64),
+    ]
+
+
 def test_opt_in_stroke_pairs_are_topology_only_not_a_wall_layer():
     result = build_layered_wall_doorway_room_rings(
         _stroke_room(), source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
@@ -52,6 +67,18 @@ def test_opt_in_stroke_pairs_are_topology_only_not_a_wall_layer():
     assert closed[0].bounding_wall_path_indices == (0, 1, 2, 3, 4, 5, 6, 7)
     owners = {owner for edge in closed[0].edge_owner_ids for owner in edge}
     assert {f"layered_wall_strip:{index}" for index in range(8)} <= owners
+
+
+def test_unique_jamb_caps_close_a_stroke_pair_door_gap():
+    result = build_layered_wall_doorway_room_rings(
+        _stroke_room_with_jamb_door(), source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True,
+    )
+    closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
+    assert closed
+    assert result.unresolved_gap_count == 0
+    assert any(item.kind == "source_stroke_closure" for item in result.closures)
+    assert all(not ring.takeoff_eligible for ring in result.rings)
 
 
 def test_three_line_hatch_does_not_invent_a_wall():
@@ -239,3 +266,95 @@ def test_one_path_with_over_cap_items_abstains_before_pairing():
     assert result.reason_codes == (REASON_PRIMITIVE_CAP,)
     assert result.rings == ()
     assert result.wall_strip_count == 0
+
+
+def _double_drawn_room():
+    # 0.48 pt CAD double-stroke on each 5.76 pt wall face.
+    faces = (
+        ((0.0, 0.48), True),
+        ((5.76, 6.24), True),
+        ((93.76, 94.24), True),
+        ((99.52, 100.0), True),
+        ((0.0, 0.48), False),
+        ((5.76, 6.24), False),
+        ((93.76, 94.24), False),
+        ((99.52, 100.0), False),
+    )
+    rows = []
+    for perps, horiz in faces:
+        for perp in perps:
+            if horiz:
+                rows.append(_line(0, perp, 100, perp, color=(0.0, 0.0, 0.0)))
+            else:
+                rows.append(_line(perp, 0, perp, 100, color=(0.0, 0.0, 0.0)))
+    return rows
+
+
+def test_double_drawn_black_faces_are_one_wall_not_rival_partners():
+    result = build_layered_wall_doorway_room_rings(
+        _double_drawn_room(), source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
+    assert closed
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
+def test_tessellated_black_shorts_merge_into_a_topology_wall():
+    rows = []
+    for x0 in range(0, 100, 10):
+        rows.append(_line(x0, 0, x0 + 9.9, 0, color=(0.0, 0.0, 0.0)))
+        rows.append(_line(x0, 4, x0 + 9.9, 4, color=(0.0, 0.0, 0.0)))
+    strips = _collect_stroke_pair_strips(rows)
+    assert len(strips) == 1
+    assert strips[0].polygon.bounds[2] - strips[0].polygon.bounds[0] >= 90.0
+
+
+def test_grey_grid_and_green_hatch_are_not_wall_faces():
+    grey = [
+        _line(0, y, 80, y, color=(0.5, 0.5, 0.5))
+        for y in (0.0, 2.0, 34.0, 36.0)
+    ]
+    green = [
+        _line(0, 0, 10, 10, color=(0.0, 0.5, 0.0)),
+        _line(2, 0, 12, 10, color=(0.0, 0.5, 0.0)),
+    ]
+    result = build_layered_wall_doorway_room_rings(
+        grey + green, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    assert result.wall_strip_count == 0
+    assert result.rings == ()
+
+
+def _fill_rect(x0, y0, x1, y1, fill):
+    import fitz
+    return {
+        "layer": "",
+        "fill": fill,
+        "color": None,
+        "fill_opacity": 1.0,
+        "rect": fitz.Rect(x0, y0, x1, y1),
+        "items": [("re", fitz.Rect(x0, y0, x1, y1))],
+    }
+
+
+def _dark_fill_room():
+    dark = (0.195, 0.195, 0.195)
+    return [
+        _fill_rect(0, 0, 100, 5, dark),
+        _fill_rect(0, 95, 100, 100, dark),
+        _fill_rect(0, 0, 5, 100, dark),
+        _fill_rect(95, 0, 100, 100, dark),
+    ]
+
+
+def test_dark_filled_wall_strips_are_topology_walls_white_masks_are_not():
+    dark_strips = _collect_dark_fill_strips(_dark_fill_room())
+    assert len(dark_strips) == 4
+    white = _collect_dark_fill_strips([_fill_rect(0, 0, 400, 300, (1.0, 1.0, 1.0))])
+    assert white == []
+    result = build_layered_wall_doorway_room_rings(
+        _dark_fill_room(), source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    closed = [ring for ring in result.rings if ring.status is EvidenceResolutionStatus.CANDIDATE]
+    assert closed
+    assert all(not ring.takeoff_eligible for ring in result.rings)
