@@ -340,10 +340,17 @@ def _axis_strokes(
 def _stroke_partners(
     stroke: tuple[int, bool, float, float, float],
     pool: Sequence[tuple[int, bool, float, float, float]],
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
 ) -> list[tuple[int, bool, float, float, float]]:
     found: list[tuple[int, bool, float, float, float]] = []
-    _index, _horiz, perp, lo, hi = stroke
+    _index, _horiz, perp, stroke_lo, stroke_hi = stroke
+    lo = stroke_lo if lo is None else lo
+    hi = stroke_hi if hi is None else hi
     span = hi - lo
+    if span < _STROKE_PAIR_MIN_SPAN:
+        return found
     for other in pool:
         if other == stroke or other[0] == _index:
             continue
@@ -372,8 +379,11 @@ def _cluster_strokes_by_perp(
 def _partner_face_clusters(
     stroke: tuple[int, bool, float, float, float],
     pool: Sequence[tuple[int, bool, float, float, float]],
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
 ) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
-    return _cluster_strokes_by_perp(_stroke_partners(stroke, pool))
+    return _cluster_strokes_by_perp(_stroke_partners(stroke, pool, lo=lo, hi=hi))
 
 
 def _merged_along_spans(
@@ -400,22 +410,21 @@ def _collect_stroke_pair_strips(
     """
     strokes = _axis_strokes(drawings)
     strips: list[_Strip] = []
-    used: set[tuple[int, bool, float, float, float]] = set()
+    seen: set[tuple[float, float, float, float]] = set()
     by_dir = {True: [s for s in strokes if s[1]], False: [s for s in strokes if not s[1]]}
     for horiz, pool in by_dir.items():
         for stroke in pool:
-            if stroke in used:
-                continue
             clusters = _partner_face_clusters(stroke, pool)
             if len(clusters) != 1:
                 continue
             _opp_perp, partners = clusters[0]
-            if any(len(_partner_face_clusters(other, pool)) != 1 for other in partners):
+            window_lo, window_hi = stroke[3], stroke[4]
+            if any(
+                len(_partner_face_clusters(other, pool, lo=window_lo, hi=window_hi)) != 1
+                for other in partners
+            ):
                 continue
             members = (stroke,) + tuple(partners)
-            if any(item in used for item in members):
-                continue
-            used.update(members)
             perps = sorted(item[2] for item in members)
             low_perp, high_perp = perps[0], perps[-1]
             if high_perp - low_perp < _STROKE_PAIR_THICK_MIN:
@@ -431,8 +440,16 @@ def _collect_stroke_pair_strips(
                         x0, x1, y0, y1 = lo, hi, low_perp, high_perp
                     else:
                         x0, x1, y0, y1 = low_perp, high_perp, lo, hi
+                    key = (round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    covering = [
+                        item for item in members
+                        if min(item[4], hi) - max(item[3], lo) > _STROKE_PAIR_FACE_PT
+                    ]
+                    paths = tuple(sorted({item[0] for item in covering} or {stroke[0]}))
                     polygon = box(x0, y0, x1, y1)
-                    paths = tuple(sorted({item[0] for item in members}))
                     strips.append(_Strip(paths[0], x0, y0, x1, y1, polygon, path_indices=paths))
     return strips
 

@@ -69,6 +69,21 @@ def test_furniture_spacing_is_not_a_wall_face():
     assert result.wall_strip_count == 0
 
 
+def test_long_outer_face_pairs_each_unique_inner_span():
+    drawings = [
+        _line(0, 0, 200, 0),
+        _line(0, 2, 70, 2),
+        _line(130, 2, 200, 2),
+        _line(80, 4, 120, 4),
+        _line(80, 6, 120, 6),
+    ]
+    result = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    assert result.wall_strip_count == 2
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
 def test_split_collinear_opposite_face_is_one_wall_not_rival_partners():
     split = [
         _line(0, 0, 100, 0),
