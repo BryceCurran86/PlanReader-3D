@@ -607,7 +607,7 @@ class _UniqueWeakValueDictionary(WeakValueDictionary):
 
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
-        if existing is not None and existing is not value and existing != value:
+        if existing is not None and existing is not value:
             raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
 
@@ -3880,65 +3880,35 @@ def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
 
     # Caller metadata must not conflict with producer-authenticated axis IDs or values
     meta_h_dim = metadata.get("horizontal_dimension_id")
-    if meta_h_dim and meta_h_dim != h_dim and meta_h_dim != f"dim_{int(round(h_val_float))}":
-        raise ValueError(
-            f"caller metadata horizontal_dimension_id '{meta_h_dim}' conflicts with authenticated producer dimension '{h_dim}'"
-        )
+    if meta_h_dim is not None and meta_h_dim != h_dim:
+        raise ValueError("caller metadata horizontal_dimension_id conflicts with authenticated producer dimension")
     meta_v_dim = metadata.get("vertical_dimension_id")
-    if meta_v_dim and meta_v_dim != v_dim and meta_v_dim != f"dim_{int(round(v_val_float))}":
-        raise ValueError(
-            f"caller metadata vertical_dimension_id '{meta_v_dim}' conflicts with authenticated producer dimension '{v_dim}'"
-        )
+    if meta_v_dim is not None and meta_v_dim != v_dim:
+        raise ValueError("caller metadata vertical_dimension_id conflicts with authenticated producer dimension")
     meta_h_val = metadata.get("horizontal_value_mm")
     if meta_h_val is not None:
         try:
             meta_h_val_float = float(meta_h_val)
         except (TypeError, ValueError):
-            raise ValueError("caller metadata horizontal_value_mm is non-numeric")
-        if abs(meta_h_val_float - h_val_float) > 1e-3:
-            raise ValueError(
-                f"caller metadata horizontal_value_mm '{meta_h_val}' conflicts with authenticated producer value '{h_val_float}'"
-            )
+            raise ValueError("caller metadata horizontal_value_mm is non-numeric") from None
+        if not math.isfinite(meta_h_val_float) or abs(meta_h_val_float - h_val_float) > 1e-3:
+            raise ValueError("caller metadata horizontal_value_mm conflicts with authenticated producer value")
     meta_v_val = metadata.get("vertical_value_mm")
     if meta_v_val is not None:
         try:
             meta_v_val_float = float(meta_v_val)
         except (TypeError, ValueError):
-            raise ValueError("caller metadata vertical_value_mm is non-numeric")
-        if abs(meta_v_val_float - v_val_float) > 1e-3:
-            raise ValueError(
-                f"caller metadata vertical_value_mm '{meta_v_val}' conflicts with authenticated producer value '{v_val_float}'"
-            )
+            raise ValueError("caller metadata vertical_value_mm is non-numeric") from None
+        if not math.isfinite(meta_v_val_float) or abs(meta_v_val_float - v_val_float) > 1e-3:
+            raise ValueError("caller metadata vertical_value_mm conflicts with authenticated producer value")
 
+    # Equal numeric figures can occur on both axes. Only the producer-issued
+    # *source observation IDs* prove two distinct physical dimension witnesses.
     corr_dim_ids = tuple(correspondence.figured_dimension_ids)
-    if not corr_dim_ids:
-        raise ValueError("ceiling correspondence missing figured dimension IDs")
-
-    valid_h_refs = {
-        h_dim,
-        f"dim_{int(round(h_val_float))}",
-        str(int(round(h_val_float))),
-    }
-    valid_v_refs = {
-        v_dim,
-        f"dim_{int(round(v_val_float))}",
-        str(int(round(v_val_float))),
-    }
-    allowed_refs = valid_h_refs | valid_v_refs
-    for dim_id in corr_dim_ids:
-        if dim_id not in allowed_refs:
-            raise ValueError(
-                f"ceiling correspondence contains foreign figured dimension ID '{dim_id}' "
-                f"not owned by authenticated room area ({h_dim}, {v_dim})"
-            )
-    if not (
-        any(ref in corr_dim_ids for ref in valid_h_refs)
-        and any(ref in corr_dim_ids for ref in valid_v_refs)
-    ):
-        raise ValueError(
-            f"room area figured dimensions ({h_dim}, {v_dim}) "
-            f"do not match ceiling correspondence figured dimensions {correspondence.figured_dimension_ids}"
-        )
+    if not h_dim or not v_dim or h_dim == v_dim or len(corr_dim_ids) != 2:
+        raise ValueError("distinct axis witnesses required")
+    if set(corr_dim_ids) != {h_dim, v_dim}:
+        raise ValueError("distinct axis witnesses required")
 
     # 4. Bind and validate room_area_qty_id strictly through authentic issuer contracts
     valid_qty_ids = {

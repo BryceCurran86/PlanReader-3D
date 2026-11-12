@@ -178,7 +178,7 @@ class _UniqueWeakValueDictionary(WeakValueDictionary):
 
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         existing = self.get(key)
-        if existing is not None and existing is not value and existing != value:
+        if existing is not None and existing is not value:
             raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
         super().__setitem__(key, value)
 
@@ -2017,7 +2017,16 @@ class CrossViewRoomAreaProducer:
             conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
-        for rec in records:
+        for index, candidate in enumerate(records):
+            # Replays may recreate an equal value. Keep the original producer
+            # object so downstream identity checks cannot be bypassed.
+            key = (str(published.snapshot.snapshot_id), str(candidate.area_evidence.evidence_id))
+            prior = _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.get(key)
+            if prior is not None and prior is not candidate:
+                if prior != candidate:
+                    raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+                records[index] = prior
+            rec = records[index]
             _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.area_evidence.evidence_id))] = rec
             _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.revision.revision_id), str(rec.area_evidence.evidence_id))] = rec
             _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT[(str(published.snapshot.snapshot_id), str(rec.physical_room_id))] = rec
