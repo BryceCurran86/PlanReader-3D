@@ -192,6 +192,35 @@ def _wall(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
     source_height_page = _page(page_map, row.get("height_source_page_index"))
     height_word = _word(source_height_page, row.get("height_word_ref"))
     height_mm = _figured_mm(height_word)
+    # Optional stronger source height lane. Historical reviewed drafts remain
+    # unchanged when no such receipt is provided; new claims must prove
+    # FFL/FCL section-line or same-callout RCP material/height source ink.
+    height_claim = row.get("height_source_receipt")
+    height_source_refs: dict[str, Any] = {}
+    if height_claim is not None:
+        from .height_evidence import (
+            RCP_MATERIAL_HEIGHT, validate_height_receipt,
+        )
+        if row.get("height_applies_to_wall_reviewed") is not True:
+            raise SourceConflict("wall_height_scope_not_reviewed")
+        proved = validate_height_receipt(
+            source_height_page, height_claim,
+            rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
+        )
+        if proved["height_word_ref"] != height_word.ref:
+            raise SourceConflict("wall_height_word_receipt_mismatch")
+        if proved["height_source_kind"] == RCP_MATERIAL_HEIGHT:
+            ceiling_zone = row.get("height_ceiling_zone_id")
+            if type(ceiling_zone) is not str or not ceiling_zone.strip():
+                raise SourceConflict("rcp_height_wall_zone_scope_missing")
+            height_source_refs["height_ceiling_zone_id_claimed"] = ceiling_zone
+        height_source_refs.update({
+            "height_source_kind": proved["height_source_kind"],
+            "height_witness_word_refs": tuple(proved["witness_word_refs"]),
+            "height_dimension_segment_refs": tuple(proved["dimension_segment_refs"]),
+            "height_material_word_ref": proved["material_word_ref"],
+            "height_source_scope_reviewed": True,
+        })
     finish_word = _word(page, row.get("finish_word_ref"))
     if _distance_to_line(_centre(finish_word), segment) > 90:
         raise SourceConflict("wall_finish_not_at_source_face")
@@ -204,6 +233,7 @@ def _wall(page_map: Mapping[int, NativePage], row: Mapping[str, Any],
         "height_word_ref": height_word.ref,
         "height_source_page_index": source_height_page.page_index,
         "finish_word_ref": finish_word.ref,
+        **height_source_refs,
     }
     gross = length_mm * height_mm / Decimal("1000000")
     outputs = [
@@ -308,6 +338,30 @@ def measure_building_components(
             quantity = _measure_one(page, row, expected_basis="source_owned_ceiling_zone",
                                     trade="ceiling_finish")
             quantity["ceiling_id"] = ceiling_id
+            # Ceiling area and height are independent sources. Invalid height
+            # evidence does not erase an otherwise valid, reviewed RCP area.
+            if "height_source_receipt" in row:
+                try:
+                    from .height_evidence import RCP_MATERIAL_HEIGHT, validate_height_receipt
+                    if row.get("height_ceiling_zone_reviewed") is not True:
+                        raise SourceConflict("rcp_height_ceiling_zone_not_reviewed")
+                    evidence = validate_height_receipt(
+                        page, row["height_source_receipt"],
+                        rcp_viewport_pdf_pts=row.get("height_rcp_viewport_pdf_pts"),
+                    )
+                    if evidence["height_source_kind"] != RCP_MATERIAL_HEIGHT:
+                        raise SourceConflict("ceiling_height_not_from_rcp_material_callout")
+                    if evidence["material_word_ref"] != row.get("finish_word_ref"):
+                        raise SourceConflict("rcp_height_material_not_owned_by_ceiling_zone")
+                    quantity["height_mm_source_candidate"] = evidence["height_mm"]
+                    quantity["height_word_ref"] = evidence["height_word_ref"]
+                    quantity["height_material_word_ref"] = evidence["material_word_ref"]
+                    quantity["height_zone_scope"] = "REVIEWED_DRAFT_NOT_AUTHENTICATED"
+                except SourceConflict as exc:
+                    abstentions.append({
+                        "family": "ceiling_height", "physical_id": ceiling_id,
+                        "reason_code": str(exc),
+                    })
             quantities.append(quantity)
         except (SourceConflict, TypeError, ValueError, InvalidOperation, ZeroDivisionError) as exc:
             abstentions.append({"family": "ceiling_finish", "physical_id": ceiling_id,

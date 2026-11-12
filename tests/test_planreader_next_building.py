@@ -331,3 +331,96 @@ def test_generic_door_word_is_not_a_numbered_schedule_identity(proof):
     assert missing(packet, "wall_finish_net_area")[0]["reason_code"] == "door_opening_source_authority_missing"
     assert not any(q["trade"] in {"door_count", "door_frame_count", "door_frame_length"}
                    for q in packet["quantities"])
+
+def _section_height_extended_proof(pages, selection):
+    """Synthetic cross-sheet 2400 FFL-FCL extension on reviewed wall fixture."""
+    from planreader_next.engine import NativePage, NativeWord, NativeSegment
+    from planreader_next.height_evidence import section_ffl_fcl_heights
+
+    second = pages[1]
+    height_word_ref = selection["walls"][0]["height_word_ref"]
+    height_word = next(w for w in second.words if w.ref == height_word_ref)
+    hx = (height_word.bbox[0]+height_word.bbox[2])/2
+    sections = NativePage(
+        second.source_sha256, second.page_index,
+        second.words + (
+            NativeWord("w:FFL:section","FFL",(hx-9,199,hx+2,207)),
+            NativeWord("w:FCL:section","FCL",(hx-9,101,hx+2,109)),
+        ),
+        second.rectangles,
+        second.segments + (
+            NativeSegment("dimline:height","line",hx,105,hx,204),
+        ),
+    )
+    new_pages = dict(pages)
+    new_pages[1] = sections
+    candidates=section_ffl_fcl_heights(sections)
+    assert len(candidates)==1
+    assert candidates[0]["height_word_ref"]==height_word_ref
+    return new_pages,candidates[0]
+
+
+def test_section_ffl_fcl_height_receipt_binds_only_reviewed_wall_draft(proof):
+    _,pages,selection=proof
+    pages,receipt=_section_height_extended_proof(pages,selection)
+    row=selection["walls"][0]
+    row["height_source_receipt"]=receipt
+    row["height_applies_to_wall_reviewed"]=True
+    packet=measure_building_components(pages,selection)
+    gross=get(packet,"wall_finish_gross_area")
+    assert gross["quantity"]=="9.6"
+    assert gross["evidence_refs"]["height_source_kind"]=="ffl_to_fcl_section"
+    assert gross["evidence_refs"]["height_dimension_segment_refs"]==("dimline:height",)
+    assert gross["commercial_publishable"] is False
+
+
+def test_wall_height_source_receipt_requires_actual_scope_and_no_injected_override(proof):
+    _,pages,selection=proof
+    pages,receipt=_section_height_extended_proof(pages,selection)
+    row=selection["walls"][0]
+    row["height_source_receipt"]=receipt
+    row["assumed_height_mm"]=2100
+    packet=measure_building_components(pages,selection)
+    assert missing(packet,"wall_finish")[0]["reason_code"]=="wall_height_scope_not_reviewed"
+    assert not any(r["trade"]=="wall_finish_gross_area" for r in packet["quantities"])
+    row["height_applies_to_wall_reviewed"]=True
+    row["height_source_receipt"]=dict(receipt,height_mm="2740")
+    packet=measure_building_components(pages,selection)
+    assert missing(packet,"wall_finish")[0]["reason_code"]=="height_receipt_value_mismatch"
+    assert get(packet,"door_count")["quantity"]=="1"
+
+
+def test_ceiling_height_callout_is_separate_optional_metadata_never_area_override(proof):
+    from planreader_next.engine import NativePage, NativeWord
+    from planreader_next.height_evidence import rcp_material_height_callouts
+
+    _,pages,selection=proof
+    original=pages[0]
+    old_ref=selection["ceilings"][0]["finish_word_ref"]
+    finish=next(w for w in original.words if w.ref==old_ref)
+    new_finish=NativeWord("word:b700:l0:w0:i700","IPF1",finish.bbox)
+    x0,y0,x1,y1=finish.bbox
+    new_height=NativeWord("word:b700:l1:w0:i701","2400",(x0,y0+17,x1,y1+17))
+    room_words=tuple(new_finish if w.ref==old_ref else w for w in original.words)
+    amended=NativePage(
+        original.source_sha256,original.page_index,
+        room_words+(new_height,),original.rectangles,original.segments,
+    )
+    updated=dict(pages)
+    updated[0]=amended
+    receipt=rcp_material_height_callouts(amended)
+    assert len(receipt)==1
+    selection["ceilings"][0]["finish_word_ref"]=new_finish.ref
+    selection["ceilings"][0]["height_source_receipt"]=receipt[0]
+    selection["ceilings"][0]["height_ceiling_zone_reviewed"]=True
+    output=measure_building_components(updated,selection)
+    ceiling=get(output,"ceiling_finish")
+    assert ceiling["quantity"]=="13.270425"
+    assert ceiling["height_mm_source_candidate"]=="2400"
+    assert ceiling["height_material_word_ref"]==new_finish.ref
+    assert ceiling["commercial_publishable"] is False
+    selection["ceilings"][0]["height_source_receipt"]=dict(receipt[0],height_mm="2740")
+    output=measure_building_components(updated,selection)
+    assert get(output,"ceiling_finish")["quantity"]=="13.270425"
+    assert "height_mm_source_candidate" not in get(output,"ceiling_finish")
+    assert missing(output,"ceiling_height")[0]["reason_code"]=="height_receipt_value_mismatch"

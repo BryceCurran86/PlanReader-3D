@@ -58,6 +58,14 @@ def main() -> int:
     match_dimensions.add_argument("--page", type=int, default=0)
     match_dimensions.add_argument("--faces", type=Path, required=True)
     match_dimensions.add_argument("--output", type=Path, required=True)
+    heights = sub.add_parser(
+        "heights", help="Extract source-backed section FFL/FCL or RCP material/height candidates",
+    )
+    heights.add_argument("--pdf", type=Path, required=True)
+    heights.add_argument("--page", type=int, default=0)
+    heights.add_argument("--drawing-type", choices=("section", "rcp"), required=True)
+    heights.add_argument("--rcp-viewport", nargs=4, type=float, metavar=("X0","Y0","X1","Y1"))
+    heights.add_argument("--output", type=Path, required=True)
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
     takeoff.add_argument("--selection", type=Path, required=True)
@@ -104,6 +112,30 @@ def main() -> int:
             result = associate_dimension_inventory_to_native_faces(
                 page, inventory_page_dimensions(page), candidates,
             )
+        elif args.mode == "heights":
+            from .height_evidence import height_evidence_inventory
+            page = load_native_page(args.pdf, args.page)
+            if args.drawing_type == "section" and args.rcp_viewport is not None:
+                raise SourceConflict("rcp_viewport_only_valid_for_rcp")
+            inventory = height_evidence_inventory(
+                page,
+                rcp_viewport_pdf_pts=(
+                    args.rcp_viewport if args.drawing_type == "rcp" else None
+                ),
+            )
+            result = {
+                "source_sha256": inventory["source_sha256"],
+                "page_index": inventory["page_index"],
+                "drawing_type_claimed": args.drawing_type,
+                "height_evidence": (
+                    inventory["section_ffl_fcl"] if args.drawing_type == "section"
+                    else inventory["rcp_material_callouts"]
+                ),
+                "physical_zone_association": "REVIEW_REQUIRED",
+                "commercial_publishable": False,
+                "benchmark_credit": False,
+                "official_score": None,
+            }
         elif args.mode == "takeoff":
             from .building import measure_building_components
             selected = json.loads(args.selection.read_text(encoding="utf-8"))
@@ -166,6 +198,13 @@ def main() -> int:
                     "unmatched_unique_figures": len(result["abstentions"]),
                     "commercial_publishable": False,
                     "review_required": True,
+                }, sort_keys=True))
+            elif args.mode == "heights":
+                print(json.dumps({
+                    "source_height_candidates": len(result["height_evidence"]),
+                    "drawing_type_claimed": result["drawing_type_claimed"],
+                    "physical_zone_association": "REVIEW_REQUIRED",
+                    "commercial_publishable": False,
                 }, sort_keys=True))
             else:
                 print(json.dumps({
