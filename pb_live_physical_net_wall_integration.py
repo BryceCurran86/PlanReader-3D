@@ -431,6 +431,8 @@ def _collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    layered_dark_painted_wall_source: bool = False,
+    layered_wall_end_stroke_closures: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -470,6 +472,21 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(layered_dark_painted_wall_source) is not bool:
+        raise ValueError("layered dark painted wall source must be an explicit boolean")
+    if layered_dark_painted_wall_source and not (
+        layered_doorway_room_rings and layered_finished_face_gate
+    ):
+        raise ValueError(
+            "layered dark painted wall source needs layered doorway room rings"
+            " and the finished face gate"
+        )
+    if type(layered_wall_end_stroke_closures) is not bool:
+        raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
+        raise ValueError(
+            "layered wall end stroke closures need layered dark painted wall source"
+        )
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -618,6 +635,10 @@ def _collect_live_physical_net_wall_claim(
            if layered_partition_witness else {}),
         **({"layered_finished_face_gate": True}
            if layered_finished_face_gate else {}),
+        **({"layered_dark_painted_wall_source": True}
+           if layered_dark_painted_wall_source else {}),
+        **({"layered_wall_end_stroke_closures": True}
+           if layered_wall_end_stroke_closures else {}),
     )
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
@@ -1427,6 +1448,8 @@ def collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    layered_dark_painted_wall_source: bool = False,
+    layered_wall_end_stroke_closures: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1463,6 +1486,21 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(layered_dark_painted_wall_source) is not bool:
+        raise ValueError("layered dark painted wall source must be an explicit boolean")
+    if layered_dark_painted_wall_source and not (
+        layered_doorway_room_rings and layered_finished_face_gate
+    ):
+        raise ValueError(
+            "layered dark painted wall source needs layered doorway room rings"
+            " and the finished face gate"
+        )
+    if type(layered_wall_end_stroke_closures) is not bool:
+        raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
+        raise ValueError(
+            "layered wall end stroke closures need layered dark painted wall source"
+        )
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1501,6 +1539,10 @@ def collect_live_physical_net_wall_claim(
            if layered_finished_face_gate else {}),
         **({"layered_finished_face_statement_pages": layered_finished_face_statement_pages}
            if layered_finished_face_statement_pages is not None else {}),
+        **({"layered_dark_painted_wall_source": True}
+           if layered_dark_painted_wall_source else {}),
+        **({"layered_wall_end_stroke_closures": True}
+           if layered_wall_end_stroke_closures else {}),
     )
     if recovery_page_id is None:
         return claim
