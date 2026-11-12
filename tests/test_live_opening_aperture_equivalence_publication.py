@@ -19,6 +19,7 @@ from pb_live_physical_opening_void_composition import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_opening_aperture_equivalence_shadow import ApertureRecord, PairVerdict
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from types import MappingProxyType
 
 
@@ -74,108 +75,61 @@ def test_enabled_flag_must_be_a_strict_bool():
             apply_aperture_equivalence_publication((), (), (), enabled=bad)
 
 
-def test_overlapping_same_figure_area_host_publishes_one_quantity_with_every_member():
-    quantities = (qty("b"), qty("a"))
+def test_enabled_overlapping_same_area_host_cannot_choose_arbitrary_owner():
+    with pytest.raises(SourceClosedRunConflictError, match="physical partition reproof"):
+        apply_aperture_equivalence_publication(
+            (qty("b"), qty("a")),
+            (rec("a"), rec("b")),
+            (verdict("a", "b", "overlapping"),),
+            enabled=True,
+        )
+
+
+@pytest.mark.parametrize("case", ("ambiguous", "unproven", "uncompared",
+                                  "missing_quantity", "conflicting", "unlisted",
+                                  "caller_forged", "distinct", "empty"))
+def test_enabled_always_refuses_unverified_suppression(case):
+    quantities = (qty("a"), qty("b"))
+    records = (rec("a"), rec("b"))
+    verdicts = (verdict("a", "b", "overlapping"),)
+    if case == "ambiguous":
+        records = (rec("a"), rec("b", host="other-host"))
+    elif case == "unproven":
+        verdicts = (verdict("a", "b", "unproven"),)
+    elif case == "uncompared":
+        verdicts = ()
+    elif case == "missing_quantity":
+        quantities = (qty("a"),)
+    elif case == "conflicting":
+        quantities = (qty("a", 1.5), qty("b", 1.6))
+    elif case == "unlisted":
+        quantities = (qty("solo"), qty("a"))
+    elif case == "caller_forged":
+        records = (rec("a", receipts=("forged",)), rec("b", receipts=("forged",)))
+    elif case == "distinct":
+        verdicts = (verdict("a", "b", "distinct"),)
+    elif case == "empty":
+        records, verdicts, quantities = (), (), ()
+    before_rows = tuple(item.to_dict() for item in quantities)
+    with pytest.raises(SourceClosedRunConflictError, match="physical partition reproof"):
+        apply_aperture_equivalence_publication(
+            quantities, records, verdicts, enabled=True,
+        )
+    assert tuple(item.to_dict() for item in quantities) == before_rows
+
+
+def test_default_off_35_3laurel_shaped_rows_are_exactly_preserved():
+    quantities = tuple(qty(f"opening-{i:02d}", 1.5) for i in range(35))
+    before_rows = tuple(item.to_dict() for item in quantities)
     published = apply_aperture_equivalence_publication(
         quantities,
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "overlapping"),),
-        enabled=True,
-    )
-    assert len(published) == 1
-    row = published[0]
-    assert row.input_entity_ids == ("a", "b")
-    assert row.value == 1.5
-    assert set(row.evidence_ids) == {"e-a", "e-b", "r-a", "r-b"}
-    assert row.metadata["aperture_member_ids"] == ("a", "b")
-    assert row.metadata["can_issue_firm_quantity"] is False
-    assert row.metadata["aperture_equivalence_status"] == EvidenceResolutionStatus.CANDIDATE.value
-    assert row.status == "corroborated"
-    assert row.authority != "firm"
-
-
-def test_input_order_does_not_choose_a_member():
-    records = (rec("a"), rec("b"))
-    verdicts = (verdict("b", "a", "overlapping"),)
-    first = apply_aperture_equivalence_publication(
-        (qty("a"), qty("b")), records, verdicts, enabled=True
-    )
-    second = apply_aperture_equivalence_publication(
-        (qty("b"), qty("a")), records[::-1], (verdict("a", "b", "overlapping"),), enabled=True
-    )
-    assert first == second
-    assert first[0].input_entity_ids == ("a", "b")
-
-
-def test_authority_distinct_pair_keeps_both_quantities():
-    published = apply_aperture_equivalence_publication(
-        (qty("a"), qty("b")),
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "distinct"),),
-        enabled=True,
-    )
-    assert {row.input_entity_ids for row in published} == {("a",), ("b",)}
-    assert all("aperture_class_id" not in row.metadata for row in published)
-
-
-def test_ambiguous_overlap_unpublishes_both_members():
-    published = apply_aperture_equivalence_publication(
-        (qty("a"), qty("b")),
-        (rec("a"), rec("b", host="wall-2")),
-        (verdict("a", "b", "overlapping"),),
-        enabled=True,
-    )
-    assert published == ()
-
-
-def test_unproven_pair_unpublishes_both_members():
-    published = apply_aperture_equivalence_publication(
-        (qty("a"), qty("b")),
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "unproven"),),
-        enabled=True,
-    )
-    assert published == ()
-
-
-def test_shared_printed_figure_without_a_pair_verdict_unpublishes():
-    published = apply_aperture_equivalence_publication(
-        (qty("a"), qty("b")),
-        (rec("a"), rec("b")),
+        tuple(rec(f"opening-{i:02d}") for i in range(35)),
         (),
-        enabled=True,
+        enabled=False,
     )
-    assert published == ()
-
-
-def test_partial_member_coverage_does_not_publish_the_class():
-    published = apply_aperture_equivalence_publication(
-        (qty("a"),),
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "overlapping"),),
-        enabled=True,
-    )
-    assert published == ()
-
-
-def test_conflicting_issued_values_do_not_publish_the_class():
-    published = apply_aperture_equivalence_publication(
-        (qty("a", value=1.5), qty("b", value=1.6)),
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "overlapping"),),
-        enabled=True,
-    )
-    assert published == ()
-
-
-def test_unlisted_opening_is_not_published_when_enabled():
-    published = apply_aperture_equivalence_publication(
-        (qty("solo"), qty("a")),
-        (rec("a"), rec("b")),
-        (verdict("a", "b", "distinct"),),
-        enabled=True,
-    )
-    assert [row.input_entity_ids for row in published] == [("a",)]
+    assert published is quantities
+    assert tuple(item.to_dict() for item in published) == before_rows
+    assert all(len(row.input_entity_ids) == 1 for row in published)
 
 
 SHA = "a" * 64
@@ -265,17 +219,22 @@ def test_publish_default_off_keeps_one_quantity_per_opening():
     assert default == explicit_off
 
 
-def test_publish_enabled_collapses_equivalent_openings_and_keeps_member_ids():
-    composition = _composition(_opening(canonical_id="opening-a"), _opening(canonical_id="opening-b"))
-    published = publish_live_opening_area_quantities(
-        composition,
-        aperture_equivalence_publication_shadow=True,
-        aperture_records=(rec("opening-a"), rec("opening-b")),
-        aperture_verdicts=(verdict("opening-a", "opening-b", "overlapping"),),
+def test_publish_enabled_rejects_untrusted_collapse():
+    composition = _composition(
+        _opening(canonical_id="opening-a"),
+        _opening(canonical_id="opening-b"),
     )
-    assert len(published) == 1
-    assert published[0].input_entity_ids == ("opening-a", "opening-b")
-    assert published[0].metadata["can_issue_firm_quantity"] is False
+    original = publish_live_opening_area_quantities(composition)
+    assert len(original) == 2
+    with pytest.raises(SourceClosedRunConflictError, match="physical partition reproof"):
+        publish_live_opening_area_quantities(
+            composition,
+            aperture_equivalence_publication_shadow=True,
+            aperture_records=(rec("opening-a"), rec("opening-b")),
+            aperture_verdicts=(verdict("opening-a", "opening-b", "overlapping"),),
+        )
+    assert publish_live_opening_area_quantities(composition) == original
+    assert all(len(row.input_entity_ids) == 1 for row in original)
 
 
 def test_live_collect_does_not_expose_or_enable_aperture_publication():
