@@ -1423,6 +1423,134 @@ def _recover_native_material_block(
     )
 
 
+def _reuse_cached_material_word_proofs(*, source, published, raster, words):
+    """Reuse source-bound readings and the existing two-word font/glyph proof.
+
+    No OCR is run here and public native-text receipts are never rewritten.
+    Only literal native/raster matches vote for glyph mappings; a material
+    typography reading cannot vote for the unverified native quote glyph.
+    """
+    if (type(raster) is not _PRODUCTION_ORDINARY_RASTER_CLASS
+            or not raster._material_quote_comparison_shadow
+            or source._source_native_finish_text_shadow is not True):
+        return tuple(words)
+    if raster._source is not source or raster._source_producer is not source._producer:
+        raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+    source_bytes = source._producer._store.source_bytes_by_revision.get(published.revision.revision_id)
+    if (not isinstance(source_bytes, bytes)
+            or hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256):
+        raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+    if len({w.observation_id for w in words}) != len(words):
+        raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+
+    from pb_font_glyph_mapping_corroboration_shadow import (
+        ALL_GLYPHS_VERIFIED, GLYPH_CONTRADICTED,
+        classify_word, verify_glyph_mappings, word_glyphs,
+    )
+    from pb_pdf_text_integrity_authority import _texttrace_spans
+    from pb_source_glyph_ledger_text_trust import is_glyph_only_untrusted
+    from pb_raster_text_corroboration_authority import (
+        MATERIAL_QUOTE_COMPARISON_POLICY, MATERIAL_QUOTE_VARIANT,
+        _material_description_quote_variant,
+    )
+
+    text_authority = source.text_integrity_authority()
+    readings = raster.authority()
+    recovered = {}; candidates = {}; voters = {}
+    with fitz.open(stream=source_bytes, filetype="pdf") as pdf:
+        spans_by_page = {}; program_keys = {}
+        for word in words:
+            args = dict(document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=word.observation_id)
+            native = text_authority.resolve_text(ObservationSelector(**args))
+            receipt = native.receipt
+            if receipt is None or (
+                receipt.parent_observation_id != word.observation_id
+                or receipt.document_id != args["document_id"]
+                or receipt.revision_id != args["revision_id"]
+                or receipt.source_sha256 != args["source_sha256"]
+                or receipt.page_id != word.page_id
+                or receipt.source_partition_id != word.source_partition_id
+                or tuple(receipt.geometry) != tuple(word.bbox)
+            ):
+                raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+            result = readings.resolve(RasterTextCorroborationSelector(**args))
+            record = result.record
+            literal = False
+            if (result.status is EvidenceResolutionStatus.CORROBORATED and record is not None
+                    and record.document_id == args["document_id"]
+                    and record.revision_id == args["revision_id"]
+                    and record.source_sha256 == args["source_sha256"]
+                    and record.snapshot_id == args["snapshot_id"]
+                    and record.page_id == word.page_id
+                    and record.source_partition_id == word.source_partition_id
+                    and record.native_observation_id == word.observation_id
+                    and record.text_integrity_receipt_id == receipt.receipt_id
+                    and tuple(record.source_bbox) == tuple(receipt.geometry)
+                    and record.backend_name == raster._backend.name
+                    and MATERIAL_QUOTE_COMPARISON_POLICY in record.backend_version
+                    and result.corroborated_text == record.corroborated_text
+                    and tuple(record.native_text_integrity_reason_codes) == tuple(receipt.reason_codes)
+                    and tuple(record.render_dpis) == tuple(RASTER_TEXT_CORROBORATION_DPIS)
+                    and tuple(v.dpi for v in record.views) == tuple(RASTER_TEXT_CORROBORATION_DPIS)
+                    and all(v.line_count == 1 and v.ocr_reading == record.corroborated_text
+                            for v in record.views)):
+                literal = record.corroborated_text == receipt.raw_text
+                typography = (
+                    MATERIAL_QUOTE_VARIANT in result.reason_codes
+                    and MATERIAL_QUOTE_COMPARISON_POLICY in record.backend_version
+                    and _material_description_quote_variant(receipt.raw_text, record.corroborated_text)
+                )
+                if normalize_reading(record.corroborated_text) == normalize_reading(receipt.raw_text) or typography:
+                    recovered[word.observation_id] = replace(
+                        word, text=record.corroborated_text, trusted=True,
+                        reason_codes=(*word.reason_codes, *result.reason_codes),
+                    )
+            if not is_glyph_only_untrusted(receipt) or receipt.raw_text != word.text:
+                continue
+            if receipt.font_xref is None:
+                continue
+            xref = int(receipt.font_xref)
+            if xref not in program_keys:
+                try:
+                    program = pdf.extract_font(xref)[3]
+                except Exception:
+                    program = b""
+                program_keys[xref] = hashlib.sha256(program).hexdigest() if program else None
+            if program_keys[xref] is None:
+                continue
+            page_id = receipt.page_id
+            if page_id not in spans_by_page:
+                spans_by_page[page_id] = _texttrace_spans(pdf.load_page(int(page_id) - 1))
+            spans = spans_by_page[page_id]
+            if spans is None:
+                continue
+            candidate = word_glyphs(word.observation_id, receipt.raw_text,
+                                    program_keys[xref], receipt.geometry, spans)
+            if candidate is not None:
+                candidates[word.observation_id] = candidate
+                if literal:
+                    voters[word.observation_id] = candidate
+    verification = verify_glyph_mappings(tuple(voters.values()))
+    for word in words:
+        state = classify_word(candidates.get(word.observation_id), verification)
+        if state == GLYPH_CONTRADICTED:
+            recovered[word.observation_id] = replace(
+                word, trusted=False, reason_codes=(*word.reason_codes, GLYPH_CONTRADICTED),
+            )
+            continue
+        if (not word.trusted and word.observation_id not in recovered
+                and state == ALL_GLYPHS_VERIFIED):
+            recovered[word.observation_id] = replace(
+                word, trusted=True,
+                reason_codes=(*word.reason_codes, "source_material_amortized_glyph_verified"),
+            )
+    return tuple(recovered.get(w.observation_id, w) for w in words)
+
+
 def _group_native_material_block_words(
     words: Sequence[_TrustedTextWord],
 ) -> dict[tuple[str, int], tuple[_TrustedTextWord, ...]]:
@@ -1586,7 +1714,10 @@ def _trusted_native_material_schedule_cluster_blocks(
     if overlap_x <= 0.0 and overlap_y <= 0.0:
         return (), tuple(sorted({row[3] for row in candidates}))
 
-    blocks: list[_TrustedScheduleBlock] = []
+    # Read each owned candidate once, then reuse the complete fixed corpus of
+    # successful native readings. Later rows can verify earlier glyphs without
+    # another OCR attempt or any first/nearest/most-confident selection.
+    recovered_candidates = []
     for partition_id, block_no, block_words, raw_code, _raw_item in owned_candidates:
         recovered = _recover_native_material_block(
             source=source,
@@ -1594,6 +1725,15 @@ def _trusted_native_material_schedule_cluster_blocks(
             raster=raster,
             block_words=block_words,
         )
+        recovered_candidates.append((partition_id, block_no, recovered, raw_code))
+    proof_words = _reuse_cached_material_word_proofs(
+        source=source, published=published, raster=raster, words=words,
+    )
+    proven = {w.observation_id: w for w in proof_words
+              if w.trusted or "glyph_contradicted" in w.reason_codes}
+    blocks: list[_TrustedScheduleBlock] = []
+    for partition_id, block_no, recovered, raw_code in recovered_candidates:
+        recovered = tuple(proven.get(w.observation_id, w) for w in recovered)
         if not recovered or any(not word.trusted for word in recovered):
             blocked_codes.add(raw_code)
             continue
@@ -2181,6 +2321,7 @@ def _ordinary_source_word_raster(
     source_visibility_producer: SourceVisibilityProducer,
     *,
     native_word_recognition_shadow: bool = False,
+    material_quote_comparison_shadow: bool = False,
 ) -> RasterTextCorroborationProducer:
     """Reuse producer-owned exact-source ordinary OCR between material stages.
 
@@ -2192,6 +2333,10 @@ def _ordinary_source_word_raster(
     """
     if type(native_word_recognition_shadow) is not bool:
         raise ValueError("native_word_recognition_shadow_requires_explicit_bool")
+    if type(material_quote_comparison_shadow) is not bool:
+        raise ValueError("material_quote_comparison_shadow_requires_explicit_bool")
+    if material_quote_comparison_shadow and not native_word_recognition_shadow:
+        raise ValueError("material_quote_comparison_requires_native_word_recognition")
     if RasterTextCorroborationProducer is not _PRODUCTION_ORDINARY_RASTER_CLASS:
         # Source-neutral tests use minimal fake word/line OCR publishers.
         # They cannot enter the original-source cache.
@@ -2200,6 +2345,8 @@ def _ordinary_source_word_raster(
         )
     cache_attr = (_ORDINARY_WORD_RASTER_CACHE_ATTR + "_native_word_recognition_shadow"
                   if native_word_recognition_shadow else _ORDINARY_WORD_RASTER_CACHE_ATTR)
+    if material_quote_comparison_shadow:
+        cache_attr += "_material_quote_comparison_shadow"
     with _ORDINARY_WORD_RASTER_LOCK:
         raster = getattr(
             source_visibility_producer,
@@ -2207,7 +2354,9 @@ def _ordinary_source_word_raster(
             _ORDINARY_WORD_RASTER_UNSET,
         )
         if raster is _ORDINARY_WORD_RASTER_UNSET:
-            factory = (RasterTextCorroborationProducer.for_native_word_recognition_shadow
+            factory = (RasterTextCorroborationProducer.for_material_description_word_shadow
+                       if material_quote_comparison_shadow else
+                       RasterTextCorroborationProducer.for_native_word_recognition_shadow
                        if native_word_recognition_shadow
                        else RasterTextCorroborationProducer.from_source_visibility_producer)
             raster = factory(source_visibility_producer)
@@ -2217,6 +2366,7 @@ def _ordinary_source_word_raster(
             or raster._source_producer is not source_visibility_producer._producer
             or raster._allow_clip_only_shadow is not False
             or raster._recognize_native_words_shadow is not native_word_recognition_shadow
+            or raster._material_quote_comparison_shadow is not material_quote_comparison_shadow
         ):
             raise ValueError("ordinary_material_word_raster_source_policy_conflict")
         # A source -> raster -> source cycle is GC-managed and intentionally
@@ -2248,6 +2398,10 @@ class SourceMaterialSemanticProducer:
         self._raster = _ordinary_source_word_raster(
             source_visibility_producer,
             native_word_recognition_shadow=bool(_physical_plan_page_ids),
+            material_quote_comparison_shadow=(
+                bool(_physical_plan_page_ids)
+                and source_visibility_producer._source_native_finish_text_shadow is True
+            ),
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
         self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
@@ -2550,6 +2704,9 @@ class SourceMaterialSemanticProducer:
                         **({"source_native_multirow_material_shadow": True}
                            if self._source_native_multirow_material_shadow else {}),
                     )
+                )
+                page_words = _reuse_cached_material_word_proofs(
+                    source=self._source, published=published, raster=raster, words=page_words,
                 )
                 incomplete_definition_codes.update(cluster_blocked_codes)
                 native_schedule_by_id = {

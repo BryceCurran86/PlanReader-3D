@@ -81,13 +81,19 @@ def test_different_producer_owned_sources_never_share_ocr_even_with_same_method(
     assert a._raster._source_producer is not b._raster._source_producer
 
 
-def test_clip_only_plan_mode_remains_distinct_from_shared_ordinary_material_policy():
+def test_plan_word_recognition_and_clip_modes_remain_distinct_from_ordinary_policy():
     source = _source()
     normal = _normal(source)
     plan = material.SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
         source, page_ids=("7",),
     )
-    assert plan._raster is normal._raster
+    assert plan._raster is not normal._raster
+    assert normal._raster._recognize_native_words_shadow is False
+    assert plan._raster._recognize_native_words_shadow is True
+    assert plan._raster._material_quote_comparison_shadow is False
+    assert material.SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+        source, page_ids=("7",),
+    )._raster is plan._raster
     assert plan._raster._allow_clip_only_shadow is False
     assert plan._plan_raster is not normal._raster
     assert plan._plan_raster._source is source
