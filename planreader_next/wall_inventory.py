@@ -13,6 +13,7 @@ from shapely.ops import unary_union
 
 from .engine import NativePage
 from .hash_chain import _FACE_PT, bind_polygon_hash_axes
+from .opening_figures import pair_opening_figures
 from .topology_faces import _path_index_from_segment_ref, native_finished_face_receipts
 
 
@@ -118,6 +119,15 @@ def inventory_source_walls(
             "topology_only": True,
         })
 
+    figure_pairs = pair_opening_figures(page, fills)
+    pair_by_id = {item["closure_id"]: item for item in figure_pairs}
+    reserved_opening_figures = {
+        ref
+        for item in figure_pairs
+        if item["pair_status"] == "UNIQUE"
+        for ref in item["paired_figure_word_refs"]
+    }
+
     openings: list[dict[str, Any]] = []
     for fill in fills:
         host_regions = [
@@ -131,6 +141,7 @@ def inventory_source_walls(
             if face["native_path_index"] in (fill.get("native_wall_path_indices") or [])
             and (not host_regions or face["region_id"] in host_regions)
         ]
+        pair = pair_by_id.get(fill["closure_id"], {})
         openings.append({
             "closure_id": fill["closure_id"],
             "kind": fill.get("kind"),
@@ -139,6 +150,12 @@ def inventory_source_walls(
             "native_wall_path_indices": list(fill.get("native_wall_path_indices") or []),
             "host_region_ids": host_regions,
             "host_face_item_ids": host_faces,
+            "paired_figure_word_refs": list(pair.get("paired_figure_word_refs") or []),
+            "paired_length_mm": pair.get("paired_length_mm"),
+            "paired_dimension_line_refs": list(pair.get("paired_dimension_line_refs") or []),
+            "pair_status": pair.get("pair_status", "NONE"),
+            "pair_reason": pair.get("pair_reason", "no_unique_opening_figure"),
+            "opening_width_is_not_wall_length": True,
             "host_wall_authenticated": False,
             "physical_opening_authenticated": False,
             "physical_wall": False,
@@ -150,11 +167,19 @@ def inventory_source_walls(
     locators: list[dict[str, Any]] = []
     for region, _polygon in polygons:
         width, height = bind_polygon_hash_axes(page, region["boundary_polygon_pdf_pts"])
+        width_payload = _hash_payload(width)
+        height_payload = _hash_payload(height)
         unresolved: list[str] = []
-        if width is None:
+        if width_payload is None:
             unresolved.append("no_unique_width_hash_chain")
-        if height is None:
+        elif reserved_opening_figures.issuperset(width_payload["word_refs"]):
+            width_payload = None
+            unresolved.append("opening_figure_reserved")
+        if height_payload is None:
             unresolved.append("no_unique_height_hash_chain")
+        elif reserved_opening_figures.issuperset(height_payload["word_refs"]):
+            height_payload = None
+            unresolved.append("opening_figure_reserved")
         face_ids = [face["item_id"] for face in faces if face["region_id"] == region["region_id"]]
         locators.append({
             "source_sha256": page.source_sha256,
@@ -172,8 +197,8 @@ def inventory_source_walls(
             "boundary_polygon_pdf_pts": region["boundary_polygon_pdf_pts"],
             "wall_face_item_ids": face_ids,
             "opening_closure_ids": list(region.get("topology_closure_ids") or []),
-            "outer_length_hash": _hash_payload(width),
-            "inner_face_or_plan_height_hash": _hash_payload(height),
+            "outer_length_hash": width_payload,
+            "inner_face_or_plan_height_hash": height_payload,
             "unresolved": unresolved,
             "room_identity_authenticated": False,
             "physical_zone_authenticated": False,
@@ -187,6 +212,8 @@ def inventory_source_walls(
         "face_count": len(faces),
         "openings": openings,
         "opening_count": len(openings),
+        "paired_opening_figure_count": sum(item["pair_status"] == "UNIQUE" for item in openings),
+        "reserved_opening_figure_word_refs": sorted(reserved_opening_figures),
         "region_locators": locators,
         "region_locator_count": len(locators),
         "topology_face_receipts": receipts,
