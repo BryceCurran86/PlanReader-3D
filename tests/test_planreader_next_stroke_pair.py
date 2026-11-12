@@ -6,6 +6,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     REASON_PRIMITIVE_CAP,
     _collect_stroke_pair_strips,
     build_layered_wall_doorway_room_rings,
+    expand_labelled_stroke_pair_viewports,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 
@@ -155,6 +156,43 @@ def test_stroke_pair_consumed_drawings_over_primitive_cap_abstain():
     assert result.reason_codes == (REASON_PRIMITIVE_CAP,)
     assert result.rings == ()
     assert result.wall_strip_count == 0
+
+
+def test_far_fat_path_does_not_cap_a_local_stroke_pair_viewport():
+    import fitz
+    items = [("l", fitz.Point(4000 + i, 4000 + i), fitz.Point(4001 + i, 4001 + i)) for i in range(20001)]
+    fat = {
+        "layer": "",
+        "fill": None,
+        "rect": fitz.Rect(4000, 4000, 24002, 24002),
+        "items": items,
+    }
+    result = build_layered_wall_doorway_room_rings(
+        _stroke_room() + [fat],
+        source_sha256=SHA,
+        page_index=0,
+        stroke_pair_wall_faces=True,
+        viewport_pdf_pts=(0, 0, 110, 110),
+    )
+    assert result.reason_codes != (REASON_PRIMITIVE_CAP,)
+    assert result.wall_strip_count >= 4
+    assert all(not ring.takeoff_eligible for ring in result.rings)
+
+
+def test_labelled_halo_grows_along_connected_stroke_pairs():
+    seed = (40.0, 40.0, 60.0, 60.0)
+    grown = expand_labelled_stroke_pair_viewports(_stroke_room(), [seed])
+    x0, y0, x1, y1 = grown[0]
+    assert x0 <= 0.0
+    assert y0 <= 0.0
+    assert x1 >= 100.0
+    assert y1 >= 100.0
+
+
+def test_three_line_hatch_halo_still_does_not_invent_a_wall():
+    hatch = [_line(0, 0, 80, 0), _line(0, 2, 80, 2), _line(0, 4, 80, 4)]
+    grown = expand_labelled_stroke_pair_viewports(hatch, [(10.0, 10.0, 20.0, 20.0)])
+    assert grown == [(10.0, 10.0, 20.0, 20.0)]
 
 
 def test_one_path_with_over_cap_items_abstains_before_pairing():

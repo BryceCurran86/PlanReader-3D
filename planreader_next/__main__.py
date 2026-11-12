@@ -46,6 +46,10 @@ def main() -> int:
     measure.add_argument("--pdf", type=Path, required=True)
     measure.add_argument("--selection", type=Path, required=True)
     measure.add_argument("--output", type=Path, required=True)
+    dimensions = sub.add_parser("dimensions", help="Register printed figures and unique dim-line geometry")
+    dimensions.add_argument("--pdf", type=Path, required=True)
+    dimensions.add_argument("--page", type=int, default=0)
+    dimensions.add_argument("--output", type=Path, required=True)
     takeoff = sub.add_parser("takeoff", help="Reviewed walls, ceiling finishes, doors and frames")
     takeoff.add_argument("--pdf", type=Path, required=True)
     takeoff.add_argument("--selection", type=Path, required=True)
@@ -67,6 +71,11 @@ def main() -> int:
             page = load_native_page(args.pdf, args.page)
             result = propose_room_enclosures(
                 page, args.pdf, include_sliding=not args.skip_sliding,
+            )
+        elif args.mode == "dimensions":
+            from .dimension_index import dimension_index_payload, inventory_page_dimensions
+            result = dimension_index_payload(
+                inventory_page_dimensions(load_native_page(args.pdf, args.page))
             )
         elif args.mode == "takeoff":
             from .building import measure_building_components
@@ -114,6 +123,14 @@ def main() -> int:
                     "unresolved_regions": result["unresolved_regions"],
                     "virtual_wall_fills": result["virtual_fill_count"],
                     "review_required": True,
+                    "commercial_publishable": False,
+                }, sort_keys=True))
+            elif args.mode == "dimensions":
+                print(json.dumps({
+                    "figure_count": result["figure_count"],
+                    "unique_geometry_count": result["unique_geometry_count"],
+                    "unmatched_count": result["unmatched_count"],
+                    "role": result["role"],
                     "commercial_publishable": False,
                 }, sort_keys=True))
             else:

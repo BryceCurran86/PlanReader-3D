@@ -14,6 +14,7 @@ from shapely.geometry import Point, Polygon
 
 from pb_layered_wall_doorway_room_ring_shadow import (
     build_layered_wall_doorway_room_rings,
+    expand_labelled_stroke_pair_viewports,
 )
 from .engine import (
     NativePage, SourceConflict, authenticated_pdf_snapshot, confirm_source_snapshot,
@@ -130,7 +131,10 @@ def propose_room_enclosures(
     confirm_source_snapshot(path, digest, identity)
     if viewport_pdf_pts is None and stroke_pair_wall_faces:
         clustered = _label_viewports(page)
-        viewport_pdf_pts = clustered or None
+        viewport_pdf_pts = (
+            expand_labelled_stroke_pair_viewports(drawings, clustered)
+            if clustered else None
+        )
     if not stroke_pair_wall_faces and viewport_pdf_pts is None:
         if len(drawings) > 20000 or len(page.segments) > 20000:
             raise SourceConflict("page_primitive_cap_exceeded")
@@ -236,10 +240,17 @@ def propose_room_enclosures(
         "cavity_slider_closures": sum(f["kind"] == "cavity_slider_cs_closure" for f in virtual_fills),
         "reason_codes": list(result.reason_codes),
         "draft_floor_candidates": _draft_floors(page, regions),
+        "dimension_index": _page_dimension_index(page),
         "commercial_publishable": False,
         "benchmark_credit": False,
         "official_score": None,
     }
+
+
+def _page_dimension_index(page: NativePage) -> dict[str, Any]:
+    from .dimension_index import dimension_index_payload, inventory_page_dimensions
+
+    return dimension_index_payload(inventory_page_dimensions(page))
 
 
 def _axis_aligned_rectangle_face(coords: list[list[float]] | list[tuple[float, float]], hole_count: int) -> bool:

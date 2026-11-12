@@ -222,6 +222,13 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     # Party-wall height hashes only carry opening figures (870). Floor m²
     # abstains until a unique height figure owns that internal face.
     assert result["draft_floor_candidates"] == []
+    dim_index = result["dimension_index"]
+    assert dim_index["commercial_publishable"] is False
+    assert dim_index["official_score"] is None
+    assert dim_index["role"] == "UNMATCHED"
+    assert dim_index["figure_count"] >= 1
+    assert all(item["role"] == "UNMATCHED" for item in dim_index["figures"])
+    assert all(item["millimetres"] != "870" or item["role"] == "UNMATCHED" for item in dim_index["figures"])
     invented = [
         r for r in result["regions"]
         if r["single_room_shape_hint"]
@@ -232,3 +239,27 @@ def test_original_3laurel_page3_closes_openings_but_keeps_unresolved_gaps():
     assert result["commercial_publishable"] is False
     assert result["official_score"] is None
     assert "quantities" not in result
+
+
+def test_original_maryborough_page7_stroke_pairs_stay_topology_only():
+    import os
+    from pathlib import Path
+
+    from pb_maryborough_customer_authority import MARYBOROUGH_SOURCE_SHA256
+
+    named = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF", "").strip()
+    default = Path(__file__).resolve().parents[1] / "documents" / "sources" / "Arch_Combined_Maryborough_Service_Station.pdf"
+    original = Path(named) if named else default
+    if not original.is_file():
+        pytest.skip("ORIGINAL_SOURCE_NOT_RUN: private Maryborough original not provisioned; this is not an original-source pass")
+    page = load_native_page(original, 6)
+    assert page.source_sha256 == MARYBOROUGH_SOURCE_SHA256
+    result = propose_room_enclosures(page, original, stroke_pair_wall_faces=True)
+    assert result["commercial_publishable"] is False
+    assert result["official_score"] is None
+    assert result["benchmark_credit"] is False
+    assert "quantities" not in result
+    assert result["draft_floor_candidates"] == []
+    assert result["dimension_index"]["role"] == "UNMATCHED"
+    assert all(not r["room_identity_authenticated"] for r in result["regions"])
+    assert all(r["topology_only"] for r in result["regions"])

@@ -317,6 +317,135 @@ def _clip_drawings(
     return clipped
 
 
+def _bbox_intersects(
+    bbox: tuple[float, float, float, float],
+    viewport: tuple[float, float, float, float],
+) -> bool:
+    x0, y0, x1, y1 = bbox
+    vx0, vy0, vx1, vy1 = viewport
+    return not (x1 < vx0 or x0 > vx1 or y1 < vy0 or y0 > vy1)
+
+
+def _item_bbox(item: Sequence[Any]) -> tuple[float, float, float, float] | None:
+    kind = item[0] if item else None
+    if kind == "l" and len(item) >= 3:
+        (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+        return min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
+    rect = _rect_of_item(item)
+    if rect is not None:
+        return rect
+    if kind == "c" and len(item) >= 5:
+        pts = [_xy(item[i]) for i in range(1, 5)]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return min(xs), min(ys), max(xs), max(ys)
+    return None
+
+
+def _clip_drawing_items(
+    drawings: Sequence[Mapping[str, Any] | None],
+    viewport: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None,
+) -> list[Mapping[str, Any] | None]:
+    """Keep original path indices; count/pair only items that intersect the clip.
+
+    A drawing path whose bbox merely overlaps a labelled neighbourhood must not
+    contribute its far-page primitives to the 20,000-item cap. This is not a
+    raised limit and not a wall layer.
+    """
+    viewports = _as_viewports(viewport)
+    if viewports is None:
+        return list(drawings)
+    clipped: list[Mapping[str, Any] | None] = []
+    for row in drawings:
+        if row is None:
+            clipped.append(None)
+            continue
+        kept: list[Any] = []
+        for item in row.get("items", ()):
+            bbox = _item_bbox(item)
+            if bbox is None:
+                if any(_intersects_viewport(row, vp) for vp in viewports):
+                    kept.append(item)
+                continue
+            if any(_bbox_intersects(bbox, vp) for vp in viewports):
+                kept.append(item)
+        if not kept:
+            clipped.append(None)
+            continue
+        copied = dict(row)
+        copied["items"] = kept
+        clipped.append(copied)
+    return clipped
+
+
+_STROKE_PAIR_HALO_PT = 160.0
+_STROKE_PAIR_GROW_PAD_PT = 2.0
+
+
+def _strip_intersects_box(strip: _Strip, box: tuple[float, float, float, float]) -> bool:
+    x0, y0, x1, y1 = box
+    return not (strip.x1 < x0 or strip.x0 > x1 or strip.y1 < y0 or strip.y0 > y1)
+
+
+def _strips_touch(left: _Strip, right: _Strip) -> bool:
+    """Representation-noise contact only. Never the 2.5 pt production snap."""
+    return not (
+        left.x1 + NOISE_PT < right.x0
+        or left.x0 - NOISE_PT > right.x1
+        or left.y1 + NOISE_PT < right.y0
+        or left.y0 - NOISE_PT > right.y1
+    )
+
+
+def expand_labelled_stroke_pair_viewports(
+    drawings: Sequence[Mapping[str, Any]],
+    seeds: Sequence[tuple[float, float, float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Grow a labelled neighbourhood along unique connected stroke-pair strips.
+
+    Pairing looks at a bounded halo around the label cluster, then keeps only
+    strips that touch the seed or uniquely abut those strips. Page-hull clips
+    and over-cap expansions are rejected. Topology only; not a wall layer.
+    """
+    grown: list[tuple[float, float, float, float]] = []
+    for seed in seeds:
+        x0, y0, x1, y1 = (float(value) for value in seed)
+        seed_box = (x0, y0, x1, y1)
+        halo = (x0 - _STROKE_PAIR_HALO_PT, y0 - _STROKE_PAIR_HALO_PT, x1 + _STROKE_PAIR_HALO_PT, y1 + _STROKE_PAIR_HALO_PT)
+        clipped = _clip_drawing_items(drawings, halo)
+        if _selected_primitive_count(clipped) > _PRIMITIVE_CAP:
+            grown.append(seed_box)
+            continue
+        strips = _collect_stroke_pair_strips(clipped)
+        kept = [strip for strip in strips if _strip_intersects_box(strip, seed_box)]
+        if not kept:
+            kept = [strip for strip in strips if _strip_intersects_box(strip, halo)]
+        if not kept:
+            grown.append(seed_box)
+            continue
+        frontier = list(kept)
+        while frontier:
+            current = frontier.pop()
+            for candidate in strips:
+                if candidate in kept:
+                    continue
+                if _strips_touch(current, candidate):
+                    kept.append(candidate)
+                    frontier.append(candidate)
+        pad = _STROKE_PAIR_GROW_PAD_PT
+        expanded = (
+            min(x0, min(strip.x0 for strip in kept) - pad),
+            min(y0, min(strip.y0 for strip in kept) - pad),
+            max(x1, max(strip.x1 for strip in kept) + pad),
+            max(y1, max(strip.y1 for strip in kept) + pad),
+        )
+        if _selected_primitive_count(_clip_drawing_items(drawings, expanded)) > _PRIMITIVE_CAP:
+            grown.append(seed_box)
+            continue
+        grown.append(expanded)
+    return grown
+
+
 def _axis_strokes(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[tuple[int, bool, float, float, float]]:
@@ -1418,7 +1547,10 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("page_index must be a non-negative int")
-    indexed = _clip_drawings(drawings, viewport_pdf_pts)
+    if stroke_pair_wall_faces and viewport_pdf_pts is not None:
+        indexed = _clip_drawing_items(drawings, viewport_pdf_pts)
+    else:
+        indexed = _clip_drawings(drawings, viewport_pdf_pts)
     if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
         return LayeredRoomRingResult(
             EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
