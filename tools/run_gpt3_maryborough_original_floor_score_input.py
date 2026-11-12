@@ -218,6 +218,9 @@ def run_original_maryborough_floor_handoff(
         pages=(6,),
         topology_pages=(6,),
         room_area_support_pages=(10,),
+        # This handoff issues floor_area only. Surface-finish/ceiling OCR is
+        # independent, costly, and must never be used to certify floor areas.
+        include_surface_finishes=False,
     )
     try:
         # Each boundary can reject source/issuer authority before the final
