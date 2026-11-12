@@ -13,7 +13,10 @@ from typing import Any, Mapping, Sequence
 
 from .engine import NativePage, SourceConflict, load_native_page
 from .enclosure import propose_room_enclosures
-from .height_evidence import section_ffl_fcl_heights
+from .height_evidence import (
+    RCP_MATERIAL_HEIGHT, rcp_material_height_callouts,
+    section_ffl_fcl_heights, validate_height_receipt,
+)
 from .project_height_policy import (
     resolve_project_standard_height, select_applicable_height,
 )
@@ -109,8 +112,6 @@ def report_ceiling_height_coverage(
         if candidates:
             claim = candidates[0]
             try:
-                if standard is None:
-                    raise SourceConflict("local_height_without_project_height_scope")
                 refs = region.get("room_label_words") or []
                 room_ref = claim.get("plan_room_label_word_ref")
                 if (len(refs) != 1 or not isinstance(refs[0], Mapping)
@@ -138,19 +139,44 @@ def report_ceiling_height_coverage(
                 ]
                 if len(matches) != 1:
                     raise SourceConflict("local_height_rcp_source_rectangle_not_unique")
-                choice = select_applicable_height(
-                    pages, standard,
-                    local_receipt=receipt,
-                    local_page_index=page_index,
-                    local_scope_reviewed=claim.get("cross_sheet_correspondence_reviewed") is True,
-                    local_zone_id=claim.get("ceiling_zone_id"),
-                )
+                if standard is not None:
+                    choice = select_applicable_height(
+                        pages, standard,
+                        local_receipt=receipt,
+                        local_page_index=page_index,
+                        local_scope_reviewed=claim.get(
+                            "cross_sheet_correspondence_reviewed"
+                        ) is True,
+                        local_zone_id=claim.get("ceiling_zone_id"),
+                    )
+                else:
+                    # Maryborough may have source-RCP heights without one
+                    # verified global section standard. A scoped RCP bubble
+                    # still has valid, independently attested local height.
+                    if (
+                        claim.get("cross_sheet_correspondence_reviewed") is not True
+                        or type(claim.get("ceiling_zone_id")) is not str
+                        or not claim["ceiling_zone_id"].strip()
+                    ):
+                        raise SourceConflict("local_height_override_zone_scope_missing")
+                    proved = validate_height_receipt(rcp, dict(receipt))
+                    if proved["height_source_kind"] != RCP_MATERIAL_HEIGHT:
+                        raise SourceConflict("local_ceiling_height_not_rcp_material")
+                    choice = {
+                        "height_mm": proved["height_mm"],
+                        "basis": "SOURCE_RCP_LOCAL_CEILING_ZONE_HEIGHT",
+                        "source_height_receipt": proved,
+                    }
                 if choice["height_mm"] != matches[0]["height_mm"]:
                     raise SourceConflict("local_ceiling_height_source_zone_disagrees")
                 row["height_mm"] = choice["height_mm"]
                 row["height_source_receipt"] = choice["source_height_receipt"]
                 row["height_policy_basis"] = choice["basis"]
-                row["height_status"] = "LOCAL_RCP_OVERRIDE_REVIEW_REQUIRED"
+                row["height_status"] = (
+                    "LOCAL_RCP_OVERRIDE_REVIEW_REQUIRED"
+                    if standard is not None
+                    else "RCP_ZONE_HEIGHT_REVIEW_REQUIRED"
+                )
                 row["rcp_source_rectangle_ref"] = matches[0]["source_rectangle_ref"]
                 row["ceiling_zone_id_claimed"] = claim["ceiling_zone_id"]
             except (SourceConflict, TypeError, ValueError) as exc:
@@ -197,31 +223,89 @@ def main() -> int:
     )
     parser.add_argument("--pdf", type=Path, required=True)
     parser.add_argument("--plan-page", type=int, required=True)
-    parser.add_argument("--section-page", type=int, required=True)
+    parser.add_argument("--section-page", type=int)
     parser.add_argument("--project-id", required=True)
-    parser.add_argument("--owner-authorized", action="store_true", required=True)
+    parser.add_argument("--owner-authorized", action="store_true")
+    parser.add_argument("--rcp-page", type=int)
+    parser.add_argument("--reviewed-local-overrides", type=Path)
+    parser.add_argument(
+        "--stroke-pair-wall-faces", action="store_true",
+        help="Opt-in source stroke pairing in dense plans; auto uses bounded label neighbourhoods",
+    )
+    parser.add_argument(
+        "--plan-viewport", nargs=4, type=float,
+        metavar=("X0", "Y0", "X1", "Y1"),
+        help="Optional PDF-native plan neighbourhood, essential on over-cap dense sheets",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if (args.section_page is None) != (not args.owner_authorized):
+        parser.error("A project standard requires BOTH --section-page and --owner-authorized")
+    if args.section_page is None and args.rcp_page is None:
+        parser.error("Provide a source section standard or an RCP page")
+    if args.reviewed_local_overrides is not None and args.rcp_page is None:
+        parser.error("Reviewed local overrides require --rcp-page")
     plan = load_native_page(args.pdf, args.plan_page)
-    section = load_native_page(args.pdf, args.section_page)
-    if plan.page_index == section.page_index:
-        raise SourceConflict("ceiling_standard_section_is_plan_page")
-    evidence = section_ffl_fcl_heights(section)
-    if len(evidence) != 1:
-        raise SourceConflict("ceiling_standard_source_ffl_fcl_not_unique")
-    policy = {
-        "rule": "all_walls_and_ceilings_unless_otherwise_stated",
-        "owner_authorized": args.owner_authorized,
-        "project_id": args.project_id,
-        "source_sha256": plan.source_sha256,
-        "section_page_index": section.page_index,
-        "source_height_receipt": evidence[0],
-    }
-    enclosures = propose_room_enclosures(plan, args.pdf, include_cross_sheet_height=False)
-    result = report_ceiling_height_coverage(
-        plan, {plan.page_index: plan, section.page_index: section},
-        enclosures, project_id=args.project_id, owner_policy=policy,
+    pages = {plan.page_index: plan}
+    policy = None
+    if args.section_page is not None:
+        if args.section_page == plan.page_index:
+            raise SourceConflict("ceiling_standard_section_is_plan_page")
+        section = load_native_page(args.pdf, args.section_page)
+        pages[section.page_index] = section
+        evidence = section_ffl_fcl_heights(section)
+        if len(evidence) != 1:
+            raise SourceConflict("ceiling_standard_source_ffl_fcl_not_unique")
+        policy = {
+            "rule": "all_walls_and_ceilings_unless_otherwise_stated",
+            "owner_authorized": args.owner_authorized,
+            "project_id": args.project_id,
+            "source_sha256": plan.source_sha256,
+            "section_page_index": section.page_index,
+            "source_height_receipt": evidence[0],
+        }
+    reviewed: list[Mapping[str, Any]] = []
+    if args.rcp_page is not None:
+        if args.rcp_page in pages:
+            raise SourceConflict("ceiling_rcp_page_must_be_distinct_from_plan_or_section")
+        rcp = load_native_page(args.pdf, args.rcp_page)
+        pages[rcp.page_index] = rcp
+        if args.reviewed_local_overrides is not None:
+            review = json.loads(args.reviewed_local_overrides.read_text(encoding="utf-8"))
+            if not isinstance(review, dict) or (
+                review.get("source_sha256") != plan.source_sha256
+                or review.get("plan_page_index") != plan.page_index
+                or review.get("rcp_page_index") != rcp.page_index
+                or review.get("project_id") != args.project_id
+                or not isinstance(review.get("links"), list)
+            ):
+                raise SourceConflict("ceiling_reviewed_local_override_source_mismatch")
+            reviewed = review["links"]
+    enclosures = propose_room_enclosures(
+        plan, args.pdf,
+        include_cross_sheet_height=False,
+        stroke_pair_wall_faces=args.stroke_pair_wall_faces,
+        viewport_pdf_pts=args.plan_viewport,
     )
+    result = report_ceiling_height_coverage(
+        plan, pages, enclosures,
+        project_id=args.project_id, owner_policy=policy,
+        reviewed_local_overrides=reviewed,
+    )
+    if args.rcp_page is not None:
+        all_callouts = rcp_material_height_callouts(pages[args.rcp_page])
+        matched_refs = {
+            row["height_source_receipt"]["height_word_ref"]
+            for row in result["ceiling_region_height_rows"]
+            if row["height_source_receipt"] is not None
+            and row["height_source_receipt"]["height_source_kind"]
+               == RCP_MATERIAL_HEIGHT
+        }
+        result["rcp_source_height_material_pair_candidates"] = len(all_callouts)
+        result["rcp_callouts_not_yet_associated_with_detected_regions"] = [
+            item["height_word_ref"] for item in all_callouts
+            if item["height_word_ref"] not in matched_refs
+        ]
     # Create-only: never replace an owner's earlier diagnostic.
     with args.output.open("x", encoding="utf-8") as stream:
         json.dump(result, stream, sort_keys=True, indent=2)
