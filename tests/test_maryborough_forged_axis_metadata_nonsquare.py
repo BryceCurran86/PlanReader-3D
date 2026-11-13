@@ -70,15 +70,15 @@ def case(monkeypatch):
         document_id=room.document_id, revision_id=room.revision_id,
         source_sha256=room.source_sha256, snapshot_id=room.snapshot_id,
     )
-    return room, corr, record
+    return room, corr, record, monkeypatch
 
 
 def _compose(case, *, refs=None, metadata=None):
-    room, corr, record = case
+    room, corr, record, mp = case
     if refs is not None:
         corr = replace(corr, figured_dimension_ids=tuple(refs))
-    correspondence._REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[
-        (corr.snapshot_id, corr.record_id)] = corr
+    mp.setitem(correspondence._REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+               (corr.snapshot_id, corr.record_id), corr)
     atom = record.area_evidence
     evidence = atom
     if metadata is not None:
@@ -99,8 +99,14 @@ def test_nonsquare_authentic_record_is_accepted(case):
     assert quantity.family == "ceiling_lining" and quantity.value == 5.4
 
 
+def test_nonsquare_quantity_evidence_wrapper_positive_is_accepted(case):
+    _surface, quantity = _compose(case, metadata={})
+    assert quantity.family == "ceiling_lining" and quantity.value == 5.4
+    assert case[2].area_evidence.evidence_id in quantity.evidence_ids
+
+
 def test_swapped_axis_ids_and_values_with_identical_product_reject(case):
-    record = case[-1]
+    record = case[2]
     swapped = {
         "horizontal_dimension_id": record.vertical_dimension_id,
         "vertical_dimension_id": record.horizontal_dimension_id,
@@ -142,10 +148,10 @@ def test_correspondence_foreign_or_missing_figured_axis_rejects(case, refs):
 
 
 def test_correspondence_area_product_not_from_producer_rejects(case):
-    room, corr, record = case
+    room, corr, record, mp = case
     forged = replace(corr, area_m2=5.9)
-    correspondence._REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT[
-        (forged.snapshot_id, forged.record_id)] = forged
+    mp.setitem(correspondence._REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT,
+               (forged.snapshot_id, forged.record_id), forged)
     with pytest.raises(ValueError):
         correspondence.compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
             correspondence=forged, room=room,
