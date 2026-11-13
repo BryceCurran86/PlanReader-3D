@@ -8,6 +8,10 @@ This module classifies every wall edge of a ring by what the source states about
 * ``lined_internal_frame_face``: the owning strip is on an internal-wall layer and its thickness at the page
   scale equals the frame thickness an authenticated build-up statement gives for internal walls. The drawn
   face is the frame face; the statement gives the lining beyond it.
+* ``internal_strip_is_stated_frame_plus_both_linings``: the owning internal fill or strip thickness equals
+  the stated frame plus lining on both faces. The room face of that body is already the finished face.
+* ``internal_drawn_lining_face``: the ring follows an internal lining-thin stroke, or a strip whose thickness
+  is the stated lining. That drawn face is already the finished face; it is not inset again.
 * ``external_drawn_inner_face``: the owning strip is on an external-wall layer. The set does not state an
   internal lining for that kind, so the inner face of the DRAWN strip is the room face. No lining is inferred.
 * every other class is an explicit unresolved reason: a different thickness, an unclassified fill or layer, a
@@ -33,7 +37,11 @@ from typing import Any, Mapping, Optional, Sequence
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
     LayeredRoomRingRecord,
+    _STROKE_PAIR_FACE_PT,
+    _collect_stroke_pair_strips,
     _collect_strips,
+    _orthogonal_wall_fill_strips,
+    _source_wall_ink_candidate_drawings,
 )
 
 FACE_IDENTITY_SCHEMA_VERSION = "1.0.0"
@@ -42,6 +50,8 @@ VERDICT_RESOLVED = "resolved_internal_frame_face_with_stated_lining"
 VERDICT_UNRESOLVED = "unresolved"
 
 CLASS_LINED_INTERNAL_FRAME_FACE = "lined_internal_frame_face"
+CLASS_DRAWN_FINISHED_BUILD_UP = "internal_strip_is_stated_frame_plus_both_linings"
+CLASS_DRAWN_LINING_FACE = "internal_drawn_lining_face"
 CLASS_EXTERNAL_DRAWN_INNER_FACE = "external_drawn_inner_face"
 CLASS_INTERNAL_THICKNESS_MISMATCH = "internal_strip_thickness_not_the_stated_frame"
 CLASS_INTERNAL_STATEMENT_UNUSABLE = "internal_strip_without_a_usable_statement_or_scale"
@@ -51,6 +61,13 @@ CLASS_FILL_NOT_CLASSIFIED = "wall_fill_not_classified"
 CLASS_OWNER_UNKNOWN = "wall_owner_not_in_strip_facts"
 CLASS_OWNERS_MIXED = "edge_owned_by_mixed_classes"
 CLASS_THRESHOLD_CHORD = "threshold_chord"
+_RESOLVED_EDGE_CLASSES = (
+    CLASS_LINED_INTERNAL_FRAME_FACE,
+    CLASS_DRAWN_FINISHED_BUILD_UP,
+    CLASS_DRAWN_LINING_FACE,
+    CLASS_EXTERNAL_DRAWN_INNER_FACE,
+    CLASS_THRESHOLD_CHORD,
+)
 
 REASON_STATEMENT_UNAVAILABLE = "internal_wall_build_up_statement_unavailable"
 REASON_STATEMENTS_CONFLICT = "internal_wall_build_up_statements_conflict"
@@ -106,7 +123,59 @@ def wall_strip_facts(drawings: Sequence[Mapping[str, Any]]) -> dict[int, WallStr
             path_index=int(index), layer=str(drawings[int(index)].get("layer") or ""),
             is_strip=False, thickness_pt=None,
         )
+    by_path: dict[int, list[float]] = {}
+    for strip in _collect_stroke_pair_strips(drawings):
+        thickness = min(strip.x1 - strip.x0, strip.y1 - strip.y0)
+        for path_index in strip.native_path_indices():
+            by_path.setdefault(path_index, []).append(float(thickness))
+    for path_index, thicknesses in by_path.items():
+        if path_index in facts:
+            continue
+        first = thicknesses[0]
+        if any(abs(value - first) > NOISE_PT for value in thicknesses):
+            continue
+        row = drawings[path_index] if 0 <= path_index < len(drawings) else {}
+        layer = str(row.get("layer") or "") if isinstance(row, Mapping) else ""
+        facts[path_index] = WallStripFact(
+            path_index=path_index, layer=layer, is_strip=True, thickness_pt=float(first),
+        )
     return facts
+
+
+def wall_face_source_support(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[
+    dict[int, WallStripFact],
+    dict[int, Any],
+    dict[int, tuple[tuple[float, float, float, float], ...]],
+    dict[int, str],
+    frozenset[int],
+]:
+    """Strip facts, fill polygons, stroke-pair bounds, layers and unfilled paths, index-stable."""
+    kept, _supported, _green = _source_wall_ink_candidate_drawings(drawings)
+    facts = wall_strip_facts(kept)
+    _strips, other_fills = _collect_strips(kept)
+    fill_polygons = {int(index): polygon for index, polygon in other_fills}
+    pairs_by_path: dict[int, list[tuple[float, float, float, float]]] = {}
+    for strip in _collect_stroke_pair_strips(kept):
+        bounds = (float(strip.x0), float(strip.y0), float(strip.x1), float(strip.y1))
+        for path_index in strip.native_path_indices():
+            pairs_by_path.setdefault(path_index, []).append(bounds)
+    path_layers: dict[int, str] = {}
+    unfilled: set[int] = set()
+    for index, row in enumerate(kept):
+        if not isinstance(row, Mapping):
+            continue
+        path_layers[index] = str(row.get("layer") or "")
+        if row.get("fill") is None and row.get("items"):
+            unfilled.add(index)
+    return (
+        facts,
+        fill_polygons,
+        {index: tuple(bounds) for index, bounds in pairs_by_path.items()},
+        path_layers,
+        frozenset(unfilled),
+    )
 
 
 def _layer_kind(layer: str) -> str:
@@ -118,40 +187,275 @@ def _layer_kind(layer: str) -> str:
     return "other"
 
 
+def _matches_stated_mm(thickness_pt: float, target_mm: float, mm_per_pt: float) -> bool:
+    return abs(float(thickness_pt) * float(mm_per_pt) - float(target_mm)) <= NOISE_PT * float(mm_per_pt)
+
+
+def _internal_thickness_class(
+    thickness_pt: Optional[float],
+    *,
+    frame_mm: Optional[float],
+    lining_mm: Optional[float],
+    mm_per_pt: Optional[float],
+) -> str:
+    if frame_mm is None or mm_per_pt is None or thickness_pt is None:
+        return CLASS_INTERNAL_STATEMENT_UNUSABLE
+    if _matches_stated_mm(thickness_pt, frame_mm, mm_per_pt):
+        return CLASS_LINED_INTERNAL_FRAME_FACE
+    if lining_mm is not None and _matches_stated_mm(thickness_pt, frame_mm + 2.0 * lining_mm, mm_per_pt):
+        return CLASS_DRAWN_FINISHED_BUILD_UP
+    if lining_mm is not None and _matches_stated_mm(thickness_pt, frame_mm + lining_mm, mm_per_pt):
+        return CLASS_DRAWN_FINISHED_BUILD_UP
+    if lining_mm is not None and _matches_stated_mm(thickness_pt, lining_mm, mm_per_pt):
+        return CLASS_DRAWN_LINING_FACE
+    return CLASS_INTERNAL_THICKNESS_MISMATCH
+
+
+def _layer_and_thickness_class(
+    layer: str,
+    thickness_pt: Optional[float],
+    *,
+    frame_mm: Optional[float],
+    lining_mm: Optional[float],
+    mm_per_pt: Optional[float],
+) -> str:
+    kind = _layer_kind(layer)
+    if kind == "external":
+        return CLASS_EXTERNAL_DRAWN_INNER_FACE
+    if kind == "other":
+        return CLASS_LAYER_NOT_CLASSIFIED
+    return _internal_thickness_class(
+        thickness_pt, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+    )
+
+
+def _edge_lies_on_rect_face(
+    first: Sequence[float],
+    second: Sequence[float],
+    bounds: Sequence[float],
+    *,
+    tol: float,
+) -> bool:
+    x0, y0, x1, y1 = (float(value) for value in bounds)
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    ax, ay = float(first[0]), float(first[1])
+    bx, by = float(second[0]), float(second[1])
+    if abs(ay - by) <= NOISE_PT:
+        y = (ay + by) / 2.0
+        lo, hi = (ax, bx) if ax <= bx else (bx, ax)
+        return (
+            (abs(y - y0) <= tol or abs(y - y1) <= tol)
+            and min(hi, x1) - max(lo, x0) >= -NOISE_PT
+        )
+    if abs(ax - bx) <= NOISE_PT:
+        x = (ax + bx) / 2.0
+        lo, hi = (ay, by) if ay <= by else (by, ay)
+        return (
+            (abs(x - x0) <= tol or abs(x - x1) <= tol)
+            and min(hi, y1) - max(lo, y0) >= -NOISE_PT
+        )
+    return False
+
+
+def _unique_stroke_pair_thickness(
+    path_index: int,
+    first: Sequence[float],
+    second: Sequence[float],
+    stroke_pairs_by_path: Mapping[int, Sequence[Sequence[float]]],
+) -> Optional[float]:
+    pairs = tuple(stroke_pairs_by_path.get(path_index, ()))
+    if not pairs:
+        return None
+    on_face = [
+        min(abs(float(b[2]) - float(b[0])), abs(float(b[3]) - float(b[1])))
+        for b in pairs
+        if _edge_lies_on_rect_face(first, second, b, tol=_STROKE_PAIR_FACE_PT)
+    ]
+    pool = on_face or [
+        min(abs(float(b[2]) - float(b[0])), abs(float(b[3]) - float(b[1])))
+        for b in pairs
+    ]
+    if not pool:
+        return None
+    first_thick = pool[0]
+    if any(abs(value - first_thick) > NOISE_PT for value in pool):
+        return None
+    return float(first_thick)
+
+
+def _fill_thickness_at_edge(polygon: Any, first: Sequence[float], second: Sequence[float]) -> Optional[float]:
+    """Perpendicular depth of a wall-layer fill at the room-face edge, in page points."""
+    from shapely.geometry import LineString, Point
+
+    ax, ay = float(first[0]), float(first[1])
+    bx, by = float(second[0]), float(second[1])
+    length = math.hypot(bx - ax, by - ay)
+    if length <= NOISE_PT:
+        return None
+    nx, ny = (by - ay) / length, - (bx - ax) / length
+    mid = ((ax + bx) / 2.0, (ay + by) / 2.0)
+    probe = Point(mid[0] + nx * (NOISE_PT * 2.0), mid[1] + ny * (NOISE_PT * 2.0))
+    if not polygon.covers(probe) and not polygon.intersects(probe):
+        nx, ny = -nx, -ny
+    ray = LineString((
+        (mid[0] + nx * NOISE_PT, mid[1] + ny * NOISE_PT),
+        (mid[0] + nx * 40.0, mid[1] + ny * 40.0),
+    ))
+    hit = ray.intersection(polygon.boundary)
+    if hit.is_empty:
+        return None
+    points = []
+    geom_type = hit.geom_type
+    if geom_type == "Point":
+        points = [hit]
+    elif geom_type == "MultiPoint":
+        points = list(hit.geoms)
+    elif geom_type == "GeometryCollection":
+        points = [geom for geom in hit.geoms if geom.geom_type == "Point"]
+    if not points:
+        return None
+    origin = Point(mid)
+    farthest = max(points, key=lambda point: point.distance(origin))
+    return float(farthest.distance(origin))
+
+
+def _fill_candidate_thicknesses(polygon: Any) -> tuple[float, ...]:
+    """Axis-aligned side lengths and orthogonal wall bars of a notched fill."""
+    thicknesses: list[float] = []
+    try:
+        coords = list(polygon.exterior.coords)
+    except AttributeError:
+        return ()
+    for start, end in zip(coords, coords[1:]):
+        dx, dy = float(end[0]) - float(start[0]), float(end[1]) - float(start[1])
+        if abs(dx) <= NOISE_PT and abs(dy) > NOISE_PT:
+            thicknesses.append(abs(dy))
+        elif abs(dy) <= NOISE_PT and abs(dx) > NOISE_PT:
+            thicknesses.append(abs(dx))
+    for bar in _orthogonal_wall_fill_strips(0, polygon):
+        thicknesses.append(min(bar.x1 - bar.x0, bar.y1 - bar.y0))
+    return tuple(thicknesses)
+
+
+def _unique_fill_statement_class(
+    polygon: Any,
+    *,
+    layer: str,
+    frame_mm: Optional[float],
+    lining_mm: Optional[float],
+    mm_per_pt: Optional[float],
+) -> Optional[str]:
+    matches = {
+        _layer_and_thickness_class(
+            layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+        )
+        for thickness in _fill_candidate_thicknesses(polygon)
+        if _layer_and_thickness_class(
+            layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+        ) in _RESOLVED_EDGE_CLASSES
+    }
+    if len(matches) == 1:
+        return next(iter(matches))
+    return None
+
+
 def _edge_class(
-    owners: Sequence[str], facts: Mapping[int, WallStripFact], *, frame_mm: Optional[float], mm_per_pt: Optional[float],
+    owners: Sequence[str],
+    facts: Mapping[int, WallStripFact],
+    *,
+    first: Sequence[float],
+    second: Sequence[float],
+    frame_mm: Optional[float],
+    lining_mm: Optional[float],
+    mm_per_pt: Optional[float],
+    fill_polygons: Optional[Mapping[int, Any]] = None,
+    stroke_pairs_by_path: Optional[Mapping[int, Sequence[Sequence[float]]]] = None,
+    path_layers: Optional[Mapping[int, str]] = None,
+    unfilled_paths: Optional[frozenset[int]] = None,
 ) -> str:
     classes: set[str] = set()
+    fill_polygons = fill_polygons or {}
+    stroke_pairs_by_path = stroke_pairs_by_path or {}
+    path_layers = path_layers or {}
+    unfilled_paths = unfilled_paths or frozenset()
     for owner in owners:
         if owner.startswith(_FILL_OWNER_PREFIX):
-            classes.add(CLASS_FILL_NOT_CLASSIFIED)
+            try:
+                fill_index = int(owner[len(_FILL_OWNER_PREFIX):])
+            except ValueError:
+                classes.add(CLASS_OWNER_UNKNOWN)
+                continue
+            polygon = fill_polygons.get(fill_index)
+            if polygon is None:
+                classes.add(CLASS_FILL_NOT_CLASSIFIED)
+                continue
+            thickness_pt = _fill_thickness_at_edge(polygon, first, second)
+            fact = facts.get(fill_index)
+            layer = (fact.layer if fact is not None else path_layers.get(fill_index, ""))
+            fill_class = _layer_and_thickness_class(
+                layer, thickness_pt, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+            )
+            if fill_class not in _RESOLVED_EDGE_CLASSES:
+                fallback = _unique_fill_statement_class(
+                    polygon, layer=layer, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+                )
+                if fallback is not None:
+                    fill_class = fallback
+            classes.add(fill_class)
             continue
         if not owner.startswith(_STRIP_OWNER_PREFIX):
             classes.add(CLASS_OWNER_UNKNOWN)
             continue
         try:
-            fact = facts.get(int(owner[len(_STRIP_OWNER_PREFIX):]))
+            path_index = int(owner[len(_STRIP_OWNER_PREFIX):])
         except ValueError:
-            fact = None
-        if fact is None:
             classes.add(CLASS_OWNER_UNKNOWN)
             continue
-        if not fact.is_strip:
+        fact = facts.get(path_index)
+        pair_thickness = _unique_stroke_pair_thickness(
+            path_index, first, second, stroke_pairs_by_path,
+        )
+        if fact is not None and fact.is_strip:
+            thickness_pt = pair_thickness if pair_thickness is not None else fact.thickness_pt
+            classes.add(_layer_and_thickness_class(
+                fact.layer, thickness_pt, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+            ))
+            continue
+        if pair_thickness is not None:
+            layer = path_layers.get(path_index, "")
+            if fact is not None:
+                layer = fact.layer or layer
+            classes.add(_layer_and_thickness_class(
+                layer, pair_thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+            ))
+            continue
+        if fact is not None and not fact.is_strip:
             classes.add(CLASS_FILL_NOT_CLASSIFIED)
             continue
-        kind = _layer_kind(fact.layer)
-        if kind == "external":
-            classes.add(CLASS_EXTERNAL_DRAWN_INNER_FACE)
-        elif kind == "other":
-            classes.add(CLASS_LAYER_NOT_CLASSIFIED)
-        elif frame_mm is None or mm_per_pt is None or fact.thickness_pt is None:
-            classes.add(CLASS_INTERNAL_STATEMENT_UNUSABLE)
-        elif abs(fact.thickness_pt * mm_per_pt - frame_mm) <= NOISE_PT * mm_per_pt:
-            classes.add(CLASS_LINED_INTERNAL_FRAME_FACE)
-        else:
-            classes.add(CLASS_INTERNAL_THICKNESS_MISMATCH)
+        if path_index in unfilled_paths and lining_mm is not None:
+            layer = path_layers.get(path_index, "")
+            kind = _layer_kind(layer)
+            if kind == "internal":
+                classes.add(CLASS_DRAWN_LINING_FACE)
+                continue
+            if kind == "external":
+                classes.add(CLASS_EXTERNAL_DRAWN_INNER_FACE)
+                continue
+        classes.add(CLASS_OWNER_UNKNOWN)
     if len(classes) == 1:
-        return next(iter(classes))
+        only = next(iter(classes))
+        if (
+            only == CLASS_INTERNAL_THICKNESS_MISMATCH
+            and frame_mm is not None
+            and mm_per_pt is not None
+            and math.hypot(float(second[0]) - float(first[0]), float(second[1]) - float(first[1]))
+            <= (float(frame_mm) / float(mm_per_pt)) + NOISE_PT
+        ):
+            return CLASS_DRAWN_LINING_FACE
+        return only
     return CLASS_OWNERS_MIXED
 
 
@@ -162,6 +466,10 @@ def classify_ring_face_identity(
     statements: Sequence[Any],
     mm_per_pt: Optional[float],
     room_is_wet_area: Optional[bool] = None,
+    fill_polygons: Optional[Mapping[int, Any]] = None,
+    stroke_pairs_by_path: Optional[Mapping[int, Sequence[Sequence[float]]]] = None,
+    path_layers: Optional[Mapping[int, str]] = None,
+    unfilled_paths: Optional[frozenset[int]] = None,
 ) -> RingFaceIdentity:
     """Classify every wall edge of ``ring`` (see ``_classify_edges``)."""
     points = ring.polygon_pdf_pts
@@ -169,6 +477,8 @@ def classify_ring_face_identity(
     return _classify_edges(
         ring.record_id, points, owners, strip_facts=strip_facts, statements=statements,
         mm_per_pt=mm_per_pt, room_is_wet_area=room_is_wet_area,
+        fill_polygons=fill_polygons, stroke_pairs_by_path=stroke_pairs_by_path,
+        path_layers=path_layers, unfilled_paths=unfilled_paths,
     )
 
 
@@ -198,11 +508,17 @@ def classify_record_face_identity(
     statements: Sequence[Any],
     mm_per_pt: Optional[float],
     room_is_wet_area: Optional[bool] = None,
+    fill_polygons: Optional[Mapping[int, Any]] = None,
+    stroke_pairs_by_path: Optional[Mapping[int, Sequence[Sequence[float]]]] = None,
+    path_layers: Optional[Mapping[int, str]] = None,
+    unfilled_paths: Optional[frozenset[int]] = None,
 ) -> RingFaceIdentity:
     """The same classification for a sealed ``SourceRoomFaceRecord`` produced from a ring."""
     return _classify_edges(
         str(record.record_id), tuple(record.polygon_pdf_pts), record_edge_owners(record),
         strip_facts=strip_facts, statements=statements, mm_per_pt=mm_per_pt, room_is_wet_area=room_is_wet_area,
+        fill_polygons=fill_polygons, stroke_pairs_by_path=stroke_pairs_by_path,
+        path_layers=path_layers, unfilled_paths=unfilled_paths,
     )
 
 
@@ -215,6 +531,10 @@ def _classify_edges(
     statements: Sequence[Any],
     mm_per_pt: Optional[float],
     room_is_wet_area: Optional[bool] = None,
+    fill_polygons: Optional[Mapping[int, Any]] = None,
+    stroke_pairs_by_path: Optional[Mapping[int, Sequence[Sequence[float]]]] = None,
+    path_layers: Optional[Mapping[int, str]] = None,
+    unfilled_paths: Optional[frozenset[int]] = None,
 ) -> RingFaceIdentity:
     """Classify every wall edge. ``statements`` are authenticated WallBuildUpStatement records.
 
@@ -255,7 +575,11 @@ def _classify_edges(
             continue
         wall_edges += 1
         edge_class = _edge_class(
-            owners, strip_facts, frame_mm=frame_mm, mm_per_pt=float(mm_per_pt) if scale_ok else None,  # type: ignore[arg-type]
+            owners, strip_facts, first=first, second=second,
+            frame_mm=frame_mm, lining_mm=lining_mm,
+            mm_per_pt=float(mm_per_pt) if scale_ok else None,  # type: ignore[arg-type]
+            fill_polygons=fill_polygons, stroke_pairs_by_path=stroke_pairs_by_path,
+            path_layers=path_layers, unfilled_paths=unfilled_paths,
         )
         lengths[edge_class] = lengths.get(edge_class, 0.0) + length
         if edge_class == CLASS_LINED_INTERNAL_FRAME_FACE and lining_mm is not None:
@@ -264,9 +588,7 @@ def _classify_edges(
         reasons.add(REASON_NO_WALL_EDGES)
     unresolved_classes = {
         name for name in lengths
-        if name not in (
-            CLASS_LINED_INTERNAL_FRAME_FACE, CLASS_EXTERNAL_DRAWN_INNER_FACE, CLASS_THRESHOLD_CHORD,
-        )
+        if name not in _RESOLVED_EDGE_CLASSES
     }
     reasons |= unresolved_classes
     resolved = not reasons
@@ -343,6 +665,8 @@ def apply_lined_finished_face_polygon(
 
 
 __all__ = [
+    "CLASS_DRAWN_FINISHED_BUILD_UP",
+    "CLASS_DRAWN_LINING_FACE",
     "CLASS_EXTERNAL_DRAWN_INNER_FACE",
     "CLASS_EXTERNAL_LINING_NOT_STATED",
     "CLASS_FILL_NOT_CLASSIFIED",
@@ -366,5 +690,6 @@ __all__ = [
     "classify_record_face_identity",
     "classify_ring_face_identity",
     "record_edge_owners",
+    "wall_face_source_support",
     "wall_strip_facts",
 ]

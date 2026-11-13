@@ -1068,8 +1068,7 @@ def _collect_live_physical_net_wall_claim(
                     same_view_by_record.update(
                         dict(recovered.evidence_by_source_room_face_record_id)
                     )
-                    if recovered.records:
-                        same_view_area = recovered
+                    same_view_area = recovered
                     evidence_by_record = _merge_documented_room_area_evidence(
                         same_view_by_record=same_view_by_record,
                         cross_view_by_record=cross_view_by_record,
@@ -1417,17 +1416,21 @@ def _finished_face_receipts(
     """Diagnostic face identity of each gated ring face; the page scale comes only from the existing authority."""
     from pb_layered_wall_face_identity_shadow import (
         classify_record_face_identity,
-        wall_strip_facts,
+        wall_face_source_support,
     )
 
     if mm_per_pt is None:
         mm_per_pt = _finished_face_mm_per_pt(scale_calibration)
     with fitz.open(stream=payload, filetype="pdf") as document:
-        facts = wall_strip_facts(document[page_no - 1].get_drawings())
+        facts, fill_polygons, stroke_pairs, path_layers, unfilled_paths = wall_face_source_support(
+            document[page_no - 1].get_drawings(),
+        )
     return tuple(
         classify_record_face_identity(
             record, strip_facts=facts, statements=statements, mm_per_pt=mm_per_pt,
-            room_is_wet_area=room_is_wet_area,
+            room_is_wet_area=room_is_wet_area, fill_polygons=fill_polygons,
+            stroke_pairs_by_path=stroke_pairs, path_layers=path_layers,
+            unfilled_paths=unfilled_paths,
         )
         for record in sorted(records, key=lambda item: item.record_id)
     )
