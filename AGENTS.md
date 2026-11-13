@@ -1,5 +1,37 @@
 # PlanReader-3D agent contract
 
+
+## Owner one-app production consolidation directive (12 November 2026)
+
+**Original PlanReader is the only commercial measurement app and quantity pipeline.**
+Use the current producer-owned pb_* source/physical/metric/quantity,
+canonical customer output and immutable four-project frozen120 scorer.
+
+planreader_next / draft PR #4284 is now a research/source-evidence donor,
+NOT a second commercial measuring system, alternative quantity issuer or
+customer app. Preserve useful code, source receipts and tests. Port
+source-positive algorithms to original producers on bounded branches;
+do not wholesale merge the new engine or lose existing original work.
+
+Required original measuring sequence: trace the external footprint from
+actual painted wall ink, connect internal walls, authenticate doors/frames
+and openings, close doorway gaps for TOPOLOGY ONLY, recover actual enclosed
+rooms without inventing walls between named open sections, then measure
+finished faces, floor/ceiling finishes and openings using original issuers.
+Invisible white background rectangles are not physical walls.
+
+Owner door-frame rule: wall continues above the authenticated opening's
+frame head to the authenticated ceiling/wall height unless source plans
+show a full-height void, upper transom or another real exception.
+Temporary doorway closures do not become full-height physical walls.
+The original net-wall issuer retains the wall over valid openings.
+
+Preserve original private PDFs, frozen120 (27/24/63/6), 20k cap, 2.5pt
+snap, all signed Lot16 opening records and Maryborough floor records,
+and customer lineage. No new customer amount from a shadow candidate.
+See docs/engineering/ONE_APP_PRODUCTION_CONSOLIDATION_20261112.md.
+
+
 ## Owner autonomous completion directive — 2026-11-10 (current)
 
 The owner directs **GPT MAX, Cursor, Claude and AntiGravity** to continue their

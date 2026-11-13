@@ -54,6 +54,14 @@ LAYERED_ROOM_RING_SCHEMA_VERSION = "1.0.0"
 NOISE_PT = 0.05  # representation noise only; NOT the 2.5 pt production snap
 _CLOSING_PT = 0.03  # hairline closing between exactly shared strip edges
 _BLACK_MAX = 0.04
+# Black source-line pair geometry, ported from Cursor's evidence-bound
+# candidate tracer. It cannot publish a wall/room quantity on its own.
+_STROKE_PAIR_THICK_MIN = 1.2
+_STROKE_PAIR_THICK_MAX = 8.0
+_STROKE_PAIR_MIN_SPAN = 8.0
+_STROKE_PAIR_FACE_PT = 0.35
+_STROKE_PAIR_CLUSTER_PT = 0.8
+
 _ARC_CIRCULARITY = 0.002  # relative; a cubic Bezier quarter circle deviates by about 0.0003
 
 REASON_RING_CLOSED = "layered_wall_ring_closed_by_source_ink"
@@ -62,6 +70,9 @@ REASON_OPEN_EXTERIOR = "open_to_exterior"
 REASON_NO_WALL_INK = "no_wall_layer_strips"
 REASON_UNOWNED_EDGE = "ring_edge_without_source_owner"
 REASON_SOURCE_HASH = "source_sha256_mismatch"
+REASON_UNLABELLED_SOURCE_PRIMITIVE_CAP = (
+    "unlabelled_dark_wall_page_exceeds_20000_primitive_cap_needs_bounded_viewport"
+)
 
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
@@ -80,6 +91,77 @@ def _is_black(color: Any) -> bool:
         and len(color) == 3
         and all(type(v) in (int, float) and math.isfinite(v) and 0.0 <= v <= _BLACK_MAX for v in color)
     )
+
+
+def _owner_excluded_green_ink(color: Any) -> bool:
+    """Owner: green aisle/equipment/cold-room details are NOT wall geometry.
+
+    This filter belongs ONLY to native wall/room tracing; cold-room
+    finishes, room labels, and original PDF layers remain available to
+    their separate source authorities. R/G/B paint channels are PDF-native
+    normalized floats, not colours interpreted from a raster image.
+    """
+    return (
+        isinstance(color, (tuple, list))
+        and len(color) == 3
+        and all(
+            type(component) in (int, float)
+            and math.isfinite(component)
+            and 0 <= component <= 1
+            for component in color
+        )
+        and color[1] >= 0.16
+        and color[1] > 1.25 * color[0]
+        and color[1] > 1.08 * color[2]
+    )
+
+
+def _source_wall_ink_candidate_drawings(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[Mapping[str, Any], ...], int, int]:
+    """Select wall-relevant source ink, keeping EVERY original path index.
+
+    Non-black strokes (except separately authenticated wall-layer ink)
+    are not proof of a wall. In particular green plan overlay artwork
+    never enters room planarization. This is NOT a source deletion: the
+    output contains empty inert rows in exactly the same indices so
+    source-owned native path numbers cannot be silently reindexed.
+    """
+    blank: Mapping[str, Any] = {
+        "layer": "", "fill": None, "color": None, "items": (),
+    }
+    kept: list[Mapping[str, Any]] = []
+    supported = 0
+    green_excluded = 0
+    for row in drawings:
+        if not isinstance(row, Mapping):
+            kept.append(blank)
+            continue
+        fill, stroke = row.get("fill"), row.get("color")
+        if _owner_excluded_green_ink(fill) or _owner_excluded_green_ink(stroke):
+            kept.append(blank)
+            green_excluded += 1
+            continue
+        candidate = (
+            is_explicit_wall_layer_name(str(row.get("layer") or ""))
+            or (fill is None and _is_black(stroke))
+            or (
+                isinstance(fill, (tuple, list))
+                and len(fill) == 3
+                and all(
+                    type(v) in (int, float)
+                    and math.isfinite(v) and 0 <= v <= 0.25
+                    for v in fill
+                )
+                and max(fill) - min(fill) <= 0.03
+            )
+        )
+        if candidate:
+            supported += 1
+            kept.append(row)
+        else:
+            kept.append(blank)
+    return tuple(kept), supported, green_excluded
 
 
 def _close(a: float, b: float, tol: float = NOISE_PT) -> bool:
@@ -129,6 +211,10 @@ class _Strip:
     y1: float
     polygon: Any = None  # exact outline (mitred ends keep their shape); bbox drives run analysis only
     forced: Optional[str] = None  # "h"/"v": a jamb cap takes the orientation of the wall it ends
+    path_indices: tuple[int, ...] = ()  # paired source strokes retain BOTH original native paths
+
+    def native_path_indices(self) -> tuple[int, ...]:
+        return tuple(sorted(set(self.path_indices or (self.path_index,))))
 
     @property
     def horizontal(self) -> bool:
@@ -221,6 +307,10 @@ class LayeredRoomRingResult:
     ambiguous_swing_count: int
     sliver_region_count: int = 0
     schema_version: str = LAYERED_ROOM_RING_SCHEMA_VERSION
+    # Original PDF black segmented arcs + radial leaves, NOT sealed
+    # openings, hosted frames or customer wall geometry.
+    source_segmented_swing_witnesses: tuple[Mapping[str, Any], ...] = ()
+    source_owned_doorway_chords: tuple[Mapping[str, Any], ...] = ()
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -275,6 +365,264 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
     return _attach_caps(strips), other
 
 
+def _collect_dark_painted_source_wall_strips(
+    drawings: Sequence[Mapping[str, Any]],
+) -> list[_Strip]:
+    """Extract actual native dark-filled narrow bars, NOT white PDF masks.
+
+    Some original plans paint structural wall faces as a dark grey fill on
+    unnamed layers rather than opaque BLACK explicit wall-layer ink.
+    This is a source-native extra wall hypothesis, default OFF. It is never
+    a physical finished-face authority or a measurement on its own.
+    Each bar keeps its exact original PDF drawing path index and endpoints.
+    """
+    candidates: list[_Strip] = []
+    for path_index, row in enumerate(drawings):
+        if not isinstance(row, Mapping):
+            continue
+        color = row.get("fill")
+        if not (
+            isinstance(color, (tuple, list))
+            and len(color) == 3
+            and all(
+                type(v) in (float, int) and math.isfinite(v)
+                and 0 <= v <= 0.25 for v in color
+            )
+            and max(color) > _BLACK_MAX
+            and max(color) - min(color) <= 0.03
+        ):
+            continue
+        if row.get("color") is not None:
+            continue
+        try:
+            fill_opacity = float(row.get("fill_opacity", 1))
+        except (ValueError, TypeError):
+            continue
+        if not math.isfinite(fill_opacity) or fill_opacity < 0.995:
+            continue
+        for item in row.get("items", ()):
+            bounds = _rect_of_item(item)
+            if bounds is None:
+                continue
+            x0, y0, x1, y1 = bounds
+            if not all(math.isfinite(v) for v in bounds):
+                continue
+            width, height = x1 - x0, y1 - y0
+            if width <= 0 or height <= 0:
+                continue
+            thickness = min(width, height)
+            span = max(width, height)
+            if not (1.2 <= thickness <= 14.0 and span >= 8.0):
+                continue
+            # An independent long dark source fill is a wall hypothesis.
+            # A square dark cabinet / label mask / furniture is not a wall.
+            if span / thickness < 4.0:
+                continue
+            candidates.append(
+                _Strip(path_index, x0, y0, x1, y1, box(*bounds))
+            )
+    return _attach_caps(candidates)
+
+
+# Black source stroke-pair evidence adapted from PR #4284's Cursor
+# experimental wall-pair tracer into the ORIGINAL PlanReader source path.
+# No Next runtime import, new customer issuer or frozen-score modification.
+def _is_wall_stroke_color(color: Any) -> bool:
+    """Default CAD stroke (None) or opaque black. Grey grid and green hatch are not walls."""
+    return color is None or _is_black(color)
+
+def _axis_strokes(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[tuple[int, bool, float, float, float]]:
+    """Axis-aligned black wall strokes, shorts merged collinearly before the 8 pt span gate.
+
+    Double-drawn CAD faces (~0.48 pt) collapse to one perp. Door-sized gaps stay open.
+    """
+    raw: list[tuple[int, bool, float, float, float]] = []
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _is_wall_stroke_color(row.get("color")):
+            continue
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if _close(ay, by, 1e-3) and abs(bx - ax) > NOISE_PT:
+                lo, hi = sorted((ax, bx))
+                raw.append((index, True, (ay + by) / 2.0, lo, hi))
+            elif _close(ax, bx, 1e-3) and abs(by - ay) > NOISE_PT:
+                lo, hi = sorted((ay, by))
+                raw.append((index, False, (ax + bx) / 2.0, lo, hi))
+    merged: list[tuple[int, bool, float, float, float]] = []
+    for horiz in (True, False):
+        members = [item for item in raw if item[1] is horiz]
+        members.sort(key=lambda item: (item[2], item[3], item[4]))
+        groups: list[list[tuple[int, bool, float, float, float]]] = []
+        for stroke in members:
+            if groups and abs(stroke[2] - groups[-1][0][2]) <= _STROKE_PAIR_CLUSTER_PT:
+                groups[-1].append(stroke)
+                continue
+            groups.append([stroke])
+        for group in groups:
+            ordered = sorted(group, key=lambda item: (item[3], item[4]))
+            run = [ordered[0]]
+            lo, hi = ordered[0][3], ordered[0][4]
+            for stroke in ordered[1:]:
+                if stroke[3] <= hi + _STROKE_PAIR_CLUSTER_PT:
+                    run.append(stroke)
+                    hi = max(hi, stroke[4])
+                    continue
+                if hi - lo >= _STROKE_PAIR_MIN_SPAN:
+                    perp = sum(item[2] for item in run) / len(run)
+                    for item in run:
+                        merged.append((item[0], horiz, perp, lo, hi))
+                run = [stroke]
+                lo, hi = stroke[3], stroke[4]
+            if hi - lo >= _STROKE_PAIR_MIN_SPAN:
+                perp = sum(item[2] for item in run) / len(run)
+                for item in run:
+                    merged.append((item[0], horiz, perp, lo, hi))
+    return merged
+
+def _stroke_partners(
+    stroke: tuple[int, bool, float, float, float],
+    pool: Sequence[tuple[int, bool, float, float, float]],
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
+) -> list[tuple[int, bool, float, float, float]]:
+    found: list[tuple[int, bool, float, float, float]] = []
+    _index, _horiz, perp, stroke_lo, stroke_hi = stroke
+    lo = stroke_lo if lo is None else lo
+    hi = stroke_hi if hi is None else hi
+    span = hi - lo
+    if span < _STROKE_PAIR_MIN_SPAN:
+        return found
+    for other in pool:
+        if other == stroke or other[0] == _index:
+            continue
+        gap = abs(other[2] - perp)
+        if gap < _STROKE_PAIR_THICK_MIN or gap > _STROKE_PAIR_THICK_MAX:
+            continue
+        overlap = min(hi, other[4]) - max(lo, other[3])
+        shorter = min(span, other[4] - other[3])
+        if shorter > 0 and overlap >= 0.7 * shorter:
+            found.append(other)
+    return found
+
+def _cluster_strokes_by_perp(
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
+    grouped: list[tuple[float, list[tuple[int, bool, float, float, float]]]] = []
+    for stroke in sorted(strokes, key=lambda item: item[2]):
+        if grouped and abs(stroke[2] - grouped[-1][0]) <= _STROKE_PAIR_CLUSTER_PT:
+            grouped[-1][1].append(stroke)
+            continue
+        grouped.append((stroke[2], [stroke]))
+    return grouped
+
+def _partner_face_clusters(
+    stroke: tuple[int, bool, float, float, float],
+    pool: Sequence[tuple[int, bool, float, float, float]],
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
+) -> list[tuple[float, list[tuple[int, bool, float, float, float]]]]:
+    return _cluster_strokes_by_perp(_stroke_partners(stroke, pool, lo=lo, hi=hi))
+
+def _merged_along_spans(
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+) -> list[tuple[float, float]]:
+    ordered = sorted((stroke[3], stroke[4]) for stroke in strokes)
+    merged: list[tuple[float, float]] = []
+    for lo, hi in ordered:
+        if merged and lo <= merged[-1][1] + _STROKE_PAIR_CLUSTER_PT:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+def _collect_stroke_pair_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Unlabelled parallel stroke pairs as topology-only wall-face candidates.
+
+    These are not an authenticated wall layer. Ambiguous three-line hatch and
+    over-thick furniture pairs are left unpaired. Split collinear ink on the
+    same opposite face is one face, not several rival partners.
+    """
+    strokes = _axis_strokes(drawings)
+    strips: list[_Strip] = []
+    seen: set[tuple[float, float, float, float]] = set()
+    by_dir = {True: [s for s in strokes if s[1]], False: [s for s in strokes if not s[1]]}
+    for horiz, pool in by_dir.items():
+        for stroke in pool:
+            clusters = _partner_face_clusters(stroke, pool)
+            if len(clusters) != 1:
+                continue
+            _opp_perp, partners = clusters[0]
+            window_lo, window_hi = stroke[3], stroke[4]
+            if any(
+                len(_partner_face_clusters(other, pool, lo=window_lo, hi=window_hi)) != 1
+                for other in partners
+            ):
+                continue
+            members = (stroke,) + tuple(partners)
+            perps = sorted(item[2] for item in members)
+            low_perp, high_perp = perps[0], perps[-1]
+            if high_perp - low_perp < _STROKE_PAIR_THICK_MIN:
+                continue
+            low_face = [item for item in members if abs(item[2] - low_perp) <= _STROKE_PAIR_CLUSTER_PT]
+            high_face = [item for item in members if abs(item[2] - high_perp) <= _STROKE_PAIR_CLUSTER_PT]
+            for lo0, hi0 in _merged_along_spans(low_face):
+                for lo1, hi1 in _merged_along_spans(high_face):
+                    lo, hi = max(lo0, lo1), min(hi0, hi1)
+                    if hi - lo < _STROKE_PAIR_MIN_SPAN:
+                        continue
+                    if horiz:
+                        x0, x1, y0, y1 = lo, hi, low_perp, high_perp
+                    else:
+                        x0, x1, y0, y1 = low_perp, high_perp, lo, hi
+                    key = (round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    covering = [
+                        item for item in members
+                        if min(item[4], hi) - max(item[3], lo) > _STROKE_PAIR_FACE_PT
+                    ]
+                    paths = tuple(sorted({item[0] for item in covering} or {stroke[0]}))
+                    polygon = box(x0, y0, x1, y1)
+                    strips.append(_Strip(paths[0], x0, y0, x1, y1, polygon, path_indices=paths))
+    # Both face directions can propose the same wall, or a long face can
+    # propose a full span in addition to its individually paired collinear
+    # subspans. Keep only maximal, source-consistent spans on each band.
+    # Otherwise one real wall is reconstructed twice and may inflate counts
+    # or make the same edge carry mutually inconsistent source owners.
+    by_band: dict[tuple[bool, float, float], list[_Strip]] = {}
+    for strip in strips:
+        band = strip.band()
+        key = (strip.horizontal, round(band[0], 3), round(band[1], 3))
+        by_band.setdefault(key, []).append(strip)
+    maximal: list[_Strip] = []
+    for group in by_band.values():
+        accepted: list[_Strip] = []
+        for strip in sorted(group, key=lambda item: (-(item.span()[1] - item.span()[0]), item.span())):
+            span_lo, span_hi = strip.span()
+            refs = set(strip.native_path_indices())
+            if any(
+                (prior.span()[0] <= span_lo + _STROKE_PAIR_FACE_PT)
+                and (prior.span()[1] >= span_hi - _STROKE_PAIR_FACE_PT)
+                and refs.issubset(prior.native_path_indices())
+                for prior in accepted
+            ):
+                continue
+            accepted.append(strip)
+        maximal.extend(accepted)
+    return maximal
+
+
 def _attach_caps(strips: list[_Strip]) -> list[_Strip]:
     """A strip drawn across the END of a wall (same band as that wall, touching it end to end)
     belongs to that wall's run whatever its own aspect ratio; otherwise it would read as a
@@ -293,7 +641,10 @@ def _attach_caps(strips: list[_Strip]) -> list[_Strip]:
                     forced = "h"
                 else:
                     continue
-                current[index] = _Strip(strip.path_index, strip.x0, strip.y0, strip.x1, strip.y1, strip.polygon, forced)
+                current[index] = _Strip(
+                    strip.path_index, strip.x0, strip.y0, strip.x1, strip.y1,
+                    strip.polygon, forced, strip.native_path_indices(),
+                )
                 changed = True
                 break
         if not changed:
@@ -319,15 +670,15 @@ def _runs(strips: Sequence[_Strip], horizontal: bool) -> list[tuple[tuple[float,
         band = group[0].band()
         group.sort(key=lambda s: s.span()[0])
         lo, hi = group[0].span()
-        paths = [group[0].path_index]
+        paths = list(group[0].native_path_indices())
         for strip in group[1:]:
             s_lo, s_hi = strip.span()
             if s_lo <= hi + NOISE_PT:
                 hi = max(hi, s_hi)
-                paths.append(strip.path_index)
+                paths.extend(strip.native_path_indices())
             else:
                 out.append((band, lo, hi, tuple(sorted(set(paths)))))
-                lo, hi, paths = s_lo, s_hi, [strip.path_index]
+                lo, hi, paths = s_lo, s_hi, list(strip.native_path_indices())
         out.append((band, lo, hi, tuple(sorted(set(paths)))))
     return out
 
@@ -371,7 +722,7 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                 if key in found:
                     continue
                 rect = box(a, band[0], b, band[1]) if horizontal else box(band[0], a, band[1], b)
-                touching = tuple(sorted(s.path_index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect)))
+                touching = tuple(sorted({index for s in strips if s.polygon.buffer(NOISE_PT).intersects(rect) for index in s.native_path_indices()}))
                 same_band = [r for r in _runs(strips, horizontal) if _close(r[0][0], band[0], 0.02) and _close(r[0][1], band[1], 0.02)]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
                 found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
@@ -449,6 +800,16 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
             else:
                 on_line = _close(centre[0], tip[0], NOISE_PT) and gap.band[0] - thickness <= centre[0] <= gap.band[1] + thickness
                 seg = sorted((centre[1], tip[1]))
+            if arc.get("source_segmented_polyline"):
+                # A visible door swing cannot turn a 52pt doorway into
+                # a 1200pt fabricated wall or arbitrary closing chord.
+                # BOTH original painted wall ends must bound the chord
+                # at the real source door leaf's CLOSED position.
+                if not (
+                    _close(seg[0], gap.lo, 0.18)
+                    and _close(seg[1], gap.hi, 0.18)
+                ):
+                    continue
             if on_line and gap.lo - NOISE_PT <= seg[0] and seg[1] <= gap.hi + NOISE_PT:
                 candidates.append(gap_index)
         if len(candidates) == 1:
@@ -750,6 +1111,7 @@ def build_layered_wall_doorway_room_rings(
     source_sha256: str,
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
+    dark_painted_wall_source: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -758,11 +1120,42 @@ def build_layered_wall_doorway_room_rings(
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
+    if type(dark_painted_wall_source) is not bool:
+        raise ValueError("dark_painted_wall_source must be an explicit boolean")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("page_index must be a non-negative int")
+    # Keep original indexed source paths, but only allow actual black/dark
+    # wall-candidate source paint to enter this opt-in topology path.
+    # On Maryborough p7 the owner-green exclusion reduces 109k PDF paths
+    # substantially and black/dark source ink is beneath the 20k cap.
+    if dark_painted_wall_source:
+        drawings, source_candidates, _green_excluded = (
+            _source_wall_ink_candidate_drawings(drawings)
+        )
+        # The frozen limit counts native PRIMITIVES, not PDF path
+        # containers; a path may own multiple line/arc/rect operations.
+        selected_native_primitives = sum(
+            len(row.get("items", ())) for row in drawings
+        )
+        if selected_native_primitives > 20_000:
+            return LayeredRoomRingResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (REASON_UNLABELLED_SOURCE_PRIMITIVE_CAP,),
+                (), (), 0, 0, 0, 0, 0, 0,
+            )
     strips, other_fills = _collect_strips(drawings)
+    if dark_painted_wall_source:
+        # Owner: black paired-line walls, dark filled wall strips and true
+        # named wall ink are the structural wall hypothesis sources.
+        # Unqualified green aisle/equipment/cold-room graphics are excluded
+        # before this stage, with original path indices still intact.
+        strips = (
+            strips
+            + _collect_dark_painted_source_wall_strips(drawings)
+            + _collect_stroke_pair_strips(drawings)
+        )
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -773,6 +1166,40 @@ def build_layered_wall_doorway_room_rings(
     if sliding_leaf_frame_closure:
         gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
     arcs, _rejected_arcs = _swing_arcs(drawings)
+    segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
+    sourced_doorway_chords: tuple[Mapping[str, Any], ...] = ()
+    if dark_painted_wall_source:
+        from pb_source_segmented_door_swing_shadow import (
+            collect_source_black_segmented_door_swings,
+            propose_source_owned_doorway_chords,
+        )
+        segmented_witnesses = collect_source_black_segmented_door_swings(drawings)
+        # One shared wall-end and jamb rule for EVERY segmented source
+        # swing. Never close the whole oversized original _Gap.
+        sourced_doorway_chords = propose_source_owned_doorway_chords(
+            drawings, segmented_witnesses, gaps,
+        )
+        gaps.extend(
+            _Gap(
+                chord["horizontal"],
+                chord["wall_band_pdf_pts"],
+                chord["door_interval_pdf_pts"][0],
+                chord["door_interval_pdf_pts"][1],
+                chord["left_source_wall_path_indices"],
+                chord["right_source_wall_path_indices"],
+                True,
+            )
+            for chord in sourced_doorway_chords
+        )
+        arcs.extend({
+            "arc": witness["arc_native_path_indices"][0],
+            "arc_source_ids": witness["arc_native_path_indices"],
+            "leaf": witness["leaf_native_path_index"],
+            "centre": witness["source_hinge_point_pdf_pts"],
+            "closed_tip": witness["source_closed_leaf_tip_pdf_pts"],
+            "radius": witness["radius_pdf_pts"],
+            "source_segmented_polyline": True,
+        } for witness in segmented_witnesses)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
     closures: list[LayeredDoorwayClosure] = []
@@ -798,7 +1225,10 @@ def build_layered_wall_doorway_room_rings(
             unresolved.append(gap)
             continue
         if swing is not None:
-            kind, native = KIND_SWING, (swing["arc"], swing["leaf"])
+            kind, native = KIND_SWING, tuple(sorted({
+                *swing.get("arc_source_ids", (swing["arc"],)),
+                swing["leaf"],
+            }))
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
         else:
@@ -864,7 +1294,7 @@ def build_layered_wall_doorway_room_rings(
                 edge_owners.append((f"layered_doorway_closure:{owner}",))
                 continue
             owners = tuple(sorted(
-                [f"layered_wall_strip:{s.path_index}" for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2]
+                [f"layered_wall_strip:{index}" for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2 for index in s.native_path_indices()]
                 + [f"layered_wall_fill:{index}" for index, polygon in other_fills if polygon.distance(mid) <= NOISE_PT * 2]
             ))
             if owners:
@@ -874,7 +1304,7 @@ def build_layered_wall_doorway_room_rings(
             edge_owners.append(owners)
         if unowned_edges:
             reasons.append(REASON_UNOWNED_EDGE)
-        wall_paths = tuple(sorted({s.path_index for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon)}))
+        wall_paths = tuple(sorted({index for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon) for index in s.native_path_indices()}))
         status = EvidenceResolutionStatus.ABSTAINED if reasons else EvidenceResolutionStatus.CANDIDATE
         if not reasons:
             reasons.append(REASON_RING_CLOSED)
@@ -903,11 +1333,14 @@ def build_layered_wall_doorway_room_rings(
         wall_gap_count=len(gaps), unresolved_gap_count=len([g for g in unresolved if g.collinear]),
         non_strip_wall_fill_count=unsupported, unplaced_swing_count=unplaced, ambiguous_swing_count=ambiguous,
         sliver_region_count=sliver_count,
+        source_segmented_swing_witnesses=segmented_witnesses,
+        source_owned_doorway_chords=sourced_doorway_chords,
     )
 
 
 def build_from_pdf_bytes(
     source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
+    dark_painted_wall_source: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -922,6 +1355,7 @@ def build_from_pdf_bytes(
     return build_layered_wall_doorway_room_rings(
         drawings, source_sha256=source_sha256, page_index=page_index,
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+        dark_painted_wall_source=dark_painted_wall_source,
     )
 
 
