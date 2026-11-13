@@ -4239,13 +4239,17 @@ class PhysicalOpeningAuthority:
             record_by_index[index] = record
 
         walls = detect_wall_lines(segments) if segments else ()
-        doors = detect_door_candidates(
+        # Use the already parity-tested conservative broad-phase indexes,
+        # rather than repeating every wall x every segment / wall pair scan.
+        # The legacy detectors remain the semantic oracle and all downstream
+        # candidate closure, source ownership and completeness gates apply.
+        doors = detect_door_candidates_indexed(
             segments, walls, (), page_no=int(seed.page_id)
         ) if walls else ()
         windows = detect_window_candidates(
             segments, walls, (), page_no=int(seed.page_id)
         ) if walls else ()
-        gaps = detect_gap_candidates(
+        gaps = detect_gap_candidates_indexed(
             segments, walls, (), page_no=int(seed.page_id)
         ) if walls else ()
 
