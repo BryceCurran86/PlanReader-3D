@@ -289,14 +289,48 @@ def _rail_mid(
     return (first + second) / 2.0
 
 
-def _chain_line_key(dimension: object, *, vertical_faces: bool) -> Optional[int]:
+def _chain_line_key(dimension: object, *, vertical_faces: bool) -> Optional[float]:
+    """Return the actual rail coordinate, never an origin-dependent grid bin."""
     ends = _dimension_endpoints_pt(dimension)
     if ends is None:
         return None
-    mid = _rail_mid(ends, vertical_faces=vertical_faces)
-    if mid is None:
-        return None
-    return int(round(mid / RING_CHAIN_LINE_PT))
+    return _rail_mid(ends, vertical_faces=vertical_faces)
+
+
+def _chain_rail_groups(
+    entries: Sequence[tuple[float, float, float, float]],
+    *,
+    tolerance_pt: float,
+) -> tuple[tuple[tuple[float, float, float, float], ...], ...]:
+    """Group nearby rails only where their figured spans overlap or abut.
+
+    Connected components retain ambiguous transitive matches; callers reject
+    components whose complete rail spread exceeds the existing rail tolerance.
+    Sorting and exact duplicate removal make grouping input-order independent.
+    Nothing is snapped and unrelated figures outside a run cannot move its rail.
+    """
+    ordered = sorted(set(entries))
+    parents = list(range(len(ordered)))
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    for index, (rail, lo, hi, _mm) in enumerate(ordered):
+        for other in range(index + 1, len(ordered)):
+            other_rail, other_lo, other_hi, _other_mm = ordered[other]
+            if other_rail - rail > RING_CHAIN_LINE_PT:
+                break
+            if lo <= other_hi + tolerance_pt and other_lo <= hi + tolerance_pt:
+                first, second = root(index), root(other)
+                if first != second:
+                    parents[second] = first
+    groups: dict[int, list[tuple[float, float, float, float]]] = {}
+    for index, entry in enumerate(ordered):
+        groups.setdefault(root(index), []).append(entry)
+    return tuple(tuple(group) for group in groups.values())
 
 
 def _hits_matching_hash(
@@ -379,7 +413,7 @@ def _unique_hashed_chain_mm(
     Two disagreeing sums abstain. A gap, overlap, or fork abstains. A hash on a
     different rail is a different chain.
     """
-    groups: dict[int, list[tuple[float, float, float]]] = {}
+    entries: list[tuple[float, float, float, float]] = []
     for dimension in dimensions:
         if dimension.orientation != orientation:  # type: ignore[attr-defined]
             continue
@@ -412,9 +446,13 @@ def _unique_hashed_chain_mm(
         key = _chain_line_key(dimension, vertical_faces=vertical_faces)
         if key is None:
             continue
-        groups.setdefault(key, []).append((span[0], span[1], millimetres))
+        entries.append((key, span[0], span[1], millimetres))
     sums: set[float] = set()
-    for parts in groups.values():
+    for group in _chain_rail_groups(entries, tolerance_pt=tolerance_pt):
+        rails = [entry[0] for entry in group]
+        if max(rails) - min(rails) > RING_CHAIN_LINE_PT:
+            return None
+        parts = sorted({(lo, hi, mm) for _rail, lo, hi, mm in group})
         hashes = [extent for part in parts for extent in (part[0], part[1])]
         start_hits = [
             extent for extent in hashes
@@ -443,6 +481,23 @@ def _unique_hashed_chain_mm(
                 if other != part
             )
         ]
+        # A containing figure is a redundant sub-run overall only when
+        # the retained parts actually cover it and agree. Otherwise it is a
+        # competing branch, not a figure that can be silently discarded.
+        for overall in parts:
+            if overall in addends:
+                continue
+            contained = [
+                part for part in addends
+                if part[0] >= overall[0] - tolerance_pt
+                and part[1] <= overall[1] + tolerance_pt
+            ]
+            subtotal = _walk_hashed_parts(
+                contained, overall[0], overall[1], vertical_faces=vertical_faces,
+                face_polygon=None, tolerance_pt=tolerance_pt,
+            )
+            if subtotal is None or abs(subtotal - overall[2]) > RING_CHAIN_MM_AGREE:
+                return None
         walked = _walk_hashed_parts(
             addends, inner_lo, inner_hi, vertical_faces=vertical_faces,
             face_polygon=face_polygon, tolerance_pt=tolerance_pt,
@@ -499,17 +554,15 @@ def _same_rail_hash_pairs(
     orientation: str,
     tolerance_pt: float,
 ) -> tuple[tuple[int, float, float, float], ...]:
-    """Unique (rail_key, lo, hi, mm) two-hash figures that sit on one rail."""
+    """Unique two-hash figures grouped by actual source collinearity."""
     vertical_faces = orientation == "horizontal"
-    by_span: dict[tuple[int, float, float], set[float]] = {}
+    entries: list[tuple[float, float, float, float]] = []
     for dimension in dimensions:
         if dimension.orientation != orientation:  # type: ignore[attr-defined]
             continue
         millimetres = _dimension_mm(dimension)
         ends = _dimension_endpoints_pt(dimension)
         if millimetres is None or ends is None:
-            continue
-        if _rail_mid(ends, vertical_faces=vertical_faces) is None:
             continue
         key = _chain_line_key(dimension, vertical_faces=vertical_faces)
         if key is None:
@@ -518,7 +571,14 @@ def _same_rail_hash_pairs(
         lo, hi = sorted((float(ax), float(bx)) if vertical_faces else (float(ay), float(by)))
         if hi - lo <= tolerance_pt:
             continue
-        by_span.setdefault((key, round(lo, 3), round(hi, 3)), set()).add(round(millimetres, 3))
+        entries.append((key, round(lo, 3), round(hi, 3), round(millimetres, 3)))
+    by_span: dict[tuple[int, float, float], set[float]] = {}
+    for group_id, group in enumerate(_chain_rail_groups(entries, tolerance_pt=tolerance_pt)):
+        rails = [entry[0] for entry in group]
+        if max(rails) - min(rails) > RING_CHAIN_LINE_PT:
+            continue
+        for _rail, lo, hi, millimetres in group:
+            by_span.setdefault((group_id, lo, hi), set()).add(millimetres)
     pairs: list[tuple[int, float, float, float]] = []
     for (rail, lo, hi), values in by_span.items():
         if len(values) != 1:
