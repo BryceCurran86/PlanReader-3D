@@ -264,6 +264,72 @@ def test_parallel_prints_of_the_same_figured_span_are_one_pair_not_a_conflict():
     assert figured_box_pair_count(box_, [left, right, v]) == 2
 
 
+def test_figured_pair_may_land_through_the_owning_wall_not_inside_the_room():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    face = ((100.0, 80.0), (250.0, 80.0), (250.0, 180.0), (100.0, 180.0))
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0))
+    through_wall = _dim("h1", "horizontal", (96.0, 70.0), (250.0, 70.0))
+    inside_room = _dim("h2", "horizontal", (104.0, 70.0), (250.0, 70.0))
+    beyond_strip = _dim("h3", "horizontal", (80.0, 70.0), (250.0, 70.0))
+    short_of_face = _dim("h4", "horizontal", (100.0, 70.0), (200.0, 70.0))
+    assert figured_box_pair_count(box_, [through_wall, v]) == 0
+    assert figured_box_pair_count(box_, [through_wall, v], face_polygon=face) == 1
+    assert figured_box_pair_count(box_, [inside_room, v], face_polygon=face) == 0
+    assert figured_box_pair_count(box_, [beyond_strip, v], face_polygon=face) == 0
+    assert figured_box_pair_count(box_, [short_of_face, v], face_polygon=face) == 0
+    inner_v = v
+    outer_v = _dim("v2", "vertical", (290.0, 77.4), (290.0, 182.6))
+    inner_h = _dim("h0", "horizontal", (100.0, 70.0), (250.0, 70.0))
+    # an outer-face figure does not unseat a unique inner-face pair on the same axis
+    assert figured_box_pair_count(box_, [inner_h, inner_v, outer_v], face_polygon=face) == 1
+
+
+def _frame_tick_room_pdf() -> bytes:
+    """Inner box (100,80)-(250,180); left wall is 8 pt so a 3600 tick at x=96 sits in the strip."""
+    doc = fitz.open()
+    page = doc.new_page(width=400.0, height=300.0)
+    oc = doc.add_ocg("Enclosure_WallInternal", on=True)
+
+    def rect(x0, y0, x1, y1):
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=None, fill=(0, 0, 0), oc=oc)
+
+    rect(92, 76, 254, 80)
+    rect(92, 180, 254, 184)
+    rect(92, 80, 100, 180)
+    rect(250, 80, 254, 180)
+    page.draw_line((96.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((96.0, 62.0), (96.0, 92.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((250.0, 62.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
+    page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
+    page.draw_line((290.0, 80.0), (290.0, 180.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((250.0, 80.0), (298.0, 80.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((278.0, 180.0), (298.0, 180.0), color=(0, 0, 0), width=1.0)
+    page.insert_text((287.0, 147.0), "2400", fontsize=9.0, rotate=90)
+    page.insert_text((150.0, 130.0), "BED 2", fontsize=10.0)
+    return doc.tobytes()
+
+
+def test_a_frame_tick_in_the_owning_wall_still_corroborates_the_ring_face():
+    data = _frame_tick_room_pdf()
+    sha = hashlib.sha256(data).hexdigest()
+    ring_result = build_from_pdf_bytes(data, source_sha256=sha, page_index=0)
+    cand = [r for r in ring_result.rings if r.status is EvidenceResolutionStatus.CANDIDATE]
+    assert len(cand) == 1
+    ring = cand[0]
+    dims = [
+        _dim("h1", "horizontal", (96.0, 70.0), (250.0, 70.0)),
+        _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0)),
+    ]
+    kwargs = dict(document_id="d", revision_id="r", source_sha256=sha, snapshot_id="s", page_id="1",
+                  decision_scope_id="wall-source:page-1")
+    assert figured_box_pair_count(ring.bbox_pdf_pts, dims) == 0
+    assert figured_box_pair_count(ring.bbox_pdf_pts, dims, face_polygon=ring.polygon_pdf_pts) == 1
+    absent = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims[:1])
+    assert absent is None or absent.records == ()
+    scope = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims)
+    assert scope is not None and len(scope.records) == 1
+
+
 def test_parallel_prints_still_corroborate_a_closed_ring_as_one_face():
     data = layered_room_pdf(vertical_pairs="full_only")
     sha = hashlib.sha256(data).hexdigest()

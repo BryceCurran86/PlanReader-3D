@@ -27,12 +27,13 @@ from __future__ import annotations
 import math
 from typing import Mapping, Optional, Sequence
 
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 from shapely.geometry import box as shapely_box
 
 from pb_layered_wall_doorway_partition_witness_shadow import partition_groups
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
+    _DARK_FILL_THICK_MAX,
     LayeredRoomRingRecord,
     LayeredRoomRingResult,
     build_from_pdf_bytes,
@@ -67,6 +68,9 @@ LAYERED_RING_FINISHED_FACE_GATE_REASON = "layered_wall_doorway_room_ring_finishe
 RING_FINISHED_FACE_REQUIRED_PREFIX = "layered_ring_finished_face_required:"
 # Witness line to drawn face: representation noise, far below the 2.5 pt production snap, a hard bound.
 RING_FIGURED_BOX_TOLERANCE_PT = 0.5
+# A figured tick may land through the thickness of the wall that owns that inner face
+# (frame face vs lining face of the same strip). Never the 2.5 pt production snap.
+RING_OWNING_WALL_THICKNESS_MAX_PT = _DARK_FILL_THICK_MAX
 # The decision scope the live room composition resolves per page (``wall-source:page-N``).
 _PAGE_DECISION_SCOPE = "wall-source:page-{page_id}"
 _CLOSURE_OWNER_PREFIX = "layered_doorway_closure:"
@@ -112,29 +116,149 @@ def _figured_span_token(dimension: object, span: tuple[float, float]) -> object:
     return ("span", span)
 
 
+def _face_mid_on_inner(
+    polygon: Sequence[Sequence[float]], inner: float, *, vertical_face: bool,
+) -> Optional[float]:
+    """Midpoint along the inner face, or None when that face is not drawn."""
+    other: list[float] = []
+    points = [(float(p[0]), float(p[1])) for p in polygon]
+    for index, start in enumerate(points):
+        end = points[(index + 1) % len(points)]
+        if vertical_face:
+            if abs(start[0] - inner) <= NOISE_PT * 2 and abs(end[0] - inner) <= NOISE_PT * 2:
+                other.extend((start[1], end[1]))
+        elif abs(start[1] - inner) <= NOISE_PT * 2 and abs(end[1] - inner) <= NOISE_PT * 2:
+            other.extend((start[0], end[0]))
+    if not other:
+        return None
+    return (min(other) + max(other)) / 2.0
+
+
+def _extent_through_owning_wall(
+    extent: float,
+    inner: float,
+    face_polygon: Sequence[Sequence[float]],
+    *,
+    vertical_face: bool,
+    toward_min: bool,
+    tolerance_pt: float,
+) -> bool:
+    """True when ``extent`` is the inner face, or through the wall that owns that face.
+
+    Exterior-side only, and only as far as a source wall strip can be thick. A tick
+    inside the room, on a neighbour's far wall, or past the strip-thickness cap is not
+    this face's witness.
+    """
+    if abs(extent - inner) <= tolerance_pt:
+        return True
+    if toward_min:
+        if extent > inner + tolerance_pt:
+            return False
+    elif extent < inner - tolerance_pt:
+        return False
+    if abs(extent - inner) > RING_OWNING_WALL_THICKNESS_MAX_PT:
+        return False
+    mid = _face_mid_on_inner(face_polygon, inner, vertical_face=vertical_face)
+    if mid is None:
+        return False
+    try:
+        face = Polygon([(float(p[0]), float(p[1])) for p in face_polygon])
+        if not face.is_valid or face.is_empty:
+            return False
+        if vertical_face:
+            line = LineString([(extent, mid), (inner, mid)])
+        else:
+            line = LineString([(mid, extent), (mid, inner)])
+        # A tick through the owning wall stays outside the room interior.
+        return not face.buffer(-NOISE_PT, join_style=2).intersects(line)
+    except (TypeError, ValueError):
+        return False
+
+
+def _span_witnesses_box(
+    span: tuple[float, float],
+    inner_lo: float,
+    inner_hi: float,
+    *,
+    vertical_faces: bool,
+    face_polygon: Optional[Sequence[Sequence[float]]],
+    tolerance_pt: float,
+) -> bool:
+    if face_polygon is None:
+        return abs(span[0] - inner_lo) <= tolerance_pt and abs(span[1] - inner_hi) <= tolerance_pt
+    return (
+        _extent_through_owning_wall(
+            span[0], inner_lo, face_polygon,
+            vertical_face=vertical_faces, toward_min=True, tolerance_pt=tolerance_pt,
+        )
+        and _extent_through_owning_wall(
+            span[1], inner_hi, face_polygon,
+            vertical_face=vertical_faces, toward_min=False, tolerance_pt=tolerance_pt,
+        )
+    )
+
+
+def _witness_spans_for_axis(
+    dimensions: Sequence[object],
+    *,
+    orientation: str,
+    inner_lo: float,
+    inner_hi: float,
+    vertical_faces: bool,
+    face_polygon: Optional[Sequence[Sequence[float]]],
+    tolerance_pt: float,
+) -> dict[tuple[float, float], set[object]]:
+    """Inner-face spans if any exist on this axis; else ticks through the owning walls.
+
+    An outer/frame figure does not compete with a unique inner-face figure of the
+    same axis. Through-wall matching is only the fallback when the inner face has
+    no printed tick.
+    """
+    inner: dict[tuple[float, float], set[object]] = {}
+    through: dict[tuple[float, float], set[object]] = {}
+    for dimension in dimensions:
+        if dimension.orientation != orientation:  # type: ignore[attr-defined]
+            continue
+        (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
+        span = tuple(sorted((float(ax), float(bx)) if vertical_faces else (float(ay), float(by))))
+        token = _figured_span_token(dimension, span)
+        if _span_witnesses_box(
+            span, inner_lo, inner_hi, vertical_faces=vertical_faces,
+            face_polygon=None, tolerance_pt=tolerance_pt,
+        ):
+            inner.setdefault(span, set()).add(token)
+        elif face_polygon is not None and _span_witnesses_box(
+            span, inner_lo, inner_hi, vertical_faces=vertical_faces,
+            face_polygon=face_polygon, tolerance_pt=tolerance_pt,
+        ):
+            through.setdefault(span, set()).add(token)
+    return inner if inner else through
+
+
 def figured_box_pair_count(
     bounding_box: Sequence[float], dimensions: Sequence[object], *,
     tolerance_pt: float = RING_FIGURED_BOX_TOLERANCE_PT,
+    face_polygon: Optional[Sequence[Sequence[float]]] = None,
 ) -> int:
     """How many authenticated (horizontal, vertical) figured pairs have exactly this witness box.
 
     Uniqueness is the geometric span (and printed millimetres when present), not observation
     id: two parallel prints of the same ticks are one figure. A span that carries two
     disagreeing millimetre values is competing, not unique.
+
+    ``face_polygon`` (optional): a tick may also land through the thickness of the wall
+    that owns that inner face, but only on an axis that has no inner-face tick. It is
+    never snapped, never nearest, and never inside the room.
     """
     x0, y0, x1, y1 = bounding_box
-    horizontal: dict[tuple[float, float], set[object]] = {}
-    vertical: dict[tuple[float, float], set[object]] = {}
-    for dimension in dimensions:
-        (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
-        if dimension.orientation == "horizontal":  # type: ignore[attr-defined]
-            span = tuple(sorted((float(ax), float(bx))))
-            if abs(span[0] - x0) <= tolerance_pt and abs(span[1] - x1) <= tolerance_pt:
-                horizontal.setdefault(span, set()).add(_figured_span_token(dimension, span))
-        elif dimension.orientation == "vertical":  # type: ignore[attr-defined]
-            span = tuple(sorted((float(ay), float(by))))
-            if abs(span[0] - y0) <= tolerance_pt and abs(span[1] - y1) <= tolerance_pt:
-                vertical.setdefault(span, set()).add(_figured_span_token(dimension, span))
+    horizontal = _witness_spans_for_axis(
+        dimensions, orientation="horizontal", inner_lo=x0, inner_hi=x1,
+        vertical_faces=True, face_polygon=face_polygon, tolerance_pt=tolerance_pt,
+    )
+    vertical = _witness_spans_for_axis(
+        dimensions, orientation="vertical", inner_lo=y0, inner_hi=y1,
+        vertical_faces=False, face_polygon=face_polygon, tolerance_pt=tolerance_pt,
+    )
 
     def _unique_spans(store: Mapping[tuple[float, float], set[object]]) -> int | None:
         if any(len(tokens) > 1 for tokens in store.values()):
@@ -151,15 +275,28 @@ def figured_box_pair_count(
 def unique_figured_box_mm_per_pt(
     bounding_box: Sequence[float], dimensions: Sequence[object], *,
     tolerance_pt: float = RING_FIGURED_BOX_TOLERANCE_PT,
+    face_polygon: Optional[Sequence[Sequence[float]]] = None,
 ) -> Optional[float]:
     """Millimetres per page-point of the unique figured pair that witnesses this box, or None."""
-    if figured_box_pair_count(bounding_box, dimensions, tolerance_pt=tolerance_pt) != 1:
+    if figured_box_pair_count(
+        bounding_box, dimensions, tolerance_pt=tolerance_pt, face_polygon=face_polygon,
+    ) != 1:
         return None
     x0, y0, x1, y1 = bounding_box
+    horizontal = _witness_spans_for_axis(
+        dimensions, orientation="horizontal", inner_lo=x0, inner_hi=x1,
+        vertical_faces=True, face_polygon=face_polygon, tolerance_pt=tolerance_pt,
+    )
+    vertical = _witness_spans_for_axis(
+        dimensions, orientation="vertical", inner_lo=y0, inner_hi=y1,
+        vertical_faces=False, face_polygon=face_polygon, tolerance_pt=tolerance_pt,
+    )
+    h_span = next(iter(horizontal))
+    v_span = next(iter(vertical))
     width_mm = height_mm = None
-    width_pt = height_pt = None
+    width_pt = h_span[1] - h_span[0]
+    height_pt = v_span[1] - v_span[0]
     for dimension in dimensions:
-        (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
         value = getattr(dimension, "value_mm", None)
         if value is None:
             continue
@@ -167,14 +304,15 @@ def unique_figured_box_mm_per_pt(
             millimetres = float(value)
         except (TypeError, ValueError):
             continue
+        (ax, ay), (bx, by) = dimension.endpoints_pt  # type: ignore[attr-defined]
         if dimension.orientation == "horizontal":  # type: ignore[attr-defined]
             span = tuple(sorted((float(ax), float(bx))))
-            if abs(span[0] - x0) <= tolerance_pt and abs(span[1] - x1) <= tolerance_pt:
-                width_mm, width_pt = millimetres, span[1] - span[0]
+            if span == h_span:
+                width_mm = millimetres
         elif dimension.orientation == "vertical":  # type: ignore[attr-defined]
             span = tuple(sorted((float(ay), float(by))))
-            if abs(span[0] - y0) <= tolerance_pt and abs(span[1] - y1) <= tolerance_pt:
-                height_mm, height_pt = millimetres, span[1] - span[0]
+            if span == v_span:
+                height_mm = millimetres
     if (
         width_mm is None or height_mm is None or width_pt is None or height_pt is None
         or width_pt <= 0.0 or height_pt <= 0.0
@@ -276,7 +414,9 @@ def layered_ring_room_face_scope(
         else:
             corroborated = (
                 corroborating_dimensions is None
-                or figured_box_pair_count(ring.bbox_pdf_pts, corroborating_dimensions) == 1
+                or figured_box_pair_count(
+                    ring.bbox_pdf_pts, corroborating_dimensions, face_polygon=polygon,
+                ) == 1
             )
         if ring.status is EvidenceResolutionStatus.CANDIDATE and corroborated:
             record_payload = {

@@ -522,15 +522,16 @@ class SameViewRoomAreaProducer:
             elif ring_box is not None and deduped:
                 # Exact equality with independent physical ink, never a nearest/first/smallest pick:
                 # zero equal pairs rejects the room, several equal pairs stay a conflict below.
-                tol = _LAYERED_RING_BOX_TOLERANCE_PT
+                # A tick through the owning wall of an inner face is the same witness, not a snap.
+                from pb_layered_wall_doorway_room_face_scope_shadow import figured_box_pair_count
+
                 kept = {}
                 for pair_key, (pair_line, pair_h, pair_v) in deduped.items():
-                    hx = sorted((float(pair_h.endpoints_pt[0][0]), float(pair_h.endpoints_pt[1][0])))
-                    vy = sorted((float(pair_v.endpoints_pt[0][1]), float(pair_v.endpoints_pt[1][1])))
-                    if (
-                        abs(hx[0] - ring_box[0]) <= tol and abs(hx[1] - ring_box[2]) <= tol
-                        and abs(vy[0] - ring_box[1]) <= tol and abs(vy[1] - ring_box[3]) <= tol
-                    ):
+                    if figured_box_pair_count(
+                        ring_box, (pair_h, pair_v),
+                        tolerance_pt=_LAYERED_RING_BOX_TOLERANCE_PT,
+                        face_polygon=room.polygon_pdf_pts,
+                    ) == 1:
                         kept[pair_key] = (pair_line, pair_h, pair_v)
                 ring_box_rejected = not kept
                 deduped = kept

@@ -1020,6 +1020,7 @@ def _collect_live_physical_net_wall_claim(
                     for record in gated_records:
                         classify_mm_per_pt = unique_figured_box_mm_per_pt(
                             ring_face_bounding_box(record), figured_dimensions,
+                            face_polygon=record.polygon_pdf_pts,
                         )
                         if classify_mm_per_pt is not None:
                             break
@@ -1046,6 +1047,7 @@ def _collect_live_physical_net_wall_claim(
                         continue
                     apply_mm_per_pt = unique_figured_box_mm_per_pt(
                         ring_face_bounding_box(record), figured_dimensions,
+                        face_polygon=record.polygon_pdf_pts,
                     )
                     if apply_mm_per_pt is None:
                         apply_mm_per_pt = scale_mm_per_pt
