@@ -1,5 +1,9 @@
 """Non-square forged cross-view axis/ceiling metadata regressions.
 
+SCOPE: ceiling composition seam only (compose_authenticated_maryborough_office_ceiling_surface_and_quantity).
+No test here invokes CrossViewFloorFinishProducer / the FT3 consumer; FT3 conclusions come from a
+separate code audit and existing suites, not this file.
+
 Synthetic seam proof only: the PDF is generated in-test, not an original
 Maryborough source, so this is NOT original-source acceptance. Axis IDs and
 millimetres must come from the producer-issued room-area record; caller
