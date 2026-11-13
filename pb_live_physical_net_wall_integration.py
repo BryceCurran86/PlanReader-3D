@@ -426,6 +426,7 @@ def _collect_live_physical_net_wall_claim(
     topology_pages: Optional[Sequence[int]] = None,
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
+    include_surface_finishes: bool = True,
     source_native_finish_text_shadow: bool = False,
     source_glyph_ledger_text_trust: bool = False,
     single_width_uniform_page_door_height_shadow: bool = False,
@@ -453,6 +454,8 @@ def _collect_live_physical_net_wall_claim(
 
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
+    if type(include_surface_finishes) is not bool:
+        raise ValueError("include_surface_finishes requires explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
@@ -1107,14 +1110,15 @@ def _collect_live_physical_net_wall_claim(
             sig = inspect.signature(CrossViewFloorFinishProducer.from_source)
             if "page_ids" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                 floor_kwargs["page_ids"] = support_pids
-        floor_finishes = CrossViewFloorFinishProducer.from_source(**floor_kwargs).publish()
-        canonical_floors = enrich_live_canonical_floor_finishes(
-            canonical_floors,
-            floor_finishes,
-        )
-        floor_finish_quantity_evidence.extend(floor_finishes.quantities)
+        if include_surface_finishes:
+            floor_finishes = CrossViewFloorFinishProducer.from_source(**floor_kwargs).publish()
+            canonical_floors = enrich_live_canonical_floor_finishes(
+                canonical_floors,
+                floor_finishes,
+            )
+            floor_finish_quantity_evidence.extend(floor_finishes.quantities)
 
-    if room_area_bridges:
+    if include_surface_finishes and room_area_bridges:
         ceiling_finishes = CrossViewCeilingFinishProducer.from_source(
             source=surface_semantic_source,
             rooms=canonical_rooms,
@@ -1426,6 +1430,7 @@ def collect_live_physical_net_wall_claim(
     topology_pages: Optional[Sequence[int]] = None,
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
+    include_surface_finishes: bool = True,
     recover_additional_opening_areas: bool = False,
     recover_supported_opening_areas: bool = False,
     source_native_finish_text_shadow: bool = False,
@@ -1452,6 +1457,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("choose one opening area recovery policy")
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
+    if type(include_surface_finishes) is not bool:
+        raise ValueError("include_surface_finishes requires explicit boolean")
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("native finish text shadow must be an explicit boolean")
     if type(source_glyph_ledger_text_trust) is not bool:
@@ -1495,6 +1502,7 @@ def collect_live_physical_net_wall_claim(
         pdf_path, pages=pages, topology_pages=topology_pages,
         room_area_support_pages=room_area_support_pages,
         surface_semantic_pages=surface_semantic_pages,
+        include_surface_finishes=include_surface_finishes,
         single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),

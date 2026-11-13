@@ -307,6 +307,28 @@ class SameViewRoomAreaProducer:
         )
         records: list[SameViewRoomAreaRecord] = []
 
+        # Authenticate room-label lines only once per original page. Previously
+        # every room on a shared plan sheet reran raster word OCR with a
+        # different single-label filter. The raw label universe, individual
+        # ownership checks and downstream dimension gates remain unchanged.
+        page_label_universe: dict[str, set[str]] = {}
+        for (source_page_id, normalized_label) in labels:
+            page_label_universe.setdefault(source_page_id, set()).add(normalized_label)
+        page_trusted_lines: dict[str, tuple] = {}
+
+        def lines_for_label(source_page_id: str, normalized_label: str) -> tuple:
+            if source_page_id not in page_trusted_lines:
+                page_trusted_lines[source_page_id] = _trusted_lines_for_page(
+                    self._source,
+                    revision_id=revision_id,
+                    page_id=source_page_id,
+                    candidate_labels=tuple(sorted(page_label_universe[source_page_id])),
+                )
+            return tuple(
+                line for line in page_trusted_lines[source_page_id]
+                if _norm_label(line.text) == normalized_label
+            )
+
         # Default iterates exactly the same unique-label candidates as before.
         # Repeated text is opt-in: never disambiguate by nearest geometry.
         area_rows: list[tuple[str, str, LiveCanonicalRoomObject, object | None]] = []
@@ -316,12 +338,7 @@ class SameViewRoomAreaProducer:
                 continue
             if not repeated_label_source_ownership_shadow:
                 continue
-            source_lines = tuple(
-                line for line in _trusted_lines_for_page(
-                    self._source, revision_id=revision_id, page_id=page_id,
-                    candidate_labels=(grouped_rooms[0].room_label,),
-                ) if _norm_label(line.text) == label
-            )
+            source_lines = lines_for_label(page_id, label)
             owned = uniquely_owned_repeated_label_lines(
                 {
                     str(room.physical_room_id): tuple(room.room_label_evidence_ids)
@@ -350,14 +367,7 @@ class SameViewRoomAreaProducer:
                 continue
             lines = (
                 (owned_line,) if owned_line is not None
-                else tuple(
-                    line for line in _trusted_lines_for_page(
-                        self._source,
-                        revision_id=revision_id,
-                        page_id=page_id,
-                        candidate_labels=(room.room_label,),
-                    ) if _norm_label(line.text) == label
-                )
+                else lines_for_label(page_id, label)
             )
             if len(lines) != 1:
                 unresolved.add(str(room.physical_room_id))
