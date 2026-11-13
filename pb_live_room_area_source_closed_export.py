@@ -156,7 +156,7 @@ def _firm_room_area_quantities(
                     or revision_id != revision_id.strip()
                 ):
                     raise SourceClosedRunConflictError(
-                        f"room-area original figured pair lacks valid source root: {quantity_id}"
+                        "room-area original figured pair lacks valid source root"
                     )
                 pair = tuple(sorted(axes))
                 owner_key = (source_sha.lower(), revision_id, pair)
@@ -167,7 +167,8 @@ def _firm_room_area_quantities(
                         if prior[0] != quantity.input_entity_ids[0]
                         else "one original figured pair reissued as a second room-area quantity"
                     )
-                    raise SourceClosedRunConflictError(f"{reason}: {pair}")
+                    # A native dimension pair may contain protected source IDs.
+                    raise SourceClosedRunConflictError(reason)
                 figured_pair_owner[owner_key] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
@@ -427,21 +428,27 @@ def build_live_room_area_source_traces(
             from shapely.geometry import Polygon
 
             original_face = Polygon(tuple(floor.polygon_pdf_pts))
-            for other_quantity_id, prior_face in claimed_source_faces.get(
-                physical_face_scope, ()
-            ):
-                if original_face.equals(prior_face):
-                    raise SourceClosedRunConflictError(
-                        "competing original ROOM_AREA quantities claim the same "
-                        "physical PDF room face: "
-                        f"{other_quantity_id}, {quantity_id}"
-                    )
-        except SourceClosedRunConflictError:
-            raise
-        except Exception as exc:
+            duplicate_source_face = any(
+                original_face.equals(prior_face)
+                for _previous_id, prior_face in claimed_source_faces.get(
+                    physical_face_scope, ()
+                )
+            )
+        except Exception:
+            # Raise outside this handler: even an implicit chained exception
+            # could disclose source coordinates, room or receipt IDs in logs.
+            comparison_failed = True
+        else:
+            comparison_failed = False
+        if comparison_failed:
             raise SourceClosedRunConflictError(
-                f"original room-area source-face comparison failed closed: {quantity_id}"
-            ) from exc
+                "original room-area source-face comparison failed closed"
+            )
+        if duplicate_source_face:
+            raise SourceClosedRunConflictError(
+                "competing original ROOM_AREA quantities claim the same "
+                "physical PDF room face"
+            )
         claimed_source_faces.setdefault(physical_face_scope, []).append(
             (quantity_id, original_face)
         )
