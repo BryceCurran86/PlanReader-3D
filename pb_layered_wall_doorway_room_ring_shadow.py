@@ -435,6 +435,43 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
     return _attach_caps(strips), other
 
 
+def _orthogonal_wall_fill_strips(index: int, polygon: Polygon) -> list[_Strip]:
+    """Axis-aligned rectangular bars covering an orthogonal notched wall fill.
+
+    CAD wall pockets fail the 85% strip test, so they never enter run hashing.
+    Vertex-grid cells that lie inside the fill and have wall thickness become
+    traced bars. The notch itself is empty, so no doorway is invented. Topology
+    still uses the exact fill polygon as a barrier; these bars are length-only.
+    """
+    pts = list(polygon.exterior.coords)
+    if len(pts) < 5:
+        return []
+    for start, end in zip(pts, pts[1:]):
+        if abs(start[0] - end[0]) > NOISE_PT and abs(start[1] - end[1]) > NOISE_PT:
+            return []
+    xs = sorted({round(float(x), 4) for x, _y in pts})
+    ys = sorted({round(float(y), 4) for _x, y in pts})
+    if len(xs) < 2 or len(ys) < 2:
+        return []
+    grown = polygon.buffer(NOISE_PT, join_style=2)
+    bars: list[_Strip] = []
+    for x0, x1 in zip(xs, xs[1:]):
+        for y0, y1 in zip(ys, ys[1:]):
+            width, height = x1 - x0, y1 - y0
+            if width <= NOISE_PT or height <= NOISE_PT:
+                continue
+            thick, span = min(width, height), max(width, height)
+            if not (_STROKE_PAIR_THICK_MIN <= thick <= _DARK_FILL_THICK_MAX and span >= 8.0):
+                continue
+            cell = box(x0, y0, x1, y1)
+            if not grown.contains(cell.centroid):
+                continue
+            if cell.difference(grown).area > 0.1 * cell.area:
+                continue
+            bars.append(_Strip(index, x0, y0, x1, y1, cell))
+    return bars
+
+
 def _collect_dark_painted_source_wall_strips(
     drawings: Sequence[Mapping[str, Any]],
 ) -> list[_Strip]:
@@ -964,34 +1001,45 @@ def _swing_arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]
     return arcs, rejected
 
 
+def _gaps_containing_swing(arc: Mapping[str, Any], gaps: Sequence[_Gap]) -> list[int]:
+    """Run-gap indices whose band contains this closed leaf. Empty when the swing is off the wall."""
+    centre, tip = arc["centre"], arc["closed_tip"]
+    candidates: list[int] = []
+    for gap_index, gap in enumerate(gaps):
+        thickness = gap.band[1] - gap.band[0]
+        if gap.horizontal:
+            on_line = _close(centre[1], tip[1], NOISE_PT) and gap.band[0] - thickness <= centre[1] <= gap.band[1] + thickness
+            seg = sorted((centre[0], tip[0]))
+        else:
+            on_line = _close(centre[0], tip[0], NOISE_PT) and gap.band[0] - thickness <= centre[0] <= gap.band[1] + thickness
+            seg = sorted((centre[1], tip[1]))
+        if arc.get("source_segmented_polyline"):
+            # A visible door swing cannot turn a 52pt doorway into
+            # a 1200pt fabricated wall or arbitrary closing chord.
+            # BOTH original painted wall ends must bound the chord
+            # at the real source door leaf's CLOSED position.
+            if not (
+                _close(seg[0], gap.lo, 0.18)
+                and _close(seg[1], gap.hi, 0.18)
+            ):
+                continue
+        if on_line and gap.lo - NOISE_PT <= seg[0] and seg[1] <= gap.hi + NOISE_PT:
+            candidates.append(gap_index)
+    opening = [
+        index for index in candidates
+        if 10.0 <= (gaps[index].hi - gaps[index].lo) <= 140.0
+        and (gaps[index].band[1] - gaps[index].band[0]) >= _STROKE_PAIR_THICK_MIN
+    ]
+    return opening if opening else []
+
+
 def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int, dict], int, int]:
     """Map gap index -> swing; count swings with no gap and swings with several."""
     placed: dict[int, list[dict]] = {}
     unplaced = 0
     ambiguous = 0
     for arc in arcs:
-        centre, tip = arc["centre"], arc["closed_tip"]
-        candidates = []
-        for gap_index, gap in enumerate(gaps):
-            thickness = gap.band[1] - gap.band[0]
-            if gap.horizontal:
-                on_line = _close(centre[1], tip[1], NOISE_PT) and gap.band[0] - thickness <= centre[1] <= gap.band[1] + thickness
-                seg = sorted((centre[0], tip[0]))
-            else:
-                on_line = _close(centre[0], tip[0], NOISE_PT) and gap.band[0] - thickness <= centre[0] <= gap.band[1] + thickness
-                seg = sorted((centre[1], tip[1]))
-            if arc.get("source_segmented_polyline"):
-                # A visible door swing cannot turn a 52pt doorway into
-                # a 1200pt fabricated wall or arbitrary closing chord.
-                # BOTH original painted wall ends must bound the chord
-                # at the real source door leaf's CLOSED position.
-                if not (
-                    _close(seg[0], gap.lo, 0.18)
-                    and _close(seg[1], gap.hi, 0.18)
-                ):
-                    continue
-            if on_line and gap.lo - NOISE_PT <= seg[0] and seg[1] <= gap.hi + NOISE_PT:
-                candidates.append(gap_index)
+        candidates = _gaps_containing_swing(arc, gaps)
         if len(candidates) == 1:
             placed.setdefault(candidates[0], []).append(arc)
         elif not candidates:
@@ -1005,6 +1053,42 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
         else:
             ambiguous += len(items)
     return unique, unplaced, ambiguous
+
+
+def _lining_face_wall_strips(
+    drawings: Sequence[Mapping[str, Any]],
+    gaps: Sequence[_Gap],
+    *,
+    all_ink: bool = False,
+) -> tuple[list[_Strip], list[_Gap]]:
+    """A spanning stroke on a lining-thin band is that wall's finished face, not a doorway.
+
+    CAD often paints only lining caps at the ends of a cavity wall and draws the long inner
+    face as an unfilled stroke. The interval between those caps is the wall. Treating the
+    stroke as a doorway chord would hide the wall from hashed length matching.
+    Framed openings on the same page are left as gaps so they can still close as doorways.
+    """
+    found: list[_Strip] = []
+    consumed: list[_Gap] = []
+    for gap in gaps:
+        if (gap.band[1] - gap.band[0]) >= _STROKE_PAIR_THICK_MIN:
+            continue
+        if _frame_pair_closed(drawings, gap) is not None:
+            continue
+        native = _stroke_closed(drawings, gap, all_ink=all_ink)
+        if native is None:
+            continue
+        x0, y0, x1, y1 = (
+            (gap.lo, gap.band[0], gap.hi, gap.band[1]) if gap.horizontal
+            else (gap.band[0], gap.lo, gap.band[1], gap.hi)
+        )
+        found.append(_Strip(
+            native[0], x0, y0, x1, y1, box(x0, y0, x1, y1),
+            forced="h" if gap.horizontal else "v",
+            path_indices=native,
+        ))
+        consumed.append(gap)
+    return found, consumed
 
 
 def _stroke_closed(
@@ -1086,6 +1170,139 @@ def _jamb_cap_closed(
         return list(dict.fromkeys(hits))
 
     low, high = caps(gap.lo), caps(gap.hi)
+    if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
+        return None
+    if set(low) & set(high):
+        return None
+    return tuple(sorted(set(low) | set(high)))
+
+
+def _swing_leaf_span(arc: Mapping[str, Any]) -> Optional[tuple[bool, float, float, float]]:
+    """(horizontal, lo, hi, perp) of a closed door leaf, else None when it is not axis-aligned."""
+    centre, tip = arc["centre"], arc["closed_tip"]
+    dx, dy = abs(centre[0] - tip[0]), abs(centre[1] - tip[1])
+    horizontal = dy <= NOISE_PT and dx > 1.0
+    vertical = dx <= NOISE_PT and dy > 1.0
+    if horizontal == vertical:
+        return None
+    if horizontal:
+        lo, hi = sorted((centre[0], tip[0]))
+        perp = (centre[1] + tip[1]) / 2.0
+    else:
+        lo, hi = sorted((centre[1], tip[1]))
+        perp = (centre[0] + tip[0]) / 2.0
+    if hi - lo < 10.0 or hi - lo > 140.0:
+        return None
+    return horizontal, lo, hi, perp
+
+
+def _gap_from_swing_leaf(arc: Mapping[str, Any], union: Any, known: Sequence[_Gap]) -> Optional[_Gap]:
+    """Doorway chord of an unplaced swing whose closed leaf sits between wall ink at both jambs.
+
+    CAD often draws the host wall as a notched fill that is not a rectangular strip, so run-gap
+    matching never sees the interruption. The swing still names the opening: the chord is the
+    closed leaf only, never a hall-length gap. Wall ink overlapping the leaf abstains (too-wide
+    or off-wall). Topology only; not a hosted opening or wall length.
+    """
+    span = _swing_leaf_span(arc)
+    if span is None:
+        return None
+    horizontal, lo, hi, perp = span
+    along_depth = _DARK_FILL_THICK_MAX
+    perp_window = _STROKE_PAIR_THICK_MAX
+    bands: list[tuple[float, float]] = []
+    inner_faces: list[float] = []
+    for station, outward in ((lo, -1.0), (hi, 1.0)):
+        if horizontal:
+            a, b = (station - along_depth, station) if outward < 0 else (station, station + along_depth)
+            slab = box(a, perp - perp_window, b, perp + perp_window)
+        else:
+            a, b = (station - along_depth, station) if outward < 0 else (station, station + along_depth)
+            slab = box(perp - perp_window, a, perp + perp_window, b)
+        inter = union.intersection(slab)
+        if inter.is_empty or inter.area <= NOISE_PT:
+            return None
+        leaf_pt = Point(station, perp) if horizontal else Point(perp, station)
+        parts = [
+            part for part in _polygon_parts(inter)
+            if part.area > NOISE_PT
+        ]
+        if not parts:
+            return None
+        parts.sort(key=lambda part: part.distance(leaf_pt))
+        nearest = parts[0]
+        bx0, by0, bx1, by1 = nearest.bounds
+        band = (by0, by1) if horizontal else (bx0, bx1)
+        if band[1] - band[0] <= NOISE_PT:
+            return None
+        bands.append(band)
+        along0, along1 = (bx0, bx1) if horizontal else (by0, by1)
+        inner_faces.append(along1 if outward < 0 else along0)
+    overlap_lo, overlap_hi = max(bands[0][0], bands[1][0]), min(bands[0][1], bands[1][1])
+    if overlap_hi - overlap_lo > NOISE_PT:
+        band = (overlap_lo, overlap_hi)
+    elif min(bands[0][1], bands[1][1]) + _STROKE_PAIR_FACE_PT >= max(bands[0][0], bands[1][0]):
+        # Corner door: one jamb is the continuing wall, the other is the
+        # abutting return. They touch; their union is the host band.
+        band = (min(bands[0][0], bands[1][0]), max(bands[0][1], bands[1][1]))
+    else:
+        return None
+    slack = band[1] - band[0]
+    if not (band[0] - slack <= perp <= band[1] + slack):
+        return None
+    chord_lo = min(lo, inner_faces[0])
+    chord_hi = max(hi, inner_faces[1])
+    if chord_hi - chord_lo < 10.0 or chord_hi - chord_lo > 140.0:
+        return None
+    lo, hi = chord_lo, chord_hi
+    door = box(lo, band[0], hi, band[1]) if horizontal else box(band[0], lo, band[1], hi)
+    door_area = door.area
+    if door_area <= NOISE_PT:
+        return None
+    if door.intersection(union).area > max(NOISE_PT * 2.0 * slack, 0.25 * door_area):
+        return None
+    mid = (lo + hi) / 2.0
+    probes = (
+        (Point(mid, band[0] - 2 * NOISE_PT), Point(mid, band[1] + 2 * NOISE_PT)) if horizontal
+        else (Point(band[0] - 2 * NOISE_PT, mid), Point(band[1] + 2 * NOISE_PT, mid))
+    )
+    if any(union.contains(probe) for probe in probes):
+        return None
+    if any(
+        gap.horizontal == horizontal
+        and _close(gap.band[0], band[0], 0.5) and _close(gap.band[1], band[1], 0.5)
+        and _close(gap.lo, lo, 0.5) and _close(gap.hi, hi, 0.5)
+        for gap in known
+    ):
+        return None
+    return _Gap(horizontal, band, lo, hi, (), (), True)
+
+
+def _frame_pair_closed(
+    drawings: Sequence[Mapping[str, Any]], gap: _Gap,
+) -> Optional[tuple[int, ...]]:
+    """Unique white wall-layer frame box at each end of an opening-sized interruption.
+
+    Cavity sliders and framed doors are drawn that way: the frames name the opening even
+    when only one leaf sits in the pocket. Hall-length interruptions are not closed.
+    """
+    span = gap.hi - gap.lo
+    if not (10.0 <= span <= 140.0):
+        return None
+    thickness = gap.band[1] - gap.band[0]
+    end_tol = _STROKE_PAIR_FACE_PT
+    low: list[int] = []
+    high: list[int] = []
+    for x0, y0, x1, y1, index in _white_frame_boxes(drawings):
+        lo, hi = (x0, x1) if gap.horizontal else (y0, y1)
+        p0, p1 = (y0, y1) if gap.horizontal else (x0, x1)
+        if p1 < gap.band[0] - thickness or p0 > gap.band[1] + thickness:
+            continue
+        if _close(hi, gap.lo, end_tol) or _close(lo, gap.lo, end_tol):
+            low.append(index)
+        if _close(lo, gap.hi, end_tol) or _close(hi, gap.hi, end_tol):
+            high.append(index)
+    low, high = list(dict.fromkeys(low)), list(dict.fromkeys(high))
     if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
         return None
     if set(low) & set(high):
@@ -1204,6 +1421,161 @@ def _frame_anchored_gaps(drawings: Sequence[Mapping[str, Any]], union: Any, know
                 ):
                     continue
                 found.append(gap)
+    return found
+
+
+def _jamb_pair_gaps(
+    drawings: Sequence[Mapping[str, Any]], union: Any, known: Sequence[_Gap],
+) -> list[tuple[_Gap, tuple[int, ...]]]:
+    """Opening-sized interruptions between adjacent white jamb boxes on one wall face.
+
+    CAD draws cavity-slider and window jambs as mixed-width boxes; a long white bar in
+    the opening is glazing or a leaf, not a jamb. Run-gaps never see a notched host, so
+    the interruption is the interval between two adjacent short jambs that share a face
+    line, with wall ink at both outward ends and no black ink between. The host band is
+    the overlap of those end inks, or their union when the bands touch. A leaf or lining
+    sliver in the opening is not wall (same 25% cap as a swing-leaf chord). Not FIRM.
+    """
+    boxes = _white_frame_boxes(drawings)
+    found: list[tuple[_Gap, tuple[int, ...]]] = []
+    seen: set[tuple[bool, float, float]] = set()
+    for horizontal in (True, False):
+        jambs: list[tuple[float, float, float, float, int]] = []
+        for x0, y0, x1, y1, index in boxes:
+            lo, hi = (x0, x1) if horizontal else (y0, y1)
+            p0, p1 = (y0, y1) if horizontal else (x0, x1)
+            if hi - lo >= 10.0 or p1 - p0 <= NOISE_PT:
+                continue
+            jambs.append((lo, hi, p0, p1, index))
+        faces: dict[int, list[tuple[float, float, float, float, int]]] = {}
+        for lo, hi, p0, p1, index in jambs:
+            for face in (p0, p1):
+                faces.setdefault(round(face / 0.02), []).append((lo, hi, p0, p1, index))
+        for members in faces.values():
+            unique = list(dict.fromkeys(members))
+            unique.sort(key=lambda item: (item[0], item[1]))
+            for (lo1, hi1, a0, a1, i1), (lo2, hi2, b0, b1, i2) in zip(unique, unique[1:]):
+                if i1 == i2 or lo2 - hi1 <= NOISE_PT:
+                    continue
+                span = lo2 - hi1
+                if not (_STROKE_PAIR_THICK_MIN <= span <= 140.0):
+                    continue
+                bands: list[tuple[float, float]] = []
+                for edge, direction, p0, p1 in ((lo1, -1.0, a0, a1), (hi2, 1.0, b0, b1)):
+                    a, b = (edge - _STROKE_PAIR_THICK_MAX, edge) if direction < 0 else (edge, edge + _STROKE_PAIR_THICK_MAX)
+                    slab = box(a, p0, b, p1) if horizontal else box(p0, a, p1, b)
+                    inter = union.intersection(slab)
+                    if inter.is_empty or inter.area <= NOISE_PT:
+                        bands = []
+                        break
+                    leaf_pt = Point(edge, (p0 + p1) / 2.0) if horizontal else Point((p0 + p1) / 2.0, edge)
+                    parts = [part for part in _polygon_parts(inter) if part.area > NOISE_PT]
+                    if not parts:
+                        bands = []
+                        break
+                    parts.sort(key=lambda part: part.distance(leaf_pt))
+                    bx0, by0, bx1, by1 = parts[0].bounds
+                    bands.append((by0, by1) if horizontal else (bx0, bx1))
+                if len(bands) != 2:
+                    continue
+                overlap_lo = max(bands[0][0], bands[1][0])
+                overlap_hi = min(bands[0][1], bands[1][1])
+                if overlap_hi - overlap_lo >= _STROKE_PAIR_THICK_MIN:
+                    band = (overlap_lo, overlap_hi)
+                elif min(bands[0][1], bands[1][1]) + _STROKE_PAIR_FACE_PT >= max(bands[0][0], bands[1][0]):
+                    band = (min(bands[0][0], bands[1][0]), max(bands[0][1], bands[1][1]))
+                else:
+                    continue
+                if band[1] - band[0] < _STROKE_PAIR_THICK_MIN:
+                    continue
+                key = (horizontal, round(lo1, 2), round(hi2, 2))
+                if key in seen:
+                    continue
+                gap = _Gap(horizontal, band, lo1, hi2, (), (), True)
+                rect = gap.rect()
+                door_area = rect.area
+                if door_area <= NOISE_PT:
+                    continue
+                if rect.intersection(union).area > max(
+                    NOISE_PT * 2.0 * (band[1] - band[0]), 0.25 * door_area,
+                ):
+                    continue
+                mid = (lo1 + hi2) / 2.0
+                probes = (
+                    (Point(mid, band[0] - 2 * NOISE_PT), Point(mid, band[1] + 2 * NOISE_PT)) if horizontal
+                    else (Point(band[0] - 2 * NOISE_PT, mid), Point(band[1] + 2 * NOISE_PT, mid))
+                )
+                if any(union.contains(probe) for probe in probes):
+                    continue
+                if any(
+                    g.horizontal == horizontal
+                    and _close(g.band[0], band[0], 0.5) and _close(g.band[1], band[1], 0.5)
+                    and _close(g.lo, lo1, 0.5) and _close(g.hi, hi2, 0.5)
+                    for g in (*known, *(item[0] for item in found))
+                ):
+                    continue
+                seen.add(key)
+                found.append((gap, tuple(sorted({i1, i2}))))
+            for lo, hi, p0, p1, index in unique:
+                for station, outward in ((lo, -1.0), (hi, 1.0)):
+                    a, b = (
+                        (station - 10.0, station) if outward < 0 else (station, station + 10.0)
+                    )
+                    slab = box(a, p0, b, p1) if horizontal else box(p0, a, p1, b)
+                    inter = union.intersection(slab)
+                    if inter.is_empty or inter.area <= NOISE_PT:
+                        continue
+                    leaf_pt = Point(station, (p0 + p1) / 2.0) if horizontal else Point((p0 + p1) / 2.0, station)
+                    parts = [part for part in _polygon_parts(inter) if part.area > NOISE_PT]
+                    if not parts:
+                        continue
+                    parts.sort(key=lambda part: part.distance(leaf_pt))
+                    bx0, by0, bx1, by1 = parts[0].bounds
+                    along0, along1 = (bx0, bx1) if horizontal else (by0, by1)
+                    inner = along1 if outward < 0 else along0
+                    span = abs(inner - station)
+                    if not (_STROKE_PAIR_FACE_PT <= span < 10.0):
+                        continue
+                    wall_band = (by0, by1) if horizontal else (bx0, bx1)
+                    overlap_lo = max(p0, wall_band[0])
+                    overlap_hi = min(p1, wall_band[1])
+                    if overlap_hi - overlap_lo >= _STROKE_PAIR_THICK_MIN:
+                        band = (overlap_lo, overlap_hi)
+                    elif min(p1, wall_band[1]) + _STROKE_PAIR_FACE_PT >= max(p0, wall_band[0]):
+                        band = (min(p0, wall_band[0]), max(p1, wall_band[1]))
+                    else:
+                        continue
+                    if band[1] - band[0] < _STROKE_PAIR_THICK_MIN:
+                        continue
+                    lo_g, hi_g = (inner, station) if inner < station else (station, inner)
+                    key = (horizontal, round(lo_g, 2), round(hi_g, 2))
+                    if key in seen:
+                        continue
+                    gap = _Gap(horizontal, band, lo_g, hi_g, (), (), True)
+                    rect = gap.rect()
+                    door_area = rect.area
+                    if door_area <= NOISE_PT:
+                        continue
+                    if rect.intersection(union).area > max(
+                        NOISE_PT * 2.0 * (band[1] - band[0]), 0.25 * door_area,
+                    ):
+                        continue
+                    mid = (lo_g + hi_g) / 2.0
+                    probes = (
+                        (Point(mid, band[0] - 2 * NOISE_PT), Point(mid, band[1] + 2 * NOISE_PT)) if horizontal
+                        else (Point(band[0] - 2 * NOISE_PT, mid), Point(band[1] + 2 * NOISE_PT, mid))
+                    )
+                    if any(union.contains(probe) for probe in probes):
+                        continue
+                    if any(
+                        g.horizontal == horizontal
+                        and _close(g.band[0], band[0], 0.5) and _close(g.band[1], band[1], 0.5)
+                        and _close(g.lo, lo_g, 0.5) and _close(g.hi, hi_g, 0.5)
+                        for g in (*known, *(item[0] for item in found))
+                    ):
+                        continue
+                    seen.add(key)
+                    found.append((gap, (index,)))
     return found
 
 
@@ -1429,8 +1801,18 @@ def build_layered_wall_doorway_room_rings(
     union = _closed_union(polygons)
     domain = union.envelope.buffer(1.0, join_style=2)
     gaps = _gaps(strips, union, domain)
-    if sliding_leaf_frame_closure:
+    if sliding_leaf_frame_closure or dark_painted_wall_source:
         gaps = gaps + _frame_anchored_gaps(drawings, union, gaps)
+    face_strips, consumed_faces = _lining_face_wall_strips(
+        drawings, gaps, all_ink=dark_painted_wall_source,
+    )
+    if face_strips:
+        strips = strips + face_strips
+        polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
+        union = _closed_union(polygons)
+        domain = union.envelope.buffer(1.0, join_style=2)
+        consumed_ids = {id(gap) for gap in consumed_faces}
+        gaps = [gap for gap in gaps if id(gap) not in consumed_ids]
     arcs, _rejected_arcs = _swing_arcs(drawings)
     segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
     sourced_doorway_chords: tuple[Mapping[str, Any], ...] = ()
@@ -1467,6 +1849,27 @@ def build_layered_wall_doorway_room_rings(
             "source_segmented_polyline": True,
         } for witness in segmented_witnesses)
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
+    run_gaps = list(gaps)
+    placed_arc_ids = {id(arc) for arc in swing_by_gap.values()}
+    unplaced = 0
+    for arc in arcs:
+        if id(arc) in placed_arc_ids:
+            continue
+        if _gaps_containing_swing(arc, run_gaps):
+            continue
+        leaf_gap = _gap_from_swing_leaf(arc, union, gaps)
+        if leaf_gap is None:
+            unplaced += 1
+            continue
+        swing_by_gap[len(gaps)] = arc
+        gaps.append(leaf_gap)
+        placed_arc_ids.add(id(arc))
+
+    jamb_by_id: dict[int, tuple[int, ...]] = {}
+    if dark_painted_wall_source:
+        for gap, native in _jamb_pair_gaps(drawings, union, gaps):
+            jamb_by_id[id(gap)] = native
+            gaps.append(gap)
 
     closures: list[LayeredDoorwayClosure] = []
     unresolved: list[_Gap] = []
@@ -1482,11 +1885,21 @@ def build_layered_wall_doorway_room_rings(
         sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
-        stroke = None if swing is not None else _stroke_closed(
-            drawings, gap, all_ink=dark_painted_wall_source,
-        )
-        if stroke is None and swing is None and dark_painted_wall_source:
+        host_wall = (gap.band[1] - gap.band[0]) >= _STROKE_PAIR_THICK_MIN
+        stroke = None
+        if swing is None and host_wall:
+            stroke = _stroke_closed(
+                drawings, gap, all_ink=dark_painted_wall_source,
+            )
+        if stroke is None and swing is None and host_wall and dark_painted_wall_source:
             stroke = _jamb_cap_closed(drawings, gap, all_ink=True)
+        if (
+            stroke is None and swing is None and host_wall
+            and dark_painted_wall_source and not sliding_leaf_frame_closure
+        ):
+            stroke = _frame_pair_closed(drawings, gap)
+        if stroke is None and swing is None and host_wall:
+            stroke = jamb_by_id.get(id(gap))
         sliding = sliding_by_gap.get(gap_index)
         if sliding is not None and (swing is not None or stroke is not None):
             unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
@@ -1521,7 +1934,14 @@ def build_layered_wall_doorway_room_rings(
             band=gap.band, gap_interval=(gap.lo, gap.hi), native_path_indices=tuple(native),
             wall_path_indices=tuple(sorted(set(gap.left_path_indices) | set(gap.right_path_indices))),
         ))
-        closure_rects.append((closure_id, gap.rect()))
+        # Frame cracks beside a sourced opening are thinner than a wall and are
+        # not rooms. Pad only the planarization barrier, never the evidenced interval.
+        pad = _STROKE_PAIR_THICK_MIN
+        if gap.horizontal:
+            barrier_rect = box(gap.lo - pad, gap.band[0], gap.hi + pad, gap.band[1])
+        else:
+            barrier_rect = box(gap.band[0], gap.lo - pad, gap.band[1], gap.hi + pad)
+        closure_rects.append((closure_id, barrier_rect))
 
     barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects)])
     free = domain.difference(barrier)
@@ -1559,21 +1979,22 @@ def build_layered_wall_doorway_room_rings(
         edge_owners: list[tuple[str, ...]] = []
         for a, b in zip(coords, coords[1:] + coords[:1]):
             mid = Point((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
-            owner = next((cid for cid, rect in closure_rects if rect.buffer(NOISE_PT).contains(mid)), None)
-            if owner is not None:
-                closure_edges += 1
-                bounding_closures.add(owner)
-                edge_owners.append((f"layered_doorway_closure:{owner}",))
-                continue
             owners = tuple(sorted(
                 [f"layered_wall_strip:{index}" for s in strips if s.polygon.distance(mid) <= NOISE_PT * 2 for index in s.native_path_indices()]
                 + [f"layered_wall_fill:{index}" for index, polygon in other_fills if polygon.distance(mid) <= NOISE_PT * 2]
             ))
             if owners:
                 wall_edges += 1
-            else:
-                unowned_edges += 1
-            edge_owners.append(owners)
+                edge_owners.append(owners)
+                continue
+            owner = next((cid for cid, rect in closure_rects if rect.buffer(NOISE_PT).contains(mid)), None)
+            if owner is not None:
+                closure_edges += 1
+                bounding_closures.add(owner)
+                edge_owners.append((f"layered_doorway_closure:{owner}",))
+                continue
+            unowned_edges += 1
+            edge_owners.append(())
         if unowned_edges:
             reasons.append(REASON_UNOWNED_EDGE)
         wall_paths = tuple(sorted({index for s in strips if part.buffer(NOISE_PT * 2).intersects(s.polygon) for index in s.native_path_indices()}))
