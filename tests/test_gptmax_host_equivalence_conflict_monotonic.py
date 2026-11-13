@@ -542,6 +542,9 @@ def test_exact_original_host_producer_equivocation_revokes_cached_authority(
         ),
     )
     producer._results = {}
+    # This test bypasses __init__; keep the producer-owned selector cache valid.
+    producer._opening_selectors = {}
+    producer._source_fragment_roles_shadow = False
     active = {"member": "wall:host:A", "blocked": False}
 
     def issue_band(*_args, **_kwargs):

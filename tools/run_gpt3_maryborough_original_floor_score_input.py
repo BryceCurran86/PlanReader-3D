@@ -32,6 +32,7 @@ from pb_live_physical_net_wall_integration import (
 from tools.diag_gpt2_room_measurement_gates import inspect_room_measurement_gates
 
 PROJECT = "au_qld_maryborough_service_station"
+SOURCE_UNAVAILABLE = "source_unavailable"
 MANIFEST = (
     Path(__file__).resolve().parents[1]
     / "benchmarks/frozen_holdout/full_plan_v2/projects"
@@ -52,7 +53,9 @@ def _verify_original_source(pdf: Path, manifest_path: Path) -> str:
     if len(architectural) != 1:
         raise ValueError("ambiguous or missing Maryborough architectural source")
     original = architectural[0]
-    if not pdf.is_file() or pdf.name != original.get("name"):
+    if not pdf.is_file():
+        raise ValueError(SOURCE_UNAVAILABLE)
+    if pdf.name != original.get("name"):
         raise ValueError("wrong Maryborough architectural source filename")
     if pdf.stat().st_size != original.get("size_bytes"):
         raise ValueError("Maryborough original source size mismatch")
@@ -215,6 +218,9 @@ def run_original_maryborough_floor_handoff(
         pages=(6,),
         topology_pages=(6,),
         room_area_support_pages=(10,),
+        # This handoff issues floor_area only. Surface-finish/ceiling OCR is
+        # independent, costly, and must never be used to certify floor areas.
+        include_surface_finishes=False,
     )
     try:
         # Each boundary can reject source/issuer authority before the final

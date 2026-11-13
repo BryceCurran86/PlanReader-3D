@@ -354,7 +354,9 @@ def test_surface_semantic_pages_use_isolated_source_without_expanding_topology(
             room_areas,
             floors,
             same_view_room_areas=None,
+            correspondence_records=(),
         ):
+            seen["correspondence_records"] = tuple(correspondence_records or ())
             revision_id = (
                 room_areas.records[0].area_evidence.metadata["room_revision_id"]
                 if room_areas is not None and room_areas.records
@@ -411,6 +413,7 @@ def test_surface_semantic_pages_use_isolated_source_without_expanding_topology(
 
     assert seen["decoded_pages"] == (1, 2, 3)
     assert seen["floor_decoded_pages"] == (1, 2, 3)
+    assert isinstance(seen["correspondence_records"], tuple)
     # Both semantic consumers retain source-plan and dimension support evidence.
     # Topology remains scoped to page 1, as asserted below.
     assert (

@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_cross_view_ceiling_finish_authority import (
     _occurrence_line as _cross_view_occurrence_line,
@@ -373,6 +373,8 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
     floor: LiveCanonicalFloorSurfaceObject,
     occurrence: SourceMaterialOccurrenceRecord,
     source_owned_shadow: bool,
+    correspondence_records: Optional[Sequence[Any]] = None,
+    dimension_box: Optional[tuple[float, float, float, float]] = None,
 ) -> bool:
     """Do not reinterpret cross-sheet mark containment as physical equality.
 
@@ -382,10 +384,95 @@ def _source_owned_mark_eligible_for_existing_physical_floor(
     """
     if type(source_owned_shadow) is not bool:
         raise ValueError("source-owned floor mode must be an explicit boolean")
-    return (
-        not source_owned_shadow
-        or _clean(floor.page_id) == _clean(occurrence.page_id)
-    )
+    if not source_owned_shadow:
+        return True
+    if _clean(floor.page_id) == _clean(occurrence.page_id):
+        return True
+    if not correspondence_records or not isinstance(correspondence_records, (tuple, list)):
+        return False
+
+    # Reject ambiguous/duplicate correspondence claims for the same physical identity
+    floor_id = _clean(getattr(floor, "canonical_floor_id", ""))
+    room_id = _clean(getattr(floor, "room_entity_id", ""))
+    face_id = _clean(getattr(floor, "source_room_face_record_id", ""))
+    if not floor_id:
+        return False
+
+    matching_records = [
+        cr for cr in correspondence_records
+        if (
+            _clean(getattr(cr, "canonical_floor_id", "")) == floor_id
+            or (room_id and _clean(getattr(cr, "physical_room_id", "")) == room_id)
+            or (face_id and _clean(getattr(cr, "source_room_face_record_id", "")) == face_id)
+        )
+    ]
+    if len(matching_records) != 1:
+        return False
+
+    cr = matching_records[0]
+    if getattr(cr, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
+        return False
+    if getattr(cr, "commercial_projection_allowed", False) is not True:
+        return False
+    if getattr(cr, "takeoff_eligible", True) is not True:
+        return False
+    if getattr(cr, "authority_blockers", None):
+        return False
+    if getattr(cr, "wall_bounded_on_both_sheets", False) is not True:
+        return False
+    if getattr(cr, "wall_evidence_identical_on_both_sheets", False) is not True:
+        return False
+    if _clean(getattr(cr, "canonical_floor_id", "")) != floor_id:
+        return False
+    if room_id and getattr(cr, "physical_room_id", None) is not None:
+        if _clean(getattr(cr, "physical_room_id", "")) != room_id:
+            return False
+    if face_id and getattr(cr, "source_room_face_record_id", None) is not None:
+        if _clean(getattr(cr, "source_room_face_record_id", "")) != face_id:
+            return False
+    if getattr(cr, "support_page_id", None) is not None:
+        if _clean(getattr(cr, "support_page_id", "")) != _clean(getattr(occurrence, "page_id", "")):
+            return False
+    if getattr(cr, "target_page_id", None) is not None:
+        if _clean(getattr(cr, "target_page_id", "")) != _clean(getattr(floor, "page_id", "")):
+            return False
+    cr_code = getattr(cr, "material_code", None)
+    occ_code = _clean(getattr(occurrence, "code", ""))
+    if cr_code is not None and _clean(cr_code) != occ_code:
+        return False
+    codes_in_box = getattr(cr, "finish_codes_in_box", None)
+    if codes_in_box is not None and occ_code:
+        if dict(codes_in_box) != {occ_code: 1}:
+            return False
+    supp_box = _bbox(getattr(cr, "support_dimension_box_pdf_pts", None))
+    occ_bbox = _bbox(getattr(occurrence, "bbox_pdf_pts", None))
+    if supp_box is not None:
+        if occ_bbox is not None and not _bbox_fully_inside(occ_bbox, supp_box):
+            return False
+        if dimension_box is not None:
+            if any(abs(float(a) - float(b)) > 0.05 for a, b in zip(dimension_box, supp_box)):
+                return False
+    wall_eqs = getattr(cr, "cross_sheet_wall_equivalences", ())
+    if (
+        not isinstance(wall_eqs, (tuple, list))
+        or len(wall_eqs) != 4
+        or {getattr(w, "side_name", None) for w in wall_eqs} != {"x0", "x1", "y0", "y1"}
+        or any(getattr(w, "status", None) is not EvidenceResolutionStatus.CORROBORATED for w in wall_eqs)
+    ):
+        return False
+    doorways = getattr(cr, "doorway_transitions", ())
+    if (
+        not isinstance(doorways, (tuple, list))
+        or not doorways
+        or any(
+            getattr(d, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+            or getattr(d, "threshold_aligned_with_internal_face", False) is not True
+            or float(getattr(d, "threshold_deduction_m2", 0.0) or 0.0) != 0.0
+            for d in doorways
+        )
+    ):
+        return False
+    return True
 
 
 def _source_owned_floor_finish_viewports(
@@ -404,6 +491,8 @@ def _source_owned_floor_finish_viewports(
     grouped = {}
     views = producer.published_plan_viewports()
     for view in views:
+        if view.view_type != DrawingViewType.FLOOR_FINISH_PLAN.value:
+            continue
         page_id = str(view.page_number)
         if (
             page_id not in allowed
@@ -874,6 +963,7 @@ class CrossViewFloorFinishProducer:
         room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
         _seal: object = None,
     ) -> None:
@@ -902,6 +992,7 @@ class CrossViewFloorFinishProducer:
         self._room_areas = room_areas
         self._same_view_room_areas = same_view_room_areas
         self._floors = floors
+        self._correspondence_records = tuple(correspondence_records or ())
         self._physical_plan_page_ids = _physical_plan_page_ids
 
     @classmethod
@@ -912,12 +1003,16 @@ class CrossViewFloorFinishProducer:
         room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
+        page_ids: Optional[Sequence[str]] = None,
     ) -> "CrossViewFloorFinishProducer":
         return cls(
             source=source,
             room_areas=room_areas,
             floors=floors,
             same_view_room_areas=same_view_room_areas,
+            correspondence_records=correspondence_records,
+            _physical_plan_page_ids=tuple(sorted(set(page_ids), key=int)) if page_ids else (),
             _seal=_PRODUCER_SEAL,
         )
 
@@ -930,6 +1025,7 @@ class CrossViewFloorFinishProducer:
         floors: LiveCanonicalFloorSurfaceComposition,
         page_ids: Sequence[str],
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        correspondence_records: Optional[Sequence[Any]] = None,
     ) -> "CrossViewFloorFinishProducer":
         """Explicit consumer of source-owned plan products; commercial default untouched."""
         if (
@@ -947,6 +1043,7 @@ class CrossViewFloorFinishProducer:
             room_areas=room_areas,
             floors=floors,
             same_view_room_areas=same_view_room_areas,
+            correspondence_records=correspondence_records,
             _physical_plan_page_ids=tuple(sorted(set(page_ids), key=int)),
             _seal=_PRODUCER_SEAL,
         )
@@ -1282,6 +1379,8 @@ class CrossViewFloorFinishProducer:
                     floor=floor,
                     occurrence=occurrence,
                     source_owned_shadow=bool(self._physical_plan_page_ids),
+                    correspondence_records=self._correspondence_records,
+                    dimension_box=box,
                 ):
                     unresolved.add(floor.canonical_floor_id)
                     continue

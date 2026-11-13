@@ -34,7 +34,12 @@ def test_extractor_forwards_exact_original_finish_inventory_once(tmp_path, monke
                                family="ceiling_lining")
     claim = replace(claim, floor_finish_quantity_evidence=finishes,
                     ceiling_lining_quantity_evidence=(separate_ceiling,))
-    before = deepcopy(claim)
+    # MappingProxyType is immutable and deliberately not pickleable. Copy its
+    # contents for the comparison snapshot, retaining deep-copy protection for
+    # every other claim field and the original production diagnostics mapping.
+    before = deepcopy(replace(
+        claim, surface_pipeline_diagnostics=dict(claim.surface_pipeline_diagnostics),
+    ))
     path = tmp_path / "routing.pdf"
     with fitz.open() as doc:
         page = doc.new_page(width=600, height=800)

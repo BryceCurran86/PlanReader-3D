@@ -19,11 +19,11 @@ import io
 import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
-from weakref import WeakKeyDictionary
+from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import fitz
 from PIL import Image, ImageOps
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
 from pb_drawing_evidence_binding import DrawingViewType
@@ -89,6 +89,7 @@ CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT = "cross_view_room_area_lineage_conflict"
 CROSS_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = (
     "authenticated_cross_view_room_area"
 )
+DUPLICATE_AUTHORITY_CONFLICT = "duplicate_authority_conflict"
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -170,6 +171,47 @@ class CrossViewRoomAreaRecord:
     def __post_init__(self) -> None:
         if self._seal is not _RECORD_SEAL:
             raise TypeError("CrossViewRoomAreaRecord is producer-owned")
+
+
+class _UniqueWeakValueDictionary(WeakValueDictionary):
+    """Keep the first live producer instance at every authority key."""
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        existing = self.get(key)
+        if existing is not None and existing is not value:
+            raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+        super().__setitem__(key, value)
+
+    def register_issued(self, keys, value):
+        """Reuse an identical producer replay without replacing its first issuance.
+
+        Only completed producer records use this seam. Direct registration
+        still requires object identity. Validate every alias before writing.
+        """
+        keys = tuple(keys)
+        issued = value
+        for key in keys:
+            existing = self.get(key)
+            if existing is None:
+                continue
+            if existing != value or (issued is not value and issued is not existing):
+                raise ValueError(DUPLICATE_AUTHORITY_CONFLICT)
+            issued = existing
+        for key in keys:
+            self[key] = issued
+        return issued
+
+
+_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT: _UniqueWeakValueDictionary[
+    tuple[str, str], "CrossViewRoomAreaRecord"
+] = _UniqueWeakValueDictionary()
+
+
+def get_authenticated_room_area_record(
+    snapshot_id: str, evidence_id: str
+) -> Optional["CrossViewRoomAreaRecord"]:
+    """Retrieve authentic producer-issued CrossViewRoomAreaRecord by snapshot_id and area evidence_id."""
+    return _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.get((str(snapshot_id), str(evidence_id)))
 
 
 @dataclass(frozen=True)
@@ -889,75 +931,6 @@ def _trusted_native_dimensions_for_page(
         if key is not None:
             needed_bbox_keys.add(key)
 
-    text_authority = source.text_integrity_authority()
-    dimension_ocr_backend, _ocr_selection_reason = (
-        select_production_ocr_backend()
-    )
-    trusted_by_bbox: dict[
-        tuple[float, float, float, float],
-        list[
-            tuple[
-                str,
-                str,
-                str,
-                str,
-                Optional[int],
-                Optional[int],
-                Optional[int],
-            ]
-        ],
-    ] = {}
-    page_text_ids = text_authority.observation_ids_for_page(
-        published.snapshot.snapshot_id,
-        str(page_id),
-    )
-    for observation_id in published.text_observation_ids:
-        if str(observation_id) not in page_text_ids:
-            continue
-        selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=observation_id,
-        )
-        resolved = text_authority.resolve_text(selector)
-        receipt = resolved.receipt
-        if receipt is None or str(receipt.page_id) != str(page_id):
-            continue
-        key = _bbox_key(receipt.geometry)
-        if key is None or key not in needed_bbox_keys:
-            continue
-
-        trusted_text: Optional[str] = None
-        if (
-            resolved.status is EvidenceResolutionStatus.CORROBORATED
-            and resolved.trusted_text
-        ):
-            trusted_text = str(resolved.trusted_text)
-        else:
-            trusted_text = _isolated_dimension_numeric_corroboration(
-                source,
-                published=published,
-                selector=selector,
-                text_result=resolved,
-                backend=dimension_ocr_backend,
-            )
-
-        if not trusted_text:
-            continue
-        trusted_by_bbox.setdefault(key, []).append(
-            (
-                trusted_text,
-                str(observation_id),
-                str(receipt.receipt_id),
-                str(receipt.source_partition_id),
-                None if receipt.block_no is None else int(receipt.block_no),
-                None if receipt.line_no is None else int(receipt.line_no),
-                None if receipt.word_no is None else int(receipt.word_no),
-            )
-        )
-
     visibility = source.authority()
     page_visible_ids = visibility.visible_observation_ids_for_page(
         published.snapshot.snapshot_id,
@@ -1036,6 +1009,111 @@ def _trusted_native_dimensions_for_page(
             # or nearest-geometry fallback is permitted here.
             out.extend(matches)
         return tuple(dict.fromkeys(out))
+
+    # A source figure cannot be FIRM unless its dimension and BOTH witness
+    # strokes independently resolve to the immutable native visible segments.
+    # These exact source checks already gate issuance below. Run them before
+    # invoking two costly OCR inferences for an ultimately unusable figure.
+    # This only removes impossible candidates; it never authenticates text.
+    source_bound_bbox_keys: set[tuple[float, float, float, float]] = set()
+    for binding in bundle.bindings:
+        if (
+            binding.status != BindingStatus.WITNESS_BOUND.value
+            or binding.endpoints is None
+            or not binding.dimension_line_id
+            or len(binding.witness_line_ids) < 2
+        ):
+            continue
+        observation = observations.get(binding.observation_id)
+        if observation is None or observation.bbox is None:
+            continue
+        key = _bbox_key(observation.bbox)
+        if key not in needed_bbox_keys:
+            continue
+        if not source_ids_for_segment(binding.dimension_line_id):
+            continue
+        witness_sets = [
+            source_ids_for_segment(witness_line_id)
+            for witness_line_id in binding.witness_line_ids
+        ]
+        if any(not matches for matches in witness_sets):
+            continue
+        witness_ids = set(
+            source_id for matches in witness_sets for source_id in matches
+        )
+        if len(witness_ids) < 2:
+            continue
+        source_bound_bbox_keys.add(key)
+    needed_bbox_keys.intersection_update(source_bound_bbox_keys)
+
+    text_authority = source.text_integrity_authority()
+    dimension_ocr_backend, _ocr_selection_reason = (
+        select_production_ocr_backend()
+    )
+    trusted_by_bbox: dict[
+        tuple[float, float, float, float],
+        list[
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                Optional[int],
+                Optional[int],
+                Optional[int],
+            ]
+        ],
+    ] = {}
+    page_text_ids = text_authority.observation_ids_for_page(
+        published.snapshot.snapshot_id,
+        str(page_id),
+    )
+    for observation_id in published.text_observation_ids:
+        if str(observation_id) not in page_text_ids:
+            continue
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        resolved = text_authority.resolve_text(selector)
+        receipt = resolved.receipt
+        if receipt is None or str(receipt.page_id) != str(page_id):
+            continue
+        key = _bbox_key(receipt.geometry)
+        if key is None or key not in needed_bbox_keys:
+            continue
+
+        trusted_text: Optional[str] = None
+        if (
+            resolved.status is EvidenceResolutionStatus.CORROBORATED
+            and resolved.trusted_text
+        ):
+            trusted_text = str(resolved.trusted_text)
+        else:
+            trusted_text = _isolated_dimension_numeric_corroboration(
+                source,
+                published=published,
+                selector=selector,
+                text_result=resolved,
+                backend=dimension_ocr_backend,
+            )
+
+        if not trusted_text:
+            continue
+        trusted_by_bbox.setdefault(key, []).append(
+            (
+                trusted_text,
+                str(observation_id),
+                str(receipt.receipt_id),
+                str(receipt.source_partition_id),
+                None if receipt.block_no is None else int(receipt.block_no),
+                None if receipt.line_no is None else int(receipt.line_no),
+                None if receipt.word_no is None else int(receipt.word_no),
+            )
+        )
 
     positive: list[_TrustedBoundDimension] = []
     for binding in bundle.bindings:
@@ -1994,6 +2072,18 @@ class CrossViewRoomAreaProducer:
             conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
+        records = [
+            _REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT.register_issued(
+                (
+                    (str(scope), str(identity))
+                    for scope in (published.snapshot.snapshot_id, published.revision.revision_id)
+                    for identity in (rec.area_evidence.evidence_id, rec.physical_room_id,
+                                     rec.source_room_face_record_id)
+                ),
+                rec,
+            )
+            for rec in records
+        ]
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
             status = EvidenceResolutionStatus.CORROBORATED
@@ -2033,6 +2123,10 @@ __all__ = [
     "CROSS_VIEW_ROOM_AREA_SCHEMA_VERSION",
     "CROSS_VIEW_ROOM_AREA_UNAVAILABLE",
     "CrossViewRoomAreaProducer",
+    "get_authenticated_room_area_record",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
+    "DUPLICATE_AUTHORITY_CONFLICT",
+    "_REGISTERED_ROOM_AREA_RECORDS_BY_SNAPSHOT",
+    "_UniqueWeakValueDictionary",
 ]

@@ -69,6 +69,8 @@ from pb_pdf_text_integrity_authority import (
     classify_native_word_integrity,
 )
 from pb_source_observation_authority import (
+    _REGISTERED_STORES_BY_SNAPSHOT,
+    get_source_observation_store_for_snapshot,
     _bind_record_to_snapshot,
     NativePageImagePlacement,
     OBSERVATION_UNAVAILABLE,
@@ -227,14 +229,55 @@ class _CachedVisibilityPage:
     visible_segments: tuple[_CachedVisibleSegment, ...]
 
 
+def _native_word_integrity_for_receipt(
+    page: fitz.Page,
+    word: Mapping[str, Any],
+    *,
+    source_native_finish_text_shadow: bool,
+    source_raster_text_receipt_replay: bool,
+) -> Any:
+    """Reprove an original raster receipt without hiding newer native failures.
+
+    The optional embedded-symbol proof can turn an old glyph-unverified native
+    receipt into a trusted one. Those different receipt bodies have different
+    IDs. The replay policy keeps the original native proof stage so downstream
+    raster authorities can reissue its historical evidence. Current native
+    contradictions, clipping, paint and other failures always veto that path.
+    A returned glyph-unverified receipt is NOT text authority: the existing
+    independent raster corroboration still has to succeed.
+    """
+    decision = classify_native_word_integrity(
+        page, word,
+        **({
+            "source_symbol_font_chain_shadow": True,
+            "source_raw_no_active_text_clip_shadow": True,
+        } if source_native_finish_text_shadow else {}),
+    )
+    if (
+        source_raster_text_receipt_replay
+        and decision.trusted is True
+        and not decision.reason_codes
+    ):
+        return classify_native_word_integrity(
+            page, word,
+            source_raw_no_active_text_clip_shadow=True,
+        )
+    return decision
+
+
 def _derive_visibility_page(
     page: fitz.Page,
     *,
     native_page: Optional[Mapping[str, Any]] = None,
     source_native_finish_text_shadow: bool = False,
+    source_raster_text_receipt_replay: bool = False,
 ) -> _CachedVisibilityPage:
     if type(source_native_finish_text_shadow) is not bool:
         raise ValueError("source_finish_text_shadow_requires_explicit_bool")
+    if type(source_raster_text_receipt_replay) is not bool:
+        raise ValueError("source_raster_receipt_replay_requires_explicit_bool")
+    if source_raster_text_receipt_replay and not source_native_finish_text_shadow:
+        raise ValueError("source_raster_receipt_replay_requires_native_source_scope")
     native = native_page if native_page is not None else extract_native_page(page)
     words: list[_CachedVisibilityWord] = []
     visible_segments: list[_CachedVisibleSegment] = []
@@ -246,12 +289,10 @@ def _derive_visibility_page(
                 raw_text=raw_text,
                 geometry=geometry,
                 primitive_ref=native_word_primitive_ref(word),
-                decision=classify_native_word_integrity(
+                decision=_native_word_integrity_for_receipt(
                     page, word,
-                    **({
-                        "source_symbol_font_chain_shadow": True,
-                        "source_raw_no_active_text_clip_shadow": True,
-                    } if source_native_finish_text_shadow else {}),
+                    source_native_finish_text_shadow=source_native_finish_text_shadow,
+                    source_raster_text_receipt_replay=source_raster_text_receipt_replay,
                 ),
                 block_no=word.get("block_no"),
                 line_no=word.get("line_no"),
@@ -945,6 +986,59 @@ def _native_dimension_component_inputs_fingerprint(*, segments, words) -> str:
     ).hexdigest()[:20]
 
 
+def _source_attested_overprint_word_glyphs(*, page, receipt, font_key, spans):
+    """One logical glyph run from source-authenticated complementary paints.
+
+    The outer producer already authenticates immutable source bytes. Recheck
+    receipt sequence ownership and embedded font here. Keep every foreign span
+    in BOTH glyph checks; exclude only the attested opposite source paint.
+    Generic word_glyphs ambiguity rules remain unchanged.
+    """
+    from pb_font_glyph_mapping_corroboration_shadow import word_glyphs
+    from pb_pdf_text_integrity_authority import _matching_trace_spans
+    from pb_source_glyph_ledger_text_trust import is_glyph_only_untrusted
+
+    if not is_glyph_only_untrusted(receipt):
+        return None
+    try:
+        if (type(page) is not fitz.Page
+                or str(page.number + 1) != receipt.page_id
+                or type(font_key) is not str or len(font_key) != 64
+                or receipt.font_xref is None):
+            return None
+        program = page.parent.extract_font(int(receipt.font_xref))[3]
+        if not program or hashlib.sha256(program).hexdigest() != font_key:
+            return None
+        owned, _text, reasons = _matching_trace_spans(
+            page, {"text": receipt.raw_text, "bbox": receipt.geometry})
+        expected = tuple(receipt.trace_sequence_numbers)
+        actual = tuple(span.get("seqno") for span in owned)
+        if (reasons or len(owned) < 2 or len(set(actual)) != len(actual)
+                or any(type(seq) is not int or seq < 0 for seq in actual)
+                or tuple(sorted(actual)) != tuple(sorted(expected))):
+            return None
+        # Match each newly source-resolved span to EXACTLY one cached span.
+        # No seqno-only exclusion may conceal another span carrying that ID.
+        matched = []
+        for owner in owned:
+            matches = [span for span in spans if span == owner]
+            if len(matches) != 1:
+                return None
+            matched.append(matches[0])
+        fills = {id(span) for span in matched if span.get("type") == 0}
+        strokes = {id(span) for span in matched if span.get("type") == 1}
+        if (not fills or len(fills) != len(strokes)
+                or len(fills) + len(strokes) != len(matched)):
+            return None
+        args = (receipt.parent_observation_id, receipt.raw_text,
+                font_key, receipt.geometry)
+        fill_run = word_glyphs(*args, tuple(span for span in spans if id(span) not in strokes))
+        stroke_run = word_glyphs(*args, tuple(span for span in spans if id(span) not in fills))
+        return fill_run if fill_run is not None and fill_run == stroke_run else None
+    except (AttributeError, TypeError, ValueError, RuntimeError, IndexError, KeyError):
+        return None
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -956,6 +1050,7 @@ class SourceVisibilityProducer:
                  raster_paired_outer_faces_shadow: bool = False,
                  exact_g17_nomination_shadow: bool = False,
                  source_native_finish_text_shadow: bool = False,
+                 source_raster_text_receipt_replay: bool = False,
                  raster_double_face_negative_shadow: bool = False,
                  source_glyph_ledger_text_trust: bool = False,
                  raster_corner_framed_opening_shadow: bool = False) -> None:
@@ -974,6 +1069,11 @@ class SourceVisibilityProducer:
         if type(source_native_finish_text_shadow) is not bool:
             raise ValueError("source_finish_text_shadow_requires_explicit_bool")
         self._source_native_finish_text_shadow = source_native_finish_text_shadow
+        if type(source_raster_text_receipt_replay) is not bool:
+            raise ValueError("source_raster_receipt_replay_requires_explicit_bool")
+        if source_raster_text_receipt_replay and not source_native_finish_text_shadow:
+            raise ValueError("source_raster_receipt_replay_requires_native_source_scope")
+        self._source_raster_text_receipt_replay = source_raster_text_receipt_replay
         # Default-off: words whose ONLY text-integrity blocker is the glyph proof may be
         # trusted through sealed raster corroboration plus verified glyph mappings.
         if type(source_glyph_ledger_text_trust) is not bool:
@@ -994,7 +1094,7 @@ class SourceVisibilityProducer:
             tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
         ] = {}
         self._visibility_page_cache: (
-            "OrderedDict[tuple[str, str, int], _CachedVisibilityPage]"
+            "OrderedDict[tuple[str, str, int, bool, bool], _CachedVisibilityPage]"
         ) = OrderedDict()
         # One source-bound physical-opening authority per producer.  The
         # visibility authority it wraps is a live read-only view over this
@@ -1853,7 +1953,7 @@ class SourceVisibilityProducer:
         policy = (
             frozenset(str(page) for page in published.coverage.decoded_pages)
             if wanted is None else frozenset(wanted),
-            min_words, max_attempts,
+            min_words, max_attempts, self._source_native_finish_text_shadow,
         )
         if str(revision_id) in self._glyph_ledger_pass_policy:
             if self._glyph_ledger_pass_policy[str(revision_id)] != policy:
@@ -1910,14 +2010,26 @@ class SourceVisibilityProducer:
                         word = word_glyphs(
                             observation_id, receipt.raw_text, program_key,
                             receipt.geometry, spans)
+                        if word is None and self._source_native_finish_text_shadow:
+                            word = _source_attested_overprint_word_glyphs(
+                                page=pdf.load_page(int(page_key) - 1),
+                                receipt=receipt, font_key=program_key, spans=spans)
                     candidates.append(GlyphTextCandidate(observation_id, word))
             finally:
                 pdf.close()
 
         def corroborate(observation_id: str) -> bool:
             if self._glyph_ledger_raster_producer is None:
+                # Both options are explicit and default off. The existing
+                # isolated-word mode still requires literal native equality;
+                # material quote comparison must never cast native glyph votes.
+                factory = (
+                    RasterTextCorroborationProducer.for_native_word_recognition_shadow
+                    if self._source_native_finish_text_shadow
+                    else RasterTextCorroborationProducer.from_source_visibility_producer
+                )
                 self._glyph_ledger_raster_producer = (
-                    RasterTextCorroborationProducer.from_source_visibility_producer(self))
+                    factory(self))
             outcome = self._glyph_ledger_raster_producer.publish(
                 RasterTextCorroborationSelector(
                     document_id=published.revision.document_id,
@@ -2316,6 +2428,7 @@ class SourceVisibilityProducer:
                     base.snapshot.snapshot_id,
                     int(page_number),
                     self._source_native_finish_text_shadow,
+                    self._source_raster_text_receipt_replay,
                 )
                 derived = self._visibility_page_cache.get(visibility_cache_key)
                 if derived is not None:
@@ -2337,6 +2450,9 @@ class SourceVisibilityProducer:
                         **({
                             "source_native_finish_text_shadow": True
                         } if self._source_native_finish_text_shadow else {}),
+                        **({
+                            "source_raster_text_receipt_replay": True
+                        } if self._source_raster_text_receipt_replay else {}),
                     )
                     self._visibility_page_cache[visibility_cache_key] = derived
                     self._visibility_page_cache.move_to_end(visibility_cache_key)
@@ -2495,6 +2611,11 @@ class SourceVisibilityProducer:
             self._visibility_page_cache.pop(cache_key, None)
 
         self._published_by_revision[published.revision.revision_id] = published
+        try:
+            _REGISTERED_STORES_BY_SNAPSHOT[published.snapshot.snapshot_id] = self._producer._store
+            _REGISTERED_STORES_BY_SNAPSHOT[published.revision.revision_id] = self._producer._store
+        except Exception:
+            pass
         if self._source_glyph_ledger_text_trust:
             self.upgrade_glyph_only_text(
                 published.revision.revision_id, page_ids=page_ids)

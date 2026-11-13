@@ -285,6 +285,8 @@ def test_publish_two_face_lineage_uses_recovered_local_scope(
     producer._opening = opening_authority
     producer._universe = universe_authority
     producer._results = {}
+    # This legacy test builds a producer without __init__.
+    producer._opening_selectors = {}
 
     monkeypatch.setattr(
         host,

@@ -253,6 +253,7 @@ def layered_ring_scope_overrides(
     sliding_leaf_frame_closure: bool = False,
     partition_witness: bool = False,
     finished_face_gate: bool = False,
+    dark_painted_wall_source: bool = False,
 ) -> Mapping[tuple[str, str, str, str, str, str], SourceRoomFaceScopeOverride]:
     """Issued ring scopes keyed like the room-face authority, read from the SHA-pinned native bytes.
 
@@ -266,6 +267,10 @@ def layered_ring_scope_overrides(
         raise ValueError("partition_witness must be an explicit boolean")
     if type(finished_face_gate) is not bool:
         raise ValueError("finished_face_gate must be an explicit boolean")
+    if type(dark_painted_wall_source) is not bool:
+        raise ValueError("dark_painted_wall_source must be an explicit boolean")
+    if dark_painted_wall_source and not finished_face_gate:
+        raise ValueError("dark_painted_wall_source requires finished_face_gate")
     if partition_witness and not (sliding_leaf_frame_closure and require_figured_box):
         raise ValueError("partition_witness requires sliding_leaf_frame_closure and require_figured_box")
     from pb_cross_view_ceiling_finish_authority import _source_bytes
@@ -284,6 +289,7 @@ def layered_ring_scope_overrides(
         ring_result = build_from_pdf_bytes(
             payload, source_sha256=published.revision.source_sha256, page_index=int(page) - 1,
             sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+            dark_painted_wall_source=dark_painted_wall_source,
         )
         decision_scope_id = _PAGE_DECISION_SCOPE.format(page_id=page)
         dimensions = None
