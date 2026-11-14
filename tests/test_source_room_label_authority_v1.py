@@ -15,6 +15,7 @@ from pb_source_room_label_authority import (
     SOURCE_ROOM_LABEL_REQUIRED_WORD_UNRESOLVED,
     SourceRoomLabelProducer,
     SourceRoomLabelWordEvidence,
+    _ROOM_LABEL_OCR_BLANK_MARGIN_MM,
     _Word,
     _line_groups,
     _normalized_room_line,
@@ -678,6 +679,11 @@ def test_gpt2_independent_sealed_room_text_receipts_survive_source_filter():
         kept,_,conflict=_unique_source_label_observation_owners((a,failed),())
         assert kept==(a,)
         assert conflict is True
+
+
+def test_isolated_line_ocr_pad_is_wide_enough_for_a_short_bed_ordinal():
+    assert _ROOM_LABEL_OCR_BLANK_MARGIN_MM >= 2.0
+    assert max(1, int(round(300.0 * _ROOM_LABEL_OCR_BLANK_MARGIN_MM / 25.4))) >= 24
 
 
 @pytest.mark.parametrize("valid", ["BED 1", "BED 2", "BED 3", "BEDROOM 4", "bed 12", "BEDROOM 99"])

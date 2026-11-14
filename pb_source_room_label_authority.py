@@ -120,7 +120,10 @@ _COMMERCIAL_ROOM_PHRASES = frozenset(
     }
 )
 _MAX_ROOM_LABEL_WORDS = 4
-_ROOM_LABEL_OCR_BLANK_MARGIN_MM = 1.0
+# Post-render white pad only. 1 mm leaves a ~11 pt "BED 2" crop undetectable at
+# 300 dpi; 2 mm is still outside the source clip and both 300/450 dpi then read
+# the native line.
+_ROOM_LABEL_OCR_BLANK_MARGIN_MM = 2.0
 
 
 @dataclass(frozen=True)
