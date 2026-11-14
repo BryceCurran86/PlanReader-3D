@@ -38,6 +38,7 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_portable_raster_ocr_authority import (
     MockOCRBackend,
+    RapidOCRBackend,
     TesseractOCRBackend,
 )
 from pb_raster_text_corroboration_authority import (
@@ -394,8 +395,10 @@ def _single_isolated_line_reading(
     """Read one already-isolated producer-owned source text line.
 
     Tesseract receives single-line page segmentation only after the exact
-    producer-owned line crop has been rendered. Other selected backends use
-    their normal extraction entrypoint. There is no backend retry or image
+    producer-owned line crop has been rendered. RapidOCR uses recognition
+    only on that same isolated crop so a short ordinal cannot be split by
+    the page detector into two readings. Other selected backends use their
+    normal extraction entrypoint. There is no backend retry or image
     preprocessing preference.
     """
 
@@ -421,7 +424,12 @@ def _single_isolated_line_reading(
         return readings[0] if len(readings) == 1 else None
 
     try:
-        lines = tuple(backend.extract_lines(image, dpi=int(dpi)))
+        if type(backend) is RapidOCRBackend:
+            lines = tuple(
+                backend.extract_lines(image, dpi=int(dpi), detect=False)
+            )
+        else:
+            lines = tuple(backend.extract_lines(image, dpi=int(dpi)))
     except Exception:
         return None
     readings = tuple(

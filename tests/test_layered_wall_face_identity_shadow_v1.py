@@ -416,6 +416,35 @@ def test_a_remote_stated_fill_return_does_not_classify_this_edge(base):
     assert identity.lined_edge_offsets_mm == ()
 
 
+def test_a_stated_fill_end_spur_does_not_classify_this_edge(base):
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    fill = _outward_fill(ring, edge, 50.0 / MM_PER_PT)
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    along_x, along_y = dx / length, dy / length
+    thick = 50.0 / MM_PER_PT
+    nx = (fill.exterior.coords[3][0] - first[0]) / thick
+    ny = (fill.exterior.coords[3][1] - first[1]) / thick
+    frame_pt = 70.0 / MM_PER_PT
+    n0 = first
+    n1 = (first[0] + along_x * 1.3, first[1] + along_y * 1.3)
+    n2 = (n1[0] + nx * frame_pt, n1[1] + ny * frame_pt)
+    n3 = (n0[0] + nx * frame_pt, n0[1] + ny * frame_pt)
+    combined = fill.union(Polygon((n0, n1, n2, n3)))
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: combined},
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
+
+
 def test_a_fill_without_its_polygon_is_still_unclassified(base):
     ring, facts = base
     edge = _first_wall_edge(ring)

@@ -8,7 +8,9 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
-from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
+from PIL import Image
+
+from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine, RapidOCRBackend
 from pb_source_room_face_authority import build_source_room_face_authority
 from pb_source_room_label_authority import (
     SOURCE_ROOM_LABEL_CONFLICT,
@@ -19,6 +21,7 @@ from pb_source_room_label_authority import (
     _Word,
     _line_groups,
     _normalized_room_line,
+    _single_isolated_line_reading,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -684,6 +687,29 @@ def test_gpt2_independent_sealed_room_text_receipts_survive_source_filter():
 def test_isolated_line_ocr_pad_is_wide_enough_for_a_short_bed_ordinal():
     assert _ROOM_LABEL_OCR_BLANK_MARGIN_MM >= 2.0
     assert max(1, int(round(300.0 * _ROOM_LABEL_OCR_BLANK_MARGIN_MM / 25.4))) >= 24
+
+
+def test_isolated_line_reading_uses_rapidocr_recognition_only(monkeypatch):
+    calls: list[object] = []
+
+    def extract_lines(self, image, dpi=150, detect=True):
+        calls.append(detect)
+        if detect:
+            return (
+                OCRLine(text="BED", confidence=None, bbox_px=(0.0, 0.0, 10.0, 8.0)),
+                OCRLine(text="2", confidence=None, bbox_px=(12.0, 0.0, 16.0, 8.0)),
+            )
+        return (OCRLine(text="BED 2", confidence=None, bbox_px=(0.0, 0.0, 16.0, 8.0)),)
+
+    monkeypatch.setattr(RapidOCRBackend, "is_available", lambda self: True)
+    monkeypatch.setattr(RapidOCRBackend, "extract_lines", extract_lines)
+    reading = _single_isolated_line_reading(
+        RapidOCRBackend(),
+        Image.new("RGB", (80, 24), "white"),
+        dpi=300,
+    )
+    assert reading == "BED 2"
+    assert calls == [False]
 
 
 @pytest.mark.parametrize("valid", ["BED 1", "BED 2", "BED 3", "BEDROOM 4", "bed 12", "BEDROOM 99"])

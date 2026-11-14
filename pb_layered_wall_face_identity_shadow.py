@@ -337,10 +337,24 @@ def _side_belongs_to_edge(
     )
 
 
+def _side_is_perpendicular_to_edge(
+    start: Sequence[float], end: Sequence[float], first: Sequence[float], second: Sequence[float],
+) -> bool:
+    edge_x = float(second[0]) - float(first[0])
+    edge_y = float(second[1]) - float(first[1])
+    side_x = float(end[0]) - float(start[0])
+    side_y = float(end[1]) - float(start[1])
+    edge_len = math.hypot(edge_x, edge_y)
+    side_len = math.hypot(side_x, side_y)
+    if edge_len <= NOISE_PT or side_len <= NOISE_PT:
+        return False
+    return abs(edge_x * side_x + edge_y * side_y) <= NOISE_PT * edge_len
+
+
 def _fill_candidate_thicknesses_at_edge(
     polygon: Any, first: Sequence[float], second: Sequence[float],
 ) -> tuple[float, ...]:
-    """Wall thicknesses of THIS room-face edge: adjacent returns and bars on this face only."""
+    """Wall thicknesses of THIS room-face edge: perpendicular returns and bars on this face only."""
     thicknesses: list[float] = []
     try:
         coords = list(polygon.exterior.coords)
@@ -354,11 +368,9 @@ def _fill_candidate_thicknesses_at_edge(
             or (_close_pt(start, second) and _close_pt(end, first))
         ):
             continue
-        dx, dy = float(end[0]) - float(start[0]), float(end[1]) - float(start[1])
-        if abs(dx) <= NOISE_PT and abs(dy) > NOISE_PT:
-            thicknesses.append(abs(dy))
-        elif abs(dy) <= NOISE_PT and abs(dx) > NOISE_PT:
-            thicknesses.append(abs(dx))
+        if not _side_is_perpendicular_to_edge(start, end, first, second):
+            continue
+        thicknesses.append(math.hypot(float(end[0]) - float(start[0]), float(end[1]) - float(start[1])))
     for bar in _orthogonal_wall_fill_strips(0, polygon):
         bounds = (bar.x0, bar.y0, bar.x1, bar.y1)
         if _edge_lies_on_rect_face(first, second, bounds, tol=NOISE_PT):
@@ -376,17 +388,17 @@ def _unique_fill_statement_class(
     lining_mm: Optional[float],
     mm_per_pt: Optional[float],
 ) -> Optional[str]:
-    matches = {
-        _layer_and_thickness_class(
-            layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
-        )
-        for thickness in _fill_candidate_thicknesses_at_edge(polygon, first, second)
-        if _layer_and_thickness_class(
-            layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
-        ) in _RESOLVED_EDGE_CLASSES
-    }
-    if len(matches) == 1:
-        return next(iter(matches))
+    thicknesses = _fill_candidate_thicknesses_at_edge(polygon, first, second)
+    if not thicknesses:
+        return None
+    first_thick = thicknesses[0]
+    if any(abs(value - first_thick) > NOISE_PT for value in thicknesses):
+        return None
+    fill_class = _layer_and_thickness_class(
+        layer, first_thick, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+    )
+    if fill_class in _RESOLVED_EDGE_CLASSES:
+        return fill_class
     return None
 
 
@@ -426,7 +438,9 @@ def _edge_class(
             fill_class = _layer_and_thickness_class(
                 layer, thickness_pt, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
             )
-            if fill_class not in _RESOLVED_EDGE_CLASSES:
+            # A measured local depth that is not the stated build-up stays unresolved.
+            # Adjacent-return uniqueness may only fill in when this face has no local depth.
+            if thickness_pt is None and fill_class not in _RESOLVED_EDGE_CLASSES:
                 fallback = _unique_fill_statement_class(
                     polygon, first=first, second=second, layer=layer,
                     frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
