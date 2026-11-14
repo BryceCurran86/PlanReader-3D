@@ -133,6 +133,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
             cached_src = _SOURCE_CACHE.get(cache_key) if hooks_unmodified else None
             if cached_src is not None:
                 source, published = cached_src
+                source._producer._store.cache_snapshot_membership(published.snapshot)
             else:
                 try:
                     source = SourceVisibilityProducer(

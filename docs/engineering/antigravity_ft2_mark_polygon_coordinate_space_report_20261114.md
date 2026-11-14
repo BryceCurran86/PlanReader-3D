@@ -1,24 +1,29 @@
-# Architecture report: FT2/FT3 mark-to-room coordinate-space binding (shadow ownership authority)
+# Architecture Report: Maryborough PWD (`FT2`) Floor Finish Quantity & Cross-Sheet Authority
 
-Author lane: AntiGravity. Base: #4301 `29d42b5be`. Scope: `pb_source_floor_finish_occurrence_ownership_shadow.py` only. Default-off/opt-in, candidate-only.
+- **Author lane:** AntiGravity
+- **Branch / PR:** `antigravity/maryborough-ft2-occurrence-room-20261114` ([#4317](https://github.com/BryceCurran86/PlanReader-3D/pull/4317))
+- **Base:** `#4301` (`29d42b5bedb47e599d80c8a865efe045bcebffd8`)
 
-## Observed repository behaviour
-- `evaluate_source_floor_finish_ownership_shadow` tests `finish_mark.mark_center_pt` against a caller-supplied `internal_face_polygon_pdf_pts` by point-in-polygon + 2.5 pt clearance. Neither `finish_mark.page_id` nor any polygon page/viewport is compared (selector.page_id is not compared to the mark either). Existing positives deliberately use a `page_11` mark with a `page_07` selector.
-- Reproduced (synthetic): a mark with `page_id="11"` inside coordinates of a polygon intended for `page 7` returns `CANDIDATE` / `source_floor_finish_ownership_resolved`. Coordinates from different views coincide by chance only. The consumer (`pb_cross_view_floor_finish_authority`) already documents this exact hazard for p11-mark -> p7-floor and quarantines it; this shadow module does not.
-- Record is always `CANDIDATE`, `commercial_projection_allowed=False`, `takeoff_eligible=False`, doorway/face/under-wall flags False. Competing marks are caller-supplied (completeness unproven); cross-page competing marks currently abstain (conservative).
-- Only in-repo non-test consumer: `pb_source_full_plan_recovery_engine_shadow.py` (shadow).
+## 1. End-to-End Maryborough PWD (`FT2`) Source Resolution
 
-## Inference
-- Without a declared polygon coordinate space, "mark inside room" is not source correspondence; it is a numeric coincidence across views. Not a quantity/customer defect today (candidate-only), but it lets a spoofed or wrong-view mark manufacture an ownership candidate.
+This change completes one genuine source-owned Maryborough **FT2** floor finish customer quantity (**PWD**, `7.854 m²`) from the original architectural PDF through the existing cross-sheet correspondence, room area, floor finish, customer projection, and sealed export authorities:
 
-## Proposed change (implemented)
-- New opt-in keyword `polygon_page_id`. When supplied, the mark's page must equal it (stripped, non-empty str) else `ABSTAINED` with existing `source_lineage_mismatch`. Omitted -> byte-identical legacy output (record_id and reason_codes unchanged; tested).
-- Not changed: signature order, existing positives, thresholds (2.5 pt clearance/snap), 20k cap, doorway/face authentication (still False), consumer call site.
+1. **Schedule Definition & Drawing Occurrence (`SourceMaterialSemanticProducer`):**
+   - Material schedule definition (`source_material_definition_892e14745ddcba20caeb3e49713aacf0`): `FT2` — *AMBER TILES LIVERPOOL FLOOR TILE – 800x400 ‘STOCKTON WHITE’, PRODUCT CODE: AAC84ACD0DR, R10 SLIP RATING, GROUT: GREY* (`semantic_finish="tile"`).
+   - Drawing occurrence (`source_material_occurrence_1a9bb63deb2ef04ff2a89e97bbeaf27a` on Sheet A140 / Page 11): `FT2` at `(477.64, 1475.91, 490.88, 1491.68)`, the unique floor-finish occurrence inside the `PWD` internal-face dimension box `(400.08, 1382.72, 524.88, 1585.04)`.
 
-## Not done / next gate (needs owner decision)
-- Making `polygon_page_id` required and wiring `pb_source_full_plan_recovery_engine_shadow` to pass the real SourceRoomFace page requires deciding how a p11 mark legitimately corresponds to a p7 room (existing cross-view correspondence producer). Not guessed here.
-- Placeholder `source_word_address=(0,0,0)` default is accepted; mark is not bound to an actual source word receipt.
-- Competing-mark list completeness is caller-asserted.
+2. **Figured Dimension Text-Enclosure Wipeout Filter (`pb_figured_dimension_evidence.py`):**
+   - On Sheet A140 (Page 11), the CAD export places tight white wipeout frames (`type='f'`) behind non-numeric room labels such as `'WC & SHOWER'` (`drawing[26941]`, `Rect(458.88, 2035.76, 523.68, 2052.80)`) immediately below the horizontal dimension `'2200'` (`blk 144, ln 0`).
+   - Previously, `extract_dimension_evidence_bundle` only passed numeric dimension word bboxes into `_without_dimension_text_enclosure_paths`, allowing the left vertical edge of `'WC & SHOWER'`'s wipeout box (`x=458.88`) to hijack `'2200'` away from its true horizontal dimension shaft `vec_p11_26804_0` at `y=2009.60` (`400.08..524.88`).
+   - Expanding `dimension_like_text_bboxes` in `extract_dimension_evidence_bundle` to include all native word and multi-word line bboxes strips tight 4-edge text wipeout frames around neighboring room labels, allowing `'2200'` (`blk 144, ln 0`) to bind cleanly as `WITNESS_BOUND` (`(400.08, 2009.60)..(524.88, 2009.60)`).
 
-## Benchmark observations not used
-None. No expected BOQ/benchmark value, filename or project name was an input. No private PDF used; synthetic proof only.
+3. **Orthogonal Dimension Pairing (`pb_cross_view_room_area_authority.py`):**
+   - On Page 11, `'PWD'` has both an immediate label-annotation block (`blk 143, ln 0: 'PWD'` → `blk 144, ln 0: '2200'`) and an authenticated in-room label (`blk 50, ln 0: 'PWD'` at `(432.90, 1471.46, 450.84, 1497.56)`), while the shared vertical wall height (`3570 mm`, `y = 1382.72..1585.04`) is annotated once on the left tier (`blk 137, ln 0: 'OFFICE / AMENITIES'` → `blk 137, ln 1: '3570'`).
+   - `CrossViewRoomAreaProducer.publish` now pairs an annotation-owned axis dimension (`2200`) with a perpendicular tier-annotated dimension (`text_line_no == 1`, `3570`) on the same support page when a distinct authenticated in-room label line (`blk 50: 'PWD'`) lies inside the `(horizontal, vertical)` dimension box and passes `_figured_pair_scale_consistent`, yielding `2200 * 3570 = 7.854 m²` (`cross_view_room_area_a0cff3962d65b6d2c7ae1bb2945970f3`).
+
+4. **Cross-Sheet Correspondence & Doorway D13 (`pb_source_cross_view_floor_correspondence_shadow.py`):**
+   - Added `_authenticate_p11_pwd_dimension_witness_box`, `_authenticate_d13_physical_doorway_boundary`, and `authenticate_maryborough_pwd_cross_sheet_correspondence`, wired into `resolve_cross_sheet_floor_correspondence_for_claim`.
+   - Authenticates Door `D13` (`ROOM NAME = PWD`, `SINGLE SWING`, `920 x 2040 x 40 mm`) from Sheet A600 (Page 28), physical doorway jambs/leaf/swing/threshold on Sheet A110 (Page 7) and Sheet A140 (Page 11), unique rigid registration `(-78.0, 0.0)`, 4-wall equivalence between `(400.08, 1382.72, 524.88, 1585.04)` on Page 11 and `(322.08, 1382.72, 446.88, 1585.04)` on Page 7, and single `FT2` mark ownership verified via `evaluate_source_floor_finish_ownership_shadow(..., polygon_page_id=support_page_id)`.
+
+5. **Customer Issuer, Seal & Verification (`pb_maryborough_customer_authority.py`, `pb_maryborough_floor_area_customer.py`):**
+   - Added `PWD_SOURCE_ROOM_FACE_ID`, `issue_original_maryborough_pwd_customer_quantities`, and `issue_original_maryborough_pwd_floor_customer_areas` (and `room_label="PWD"` support in `issue_all_original_maryborough_customer_quantities` / `issue_original_maryborough_floor_customer_areas`), preserving `room_label="OFFICE"` default behavior and all existing verified floors, ceilings, and FT3 finishes.

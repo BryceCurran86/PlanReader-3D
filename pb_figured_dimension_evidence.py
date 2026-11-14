@@ -1601,26 +1601,36 @@ def extract_dimension_evidence_bundle(
     )
     native_words = list(_native_words(page))
     dimension_like_text_bboxes: list[tuple[float, float, float, float]] = []
+    line_word_bboxes: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
     for index, word in enumerate(native_words):
         try:
             text = str(word[4]).strip()
-            preceding = _same_line_preceding_context(native_words, index)
-            token = classify_dimension_token(text, preceding_context=preceding)
-            if (
-                not token.is_linear_dimension
-                and token.kind != DimensionTokenKind.YEAR.value
-            ):
+            if not text:
                 continue
-            dimension_like_text_bboxes.append(
-                (
-                    float(word[0]),
-                    float(word[1]),
-                    float(word[2]),
-                    float(word[3]),
-                )
+            wbbox = (
+                float(word[0]),
+                float(word[1]),
+                float(word[2]),
+                float(word[3]),
             )
+            dimension_like_text_bboxes.append(wbbox)
+            if len(word) >= 7:
+                line_word_bboxes.setdefault(
+                    (int(word[5]), int(word[6])),
+                    [],
+                ).append(wbbox)
         except (IndexError, TypeError, ValueError):
             continue
+    for line_bboxes in line_word_bboxes.values():
+        if len(line_bboxes) > 1:
+            dimension_like_text_bboxes.append(
+                (
+                    min(b[0] for b in line_bboxes),
+                    min(b[1] for b in line_bboxes),
+                    max(b[2] for b in line_bboxes),
+                    max(b[3] for b in line_bboxes),
+                )
+            )
     binding_segments = _without_dimension_text_enclosure_paths(
         segments,
         dimension_like_text_bboxes,
