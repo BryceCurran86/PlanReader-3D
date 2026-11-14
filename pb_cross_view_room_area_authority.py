@@ -1878,6 +1878,116 @@ class CrossViewRoomAreaProducer:
                                     vertical,
                                 )
                             )
+                    if owned_horizontals and not owned_verticals:
+                        in_room_lines = tuple(
+                            line
+                            for line in page_lines.get(page_id, ())
+                            if _norm_label(line.text) == label
+                        )
+                        verticals = tuple(
+                            item
+                            for item in trusted_dimensions
+                            if (
+                                item.orientation
+                                == DimensionOrientation.VERTICAL.value
+                                and item.text_line_no == 1
+                            )
+                        )
+                        for horizontal_line, horizontal in owned_horizontals:
+                            if _norm_label(horizontal_line.text) != label:
+                                continue
+                            for in_room_line in in_room_lines:
+                                if in_room_line == horizontal_line:
+                                    continue
+                                for vertical in verticals:
+                                    if not _line_inside_dimension_pair(
+                                        in_room_line,
+                                        horizontal,
+                                        vertical,
+                                    ):
+                                        continue
+                                    if not _figured_pair_scale_consistent(
+                                        page_id=page_id,
+                                        horizontal=horizontal,
+                                        vertical=vertical,
+                                    ):
+                                        continue
+                                    key = (
+                                        str(page_id),
+                                        horizontal.dimension_id,
+                                        vertical.dimension_id,
+                                    )
+                                    if key in seen_annotation_pairs:
+                                        continue
+                                    seen_annotation_pairs.add(key)
+                                    support_lines = tuple(
+                                        dict.fromkeys(
+                                            (horizontal_line, in_room_line)
+                                        )
+                                    )
+                                    annotation_matches.append(
+                                        (
+                                            support_lines,
+                                            page_id,
+                                            horizontal,
+                                            vertical,
+                                        )
+                                    )
+                    elif owned_verticals and not owned_horizontals:
+                        in_room_lines = tuple(
+                            line
+                            for line in page_lines.get(page_id, ())
+                            if _norm_label(line.text) == label
+                        )
+                        horizontals = tuple(
+                            item
+                            for item in trusted_dimensions
+                            if (
+                                item.orientation
+                                == DimensionOrientation.HORIZONTAL.value
+                                and item.text_line_no == 1
+                            )
+                        )
+                        for vertical_line, vertical in owned_verticals:
+                            if _norm_label(vertical_line.text) != label:
+                                continue
+                            for in_room_line in in_room_lines:
+                                if in_room_line == vertical_line:
+                                    continue
+                                for horizontal in horizontals:
+                                    if not _line_inside_dimension_pair(
+                                        in_room_line,
+                                        horizontal,
+                                        vertical,
+                                    ):
+                                        continue
+                                    if not _figured_pair_scale_consistent(
+                                        page_id=page_id,
+                                        horizontal=horizontal,
+                                        vertical=vertical,
+                                    ):
+                                        continue
+                                    key = (
+                                        str(page_id),
+                                        horizontal.dimension_id,
+                                        vertical.dimension_id,
+                                    )
+                                    if key in seen_annotation_pairs:
+                                        continue
+                                    seen_annotation_pairs.add(key)
+                                    support_lines = tuple(
+                                        dict.fromkeys(
+                                            (in_room_line, vertical_line)
+                                        )
+                                    )
+                                    annotation_matches.append(
+                                        (
+                                            support_lines,
+                                            page_id,
+                                            horizontal,
+                                            vertical,
+                                        )
+                                    )
                 matches.extend(annotation_matches)
 
             if len(matches) != 1:

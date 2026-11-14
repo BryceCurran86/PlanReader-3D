@@ -409,3 +409,71 @@ def test_forged_threshold_id_cannot_authenticate_doorway_or_faces():
     assert res.record.doorway_transition_authenticated is False
     assert res.record.terminates_at_internal_faces is False
     assert res.record.under_wall_finish_excluded is False
+
+
+def test_declared_polygon_page_rejects_mark_from_other_view_by_coordinate_coincidence():
+    """A p11 mark inside p7-space coordinates is only a numeric coincidence."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC_FT2_P11",
+        page_id="page_11",
+        material_code="FT2",
+        mark_center_pt=(150.0, 200.0),
+        source_word_address=(56, 0, 0),
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=mark, internal_face_polygon_pdf_pts=poly,
+        polygon_page_id="page_07",
+    )
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert res.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert res.record is None
+
+
+def test_declared_polygon_page_matching_mark_page_stays_candidate_only():
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC_FT2_P11",
+        page_id="page_11",
+        material_code="FT2",
+        mark_center_pt=(150.0, 200.0),
+        source_word_address=(56, 0, 0),
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=mark, internal_face_polygon_pdf_pts=poly,
+        polygon_page_id="page_11",
+    )
+    assert res.status is EvidenceResolutionStatus.CANDIDATE
+    assert res.record.commercial_projection_allowed is False
+    assert res.record.takeoff_eligible is False
+    assert res.record.doorway_transition_authenticated is False
+
+
+@pytest.mark.parametrize("bad", ["", "   ", 7, b"page_11"])
+def test_declared_polygon_page_malformed_abstains(bad):
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC", page_id="page_11", material_code="FT2",
+        mark_center_pt=(150.0, 200.0), source_word_address=(56, 0, 0),
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=mark, internal_face_polygon_pdf_pts=poly,
+        polygon_page_id=bad,
+    )
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_polygon_page_omitted_preserves_legacy_candidate_output():
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC", page_id="page_11", material_code="FT2",
+        mark_center_pt=(150.0, 200.0), source_word_address=(56, 0, 0),
+    )
+    a = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=mark, internal_face_polygon_pdf_pts=poly)
+    b = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=mark, internal_face_polygon_pdf_pts=poly,
+        polygon_page_id="page_11")
+    assert a.status is b.status is EvidenceResolutionStatus.CANDIDATE
+    assert a.record.record_id == b.record.record_id
+    assert a.reason_codes == b.reason_codes

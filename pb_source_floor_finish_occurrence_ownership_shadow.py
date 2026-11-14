@@ -276,8 +276,15 @@ def evaluate_source_floor_finish_ownership_shadow(
     doorway_transitions: Sequence[SourceDoorwayThreshold] = (),
     clearance_tolerance_pt: float = DEFAULT_CLEARANCE_TOLERANCE_PT,
     snap_tolerance_pt: float = DEFAULT_SNAP_TOLERANCE_PT,
+    polygon_page_id: str | None = None,
 ) -> SourceFloorFinishOwnershipResult:
-    """Evaluate whether an authentic floor finish occurrence owns an exact physical floor space."""
+    """Evaluate whether an authentic floor finish occurrence owns an exact physical floor space.
+
+    `polygon_page_id` is opt-in. When declared, the polygon's coordinate space is
+    asserted to be that page, and a mark observed on any other page cannot be
+    tested against it: coordinates from different views coincide only by chance.
+    Omitting it keeps the legacy (candidate-only, non-authoritative) behaviour.
+    """
     if not isinstance(selector, SourceFloorFinishOwnershipSelector):
         return SourceFloorFinishOwnershipResult(
             status=EvidenceResolutionStatus.ABSTAINED,
@@ -290,6 +297,19 @@ def evaluate_source_floor_finish_ownership_shadow(
             reason_codes=(SOURCE_LINEAGE_MISMATCH,),
             selector=selector,
         )
+
+    if polygon_page_id is not None:
+        if (
+            not isinstance(polygon_page_id, str)
+            or not polygon_page_id.strip()
+            or not isinstance(finish_mark.page_id, str)
+            or finish_mark.page_id.strip() != polygon_page_id.strip()
+        ):
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
 
     # 1. Material code check
     if finish_mark.material_code.strip().upper() != selector.material_code.strip().upper():
