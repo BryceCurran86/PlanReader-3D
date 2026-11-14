@@ -1731,20 +1731,30 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
 
     # 1. Resolve geometry input: either directly passed segments or extracted from doc/bytes/pdf_path
     opened_doc = None
-    if doc is None:
+    has_authentic_doc = False
+    if doc is not None:
+        has_authentic_doc = True
+    else:
         if source_bytes is not None:
+            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
             import fitz
             try:
                 opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_pdf_unreadable",))
         elif pdf_path is not None:
             import fitz
             try:
                 path = Path(pdf_path)
-                opened_doc = fitz.open(stream=path.read_bytes(), filetype="pdf")
+                data = path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != source_sha256:
+                    return _abstained(reason_codes=("source_sha_mismatch",))
+                opened_doc = fitz.open(stream=data, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_path_unavailable",))
 
