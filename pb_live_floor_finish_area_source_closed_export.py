@@ -15,7 +15,7 @@ from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -629,6 +629,55 @@ def build_live_floor_finish_area_source_traces(
         # A foreign simple room polygon cannot lend source ownership to a
         # previously FIRM floor-finish area. Roomless legacy runs stay intact.
         if claim.canonical_rooms:
+            if getattr(claim, "status", None) is EvidenceResolutionStatus.CORROBORATED:
+                if not claim.canonical_walls:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish canonical walls missing: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "canonical_wall_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_wall_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "unresolved_wall_candidate_ids", ()):
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim retains unresolved wall candidates: {quantity.quantity_id}"
+                    )
+                if getattr(claim, "canonical_room_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_room_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
+                if claim.canonical_floors and getattr(claim, "canonical_floor_status", None) is not EvidenceResolutionStatus.CORROBORATED:
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish claim canonical_floor_status is not CORROBORATED: {quantity.quantity_id}"
+                    )
+            if claim.canonical_walls:
+                wall_by_id = {
+                    w.canonical_wall_id: w
+                    for w in claim.canonical_walls
+                    if getattr(w, "canonical_wall_id", None)
+                }
+                owners_for_walls = tuple(
+                    r for r in claim.canonical_rooms
+                    if getattr(r, "canonical_room_id", None) == floor.room_entity_id
+                )
+                if len(owners_for_walls) == 1:
+                    r_walls = owners_for_walls[0]
+                    b_ids = getattr(r_walls, "canonical_bounding_wall_ids", ()) or getattr(r_walls, "bounding_wall_ids", ())
+                    if b_ids:
+                        for wid in b_ids:
+                            if wid not in wall_by_id:
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}"
+                                )
+                            w_obj = wall_by_id[wid]
+                            if getattr(w_obj, "role", None) != "internal_finished_wall_face":
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall is not an internal finished face: {wid}"
+                                )
+                            if getattr(w_obj, "physical_identity_resolved", None) is not True:
+                                raise SourceClosedRunConflictError(
+                                    f"floor-finish bounding wall physical identity is not resolved: {wid}"
+                                )
             owners = tuple(
                 room for room in claim.canonical_rooms
                 if getattr(room, "canonical_room_id", None) == floor.room_entity_id

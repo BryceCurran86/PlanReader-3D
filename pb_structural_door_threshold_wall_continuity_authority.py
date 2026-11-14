@@ -106,6 +106,20 @@ class StructuralDoorApertureEvaluation:
 class StructuralDoorThresholdWallContinuityAuthority:
     """Evaluates opening candidates to discriminate door apertures from solid wall continuity."""
 
+    def assess_all_scheduled_door_heads(
+        self, *, source, revision_id, schedule_page_id,
+        ceiling_page_ids=(), ceiling_pair_ids_by_door=None, enabled=False,
+    ):
+        """Default-off owner presumption; never physical or metric authority."""
+        from pb_original_door_head_wall_default import (
+            collect_original_door_head_wall_defaults,
+        )
+        return collect_original_door_head_wall_defaults(
+            source=source, revision_id=revision_id,
+            schedule_page_id=schedule_page_id, ceiling_page_ids=ceiling_page_ids,
+            ceiling_pair_ids_by_door=ceiling_pair_ids_by_door, enabled=enabled,
+        )
+
     @staticmethod
     def _compute_ordered_jambs(
         p_a: tuple[float, float], p_b: tuple[float, float]

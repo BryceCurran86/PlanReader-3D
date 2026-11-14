@@ -43,6 +43,13 @@ highest-confidence / largest-box / edit-distance choice, no confidence
 threshold (OCR confidence is retained only as diagnostic provenance), and no
 vocabulary correction.
 
+The separately selected material-description mode also accepts straight versus
+typographic quotation marks around an alphabetic name. Both raster readings
+must still agree literally, and their actual text is retained with the original
+native claim and comparison policy in its audit. Quotes cannot disappear;
+letters, case, digits and other punctuation cannot change. This comparison never
+authenticates native quote glyphs and is not used by ordinary/glyph-ledger OCR.
+
 The two views are two independently rendered raster scales read by the SAME OCR
 engine. They are not two independent OCR engines and are never described as
 such.
@@ -59,6 +66,7 @@ from dataclasses import dataclass
 import hashlib
 import io
 import math
+import re
 import unicodedata
 
 import fitz
@@ -109,6 +117,8 @@ RASTER_TEXT_OCR_GEOMETRY_INVALID = "raster_text_ocr_geometry_invalid"
 RASTER_TEXT_VIEW_DISAGREEMENT = "raster_text_view_disagreement"
 RASTER_TEXT_NATIVE_MISMATCH = "raster_text_native_claim_mismatch"
 RASTER_TEXT_RECORD_UNAVAILABLE = "raster_text_record_unavailable"
+MATERIAL_QUOTE_COMPARISON_POLICY = "material-description-quote-comparison-shadow:v1"
+MATERIAL_QUOTE_VARIANT = "material_description_quote_variant"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -774,6 +784,21 @@ def normalize_reading(text: Optional[str]) -> str:
     return unicodedata.normalize("NFC", str(text or "")).strip()
 
 
+def _material_description_quote_variant(native: str, reading: str) -> bool:
+    """Compare quote typography around an alphabetic material name only.
+
+    The actual raster reading is retained. Quotes cannot disappear or change
+    from single to double; letters, case and punctuation stay literal. Code,
+    numeric, dimension and compound tokens never enter this comparison.
+    This does not authenticate the native Unicode claim or its quote glyphs.
+    """
+    if not any(char in native for char in "“”‘’"):
+        return False
+    if re.fullmatch(r'(?:[“”]?[A-Za-z]+[“”]?|[‘’]?[A-Za-z]+[‘’]?)[.,;:]?', native) is None:
+        return False
+    return native.translate(str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})) == reading
+
+
 def _geometry_valid(line: OCRLine, size_px: tuple[int, int]) -> bool:
     try:
         x0, y0, x1, y1 = (float(v) for v in line.bbox_px)
@@ -824,6 +849,8 @@ class RasterTextCorroborationProducer:
         *,
         _seal: object = None,
         _allow_clip_only_shadow: bool = False,
+        _recognize_native_words_shadow: bool = False,
+        _material_quote_comparison_shadow: bool = False,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
@@ -836,6 +863,17 @@ class RasterTextCorroborationProducer:
         self._text_authority: PdfTextIntegrityAuthority = source_visibility_producer.text_integrity_authority()
         self._backend = backend
         self._allow_clip_only_shadow = _allow_clip_only_shadow
+        if type(_recognize_native_words_shadow) is not bool:
+            raise ValueError("native_word_recognition_shadow_requires_explicit_bool")
+        self._recognize_native_words_shadow = _recognize_native_words_shadow
+        if type(_material_quote_comparison_shadow) is not bool:
+            raise ValueError("material_quote_comparison_shadow_requires_explicit_bool")
+        if _material_quote_comparison_shadow and (
+            not _recognize_native_words_shadow or _allow_clip_only_shadow
+        ):
+            raise ValueError("material_quote_comparison_requires_glyph_only_word_mode")
+        self._material_quote_comparison_shadow = _material_quote_comparison_shadow
+        self._material_quote_proofs = {}
         self._glyph_cover_proofs = {}
         self._results: dict[tuple[str, str, str, str, str], RasterTextCorroborationResult] = {}
 
@@ -856,6 +894,21 @@ class RasterTextCorroborationProducer:
         return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
 
     @classmethod
+    def for_native_word_recognition_shadow(
+        cls, source_visibility_producer: SourceVisibilityProducer,
+    ) -> "RasterTextCorroborationProducer":
+        """Recognize an owned native word without admitting clip-only receipts.
+
+        This opt-in changes only RapidOCR crop inference configuration. The
+        ordinary glyph-integrity and all two-view source gates still apply.
+        """
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        backend, _selection_reason = select_production_ocr_backend()
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
+                   _recognize_native_words_shadow=True)
+
+    @classmethod
     def for_physical_plan_view_shadow(
         cls, source_visibility_producer: SourceVisibilityProducer,
     ) -> "RasterTextCorroborationProducer":
@@ -870,6 +923,18 @@ class RasterTextCorroborationProducer:
         backend, _selection_reason = select_production_ocr_backend()
         return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
                    _allow_clip_only_shadow=True)
+
+    @classmethod
+    def for_material_description_word_shadow(
+        cls, source_visibility_producer: SourceVisibilityProducer,
+    ) -> "RasterTextCorroborationProducer":
+        """Material-only raster reading; ordinary native/glyph trust is unchanged."""
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        backend, _selection_reason = select_production_ocr_backend()
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
+                   _recognize_native_words_shadow=True,
+                   _material_quote_comparison_shadow=True)
 
     @classmethod
     def from_source_visibility_producer_for_tests(
@@ -907,6 +972,14 @@ class RasterTextCorroborationProducer:
         if result.status is not EvidenceResolutionStatus.CORROBORATED:
             return ()
         return deepcopy(self._glyph_cover_proofs.get(selector.key, ()))
+
+    def material_quote_comparison_proof(self, selector: RasterTextCorroborationSelector):
+        """Source-revalidated audit of the native claim and actual raster text."""
+        from copy import deepcopy
+        result = self.publish(selector)
+        if result.status is not EvidenceResolutionStatus.CORROBORATED:
+            return None
+        return deepcopy(self._material_quote_proofs.get(selector.key))
 
     def _store(
         self, selector: RasterTextCorroborationSelector, result: RasterTextCorroborationResult
@@ -1073,7 +1146,22 @@ class RasterTextCorroborationProducer:
             except Exception:
                 return _abstain(RASTER_TEXT_RENDER_FAILED, "render_png_undecodable")
             try:
-                lines = tuple(self._backend.extract_lines(cropped, dpi=int(dpi)))
+                # This explicitly opt-in path already owns one native word
+                # crop. RapidOCR's page detector can reject that tight crop;
+                # use its existing recognition-only seam without retrying a
+                # failed reading or changing the ordinary production path.
+                # Legend word recognition is independent of clip admissibility.
+                from pb_portable_raster_ocr_authority import RapidOCRBackend
+                isolated_word_shadow = (
+                    (self._allow_clip_only_shadow or self._recognize_native_words_shadow)
+                    and type(self._backend) is RapidOCRBackend
+                )
+                if isolated_word_shadow:
+                    lines = tuple(self._backend.extract_lines(
+                        cropped, dpi=int(dpi), detect=False,
+                    ))
+                else:
+                    lines = tuple(self._backend.extract_lines(cropped, dpi=int(dpi)))
             except Exception:
                 return _abstain(RASTER_TEXT_BACKEND_ERROR)
 
@@ -1138,11 +1226,21 @@ class RasterTextCorroborationProducer:
         readings = [view.ocr_reading for view in views]
         if len(set(readings)) != 1:
             return _abstain(RASTER_TEXT_VIEW_DISAGREEMENT)
-        if readings[0] != native_claim:
+        quote_variant = readings[0] != native_claim
+        if quote_variant and not (
+            self._material_quote_comparison_shadow
+            and _material_description_quote_variant(native_claim, readings[0])
+        ):
             return _abstain(RASTER_TEXT_NATIVE_MISMATCH)
+        corroborated_text = readings[0] if quote_variant else native_claim
         if glyph_covers:
             self._glyph_cover_proofs[selector.key] = tuple(glyph_covers)
 
+        backend_version = self._backend.version
+        if isolated_word_shadow:
+            backend_version += ";native-word-recognition-shadow:detect=False"
+        if self._material_quote_comparison_shadow:
+            backend_version += ";" + MATERIAL_QUOTE_COMPARISON_POLICY
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
@@ -1157,13 +1255,18 @@ class RasterTextCorroborationProducer:
             "source_partition_id": partition_id,
             "render_dpis": tuple(RASTER_TEXT_CORROBORATION_DPIS),
             "backend_name": self._backend.name,
-            "backend_version": self._backend.version,
+            "backend_version": backend_version,
             "views": tuple(
                 (v.dpi, v.image_size_px, v.image_png_sha256, v.ocr_reading)
                 for v in views
             ),
-            "corroborated_text": native_claim,
+            "corroborated_text": corroborated_text,
         }
+        if self._material_quote_comparison_shadow:
+            payload["material_description_comparison"] = {
+                "policy_id": MATERIAL_QUOTE_COMPARISON_POLICY,
+                "native_claim": native_claim,
+            }
         if ocr_rotation_degrees != 0 or raster_bbox != bbox:
             payload["source_owned_ocr_target"] = {
                 "clip_pt": raster_bbox,
@@ -1185,14 +1288,22 @@ class RasterTextCorroborationProducer:
             source_partition_id=partition_id,
             render_dpis=tuple(RASTER_TEXT_CORROBORATION_DPIS),
             backend_name=self._backend.name,
-            backend_version=self._backend.version,
+            backend_version=backend_version,
             views=tuple(views),
-            corroborated_text=native_claim,
+            corroborated_text=corroborated_text,
         )
+        if quote_variant:
+            self._material_quote_proofs[selector.key] = {
+                "policy_id": MATERIAL_QUOTE_COMPARISON_POLICY,
+                "native_claim": native_claim,
+                "raster_reading": corroborated_text,
+                "record_id": record.record_id,
+            }
         return RasterTextCorroborationResult(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(RASTER_TEXT_CORROBORATED,),
-            corroborated_text=native_claim,
+            reason_codes=((RASTER_TEXT_CORROBORATED, MATERIAL_QUOTE_VARIANT)
+                          if quote_variant else (RASTER_TEXT_CORROBORATED,)),
+            corroborated_text=corroborated_text,
             record=record,
         )
 

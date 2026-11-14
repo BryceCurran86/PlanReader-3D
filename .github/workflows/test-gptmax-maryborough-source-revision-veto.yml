@@ -1,0 +1,45 @@
+name: GPT MAX Maryborough exact-original-revision source-veto regression
+
+on:
+  push:
+    branches: [gptmax/maryborough-crossview-owned-revision-veto-20261108]
+  pull_request:
+    paths:
+      - pb_source_cross_view_floor_correspondence_shadow.py
+      - tests/test_gptmax_maryborough_revision_source_veto.py
+      - .github/workflows/test-gptmax-maryborough-source-revision-veto.yml
+permissions:
+  contents: read
+
+jobs:
+  maryborough-revision:
+    name: Source-owned PDF revision veto (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install production and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Verify live cross-view revision ownership and existing source-neutral producer
+        env:
+          PYTHONPATH: .:tests
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pytest -q \
+            tests/test_gptmax_maryborough_revision_source_veto.py \
+            tests/test_source_cross_view_floor_correspondence_shadow.py \
+            tests/test_maryborough_office_ft3_source_customer.py
+          ruff check --select F821,F823 pb_source_cross_view_floor_correspondence_shadow.py tests/test_gptmax_maryborough_revision_source_veto.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_v2_truth_separation.py

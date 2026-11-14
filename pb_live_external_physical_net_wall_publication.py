@@ -62,6 +62,73 @@ PERIMETER_WALLING_SEMANTIC_KEY = "perimeter_walling"
 CANONICAL_WALL_OBJECT_SCHEMA_VERSION = "1.0.0"
 
 
+
+def _source_wall_above_frame_head_is_retained(
+    *,
+    wall_length_m: float,
+    wall_height_m: float,
+    opening_void_polygons: tuple,
+    net_wall_polygon: object,
+) -> bool:
+    """Verify original full-height wall remains above every true opening.
+
+    A confirmed door/frame is an aperture ONLY from z0 through its source
+    authenticated z1 (frame head). Above z1, wall runs to the authenticated
+    wall/ceiling height unless another source-owned opening overlaps it.
+    This is an exact geometric check against existing ORIGINAL producers,
+    not an assumed height, extra deduction, quantity, or new geometry engine.
+
+    The other actual opening voids may remove a head portion (e.g. a
+    source-authenticated transom); no fake solid wall is inserted there.
+    """
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+
+    if not (
+        type(wall_length_m) in (float, int)
+        and type(wall_height_m) in (float, int)
+        and math.isfinite(wall_length_m)
+        and math.isfinite(wall_height_m)
+        and wall_length_m > 0.0
+        and wall_height_m > 0.0
+    ):
+        return False
+    voids = tuple(opening_void_polygons)
+    for index, void in enumerate(voids):
+        if not (
+            hasattr(void, "is_valid")
+            and bool(void.is_valid)
+            and not bool(void.is_empty)
+        ):
+            return False
+        left, bottom, right, top = (float(v) for v in void.bounds)
+        if (
+            not all(math.isfinite(v) for v in (left, bottom, right, top))
+            or left < 0.0
+            or bottom < 0.0
+            or right > wall_length_m
+            or top > wall_height_m
+        ):
+            return False
+        if top >= wall_height_m:
+            # A genuinely source-attested full-height door / opening may
+            # have no wall header, but must not make neighboring wall void.
+            continue
+        head = box(left, top, right, wall_height_m)
+        # Honor source-authenticated windows/transoms above the door frame.
+        if len(voids) > 1:
+            others = unary_union([v for i, v in enumerate(voids) if i != index])
+            head = head.difference(others)
+        if head.is_empty:
+            continue
+        # This compares actual source/authority-derived geometry. It does not
+        # create a wall by extending a topological doorway closing chord.
+        missing_head = head.difference(net_wall_polygon)
+        if missing_head.area > max(1e-10, head.area * 1e-10):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class CanonicalWallPlanMember:
     """Authenticated plan-space geometry retained for one wall member candidate."""
@@ -765,6 +832,23 @@ def compose_live_external_physical_net_wall_publication(
                 void_polygons,
             )
         except ValueError:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        # Owner rule, enforced in the ORIGINAL live wall issuer:
+        # the temporary room-topology doorway closure has no height.
+        # A door void ends at its AUTHENTICATED frame head z1. The physical
+        # gross wall must still be present over the frame up to the proved
+        # wall/ceiling head, except for independently attested other voids.
+        if not _source_wall_above_frame_head_is_retained(
+            wall_length_m=float(gross_record.length_m),
+            wall_height_m=float(gross_record.height_m),
+            opening_void_polygons=tuple(void_polygons),
+            net_wall_polygon=net_polygon,
+        ):
             return _blocked(
                 revision_id=revision_id,
                 status=EvidenceResolutionStatus.CONFLICT,

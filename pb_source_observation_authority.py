@@ -17,6 +17,7 @@ import hashlib
 import math
 from operator import attrgetter
 from typing import Any, Mapping, Optional, Sequence
+import weakref
 
 import fitz
 
@@ -48,6 +49,8 @@ PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
+_NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES = 2
+_NATIVE_RENDER_METHODS = (fitz.Page.get_pixmap, fitz.Page.get_displaylist)
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
 # Representation cache only. Lookups stay the same above and below this size.
@@ -461,6 +464,15 @@ def committed_record_is_trusted(store: "_SourceObservationStore", snapshot_id: s
     )
 
 
+
+_REGISTERED_STORES_BY_SNAPSHOT: weakref.WeakValueDictionary[str, "_SourceObservationStore"] = weakref.WeakValueDictionary()
+
+
+def get_source_observation_store_for_snapshot(snapshot_id: str) -> Optional["_SourceObservationStore"]:
+    """Retrieve authentic _SourceObservationStore for a producer-issued snapshot_id."""
+    return _REGISTERED_STORES_BY_SNAPSHOT.get(str(snapshot_id))
+
+
 class _SourceObservationStore:
     def __init__(self) -> None:
         self.generation = 0
@@ -542,6 +554,8 @@ class _SourceObservationStore:
         cached = (snapshot, frozenset(snapshot.observation_ids))
         self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
         self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.snapshot_id] = self
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.revision_id] = self
         while len(self.snapshot_observation_id_sets) > _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS:
             self.snapshot_observation_id_sets.popitem(last=False)
         return cached
@@ -728,6 +742,7 @@ class SourceObservationProducer:
             "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]"
         ) = OrderedDict()
         self._native_image_scope_cache: "OrderedDict[tuple[str, str, str, int], tuple]" = OrderedDict()
+        self._native_clip_display_lists: "OrderedDict[tuple[str, int], fitz.DisplayList]" = OrderedDict()
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
@@ -809,6 +824,7 @@ class SourceObservationProducer:
         if cached is not None and cached[0] is source_bytes:
             return cached[1]
         if cached is not None:
+            self._native_clip_display_lists.clear()
             try:
                 cached[1].close()
             except Exception:
@@ -835,16 +851,21 @@ class SourceObservationProducer:
             and cached[1] == page_number
         ):
             return cached[2]
-        pdf = self._retained_source_pdf(source_bytes)
-        if page_number < 1 or page_number > int(pdf.page_count):
-            return None
-        page = pdf.load_page(page_number - 1)
-        rawdict = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS) or {}
-        traces = tuple(page.get_texttrace() or ())
-        matrix = page.rotation_matrix
-        rotation = fitz.Matrix(
-            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
-        )
+        # Native text extraction can mark a PDF dirty through library
+        # bookkeeping. Keep that temporary document separate from the retained
+        # exact-source renderer, whose dirty-document cache guard stays intact.
+        # Retain the existing byte-identity lifetime and one-page facts cache.
+        self._retained_source_pdf(source_bytes)
+        with fitz.open(stream=source_bytes, filetype="pdf") as pdf:
+            if page_number < 1 or page_number > int(pdf.page_count):
+                return None
+            page = pdf.load_page(page_number - 1)
+            rawdict = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS) or {}
+            traces = tuple(page.get_texttrace() or ())
+            matrix = page.rotation_matrix
+            rotation = fitz.Matrix(
+                matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
+            )
         facts = (rawdict, traces, rotation)
         self._source_page_text_facts = (source_bytes, page_number, facts)
         return facts
@@ -1082,11 +1103,34 @@ class SourceObservationProducer:
                         f"{INVALID_RENDER_CLIP}: transformed clip lies outside the display page"
                     )
 
-                pix = page.get_pixmap(
-                    matrix=fitz.Matrix(scale, scale),
-                    clip=render_clip,
-                    alpha=False,
-                )
+                # PyMuPDF's ordinary get_pixmap builds this same display list
+                # on every crop. Retain at most two immutable source pages;
+                # each DPI still renders its own exact validated clip. Custom
+                # renderer hooks and mutable pages keep the ordinary path.
+                if (
+                    not pdf.is_dirty
+                    and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
+                    and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
+                ):
+                    cache_key = (source_sha256, page_number)
+                    display_list = self._native_clip_display_lists.get(cache_key)
+                    if display_list is None:
+                        display_list = page.get_displaylist(annots=True)
+                        self._native_clip_display_lists[cache_key] = display_list
+                    self._native_clip_display_lists.move_to_end(cache_key)
+                    while len(self._native_clip_display_lists) > _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES:
+                        self._native_clip_display_lists.popitem(last=False)
+                    pix = display_list.get_pixmap(
+                        matrix=fitz.Matrix(scale, scale),
+                        clip=render_clip,
+                        alpha=False,
+                    )
+                else:
+                    pix = page.get_pixmap(
+                        matrix=fitz.Matrix(scale, scale),
+                        clip=render_clip,
+                        alpha=False,
+                    )
             png_bytes = pix.tobytes("png")
         finally:
             if "pix" in locals() and pix is not None:
@@ -1977,6 +2021,8 @@ class SourceObservationProducer:
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
         self._store.cache_snapshot_membership(snapshot)
+        _REGISTERED_STORES_BY_SNAPSHOT[snapshot.snapshot_id] = self._store
+        _REGISTERED_STORES_BY_SNAPSHOT[revision.revision_id] = self._store
         if parent_id is not None:
             self._store.observations.fork(snapshot.snapshot_id, parent_id)
             self._store.record_fingerprints.fork(snapshot.snapshot_id, parent_id)
@@ -2179,6 +2225,7 @@ class SourceObservationAuthority:
 
 
 __all__ = [
+    "get_source_observation_store_for_snapshot",
     "LINEAGE_UNAVAILABLE",
     "NativePageImagePlacement",
     "OBSERVATION_UNAVAILABLE",

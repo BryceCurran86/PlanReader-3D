@@ -549,6 +549,9 @@ class OpeningHostBindingProducer:
         self._universe = host_wall_universe_authority
         self._supplemental_wall_authority = supplemental_wall_candidate_authority
         self._results: dict[_BindingKey, OpeningHostBindingResult] = {}
+        # Only selectors accepted by this producer's physical/host reproof may
+        # establish that shared wall members belong to distinct apertures.
+        self._opening_selectors: dict[_BindingKey, ObservationSelector] = {}
         self._local_boundary_scope_indexes: dict[
             tuple[str, str, str, str, str, str],
             _LocalBoundaryScopeInvariantIndex,
@@ -629,6 +632,7 @@ class OpeningHostBindingProducer:
             status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
         ) -> OpeningHostBindingResult:
             self._results.pop(key, None)
+            self._opening_selectors.pop(key, None)
             return _blocked_binding(*reasons, status=status)
 
         universe = self._universe.resolve_scope(host_universe_selector)
@@ -995,18 +999,100 @@ class OpeningHostBindingProducer:
             # exact immutable source/opening selector. A newly issued
             # authority must not retain the earlier host as CORROBORATED.
             self._results.pop(key, None)
+            self._opening_selectors.pop(key, None)
             raise RuntimeError("opening host-binding producer equivocation")
         self._results[key] = result
+        self._opening_selectors[key] = opening_left_selector
         return result
 
-    def drop_borrowed_mixed_scope_hosts(self) -> None:
-        """Demote mixed-scope hosts whose every member is already another host.
+    def _shared_piers_source_partitioned(self, record, results) -> bool:
+        """Reprove every shared-member peer through the physical source owner.
 
-        A shared pier may appear beside two openings. It cannot uniquely own
-        both missing flanks. Ordinary/default hosts that still have at least
-        one unshared member stay. No first/nearest ranking.
+        A middle aperture can legitimately share both solid piers. Neither
+        member counts nor different physical IDs prove that; source-owned
+        aperture partitions must agree for every peer in the original census.
         """
-        self._results = _exclusive_mixed_scope_host_results(self._results)
+        from pb_physical_opening_authority import PhysicalOpeningPartitionReceipt
+
+        members = set(record.member_wall_candidate_ids)
+        if len(members) != 2 or len(record.member_wall_candidate_ids) != 2:
+            return False
+        peers = tuple(
+            result.record for result in results.values()
+            if result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.record is not None
+            and result.record.opening_identity_id != record.opening_identity_id
+            and _physical_source_scope(result.record) == _physical_source_scope(record)
+            and not members.isdisjoint(result.record.member_wall_candidate_ids)
+        )
+        if not peers or members != {
+            member for peer in peers for member in peer.member_wall_candidate_ids
+            if member in members
+        }:
+            return False
+
+        def reprove(binding):
+            key = _binding_key(
+                binding.document_id, binding.revision_id, binding.source_sha256,
+                binding.snapshot_id, binding.page_id, binding.decision_scope_id,
+                binding.opening_identity_id,
+            )
+            selector = self._opening_selectors.get(key)
+            if selector is None:
+                return None
+            proof = self._opening.prove_existence(selector)
+            opening = proof.existence_record
+            if (proof.status is not EvidenceResolutionStatus.CORROBORATED
+                    or proof.proposition != PHYSICAL_OPENING_EXISTS
+                    or opening is None
+                    or opening.record_id != binding.opening_identity_id
+                    or any(getattr(opening, field) != getattr(binding, field)
+                           for field in ("document_id", "revision_id", "source_sha256",
+                                         "snapshot_id", "page_id"))):
+                return None
+            return selector, opening
+
+        try:
+            selected = reprove(record)
+            if selected is None:
+                return False
+            left, opening = selected
+            for peer in peers:
+                other = reprove(peer)
+                if other is None:
+                    return False
+                right, other_opening = other
+                receipt = self._opening.partition_receipt(left, right)
+                if (type(receipt) is not PhysicalOpeningPartitionReceipt
+                        or not receipt.is_physically_distinct
+                        or receipt.grants_quantity or receipt.grants_firm_authority
+                        or {receipt.left_record_id, receipt.right_record_id}
+                        != {opening.record_id, other_opening.record_id}
+                        or any(getattr(receipt, field) != getattr(record, field)
+                               for field in ("document_id", "revision_id", "source_sha256",
+                                             "snapshot_id", "page_id"))
+                        or self._opening.verify_partition_receipt(receipt, left, right) is not True):
+                    return False
+            return True
+        except Exception:
+            # A source-reader failure never releases the shared-member veto.
+            return False
+
+    def drop_borrowed_mixed_scope_hosts(self) -> None:
+        """Demote borrowed mixed-scope hosts, retaining source-proven partitions.
+
+        Default policy keeps the conservative shared-member veto. The existing
+        source-fragment opt-in may reprove distinct apertures sharing solid
+        piers; it cannot grant a host from caller verdicts or missing source.
+        """
+        previous = self._results
+        exclusive = _exclusive_mixed_scope_host_results(previous)
+        if self._source_fragment_roles_shadow:
+            for key, result in previous.items():
+                if (result.record is not None and exclusive[key].record is None
+                        and self._shared_piers_source_partitioned(result.record, previous)):
+                    exclusive[key] = result
+        self._results = exclusive
 
     def published_results(self) -> Mapping[_BindingKey, OpeningHostBindingResult]:
         return MappingProxyType(dict(self._results))

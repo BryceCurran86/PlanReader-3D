@@ -1,0 +1,9 @@
+# Native text and raster document isolation — 11 November 2026
+
+The original source visibility path calls `SourceObservationProducer.page_text_facts` before material OCR. On the verified original Maryborough PDF, `get_text("rawdict", flags=TEXTFLAGS_WORDS)` marks the open PyMuPDF document dirty. The document had also been retained for raster rendering, so the existing dirty-document guard correctly disabled clipped display-list reuse for the remainder of the actual source run. A standalone clean-document rendering sample therefore did not represent the full pipeline.
+
+`page_text_facts` now reads the same exact bytes through one short-lived PDF document, closing it on success, invalid page and exceptions. Its one-page facts cache and byte-identity lifetime remain intact. The existing single retained render document, two-page display-list bound, modified-document/custom-render-hook fallback, source validation, native frame/clip rejection, PNG rendering and parent provenance remain unchanged. No extra PDF document is retained.
+
+The source-neutral regression first failed in all four text-read/render ordering and rotation cases. After isolation, all seven new resource/render tests and the existing clip/render tests passed (71 total). A private, unmodified original-byte diagnostic independently compared page7/page11 raw text facts, native text traces and rotations, then four actual crop PNGs and page-parent records: all identical; the retained renderer stayed clean after text reads and retained two display lists. No original plan data is included here. The sample measured 0.1809s ordinary versus0.1395s cached for four first-use crops; it is not a whole-run speedup claim.
+
+This is a runtime correction to the original producer. It does not grant OCR, room, finish, dimension, quantity, customer or benchmark authority. Final source/customer acceptance and exact-head Python3.13/3.14 CI remain separate release requirements.
