@@ -2020,6 +2020,22 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         },
     )
 
+    if not has_authentic_doc:
+        final_status = EvidenceResolutionStatus.CANDIDATE
+        commercial_allowed = False
+        takeoff_ok = False
+        final_reasons = (
+            "source_cross_view_floor_correspondence_unverified_source_doc",
+            "noncommercial_candidate_synthetic_geometry_only",
+        )
+        final_blockers = STANDING_AUTHORITY_BLOCKERS
+    else:
+        final_status = EvidenceResolutionStatus.CORROBORATED
+        commercial_allowed = True
+        takeoff_ok = True
+        final_reasons = (SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,)
+        final_blockers = ()
+
     res = SourceCrossViewFloorCorrespondenceRecord(
         record_id=rec_id,
         canonical_floor_id=canonical_floor_id,
@@ -2040,11 +2056,11 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         side_kinds=MappingProxyType(corr["side_kinds"]),
         finish_codes_in_box=MappingProxyType({material_code: 1}),
         material_code=material_code,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,),
-        authority_blockers=(),
-        commercial_projection_allowed=True,
-        takeoff_eligible=True,
+        status=final_status,
+        reason_codes=final_reasons,
+        authority_blockers=final_blockers,
+        commercial_projection_allowed=commercial_allowed,
+        takeoff_eligible=takeoff_ok,
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d15_evidence,),
         document_id=document_id,
@@ -2052,9 +2068,11 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
-    return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-        ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-    )
+    if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
+    return res
 
 
 
@@ -2161,20 +2179,30 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
         )
 
     opened_doc = None
-    if doc is None:
+    has_authentic_doc = False
+    if doc is not None:
+        has_authentic_doc = True
+    else:
         if source_bytes is not None:
+            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
             import fitz
             try:
                 opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_pdf_unreadable",))
         elif pdf_path is not None:
             import fitz
             try:
                 path_obj = Path(pdf_path)
-                opened_doc = fitz.open(stream=path_obj.read_bytes(), filetype="pdf")
+                data = path_obj.read_bytes()
+                if hashlib.sha256(data).hexdigest() != source_sha256:
+                    return _abstained(reason_codes=("source_sha_mismatch",))
+                opened_doc = fitz.open(stream=data, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_path_unavailable",))
 
@@ -2357,6 +2385,22 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
                 "reasons": ["authenticated_cross_sheet_correspondence_resolved"],
             },
         )
+        if not has_authentic_doc:
+            final_status = EvidenceResolutionStatus.CANDIDATE
+            commercial_allowed = False
+            takeoff_ok = False
+            final_reasons = (
+                "source_cross_view_floor_correspondence_unverified_source_doc",
+                "noncommercial_candidate_synthetic_geometry_only",
+            )
+            final_blockers = STANDING_AUTHORITY_BLOCKERS
+        else:
+            final_status = EvidenceResolutionStatus.CORROBORATED
+            commercial_allowed = True
+            takeoff_ok = True
+            final_reasons = ("authenticated_cross_sheet_correspondence_resolved",)
+            final_blockers = ()
+
         res = SourceCrossViewFloorCorrespondenceRecord(
             record_id=rec_id,
             canonical_floor_id=canonical_floor_id,
@@ -2377,11 +2421,11 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             side_kinds=MappingProxyType({"x0": "full", "x1": "with_openings", "y0": "full", "y1": "full"}),
             finish_codes_in_box=MappingProxyType({material_code: 1}),
             material_code=material_code,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=("authenticated_cross_sheet_correspondence_resolved",),
-            authority_blockers=(),
-            commercial_projection_allowed=True,
-            takeoff_eligible=True,
+            status=final_status,
+            reason_codes=final_reasons,
+            authority_blockers=final_blockers,
+            commercial_projection_allowed=commercial_allowed,
+            takeoff_eligible=takeoff_ok,
             cross_sheet_wall_equivalences=tuple(equiv_records),
             doorway_transitions=(d28_evidence,),
             document_id=document_id,
@@ -2389,9 +2433,11 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
-        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-        )
+        if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+            return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+                ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+            )
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -2753,20 +2799,30 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         )
 
     opened_doc = None
-    if doc is None:
+    has_authentic_doc = False
+    if doc is not None:
+        has_authentic_doc = True
+    else:
         if source_bytes is not None:
+            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
             import fitz
             try:
                 opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_pdf_unreadable",))
         elif pdf_path is not None:
             import fitz
             try:
                 path_obj = Path(pdf_path)
-                opened_doc = fitz.open(stream=path_obj.read_bytes(), filetype="pdf")
+                data = path_obj.read_bytes()
+                if hashlib.sha256(data).hexdigest() != source_sha256:
+                    return _abstained(reason_codes=("source_sha_mismatch",))
+                opened_doc = fitz.open(stream=data, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_path_unavailable",))
 
@@ -3081,6 +3137,22 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         },
     )
 
+    if not has_authentic_doc:
+        final_status = EvidenceResolutionStatus.CANDIDATE
+        commercial_allowed = False
+        takeoff_ok = False
+        final_reasons = (
+            "source_cross_view_floor_correspondence_unverified_source_doc",
+            "noncommercial_candidate_synthetic_geometry_only",
+        )
+        final_blockers = STANDING_AUTHORITY_BLOCKERS
+    else:
+        final_status = EvidenceResolutionStatus.CORROBORATED
+        commercial_allowed = True
+        takeoff_ok = True
+        final_reasons = (SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,)
+        final_blockers = ()
+
     res = SourceCrossViewFloorCorrespondenceRecord(
         record_id=rec_id,
         canonical_floor_id=canonical_floor_id,
@@ -3101,11 +3173,11 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         side_kinds=MappingProxyType(corr["side_kinds"]),
         finish_codes_in_box=MappingProxyType({material_code: 1}),
         material_code=material_code,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,),
-        authority_blockers=(),
-        commercial_projection_allowed=True,
-        takeoff_eligible=True,
+        status=final_status,
+        reason_codes=final_reasons,
+        authority_blockers=final_blockers,
+        commercial_projection_allowed=commercial_allowed,
+        takeoff_eligible=takeoff_ok,
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d13_evidence,),
         document_id=document_id,
@@ -3113,9 +3185,11 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
-    return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-        ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-    )
+    if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
+    return res
 
 
 def compose_authenticated_cross_sheet_room_and_floor(
@@ -4266,20 +4340,30 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
         )
 
     opened_doc = None
-    if doc is None:
+    has_authentic_doc = False
+    if doc is not None:
+        has_authentic_doc = True
+    else:
         if source_bytes is not None:
+            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
             import fitz
             try:
                 opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_pdf_unreadable",))
         elif pdf_path is not None:
             import fitz
             try:
                 path_obj = Path(pdf_path)
-                opened_doc = fitz.open(stream=path_obj.read_bytes(), filetype="pdf")
+                data = path_obj.read_bytes()
+                if hashlib.sha256(data).hexdigest() != source_sha256:
+                    return _abstained(reason_codes=("source_sha_mismatch",))
+                opened_doc = fitz.open(stream=data, filetype="pdf")
                 doc = opened_doc
+                has_authentic_doc = True
             except Exception:
                 return _abstained(reason_codes=("source_path_unavailable",))
 

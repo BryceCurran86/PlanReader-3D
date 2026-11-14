@@ -33,6 +33,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     COMPETING_FINISH_CODES_IN_BOX,
     EvidenceResolutionStatus,
     authenticate_maryborough_pwd_cross_sheet_correspondence,
+    get_authenticated_floor_correspondence,
 )
 from pb_source_floor_finish_occurrence_ownership_shadow import (
     SOURCE_LINEAGE_MISMATCH,
@@ -303,3 +304,52 @@ def test_tampered_source_sha_abstains(tmp_path, maryborough_pdf_path):
     )
     assert result.status == "ABSTAIN"
     assert result.reason_codes == ("maryborough_source_sha_mismatch",)
+
+
+def test_synthetic_caller_without_authentic_doc_stays_candidate_and_unregistered():
+    """Verify source-neutral synthetic observation probe without authentic doc remains CANDIDATE and unregistered."""
+    import random
+    segments = []
+
+    def line(x1, y1, x2, y2):
+        segments.append(dict(x1=x1, y1=y1, x2=x2, y2=y2))
+
+    x0, y0, x1, y1 = 400.08, 1382.72, 524.88, 1585.04
+    for y in (y0, y0 - 6, y1, y1 + 6):
+        line(x0 - 6, y, x1 + 6, y)
+    for x in (x0, x0 - 6, x1, x1 + 6):
+        line(x, y0 - 6, x, y1 + 6)
+    rng = random.Random(1729)
+    for _ in range(90):
+        x, y = rng.uniform(40, 1100), rng.uniform(40, 2200)
+        length = rng.uniform(50, 200)
+        if rng.random() < 0.5:
+            line(x, y, x + length, y)
+        else:
+            line(x, y, x, y + length)
+    target = [dict(x1=s["x1"] - 78, y1=s["y1"], x2=s["x2"] - 78, y2=s["y2"]) for s in segments]
+
+    snapshot_id = "synthetic-review-snapshot-test"
+    record = authenticate_maryborough_pwd_cross_sheet_correspondence(
+        document_id="synthetic-review-document",
+        revision_id="synthetic-review-revision",
+        source_sha256="f" * 64,
+        snapshot_id=snapshot_id,
+        canonical_floor_id="synthetic-review-floor",
+        physical_room_id="synthetic-review-room",
+        source_room_face_record_id="synthetic-review-face",
+        support_segments=segments,
+        target_segments=target,
+        marks=({"code": "FT2", "x": 455.28, "y": 1480.785, "page_id": "11"},),
+        door_observations=({"callout": "D13"},),
+        schedule_observations=({"callout": "D13"},),
+        dimension_witness_observations=({"code": "2200"}, {"code": "3570"}),
+        room_label_observations=({"label": "PWD"},),
+    )
+    assert record.status is EvidenceResolutionStatus.CANDIDATE
+    assert "noncommercial_candidate_synthetic_geometry_only" in record.reason_codes
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible
+
+    # Verify trusted registry rejects / does NOT register synthetic record
+    assert get_authenticated_floor_correspondence(snapshot_id, record.record_id) is None
