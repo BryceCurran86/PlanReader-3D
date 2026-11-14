@@ -41,16 +41,26 @@ def test_replay_rejects_source_frozen_aliases_and_children(tmp_path, target):
     assert not (frozen / "projects").exists()
 
 
-def test_external_existing_json_and_symlink_diagnostics_cannot_be_replaced(tmp_path):
+@pytest.mark.parametrize("target_kind", ("existing", "symlink"))
+def test_external_existing_json_and_symlink_diagnostics_cannot_be_replaced(
+    tmp_path, target_kind,
+):
     unrelated = tmp_path / "unrelated.json"
     unrelated.write_text('{"customer":"original"}')
     source = tmp_path / "signed.json"
     source.write_text("immutable")
-    for target in (unrelated, tmp_path / "linked.json"):
-        if target.name == "linked.json":
+    target = unrelated if target_kind == "existing" else tmp_path / "linked.json"
+    if target_kind == "symlink":
+        try:
             target.symlink_to(source)
-        with pytest.raises(FileExistsError, match="new path"):
-            pub.write_new_diagnostic(target, '{}', protected_roots=(source,))
+        except OSError as exc:
+            # An ordinary Windows account may not hold SeCreateSymbolicLinkPrivilege.
+            # This affects test setup, not the production no-follow guard.
+            if getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink creation privilege is unavailable")
+            raise
+    with pytest.raises(FileExistsError, match="new path"):
+        pub.write_new_diagnostic(target, '{}', protected_roots=(source,))
     assert unrelated.read_text() == '{"customer":"original"}'
     assert source.read_text() == "immutable"
 
@@ -183,6 +193,18 @@ def test_same_byte_report_replacement_between_identity_and_read_is_rejected(
     payload = '{"verified":true}\n'
     source.write_bytes(b"%PDF-private-source-unchanged")
     replacement.write_bytes(payload.encode("utf-8"))
+    if replacement_kind == "same_bytes_symlink":
+        # Test capability before monkeypatching the race. Otherwise a genuine
+        # WinError 1314 in the attack setup is hidden as a writer failure.
+        probe = tmp_path / "symlink-privilege-probe"
+        try:
+            probe.symlink_to(replacement)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink creation privilege is unavailable")
+            raise
+        finally:
+            probe.unlink(missing_ok=True)
     real_samefile = Path.samefile
     real_open = pub.os.open
     swapped = False
