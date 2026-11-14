@@ -1732,31 +1732,32 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
     # 1. Resolve geometry input: either directly passed segments or extracted from doc/bytes/pdf_path
     opened_doc = None
     has_authentic_doc = False
-    if doc is not None:
-        has_authentic_doc = True
-    else:
-        if source_bytes is not None:
-            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path = Path(pdf_path)
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
                 return _abstained(reason_codes=("source_sha_mismatch",))
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path = Path(pdf_path)
-                data = path.read_bytes()
-                if hashlib.sha256(data).hexdigest() != source_sha256:
-                    return _abstained(reason_codes=("source_sha_mismatch",))
-                opened_doc = fitz.open(stream=data, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -1768,12 +1769,20 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
-                if support_segments is None:
-                    support_segments = _extract_segments_from_drawings(d_sup)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
-                if marks is None:
-                    marks = _extract_marks_from_page(p_sup)
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
 
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
@@ -2190,31 +2199,32 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
 
     opened_doc = None
     has_authentic_doc = False
-    if doc is not None:
-        has_authentic_doc = True
-    else:
-        if source_bytes is not None:
-            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
                 return _abstained(reason_codes=("source_sha_mismatch",))
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path_obj = Path(pdf_path)
-                data = path_obj.read_bytes()
-                if hashlib.sha256(data).hexdigest() != source_sha256:
-                    return _abstained(reason_codes=("source_sha_mismatch",))
-                opened_doc = fitz.open(stream=data, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -2226,12 +2236,20 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
-                if support_segments is None:
-                    support_segments = _extract_segments_from_drawings(d_sup)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
-                if marks is None:
-                    marks = _extract_marks_from_page(p_sup)
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
 
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
@@ -2810,31 +2828,32 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
 
     opened_doc = None
     has_authentic_doc = False
-    if doc is not None:
-        has_authentic_doc = True
-    else:
-        if source_bytes is not None:
-            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
                 return _abstained(reason_codes=("source_sha_mismatch",))
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path_obj = Path(pdf_path)
-                data = path_obj.read_bytes()
-                if hashlib.sha256(data).hexdigest() != source_sha256:
-                    return _abstained(reason_codes=("source_sha_mismatch",))
-                opened_doc = fitz.open(stream=data, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -2846,12 +2865,20 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
-                if support_segments is None:
-                    support_segments = _extract_segments_from_drawings(d_sup)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
-                if marks is None:
-                    marks = _extract_marks_from_page(p_sup)
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
 
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
@@ -4023,15 +4050,28 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         )
 
     # 5. Extract PDF content if live doc/bytes/path provided
-    doc_obj = doc
+    doc_obj = None
     owns_doc = False
-    if doc_obj is None:
-        if source_bytes is not None:
-            doc_obj = fitz.open(stream=source_bytes, filetype="pdf")
-            owns_doc = True
-        elif pdf_path is not None:
-            doc_obj = fitz.open(str(pdf_path))
-            owns_doc = True
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(
+                reason_codes=(SOURCE_DIGEST_MISMATCH,),
+                authority_blockers=("unverified_source_document_sha",),
+            )
+        doc_obj = fitz.open(stream=source_bytes, filetype="pdf")
+        owns_doc = True
+    elif pdf_path is not None:
+        path_p = Path(pdf_path)
+        data_p = path_p.read_bytes()
+        if hashlib.sha256(data_p).hexdigest() != source_sha256:
+            return _abstained(
+                reason_codes=(SOURCE_DIGEST_MISMATCH,),
+                authority_blockers=("unverified_source_document_sha",),
+            )
+        doc_obj = fitz.open(stream=data_p, filetype="pdf")
+        owns_doc = True
+    elif doc is not None:
+        doc_obj = doc
 
     try:
         if doc_obj is not None:
@@ -4351,31 +4391,32 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
 
     opened_doc = None
     has_authentic_doc = False
-    if doc is not None:
-        has_authentic_doc = True
-    else:
-        if source_bytes is not None:
-            if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
                 return _abstained(reason_codes=("source_sha_mismatch",))
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path_obj = Path(pdf_path)
-                data = path_obj.read_bytes()
-                if hashlib.sha256(data).hexdigest() != source_sha256:
-                    return _abstained(reason_codes=("source_sha_mismatch",))
-                opened_doc = fitz.open(stream=data, filetype="pdf")
-                doc = opened_doc
-                has_authentic_doc = True
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -4386,10 +4427,16 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_rcp or not d_tgt:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
-                if rcp_segments is None:
-                    rcp_segments = _extract_segments_from_drawings(d_rcp)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
+                derived_rcp = _extract_segments_from_drawings(d_rcp)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                if has_authentic_doc:
+                    rcp_segments = derived_rcp
+                    target_segments = derived_tgt
+                else:
+                    if rcp_segments is None:
+                        rcp_segments = derived_rcp
+                    if target_segments is None:
+                        target_segments = derived_tgt
                 w_rcp = p_rcp.get_text("words") or []
                 w_tgt = p_tgt.get_text("words") or []
 

@@ -198,6 +198,7 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
             elif is_pwd:
                 target_floor_id = PWD_PHYSICAL_FLOOR_ID
@@ -212,6 +213,7 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
             else:
                 target_floor_id = OFFICE_PHYSICAL_FLOOR_ID
@@ -226,6 +228,7 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
 
             if (

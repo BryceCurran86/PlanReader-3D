@@ -353,3 +353,90 @@ def test_synthetic_caller_without_authentic_doc_stays_candidate_and_unregistered
 
     # Verify trusted registry rejects / does NOT register synthetic record
     assert get_authenticated_floor_correspondence(snapshot_id, record.record_id) is None
+
+
+def test_direct_doc_without_matching_source_bytes_stays_candidate_and_unregistered():
+    """Verify that a direct doc object passed without verified source_bytes matching source_sha256 stays CANDIDATE."""
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(30):
+        doc.new_page()
+
+    snapshot_id = "direct-doc-unverified-snapshot"
+    record = authenticate_maryborough_pwd_cross_sheet_correspondence(
+        document_id="direct-doc-document",
+        revision_id="direct-doc-revision",
+        source_sha256="a" * 64,
+        snapshot_id=snapshot_id,
+        canonical_floor_id="direct-doc-floor",
+        physical_room_id="direct-doc-room",
+        source_room_face_record_id="direct-doc-face",
+        doc=doc,
+    )
+    # Direct doc without verified source bytes or path matching source_sha256 must NOT gain commercial authority
+    assert record.status in (EvidenceResolutionStatus.CANDIDATE, EvidenceResolutionStatus.ABSTAINED)
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible
+    assert get_authenticated_floor_correspondence(snapshot_id, record.record_id) is None
+
+
+def test_source_bytes_sha_mismatch_abstains():
+    """Verify that passing source_bytes with mismatched source_sha256 returns ABSTAINED with source_sha_mismatch."""
+    dummy_bytes = b"%PDF-1.4 dummy content"
+    wrong_sha = "0" * 64
+
+    snapshot_id = "sha-mismatch-snapshot"
+    record = authenticate_maryborough_pwd_cross_sheet_correspondence(
+        document_id="sha-mismatch-document",
+        revision_id="sha-mismatch-revision",
+        source_sha256=wrong_sha,
+        snapshot_id=snapshot_id,
+        canonical_floor_id="sha-mismatch-floor",
+        physical_room_id="sha-mismatch-room",
+        source_room_face_record_id="sha-mismatch-face",
+        source_bytes=dummy_bytes,
+    )
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert "source_sha_mismatch" in record.reason_codes
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible
+
+
+def test_direct_doc_with_synthetic_geometry_stays_candidate():
+    """Verify that passing an unverified doc with synthetic geometry cannot gain commercial authority and stays CANDIDATE."""
+    import fitz
+    doc = fitz.open()
+
+    segments = []
+    x0, y0, x1, y1 = 400.08, 1382.72, 524.88, 1585.04
+    for y in (y0, y0 - 6, y1, y1 + 6):
+        segments.append(dict(x1=x0 - 6, y1=y, x2=x1 + 6, y2=y))
+    for x in (x0, x0 - 6, x1, x1 + 6):
+        segments.append(dict(x1=x, y1=y0 - 6, x2=x, y2=y1 + 6))
+    target = [dict(x1=s["x1"] - 78, y1=s["y1"], x2=s["x2"] - 78, y2=s["y2"]) for s in segments]
+
+    snapshot_id = "direct-doc-synthetic-snapshot"
+    record = authenticate_maryborough_pwd_cross_sheet_correspondence(
+        document_id="direct-doc-synthetic-doc",
+        revision_id="direct-doc-synthetic-rev",
+        source_sha256="b" * 64,
+        snapshot_id=snapshot_id,
+        canonical_floor_id="direct-doc-synthetic-floor",
+        physical_room_id="direct-doc-synthetic-room",
+        source_room_face_record_id="direct-doc-synthetic-face",
+        doc=doc,
+        support_segments=segments,
+        target_segments=target,
+        marks=({"code": "FT2", "x": 455.28, "y": 1480.785, "page_id": "11"},),
+        door_observations=({"callout": "D13"},),
+        schedule_observations=({"callout": "D13"},),
+        dimension_witness_observations=({"code": "2200"}, {"code": "3570"}),
+        room_label_observations=({"label": "PWD"},),
+    )
+    assert record.status in (EvidenceResolutionStatus.CANDIDATE, EvidenceResolutionStatus.ABSTAINED)
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible
+    assert get_authenticated_floor_correspondence(snapshot_id, record.record_id) is None
+
+
