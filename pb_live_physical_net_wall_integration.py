@@ -431,6 +431,8 @@ def _collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    layered_dark_painted_wall_source: bool = False,
+    layered_wall_end_stroke_closures: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -470,6 +472,21 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(layered_dark_painted_wall_source) is not bool:
+        raise ValueError("layered dark painted wall source must be an explicit boolean")
+    if layered_dark_painted_wall_source and not (
+        layered_doorway_room_rings and layered_finished_face_gate
+    ):
+        raise ValueError(
+            "layered dark painted wall source needs layered doorway room rings"
+            " and the finished face gate"
+        )
+    if type(layered_wall_end_stroke_closures) is not bool:
+        raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
+        raise ValueError(
+            "layered wall end stroke closures need layered dark painted wall source"
+        )
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -618,6 +635,10 @@ def _collect_live_physical_net_wall_claim(
            if layered_partition_witness else {}),
         **({"layered_finished_face_gate": True}
            if layered_finished_face_gate else {}),
+        **({"layered_dark_painted_wall_source": True}
+           if layered_dark_painted_wall_source else {}),
+        **({"layered_wall_end_stroke_closures": True}
+           if layered_wall_end_stroke_closures else {}),
     )
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
@@ -717,6 +738,7 @@ def _collect_live_physical_net_wall_claim(
                 continue
 
             gated_record_ids: frozenset[str] = frozenset()
+            finished_polygons: dict[str, tuple[tuple[float, float], ...]] = {}
             if layered_finished_face_gate:
                 from pb_layered_wall_doorway_room_face_scope_shadow import (
                     RING_FINISHED_FACE_REQUIRED_PREFIX,
@@ -976,18 +998,98 @@ def _collect_live_physical_net_wall_claim(
                         published=published,
                         statement_pages=layered_finished_face_statement_pages,
                     )
-                finished_face_receipts.extend(
-                    _finished_face_receipts(
-                        records=tuple(
-                            record for record in room_scope.records
-                            if record.record_id in gated_record_ids
-                        ),
-                        payload=payload,
-                        page_no=page_no,
-                        statements=finished_face_statements,
-                        scale_calibration=scale_calibration,
-                    )
+                gated_records = tuple(
+                    record for record in room_scope.records
+                    if record.record_id in gated_record_ids
                 )
+                from pb_layered_wall_doorway_room_face_scope_shadow import (
+                    ring_face_bounding_box,
+                    unique_figured_box_mm_per_pt,
+                )
+                from pb_cross_view_room_area_authority import _trusted_native_dimensions_for_page
+
+                figured_dimensions = _trusted_native_dimensions_for_page(
+                    source,
+                    revision_id=str(scope_rooms[0].revision_id),
+                    page_id=str(page_id),
+                    candidate_lines=(),
+                    view_type=DrawingViewType.FLOOR_PLAN.value,
+                )
+                classify_mm_per_pt = _finished_face_mm_per_pt(scale_calibration)
+                if classify_mm_per_pt is None:
+                    for record in gated_records:
+                        classify_mm_per_pt = unique_figured_box_mm_per_pt(
+                            ring_face_bounding_box(record), figured_dimensions,
+                            face_polygon=record.polygon_pdf_pts,
+                        )
+                        if classify_mm_per_pt is not None:
+                            break
+                receipts = _finished_face_receipts(
+                    records=gated_records,
+                    payload=payload,
+                    page_no=page_no,
+                    statements=finished_face_statements,
+                    scale_calibration=scale_calibration,
+                    room_is_wet_area=False,
+                    mm_per_pt=classify_mm_per_pt,
+                )
+                finished_face_receipts.extend(receipts)
+                from pb_layered_wall_face_identity_shadow import (
+                    VERDICT_RESOLVED,
+                    apply_lined_finished_face_polygon,
+                )
+
+                scale_mm_per_pt = classify_mm_per_pt
+                for record, receipt in zip(
+                    sorted(gated_records, key=lambda item: item.record_id), receipts,
+                ):
+                    if receipt.verdict != VERDICT_RESOLVED:
+                        continue
+                    apply_mm_per_pt = unique_figured_box_mm_per_pt(
+                        ring_face_bounding_box(record), figured_dimensions,
+                        face_polygon=record.polygon_pdf_pts,
+                    )
+                    if apply_mm_per_pt is None:
+                        apply_mm_per_pt = scale_mm_per_pt
+                    if apply_mm_per_pt is None:
+                        continue
+                    polygon = apply_lined_finished_face_polygon(
+                        record.polygon_pdf_pts, receipt.lined_edge_offsets_mm, apply_mm_per_pt,
+                    )
+                    if polygon is not None:
+                        finished_polygons[record.record_id] = polygon
+                if finished_polygons:
+                    recovered = SameViewRoomAreaProducer.from_source(
+                        source=source, rooms=canonical_rooms,
+                    ).publish(
+                        layered_ring_box_selection_shadow=True,
+                        finished_face_polygons_by_source_record_id=finished_polygons,
+                    )
+                    same_view_by_record.update(
+                        dict(recovered.evidence_by_source_room_face_record_id)
+                    )
+                    same_view_area = recovered
+                    evidence_by_record = _merge_documented_room_area_evidence(
+                        same_view_by_record=same_view_by_record,
+                        cross_view_by_record=cross_view_by_record,
+                    )
+                    gated_record_ids = gated_record_ids - frozenset(finished_polygons)
+                    explicit_by_face_id = _uniquely_owned_explicit_area_by_source_face(
+                        source_face_records=room_scope.records,
+                        canonical_rooms=scope_rooms,
+                        evidence_by_source_record=(
+                            {
+                                record_id: evidence
+                                for record_id, evidence in evidence_by_record.items()
+                                if record_id not in gated_record_ids
+                            } if gated_record_ids else evidence_by_record
+                        ),
+                    )
+
+            established_finished_face_ids = tuple(
+                record.face_id for record in room_scope.records
+                if record.record_id in finished_polygons
+            )
 
             if not explicit_by_face_id and scale_calibration is None:
                 continue
@@ -1003,6 +1105,8 @@ def _collect_live_physical_net_wall_claim(
                 explicit_area_evidence_by_room_id=(
                     explicit_by_face_id if explicit_by_face_id else None
                 ),
+                **({"established_finished_face_ids": established_finished_face_ids}
+                   if established_finished_face_ids else {}),
             )
             room_area_bridges.append(bridge)
             canonical_floors = enrich_live_canonical_floor_metric_areas(
@@ -1298,23 +1402,35 @@ def _collect_finished_face_statements(
     )
 
 
+def _finished_face_mm_per_pt(scale_calibration) -> Optional[float]:
+    if scale_calibration is not None and scale_calibration.is_usable_for_firm_measurement():
+        return 1000.0 / float(scale_calibration.px_per_m)
+    return None
+
+
 def _finished_face_receipts(
     *, records, payload, page_no, statements, scale_calibration,
+    room_is_wet_area: Optional[bool] = False,
+    mm_per_pt: Optional[float] = None,
 ) -> tuple[Any, ...]:
     """Diagnostic face identity of each gated ring face; the page scale comes only from the existing authority."""
     from pb_layered_wall_face_identity_shadow import (
         classify_record_face_identity,
-        wall_strip_facts,
+        wall_face_source_support,
     )
 
-    mm_per_pt = None
-    if scale_calibration is not None and scale_calibration.is_usable_for_firm_measurement():
-        mm_per_pt = 1000.0 / float(scale_calibration.px_per_m)
+    if mm_per_pt is None:
+        mm_per_pt = _finished_face_mm_per_pt(scale_calibration)
     with fitz.open(stream=payload, filetype="pdf") as document:
-        facts = wall_strip_facts(document[page_no - 1].get_drawings())
+        facts, fill_polygons, stroke_pairs, path_layers, unfilled_paths = wall_face_source_support(
+            document[page_no - 1].get_drawings(),
+        )
     return tuple(
         classify_record_face_identity(
             record, strip_facts=facts, statements=statements, mm_per_pt=mm_per_pt,
+            room_is_wet_area=room_is_wet_area, fill_polygons=fill_polygons,
+            stroke_pairs_by_path=stroke_pairs, path_layers=path_layers,
+            unfilled_paths=unfilled_paths,
         )
         for record in sorted(records, key=lambda item: item.record_id)
     )
@@ -1337,6 +1453,8 @@ def collect_live_physical_net_wall_claim(
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
+    layered_dark_painted_wall_source: bool = False,
+    layered_wall_end_stroke_closures: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1373,6 +1491,21 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face gate needs layered doorway room rings")
     if layered_finished_face_statement_pages is not None and not layered_finished_face_gate:
         raise ValueError("layered finished face statement pages need the finished face gate")
+    if type(layered_dark_painted_wall_source) is not bool:
+        raise ValueError("layered dark painted wall source must be an explicit boolean")
+    if layered_dark_painted_wall_source and not (
+        layered_doorway_room_rings and layered_finished_face_gate
+    ):
+        raise ValueError(
+            "layered dark painted wall source needs layered doorway room rings"
+            " and the finished face gate"
+        )
+    if type(layered_wall_end_stroke_closures) is not bool:
+        raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
+        raise ValueError(
+            "layered wall end stroke closures need layered dark painted wall source"
+        )
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1411,6 +1544,10 @@ def collect_live_physical_net_wall_claim(
            if layered_finished_face_gate else {}),
         **({"layered_finished_face_statement_pages": layered_finished_face_statement_pages}
            if layered_finished_face_statement_pages is not None else {}),
+        **({"layered_dark_painted_wall_source": True}
+           if layered_dark_painted_wall_source else {}),
+        **({"layered_wall_end_stroke_closures": True}
+           if layered_wall_end_stroke_closures else {}),
     )
     if recovery_page_id is None:
         return claim

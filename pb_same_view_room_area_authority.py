@@ -15,7 +15,7 @@ import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
 from pb_repeated_room_label_source_shadow import uniquely_owned_repeated_label_lines
-from typing import Mapping
+from typing import Mapping, Optional, Sequence
 
 from pb_cross_view_room_area_authority import (
     _dimension_is_immediate_label_annotation,
@@ -37,7 +37,7 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
-from pb_source_room_face_authority import SourceRoomFaceSelector
+from pb_source_room_face_authority import SourceRoomFaceSelector, _polygon_area
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -52,6 +52,62 @@ SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = "authenticated_same_view_room_area"
 # bounding box. 0.5 pt is representation noise between a witness line and a drawn face, far
 # below the 2.5 pt production snap, and a hard bound.
 _LAYERED_RING_BOX_TOLERANCE_PT = 0.5
+
+
+def _face_polygon_area_m2_from_figured_pair(
+    polygon_pdf_pts: Sequence[Sequence[float]],
+    horizontal: object,
+    vertical: object,
+) -> float | None:
+    """Area of the drawn face from unique figured width and depth, not the bounding-box product.
+
+    Each axis keeps its own authenticated millimetres. This is not title-block scaling and not
+    a one-axis product. A pair that is not scale-consistent never reaches here.
+    """
+    points = tuple((float(point[0]), float(point[1])) for point in polygon_pdf_pts)
+    if len(points) < 3:
+        return None
+    area_pt2 = _polygon_area(points)
+    width_pt = abs(
+        float(horizontal.endpoints_pt[0][0]) - float(horizontal.endpoints_pt[1][0])  # type: ignore[attr-defined]
+    )
+    height_pt = abs(
+        float(vertical.endpoints_pt[0][1]) - float(vertical.endpoints_pt[1][1])  # type: ignore[attr-defined]
+    )
+    width_mm = float(horizontal.value_mm)  # type: ignore[attr-defined]
+    height_mm = float(vertical.value_mm)  # type: ignore[attr-defined]
+    if (
+        not math.isfinite(area_pt2)
+        or area_pt2 <= 0.0
+        or width_pt <= 0.0
+        or height_pt <= 0.0
+        or not math.isfinite(width_mm)
+        or not math.isfinite(height_mm)
+        or width_mm <= 0.0
+        or height_mm <= 0.0
+    ):
+        return None
+    area_m2 = area_pt2 * (width_mm / width_pt) * (height_mm / height_pt) / 1_000_000.0
+    if not math.isfinite(area_m2) or area_m2 <= 0.0:
+        return None
+    return round(area_m2, 6)
+
+
+def _figured_pair_span_identity(horizontal: object, vertical: object) -> tuple:
+    """One physical (width, depth) pair: span plus millimetres, not observation id.
+
+    Two parallel prints of the same ticks are one pair. Distinct millimetre values
+    on the same ticks remain competing.
+    """
+    hx = tuple(sorted((
+        float(horizontal.endpoints_pt[0][0]),  # type: ignore[attr-defined]
+        float(horizontal.endpoints_pt[1][0]),  # type: ignore[attr-defined]
+    )))
+    vy = tuple(sorted((
+        float(vertical.endpoints_pt[0][1]),  # type: ignore[attr-defined]
+        float(vertical.endpoints_pt[1][1]),  # type: ignore[attr-defined]
+    )))
+    return (hx, vy, float(horizontal.value_mm), float(vertical.value_mm))  # type: ignore[attr-defined]
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -174,11 +230,16 @@ class SameViewRoomAreaProducer:
     def publish(
         self, *, repeated_label_source_ownership_shadow: bool = False,
         layered_ring_box_selection_shadow: bool = False,
+        finished_face_polygons_by_source_record_id: Optional[Mapping[str, Sequence[Sequence[float]]]] = None,
     ) -> SameViewRoomAreaResult:
         if type(repeated_label_source_ownership_shadow) is not bool:
             raise TypeError('repeated_label_source_ownership_shadow must be bool')
         if type(layered_ring_box_selection_shadow) is not bool:
             raise TypeError('layered_ring_box_selection_shadow must be bool')
+        if finished_face_polygons_by_source_record_id is not None and not isinstance(
+            finished_face_polygons_by_source_record_id, Mapping
+        ):
+            raise TypeError("finished_face_polygons_by_source_record_id must be a mapping")
         rooms = tuple(self._rooms.rooms)
         if not rooms:
             return SameViewRoomAreaResult(
@@ -404,6 +465,12 @@ class SameViewRoomAreaProducer:
                     ):
                         continue
                     scale_consistent_pairs += 1
+                    if layered_ring_box_selection_shadow:
+                        # Offset rails that uniquely hash this ring are the physical
+                        # pair. They need not share a vector junction elsewhere on
+                        # the sheet.
+                        matches.append((line, horizontal, vertical))
+                        continue
                     if not _witness_systems_intersect(horizontal, vertical):
                         continue
                     witness_pairs += 1
@@ -430,10 +497,9 @@ class SameViewRoomAreaProducer:
                             matches.append((line, horizontal, vertical))
 
             deduped = {
-                (
-                    horizontal.dimension_id,
-                    vertical.dimension_id,
-                ): (owned_line, horizontal, vertical)
+                _figured_pair_span_identity(horizontal, vertical): (
+                    owned_line, horizontal, vertical,
+                )
                 for owned_line, horizontal, vertical in matches
             }
             ring_face = (
@@ -444,33 +510,41 @@ class SameViewRoomAreaProducer:
             ring_not_rectangle = ring_face is not None and not ring_face[1]
             ring_partition_part = ring_face is not None and ring_face[2]
             ring_finished_face_required = self._finished_face_required(room)
+            finished_polygon = None
+            if finished_face_polygons_by_source_record_id is not None:
+                finished_polygon = finished_face_polygons_by_source_record_id.get(
+                    str(room.source_room_face_record_id)
+                )
             ring_box_rejected = False
-            if (ring_not_rectangle or ring_partition_part or ring_finished_face_required) and deduped:
-                # A figured width x depth is the area of its rectangle, not of a face with a wall
-                # return or a recess split off inside it: the documented route is withdrawn and the
-                # face's own polygon at a verified scale is the only measure left. A part of a
-                # sliding-leaf partition is corroborated by the UNION's pair, which is never a part's area.
+            if (
+                ring_partition_part
+                or (ring_finished_face_required and finished_polygon is None)
+            ) and deduped:
+                # A sliding-leaf part is corroborated by the UNION's pair, which is never a part's
+                # area. A gated frame face is not an established finished face. Both stay withdrawn.
+                # A non-rectangle with a unique pair keeps that pair: area is the face polygon below.
                 deduped = {}
                 ring_box_rejected = True
             elif ring_box is not None and deduped:
                 # Exact equality with independent physical ink, never a nearest/first/smallest pick:
                 # zero equal pairs rejects the room, several equal pairs stay a conflict below.
-                tol = _LAYERED_RING_BOX_TOLERANCE_PT
+                # A tick through the owning wall of an inner face is the same witness, not a snap.
+                from pb_layered_wall_doorway_room_face_scope_shadow import figured_box_pair_count
+
                 kept = {}
                 for pair_key, (pair_line, pair_h, pair_v) in deduped.items():
-                    hx = sorted((float(pair_h.endpoints_pt[0][0]), float(pair_h.endpoints_pt[1][0])))
-                    vy = sorted((float(pair_v.endpoints_pt[0][1]), float(pair_v.endpoints_pt[1][1])))
-                    if (
-                        abs(hx[0] - ring_box[0]) <= tol and abs(hx[1] - ring_box[2]) <= tol
-                        and abs(vy[0] - ring_box[1]) <= tol and abs(vy[1] - ring_box[3]) <= tol
-                    ):
+                    if figured_box_pair_count(
+                        ring_box, (pair_h, pair_v),
+                        tolerance_pt=_LAYERED_RING_BOX_TOLERANCE_PT,
+                        face_polygon=room.polygon_pdf_pts,
+                    ) == 1:
                         kept[pair_key] = (pair_line, pair_h, pair_v)
                 ring_box_rejected = not kept
                 deduped = kept
             if len(deduped) != 1:
                 room_id = str(room.physical_room_id)
                 unresolved.add(room_id)
-                if ring_finished_face_required:
+                if ring_finished_face_required and finished_polygon is None:
                     # A figured width x depth is the box between the DRAWN wall faces; the original has not been
                     # shown to make that the exposed finished face, so it is a noncommercial candidate.
                     first_failures[room_id] = "same_view_layered_ring_finished_face_not_established"
@@ -489,19 +563,31 @@ class SameViewRoomAreaProducer:
                     first_failures[room_id] = "same_view_label_outside_dimension_box"
                 elif not scale_consistent_pairs:
                     first_failures[room_id] = "same_view_figured_pair_scale_inconsistent"
-                elif not witness_pairs:
+                elif not layered_ring_box_selection_shadow and not witness_pairs:
                     first_failures[room_id] = "same_view_dimension_witness_intersection_unavailable"
                 else:
                     first_failures[room_id] = "same_view_dimension_pair_unavailable"
                 continue
 
             owned_line, horizontal, vertical = next(iter(deduped.values()))
-            area_m2 = round(
-                float(horizontal.value_mm)
-                * float(vertical.value_mm)
-                / 1_000_000.0,
-                6,
-            )
+            area_polygon = finished_polygon if finished_polygon is not None else room.polygon_pdf_pts
+            if ring_not_rectangle or finished_polygon is not None:
+                area_m2 = _face_polygon_area_m2_from_figured_pair(
+                    area_polygon, horizontal, vertical,
+                )
+                if area_m2 is None:
+                    unresolved.add(str(room.physical_room_id))
+                    first_failures[str(room.physical_room_id)] = (
+                        "same_view_layered_ring_not_a_rectangle"
+                    )
+                    continue
+            else:
+                area_m2 = round(
+                    float(horizontal.value_mm)
+                    * float(vertical.value_mm)
+                    / 1_000_000.0,
+                    6,
+                )
             if not math.isfinite(area_m2) or area_m2 <= 0.0:
                 unresolved.add(str(room.physical_room_id))
                 first_failures[str(room.physical_room_id)] = "same_view_metric_area_invalid"
@@ -594,6 +680,7 @@ class SameViewRoomAreaProducer:
                     "room_revision_id": str(room.revision_id),
                     "room_snapshot_id": str(room.snapshot_id),
                     "source_sha256": str(room.source_sha256),
+                    "face_polygon_area": bool(ring_not_rectangle or finished_polygon is not None),
                 },
             )
             records.append(

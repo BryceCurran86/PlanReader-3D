@@ -17,6 +17,7 @@ from pb_layered_wall_doorway_room_ring_shadow import build_from_pdf_bytes
 from pb_layered_wall_face_identity_shadow import (
     REASON_SCALE_UNAVAILABLE,
     REASON_STATEMENT_UNAVAILABLE,
+    VERDICT_RESOLVED,
     VERDICT_UNRESOLVED,
 )
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
@@ -271,14 +272,15 @@ def test_whole_claim_with_the_gate_publishes_no_quantity_and_says_why(tmp_path):
     assert claim.floor_finish_quantity_evidence == () and claim.ceiling_lining_quantity_evidence == ()
     receipt, = claim.layered_finished_face_receipts
     assert receipt.verdict == VERDICT_UNRESOLVED
-    # no statement page was named and this page has no scale bar: both facts are reported, nothing is guessed
-    assert {REASON_STATEMENT_UNAVAILABLE, REASON_SCALE_UNAVAILABLE} <= set(receipt.reason_codes)
+    # no statement page was named: lining is not guessed. A unique figured pair may still
+    # classify strip thickness, so scale-unavailable is not required here.
+    assert REASON_STATEMENT_UNAVAILABLE in receipt.reason_codes
     assert claim.layered_finished_face_statement_diagnostics == ()  # no page was named, so nothing was read
     assert (receipt.takeoff_eligible, receipt.commercial_projection_allowed, receipt.metric_area_issued) == (False, False, False)
     assert {c for _r, c in claim.same_view_room_area_first_failure_codes} == {"same_view_layered_ring_finished_face_not_established"}
 
 
-def test_whole_claim_reads_an_authenticated_statement_but_still_issues_nothing(tmp_path):
+def test_whole_claim_reads_an_authenticated_statement_and_measures_the_inset_face(tmp_path):
     claim = _claim(tmp_path, gate=True, statement_pages=(0,), note=NOTE)
     receipt, = claim.layered_finished_face_receipts
     assert REASON_STATEMENT_UNAVAILABLE not in receipt.reason_codes  # the statement was authenticated and read
@@ -286,8 +288,11 @@ def test_whole_claim_reads_an_authenticated_statement_but_still_issues_nothing(t
     page, = claim.layered_finished_face_statement_diagnostics
     block, = page.candidate_blocks
     assert page.page_id == "1" and block.parsed and block.unproved_words == 0 and block.word_count == len(NOTE.split())
-    # a statement is not a scale, an area or authority: the face is still noncommercial
-    assert claim.room_area_quantity_evidence == () and publish_live_floor_area_quantities(claim) == ()
+    # the unique figured pair classifies the 96 mm frame and measures the 10 mm inset face
+    assert receipt.verdict == VERDICT_RESOLVED
+    assert len(claim.room_area_quantity_evidence) == 1
+    assert claim.room_area_quantity_evidence[0].value is not None
+    assert claim.room_area_quantity_evidence[0].value < 8.64
 
 
 def test_a_receipt_without_a_statement_says_whether_the_page_was_read_and_why_nothing_parsed(tmp_path):
@@ -312,7 +317,7 @@ def test_with_a_page_scale_the_documented_area_is_still_the_unchanged_default(tm
     assert claim.physical_scale_first_failure_codes == () and claim.layered_finished_face_receipts == ()
 
 
-def test_a_resolved_face_identity_alone_issues_nothing_until_a_finished_polygon_is_applied(tmp_path):
+def test_a_resolved_face_identity_issues_the_inset_finished_polygon_not_the_frame_box(tmp_path):
     from pb_layered_wall_face_identity_shadow import VERDICT_RESOLVED
 
     # the stated frame equals the drawn strip at the page scale, so every wall edge is a lined internal frame face...
@@ -320,9 +325,11 @@ def test_a_resolved_face_identity_alone_issues_nothing_until_a_finished_polygon_
     receipt, = claim.layered_finished_face_receipts
     assert receipt.verdict == VERDICT_RESOLVED and receipt.reason_codes == ()
     assert {offset for _edge, offset in receipt.lined_edge_offsets_mm} == {10.0}
-    # ...yet neither the documented route nor the scaled-polygon route may measure the frame-face polygon
-    assert claim.room_area_quantity_evidence == () and publish_live_floor_area_quantities(claim) == ()
-    assert claim.floor_finish_quantity_evidence == () and claim.ceiling_lining_quantity_evidence == ()
+    quantities = publish_live_floor_area_quantities(claim)
+    assert len(claim.room_area_quantity_evidence) == 1 and len(quantities) == 1
+    assert claim.room_area_quantity_evidence[0].value is not None
+    assert claim.room_area_quantity_evidence[0].value < 8.64
+    assert quantities[0].status in {"firm", "corroborated"}
 
 
 def test_the_scaled_polygon_route_is_withheld_for_an_unresolved_face_too(tmp_path):

@@ -11,6 +11,9 @@ import pytest
 
 from pb_layered_wall_doorway_room_ring_shadow import build_from_pdf_bytes
 from pb_layered_wall_face_identity_shadow import (
+    CLASS_DRAWN_FINISHED_BUILD_UP,
+    CLASS_DRAWN_LINING_FACE,
+    CLASS_EXTERNAL_DRAWN_INNER_FACE,
     CLASS_EXTERNAL_LINING_NOT_STATED,
     CLASS_FILL_NOT_CLASSIFIED,
     CLASS_INTERNAL_STATEMENT_UNUSABLE,
@@ -28,6 +31,7 @@ from pb_layered_wall_face_identity_shadow import (
     VERDICT_RESOLVED,
     VERDICT_UNRESOLVED,
     WallStripFact,
+    apply_lined_finished_face_polygon,
     classify_ring_face_identity,
     wall_strip_facts,
 )
@@ -94,13 +98,15 @@ def test_every_wall_edge_a_lined_internal_frame_face_resolves_with_the_stated_li
             identity.floor_finish_issued, identity.diagnostic_only) == (False, False, False, False, True)
 
 
-def test_an_external_wall_run_whose_lining_the_set_does_not_state_leaves_the_face_unresolved():
+def test_an_external_wall_run_whose_lining_the_set_does_not_state_is_the_drawn_inner_face():
     ring, facts = _ring_and_facts(identity_pdf(right_layer="Enclosure_WallExternal", right_pt=90.0 / MM_PER_PT))
     identity = classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT)
-    assert identity.verdict == VERDICT_UNRESOLVED and identity.reason_codes == (CLASS_EXTERNAL_LINING_NOT_STATED,)
+    assert identity.verdict == VERDICT_RESOLVED and identity.reason_codes == ()
     lengths = classes(identity)
-    assert lengths[CLASS_EXTERNAL_LINING_NOT_STATED] == pytest.approx(30.0 + 46.0, abs=0.01)  # the two wall pieces beside the doorway
-    assert lengths[CLASS_LINED_INTERNAL_FRAME_FACE] > 0 and identity.lined_edge_offsets_mm == ()
+    assert lengths[CLASS_EXTERNAL_DRAWN_INNER_FACE] == pytest.approx(30.0 + 46.0, abs=0.01)
+    assert lengths[CLASS_LINED_INTERNAL_FRAME_FACE] > 0
+    assert {offset for _edge, offset in identity.lined_edge_offsets_mm} == {10.0}
+    assert CLASS_EXTERNAL_LINING_NOT_STATED not in identity.reason_codes
 
 
 def test_an_internal_strip_that_is_not_the_stated_frame_thickness_is_not_resolved():
@@ -201,6 +207,23 @@ def test_replay_is_deterministic_statement_order_invariant_and_translation_invar
         classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT).lined_edge_offsets_mm
 
 
+def test_finished_polygon_insets_only_authenticated_lining_edges(base):
+    ring, facts = base
+    identity = classify_ring_face_identity(ring, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT)
+    finished = apply_lined_finished_face_polygon(
+        ring.polygon_pdf_pts, identity.lined_edge_offsets_mm, MM_PER_PT,
+    )
+    assert finished is not None
+    from shapely.geometry import Polygon
+    original = Polygon(ring.polygon_pdf_pts)
+    inset = Polygon(finished)
+    assert inset.is_valid and inset.area < original.area
+    assert apply_lined_finished_face_polygon(ring.polygon_pdf_pts, (), MM_PER_PT) == tuple(
+        (float(x), float(y)) for x, y in ring.polygon_pdf_pts
+    )
+    assert apply_lined_finished_face_polygon(ring.polygon_pdf_pts, identity.lined_edge_offsets_mm, 0.0) is None
+
+
 def test_strip_facts_carry_layer_and_thickness_and_never_mutate_the_drawings():
     data = identity_pdf(right_layer="Enclosure_WallExternal", right_pt=5.0)
     drawings = fitz.open(stream=data, filetype="pdf")[0].get_drawings()
@@ -210,3 +233,333 @@ def test_strip_facts_carry_layer_and_thickness_and_never_mutate_the_drawings():
     layers = {f.layer for f in facts.values()}
     assert {"Enclosure_WallInternal", "Enclosure_WallExternal"} <= layers
     assert all(f.thickness_pt is not None and f.thickness_pt > 0 for f in facts.values() if f.is_strip)
+
+
+def _first_wall_edge(ring):
+    return next(
+        index for index, owners in enumerate(ring.edge_owner_ids)
+        if owners and not owners[0].startswith("layered_doorway_closure:")
+    )
+
+
+def _outward_fill(ring, edge_index, thickness_pt):
+    from shapely.geometry import Point, Polygon
+
+    points = ring.polygon_pdf_pts
+    first, second = points[edge_index], points[(edge_index + 1) % len(points)]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    nx, ny = dy / length, -dx / length
+    face = Polygon(points)
+    probe = Point(
+        (first[0] + second[0]) / 2.0 + nx * 0.2,
+        (first[1] + second[1]) / 2.0 + ny * 0.2,
+    )
+    if face.covers(probe):
+        nx, ny = -nx, -ny
+    return Polygon((
+        first, second,
+        (second[0] + nx * thickness_pt, second[1] + ny * thickness_pt),
+        (first[0] + nx * thickness_pt, first[1] + ny * thickness_pt),
+    ))
+
+
+def _with_fill_owner(ring, edge_index, fill_index=7):
+    owners = list(ring.edge_owner_ids)
+    owners[edge_index] = (f"layered_wall_fill:{fill_index}",)
+    return replace(ring, edge_owner_ids=tuple(owners))
+
+
+def test_an_internal_fill_of_frame_plus_both_linings_is_already_the_finished_face(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    fill = _outward_fill(ring, edge, 90.0 / MM_PER_PT)
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: fill},
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_DRAWN_FINISHED_BUILD_UP in classes(identity)
+    assert {offset for _edge, offset in identity.lined_edge_offsets_mm} == {10.0}
+
+
+def test_an_internal_strip_of_frame_plus_one_lining_is_already_the_finished_face(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owner_id = int(ring.edge_owner_ids[edge][0].split(":")[-1])
+    thicker = {
+        **facts,
+        owner_id: WallStripFact(owner_id, "Enclosure_WallInternal", True, 80.0 / MM_PER_PT),
+    }
+    identity = classify_ring_face_identity(
+        ring, strip_facts=thicker, statements=[statement()], mm_per_pt=MM_PER_PT,
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_DRAWN_FINISHED_BUILD_UP in classes(identity)
+    assert all(index != edge for index, _offset in identity.lined_edge_offsets_mm)
+
+
+def test_a_lining_cap_fill_uses_the_unique_stated_frame_side(base):
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    along_x, along_y = dx / length, dy / length
+    fill = _outward_fill(ring, edge, 60.0 / MM_PER_PT)
+    # rebuild as a 70 mm return + shorter far side so the room-edge perp is 60 mm
+    nx = (fill.exterior.coords[3][0] - first[0]) / (60.0 / MM_PER_PT)
+    ny = (fill.exterior.coords[3][1] - first[1]) / (60.0 / MM_PER_PT)
+    frame_pt = 70.0 / MM_PER_PT
+    a = first
+    d = (first[0] + along_x * (3.4), first[1] + along_y * (3.4))
+    b = (a[0] + nx * frame_pt, a[1] + ny * frame_pt)
+    c = (b[0] + along_x * (1.42), b[1] + along_y * (1.42))
+    cap = Polygon((a, d, c, b))
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: cap},
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_LINED_INTERNAL_FRAME_FACE in classes(identity)
+
+
+def test_a_short_mismatch_end_cap_is_not_a_second_wall_type(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owner_id = int(ring.edge_owner_ids[edge][0].split(":")[-1])
+    points = list(ring.polygon_pdf_pts)
+    first = points[edge]
+    cap = 60.0 / MM_PER_PT
+    points[edge] = first
+    points[(edge + 1) % len(points)] = (first[0] + cap, first[1])
+    owners = list(ring.edge_owner_ids)
+    edited = replace(
+        ring,
+        polygon_pdf_pts=tuple(points),
+        edge_owner_ids=tuple(owners),
+    )
+    thicker = {
+        **facts,
+        owner_id: WallStripFact(owner_id, "Enclosure_WallInternal", True, cap),
+    }
+    identity = classify_ring_face_identity(
+        edited, strip_facts=thicker, statements=[statement()], mm_per_pt=MM_PER_PT,
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_DRAWN_LINING_FACE in classes(identity)
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH not in identity.reason_codes
+
+
+def test_a_long_internal_strip_that_is_not_the_stated_frame_still_abstains(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owner_id = int(ring.edge_owner_ids[edge][0].split(":")[-1])
+    thicker = {
+        **facts,
+        owner_id: WallStripFact(owner_id, "Enclosure_WallInternal", True, 50.0 / MM_PER_PT),
+    }
+    identity = classify_ring_face_identity(
+        ring, strip_facts=thicker, statements=[statement()], mm_per_pt=MM_PER_PT,
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+
+
+def test_an_internal_fill_that_is_not_the_stated_build_up_stays_unresolved(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    fill = _outward_fill(ring, edge, 50.0 / MM_PER_PT)
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: fill},
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
+
+
+def test_a_remote_stated_fill_return_does_not_classify_this_edge(base):
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    fill = _outward_fill(ring, edge, 50.0 / MM_PER_PT)
+    coords = list(fill.exterior.coords)
+    far_first, far_second = coords[3], coords[2]
+    along_x = far_second[0] - far_first[0]
+    along_y = far_second[1] - far_first[1]
+    along = math.hypot(along_x, along_y)
+    along_x, along_y = along_x / along, along_y / along
+    thick = 50.0 / MM_PER_PT
+    nx = (far_first[0] - first[0]) / thick
+    ny = (far_first[1] - first[1]) / thick
+    frame_pt = 70.0 / MM_PER_PT
+    n0 = far_first
+    n1 = (far_first[0] + along_x * 1.3, far_first[1] + along_y * 1.3)
+    n2 = (n1[0] + nx * frame_pt, n1[1] + ny * frame_pt)
+    n3 = (n0[0] + nx * frame_pt, n0[1] + ny * frame_pt)
+    combined = fill.union(Polygon((n0, n1, n2, n3)))
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: combined},
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
+
+
+def test_a_stated_fill_end_spur_does_not_classify_this_edge(base):
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    fill = _outward_fill(ring, edge, 50.0 / MM_PER_PT)
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    along_x, along_y = dx / length, dy / length
+    thick = 50.0 / MM_PER_PT
+    nx = (fill.exterior.coords[3][0] - first[0]) / thick
+    ny = (fill.exterior.coords[3][1] - first[1]) / thick
+    frame_pt = 70.0 / MM_PER_PT
+    n0 = first
+    n1 = (first[0] + along_x * 1.3, first[1] + along_y * 1.3)
+    n2 = (n1[0] + nx * frame_pt, n1[1] + ny * frame_pt)
+    n3 = (n0[0] + nx * frame_pt, n0[1] + ny * frame_pt)
+    combined = fill.union(Polygon((n0, n1, n2, n3)))
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: combined},
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
+
+
+def test_a_fill_without_its_polygon_is_still_unclassified(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT,
+    )
+    assert CLASS_FILL_NOT_CLASSIFIED in identity.reason_codes
+
+
+def test_a_unique_stroke_pair_thickness_is_the_stated_frame(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_strip:50",)
+    edited = replace(ring, edge_owner_ids=tuple(owners))
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    nx, ny = dy / length, -dx / length
+    from shapely.geometry import Point, Polygon
+    face = Polygon(ring.polygon_pdf_pts)
+    if face.covers(Point((first[0] + second[0]) / 2.0 + nx * 0.2, (first[1] + second[1]) / 2.0 + ny * 0.2)):
+        nx, ny = -nx, -ny
+    thick = 70.0 / MM_PER_PT
+    bounds = (
+        min(first[0], second[0], first[0] + nx * thick, second[0] + nx * thick),
+        min(first[1], second[1], first[1] + ny * thick, second[1] + ny * thick),
+        max(first[0], second[0], first[0] + nx * thick, second[0] + nx * thick),
+        max(first[1], second[1], first[1] + ny * thick, second[1] + ny * thick),
+    )
+    identity = classify_ring_face_identity(
+        edited, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT,
+        stroke_pairs_by_path={50: (bounds,)}, path_layers={50: "Enclosure_WallInternal"},
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_OWNER_UNKNOWN not in identity.reason_codes
+
+
+def test_competing_stroke_pair_thicknesses_on_the_same_face_abstain(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_strip:50",)
+    edited = replace(ring, edge_owner_ids=tuple(owners))
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    nx, ny = dy / length, -dx / length
+    from shapely.geometry import Point, Polygon
+    face = Polygon(ring.polygon_pdf_pts)
+    if face.covers(Point((first[0] + second[0]) / 2.0 + nx * 0.2, (first[1] + second[1]) / 2.0 + ny * 0.2)):
+        nx, ny = -nx, -ny
+
+    def bounds(mm):
+        thick = mm / MM_PER_PT
+        return (
+            min(first[0], second[0], first[0] + nx * thick, second[0] + nx * thick),
+            min(first[1], second[1], first[1] + ny * thick, second[1] + ny * thick),
+            max(first[0], second[0], first[0] + nx * thick, second[0] + nx * thick),
+            max(first[1], second[1], first[1] + ny * thick, second[1] + ny * thick),
+        )
+
+    identity = classify_ring_face_identity(
+        edited, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT,
+        stroke_pairs_by_path={50: (bounds(70.0), bounds(90.0))},
+        path_layers={50: "Enclosure_WallInternal"},
+        unfilled_paths=frozenset({50}),
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_OWNER_UNKNOWN in identity.reason_codes
+    assert CLASS_DRAWN_LINING_FACE not in identity.reason_codes
+
+
+def test_an_unpaired_internal_lining_stroke_is_already_the_finished_face(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_strip:51",)
+    edited = replace(ring, edge_owner_ids=tuple(owners))
+    identity = classify_ring_face_identity(
+        edited, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT,
+        path_layers={51: "Enclosure_WallInternal"}, unfilled_paths=frozenset({51}),
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_DRAWN_LINING_FACE in classes(identity)
+    # that edge is not inset; the remaining frame faces still are
+    assert all(index != edge for index, _offset in identity.lined_edge_offsets_mm)
+
+
+def test_an_unpaired_joinery_stroke_is_not_a_lining_face(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_strip:51",)
+    edited = replace(ring, edge_owner_ids=tuple(owners))
+    identity = classify_ring_face_identity(
+        edited, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT,
+        path_layers={51: "Interior_Joinery"}, unfilled_paths=frozenset({51}),
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_OWNER_UNKNOWN in identity.reason_codes
+
+
+def test_an_unpaired_lining_stroke_without_a_statement_is_not_guessed(base):
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_strip:51",)
+    edited = replace(ring, edge_owner_ids=tuple(owners))
+    identity = classify_ring_face_identity(
+        edited, strip_facts=facts, statements=[], mm_per_pt=MM_PER_PT,
+        path_layers={51: "Enclosure_WallInternal"}, unfilled_paths=frozenset({51}),
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_OWNER_UNKNOWN in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
