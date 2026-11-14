@@ -47,7 +47,7 @@ K = 0.5522847498
 
 def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_layer: str = "Enclosure_WallInternal",
                      swing: bool = True, label: str = "BED 2", stub: bool = False, robe: bool = False,
-                     stub_depth: float = 28.0) -> bytes:
+                     stub_depth: float = 28.0, offset_rails: bool = False) -> bytes:
     """Room inner box (100, 80)-(250, 180) on a 400 x 300 page; figured 3600 x 2400 (24 mm per pt).
 
     vertical_pairs: "both" adds a second, independent figured pair 3600 x 1440 whose box is smaller
@@ -90,11 +90,22 @@ def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_la
     else:
         rect(250, 80, 254, 180)
     tick_end = 170.0 if vertical_pairs == "both" else 92.0
-    page.draw_line((100.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
-    page.draw_line((100.0, 62.0), (100.0, tick_end), color=(0, 0, 0), width=1.0)
-    page.draw_line((250.0, 62.0), (250.0, tick_end), color=(0, 0, 0), width=1.0)
-    page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
-    if vertical_pairs in ("both", "full_only"):
+    if offset_rails:
+        page.draw_line((100.0, 20.0), (250.0, 20.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((100.0, 12.0), (100.0, 28.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((250.0, 12.0), (250.0, 28.0), color=(0, 0, 0), width=1.0)
+        page.insert_text((164.0, 17.0), "3600", fontsize=9.0)
+    else:
+        page.draw_line((100.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((100.0, 62.0), (100.0, tick_end), color=(0, 0, 0), width=1.0)
+        page.draw_line((250.0, 62.0), (250.0, tick_end), color=(0, 0, 0), width=1.0)
+        page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
+    if offset_rails:
+        page.draw_line((20.0, 80.0), (20.0, 180.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((12.0, 80.0), (28.0, 80.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((12.0, 180.0), (28.0, 180.0), color=(0, 0, 0), width=1.0)
+        page.insert_text((17.0, 147.0), "2400", fontsize=9.0, rotate=90)
+    elif vertical_pairs in ("both", "full_only"):
         page.draw_line((290.0, 80.0), (290.0, 180.0), color=(0, 0, 0), width=1.0)
         page.draw_line((250.0, 80.0), (298.0, 80.0), color=(0, 0, 0), width=1.0)
         page.draw_line((278.0, 180.0), (298.0, 180.0), color=(0, 0, 0), width=1.0)
@@ -236,6 +247,22 @@ def test_same_view_still_rejects_a_pair_that_differs_from_a_ring_face(monkeypatc
     rejected = _area(source, rooms, selection=True)
     assert rejected.records == ()
     assert "same_view_figured_box_differs_from_layered_ring" in {c for _r, c in rejected.unresolved_first_failure_codes}
+
+
+def test_offset_dimension_rails_that_uniquely_hash_the_ring_are_the_physical_pair():
+    source, _published, _wall_opening, rooms = _chain(
+        layered_room_pdf(vertical_pairs="full_only", offset_rails=True), rings=True,
+    )
+    default = _area(source, rooms, selection=False)
+    assert default.records == ()
+    assert "same_view_dimension_witness_intersection_unavailable" in {
+        code for _room, code in default.unresolved_first_failure_codes
+    }
+    selected = _area(source, rooms, selection=True)
+    assert selected.status is EvidenceResolutionStatus.CORROBORATED and len(selected.records) == 1
+    evidence = selected.records[0].area_evidence
+    assert evidence.normalized_value == pytest.approx(3.6 * 2.4)
+    assert (evidence.metadata["horizontal_value_mm"], evidence.metadata["vertical_value_mm"]) == (3600, 2400)
 
 
 def _dim(dimension_id, orientation, a, b, value_mm=None):

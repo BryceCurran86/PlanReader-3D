@@ -260,15 +260,16 @@ def _edge_lies_on_rect_face(
     return False
 
 
-def _unique_stroke_pair_thickness(
+def _stroke_pair_thickness_decision(
     path_index: int,
     first: Sequence[float],
     second: Sequence[float],
     stroke_pairs_by_path: Mapping[int, Sequence[Sequence[float]]],
-) -> Optional[float]:
+) -> tuple[Optional[float], bool]:
+    """(unique thickness, competing-pair conflict) for this owner path on this edge."""
     pairs = tuple(stroke_pairs_by_path.get(path_index, ()))
     if not pairs:
-        return None
+        return None, False
     on_face = [
         min(abs(float(b[2]) - float(b[0])), abs(float(b[3]) - float(b[1])))
         for b in pairs
@@ -279,11 +280,11 @@ def _unique_stroke_pair_thickness(
         for b in pairs
     ]
     if not pool:
-        return None
+        return None, False
     first_thick = pool[0]
     if any(abs(value - first_thick) > NOISE_PT for value in pool):
-        return None
-    return float(first_thick)
+        return None, True
+    return float(first_thick), False
 
 
 def _fill_thickness_at_edge(polygon: Any, first: Sequence[float], second: Sequence[float]) -> Optional[float]:
@@ -322,27 +323,54 @@ def _fill_thickness_at_edge(polygon: Any, first: Sequence[float], second: Sequen
     return float(farthest.distance(origin))
 
 
-def _fill_candidate_thicknesses(polygon: Any) -> tuple[float, ...]:
-    """Axis-aligned side lengths and orthogonal wall bars of a notched fill."""
+def _close_pt(first: Sequence[float], second: Sequence[float]) -> bool:
+    return math.hypot(float(first[0]) - float(second[0]), float(first[1]) - float(second[1])) <= NOISE_PT
+
+
+def _side_belongs_to_edge(
+    start: Sequence[float], end: Sequence[float], first: Sequence[float], second: Sequence[float],
+) -> bool:
+    """True when this polygon side is the room edge or a return that shares an endpoint with it."""
+    return (
+        _close_pt(start, first) or _close_pt(start, second)
+        or _close_pt(end, first) or _close_pt(end, second)
+    )
+
+
+def _fill_candidate_thicknesses_at_edge(
+    polygon: Any, first: Sequence[float], second: Sequence[float],
+) -> tuple[float, ...]:
+    """Wall thicknesses of THIS room-face edge: adjacent returns and bars on this face only."""
     thicknesses: list[float] = []
     try:
         coords = list(polygon.exterior.coords)
     except AttributeError:
         return ()
     for start, end in zip(coords, coords[1:]):
+        if not _side_belongs_to_edge(start, end, first, second):
+            continue
+        if (
+            (_close_pt(start, first) and _close_pt(end, second))
+            or (_close_pt(start, second) and _close_pt(end, first))
+        ):
+            continue
         dx, dy = float(end[0]) - float(start[0]), float(end[1]) - float(start[1])
         if abs(dx) <= NOISE_PT and abs(dy) > NOISE_PT:
             thicknesses.append(abs(dy))
         elif abs(dy) <= NOISE_PT and abs(dx) > NOISE_PT:
             thicknesses.append(abs(dx))
     for bar in _orthogonal_wall_fill_strips(0, polygon):
-        thicknesses.append(min(bar.x1 - bar.x0, bar.y1 - bar.y0))
+        bounds = (bar.x0, bar.y0, bar.x1, bar.y1)
+        if _edge_lies_on_rect_face(first, second, bounds, tol=NOISE_PT):
+            thicknesses.append(min(bar.x1 - bar.x0, bar.y1 - bar.y0))
     return tuple(thicknesses)
 
 
 def _unique_fill_statement_class(
     polygon: Any,
     *,
+    first: Sequence[float],
+    second: Sequence[float],
     layer: str,
     frame_mm: Optional[float],
     lining_mm: Optional[float],
@@ -352,7 +380,7 @@ def _unique_fill_statement_class(
         _layer_and_thickness_class(
             layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
         )
-        for thickness in _fill_candidate_thicknesses(polygon)
+        for thickness in _fill_candidate_thicknesses_at_edge(polygon, first, second)
         if _layer_and_thickness_class(
             layer, thickness, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
         ) in _RESOLVED_EDGE_CLASSES
@@ -400,7 +428,8 @@ def _edge_class(
             )
             if fill_class not in _RESOLVED_EDGE_CLASSES:
                 fallback = _unique_fill_statement_class(
-                    polygon, layer=layer, frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
+                    polygon, first=first, second=second, layer=layer,
+                    frame_mm=frame_mm, lining_mm=lining_mm, mm_per_pt=mm_per_pt,
                 )
                 if fallback is not None:
                     fill_class = fallback
@@ -415,9 +444,12 @@ def _edge_class(
             classes.add(CLASS_OWNER_UNKNOWN)
             continue
         fact = facts.get(path_index)
-        pair_thickness = _unique_stroke_pair_thickness(
+        pair_thickness, pair_conflict = _stroke_pair_thickness_decision(
             path_index, first, second, stroke_pairs_by_path,
         )
+        if pair_conflict:
+            classes.add(CLASS_OWNER_UNKNOWN)
+            continue
         if fact is not None and fact.is_strip:
             thickness_pt = pair_thickness if pair_thickness is not None else fact.thickness_pt
             classes.add(_layer_and_thickness_class(

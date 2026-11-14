@@ -384,6 +384,38 @@ def test_an_internal_fill_that_is_not_the_stated_build_up_stays_unresolved(base)
     assert identity.lined_edge_offsets_mm == ()
 
 
+def test_a_remote_stated_fill_return_does_not_classify_this_edge(base):
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    first, second = ring.polygon_pdf_pts[edge], ring.polygon_pdf_pts[(edge + 1) % len(ring.polygon_pdf_pts)]
+    fill = _outward_fill(ring, edge, 50.0 / MM_PER_PT)
+    coords = list(fill.exterior.coords)
+    far_first, far_second = coords[3], coords[2]
+    along_x = far_second[0] - far_first[0]
+    along_y = far_second[1] - far_first[1]
+    along = math.hypot(along_x, along_y)
+    along_x, along_y = along_x / along, along_y / along
+    thick = 50.0 / MM_PER_PT
+    nx = (far_first[0] - first[0]) / thick
+    ny = (far_first[1] - first[1]) / thick
+    frame_pt = 70.0 / MM_PER_PT
+    n0 = far_first
+    n1 = (far_first[0] + along_x * 1.3, far_first[1] + along_y * 1.3)
+    n2 = (n1[0] + nx * frame_pt, n1[1] + ny * frame_pt)
+    n3 = (n0[0] + nx * frame_pt, n0[1] + ny * frame_pt)
+    combined = fill.union(Polygon((n0, n1, n2, n3)))
+    edited = _with_fill_owner(ring, edge)
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: combined},
+    )
+    assert identity.verdict == VERDICT_UNRESOLVED
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH in identity.reason_codes
+    assert identity.lined_edge_offsets_mm == ()
+
+
 def test_a_fill_without_its_polygon_is_still_unclassified(base):
     ring, facts = base
     edge = _first_wall_edge(ring)
@@ -452,9 +484,11 @@ def test_competing_stroke_pair_thicknesses_on_the_same_face_abstain(base):
         edited, strip_facts=facts, statements=[statement()], mm_per_pt=MM_PER_PT,
         stroke_pairs_by_path={50: (bounds(70.0), bounds(90.0))},
         path_layers={50: "Enclosure_WallInternal"},
+        unfilled_paths=frozenset({50}),
     )
     assert identity.verdict == VERDICT_UNRESOLVED
     assert CLASS_OWNER_UNKNOWN in identity.reason_codes
+    assert CLASS_DRAWN_LINING_FACE not in identity.reason_codes
 
 
 def test_an_unpaired_internal_lining_stroke_is_already_the_finished_face(base):

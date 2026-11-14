@@ -465,6 +465,12 @@ class SameViewRoomAreaProducer:
                     ):
                         continue
                     scale_consistent_pairs += 1
+                    if layered_ring_box_selection_shadow:
+                        # Offset rails that uniquely hash this ring are the physical
+                        # pair. They need not share a vector junction elsewhere on
+                        # the sheet.
+                        matches.append((line, horizontal, vertical))
+                        continue
                     if not _witness_systems_intersect(horizontal, vertical):
                         continue
                     witness_pairs += 1
@@ -538,7 +544,7 @@ class SameViewRoomAreaProducer:
             if len(deduped) != 1:
                 room_id = str(room.physical_room_id)
                 unresolved.add(room_id)
-                if ring_finished_face_required:
+                if ring_finished_face_required and finished_polygon is None:
                     # A figured width x depth is the box between the DRAWN wall faces; the original has not been
                     # shown to make that the exposed finished face, so it is a noncommercial candidate.
                     first_failures[room_id] = "same_view_layered_ring_finished_face_not_established"
@@ -557,7 +563,7 @@ class SameViewRoomAreaProducer:
                     first_failures[room_id] = "same_view_label_outside_dimension_box"
                 elif not scale_consistent_pairs:
                     first_failures[room_id] = "same_view_figured_pair_scale_inconsistent"
-                elif not witness_pairs:
+                elif not layered_ring_box_selection_shadow and not witness_pairs:
                     first_failures[room_id] = "same_view_dimension_witness_intersection_unavailable"
                 else:
                     first_failures[room_id] = "same_view_dimension_pair_unavailable"
