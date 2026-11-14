@@ -156,7 +156,7 @@ def _firm_room_area_quantities(
                     or revision_id != revision_id.strip()
                 ):
                     raise SourceClosedRunConflictError(
-                        f"room-area original figured pair lacks valid source root: {quantity_id}"
+                        "room-area original figured pair lacks valid source root"
                     )
                 pair = tuple(sorted(axes))
                 owner_key = (source_sha.lower(), revision_id, pair)
@@ -167,7 +167,8 @@ def _firm_room_area_quantities(
                         if prior[0] != quantity.input_entity_ids[0]
                         else "one original figured pair reissued as a second room-area quantity"
                     )
-                    raise SourceClosedRunConflictError(f"{reason}: {pair}")
+                    # A native dimension pair may contain protected source IDs.
+                    raise SourceClosedRunConflictError(reason)
                 figured_pair_owner[owner_key] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
@@ -284,6 +285,9 @@ def build_live_room_area_source_traces(
             floors_by_quantity_id.setdefault(quantity_id, []).append(floor)
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # Distinct metric receipts cannot sell the same original physical room
+    # face twice. This negative test never derives a metric area or a room.
+    claimed_source_faces: dict[tuple[object, ...], list[tuple[str, object]]] = {}
     for quantity in quantities:
         quantity_id = _clean(quantity.quantity_id)
         floors = floors_by_quantity_id.get(quantity_id, ())
@@ -411,6 +415,44 @@ def build_live_room_area_source_traces(
                 if _clean(value)
             )
         )
+        original_bbox = _source_bbox(floor)
+        physical_face_scope = (
+            floor.document_id,
+            floor.source_sha256.lower(),
+            floor.revision_id,
+            floor.page_id,
+            viewport_id,
+            original_bbox,
+        )
+        try:
+            from shapely.geometry import Polygon
+
+            original_face = Polygon(tuple(floor.polygon_pdf_pts))
+            duplicate_source_face = any(
+                original_face.equals(prior_face)
+                for _previous_id, prior_face in claimed_source_faces.get(
+                    physical_face_scope, ()
+                )
+            )
+        except Exception:
+            # Raise outside this handler: even an implicit chained exception
+            # could disclose source coordinates, room or receipt IDs in logs.
+            comparison_failed = True
+        else:
+            comparison_failed = False
+        if comparison_failed:
+            raise SourceClosedRunConflictError(
+                "original room-area source-face comparison failed closed"
+            )
+        if duplicate_source_face:
+            raise SourceClosedRunConflictError(
+                "competing original ROOM_AREA quantities claim the same "
+                "physical PDF room face"
+            )
+        claimed_source_faces.setdefault(physical_face_scope, []).append(
+            (quantity_id, original_face)
+        )
+
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
             project_id=project_id,
@@ -422,7 +464,7 @@ def build_live_room_area_source_traces(
             current_revision_id=floor.revision_id,
             evidence_ids=evidence_ids,
             canonical_entity_ids=canonical_entity_ids,
-            source_bbox=_source_bbox(floor),
+            source_bbox=original_bbox,
             metadata={
                 "family": quantity.family,
                 "canonical_floor_id": floor.canonical_floor_id,
