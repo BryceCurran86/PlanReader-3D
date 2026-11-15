@@ -176,9 +176,9 @@ def test_source_hygiene_then_outer_walls_before_inner_room_trace(tmp_path, monke
     vector = preview.scope_outlined_vector_lettering
     inner = preview.build_layered_wall_doorway_room_rings
 
-    def outer_first(drawings):
+    def outer_first(drawings, **kwargs):
         order.append("outer")
-        return outer(drawings)
+        return outer(drawings, **kwargs)
 
     def source_hygiene(page, drawings):
         order.append("source_hygiene")
@@ -416,9 +416,9 @@ def test_tracing_attempts_exterior_before_numbered_key_and_room(tmp_path,monkeyp
     order=[]
     outer=preview.attempt_source_native_outer_wall_first
     inner=preview.build_layered_wall_doorway_room_rings
-    def first(drawings):
+    def first(drawings, **kwargs):
         order.append("exterior")
-        return outer(drawings)
+        return outer(drawings, **kwargs)
     def second(page,*,page_index,source_sha256):
         order.append("key")
         return NumberedSpaceKeyResult(
@@ -864,3 +864,59 @@ def test_wall_nearmiss_source_layer_and_paint_are_hints_not_joins():
     result3 = inspect_native_wall_graph(bars, source_drawings=unfilled)
     assert all(not m.same_painted_exterior_layer_hint
                for m in result3.endpoint_near_misses)
+
+
+def test_neutral_dark_expansion_never_erases_strict_source_wall_pairs():
+    from pb_next_wall_ring_preview import (
+        _collect_stroke_pair_strips,
+        _collect_monotonic_source_stroke_pairs,
+    )
+    import fitz
+
+    def line(x0,y0,x1,y1,color=(0.,0.,0.)):
+        return {
+            "type":"s","layer":"","color":color,"fill":None,
+            "width":.5,"stroke_opacity":1.,
+            "items":(("l",fitz.Point(x0,y0),fitz.Point(x1,y1)),),
+            "rect":fitz.Rect(min(x0,x1),min(y0,y1),max(x0,x1),max(y0,y1)),
+        }
+    left=line(20,100,200,100)
+    right=line(20,104,200,104)
+    grey=line(20,102,200,102,color=(.1,.1,.1))
+    blank={"type":"s","color":None,"fill":None,"items":()}
+    strict=(left,right,blank)
+    expanded=(left,right,grey)
+    original=_collect_stroke_pair_strips(strict)
+    assert original, "two original source face strokes must create a pair"
+    expanded_only=_collect_stroke_pair_strips(expanded)
+    merged=_collect_monotonic_source_stroke_pairs(expanded,strict)
+    def identity(strip):
+        return (strip.native_path_indices(),
+                tuple(round(v,5) for v in (
+                    strip.x0,strip.y0,strip.x1,strip.y1)))
+    assert {identity(s) for s in original}.issubset(
+        {identity(s) for s in merged}
+    ), "adding neutral gray paint cannot delete original source pair"
+    assert all(
+        all(0 <= path < len(expanded) for path in strip.native_path_indices())
+        for strip in merged
+    )
+    assert len(merged) >= len(original)
+    # A preview cannot manufacture accepted physical wall or quantities
+    # simply because more source paint was found.
+    assert _collect_monotonic_source_stroke_pairs(strict)==original
+
+
+def test_neutral_dark_baseline_rejects_reindexed_or_replaced_source_paths():
+    import fitz
+    from pb_next_wall_ring_preview import _collect_monotonic_source_stroke_pairs
+    stroke={
+        "type":"s","color":(0.,0.,0.),"fill":None,
+        "items":(("l",fitz.Point(20,100),fitz.Point(200,100)),),
+        "stroke_opacity":1.,"width":.5,
+    }
+    inert={"color":None,"fill":None,"items":()}
+    with pytest.raises(ValueError,match="identity_length_mismatch"):
+        _collect_monotonic_source_stroke_pairs((),(stroke,))
+    with pytest.raises(ValueError,match="original_path_replaced"):
+        _collect_monotonic_source_stroke_pairs((inert,),(stroke,))
