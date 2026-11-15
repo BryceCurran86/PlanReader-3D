@@ -166,7 +166,7 @@ def _is_outdoor_name(name: str) -> bool:
     t = " " + re.sub(r"[^A-Z ]", " ", name.upper()) + " "
     return any(x in t for x in (
         " CARPORT ", " COURT ", " COURTYARD ", " PORTICO ",
-        " PATIO ", " PORCH ", " TERRACE ", " VERANDAH ",
+        " ALFRESCO ", " PATIO ", " PORCH ", " TERRACE ", " VERANDAH ",
         " BALCONY ", " DRIVEWAY ", " DECK ", " PERGOLA ",
         " WATER TANK ", " GARDEN ", " ATRIUM ", " VOID ",
     ))
