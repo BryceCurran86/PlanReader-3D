@@ -416,6 +416,67 @@ def test_a_remote_stated_fill_return_does_not_classify_this_edge(base):
     assert identity.lined_edge_offsets_mm == ()
 
 
+def test_a_mitred_stated_frame_fill_is_the_frame_face_not_the_mitre_depth(base):
+    """A 45-degree mitre at mid-edge is not a second wall thickness.
+
+    Observed original A0.3 BED 2 jog fill is a 70 mm internal body whose far corner is
+    mitred; the room-edge ray strikes that mitre. Classification uses the unique
+    perpendicular side of this same fill (the stated frame), not the mitre depth and
+    not an adjacent-return override of a parallel-face measurement.
+    """
+    from shapely.geometry import Polygon
+
+    ring, facts = base
+    edge = _first_wall_edge(ring)
+    points = list(ring.polygon_pdf_pts)
+    first = points[edge]
+    second = points[(edge + 1) % len(points)]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    along_x, along_y = dx / length, dy / length
+    fill_guide = _outward_fill(ring, edge, 70.0 / MM_PER_PT)
+    nx = (fill_guide.exterior.coords[3][0] - first[0]) / (70.0 / MM_PER_PT)
+    ny = (fill_guide.exterior.coords[3][1] - first[1]) / (70.0 / MM_PER_PT)
+    frame_pt = 70.0 / MM_PER_PT
+    run_pt = 6.0
+    a = first
+    d = (first[0] + along_x * run_pt, first[1] + along_y * run_pt)
+    b = (a[0] + nx * frame_pt, a[1] + ny * frame_pt)
+    c = (b[0] + along_x * (run_pt - frame_pt), b[1] + along_y * (run_pt - frame_pt))
+    points[(edge + 1) % len(points)] = d
+    owners = list(ring.edge_owner_ids)
+    owners[edge] = ("layered_wall_fill:7",)
+    edited = replace(ring, polygon_pdf_pts=tuple(points), edge_owner_ids=tuple(owners))
+    identity = classify_ring_face_identity(
+        edited, strip_facts={**facts, 7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        statements=[statement()], mm_per_pt=MM_PER_PT, fill_polygons={7: Polygon((a, d, c, b))},
+    )
+    assert identity.verdict == VERDICT_RESOLVED
+    assert CLASS_LINED_INTERNAL_FRAME_FACE in classes(identity)
+    assert CLASS_INTERNAL_THICKNESS_MISMATCH not in identity.reason_codes
+
+
+def test_original_scale_mitred_internal_fill_matches_the_stated_frame():
+    """Exact A0.3 jog-fill coordinates at the unique-pair page scale."""
+    from shapely.geometry import Polygon
+
+    from pb_layered_wall_face_identity_shadow import _edge_class
+
+    mm_per_pt = 35.278
+    first, second = (704.3453, 355.7061), (700.9437, 355.7061)
+    fill = Polygon((
+        (700.9437, 355.7061), (700.9437, 353.7218),
+        (702.3611, 353.7218), (704.3453, 355.7061),
+    ))
+    edge_class = _edge_class(
+        ("layered_wall_fill:7",),
+        {7: WallStripFact(7, "Enclosure_WallInternal", False, None)},
+        first=first, second=second, frame_mm=70.0, lining_mm=10.0, mm_per_pt=mm_per_pt,
+        fill_polygons={7: fill},
+    )
+    assert edge_class == CLASS_LINED_INTERNAL_FRAME_FACE
+
+
 def test_a_stated_fill_end_spur_does_not_classify_this_edge(base):
     from shapely.geometry import Polygon
 

@@ -287,8 +287,34 @@ def _stroke_pair_thickness_decision(
     return float(first_thick), False
 
 
+def _side_is_parallel_to_edge(
+    start: Sequence[float], end: Sequence[float], first: Sequence[float], second: Sequence[float],
+) -> bool:
+    edge_x = float(second[0]) - float(first[0])
+    edge_y = float(second[1]) - float(first[1])
+    side_x = float(end[0]) - float(start[0])
+    side_y = float(end[1]) - float(start[1])
+    edge_len = math.hypot(edge_x, edge_y)
+    side_len = math.hypot(side_x, side_y)
+    if edge_len <= NOISE_PT or side_len <= NOISE_PT:
+        return False
+    return abs(edge_x * side_y - edge_y * side_x) <= NOISE_PT * edge_len
+
+
+def _point_lies_on_side(point: Any, start: Sequence[float], end: Sequence[float]) -> bool:
+    from shapely.geometry import LineString, Point
+
+    return LineString((start, end)).distance(Point(float(point.x), float(point.y))) <= NOISE_PT
+
+
 def _fill_thickness_at_edge(polygon: Any, first: Sequence[float], second: Sequence[float]) -> Optional[float]:
-    """Perpendicular depth of a wall-layer fill at the room-face edge, in page points."""
+    """Perpendicular depth of a wall-layer fill at the room-face edge, in page points.
+
+    The hit must lie on a polygon side parallel to the room edge. A ray that strikes a
+    mitre or return is not a thickness; that edge then falls through to unique on-face
+    perpendicular sides of this same fill. It does not override a measured parallel-face
+    depth with an adjacent return.
+    """
     from shapely.geometry import LineString, Point
 
     ax, ay = float(first[0]), float(first[1])
@@ -320,6 +346,16 @@ def _fill_thickness_at_edge(polygon: Any, first: Sequence[float], second: Sequen
         return None
     origin = Point(mid)
     farthest = max(points, key=lambda point: point.distance(origin))
+    try:
+        coords = list(polygon.exterior.coords)
+    except AttributeError:
+        return None
+    if not any(
+        _point_lies_on_side(farthest, start, end)
+        and _side_is_parallel_to_edge(start, end, first, second)
+        for start, end in zip(coords, coords[1:])
+    ):
+        return None
     return float(farthest.distance(origin))
 
 
