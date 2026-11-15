@@ -430,6 +430,48 @@ def issue_original_maryborough_pwd_ceiling_customer_quantities(
     )
 
 
+def _is_authentic_cad_page(page, *, min_drawings: int = 500, min_words: int = 20) -> bool:
+    try:
+        drawings = page.get_drawings() or []
+        valid_drawings = [
+            d for d in drawings
+            if isinstance(d, dict)
+            and isinstance(d.get("items"), (list, tuple))
+            and d["items"]
+            and all(
+                isinstance(it, (tuple, list))
+                and len(it) >= 2
+                and not any(isinstance(coord, str) for coord in it[1:])
+                for it in d["items"]
+            )
+        ]
+        if len(valid_drawings) < min_drawings:
+            return False
+    except Exception:
+        return False
+
+    try:
+        words = page.get_text("words") or []
+        if len(words) < min_words:
+            return False
+        if not any(
+            isinstance(w, (tuple, list))
+            and len(w) >= 5
+            and isinstance(w[0], (int, float))
+            and isinstance(w[1], (int, float))
+            and isinstance(w[2], (int, float))
+            and isinstance(w[3], (int, float))
+            and w[2] > w[0]
+            and w[3] > w[1]
+            for w in words
+        ):
+            return False
+    except Exception:
+        return False
+
+    return True
+
+
 def _issue_maryborough_source_figured_ceiling_customer(
     pdf_path: str | Path,
     *,
@@ -467,13 +509,8 @@ def _issue_maryborough_source_figured_ceiling_customer(
             if document.page_count < 30:
                 return _blocked("maryborough_page_count_too_short")
 
-            # Native drawing observations check
-            try:
-                drawings_rcp = document[rcp_page_no - 1].get_drawings() or []
-                drawings_dim = document[dim_page_no - 1].get_drawings() or []
-                if len(drawings_rcp) < 500 or len(drawings_dim) < 500:
-                    return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
-            except Exception:
+            # Authentic CAD page check
+            if not _is_authentic_cad_page(document[rcp_page_no - 1]) or not _is_authentic_cad_page(document[dim_page_no - 1]):
                 return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             # Raster backend check
