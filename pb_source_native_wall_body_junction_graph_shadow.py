@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from shapely.geometry import Point
+from shapely.ops import nearest_points
 
 from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_dark_painted_source_wall_strips,
@@ -27,8 +28,13 @@ from pb_next_wall_ring_preview import (
     _collect_source_heavy_stroke_strips,
     _collect_source_wide_face_pairs,
 )
+from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_source_native_exterior_endpoint_authority_shadow import (
     CONTACT_PT,
+    REASON_COMPETING,
+    ROLE_DIAGONAL_BRIDGE,
+    ROLE_EXCLUSION,
+    ROLE_EXTERIOR_OUTER_FACE,
     ROLE_UNKNOWN,
     authenticate_external_wall_junction,
     classify_source_native_path_role,
@@ -46,6 +52,12 @@ JUNCTION_CORNER_RETURN = "corner_return"
 
 REASON_MISSING_PROVENANCE = "source_path_provenance_missing"
 REASON_INFERRED_JOIN_FORBIDDEN = "inferred_collinear_join_not_source_ink"
+REASON_NON_STRUCTURAL = "visual_crossing_without_structural_native_witness"
+REASON_UNCLOSED_EXTERIOR = "unclosed_exterior_endpoint_no_unique_jamb"
+REASON_DUPLICATE_PATH_OWNER = "duplicate_native_path_owner"
+REASON_LAYER_NOT_PHYSICAL = "exterior_layer_name_is_not_physical_wall"
+REASON_WINDOW_NO_UNIQUE_JAMB = "window_gap_missing_unique_hosted_jamb_pair"
+JUNCTION_WINDOW_CONTINUITY = "window_continuity_topology_only"
 
 
 def _path_ids(bar: Any) -> tuple[int, ...]:
@@ -101,6 +113,7 @@ class SourcePathProvenance:
     native_path_ids: tuple[int, ...]
     native_source_layers: tuple[str, ...]
     viewport_id: str
+    page_index: int
     geometry_kind: str
     role: str
 
@@ -109,6 +122,7 @@ class SourcePathProvenance:
             "native_path_ids": list(self.native_path_ids),
             "native_source_layers": list(self.native_source_layers),
             "viewport_id": self.viewport_id,
+            "page_index": self.page_index,
             "geometry_kind": self.geometry_kind,
             "role": self.role,
         }
@@ -146,6 +160,8 @@ class SourceJunctionRecord:
     left_path_ids: tuple[int, ...]
     right_path_ids: tuple[int, ...]
     separation_pdf_pts: float
+    contact_pdf_pts: tuple[float, float]
+    page_index: int
     provenance_geometry_kind: str
     status: EvidenceResolutionStatus
     reason: str
@@ -160,6 +176,8 @@ class SourceJunctionRecord:
             "left_path_ids": list(self.left_path_ids),
             "right_path_ids": list(self.right_path_ids),
             "separation_pdf_pts": self.separation_pdf_pts,
+            "contact_pdf_pts": list(self.contact_pdf_pts),
+            "page_index": self.page_index,
             "provenance_geometry_kind": self.provenance_geometry_kind,
             "status": self.status.value,
             "reason": self.reason,
@@ -177,6 +195,8 @@ def _body_id(paths: Sequence[int], bounds: Sequence[float]) -> str:
 def _provenance_for_bar(
     bar: Any,
     drawings: Sequence[Mapping[str, Any] | object],
+    *,
+    page_index: int = -1,
 ) -> SourcePathProvenance | None:
     paths = _path_ids(bar)
     if not paths:
@@ -193,9 +213,15 @@ def _provenance_for_bar(
         native_path_ids=paths,
         native_source_layers=layers,
         viewport_id=viewport,
+        page_index=page_index,
         geometry_kind=GEOMETRY_OBSERVED,
         role=role,
     )
+
+
+def _contact_point(left: Any, right: Any) -> tuple[float, float]:
+    a, b = nearest_points(left.polygon, right.polygon)
+    return (round((a.x + b.x) / 2.0, 3), round((a.y + b.y) / 2.0, 3))
 
 
 def _classify_pair(left: Any, right: Any) -> str | None:
@@ -223,6 +249,8 @@ def _classify_pair(left: Any, right: Any) -> str | None:
 def classify_source_wall_body_junctions(
     bars: Sequence[Any],
     drawings: Sequence[Mapping[str, Any] | object],
+    *,
+    page_index: int = -1,
 ) -> tuple[tuple[SourceWallBodyRecord, ...], tuple[SourceJunctionRecord, ...]]:
     """Typed bodies and junctions. Collinear gaps stay unsnapped."""
     bodies: list[SourceWallBodyRecord] = []
@@ -230,12 +258,14 @@ def classify_source_wall_body_junctions(
     for bar in bars:
         if getattr(bar, "polygon", None) is None or bar.polygon.is_empty:
             continue
-        provenance = _provenance_for_bar(bar, drawings)
+        provenance = _provenance_for_bar(bar, drawings, page_index=page_index)
         bounds = tuple(round(float(v), 3) for v in bar.polygon.bounds)
         if provenance is None:
             bodies.append(SourceWallBodyRecord(
                 body_id=_body_id((), bounds),
-                provenance=SourcePathProvenance((), (), "", GEOMETRY_OBSERVED, "unknown"),
+                provenance=SourcePathProvenance(
+                    (), (), "", page_index, GEOMETRY_OBSERVED, "unknown",
+                ),
                 bounds_pdf_pts=bounds,
                 long_axis=_axis(bar),
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -252,6 +282,23 @@ def classify_source_wall_body_junctions(
             reason="source_wall_body_observed_not_physical_authority",
         ))
         index_for.append(bodies[-1].body_id)
+    owner_counts: dict[int, int] = {}
+    for body in bodies:
+        for path in body.provenance.native_path_ids:
+            owner_counts[path] = owner_counts.get(path, 0) + 1
+    bodies = [
+        body
+        if not any(owner_counts.get(path, 0) > 1 for path in body.provenance.native_path_ids)
+        else SourceWallBodyRecord(
+            body_id=body.body_id,
+            provenance=body.provenance,
+            bounds_pdf_pts=body.bounds_pdf_pts,
+            long_axis=body.long_axis,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason=REASON_DUPLICATE_PATH_OWNER,
+        )
+        for body in bodies
+    ]
     valid = [bar for bar in bars if getattr(bar, "polygon", None) is not None and not bar.polygon.is_empty]
     contacts: dict[int, set[int]] = {i: set() for i in range(len(valid))}
     junctions: list[SourceJunctionRecord] = []
@@ -276,9 +323,13 @@ def classify_source_wall_body_junctions(
                 bodies[i].provenance.role,
                 bodies[j].provenance.role,
             )
+            if any(role in {ROLE_EXCLUSION, ROLE_DIAGONAL_BRIDGE} for role in roles):
+                status = EvidenceResolutionStatus.ABSTAINED
+                if reason != REASON_COMPETING:
+                    reason = REASON_NON_STRUCTURAL
             if kind == JUNCTION_L and roles == (
-                "exterior_outer_face_candidate",
-                "exterior_outer_face_candidate",
+                ROLE_EXTERIOR_OUTER_FACE,
+                ROLE_EXTERIOR_OUTER_FACE,
             ):
                 kind = JUNCTION_CORNER_RETURN
             junctions.append(SourceJunctionRecord(
@@ -288,6 +339,8 @@ def classify_source_wall_body_junctions(
                 left_path_ids=left_ids,
                 right_path_ids=right_ids,
                 separation_pdf_pts=separation,
+                contact_pdf_pts=_contact_point(left, right),
+                page_index=page_index,
                 provenance_geometry_kind=GEOMETRY_OBSERVED,
                 status=status,
                 reason=reason,
@@ -310,11 +363,190 @@ def classify_source_wall_body_junctions(
             left_path_ids=_path_ids(valid[members[0]]),
             right_path_ids=_path_ids(valid[members[1]]),
             separation_pdf_pts=0.0,
+            contact_pdf_pts=_contact_point(valid[members[0]], valid[members[1]]),
+            page_index=page_index,
             provenance_geometry_kind=GEOMETRY_OBSERVED,
             status=EvidenceResolutionStatus.ABSTAINED,
             reason="multi_face_meeting_needs_source_owned_wall_body",
         ))
     return tuple(bodies), tuple(junctions)
+
+
+def _open_endpoint_receipts(bars: Sequence[Any]) -> tuple[dict[str, object], ...]:
+    opens: list[dict[str, object]] = []
+    valid = [bar for bar in bars if getattr(bar, "polygon", None) is not None and not bar.polygon.is_empty]
+    for i, bar in enumerate(valid):
+        for tip in _tips(bar):
+            if any(j != i and _tip_hits(tip, valid[j]) for j in range(len(valid))):
+                continue
+            nearest_sep = None
+            nearby: tuple[int, ...] = ()
+            for j, other in enumerate(valid):
+                if j == i:
+                    continue
+                sep = float(Point(tip).distance(other.polygon))
+                if nearest_sep is None or sep < nearest_sep:
+                    nearest_sep = sep
+                    nearby = _path_ids(other)
+            opens.append({
+                "tip_pdf_pts": [round(float(tip[0]), 3), round(float(tip[1]), 3)],
+                "native_path_ids": list(_path_ids(bar)),
+                "nearby_native_path_ids": list(nearby),
+                "separation_pdf_pts": None if nearest_sep is None else round(float(nearest_sep), 4),
+                "status": EvidenceResolutionStatus.ABSTAINED.value,
+                "reason": REASON_UNCLOSED_EXTERIOR,
+                "physical_join_authenticated": False,
+                "measurement_authorized": False,
+                "snap_join_applied": False,
+            })
+    opens.sort(key=lambda row: (
+        float("inf") if row["separation_pdf_pts"] is None else float(row["separation_pdf_pts"]),
+        row["native_path_ids"],
+        row["nearby_native_path_ids"],
+        row["tip_pdf_pts"],
+    ))
+    return tuple(opens)
+
+
+def authenticate_window_continuity_topology(
+    *,
+    left_host_path_ids: Sequence[int],
+    right_host_path_ids: Sequence[int],
+    left_jamb_path_ids: Sequence[int],
+    right_jamb_path_ids: Sequence[int],
+    sill_or_floor_path_ids: Sequence[int],
+    drawings: Sequence[Mapping[str, Any] | object],
+) -> tuple[EvidenceResolutionStatus, str]:
+    """Topology-only window continuity. Never a wall and never a quantity."""
+    hosts = (tuple(left_host_path_ids), tuple(right_host_path_ids))
+    jambs = (tuple(left_jamb_path_ids), tuple(right_jamb_path_ids))
+    sill = tuple(sill_or_floor_path_ids)
+    owned = (*hosts[0], *hosts[1], *jambs[0], *jambs[1], *sill)
+    if (
+        not hosts[0] or not hosts[1] or not jambs[0] or not jambs[1] or not sill
+        or len(set(owned)) != len(owned)
+        or not set(hosts[0]).isdisjoint(set(hosts[1]))
+        or not set(jambs[0]).isdisjoint(set(jambs[1]))
+    ):
+        return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=hosts[0],
+        nearby_native_path_ids=hosts[1],
+        separation_pdf_pts=CONTACT_PT,
+        drawings=drawings,
+    )
+    if status is EvidenceResolutionStatus.ABSTAINED and reason in {
+        REASON_COMPETING,
+        "native_source_path_owner_missing",
+        "foreign_view_path_index_collision",
+        "native_path_owners_not_disjoint",
+    }:
+        return status, reason
+    for path in owned:
+        if not (0 <= path < len(drawings)) or not isinstance(drawings[path], Mapping):
+            return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
+    return EvidenceResolutionStatus.CANDIDATE, "window_continuity_topology_only_not_wall"
+
+
+def classify_window_continuity_edges(
+    junctions: Sequence[SourceJunctionRecord],
+    drawings: Sequence[Mapping[str, Any] | object],
+    *,
+    page_index: int = -1,
+    opening_witnesses: Sequence[Mapping[str, Any]] = (),
+) -> tuple[SourceJunctionRecord, ...]:
+    """Collinear exterior gaps stay unsnapped unless unique jamb/host/sill exist."""
+    by_hosts = {
+        (tuple(row.get("left_host_path_ids") or ()), tuple(row.get("right_host_path_ids") or ())): row
+        for row in opening_witnesses
+        if isinstance(row, Mapping)
+    }
+    out: list[SourceJunctionRecord] = []
+    for item in junctions:
+        if item.junction_kind != JUNCTION_COLLINEAR_GAP:
+            continue
+        key = (item.left_path_ids, item.right_path_ids)
+        mirror = (item.right_path_ids, item.left_path_ids)
+        witness = by_hosts.get(key) or by_hosts.get(mirror) or {}
+        status, reason = authenticate_window_continuity_topology(
+            left_host_path_ids=witness.get("left_host_path_ids") or (),
+            right_host_path_ids=witness.get("right_host_path_ids") or (),
+            left_jamb_path_ids=witness.get("left_jamb_path_ids") or (),
+            right_jamb_path_ids=witness.get("right_jamb_path_ids") or (),
+            sill_or_floor_path_ids=witness.get("sill_or_floor_path_ids") or (),
+            drawings=drawings,
+        )
+        out.append(SourceJunctionRecord(
+            junction_kind=JUNCTION_WINDOW_CONTINUITY,
+            left_body_id=item.left_body_id,
+            right_body_id=item.right_body_id,
+            left_path_ids=item.left_path_ids,
+            right_path_ids=item.right_path_ids,
+            separation_pdf_pts=item.separation_pdf_pts,
+            contact_pdf_pts=item.contact_pdf_pts,
+            page_index=page_index,
+            provenance_geometry_kind=GEOMETRY_INFERRED,
+            status=status,
+            reason=reason if status is EvidenceResolutionStatus.ABSTAINED else (
+                "window_continuity_topology_only_not_wall"
+            ),
+        ))
+    return tuple(out)
+
+
+def audit_source_native_exterior_cycle(
+    bars: Sequence[Any],
+    drawings: Sequence[Mapping[str, Any] | object],
+    *,
+    page_index: int = -1,
+    opening_chassis_witness: bool = False,
+    bodies: Sequence[SourceWallBodyRecord] | None = None,
+) -> dict[str, object]:
+    """Unique-or-abstain outer cycle. Layer names are not physical walls."""
+    if bodies is None:
+        bodies, _junctions = classify_source_wall_body_junctions(
+            bars, drawings, page_index=page_index,
+        )
+    opens = _open_endpoint_receipts(bars)
+    graph = inspect_native_wall_graph(bars, source_drawings=drawings)
+    exterior_bodies = tuple(
+        body for body in bodies if body.provenance.role == ROLE_EXTERIOR_OUTER_FACE
+    )
+    first = opens[0] if opens else None
+    closed = (
+        not opens
+        and len(exterior_bodies) >= 3
+        and all(body.status is not EvidenceResolutionStatus.ABSTAINED for body in exterior_bodies)
+        and opening_chassis_witness is False
+        and graph.second_stage_join_applied is False
+    )
+    return {
+        "status": (
+            EvidenceResolutionStatus.CANDIDATE.value
+            if closed else EvidenceResolutionStatus.ABSTAINED.value
+        ),
+        "reason": (
+            "source_exterior_cycle_candidate_not_physical_authority"
+            if closed else (
+                first["reason"] if first else REASON_UNCLOSED_EXTERIOR
+            )
+        ),
+        "first_unclosed_endpoint": first,
+        "open_endpoint_count": len(opens),
+        "open_endpoints": list(opens),
+        "component_count": graph.component_count,
+        "second_stage_join_applied": graph.second_stage_join_applied,
+        "exterior_layer_body_count": len(exterior_bodies),
+        "exterior_layer_is_not_physical_wall": True,
+        "candidate_outer_cycle_count": 1 if closed else 0,
+        "path_id_sequence": [
+            list(body.provenance.native_path_ids) for body in exterior_bodies
+        ],
+        "physical_wall_authenticated": False,
+        "measurement_authorized": False,
+        "layer_name_physical_promotion": False,
+        "snap_join_applied": False,
+    }
 
 
 def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> list[Any]:
@@ -339,11 +571,20 @@ def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> 
 
 def build_source_native_wall_body_junction_graph(
     drawings: Sequence[Mapping[str, Any] | object],
+    *,
+    page_index: int = -1,
 ) -> dict[str, object]:
     """P0–P2 shadow graph. Zero quantities; collinear gaps are not walls."""
     attempt = attempt_source_native_outer_wall_first(drawings)
+    bars = _unique_source_wall_bars(drawings)
     bodies, junctions = classify_source_wall_body_junctions(
-        _unique_source_wall_bars(drawings), drawings,
+        bars, drawings, page_index=page_index,
+    )
+    cycle = audit_source_native_exterior_cycle(
+        bars, drawings, page_index=page_index, bodies=bodies,
+    )
+    window_edges = classify_window_continuity_edges(
+        junctions, drawings, page_index=page_index,
     )
     inferred = sum(1 for item in junctions if item.provenance_geometry_kind == GEOMETRY_INFERRED)
     joined = sum(
@@ -352,21 +593,38 @@ def build_source_native_wall_body_junction_graph(
         if item.status is EvidenceResolutionStatus.CANDIDATE
         and item.junction_kind != JUNCTION_COLLINEAR_GAP
     )
+    refused = sum(1 for item in junctions if item.status is EvidenceResolutionStatus.ABSTAINED)
     return {
+        "page_index": page_index,
         "exterior_preflight_status": attempt.status,
         "exterior_preflight_reason": attempt.reason,
+        "component_count": cycle["component_count"],
         "body_count": len(bodies),
         "junction_count": len(junctions),
         "bodies": [item.to_dict() for item in bodies],
         "junctions": [item.to_dict() for item in junctions],
         "inferred_join_count": inferred,
         "joined_candidate_count": joined,
+        "refused_join_count": refused,
         "collinear_gap_unsnapped_count": sum(
             1 for item in junctions if item.junction_kind == JUNCTION_COLLINEAR_GAP
         ),
+        "window_continuity_edges": [item.to_dict() for item in window_edges],
+        "window_continuity_candidate_count": sum(
+            1 for item in window_edges if item.status is EvidenceResolutionStatus.CANDIDATE
+        ),
+        "window_continuity_abstain_count": sum(
+            1 for item in window_edges if item.status is EvidenceResolutionStatus.ABSTAINED
+        ),
+        "exterior_cycle": cycle,
+        "first_unclosed_endpoint": cycle["first_unclosed_endpoint"],
+        "open_endpoint_count": cycle["open_endpoint_count"],
+        "candidate_outer_cycle_count": cycle["candidate_outer_cycle_count"],
         "physical_wall_authenticated": False,
         "measurement_authorized": False,
         "commercial_publishable": False,
         "can_issue_area": False,
         "official_frozen120_score_change": 0,
+        "snap_join_applied": False,
+        "layer_name_physical_promotion": False,
     }
