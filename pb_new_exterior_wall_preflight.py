@@ -58,6 +58,10 @@ class SourceNativeOuterWallAttempt:
     window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
     garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
     swing_door_footprint_bridges: tuple[ExteriorSwingDoorFootprintBridge, ...] = ()
+    diagnostic_closed_wall_loop_count: int = 0
+    diagnostic_rejected_loop_bbox_pdf_pts: tuple[float, float, float, float] | None = None
+    diagnostic_wall_bands_outside_loop: int = 0
+    diagnostic_outside_source_path_sample: tuple[int, ...] = ()
 
 
 def attempt_source_native_outer_wall_first(
@@ -207,6 +211,7 @@ def attempt_source_native_outer_wall_first(
     if len(closed) != 1:
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_perimeter_not_unique_and_closed",
+            diagnostic_closed_wall_loop_count=len(closed),
             **counts,
         )
     outer = closed[0]
@@ -217,9 +222,26 @@ def attempt_source_native_outer_wall_first(
         )
     # A single ROOM perimeter with other walls beyond it is not the outer
     # building boundary. Count every independent source-painted wall bar.
-    if any(not outer.buffer(.05).covers(bar.polygon) for bar in bars):
+    expanded_outer = outer.buffer(.05)
+    outside_bars = [
+        bar for bar in bars if not expanded_outer.covers(bar.polygon)
+    ]
+    if outside_bars:
+        # The short receipt contains actual original path_index owners for
+        # rejected source wall BANDS; composite bars may reference many more
+        # primitive paths. A bounded first-seen owner sample is readable on
+        # the original drawing, and never authorizes any physical wall area.
+        outside_source_paths = tuple(dict.fromkeys(
+            int(bar.path_index) for bar in outside_bars
+        ))
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_other_wall_ink_outside_candidate",
+            diagnostic_closed_wall_loop_count=len(closed),
+            diagnostic_rejected_loop_bbox_pdf_pts=tuple(
+                round(float(v), 3) for v in outer.bounds
+            ),
+            diagnostic_wall_bands_outside_loop=len(outside_bars),
+            diagnostic_outside_source_path_sample=outside_source_paths[:32],
             **counts,
         )
     points = tuple(
@@ -248,4 +270,5 @@ def attempt_source_native_outer_wall_first(
         window_footprint_bridges=window_bridges,
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
+        diagnostic_closed_wall_loop_count=len(closed),
     )
