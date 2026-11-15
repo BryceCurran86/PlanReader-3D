@@ -266,6 +266,18 @@ def test_closed_detached_wall_cycle_is_decoy_only_not_conditioned_interior():
     assert res.interior_room_count == 1
     assert res.disconnected_decoy_count == 1
     assert len(rooms) == 1 and len(decoys) == 1
+    # A detached CLOSED geometry still has a reviewable polygon; its wall
+    # owners must not become another conditioned room or customer area.
+    unverified = [
+        item for item in res.regions
+        if item.kind == SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE
+    ]
+    assert res.unverified_enclosed_count == 1
+    assert len(unverified) == 1
+    assert set(unverified[0].bounding_native_path_ids) == {5, 6, 7, 8}
+    assert unverified[0].status == EvidenceResolutionStatus.ABSTAINED
+    assert unverified[0].is_conditioned_living is False
+    assert unverified[0].measurement_authorized is False
     assert set(rooms[0].bounding_native_path_ids) == {1, 2, 3, 4}
     assert set(decoys[0].bounding_native_path_ids) == {5, 6, 7, 8}
     assert not set(rooms[0].bounding_native_path_ids) & set(decoys[0].bounding_native_path_ids)

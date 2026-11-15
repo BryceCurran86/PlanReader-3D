@@ -94,6 +94,7 @@ def main() -> int:
         "courtyard_holes": report["courtyard_hole_count"],
         "attached_outdoor": report["attached_outdoor_count"],
         "disconnected_decoys": report["disconnected_decoy_count"],
+        "unverified_enclosed_candidates": report["unverified_enclosed_count"],
         "primary_building_bodies": report["primary_building_body_count"],
         "regions_by_kind": kinds_breakdown,
         "boundary_faces_by_type": faces_breakdown,

@@ -36,6 +36,7 @@ class SpatialRegionKind(str, enum.Enum):
     INTERNAL_COURTYARD_HOLE = "internal_courtyard_hole"
     ATTACHED_OUTDOOR_REGION = "attached_outdoor_region"
     DISCONNECTED_STRUCTURE_OR_DECOY = "disconnected_structure_or_decoy"
+    UNVERIFIED_ENCLOSED_CANDIDATE = "unverified_enclosed_candidate"
 
 
 REASON_SPATIAL_OK = "spatial_subdivision_candidate_observed"
@@ -43,6 +44,7 @@ REASON_INSUFFICIENT_WALLS = "insufficient_source_wall_bodies_for_building"
 REASON_NO_OUTSIDE_FACE = "explicit_outside_face_not_resolved"
 REASON_DISCONNECTED_DECOY = "disconnected_decoy_component_rejected"
 REASON_OPEN_BOUNDARY_LEAK = "open_wall_boundary_leaks_to_outside"
+REASON_UNVERIFIED_ENCLOSURE = "closed_native_geometry_in_disconnected_component_not_conditioned_space"
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,7 @@ class SpatialSubdivisionResult:
     courtyard_hole_count: int
     attached_outdoor_count: int
     disconnected_decoy_count: int
+    unverified_enclosed_count: int = 0
     regions: tuple[SpatialRegionRecord, ...] = ()
     boundary_faces: tuple[SpatialBoundaryFaceRecord, ...] = ()
     outside_region_id: str = ""
@@ -141,6 +144,7 @@ class SpatialSubdivisionResult:
             "courtyard_hole_count": self.courtyard_hole_count,
             "attached_outdoor_count": self.attached_outdoor_count,
             "disconnected_decoy_count": self.disconnected_decoy_count,
+            "unverified_enclosed_count": self.unverified_enclosed_count,
             "outside_region_id": self.outside_region_id,
             "has_explicit_outside_face": self.has_explicit_outside_face,
             "primary_building_body_count": self.primary_building_body_count,
@@ -354,9 +358,29 @@ def build_source_spatial_subdivision(
         # are not conditioned/interior rooms of the primary structure. Keep
         # their source paths in the existing disconnected-decoy ABSTAIN
         # record below rather than publishing the same paths as both kinds.
-        if not touching_body_ids or all(
-            body_id in disconnected_body_set for body_id in touching_body_ids
-        ):
+        if not touching_body_ids:
+            continue
+        if all(body_id in disconnected_body_set for body_id in touching_body_ids):
+            # Preserve source-closed geometric voids for plan review, but do
+            # not classify them as conditioned rooms or feed wall-face ownership.
+            # A separate detached-structure record retains the same path IDs
+            # as a component-level diagnostic, not an extra physical room.
+            regions.append(SpatialRegionRecord(
+                region_id=f"region:unverified:{region_idx}",
+                kind=SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE,
+                bounds_pdf_pts=poly_bounds,
+                polygon_pdf_pts=coords,
+                area_pdf_pts=area,
+                label=None,
+                semantic_role="unverified_enclosed_geometry_not_room_authority",
+                bounding_wall_body_ids=touching_body_ids,
+                bounding_native_path_ids=touching_path_ids,
+                is_hole_in_building=False,
+                is_conditioned_living=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=REASON_UNVERIFIED_ENCLOSURE,
+            ))
+            region_idx += 1
             continue
 
         # Find any space label inside this geometry
@@ -573,6 +597,10 @@ def build_source_spatial_subdivision(
         r for r in regions
         if r.kind == SpatialRegionKind.DISCONNECTED_STRUCTURE_OR_DECOY
     ]
+    unverified_enclosed = [
+        r for r in regions
+        if r.kind == SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE
+    ]
 
     status = (
         EvidenceResolutionStatus.CANDIDATE if has_outside
@@ -588,6 +616,7 @@ def build_source_spatial_subdivision(
         courtyard_hole_count=len(courtyards),
         attached_outdoor_count=len(outdoor_attached),
         disconnected_decoy_count=len(decoys),
+        unverified_enclosed_count=len(unverified_enclosed),
         regions=tuple(regions),
         boundary_faces=tuple(boundary_faces),
         outside_region_id=outside_region_id,
