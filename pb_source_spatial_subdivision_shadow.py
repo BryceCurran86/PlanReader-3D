@@ -169,7 +169,7 @@ def _is_outdoor_name(name: str) -> bool:
     return any(x in t for x in (
         " ALFRESCO ", " AL FRESCO ", " OUTDOOR ", " OUTDOOR LIVING ",
         " CARPORT ", " COURT ", " COURTYARD ", " PORTICO ",
-        " PATIO ", " PORCH ", " TERRACE ", " VERANDAH ",
+        " ALFRESCO ", " PATIO ", " PORCH ", " TERRACE ", " VERANDAH ",
         " BALCONY ", " DRIVEWAY ", " DECK ", " PERGOLA ",
         " WATER TANK ", " GARDEN ", " ATRIUM ", " VOID ",
         " LANAI ", " CABANA ",
