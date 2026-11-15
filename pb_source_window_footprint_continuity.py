@@ -129,7 +129,11 @@ def detect_exterior_window_footprint_bridges(
             if max(float(v) for v in fill[:3]) < 0.3:
                 filled_rectangles.append((idx, layer, bounds))
                 dx, dy = bounds[2]-bounds[0], bounds[3]-bounds[1]
-                if max(dx, dy) > 4*min(dx, dy) and min(dx, dy) >= 0.3:
+                # Genuine external wall ends beside windows can be short
+                # jamb-side stubs (2-4 wall thicknesses). The actual window
+                # marker + unique same-layer hosts + label remain mandatory;
+                # this aspect gate must not erase those original wall owners.
+                if max(dx, dy) > 2*min(dx, dy) and min(dx, dy) >= 0.3:
                     walls.append((idx, layer, bounds))
         ln = _line(row)
         if ln and 0.5 <= math.dist(*ln) <= 16:

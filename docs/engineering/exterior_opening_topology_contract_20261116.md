@@ -28,6 +28,13 @@ Narrow, source-painted sash infill can be present inside this span; an
 intervening full-thickness wall makes it ambiguous and prevents the span.
 Door jambs or schedules without unique window ownership cannot substitute.
 
+Real native-painted exterior wall stubs adjacent to ASW/window apertures may
+be only two to four wall thicknesses long. A host-strip aspect-ratio cutoff
+must not exclude them when independent native window-marker and unique
+source-labelled host witnesses are available. This only broadens candidate
+host discovery; the window still cannot become solid wall material, and
+ambiguous or mismatched hosts must still abstain.
+
 ### Panel-lift garage door
 
 A native label with Panel, Lift and Door on an externally hosted aperture,
