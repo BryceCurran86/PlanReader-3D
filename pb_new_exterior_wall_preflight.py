@@ -20,7 +20,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _source_wall_ink_candidate_drawings,
 )
 from pb_next_wall_ring_preview import (
-    _collect_stroke_pair_strips,
+    _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
     _collect_cavity_multi_face_strips,
     _collect_source_wide_face_pairs,
@@ -48,6 +48,9 @@ class SourceNativeOuterWallAttempt:
 
 def attempt_source_native_outer_wall_first(
     drawings: Sequence[Mapping[str, Any]],
+    *,
+    baseline_source_drawings: Sequence[Mapping[str, Any]] | None = None,
+    source_ink_already_scoped: bool = False,
 ) -> SourceNativeOuterWallAttempt:
     """Find one joined perimeter in *source wall fills*, NOT the sheet bbox.
 
@@ -56,13 +59,31 @@ def attempt_source_native_outer_wall_first(
     candidate. Ambiguous outer candidates and separate wings fail closed.
     This is deliberately stricter than a raster contour or concave hull.
     """
-    wall_ink, _n, _green = _source_wall_ink_candidate_drawings(drawings)
+    if type(source_ink_already_scoped) is not bool:
+        raise ValueError("source_ink_already_scoped_must_be_bool")
+    # The preview already applies original source-negative paint hygiene.
+    # Reapplying its original black-only mask here would silently discard
+    # the newly recovered neutral-grey paths.
+    wall_ink = (
+        tuple(drawings)
+        if source_ink_already_scoped
+        else _source_wall_ink_candidate_drawings(drawings)[0]
+    )
+    strict_ink = None
+    if baseline_source_drawings is not None:
+        if len(baseline_source_drawings) != len(drawings):
+            raise ValueError("source_pair_baseline_path_identity_length_mismatch")
+        strict_ink = (
+            tuple(baseline_source_drawings)
+            if source_ink_already_scoped
+            else _source_wall_ink_candidate_drawings(baseline_source_drawings)[0]
+        )
     named, _other = _collect_strips(wall_ink)
     dark = _collect_dark_painted_source_wall_strips(wall_ink)
     # Architectural walls can be two separate native ink strokes, not opaque
     # filled rectangles. The original preflight omitted them entirely.
     # Source paired faces are candidates, NEVER automatically physical walls.
-    paired = _collect_stroke_pair_strips(wall_ink)
+    paired = _collect_monotonic_source_stroke_pairs(wall_ink, strict_ink)
     # Preserve native thick-line paint. Those source strokes are physical
     # wall candidates, not inferred or double-line approximations.
     thick = _collect_source_heavy_stroke_strips(wall_ink)

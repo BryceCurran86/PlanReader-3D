@@ -16,6 +16,7 @@ from pb_next_wall_ring_preview import (
     _collect_dark_fill_strips,
     _collect_strips,
     _collect_stroke_pair_strips,
+    _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
     _collect_cavity_multi_face_strips,
     _collect_source_wide_face_pairs,
@@ -93,6 +94,9 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         wall_drawings, source_wall_ink_count, green_path_exclusions = (
             _source_wall_ink_candidate_drawings(vector_scope.drawings)
         )
+        # Preserve the immutable strict black source mask. Near-black paths
+        # must ADD candidates, not erase earlier valid pair witnesses.
+        strict_wall_drawings = wall_drawings
         wall_drawings, neutral_dark_added = include_source_neutral_dark_strokes(
             vector_scope.drawings, wall_drawings,
         )
@@ -107,6 +111,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             # wall candidates for this image-backed plan page.
             blank = {"layer":"","fill":None,"color":None,"items":()}
             wall_drawings = tuple(blank for _ in wall_drawings)
+            strict_wall_drawings = wall_drawings
             source_wall_ink_count = 0
             neutral_dark_added = 0
             outer_wall = SourceNativeOuterWallAttempt(
@@ -115,7 +120,13 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         else:
             # MANDATORY FIRST GEOMETRY on native-vector source: structural
             # wall-band outer attempt before internal wall/room work.
-            outer_wall = attempt_source_native_outer_wall_first(wall_drawings)
+            outer_wall = attempt_source_native_outer_wall_first(
+                wall_drawings,
+                baseline_source_drawings=(
+                    strict_wall_drawings if neutral_dark_added else None
+                ),
+                source_ink_already_scoped=True,
+            )
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
         # a failed exterior trace. Missing key evidence is explicitly shown.
@@ -147,6 +158,9 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 for w in page.get_text("words")
             ),
             stroke_pair_wall_faces=True,
+            source_pair_baseline_drawings=(
+                strict_wall_drawings if neutral_dark_added else None
+            ),
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
         )
@@ -157,10 +171,16 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         seen = set()
         for pane in panes:
             clipped = _clip_drawing_items(wall_drawings, pane)
+            clipped_baseline = (
+                _clip_drawing_items(strict_wall_drawings, pane)
+                if neutral_dark_added else None
+            )
             filled, _other = _collect_strips(clipped)
             candidates = (
                 ("source_filled", filled, (0.18, 0.50, 0.94)),
-                ("stroke_pair", _collect_stroke_pair_strips(clipped), (0.0, 0.73, 0.80)),
+                ("stroke_pair", _collect_monotonic_source_stroke_pairs(
+                    clipped, clipped_baseline,
+                ), (0.0, 0.73, 0.80)),
                 ("dark_fill", (
                     _collect_dark_fill_strips(clipped)
                     + _collect_dark_painted_source_wall_strips(clipped)
@@ -319,6 +339,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             "source_wall_ink_paths_retained": source_wall_ink_count,
             "green_source_paths_excluded": green_path_exclusions,
             "source_neutral_dark_stroke_paths_added": neutral_dark_added,
+            "source_stroke_pair_strict_count": (
+                len(_collect_stroke_pair_strips(strict_wall_drawings))
+                if neutral_dark_added else None
+            ),
+            "source_stroke_pair_expanded_count": (
+                len(_collect_stroke_pair_strips(wall_drawings))
+                if neutral_dark_added else None
+            ),
             "external_wall_path_points": [
                 list(p) for p in outer_wall.polygon_pdf_pts
             ],
