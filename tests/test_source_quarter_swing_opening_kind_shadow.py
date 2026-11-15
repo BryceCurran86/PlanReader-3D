@@ -13,6 +13,11 @@ from pb_opening_kind_authority import (
     SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
     resolve_opening_kind,
 )
+from pb_source_opening_identity_partition_shadow import (
+    AMBIGUOUS,
+    DISTINCT,
+    compare_live_canonical_opening_identity,
+)
 from pb_source_quarter_swing_opening_kind_shadow import (
     apply_source_quarter_swing_opening_kinds,
 )
@@ -228,6 +233,32 @@ def test_hinge_jamb_and_closed_tip_of_one_swing_are_one_doorway() -> None:
     assert by_id["opening-tip"].opening_kind is None
 
 
+def test_hinge_tick_from_wall_cut_to_painted_hinge_is_one_doorway() -> None:
+    hosted = _hosted(geom=(49.72, 50.85, 52.5, 50.85), opening_id="opening-hosted")
+    hinge_tick = replace(
+        _hosted(geom=(50.0, 50.0, 50.0, 50.85), opening_id="opening-hinge"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("opening-hinge",),
+    )
+    tip = replace(
+        _hosted(geom=(49.72, 25.0, 52.5, 25.0), opening_id="opening-tip"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("opening-tip",),
+    )
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hinge_tick, hosted, tip),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-hosted"].opening_kind == "door"
+    assert by_id["opening-hinge"].opening_kind is None
+    assert by_id["opening-tip"].opening_kind is None
+
+
 def test_crossing_unhosted_competitor_is_not_a_same_jamb() -> None:
     hosted = _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-hosted")
     unhosted = replace(
@@ -243,6 +274,45 @@ def test_crossing_unhosted_competitor_is_not_a_same_jamb() -> None:
     by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
     assert by_id["opening-hosted"].opening_kind is None
     assert by_id["opening-unhosted"].opening_kind is None
+
+
+def test_adjacent_unhosted_sharing_a_far_jamb_does_not_kind_the_hosted_opening() -> None:
+    hosted = _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="actual-hosted")
+    adjacent = replace(
+        _hosted(geom=(52.5, 50.0, 52.5, 59.0), opening_id="adjacent-unhosted"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("adjacent-unhosted",),
+    )
+    assert compare_live_canonical_opening_identity(hosted, adjacent) == AMBIGUOUS
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hosted, adjacent),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["actual-hosted"].opening_kind is None
+    assert by_id["adjacent-unhosted"].opening_kind is None
+
+
+def test_different_viewport_adjacent_stays_distinct_and_does_not_kind() -> None:
+    hosted = _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="actual-hosted")
+    adjacent = replace(
+        _hosted(geom=(52.5, 50.0, 52.5, 59.0), opening_id="adjacent-unhosted"),
+        viewport_id="other-authenticated-viewport",
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("adjacent-unhosted",),
+    )
+    assert compare_live_canonical_opening_identity(hosted, adjacent) == DISTINCT
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hosted, adjacent),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["actual-hosted"].opening_kind is None
+    assert by_id["adjacent-unhosted"].opening_kind is None
 
 
 def test_original_hosted_opening_at_a_detected_swing_becomes_a_door() -> None:

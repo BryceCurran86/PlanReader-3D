@@ -73,6 +73,36 @@ def test_missing_viewport_does_not_prove_same() -> None:
     assert compare_live_canonical_opening_identity(first, second) == AMBIGUOUS
 
 
+def test_equal_geometries_without_issued_aperture_stay_ambiguous() -> None:
+    first = replace(
+        _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="dup-a"),
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("dup-a",),
+    )
+    second = replace(
+        _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="dup-b"),
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("dup-b",),
+    )
+    assert compare_live_canonical_opening_identity(first, second) == AMBIGUOUS
+
+
+def test_equal_geometries_with_issued_aperture_are_the_same_opening() -> None:
+    first = replace(
+        _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="dup-a"),
+        host_binding_record_id="opening_host_binding_v3_issued",
+        evidence_ids=("dup-a", "opening_host_binding_v3_issued"),
+    )
+    second = replace(
+        _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="dup-b"),
+        host_binding_record_id="opening_host_binding_v3_issued",
+        evidence_ids=("dup-b", "opening_host_binding_v3_issued"),
+    )
+    assert compare_live_canonical_opening_identity(first, second) == SAME
+
+
 def test_adjacent_shared_jamb_doorways_stay_ambiguous() -> None:
     first = replace(
         _hosted(geom=(0.0, 0.0, 10.0, 0.0), opening_id="door-a"),

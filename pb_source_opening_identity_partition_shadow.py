@@ -7,10 +7,12 @@ does not mint openings, hosts, kinds or quantities.
 A jamb-bounded two-face interruption is often stored as three records: a short
 hinge tick, the hosted wall-band cut, and the closed-leaf tip. Global SAME
 requires matching document/revision/SHA/snapshot/page/viewport plus issued
-host/frame ownership. Shared vertices alone stay AMBIGUOUS. Distance beyond
-the production 2.5 pt snap is not DISTINCT without an independently bounded
-aperture. A painted-swing consumer may still union vertex-joined hits local
-to that witness.
+host/frame ownership. Equal source geometries are not SAME without that
+ownership. Shared vertices alone stay AMBIGUOUS. Distance beyond the
+production 2.5 pt snap is not DISTINCT without an independently bounded
+aperture. A painted-swing consumer may union AMBIGUOUS hits only when they
+share this witness's hinge or closed-tip vertex, or share issued aperture;
+it must never override DISTINCT.
 """
 from __future__ import annotations
 
@@ -98,6 +100,49 @@ def share_source_jamb_vertex(
     return _vertex_join(left, right)
 
 
+def source_segment_endpoint_at(
+    opening: LiveCanonicalOpeningObject,
+    point: tuple[float, float],
+) -> bool:
+    """True when a source-segment endpoint is this CAD point."""
+    px, py = float(point[0]), float(point[1])
+    return any(
+        math.hypot(x - px, y - py) <= _SHARED_JAMB_VERTEX_PT
+        for x, y in _endpoints(opening)
+    )
+
+
+def share_issued_aperture_ownership(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+) -> bool:
+    """True when both records carry the same issued host or frame receipt."""
+    return _issued_aperture_ownership(left, right)
+
+
+def share_source_jamb_vertex_at(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+    point: tuple[float, float],
+) -> bool:
+    """True when the shared CAD vertex is this painted-swing hinge or tip.
+
+    Sharing a different jamb corner is not this witness's doorway face.
+    """
+    if not _vertex_join(left, right):
+        return False
+    px, py = float(point[0]), float(point[1])
+    for ax, ay in _endpoints(left):
+        for bx, by in _endpoints(right):
+            if math.hypot(ax - bx, ay - by) > _SHARED_JAMB_VERTEX_PT:
+                continue
+            if math.hypot(ax - px, ay - py) <= _SHARED_JAMB_VERTEX_PT:
+                return True
+            if math.hypot(bx - px, by - py) <= _SHARED_JAMB_VERTEX_PT:
+                return True
+    return False
+
+
 def _issued_aperture_ownership(
     left: LiveCanonicalOpeningObject,
     right: LiveCanonicalOpeningObject,
@@ -124,7 +169,8 @@ def compare_live_canonical_opening_identity(
 
     Unique ID strings are ignored except as a SAME shortcut when they match.
     Document/revision/SHA/snapshot/page/viewport must agree before any
-    geometry shortcut. Shared vertices alone are not SAME.
+    geometry shortcut. Equal source geometries still need issued host/frame
+    ownership. Shared vertices alone are not SAME.
     """
     if type(left) is not LiveCanonicalOpeningObject:
         raise TypeError("left must be LiveCanonicalOpeningObject")
@@ -153,7 +199,9 @@ def compare_live_canonical_opening_identity(
     ):
         return SAME
     if left.source_geometries and left.source_geometries == right.source_geometries:
-        return SAME
+        if _issued_aperture_ownership(left, right):
+            return SAME
+        return AMBIGUOUS
     left_line = _segment(left)
     right_line = _segment(right)
     if left_line is None or right_line is None:

@@ -32,9 +32,14 @@ from pb_opening_kind_authority import (
     resolve_opening_kind,
 )
 from pb_source_opening_identity_partition_shadow import (
+    AMBIGUOUS,
+    DISTINCT,
     SAME,
     compare_live_canonical_opening_identity,
+    share_issued_aperture_ownership,
     share_source_jamb_vertex,
+    share_source_jamb_vertex_at,
+    source_segment_endpoint_at,
 )
 
 
@@ -165,16 +170,65 @@ def _witness_hits(
     return tuple(hits)
 
 
+def _authenticated_same_viewport(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+) -> bool:
+    left_viewport = str(left.viewport_id or "").strip()
+    right_viewport = str(right.viewport_id or "").strip()
+    return bool(left_viewport and right_viewport and left_viewport == right_viewport)
+
+
+def _local_swing_face_join(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+    hinge: tuple[float, float],
+    tip: tuple[float, float],
+    relation: str,
+) -> bool:
+    """Join records of one doorway at this painted swing.
+
+    DISTINCT never joins. SAME joins. AMBIGUOUS joins only with an
+    authenticated shared viewport plus issued aperture ownership, a CAD
+    vertex that is this witness's hinge or closed tip, or an unhosted
+    jamb tick that reaches that hinge/tip from the hosted wall cut.
+    """
+    if relation == DISTINCT:
+        return False
+    if relation == SAME:
+        return True
+    if relation != AMBIGUOUS:
+        return False
+    if not _authenticated_same_viewport(left, right):
+        return False
+    if share_issued_aperture_ownership(left, right):
+        return True
+    if not share_source_jamb_vertex(left, right):
+        return False
+    if share_source_jamb_vertex_at(left, right, hinge) or share_source_jamb_vertex_at(
+        left, right, tip
+    ):
+        return True
+    left_hosted = bool(str(left.host_wall_id or "").strip())
+    right_hosted = bool(str(right.host_wall_id or "").strip())
+    if left_hosted == right_hosted:
+        return False
+    tick = right if left_hosted else left
+    return source_segment_endpoint_at(tick, hinge) or source_segment_endpoint_at(tick, tip)
+
+
 def _swing_identity_groups(
     hits: Sequence[LiveCanonicalOpeningObject],
     witness: Mapping[str, Any],
 ) -> tuple[frozenset[str], ...]:
     """Count physical doorways, not record IDs, at one painted swing.
 
-    Vertex-joined jamb ticks collapse to one doorway. One hinge-only cluster
-    and one tip-only cluster of the same swing are the two faces of that
-    doorway. Two clusters at the same end remain competitors. Typed
-    neighbours still consume the witness.
+    Vertex-joined jamb ticks collapse to one doorway only when the shared
+    vertex is this witness's hinge or closed tip, both records share an
+    authenticated viewport, and identity is not DISTINCT. One hinge-only
+    cluster and one tip-only cluster of the same swing are the two faces of
+    that doorway. Adjacent openings that only share a far jamb stay
+    competitors. Typed neighbours still consume the witness.
     """
     if not hits:
         return ()
@@ -196,12 +250,8 @@ def _swing_identity_groups(
 
     for index, left in enumerate(hits):
         for right in hits[index + 1:]:
-            if compare_live_canonical_opening_identity(left, right) == SAME:
-                union(left.canonical_opening_id, right.canonical_opening_id)
-                continue
-            # Local to this painted swing: vertex-joined jamb/tip ticks of one
-            # doorway. Global identity does not treat a shared vertex as SAME.
-            if share_source_jamb_vertex(left, right):
+            relation = compare_live_canonical_opening_identity(left, right)
+            if _local_swing_face_join(left, right, hinge, tip, relation):
                 union(left.canonical_opening_id, right.canonical_opening_id)
     grouped: dict[str, list[str]] = {}
     for item in hits:
