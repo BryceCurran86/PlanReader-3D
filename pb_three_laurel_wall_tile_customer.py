@@ -203,22 +203,64 @@ def _parse_dim_m(dim_str: str) -> Decimal:
     return Decimal(dim_str.replace(",", "")) / Decimal(1000)
 
 
-def _is_authentic_cad_page(page, *, min_drawings: int = 500, min_words: int = 20) -> bool:
+def _is_authentic_cad_page(
+    page,
+    *,
+    min_drawings: int = 1000,
+    min_orthogonal: int = 50,
+    min_long_lines: int = 50,
+    min_words: int = 20,
+    min_spread_x: float = 300.0,
+    min_spread_y: float = 200.0,
+) -> bool:
     try:
         drawings = page.get_drawings() or []
-        valid_drawings = [
-            d for d in drawings
-            if isinstance(d, dict)
-            and isinstance(d.get("items"), (list, tuple))
-            and d["items"]
-            and all(
-                isinstance(it, (tuple, list))
-                and len(it) >= 2
-                and not any(isinstance(coord, str) for coord in it[1:])
-                for it in d["items"]
-            )
-        ]
-        if len(valid_drawings) < min_drawings:
+        if len(drawings) < min_drawings:
+            return False
+
+        h_lines = 0
+        v_lines = 0
+        long_lines = 0
+        valid_drawing_count = 0
+
+        for d in drawings:
+            if not isinstance(d, dict):
+                continue
+            items = d.get("items")
+            if not isinstance(items, (list, tuple)) or not items:
+                continue
+
+            items_valid = True
+            for it in items:
+                if not isinstance(it, (tuple, list)) or len(it) < 2:
+                    items_valid = False
+                    break
+                if any(isinstance(coord, str) for coord in it[1:]):
+                    items_valid = False
+                    break
+                if it[0] == "l" and len(it) >= 3:
+                    p1, p2 = it[1], it[2]
+                    try:
+                        x1, y1 = float(p1[0]), float(p1[1])
+                        x2, y2 = float(p2[0]), float(p2[1])
+                    except (TypeError, ValueError, IndexError, AttributeError):
+                        continue
+                    dx = abs(x2 - x1)
+                    dy = abs(y2 - y1)
+                    length = (dx * dx + dy * dy) ** 0.5
+                    if length >= 15.0:
+                        long_lines += 1
+                    if dy <= 0.5 and dx >= 10.0:
+                        h_lines += 1
+                    elif dx <= 0.5 and dy >= 10.0:
+                        v_lines += 1
+
+            if items_valid:
+                valid_drawing_count += 1
+
+        if valid_drawing_count < min_drawings:
+            return False
+        if h_lines < min_orthogonal or v_lines < min_orthogonal or long_lines < min_long_lines:
             return False
     except Exception:
         return False
@@ -227,8 +269,9 @@ def _is_authentic_cad_page(page, *, min_drawings: int = 500, min_words: int = 20
         words = page.get_text("words") or []
         if len(words) < min_words:
             return False
-        if not any(
-            isinstance(w, (tuple, list))
+        valid_words = [
+            w for w in words
+            if isinstance(w, (tuple, list))
             and len(w) >= 5
             and isinstance(w[0], (int, float))
             and isinstance(w[1], (int, float))
@@ -236,8 +279,14 @@ def _is_authentic_cad_page(page, *, min_drawings: int = 500, min_words: int = 20
             and isinstance(w[3], (int, float))
             and w[2] > w[0]
             and w[3] > w[1]
-            for w in words
-        ):
+        ]
+        if len(valid_words) < min_words:
+            return False
+        min_x = min(w[0] for w in valid_words)
+        max_x = max(w[2] for w in valid_words)
+        min_y = min(w[1] for w in valid_words)
+        max_y = max(w[3] for w in valid_words)
+        if (max_x - min_x) < min_spread_x or (max_y - min_y) < min_spread_y:
             return False
     except Exception:
         return False
