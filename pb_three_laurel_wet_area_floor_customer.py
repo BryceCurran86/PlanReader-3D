@@ -259,53 +259,79 @@ def _is_authentic_cad_page(
 
 
 def _is_room_enclosed_by_walls(page, label: str) -> bool:
-    """Verify that the room label is physically enclosed by orthogonal wall lines."""
+    """Verify that the room label is physically enclosed by authentic, connected CAD walls."""
     words = page.get_text("words") or []
     tokens = label.split()
-    label_rect = None
+    matches = []
     for i in range(len(words) - len(tokens) + 1):
         if all(tokens[k].upper() == words[i + k][4].upper() for k in range(len(tokens))):
             x0 = min(words[i + k][0] for k in range(len(tokens)))
             y0 = min(words[i + k][1] for k in range(len(tokens)))
             x1 = max(words[i + k][2] for k in range(len(tokens)))
             y1 = max(words[i + k][3] for k in range(len(tokens)))
-            label_rect = fitz.Rect(x0, y0, x1, y1)
-            break
-    if label_rect is None:
+            matches.append(fitz.Rect(x0, y0, x1, y1))
+    if not matches:
         return False
 
-    cx = (label_rect.x0 + label_rect.x1) / 2.0
-    cy = (label_rect.y0 + label_rect.y1) / 2.0
     drawings = page.get_drawings() or []
-    h_above = False
-    h_below = False
-    v_left = False
-    v_right = False
-    for d in drawings:
-        for it in d.get("items", ()):
-            if it[0] == "l" and len(it) >= 3:
-                try:
-                    x1, y1 = float(it[1][0]), float(it[1][1])
-                    x2, y2 = float(it[2][0]), float(it[2][1])
-                except (TypeError, ValueError, IndexError, AttributeError):
-                    continue
-                dx = abs(x2 - x1)
-                dy = abs(y2 - y1)
-                if (dx * dx + dy * dy) ** 0.5 < 8.0:
-                    continue
-                mid_x = (x1 + x2) / 2.0
-                mid_y = (y1 + y2) / 2.0
-                if dy <= 1.0 and abs(mid_x - cx) < 300:
-                    if cy - 300 < mid_y < cy:
-                        h_above = True
-                    elif cy < mid_y < cy + 300:
-                        h_below = True
-                if dx <= 1.0 and abs(mid_y - cy) < 300:
-                    if cx - 300 < mid_x < cx:
-                        v_left = True
-                    elif cx < mid_x < cx + 300:
-                        v_right = True
-    return bool(h_above and h_below and v_left and v_right)
+    for label_rect in matches:
+        cx = (label_rect.x0 + label_rect.x1) / 2.0
+        cy = (label_rect.y0 + label_rect.y1) / 2.0
+
+        # Per-room authentic CAD structural primitives within 250 pt of label center:
+        # Genuine CAD floor plans feature filled walls/cavities, door swing curves, or thick cut lines.
+        # Synthetic text-dump decoys have zero local structural primitives near the labels.
+        local_fills = 0
+        local_curves = 0
+        local_thick = 0
+        for d in drawings:
+            r = d.get("rect")
+            if r and abs(r.x0 - cx) < 250 and abs(r.y0 - cy) < 250:
+                if d.get("fill") is not None:
+                    local_fills += 1
+                w = d.get("width") or 0.0
+                if w > 0.4:
+                    local_thick += 1
+                for it in d.get("items", ()):
+                    if it[0] == "c":
+                        local_curves += 1
+
+        if local_fills == 0 and local_curves == 0 and local_thick == 0:
+            continue
+
+        h_above = False
+        h_below = False
+        v_left = False
+        v_right = False
+        for d in drawings:
+            for it in d.get("items", ()):
+                if it[0] == "l" and len(it) >= 3:
+                    try:
+                        x1, y1 = float(it[1][0]), float(it[1][1])
+                        x2, y2 = float(it[2][0]), float(it[2][1])
+                    except (TypeError, ValueError, IndexError, AttributeError):
+                        continue
+                    dx = abs(x2 - x1)
+                    dy = abs(y2 - y1)
+                    if (dx * dx + dy * dy) ** 0.5 < 8.0:
+                        continue
+                    mid_x = (x1 + x2) / 2.0
+                    mid_y = (y1 + y2) / 2.0
+                    if dy <= 1.0 and abs(mid_x - cx) < 250:
+                        if cy - 250 < mid_y < cy:
+                            h_above = True
+                        elif cy < mid_y < cy + 250:
+                            h_below = True
+                    if dx <= 1.0 and abs(mid_y - cy) < 250:
+                        if cx - 250 < mid_x < cx:
+                            v_left = True
+                        elif cx < mid_x < cx + 250:
+                            v_right = True
+
+        if h_above and h_below and v_left and v_right:
+            return True
+
+    return False
 
 
 def issue_original_three_laurel_wet_area_floor_customer_quantities(

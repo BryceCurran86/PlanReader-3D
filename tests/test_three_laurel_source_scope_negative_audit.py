@@ -169,7 +169,7 @@ def test_valid_native_vector_decoy_without_wall_geometry_abstains(monkeypatch, t
         assert len(res.customer_rows) == 0
         assert "source_owned_physical_quantity_authority_unavailable" in res.reason_codes
 
-def test_orthogonal_native_vector_decoy_without_room_wall_enclosures_abstains(tmp_path: Path, monkeypatch):
+def test_orthogonal_native_vector_decoy_without_room_wall_enclosures_abstains(tmp_path, monkeypatch):
     """Adversarial decoy with 1220 native vectors (including 60 H and 60 V lines) must abstain."""
     import fitz
 
@@ -215,6 +215,100 @@ def test_orthogonal_native_vector_decoy_without_room_wall_enclosures_abstains(tm
             ]
             for k, row in enumerate(vals):
                 page.insert_text((961, 632 + 13 * k), row, fontsize=8)
+    doc.save(path)
+    doc.close()
+
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    for mod, fn in (
+        (vinyl, vinyl.issue_original_three_laurel_vinyl_floor_customer_quantities),
+        (wet, wet.issue_original_three_laurel_wet_area_floor_customer_quantities),
+        (wall, wall.issue_original_three_laurel_wall_tile_customer_quantities),
+        (ceiling, ceiling.issue_original_three_laurel_ceiling_customer_quantities),
+    ):
+        monkeypatch.setattr(mod, "THREE_LAUREL_SOURCE_SHA256", digest)
+        monkeypatch.setattr(mod, "THREE_LAUREL_DOCUMENT_ID", f"live-source:{digest[:32]}")
+        monkeypatch.setattr(mod, "THREE_LAUREL_REVISION_ID", f"3laurel_sha_{digest[:20]}")
+        res = fn(path)
+        assert res.status == "ABSTAIN"
+        assert len(res.quantities) == 0
+        assert len(res.customer_rows) == 0
+        assert "source_owned_physical_quantity_authority_unavailable" in res.reason_codes
+
+
+def test_disconnected_four_quadrant_decoy_without_room_cad_primitives_abstains(tmp_path, monkeypatch):
+    """3rd-generation adversarial decoy with disconnected quadrant strokes around room labels
+    and an unrelated thick stroke at (1290, 850) must strictly return ABSTAIN across all 4 finish issuers.
+    """
+    import fitz
+
+    terms = [
+        "GROUND FLOOR PLAN AREA SCHEDULE VINYL TILES MEDIA BED 2 BED 3",
+        "SECTION A-A 2,700 GYPROCK",
+    ]
+    for spec in wet._WET_FLOOR_SPECS.values():
+        terms.extend(["TILES", *map(str, spec["dim_strings"])])
+    for spec in vinyl._VINYL_FLOOR_SPECS.values():
+        terms.extend(["VINYL", str(spec["room_label"]), *map(str, spec["dim_strings"])])
+    for spec in wall._WALL_TILE_SPECS.values():
+        terms.extend(map(str, spec["evidence_tokens"]))
+
+    path = tmp_path / "native_disconnected_quadrant_decoy.pdf"
+    doc = fitz.open()
+    for page_i in range(18):
+        page = doc.new_page(width=1400, height=950)
+        for i in range(1100):
+            x = 40 + (i % 100) * 7
+            y = 380 + (i // 100) * 17
+            page.draw_line((x, y), (x + 2.1, y + 1.6), color=(0, 0, 0), width=0.2)
+        for i in range(60):
+            page.draw_line((900, 80 + 8 * i), (924, 80 + 8 * i), color=(0, 0, 0), width=0.2)
+            page.draw_line((1100 + 2 * i, 80), (1100 + 2 * i, 104), color=(0, 0, 0), width=0.2)
+        text = " ".join(terms)
+        words = text.split()
+        for j in range(0, len(words), 10):
+            row = " ".join(words[j : j + 10])
+            page.insert_text((30, 36 + 14 * (j // 10)), row, fontsize=7.4)
+        page.insert_text((1000, 750), "FLOOR PLAN", fontsize=8)
+        page.draw_line((1290, 850), (1320, 850), color=(0, 0, 0), width=0.8)
+        if page_i == 2:
+            vals = [
+                "MAIN LIVING 12.34 m2",
+                "GARAGE 12.34 m2",
+                "MAIN PORCH 12.34 m2",
+                "MAIN ALFRESCO 12.34 m2",
+                "GF LIVING 12.34 m2",
+                "GF ALFRESCO 12.34 m2",
+                "GF PORCH 12.34 m2",
+            ]
+            for k, row in enumerate(vals):
+                page.insert_text((961, 632 + 13 * k), row, fontsize=8)
+    page = doc[2]
+    for i, label in enumerate(("BATH", "BATHROOM", "LAUNDRY", "ENSUITE", "WC")):
+        page.insert_text((480, 195 + 47 * i), label, fontsize=8)
+    words = page.get_text("words")
+    labels = (
+        "MEDIA", "BED 2", "BED 3", "BATH", "BATHROOM", "LAUNDRY", "ENSUITE", "LIVING", "GARAGE", "WC",
+    )
+    for label in labels:
+        toks = label.split()
+        matches = [
+            words[i : i + len(toks)]
+            for i in range(len(words) - len(toks) + 1)
+            if all(toks[k].upper() == words[i + k][4].upper() for k in range(len(toks)))
+        ]
+        if not matches:
+            continue
+        tw = matches[0]
+        cx = (min(w[0] for w in tw) + max(w[2] for w in tw)) / 2.0
+        cy = (min(w[1] for w in tw) + max(w[3] for w in tw)) / 2.0
+        lines = (
+            ((cx - 9, cy - 20), (cx + 9, cy - 20)),
+            ((cx - 9, cy + 20), (cx + 9, cy + 20)),
+            ((cx - 20, cy - 9), (cx - 20, cy + 9)),
+            ((cx + 20, cy - 9), (cx + 20, cy + 9)),
+        )
+        for a, b in lines:
+            page.draw_line(a, b, color=(0, 0, 0), width=0.2)
     doc.save(path)
     doc.close()
 
