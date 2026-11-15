@@ -126,6 +126,8 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     strict_wall_drawings if neutral_dark_added else None
                 ),
                 source_ink_already_scoped=True,
+                source_words=page.get_text("words"),
+                window_source_drawings=drawings,
             )
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
@@ -225,6 +227,22 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 color=(0.95, 0.07, 0.13),
                 width=2.8,
             )
+        # Blue spans are native window aperture CONTINUITY of the footprint,
+        # not solid walls or customer-measurable material.
+        for bridge in outer_wall.window_footprint_bridges:
+            canvas.draw_rect(
+                fitz.Rect(*bridge.bounds_pdf_pts),
+                color=(0.0, 0.43, 0.95), fill=(0.15, 0.7, 1.0),
+                fill_opacity=0.25, width=2.2,
+            )
+        # Orange denotes a hosted garage panel-lift aperture. Its 2D
+        # boundary continues across the door, but it is never wall material.
+        for bridge in outer_wall.garage_door_footprint_bridges:
+            canvas.draw_rect(
+                fitz.Rect(*bridge.bounds_pdf_pts),
+                color=(0.96, 0.48, 0.02), fill=(1., 0.64, 0.08),
+                fill_opacity=0.17, width=2.2,
+            )
         # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
         # applied to native geometry and never counted as physical walls.
         for ax,ay,bx,by,distance in (
@@ -281,6 +299,15 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             ),
             "external_wall_trace_status": outer_wall.status,
             "external_wall_trace_reason": outer_wall.reason,
+            "source_window_footprint_continuity_count": len(outer_wall.window_footprint_bridges),
+            "source_garage_door_footprint_continuity_count": len(outer_wall.garage_door_footprint_bridges),
+            "source_garage_door_footprint_continuity": [
+                bridge.to_dict() for bridge in outer_wall.garage_door_footprint_bridges
+            ],
+            "source_window_footprint_continuity": [
+                bridge.to_dict() for bridge in outer_wall.window_footprint_bridges
+            ],
+            "window_continuity_billing_authorized": False,
             "external_wall_native_source_paths": list(
                 outer_wall.source_wall_path_ids
             ),
