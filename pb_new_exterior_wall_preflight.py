@@ -37,6 +37,10 @@ from pb_source_swing_door_footprint_continuity import (
     ExteriorSwingDoorFootprintBridge,
     detect_exterior_swing_door_footprint_bridges,
 )
+from pb_source_sliding_door_footprint_continuity import (
+    ExteriorSlidingDoorFootprintBridge,
+    detect_exterior_sliding_door_footprint_bridges,
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class SourceNativeOuterWallAttempt:
     window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
     garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
     swing_door_footprint_bridges: tuple[ExteriorSwingDoorFootprintBridge, ...] = ()
+    sliding_door_footprint_bridges: tuple[ExteriorSlidingDoorFootprintBridge, ...] = ()
     diagnostic_closed_wall_loop_count: int = 0
     diagnostic_rejected_loop_bbox_pdf_pts: tuple[float, float, float, float] | None = None
     diagnostic_wall_bands_outside_loop: int = 0
@@ -134,6 +139,9 @@ def attempt_source_native_outer_wall_first(
     swing_bridges = detect_exterior_swing_door_footprint_bridges(
         opening_drawings, source_words,
     )
+    sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
+        opening_drawings, source_words,
+    )
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
         bridge for bridge in window_bridges
@@ -161,13 +169,24 @@ def attempt_source_native_outer_wall_first(
             for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
         )
     )
+    sliding_bridges = tuple(
+        bridge for bridge in sliding_bridges
+        if all(
+            0 <= idx < len(wall_ink)
+            and isinstance(wall_ink[idx], Mapping)
+            and wall_ink[idx].get("fill") is not None
+            and max(wall_ink[idx]["fill"][:3]) < .3
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
+        )
+    )
     # Only source-dark verified jamb-side bodies are included in this
     # TOPOLOGY union, never in customer wall area or published quantities.
-    swing_host_ink = tuple(
+    door_host_ink = tuple(
         box(*wall_ink[idx]["rect"])
         for idx in sorted({
             path
-            for bridge in swing_bridges
+            for bridge in (*swing_bridges, *sliding_bridges)
             for path in (bridge.first_host_path_id, bridge.second_host_path_id)
             if path not in source_bar_paths
         })
@@ -176,6 +195,7 @@ def attempt_source_native_outer_wall_first(
         window_footprint_bridges=window_bridges,
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
+        sliding_door_footprint_bridges=sliding_bridges,
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
@@ -196,7 +216,8 @@ def attempt_source_native_outer_wall_first(
         + [box(*bridge.bounds_pdf_pts) for bridge in window_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in swing_bridges]
-        + list(swing_host_ink)
+        + [box(*bridge.bounds_pdf_pts) for bridge in sliding_bridges]
+        + list(door_host_ink)
     )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
@@ -270,5 +291,6 @@ def attempt_source_native_outer_wall_first(
         window_footprint_bridges=window_bridges,
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
+        sliding_door_footprint_bridges=sliding_bridges,
         diagnostic_closed_wall_loop_count=len(closed),
     )
