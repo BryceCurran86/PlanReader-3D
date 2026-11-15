@@ -127,7 +127,9 @@ def _witnesses(
             "arc": item["arc"],
             "leaf": item["leaf"],
             "centre": tuple(item["centre"]),
+            "open_tip": tuple(item["open_tip"]),
             "closed_tip": tuple(item["closed_tip"]),
+            "radius": float(item["radius"]),
             "pattern": SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
         }
         for item in arcs
@@ -225,9 +227,12 @@ def _swing_identity_groups(
 
     Vertex-joined jamb ticks collapse to one doorway only when the shared
     vertex is this witness's hinge or closed tip, both records share an
-    authenticated viewport, and identity is not DISTINCT. One hinge-only
-    cluster and one tip-only cluster of the same swing are the two faces of
-    that doorway. Adjacent openings that only share a far jamb stay
+    authenticated viewport, and identity is not DISTINCT. A hinge-only
+    cluster and a tip-only cluster collapse only when they share this
+    swing's aperture: SAME, or AMBIGUOUS with the same viewport plus
+    issued host/frame ownership or one hosted face and one unhosted tick.
+    DISTINCT never joins. Opposite ends of a painted swing are not SAME
+    by themselves. Adjacent openings that only share a far jamb stay
     competitors. Typed neighbours still consume the witness.
     """
     if not hits:
@@ -275,9 +280,46 @@ def _swing_identity_groups(
         len(classified) == 2
         and len(hinge_only) == 1
         and len(tip_only) == 1
+        and _hinge_tip_clusters_share_aperture(
+            hinge_only[0][0], tip_only[0][0], by_id, hinge, tip,
+        )
     ):
         return (hinge_only[0][0] | tip_only[0][0],)
     return tuple(item[0] for item in classified)
+
+
+def _hinge_tip_clusters_share_aperture(
+    hinge_members: frozenset[str],
+    tip_members: frozenset[str],
+    by_id: Mapping[str, LiveCanonicalOpeningObject],
+    hinge: tuple[float, float],
+    tip: tuple[float, float],
+) -> bool:
+    """True when opposite-end clusters are one doorway of this swing."""
+    saw_doorway = False
+    for left_id in hinge_members:
+        for right_id in tip_members:
+            left = by_id[left_id]
+            right = by_id[right_id]
+            relation = compare_live_canonical_opening_identity(left, right)
+            if relation == DISTINCT:
+                return False
+            if _local_swing_face_join(left, right, hinge, tip, relation):
+                saw_doorway = True
+                continue
+            if relation == SAME:
+                saw_doorway = True
+                continue
+            if relation != AMBIGUOUS or not _authenticated_same_viewport(left, right):
+                continue
+            if share_issued_aperture_ownership(left, right):
+                saw_doorway = True
+                continue
+            left_hosted = bool(str(left.host_wall_id or "").strip())
+            right_hosted = bool(str(right.host_wall_id or "").strip())
+            if left_hosted != right_hosted:
+                saw_doorway = True
+    return saw_doorway
 
 
 def _unique_bindings(
@@ -325,6 +367,83 @@ def _unique_bindings(
     }
 
 
+_HINGED_WIDTH_BLOCK_PREFIXES = (
+    "source_dashed_outer_line_cased_opening",
+    "source_sliding_leaf_opening_host",
+    "source_stacker_leaf_opening_host",
+)
+
+
+def _blocked_hinged_width_evidence(opening: LiveCanonicalOpeningObject) -> bool:
+    return any(
+        str(item).startswith(prefix)
+        for prefix in _HINGED_WIDTH_BLOCK_PREFIXES
+        for item in opening.evidence_ids
+    )
+
+
+def _hosted_hinged_door(opening: LiveCanonicalOpeningObject) -> bool:
+    """Hosted personnel door, including one already kinded during composition."""
+    kind = str(opening.opening_kind or "").strip().lower()
+    if kind not in {"", "door"}:
+        return False
+    if _blocked_hinged_width_evidence(opening):
+        return False
+    if not str(opening.host_wall_id or "").strip():
+        return False
+    if not (
+        str(opening.host_binding_record_id or "").strip()
+        or str(opening.host_frame_record_id or "").strip()
+    ):
+        return False
+    return True
+
+
+def _unique_hosted_door_bindings(
+    openings: Sequence[LiveCanonicalOpeningObject],
+    witnesses: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Mapping[str, Any]]:
+    """Unique painted swing owns one hosted hinged door, even if already kinded.
+
+    Composition may already have stamped ``opening_kind='door'`` from a plan
+    tag. Kinding then consumes that witness and refuses a second kind. Width
+    still needs the unique in-swing figure on that same hosted door.
+    A window, cased opening, or sliding/stacker host still consumes the
+    witness. Unique IDs alone never prove DISTINCT.
+    """
+    by_id = {
+        item.canonical_opening_id: item
+        for item in openings
+        if type(item) is LiveCanonicalOpeningObject
+    }
+    page_openings = tuple(by_id.values())
+    by_opening: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for witness in witnesses:
+        if str(witness.get("pattern") or "") != SOURCE_QUARTER_SWING_AND_RADIAL_LEAF:
+            continue
+        hits = _witness_hits(page_openings, witness)
+        groups = _swing_identity_groups(hits, witness)
+        if len(groups) != 1:
+            continue
+        members = groups[0]
+        if any(
+            str(by_id[member].opening_kind or "").strip().lower() == "window"
+            for member in members
+        ):
+            continue
+        hosted_doors = [
+            by_id[member] for member in members if _hosted_hinged_door(by_id[member])
+        ]
+        if len(hosted_doors) != 1:
+            continue
+        by_opening[hosted_doors[0].canonical_opening_id].append(witness)
+    return {
+        opening_id: bound[0]
+        for opening_id, bound in by_opening.items()
+        if len(bound) == 1
+    }
+
+
 def _leaf_evidence_id(page_id: str, witness: Mapping[str, Any]) -> str:
     return stable_contract_id(
         "source_drawn_door_leaf",
@@ -360,6 +479,11 @@ def apply_source_quarter_swing_opening_kinds(
             continue
         bindings = _unique_bindings(openings, _witnesses(drawings))
         for opening in openings:
+            if any(
+                str(item).startswith("source_dashed_outer_line_cased_opening")
+                for item in opening.evidence_ids
+            ):
+                continue
             witness = bindings.get(opening.canonical_opening_id)
             if witness is None:
                 continue

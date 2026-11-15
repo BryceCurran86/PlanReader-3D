@@ -28,6 +28,11 @@ What counts as evidence (all of it is original native ink on an explicit wall la
   to one arc end; the other arc end is the closed-door tip. The doorway is the MAXIMAL
   interruption of the wall line (between two wall strips of one band) that contains the
   closed-door segment. It is unique by construction: no nearest, first or smallest choice.
+* a cased opening: a unique axis-aligned rectangle of exploded ``Annotation_General``
+  dashes with a unique pair of solid outer wall-face strokes immediately outside one
+  side. Dashed inner lines plus those outer wall lines are an opening, not a door.
+  The wall-band span is filled on the wall trace like a door or window closure. It is
+  never a door kind, height default or figured joinery size.
 
 An interruption with no such evidence is never closed. A free-space region adjacent to one
 is reported ``open_wall_gap_unresolved``; a region that reaches the page frame of the wall
@@ -87,6 +92,11 @@ KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
 KIND_STACKER_LEAF = "stacker_leaf_frame_closure"
+KIND_CASED_OPENING = "dashed_outer_line_cased_opening"
+_DASHED_CASED_LAYER = "Annotation_General"
+_DASHED_CASED_LEN_MIN = 1.0
+_DASHED_CASED_LEN_MAX = 6.0
+_DASHED_CASED_MIN_DASHES = 4
 _STACKER_CLUSTER_SPLIT_PT = 10.0  # smaller than an opening; existing jamb/window min span
 _STACKER_MIN_FRAMES = 3
 
@@ -1005,7 +1015,14 @@ def _swing_arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]
             rejected += 1
             continue
         leaf_index, open_tip, closed_tip = leaf_hits[0]
-        arcs.append({"arc": index, "leaf": leaf_index, "centre": centre, "closed_tip": closed_tip, "radius": radius})
+        arcs.append({
+            "arc": index,
+            "leaf": leaf_index,
+            "centre": centre,
+            "open_tip": open_tip,
+            "closed_tip": closed_tip,
+            "radius": radius,
+        })
     return arcs, rejected
 
 
@@ -1765,6 +1782,341 @@ def _stacker_cluster_gaps(
     return [(gap, native) for gap, native in found if all(uses[index] == 1 for index in native)]
 
 
+@dataclass(frozen=True)
+class DashedOuterLineCasedOpening:
+    """Unique dashed inner rectangle plus unique outer wall-face pair."""
+
+    box: tuple[float, float, float, float]
+    horizontal: bool
+    band: tuple[float, float]
+    lo: float
+    hi: float
+    native_path_indices: tuple[int, ...]
+
+    def wall_rect(self) -> Polygon:
+        if self.horizontal:
+            return box(self.lo, self.band[0], self.hi, self.band[1])
+        return box(self.band[0], self.lo, self.band[1], self.hi)
+
+
+def _split_dash_runs(
+    segs: Sequence[tuple[float, float, int]],
+) -> tuple[list[tuple[float, float, int]], ...]:
+    """Keep separate dashed rectangles on one line from becoming one rail."""
+    ordered = sorted(segs, key=lambda item: (item[0], item[1]))
+    runs: list[list[tuple[float, float, int]]] = []
+    current: list[tuple[float, float, int]] = []
+    for seg in ordered:
+        if current and seg[0] > current[-1][1] + _DASHED_CASED_LEN_MAX:
+            if len(current) >= _DASHED_CASED_MIN_DASHES:
+                runs.append(current)
+            current = [seg]
+            continue
+        current.append(seg)
+    if len(current) >= _DASHED_CASED_MIN_DASHES:
+        runs.append(current)
+    return tuple(runs)
+
+
+def _dashed_cased_rails(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[
+    dict[float, tuple[list[tuple[float, float, int]], ...]],
+    dict[float, tuple[list[tuple[float, float, int]], ...]],
+]:
+    """Exploded annotation dashes grouped into split axis-aligned rails."""
+    horiz: dict[float, list[tuple[float, float, int]]] = {}
+    vert: dict[float, list[tuple[float, float, int]]] = {}
+    for index, row in enumerate(drawings):
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("layer") or "") != _DASHED_CASED_LAYER:
+            continue
+        if row.get("fill") is not None:
+            continue
+        if not _visible_source_stroke_paint(row):
+            continue
+        for item in row.get("items") or ():
+            if not item or item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if _close(ay, by, 1e-3):
+                length = abs(bx - ax)
+                if not (_DASHED_CASED_LEN_MIN < length < _DASHED_CASED_LEN_MAX):
+                    continue
+                key = round((ay + by) / 2.0, 2)
+                horiz.setdefault(key, []).append((min(ax, bx), max(ax, bx), index))
+            elif _close(ax, bx, 1e-3):
+                length = abs(by - ay)
+                if not (_DASHED_CASED_LEN_MIN < length < _DASHED_CASED_LEN_MAX):
+                    continue
+                key = round((ax + bx) / 2.0, 2)
+                vert.setdefault(key, []).append((min(ay, by), max(ay, by), index))
+    return (
+        {key: _split_dash_runs(segs) for key, segs in horiz.items() if _split_dash_runs(segs)},
+        {key: _split_dash_runs(segs) for key, segs in vert.items() if _split_dash_runs(segs)},
+    )
+
+
+def _rail_span(segs: Sequence[tuple[float, float, int]]) -> tuple[float, float]:
+    return (min(item[0] for item in segs), max(item[1] for item in segs))
+
+
+def _collect_dashed_cased_boxes(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[float, float, float, float, tuple[int, ...]], ...]:
+    horiz, vert = _dashed_cased_rails(drawings)
+    boxes: dict[tuple[float, float, float, float], set[int]] = {}
+    horiz_runs = tuple(
+        (y, run) for y, runs in horiz.items() for run in runs
+    )
+    vert_runs = tuple(
+        (x, run) for x, runs in vert.items() for run in runs
+    )
+    for i, (y0, segs0) in enumerate(horiz_runs):
+        span0 = _rail_span(segs0)
+        for y1, segs1 in horiz_runs[i + 1:]:
+            span1 = _rail_span(segs1)
+            if not (
+                _close(span0[0], span1[0], _STROKE_PAIR_CLUSTER_PT)
+                and _close(span0[1], span1[1], _STROKE_PAIR_CLUSTER_PT)
+            ):
+                continue
+            x0 = min(span0[0], span1[0])
+            x1 = max(span0[1], span1[1])
+            lo_y, hi_y = (y0, y1) if y0 < y1 else (y1, y0)
+            left = [
+                (x, segs) for x, segs in vert_runs
+                if _close(x, x0, _STROKE_PAIR_CLUSTER_PT)
+                and _close(_rail_span(segs)[0], lo_y, _STROKE_PAIR_CLUSTER_PT)
+                and _close(_rail_span(segs)[1], hi_y, _STROKE_PAIR_CLUSTER_PT)
+            ]
+            right = [
+                (x, segs) for x, segs in vert_runs
+                if _close(x, x1, _STROKE_PAIR_CLUSTER_PT)
+                and _close(_rail_span(segs)[0], lo_y, _STROKE_PAIR_CLUSTER_PT)
+                and _close(_rail_span(segs)[1], hi_y, _STROKE_PAIR_CLUSTER_PT)
+            ]
+            if len(left) != 1 or len(right) != 1:
+                continue
+            paths = {
+                index
+                for segs in (segs0, segs1, left[0][1], right[0][1])
+                for _lo, _hi, index in segs
+            }
+            key = (round(x0, 3), round(lo_y, 3), round(x1, 3), round(hi_y, 3))
+            boxes.setdefault(key, set()).update(paths)
+    return tuple(
+        (key[0], key[1], key[2], key[3], tuple(sorted(paths)))
+        for key, paths in sorted(boxes.items())
+    )
+
+
+def _wall_face_strokes(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[int, bool, float, float, float], ...]:
+    """Unfilled wall-layer axis strokes. Short opening-span faces are kept."""
+    found: list[tuple[int, bool, float, float, float]] = []
+    for index, row in _wall_rows(drawings):
+        if row.get("fill") is not None or not _visible_source_stroke_paint(row):
+            continue
+        for item in row.get("items") or ():
+            if not item or item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if _close(ay, by, 1e-3) and abs(bx - ax) > NOISE_PT:
+                found.append((index, True, (ay + by) / 2.0, min(ax, bx), max(ax, bx)))
+            elif _close(ax, bx, 1e-3) and abs(by - ay) > NOISE_PT:
+                found.append((index, False, (ax + bx) / 2.0, min(ay, by), max(ay, by)))
+    return tuple(found)
+
+
+def _cluster_outer_faces(
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+    *,
+    wall_horizontal: bool,
+    perp: float,
+    outward: float,
+    along_lo: float,
+    along_hi: float,
+) -> Optional[tuple[float, float, tuple[tuple[int, bool, float, float, float], ...]]]:
+    clustered: dict[float, list[tuple[int, bool, float, float, float]]] = {}
+    for stroke in strokes:
+        if stroke[1] is not wall_horizontal:
+            continue
+        delta = (stroke[2] - perp) * outward
+        if delta <= NOISE_PT or delta > _STROKE_PAIR_THICK_MAX:
+            continue
+        overlap = min(stroke[4], along_hi) - max(stroke[3], along_lo)
+        if overlap <= NOISE_PT:
+            continue
+        clustered.setdefault(round(stroke[2], 2), []).append(stroke)
+    if len(clustered) < 2:
+        return None
+    ordered = sorted(clustered, key=lambda value: (value - perp) * outward)
+    first, second = ordered[0], ordered[1]
+    low, high = (first, second) if first < second else (second, first)
+    if not (_STROKE_PAIR_THICK_MIN <= high - low <= _STROKE_PAIR_THICK_MAX):
+        return None
+    members = tuple(item for key in (first, second) for item in clustered[key])
+    return (low, high, members)
+
+
+def _outer_wall_pair_for_box(
+    drawings: Sequence[Mapping[str, Any]],
+    box_pdf: tuple[float, float, float, float],
+) -> Optional[tuple[bool, tuple[float, float], float, float, tuple[int, ...]]]:
+    """Unique two-face wall pair immediately outside exactly one dashed-box side.
+
+    Jamb-ending faces (the opening through the wall) win over a long wall that
+    only runs past another side of the same dashed rectangle. Unique-or-abstain.
+    """
+    x0, y0, x1, y1 = box_pdf
+    strokes = _wall_face_strokes(drawings)
+    sides = (
+        (False, x0, y0, y1, -1.0),
+        (False, x1, y0, y1, 1.0),
+        (True, y0, x0, x1, -1.0),
+        (True, y1, x0, x1, 1.0),
+    )
+    end_hits: list[tuple[bool, tuple[float, float], float, float, tuple[int, ...]]] = []
+    overlap_hits: list[tuple[bool, tuple[float, float], float, float, tuple[int, ...]]] = []
+    for wall_horizontal, perp, along_lo, along_hi, outward in sides:
+        clustered = _cluster_outer_faces(
+            strokes, wall_horizontal=wall_horizontal, perp=perp, outward=outward,
+            along_lo=along_lo, along_hi=along_hi,
+        )
+        if clustered is None:
+            continue
+        low, high, members = clustered
+        face_covers = []
+        grouped: dict[float, list[tuple[int, bool, float, float, float]]] = {}
+        for item in members:
+            grouped.setdefault(round(item[2], 2), []).append(item)
+        for group in grouped.values():
+            face_covers.append(
+                (
+                    max(along_lo, min(part[3] for part in group)),
+                    min(along_hi, max(part[4] for part in group)),
+                )
+            )
+        cover_lo = max(part[0] for part in face_covers)
+        cover_hi = min(part[1] for part in face_covers)
+        overlap_lo = max(along_lo, cover_lo)
+        overlap_hi = min(along_hi, cover_hi)
+        if overlap_hi - overlap_lo < 10.0:
+            continue
+        paths = tuple(sorted({item[0] for item in members}))
+        record = (wall_horizontal, (low, high), overlap_lo, overlap_hi, paths)
+        if all(
+            _close(item[3], along_lo, _STROKE_PAIR_THICK_MIN)
+            and _close(item[4], along_hi, _STROKE_PAIR_THICK_MIN)
+            for item in members
+        ):
+            end_hits.append((wall_horizontal, (low, high), along_lo, along_hi, paths))
+        else:
+            overlap_hits.append(record)
+    if len(end_hits) == 1:
+        return end_hits[0]
+    if end_hits:
+        return None
+    if len(overlap_hits) != 1:
+        return None
+    return overlap_hits[0]
+
+
+def collect_dashed_outer_line_cased_openings(
+    drawings: Sequence[Mapping[str, Any]],
+) -> tuple[DashedOuterLineCasedOpening, ...]:
+    """Unique dashed-inner + solid-outer-wall openings. Unique-or-abstain."""
+    found: list[DashedOuterLineCasedOpening] = []
+    for x0, y0, x1, y1, dash_paths in _collect_dashed_cased_boxes(drawings):
+        outer = _outer_wall_pair_for_box(drawings, (x0, y0, x1, y1))
+        if outer is None:
+            continue
+        wall_horizontal, band, lo, hi, wall_paths = outer
+        found.append(
+            DashedOuterLineCasedOpening(
+                box=(x0, y0, x1, y1),
+                horizontal=wall_horizontal,
+                band=band,
+                lo=lo,
+                hi=hi,
+                native_path_indices=tuple(sorted(set(dash_paths) | set(wall_paths))),
+            )
+        )
+    claimed: dict[tuple[float, float, float, float], int] = {}
+    for item in found:
+        key = (
+            round(item.band[0], 3), round(item.band[1], 3),
+            round(item.lo, 3), round(item.hi, 3),
+        )
+        claimed[key] = claimed.get(key, 0) + 1
+    return tuple(
+        item for item in found
+        if claimed[(
+            round(item.band[0], 3), round(item.band[1], 3),
+            round(item.lo, 3), round(item.hi, 3),
+        )] == 1
+    )
+
+
+def _slice_strip(strip: _Strip, lo: float, hi: float) -> _Strip:
+    if strip.horizontal:
+        x0, x1, y0, y1 = lo, hi, strip.y0, strip.y1
+    else:
+        x0, x1, y0, y1 = strip.x0, strip.x1, lo, hi
+    return _Strip(
+        strip.path_index, x0, y0, x1, y1, box(x0, y0, x1, y1),
+        strip.forced, strip.native_path_indices(),
+    )
+
+
+def _notch_strips_for_cased_openings(
+    strips: Sequence[_Strip],
+    openings: Sequence[DashedOuterLineCasedOpening],
+) -> list[_Strip]:
+    """Drop the wall-band span that the dashed+outer opening itself occupies."""
+    remaining = list(strips)
+    for opening in openings:
+        next_remaining: list[_Strip] = []
+        for strip in remaining:
+            if (strip.horizontal if opening.horizontal else strip.vertical) is False:
+                next_remaining.append(strip)
+                continue
+            band = strip.band()
+            overlap = min(band[1], opening.band[1]) - max(band[0], opening.band[0])
+            if overlap <= NOISE_PT:
+                next_remaining.append(strip)
+                continue
+            span_lo, span_hi = strip.span()
+            if opening.hi <= span_lo + NOISE_PT or opening.lo >= span_hi - NOISE_PT:
+                next_remaining.append(strip)
+                continue
+            if span_lo < opening.lo - NOISE_PT:
+                next_remaining.append(_slice_strip(strip, span_lo, opening.lo))
+            if span_hi > opening.hi + NOISE_PT:
+                next_remaining.append(_slice_strip(strip, opening.hi, span_hi))
+        remaining = next_remaining
+    return remaining
+
+
+def _cased_opening_for_gap(
+    gap: _Gap,
+    openings: Sequence[DashedOuterLineCasedOpening],
+) -> Optional[DashedOuterLineCasedOpening]:
+    hits = tuple(
+        item for item in openings
+        if item.horizontal == gap.horizontal
+        and _close(item.lo, gap.lo, _STROKE_PAIR_CLUSTER_PT)
+        and _close(item.hi, gap.hi, _STROKE_PAIR_CLUSTER_PT)
+        and min(item.band[1], gap.band[1]) - max(item.band[0], gap.band[0]) > NOISE_PT
+    )
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
 def _same_gap(left: _Gap, right: _Gap, *, tol: float = 0.5) -> bool:
     """Same interruption: matching span, overlapping wall band.
 
@@ -1893,6 +2245,7 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("page_index must be a non-negative int")
+    cased_openings = collect_dashed_outer_line_cased_openings(drawings)
     # Keep original indexed source paths, but only allow actual black/dark
     # wall-candidate source paint to enter this opt-in topology path.
     # On Maryborough p7 the owner-green exclusion reduces 109k PDF paths
@@ -1929,6 +2282,8 @@ def build_layered_wall_doorway_room_rings(
         )
         if wall_end_stroke_closures:
             strips = strips + _collect_wall_end_closing_strips(drawings, strips)
+    if cased_openings:
+        strips = _notch_strips_for_cased_openings(strips, cased_openings)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -2038,6 +2393,13 @@ def build_layered_wall_doorway_room_rings(
             )
             stacker_by_gap[best] = native
             consumed_by_stacker.update(index for index in matches if index != best)
+    used_cased: set[int] = set()
+    for opening in cased_openings:
+        minted = _Gap(
+            opening.horizontal, opening.band, opening.lo, opening.hi, (), (), True,
+        )
+        if not any(_same_gap(minted, known) for known in gaps):
+            gaps.append(minted)
     for gap_index, gap in enumerate(gaps):
         if gap_index in consumed_by_stacker:
             continue
@@ -2057,13 +2419,26 @@ def build_layered_wall_doorway_room_rings(
             stroke = _frame_pair_closed(drawings, gap)
         if stroke is None and swing is None and host_wall:
             stroke = jamb_by_id.get(id(gap))
+        cased = _cased_opening_for_gap(gap, cased_openings)
+        if swing is not None:
+            cased = None
+            stroke = None
+        elif cased is not None:
+            marker = id(cased)
+            if marker in used_cased:
+                cased = None
+            else:
+                used_cased.add(marker)
+                # Outer wall faces are this opening's own spanning lines, not a
+                # second window stroke.
+                stroke = None
         sliding = sliding_by_gap.get(gap_index)
         stacker = stacker_by_gap.get(gap_index)
         if stacker is not None and stroke is not None:
             # A head/sill stroke spanning the cluster is the stacker's own ink,
             # not a second doorway. Swing or sliding on the same interruption still abstains.
             stroke = None
-        claims = [item for item in (swing, stroke, sliding, stacker) if item is not None]
+        claims = [item for item in (swing, cased, stroke, sliding, stacker) if item is not None]
         if len(claims) > 1:
             unresolved.append(gap)  # competing doorway evidence in one interruption: none is chosen
             continue
@@ -2075,6 +2450,8 @@ def build_layered_wall_doorway_room_rings(
                 *swing.get("arc_source_ids", (swing["arc"],)),
                 swing["leaf"],
             }))
+        elif cased is not None:
+            kind, native = KIND_CASED_OPENING, tuple(cased.native_path_indices)
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
         elif sliding is not None:
@@ -2226,6 +2603,9 @@ __all__ = [
     "KIND_SLIDING_LEAF",
     "KIND_STACKER_LEAF",
     "KIND_SWING",
+    "KIND_CASED_OPENING",
+    "DashedOuterLineCasedOpening",
+    "collect_dashed_outer_line_cased_openings",
     "LAYERED_ROOM_RING_SCHEMA_VERSION",
     "LayeredDoorwayClosure",
     "LayeredRoomRingRecord",

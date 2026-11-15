@@ -35,6 +35,7 @@ _NON_PERSONNEL_DOOR_RE = re.compile(
 _SLIDING_JOINERY_EVIDENCE_PREFIXES = (
     "source_sliding_leaf_opening_host",
     "source_stacker_leaf_opening_host",
+    "source_dashed_outer_line_cased_opening",
 )
 
 

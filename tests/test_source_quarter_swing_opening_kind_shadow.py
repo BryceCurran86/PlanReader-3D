@@ -315,6 +315,39 @@ def test_different_viewport_adjacent_stays_distinct_and_does_not_kind() -> None:
     assert by_id["adjacent-unhosted"].opening_kind is None
 
 
+def test_foreign_viewport_tip_does_not_kind_the_hosted_hinge() -> None:
+    hosted = _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="hosted-hinge")
+    other = replace(
+        _hosted(geom=(49.72, 25.0, 52.5, 25.0), opening_id="other-tip"),
+        viewport_id="foreign-viewport",
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        evidence_ids=("unrelated",),
+    )
+    assert compare_live_canonical_opening_identity(hosted, other) == DISTINCT
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hosted, other),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["hosted-hinge"].opening_kind is None
+    assert by_id["other-tip"].opening_kind is None
+
+
+def test_same_viewport_hosted_tip_is_a_different_aperture() -> None:
+    hosted = _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="hosted-hinge")
+    other = _hosted(geom=(49.72, 25.0, 52.5, 25.0), opening_id="hosted-tip")
+    assert compare_live_canonical_opening_identity(hosted, other) == AMBIGUOUS
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hosted, other),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["hosted-hinge"].opening_kind is None
+    assert by_id["hosted-tip"].opening_kind is None
+
+
 def test_original_hosted_opening_at_a_detected_swing_becomes_a_door() -> None:
     from pb_layered_wall_doorway_room_ring_shadow import _swing_arcs
 

@@ -9,6 +9,7 @@ import fitz
 import pytest
 
 from pb_layered_wall_doorway_room_ring_shadow import (
+    KIND_CASED_OPENING,
     KIND_STROKE,
     KIND_SLIDING_LEAF,
     KIND_STACKER_LEAF,
@@ -766,3 +767,119 @@ def test_stacker_closure_is_invariant_to_rigid_motion():
     moved = stacker(stacker_room(lambda x, y: (x + 317.25, y - 88.5)))
     for other in (rotated, moved):
         assert sorted(c.kind for c in other.closures) == sorted(c.kind for c in base.closures)
+
+
+def _dashed_rect(x0, y0, x1, y1, *, dash=2.83, gap=2.4, layer="Annotation_General"):
+    rows = []
+
+    def emit(a, b):
+        rows.append({
+            "layer": layer,
+            "fill": None,
+            "color": (0.0, 0.0, 0.0),
+            "items": [("l", fitz.Point(*a), fitz.Point(*b))],
+        })
+
+    def along(start, end):
+        ax, ay = start
+        bx, by = end
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        if length <= dash:
+            emit(start, end)
+            return
+        ux, uy = dx / length, dy / length
+        t = 0.0
+        while t < length - 1e-9:
+            remaining = length - t
+            piece = dash if remaining >= dash + 1.0 else remaining
+            if piece < 1.0:
+                break
+            emit((ax + ux * t, ay + uy * t), (ax + ux * (t + piece), ay + uy * (t + piece)))
+            t += piece + gap
+
+    along((x0, y0), (x1, y0))
+    along((x1, y0), (x1, y1))
+    along((x1, y1), (x0, y1))
+    along((x0, y1), (x0, y0))
+    return rows
+
+
+def _cased_opening_room():
+    """Right-wall gap with dashed inner rectangle and outer wall-face pair."""
+    rows = _open_gap_room()
+    rows += _dashed_rect(64.0, 40.0, 97.7, 64.0)
+    rows.append(line((98.0, 40.0), (98.0, 64.0)))
+    rows.append(line((100.0, 40.0), (100.0, 64.0)))
+    return rows
+
+
+def test_dashed_inner_and_outer_wall_lines_fill_the_opening_like_a_window():
+    result = build_layered_wall_doorway_room_rings(
+        _cased_opening_room(), source_sha256=SHA, page_index=0,
+    )
+    assert len(candidates(result)) == 1
+    assert [c.kind for c in result.closures] == [KIND_CASED_OPENING]
+    assert math.isclose(result.closures[0].gap_interval[0], 40.0, abs_tol=0.8)
+    assert math.isclose(result.closures[0].gap_interval[1], 64.0, abs_tol=0.8)
+
+
+def test_dashed_box_without_outer_wall_lines_does_not_close():
+    rows = _open_gap_room() + _dashed_rect(64.0, 40.0, 97.7, 64.0)
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert candidates(result) == []
+    assert result.closures == ()
+
+
+def test_joinery_dashes_are_not_a_cased_opening_but_outer_strokes_still_fill():
+    rows = _open_gap_room()
+    rows += _dashed_rect(64.0, 40.0, 97.7, 64.0, layer="Interior_Joinery")
+    rows.append(line((98.0, 40.0), (98.0, 64.0)))
+    rows.append(line((100.0, 40.0), (100.0, 64.0)))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert KIND_CASED_OPENING not in {c.kind for c in result.closures}
+    assert KIND_STROKE in {c.kind for c in result.closures}
+    assert len(candidates(result)) == 1
+
+
+def test_continuous_outer_pair_is_notched_and_still_filled_as_an_opening():
+    rows = strip(0, 0, 100, 2) + strip(0, 2, 2, 98) + strip(0, 98, 100, 100)
+    rows += strip(98, 2, 100, 98)
+    rows += _dashed_rect(64.0, 40.0, 97.7, 64.0)
+    rows.append(line((98.0, 40.0), (98.0, 64.0)))
+    rows.append(line((100.0, 40.0), (100.0, 64.0)))
+    closed = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert [c.kind for c in closed.closures] == [KIND_CASED_OPENING]
+    assert len(candidates(closed)) == 1
+    bare = build_layered_wall_doorway_room_rings(
+        strip(0, 0, 100, 2) + strip(0, 2, 2, 98) + strip(0, 98, 100, 100) + strip(98, 2, 100, 98),
+        source_sha256=SHA, page_index=0,
+    )
+    assert bare.closures == ()
+    assert len(candidates(bare)) == 1
+
+
+def test_two_unique_cased_openings_each_fill_their_own_wall_gap():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100)
+    rows += strip(198, 2, 200, 98)
+    rows += strip(98, 2, 100, 40) + strip(98, 64, 100, 98)
+    rows += _dashed_rect(64.0, 40.0, 97.7, 64.0)
+    rows.append(line((98.0, 40.0), (98.0, 64.0)))
+    rows.append(line((100.0, 40.0), (100.0, 64.0)))
+    rows += strip(0, 2, 2, 40) + strip(0, 64, 2, 98)
+    rows += _dashed_rect(2.3, 40.0, 36.0, 64.0)
+    rows.append(line((0.0, 40.0), (0.0, 64.0)))
+    rows.append(line((2.0, 40.0), (2.0, 64.0)))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    kinds = [c.kind for c in result.closures]
+    assert kinds.count(KIND_CASED_OPENING) == 2
+
+
+def test_cased_opening_does_not_steal_a_swing_door():
+    rows = room()
+    rows += _dashed_rect(64.0, 40.0, 97.7, 64.0)
+    rows.append(line((98.2, 40.0), (98.2, 64.0)))
+    rows.append(line((100.0, 40.0), (100.0, 64.0)))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert KIND_CASED_OPENING not in {c.kind for c in result.closures}
+    assert KIND_SWING in {c.kind for c in result.closures}

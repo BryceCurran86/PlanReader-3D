@@ -1218,6 +1218,15 @@ def _collect_live_physical_net_wall_claim(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
+    if swing_drawings_by_page:
+        from pb_source_dashed_outer_line_cased_opening_shadow import (
+            apply_source_dashed_outer_line_cased_openings,
+        )
+
+        physical_void = apply_source_dashed_outer_line_cased_openings(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+        )
     if source_unique_swing_opening_host:
         from pb_source_unique_swing_opening_host_shadow import (
             apply_source_sliding_leaf_opening_hosts,
@@ -1265,6 +1274,33 @@ def _collect_live_physical_net_wall_claim(
         producer = getattr(wall_opening, "opening_host_binding_producer", None)
         if producer is not None:
             physical_void = republish_nominated_hosts(physical_void, producer)
+    if source_quarter_swing_opening_kind or source_unique_swing_opening_host:
+        from pb_cross_view_room_area_authority import _trusted_native_dimensions_for_page
+        from pb_source_swing_figured_width_shadow import (
+            apply_source_swing_figured_widths,
+        )
+
+        dimensions_by_page_id: dict[str, tuple] = {}
+        for page_id in swing_drawings_by_page:
+            page_openings = [
+                item
+                for item in physical_void.canonical_openings
+                if str(item.page_id) == str(page_id)
+            ]
+            if not page_openings:
+                continue
+            dimensions_by_page_id[str(page_id)] = _trusted_native_dimensions_for_page(
+                source,
+                revision_id=str(page_openings[0].revision_id),
+                page_id=str(page_id),
+                candidate_lines=(),
+                view_type=DrawingViewType.FLOOR_PLAN.value,
+            )
+        physical_void = apply_source_swing_figured_widths(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            dimensions_by_page_id=dimensions_by_page_id,
+        )
     if source_quarter_swing_opening_kind:
         from pb_source_quarter_swing_opening_kind_shadow import (
             apply_source_quarter_swing_opening_kinds,
