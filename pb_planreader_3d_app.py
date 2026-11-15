@@ -6329,10 +6329,89 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 break
     chosen=st.selectbox("Drawing page",labels,index=default_page_index,key=f"plan_mapper_page_select_{workspace['id']}")
     page=pages.iloc[labels.index(chosen)].to_dict()
+    # Owner mandate: the first automatic plan geometry is the newer
+    # SOURCE-NATIVE wall/room tracer. Never call the old raster envelope
+    # detector as fallback or convert a guessed outline into measurements.
+    native_trace_key=f"source_native_wall_trace_{int(page['id'])}"
+    doc_rows=lquery(
+        "SELECT path,sha256 FROM documents WHERE id=?",
+        (int(page["document_id"]),),
+    )
+    doc_path=Path(str(doc_rows[0].get("path") or "")) if doc_rows else None
+    if doc_path and doc_path.is_file() and doc_path.suffix.lower()==".pdf":
+        digest=hashlib.sha256(doc_path.read_bytes()).hexdigest()
+        stored_sha=str(doc_rows[0].get("sha256") or "").strip().lower()
+        if stored_sha and stored_sha!=digest:
+            st.session_state[native_trace_key]={
+                "digest":digest,"summary":{"status":"abstained","reason_codes":[
+                    "original_pdf_changed_since_document_registration"]},"png":None,
+            }
+        elif st.session_state.get(native_trace_key,{}).get("digest")!=digest:
+            try:
+                from pb_new_source_trace_preview import source_native_trace_preview
+                with st.spinner("Tracing original PDF wall ink and room closures (new engine only)..."):
+                    trace_summary,trace_png=source_native_trace_preview(
+                        doc_path,int(page["page_no"])-1,
+                    )
+                st.session_state[native_trace_key]={
+                    "digest":digest,"summary":trace_summary,"png":trace_png,
+                }
+            except Exception as trace_error:
+                st.session_state[native_trace_key]={
+                    "digest":digest,"summary":{
+                        "status":"abstained",
+                        "reason_codes":[
+                            "new_source_native_trace_failed:"+type(trace_error).__name__,
+                        ],
+                    },"png":None,
+                }
+    else:
+        st.session_state[native_trace_key]={
+            "digest":None,"summary":{
+                "status":"abstained",
+                "reason_codes":["original_pdf_required_no_legacy_envelope_fallback"],
+            },"png":None,
+        }
+    native_trace=st.session_state[native_trace_key]
     zones=lquery("SELECT * FROM mapped_zones WHERE page_id=? ORDER BY id",(int(page["id"]),))
     tab0,tab1,tab2,tab3=st.tabs(["Draw measurements","Scale","Map zone","Saved zones"])
     with tab0:
         pxpm=to_float(page.get("px_per_m"))
+        st.markdown("### New source-native wall trace — first stage")
+        native_report=native_trace.get("summary") or {}
+        native_codes=native_report.get("reason_codes") or ["new_trace_no_result"]
+        if native_trace.get("png"):
+            st.image(native_trace["png"],use_container_width=True,
+                caption="New source-native candidate wall strips (cyan/blue), temporary doorway closures (orange), candidate room rings (green). All require source review.")
+            st.caption(
+                f"Source wall strips: {native_report.get('wall_strip_count',0)}; "
+                f"temporary closures: {native_report.get('temporary_opening_closures',0)}; "
+                f"candidate enclosed regions: {native_report.get('candidate_enclosed_regions',0)}. "
+                "No exterior footprint, floor or wall quantities authorized."
+            )
+        if not native_report.get("exterior_physical_wall_authenticated"):
+            st.warning(
+                "EXTERNAL WALLS NOT YET VERIFIED: the coloured drawing lines "
+                "are unclassified source-ink candidates, not approved internal "
+                "or external walls. Nothing outside a verified building boundary "
+                "can be admitted to measurements. No legacy envelope fallback."
+            )
+            if native_report.get("external_wall_trace_reason"):
+                st.caption(
+                    "Exterior trace diagnostic: "
+                    + str(native_report["external_wall_trace_reason"])
+                )
+        if native_report.get("status")=="abstained":
+            st.warning(
+                "New tracing could not establish an enclosed room: "
+                + ", ".join(map(str, native_codes[:4]))
+                + ". The old envelope detector is NOT used as fallback."
+            )
+        else:
+            st.info(
+                "New engine found candidate enclosed regions only; "
+                "physical wall ownership and customer areas remain unverified."
+            )
         st.markdown("### Draw take-off measurements on the plan")
         st.caption("Pick a take-off row, choose **Line** (walls, doors, frames, skirting — click two points) or **Outline** (building footprint, ceilings — click each corner then double-click to close), then click directly on the plan. Drawn lengths and areas are measured from the saved drawing scale.")
         detected=auto_detect_scale(page)
@@ -6400,16 +6479,11 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
             st.session_state[store_key]=new_lines
             st.session_state[rev_key]=int(st.session_state.get(rev_key,0))+1
             st.rerun()
-        if c4.button("Auto-detect building envelope",key=f"autodet_{page['id']}",use_container_width=True):
-            det_level=st.session_state.get(f"qa_level_{int(page['id'])}","Level 1")
-            auto_lines=auto_detect_envelope_shapes(int(workspace["id"]),page,pxpm,str(det_level))
-            if auto_lines:
-                st.session_state[store_key]=auto_lines
-                st.session_state[rev_key]=int(st.session_state.get(rev_key,0))+1
-                st.rerun()
-            else:
-                st.warning("No building envelope could be detected on this page — draw the external outline manually, or check the page image.")
-        st.caption("**Auto-detect** outlines the outer building envelope on this page, creating an **External walls / cladding** box (area = perimeter × 2.7 m wall height) and a **Floor plan · {level}** box (internal floor area, the flat-rate basis for internal works incl. paint). Select a box, then drag a corner to reshape or drag the box to move it — no auto-detect is perfect, so adjust before saving.")
+        if c4.button("Re-run new native wall trace",key=f"newtrace_{page['id']}",use_container_width=True):
+            st.session_state.pop(native_trace_key,None)
+            st.rerun()
+        st.caption("Automatic tracing uses the source-native wall and doorway engine only. No old-envelope fallback and no automatic commercial floor/cladding shapes. Review or manually draw source-verified measurements.")
+
         path=Path(str(page.get("image_path") or ""))
         if plan_line_editor is not None and path.exists():
             active_row_id=st.session_state.get(f"ml_active_{int(page['id'])}")

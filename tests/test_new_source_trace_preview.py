@@ -1,0 +1,307 @@
+"""The original app only consumes source-native new tracing for automatic preview."""
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import fitz
+import pytest
+
+from pb_new_source_trace_preview import source_native_trace_preview, _full_page_source_tiles
+
+
+def _floor_plan(tmp_path: Path) -> Path:
+    pdf = tmp_path / "drawing.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=790, height=590)
+        for rect in (
+            fitz.Rect(160, 120, 165, 420),
+            fitz.Rect(530, 120, 535, 420),
+            fitz.Rect(165, 120, 530, 125),
+            fitz.Rect(165, 415, 530, 420),
+        ):
+            page.draw_rect(rect, color=None, fill=(0, 0, 0))
+        doc.save(pdf)
+    return pdf
+
+
+def test_new_source_preview_on_original_pdf_does_not_issue_quantities(tmp_path):
+    pdf = _floor_plan(tmp_path)
+    result, png = source_native_trace_preview(pdf, 0)
+    assert len(png) > 1000 and png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert result["page_index"] == 0
+    assert len(result["source_sha256"]) == 64
+    assert result["producer"].endswith("build_layered_wall_doorway_room_rings")
+    assert result["legacy_envelope_used"] is False
+    assert result["legacy_fallback_allowed"] is False
+    assert result["quantity_authorized"] is False
+    assert result["commercial_publishable"] is False
+    assert result["primitive_cap_per_tile"] == 20000
+    assert result["source_tile_count"] > 0
+
+
+def test_new_preview_rejects_non_original_pdf_without_legacy_fallback(tmp_path):
+    with pytest.raises(ValueError, match="original_pdf_required_no_legacy_fallback"):
+        source_native_trace_preview(tmp_path / "floorplan.png", 0)
+
+
+def test_new_preview_rejects_wrong_page_without_fallback(tmp_path):
+    pdf = _floor_plan(tmp_path)
+    with pytest.raises(ValueError, match="original_page_index_invalid"):
+        source_native_trace_preview(pdf, 10)
+
+
+def test_source_tiles_are_generic_whole_sheet_and_bounded():
+    tiles = _full_page_source_tiles(1200.0, 800.0, 7000)
+    assert len(tiles) == 9
+    assert min(t[0] for t in tiles) == 0.0
+    assert min(t[1] for t in tiles) == 0.0
+    assert max(t[2] for t in tiles) == 1200.0
+    assert max(t[3] for t in tiles) == 800.0
+
+
+def test_actual_original_app_drawing_page_has_no_old_auto_envelope_button():
+    source = (Path(__file__).resolve().parents[1] / "pb_planreader_3d_app.py").read_text(encoding="utf8")
+    tree = ast.parse(source)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "plan_mapper_page")
+    text = ast.get_source_segment(source, fn)
+    assert text is not None
+    assert "Auto-detect building envelope" not in text
+    assert "auto_detect_envelope_shapes(" not in text
+    assert "source_native_trace_preview(" in text
+    assert "Re-run new native wall trace" in text
+    assert "No building envelope could be detected" not in text
+
+
+def test_app_legacy_shape_generator_is_not_a_required_preview_dependency():
+    src = (Path(__file__).resolve().parents[1] / "pb_new_source_trace_preview.py").read_text(encoding="utf-8-sig")
+    call_names = {
+        n.func.id
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "auto_detect_building_envelope" not in call_names
+    assert "auto_detect_envelope_shapes" not in call_names
+
+
+def test_existing_black_source_wall_pr_is_in_new_trace_producer():
+    from pb_next_wall_ring_preview import build_layered_wall_doorway_room_rings
+    from tests.test_original_anonymous_wall_door_source_20261112 import (
+        door_room,
+    )
+    from tests.test_original_live_dark_filled_wall_rooms_20261112 import (
+        _dark_rect_room,
+    )
+    from tests.test_layered_wall_doorway_room_ring_shadow_v1 import SHA
+
+    black = [dict(row, fill=(0., 0., 0.)) for row in _dark_rect_room()]
+    traced = build_layered_wall_doorway_room_rings(
+        black, source_sha256=SHA, page_index=0, stroke_pair_wall_faces=True,
+    )
+    assert traced.wall_strip_count == 4
+    assert len(traced.rings) == 1
+    assert all(not room.metric_area_issued for room in traced.rings)
+
+    swing = build_layered_wall_doorway_room_rings(
+        door_room(), source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True,
+    )
+    assert swing.wall_strip_count == 5
+    assert len(swing.closures) == 1
+    assert len(swing.rings) == 1
+    assert all(not ring.commercial_projection_allowed for ring in swing.rings)
+
+
+def test_outlined_vector_filter_keeps_original_path_ids_and_curves(monkeypatch):
+    from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
+    import pb_new_typed_vector_ink_scope as scope
+
+    class Sheet:
+        class Rect:
+            width = 1100
+            height = 800
+        rect = Rect()
+        def get_text(self, variant):
+            assert variant == "words"
+            return []
+
+    line = {"type": "s", "color": (0, 0, 0), "fill": None,
+            "items": (("l", (0, 0), (5, 5)),)}
+    curved = {"type": "s", "color": (0, 0, 0), "fill": None,
+              "items": (("c", (1, 1), (3, 2), (4, 1)),)}
+    filled = {"type": "f", "color": None, "fill": (0, 0, 0),
+              "items": (("re", (0, 0, 1, 1), 1),)}
+    drawings = [line, line, filled, curved] + [
+        {"type": "s", "color": None, "fill": None, "items": ()}
+        for _ in range(5000)
+    ]
+    native = [{"path_index": 0, "item_index": 0}] * 9999
+    native.extend([{"path_index": 1, "item_index": 0}])
+    monkeypatch.setattr(scope, "extract_native_page",
+                        lambda page: {"segments": native})
+    monkeypatch.setattr(
+        scope, "_filter_repeated_non_physical_drafting_primitives",
+        lambda segments, **opts: [segments[-1]],
+    )
+    result = scope_outlined_vector_lettering(Sheet(), drawings)
+    assert result.applied is True
+    assert result.discarded_simple_stroke_paths == 1
+    assert len(result.drawings) == len(drawings)
+    assert result.drawings[0].get("items") == ()
+    assert result.drawings[1] is line
+    assert result.drawings[2] is filled
+    assert result.drawings[3] is curved
+
+
+def test_no_vector_prefilter_on_normal_pdf_text(monkeypatch):
+    from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
+    import pb_new_typed_vector_ink_scope as scope
+
+    class Sheet:
+        def get_text(self, variant):
+            return [("word",)] * 21
+
+    monkeypatch.setattr(scope, "extract_native_page",
+                        lambda page: (_ for _ in ()).throw(AssertionError()))
+    rows = [{"type": "s", "items": ()}] * 5000
+    result = scope_outlined_vector_lettering(Sheet(), rows)
+    assert result.applied is False
+    assert len(result.drawings) == 5000
+
+
+def test_source_hygiene_then_outer_walls_before_inner_room_trace(tmp_path, monkeypatch):
+    import pb_new_source_trace_preview as preview
+    order = []
+    outer = preview.attempt_source_native_outer_wall_first
+    vector = preview.scope_outlined_vector_lettering
+    inner = preview.build_layered_wall_doorway_room_rings
+
+    def outer_first(drawings):
+        order.append("outer")
+        return outer(drawings)
+
+    def source_hygiene(page, drawings):
+        order.append("source_hygiene")
+        return vector(page, drawings)
+
+    def inner_last(*args, **kwargs):
+        order.append("internal")
+        return inner(*args, **kwargs)
+
+    monkeypatch.setattr(preview, "attempt_source_native_outer_wall_first", outer_first)
+    monkeypatch.setattr(preview, "scope_outlined_vector_lettering", source_hygiene)
+    monkeypatch.setattr(preview, "build_layered_wall_doorway_room_rings", inner_last)
+    source_native_trace_preview(_floor_plan(tmp_path), 0)
+    assert order == ["source_hygiene", "outer", "internal"]
+
+
+def _unfilled_double_wall_drawings(*, open_right=False, extra_box=False):
+    import fitz
+    lines = []
+    def line(ax, ay, bx, by):
+        lines.append({
+            "type": "s", "color": (0., 0., 0.),
+            "fill": None, "width": 0.7, "stroke_opacity": 1.,
+            "layer": "",
+            "rect": fitz.Rect(min(ax,bx),min(ay,by),max(ax,bx),max(ay,by)),
+            "items": (("l",fitz.Point(ax,ay),fitz.Point(bx,by)),),
+        })
+    def box_lines(x0,y0,x1,y1):
+        for y in (y0,y0+3,y1-3,y1):
+            line(x0,y,x1,y)
+        for x in (x0,x0+3,x1-3,x1):
+            if open_right and x==x1:
+                continue
+            line(x,y0,x,y1)
+    box_lines(100,100,400,350)
+    if extra_box:
+        box_lines(500,100,650,280)
+    return lines
+
+
+def test_external_wall_first_traces_source_native_double_stroke_not_ink_hull():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    result = attempt_source_native_outer_wall_first(
+        _unfilled_double_wall_drawings()
+    )
+    assert result.source_stroke_pair_band_count >= 4
+    assert result.source_wall_band_count >= 4
+    assert result.source_wall_path_count >= 4
+    assert result.measurement_authorized is False
+    assert result.internal_wall_filter_authorized is False
+    assert result.physical_wall_authenticated is False
+    assert result.status in ("CANDIDATE","ABSTAINED")
+    # Never construct the sheet bbox or a non-source enclosing rectangle.
+    if result.polygon_pdf_pts:
+        assert 95 <= min(p[0] for p in result.polygon_pdf_pts) <= 105
+        assert 345 <= max(p[1] for p in result.polygon_pdf_pts) <= 355
+
+
+def test_external_wall_first_never_bridges_open_wall_or_rival_building():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    open_wall = attempt_source_native_outer_wall_first(
+        _unfilled_double_wall_drawings(open_right=True)
+    )
+    rival = attempt_source_native_outer_wall_first(
+        _unfilled_double_wall_drawings(extra_box=True)
+    )
+    assert open_wall.status == "ABSTAINED"
+    assert rival.status == "ABSTAINED"
+    assert not open_wall.polygon_pdf_pts and not rival.polygon_pdf_pts
+    assert not open_wall.measurement_authorized
+    assert not rival.internal_wall_filter_authorized
+
+def test_viewport_inert_rows_do_not_crash_sliding_frame_detector():
+    from pb_next_wall_ring_preview import (
+        _clip_drawings,
+        build_layered_wall_doorway_room_rings,
+    )
+    from tests.test_original_anonymous_wall_door_source_20261112 import (
+        door_room,
+    )
+    from tests.test_layered_wall_doorway_room_ring_shadow_v1 import SHA
+
+    source = door_room()
+    # The original geometry is inside the requested viewport. An unrelated
+    # drawing row outside that viewport used to become None and crash inside
+    # _sliding_leaf_evidence even with the engine's source cap respected.
+    unrelated = dict(source[0])
+    unrelated["rect"] = fitz.Rect(500, 500, 700, 700)
+    source.append(unrelated)
+    selected = _clip_drawings(
+        source, viewport=(0., 0., 125., 125.),
+    )
+    assert len(selected) == len(source)
+    assert selected[-1].get("items") == ()
+    assert all(x is not None for x in selected)
+    result = build_layered_wall_doorway_room_rings(
+        source, source_sha256=SHA, page_index=0,
+        stroke_pair_wall_faces=True,
+        sliding_leaf_frame_closure=True,
+        viewport_pdf_pts=(0., 0., 125., 125.),
+    )
+    assert result is not None
+    assert result.wall_strip_count >= 1
+    assert not any(r.commercial_projection_allowed for r in result.rings)
+
+def test_item_viewport_clip_returns_inert_source_rows_not_none():
+    from pb_next_wall_ring_preview import _clip_drawing_items
+
+    outside = {
+        "type": "s", "color": (0., 0., 0.), "fill": None,
+        "items": (("l", fitz.Point(500, 500), fitz.Point(650, 650)),),
+        "rect": fitz.Rect(500, 500, 650, 650),
+    }
+    inside = {
+        "type": "s", "color": (0., 0., 0.), "fill": None,
+        "items": (("l", fitz.Point(20, 20), fitz.Point(70, 20)),),
+        "rect": fitz.Rect(20, 20, 70, 20),
+    }
+    result = _clip_drawing_items(
+        (outside,inside), (0., 0., 100., 100.),
+    )
+    assert len(result) == 2
+    assert all(row is not None for row in result)
+    assert result[0]["items"] == ()
+    assert len(result[1]["items"]) == 1
+    assert outside["items"] and inside["items"]
