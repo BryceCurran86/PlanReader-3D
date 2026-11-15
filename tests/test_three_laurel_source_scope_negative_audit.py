@@ -106,3 +106,66 @@ def test_wall_tile_tokens_without_wall_faces_must_not_publish(monkeypatch, tmp_p
     assert result.status == "ABSTAIN"
     assert not result.customer_rows
 
+
+def test_valid_native_vector_decoy_without_wall_geometry_abstains(monkeypatch, tmp_path):
+    """Adversarial regression: real native PDF with 610 valid vector strokes but no walls.
+
+    Verifies that real vector strokes without orthogonal wall geometry or closed room
+    perimeters strictly abstain and emit zero customer rows across all four issuers.
+    """
+    import fitz
+
+    path = tmp_path / "native_decoy.pdf"
+    doc = fitz.open()
+    terms = [
+        "GROUND FLOOR PLAN AREA SCHEDULE VINYL TILES MEDIA BED 2 BED 3",
+        "SECTION A-A 2,700 GYPROCK",
+    ]
+    for spec in wet._WET_FLOOR_SPECS.values():
+        terms.extend(["TILES", *map(str, spec["dim_strings"])])
+    for spec in vinyl._VINYL_FLOOR_SPECS.values():
+        terms.extend(["VINYL", str(spec["room_label"]), *map(str, spec["dim_strings"])])
+    for spec in wall._WALL_TILE_SPECS.values():
+        terms.extend(map(str, spec["evidence_tokens"]))
+
+    for page_i in range(18):
+        page = doc.new_page(width=1400, height=950)
+        for i in range(610):
+            x = 40 + (i % 100) * 7
+            y = 380 + (i // 100) * 17
+            page.draw_line((x, y), (x + 2.1, y + 1.6), color=(0, 0, 0), width=0.2)
+        words = (" ".join(terms)).split()
+        for j in range(0, len(words), 10):
+            row = " ".join(words[j : j + 10])
+            page.insert_text((30, 36 + 14 * (j // 10)), row, fontsize=7.4)
+        if page_i == 2:
+            vals = [
+                "MAIN LIVING 12.34 m2",
+                "GARAGE 12.34 m2",
+                "MAIN PORCH 12.34 m2",
+                "MAIN ALFRESCO 12.34 m2",
+                "GF LIVING 12.34 m2",
+                "GF ALFRESCO 12.34 m2",
+                "GF PORCH 12.34 m2",
+            ]
+            for k, row in enumerate(vals):
+                page.insert_text((961, 632 + 13 * k), row, fontsize=8)
+    doc.save(path)
+    doc.close()
+
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    for mod, fn in (
+        (vinyl, vinyl.issue_original_three_laurel_vinyl_floor_customer_quantities),
+        (wet, wet.issue_original_three_laurel_wet_area_floor_customer_quantities),
+        (wall, wall.issue_original_three_laurel_wall_tile_customer_quantities),
+        (ceiling, ceiling.issue_original_three_laurel_ceiling_customer_quantities),
+    ):
+        monkeypatch.setattr(mod, "THREE_LAUREL_SOURCE_SHA256", digest)
+        monkeypatch.setattr(mod, "THREE_LAUREL_DOCUMENT_ID", f"live-source:{digest[:32]}")
+        monkeypatch.setattr(mod, "THREE_LAUREL_REVISION_ID", f"3laurel_sha_{digest[:20]}")
+        res = fn(path)
+        assert res.status == "ABSTAIN"
+        assert len(res.quantities) == 0
+        assert len(res.customer_rows) == 0
+        assert "source_owned_physical_quantity_authority_unavailable" in res.reason_codes
+
