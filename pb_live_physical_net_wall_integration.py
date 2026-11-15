@@ -1220,12 +1220,21 @@ def _collect_live_physical_net_wall_claim(
     )
     if source_unique_swing_opening_host:
         from pb_source_unique_swing_opening_host_shadow import (
+            apply_source_sliding_leaf_opening_hosts,
             apply_source_unique_swing_opening_hosts,
         )
 
         physical_void = apply_source_unique_swing_opening_hosts(
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+        )
+        # Sliding/stacker hosts are drawing-leaf closures, not room-area rings.
+        physical_void = apply_source_sliding_leaf_opening_hosts(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            stacker_leaf_frame_closure=True,
+            dark_painted_wall_source=True,
+            wall_end_stroke_closures=True,
         )
     if layered_sliding_leaf_closure:
         from pb_source_unique_swing_opening_host_shadow import (
@@ -1243,12 +1252,17 @@ def _collect_live_physical_net_wall_claim(
                if layered_wall_end_stroke_closures else {}),
         )
     if source_unique_swing_opening_host or layered_sliding_leaf_closure:
+        from pb_source_issued_host_binding_rebind_shadow import (
+            apply_corroborated_live_host_traces,
+            republish_nominated_hosts,
+        )
+
+        physical_void = apply_corroborated_live_host_traces(
+            physical_void,
+            wall_opening.opening_bindings,
+        )
         producer = getattr(wall_opening, "opening_host_binding_producer", None)
         if producer is not None:
-            from pb_source_issued_host_binding_rebind_shadow import (
-                republish_nominated_hosts,
-            )
-
             physical_void = republish_nominated_hosts(physical_void, producer)
     if source_quarter_swing_opening_kind:
         from pb_source_quarter_swing_opening_kind_shadow import (

@@ -20,6 +20,7 @@ from pb_live_wall_opening_authority_composition import LiveOpeningHostTrace
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_host_binding_authority import (
     OpeningHostBindingProducer,
+    OpeningHostBindingRecord,
     OpeningHostBindingResult,
     OpeningHostWallUniverseSelector,
 )
@@ -64,6 +65,58 @@ def first_failing_live_host_trace_gate(
             return str(trace.reason_codes[0])
         return "opening_host_binding_unavailable"
     return "opening_host_trace_missing"
+
+
+def _result_from_live_host_trace(
+    opening: LiveCanonicalOpeningObject,
+    traces: Sequence[LiveOpeningHostTrace],
+) -> OpeningHostBindingResult | None:
+    """Rebuild the producer receipt already on the live wall-opening trace."""
+    physical_id = str(opening.physical_opening_id or "").strip()
+    for trace in traces:
+        if str(trace.opening_identity_id or "") != physical_id:
+            continue
+        if first_failing_live_host_trace_gate(opening, (trace,)):
+            return None
+        record_id = str(trace.record_id or "").strip()
+        host_wall_id = str(trace.host_wall_id or "").strip()
+        record = OpeningHostBindingRecord(
+            record_id=record_id,
+            document_id=str(opening.document_id),
+            revision_id=str(opening.revision_id),
+            source_sha256=str(opening.source_sha256),
+            snapshot_id=str(opening.snapshot_id),
+            page_id=str(opening.page_id),
+            decision_scope_id=f"wall-source:page-{opening.page_id}",
+            opening_identity_id=physical_id,
+            host_wall_id=host_wall_id,
+            member_wall_candidate_ids=tuple(trace.member_wall_candidate_ids or ()),
+            member_candidate_identity_ids=(),
+            member_equivalence_groups=(),
+            source_observation_ids=tuple(opening.source_observation_ids or ()),
+        )
+        return OpeningHostBindingResult(
+            status=trace.status,
+            reason_codes=tuple(trace.reason_codes),
+            record=record,
+        )
+    return None
+
+
+def apply_corroborated_live_host_traces(
+    composition: LivePhysicalOpeningVoidComposition,
+    traces: Sequence[LiveOpeningHostTrace],
+) -> LivePhysicalOpeningVoidComposition:
+    """Install already-published host traces; do not re-call publish."""
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    issued: dict[str, OpeningHostBindingResult] = {}
+    for opening in composition.canonical_openings:
+        result = _result_from_live_host_trace(opening, traces)
+        if first_failing_host_publish_gate(result):
+            continue
+        issued[str(opening.physical_opening_id)] = result
+    return apply_issued_opening_host_binding_receipts(composition, issued)
 
 
 def observation_selector_for_opening(

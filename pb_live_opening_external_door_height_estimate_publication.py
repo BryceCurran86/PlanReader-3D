@@ -30,6 +30,10 @@ _NON_PERSONNEL_DOOR_RE = re.compile(
     r"\b(?:garage|overhead|roller|joinery|panel\s*lift)\b",
     re.IGNORECASE,
 )
+_SLIDING_JOINERY_EVIDENCE_PREFIXES = (
+    "source_sliding_leaf_opening_host",
+    "source_stacker_leaf_opening_host",
+)
 
 
 def _positive_mm(value: object) -> bool:
@@ -126,6 +130,11 @@ def _apply_one(
     if opening.height_m is not None:
         return opening
     if _blocked_non_personnel_door(opening):
+        return opening
+    if any(
+        str(item).startswith(_SLIDING_JOINERY_EVIDENCE_PREFIXES)
+        for item in opening.evidence_ids
+    ):
         return opening
     host_wall_id = _clean(opening.host_wall_id)
     framed_wall_id = _clean(opening.wall_local_frame_id)

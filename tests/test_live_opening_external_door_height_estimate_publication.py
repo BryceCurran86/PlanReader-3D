@@ -163,6 +163,21 @@ def test_unauthenticated_host_cannot_receive_the_2100_assumption():
     assert composition.canonical_openings[0].area_m2 is None
 
 
+def test_sliding_joinery_host_cannot_receive_the_2100_assumption():
+    composition = apply_live_external_door_height_estimates(
+        composition=_composition(
+            _bare_external_door(
+                evidence_ids=(
+                    *_bare_external_door().evidence_ids,
+                    "source_sliding_leaf_opening_host_abc",
+                ),
+            )
+        ),
+        whole_wall_role_composition=_roles("wall-1"),
+    )
+    assert composition.canonical_openings[0].area_m2 is None
+
+
 def test_framed_whole_wall_identity_authenticates_external_role_when_host_id_is_opening_scoped():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(

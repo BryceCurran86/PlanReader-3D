@@ -11,6 +11,7 @@ from pb_opening_host_binding_authority import (
     OpeningHostBindingResult,
 )
 from pb_source_issued_host_binding_rebind_shadow import (
+    apply_corroborated_live_host_traces,
     apply_issued_opening_host_binding_receipts,
     first_failing_host_publish_gate,
     first_failing_live_host_trace_gate,
@@ -103,6 +104,40 @@ def test_issued_publish_receipt_replaces_the_nomination() -> None:
         evidence_ids=tuple(
             dict.fromkeys((*updated.evidence_ids, "figured-1"))
         ),
+    )
+    quantity = _opening_quantity(billed)
+    assert quantity is not None
+    assert quantity.value == 1.827
+
+
+def test_corroborated_live_host_trace_replaces_a_nomination_and_bills() -> None:
+    opening = _unhosted(geom=(49.2, 50.0, 52.5, 50.0), kind="door")
+    nominated = apply_source_unique_swing_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    issued = _issued_result(opening_id=opening.canonical_opening_id)
+    trace = LiveOpeningHostTrace(
+        opening_identity_id=nominated.canonical_openings[0].physical_opening_id,
+        representative_observation_id=nominated.canonical_openings[0].representative_observation_id,
+        page_id="3",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("opening_host_binding_resolved",),
+        record_id=issued.record.record_id,
+        host_wall_id=issued.record.host_wall_id,
+        member_wall_candidate_ids=issued.record.member_wall_candidate_ids,
+    )
+    rebound = apply_corroborated_live_host_traces(nominated, (trace,))
+    updated = rebound.canonical_openings[0]
+    assert updated.host_wall_id == "physical-wall-issued"
+    assert updated.host_binding_record_id == issued.record.record_id
+    assert issued.record.record_id in updated.evidence_ids
+    billed = replace(
+        updated,
+        area_m2=1.827,
+        area_basis="figured_opening_label",
+        figured_area_record_id="figured-1",
+        evidence_ids=tuple(dict.fromkeys((*updated.evidence_ids, "figured-1"))),
     )
     quantity = _opening_quantity(billed)
     assert quantity is not None
