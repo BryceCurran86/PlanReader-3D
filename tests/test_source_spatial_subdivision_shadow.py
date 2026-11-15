@@ -237,3 +237,84 @@ def test_zero_quantities_and_zero_frozen120_score():
     for r in d["regions"]:
         assert r["physical_space_authenticated"] is False
         assert r["measurement_authorized"] is False
+
+
+def test_closed_detached_wall_cycle_is_decoy_only_not_conditioned_interior():
+    """A complete detached structure is not also a primary enclosed room."""
+    bars = [
+        # Four genuinely connected source-owned primary building wall bars.
+        _strip(1, (100.0, 100.0, 300.0, 110.0)),
+        _strip(2, (100.0, 290.0, 300.0, 300.0)),
+        _strip(3, (100.0, 100.0, 110.0, 300.0)),
+        _strip(4, (290.0, 100.0, 300.0, 300.0)),
+        # Four fully closed, isolated decoy wall bars. Unlike two detached
+        # strokes these make a second free-space polygon and previously
+        # leaked into INTERIOR_ENCLOSED_ROOM candidates.
+        _strip(5, (750.0, 750.0, 850.0, 760.0)),
+        _strip(6, (750.0, 840.0, 850.0, 850.0)),
+        _strip(7, (750.0, 750.0, 760.0, 850.0)),
+        _strip(8, (840.0, 750.0, 850.0, 850.0)),
+    ]
+    res = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    rooms = [r for r in res.regions if r.kind == SpatialRegionKind.INTERIOR_ENCLOSED_ROOM]
+    decoys = [r for r in res.regions if r.kind == SpatialRegionKind.DISCONNECTED_STRUCTURE_OR_DECOY]
+    assert res.primary_building_body_count == 4
+    assert res.interior_room_count == 1
+    assert res.disconnected_decoy_count == 1
+    assert len(rooms) == 1 and len(decoys) == 1
+    # A detached CLOSED geometry still has a reviewable polygon; its wall
+    # owners must not become another conditioned room or customer area.
+    unverified = [
+        item for item in res.regions
+        if item.kind == SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE
+    ]
+    assert res.unverified_enclosed_count == 1
+    assert len(unverified) == 1
+    assert set(unverified[0].bounding_native_path_ids) == {5, 6, 7, 8}
+    assert unverified[0].status == EvidenceResolutionStatus.ABSTAINED
+    assert unverified[0].is_conditioned_living is False
+    assert unverified[0].measurement_authorized is False
+    assert set(rooms[0].bounding_native_path_ids) == {1, 2, 3, 4}
+    assert set(decoys[0].bounding_native_path_ids) == {5, 6, 7, 8}
+    assert not set(rooms[0].bounding_native_path_ids) & set(decoys[0].bounding_native_path_ids)
+    assert rooms[0].measurement_authorized is False
+    assert decoys[0].measurement_authorized is False
+    assert res.official_frozen120_score_change == 0
+
+
+def test_tiny_enclosed_wall_ink_void_is_not_room_sized_candidate():
+    """Scale-relative wall-thickness filter preserves source without claiming room."""
+    bars = [
+        _strip(1, (100, 100, 300, 110)),
+        _strip(2, (100, 290, 300, 300)),
+        _strip(3, (100, 100, 110, 300)),
+        _strip(4, (290, 100, 300, 300)),
+        _strip(5, (750, 750, 780, 753)),
+        _strip(6, (750, 777, 780, 780)),
+        _strip(7, (750, 750, 753, 780)),
+        _strip(8, (777, 750, 780, 780)),
+    ]
+    result = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0, 0, 1000, 1000),
+    )
+    tiny = [
+        record for record in result.regions
+        if record.kind == SpatialRegionKind.NATIVE_SOURCE_MICRO_VOID
+    ]
+    assert result.interior_room_count == 1
+    assert result.disconnected_decoy_count == 1
+    assert result.micro_source_void_count == 1
+    assert result.unverified_enclosed_count == 0
+    assert len(tiny) == 1
+    assert set(tiny[0].bounding_native_path_ids) == {5, 6, 7, 8}
+    assert tiny[0].status == EvidenceResolutionStatus.ABSTAINED
+    assert tiny[0].is_conditioned_living is False
+    assert tiny[0].measurement_authorized is False
+    assert result.commercial_publishable is False
+    assert result.official_frozen120_score_change == 0

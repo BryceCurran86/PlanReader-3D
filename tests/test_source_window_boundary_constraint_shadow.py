@@ -20,6 +20,7 @@ from pb_source_window_boundary_constraint_shadow import (
     authenticate_window_boundary_constraint,
     REASON_FOREIGN_LAYER,
     REASON_GLAZED_DOOR,
+    REASON_UNKNOWN_APERTURE,
     REASON_MISSING_JAMB,
     REASON_ONE_END_SHORT,
     REASON_UNHOSTED,
@@ -46,6 +47,41 @@ def _body(
         status=EvidenceResolutionStatus.CANDIDATE,
         reason="test_body",
     )
+
+
+def test_unknown_or_mixed_aperture_label_does_not_close_room():
+    """Actual source host/sill geometry is not enough to guess fixed glazing."""
+    left = _body(1, (100.0, 100.0, 200.0, 110.0))
+    right = _body(2, (250.0, 100.0, 350.0, 110.0))
+    left_jamb = {
+        "rect": fitz.Rect(199.5, 100.0, 200.5, 110.0),
+        "path_index": 10,
+        "layer": "Enclosure_WallExternal",
+    }
+    right_jamb = {
+        "rect": fitz.Rect(249.5, 100.0, 250.5, 110.0),
+        "path_index": 11,
+        "layer": "Enclosure_WallExternal",
+    }
+    sill = [{
+        "rect": fitz.Rect(200.0, 100.0, 250.0, 100.5),
+        "path_index": 12,
+        "layer": "Enclosure_WallExternal",
+    }]
+    for tag in ("", "X01", "UNLABELLED", "W01 D01", "SGW SGD"):
+        result = authenticate_window_boundary_constraint(
+            sill_drawings=sill,
+            left_jamb_drawing=left_jamb,
+            right_jamb_drawing=right_jamb,
+            left_wall_body=left,
+            right_wall_body=right,
+            callout_tag=tag,
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.reason == REASON_UNKNOWN_APERTURE
+        assert result.closes_2d_room_boundary is False
+        assert result.deducts_from_wall_surface is False
+        assert result.measurement_authorized is False
 
 
 def test_external_window_vs_glazed_door_sill_continuity():

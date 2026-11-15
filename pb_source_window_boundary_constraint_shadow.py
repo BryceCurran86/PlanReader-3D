@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import math
+import re
 from typing import Any
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -34,6 +35,7 @@ REASON_FOREIGN_LAYER = "window_candidate_foreign_layer_competitor"
 REASON_ONE_END_SHORT = "window_sill_line_does_not_span_both_jambs"
 REASON_UNHOSTED = "window_aperture_unhosted_by_structural_wall_bodies"
 REASON_GLAZED_DOOR = "opening_classified_as_glazed_door_not_window"
+REASON_UNKNOWN_APERTURE = "opening_identity_not_uniquely_window_or_door"
 
 
 @dataclass(frozen=True)
@@ -254,10 +256,33 @@ def authenticate_window_boundary_constraint(
         )
 
     # Gate 5: Distinguish Window vs Glazed Door
-    tag_clean = callout_tag.strip().upper()
-    is_door = False
-    if tag_clean.startswith("D") or "DOOR" in tag_clean or "SGD" in tag_clean:
-        is_door = True
+    tag_clean = str(callout_tag or "").strip().upper()
+    is_door = bool(re.search(
+        r"\b(?:D[- ]?\d+[A-Z]*|DOOR|SGD|STACKER)\b", tag_clean
+    ))
+    is_window = bool(re.search(
+        r"\b(?:W[- ]?\d+[A-Z]*|ASW|AW|WINDOW|WIN|FGW|SGW)\b", tag_clean
+    ))
+    # A geometric sill is not evidence that an unknown aperture is a window.
+    # Missing labels and mixed door/window callouts must never seal rooms.
+    if is_door == is_window:
+        return WindowApertureConstraintRecord(
+            aperture_id=f"aperture:unknown:{left_jamb_id}:{right_jamb_id}",
+            left_jamb_path_id=left_jamb_id,
+            right_jamb_path_id=right_jamb_id,
+            sill_path_ids=tuple(
+                int(s.get("path_index", 0)) for s in sill_drawings
+            ),
+            wall_host_left_body_id=left_wall_body.body_id,
+            wall_host_right_body_id=right_wall_body.body_id,
+            sill_chord_pdf_pts=(lj_pt, rj_pt),
+            clear_width_pts=clear_width,
+            is_window_not_door=False,
+            closes_2d_room_boundary=False,
+            deducts_from_wall_surface=False,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason=REASON_UNKNOWN_APERTURE,
+        )
 
     if is_door:
         return WindowApertureConstraintRecord(
