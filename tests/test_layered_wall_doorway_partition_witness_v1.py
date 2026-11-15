@@ -244,8 +244,8 @@ def test_the_control_is_an_explicit_boolean_and_needs_the_sliding_control():
     pytest.param([H_FULL], id="vertical_missing"),
     pytest.param([V_FULL], id="horizontal_missing"),
     pytest.param([], id="no_dimensions"),
-    pytest.param([H_FULL, V_FULL, _dim("v2", "vertical", (320.0, 80.0), (320.0, 180.0))], id="two_vertical_candidates"),
-    pytest.param([H_FULL, _dim("h2", "horizontal", (100.0, 70.0), (250.0, 80.0)), V_FULL], id="two_horizontal_candidates"),
+    pytest.param([H_FULL, V_FULL, _dim("v2", "vertical", (320.0, 80.3), (320.0, 179.8))], id="two_vertical_candidates"),
+    pytest.param([H_FULL, _dim("h2", "horizontal", (100.0, 50.0), (249.6, 50.0)), V_FULL], id="two_horizontal_candidates"),
     pytest.param([_dim("h-wide", "horizontal", (100.0, 70.0), (250.8, 70.0)), V_FULL], id="span_off_by_more_than_half_a_point"),
     pytest.param([_dim("h-moved", "horizontal", (140.0, 70.0), (290.0, 70.0)), _dim("v-moved", "vertical", (330.0, 80.0), (330.0, 180.0))],
                  id="wrong_viewport_translated_figures"),
@@ -253,6 +253,15 @@ def test_the_control_is_an_explicit_boolean_and_needs_the_sliding_control():
 def test_ambiguous_wrong_or_missing_union_pair_abstains_every_part(dims):
     _data, sha, result, *_ = _base()
     assert _refused(result, sha, dims)
+
+
+def test_two_prints_of_the_union_height_are_one_pair():
+    _data, sha, result, *_ = _base()
+    scope = _scope(
+        result, sha,
+        [H_FULL, V_FULL, _dim("v2", "vertical", (320.0, 80.0), (320.0, 180.0))],
+    )
+    assert scope is not None and len(scope.records) == 2
 
 
 def test_a_part_with_a_matching_own_box_is_still_judged_only_by_its_group():
@@ -687,7 +696,7 @@ def test_live_chain_competing_labels_stay_unresolved_and_never_choose_nearest_or
 
 
 @pytest.mark.parametrize("kwargs", [
-    pytest.param({"vertical_spans": ((290.0, 80.0, 180.0), (320.0, 80.0, 180.0))}, id="two_vertical_figures_with_the_union_span"),
+    pytest.param({"vertical_spans": ((290.0, 80.0, 180.0), (320.0, 80.3, 179.8))}, id="two_vertical_figures_with_the_union_span"),
     pytest.param({"vertical_spans": ((290.0, 110.0, 180.0),)}, id="only_the_bedroom_span_is_printed"),
     pytest.param({"horizontal_span": (140.0, 290.0)}, id="horizontal_figure_in_the_wrong_place"),
     pytest.param({"alcove_top_wall": False}, id="omitted_robe"),

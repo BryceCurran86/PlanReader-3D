@@ -19,6 +19,11 @@ from pb_layered_wall_doorway_room_face_scope_shadow import (
     layered_ring_room_face_scope,
     layered_ring_scope_overrides,
     ring_face_bounding_box,
+    unique_figured_box_mm_per_pt,
+    unique_hashed_ring_wall_lengths,
+    unique_hashed_traced_strip_lengths,
+    unique_hashed_wall_length_mm,
+    bracket_hashed_figure_endpoints,
 )
 from pb_layered_wall_doorway_room_ring_shadow import build_from_pdf_bytes, build_layered_wall_doorway_room_rings
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
@@ -42,7 +47,7 @@ K = 0.5522847498
 
 def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_layer: str = "Enclosure_WallInternal",
                      swing: bool = True, label: str = "BED 2", stub: bool = False, robe: bool = False,
-                     stub_depth: float = 28.0) -> bytes:
+                     stub_depth: float = 28.0, offset_rails: bool = False) -> bytes:
     """Room inner box (100, 80)-(250, 180) on a 400 x 300 page; figured 3600 x 2400 (24 mm per pt).
 
     vertical_pairs: "both" adds a second, independent figured pair 3600 x 1440 whose box is smaller
@@ -85,11 +90,22 @@ def layered_room_pdf(*, vertical_pairs: str = "both", door: bool = True, wall_la
     else:
         rect(250, 80, 254, 180)
     tick_end = 170.0 if vertical_pairs == "both" else 92.0
-    page.draw_line((100.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
-    page.draw_line((100.0, 62.0), (100.0, tick_end), color=(0, 0, 0), width=1.0)
-    page.draw_line((250.0, 62.0), (250.0, tick_end), color=(0, 0, 0), width=1.0)
-    page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
-    if vertical_pairs in ("both", "full_only"):
+    if offset_rails:
+        page.draw_line((100.0, 20.0), (250.0, 20.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((100.0, 12.0), (100.0, 28.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((250.0, 12.0), (250.0, 28.0), color=(0, 0, 0), width=1.0)
+        page.insert_text((164.0, 17.0), "3600", fontsize=9.0)
+    else:
+        page.draw_line((100.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((100.0, 62.0), (100.0, tick_end), color=(0, 0, 0), width=1.0)
+        page.draw_line((250.0, 62.0), (250.0, tick_end), color=(0, 0, 0), width=1.0)
+        page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
+    if offset_rails:
+        page.draw_line((20.0, 80.0), (20.0, 180.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((12.0, 80.0), (28.0, 80.0), color=(0, 0, 0), width=1.0)
+        page.draw_line((12.0, 180.0), (28.0, 180.0), color=(0, 0, 0), width=1.0)
+        page.insert_text((17.0, 147.0), "2400", fontsize=9.0, rotate=90)
+    elif vertical_pairs in ("both", "full_only"):
         page.draw_line((290.0, 80.0), (290.0, 180.0), color=(0, 0, 0), width=1.0)
         page.draw_line((250.0, 80.0), (298.0, 80.0), color=(0, 0, 0), width=1.0)
         page.draw_line((278.0, 180.0), (298.0, 180.0), color=(0, 0, 0), width=1.0)
@@ -233,8 +249,26 @@ def test_same_view_still_rejects_a_pair_that_differs_from_a_ring_face(monkeypatc
     assert "same_view_figured_box_differs_from_layered_ring" in {c for _r, c in rejected.unresolved_first_failure_codes}
 
 
-def _dim(dimension_id, orientation, a, b):
-    return SimpleNamespace(dimension_id=dimension_id, orientation=orientation, endpoints_pt=(a, b))
+def test_offset_dimension_rails_that_uniquely_hash_the_ring_are_the_physical_pair():
+    source, _published, _wall_opening, rooms = _chain(
+        layered_room_pdf(vertical_pairs="full_only", offset_rails=True), rings=True,
+    )
+    default = _area(source, rooms, selection=False)
+    assert default.records == ()
+    assert "same_view_dimension_witness_intersection_unavailable" in {
+        code for _room, code in default.unresolved_first_failure_codes
+    }
+    selected = _area(source, rooms, selection=True)
+    assert selected.status is EvidenceResolutionStatus.CORROBORATED and len(selected.records) == 1
+    evidence = selected.records[0].area_evidence
+    assert evidence.normalized_value == pytest.approx(3.6 * 2.4)
+    assert (evidence.metadata["horizontal_value_mm"], evidence.metadata["vertical_value_mm"]) == (3600, 2400)
+
+
+def _dim(dimension_id, orientation, a, b, value_mm=None):
+    return SimpleNamespace(
+        dimension_id=dimension_id, orientation=orientation, endpoints_pt=(a, b), value_mm=value_mm,
+    )
 
 
 def test_figured_box_pair_count_is_exact_equality_within_a_hard_tolerance():
@@ -248,6 +282,306 @@ def test_figured_box_pair_count_is_exact_equality_within_a_hard_tolerance():
     assert figured_box_pair_count(box_, [h, h, v]) == 1
     assert figured_box_pair_count(box_, [_dim("h2", "horizontal", (100.0, 70.0), (250.7, 70.0)), v]) == 0
     assert figured_box_pair_count(box_, [_dim("h3", "horizontal", (100.0, 70.0), (250.4, 70.0)), v]) == 1
+
+
+def test_parallel_prints_of_the_same_figured_span_are_one_pair_not_a_conflict():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    h1 = _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0))
+    h2 = _dim("h2", "horizontal", (100.0, 50.0), (250.0, 50.0))
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0))
+    assert figured_box_pair_count(box_, [h1, h2, v]) == 1
+    # disagreeing millimetres on those same ticks stay competing
+    left = SimpleNamespace(dimension_id="a", orientation="horizontal",
+                           endpoints_pt=((100.0, 70.0), (250.0, 70.0)), value_mm=3600.0)
+    right = SimpleNamespace(dimension_id="b", orientation="horizontal",
+                            endpoints_pt=((100.0, 50.0), (250.0, 50.0)), value_mm=3500.0)
+    assert figured_box_pair_count(box_, [left, right, v]) == 2
+
+
+def test_figured_pair_may_land_through_the_owning_wall_not_inside_the_room():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    face = ((100.0, 80.0), (250.0, 80.0), (250.0, 180.0), (100.0, 180.0))
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0))
+    through_wall = _dim("h1", "horizontal", (96.0, 70.0), (250.0, 70.0))
+    inside_room = _dim("h2", "horizontal", (104.0, 70.0), (250.0, 70.0))
+    beyond_strip = _dim("h3", "horizontal", (80.0, 70.0), (250.0, 70.0))
+    short_of_face = _dim("h4", "horizontal", (100.0, 70.0), (200.0, 70.0))
+    assert figured_box_pair_count(box_, [through_wall, v]) == 0
+    assert figured_box_pair_count(box_, [through_wall, v], face_polygon=face) == 1
+    assert figured_box_pair_count(box_, [inside_room, v], face_polygon=face) == 0
+    assert figured_box_pair_count(box_, [beyond_strip, v], face_polygon=face) == 0
+    assert figured_box_pair_count(box_, [short_of_face, v], face_polygon=face) == 0
+    inner_v = v
+    outer_v = _dim("v2", "vertical", (290.0, 77.4), (290.0, 182.6))
+    inner_h = _dim("h0", "horizontal", (100.0, 70.0), (250.0, 70.0))
+    # an outer-face figure does not unseat a unique inner-face pair on the same axis
+    assert figured_box_pair_count(box_, [inner_h, inner_v, outer_v], face_polygon=face) == 1
+
+
+def test_hashed_parts_between_matching_ends_add_to_one_length():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400.0)
+    left = _dim("h1", "horizontal", (100.0, 70.0), (160.0, 70.0), value_mm=1440.0)
+    right = _dim("h2", "horizontal", (160.0, 70.0), (250.0, 70.0), value_mm=2160.0)
+    assert figured_box_pair_count(box_, [left, v]) == 0
+    assert figured_box_pair_count(box_, [left, right, v]) == 1
+    assert unique_figured_box_mm_per_pt(box_, [left, right, v]) == pytest.approx(24.0)
+    overall = _dim("h0", "horizontal", (100.0, 50.0), (250.0, 50.0), value_mm=3600.0)
+    assert figured_box_pair_count(box_, [left, right, overall, v]) == 1
+    disagree = _dim("h9", "horizontal", (100.0, 50.0), (250.0, 50.0), value_mm=3500.0)
+    assert figured_box_pair_count(box_, [left, right, disagree, v]) == 2
+    gapped = _dim("h3", "horizontal", (180.0, 70.0), (250.0, 70.0), value_mm=1680.0)
+    assert figured_box_pair_count(box_, [left, gapped, v]) == 0
+    window = _dim("w1", "horizontal", (120.0, 200.0), (170.0, 200.0), value_mm=1200.0)
+    assert figured_box_pair_count(box_, [left, right, window, v]) == 1
+    a = _dim("ha", "horizontal", (100.0, 70.0), (140.0, 70.0), value_mm=960.0)
+    b = _dim("hb", "horizontal", (140.0, 70.0), (190.0, 70.0), value_mm=1200.0)
+    c = _dim("hc", "horizontal", (190.0, 70.0), (250.0, 70.0), value_mm=1440.0)
+    assert figured_box_pair_count(box_, [a, b, c, v]) == 1
+    assert unique_figured_box_mm_per_pt(box_, [a, b, c, v]) == pytest.approx(24.0)
+
+
+def test_both_end_hashes_must_sit_on_the_same_rail():
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400.0)
+    left = _dim("h1", "horizontal", (100.0, 70.0), (160.0, 70.0), value_mm=1440.0)
+    other_rail = _dim("h2", "horizontal", (160.0, 50.0), (250.0, 50.0), value_mm=2160.0)
+    assert unique_hashed_wall_length_mm(100.0, 250.0, [left, other_rail, v], orientation="horizontal") is None
+    assert figured_box_pair_count((100.0, 80.0, 250.0, 180.0), [left, other_rail, v]) == 0
+    same = _dim("h3", "horizontal", (100.0, 70.0), (250.0, 70.0), value_mm=3600.0)
+    assert unique_hashed_wall_length_mm(100.0, 250.0, [same, v], orientation="horizontal") == pytest.approx(3600.0)
+    skew = _dim("h4", "horizontal", (100.0, 70.0), (250.0, 90.0), value_mm=3600.0)
+    assert unique_hashed_wall_length_mm(100.0, 250.0, [skew, v], orientation="horizontal") is None
+
+
+def test_one_3p6m_rail_matches_two_walls_in_each_of_two_rooms():
+    depth = _dim("v36", "vertical", (400.0, 90.0), (400.0, 180.0), value_mm=3600.0)
+    width_a = _dim("ha", "horizontal", (100.0, 70.0), (180.0, 70.0), value_mm=2000.0)
+    width_b = _dim("hb", "horizontal", (190.0, 70.0), (270.0, 70.0), value_mm=2000.0)
+    # Robe north of each bedroom: collinear N-S run 80-180 with a return at y=90.
+    # One 3.6 m rail is the inner bedroom depth of both rooms (two walls each).
+    bed_a = (
+        (100.0, 80.0), (180.0, 80.0),
+        (180.0, 90.0), (180.0, 180.0),
+        (100.0, 180.0), (100.0, 90.0),
+    )
+    bed_b = (
+        (190.0, 80.0), (270.0, 80.0),
+        (270.0, 90.0), (270.0, 180.0),
+        (190.0, 180.0), (190.0, 90.0),
+    )
+    longer = _dim("v42", "vertical", (420.0, 80.0), (420.0, 180.0), value_mm=4200.0)
+    decoy = _dim("v35", "vertical", (50.0, 95.0), (50.0, 180.0), value_mm=3490.0)
+    a = unique_hashed_ring_wall_lengths(bed_a, [depth, width_a, longer, decoy])
+    b = unique_hashed_ring_wall_lengths(bed_b, [depth, width_b, longer, decoy])
+    assert a.count(3600.0) == 2
+    assert b.count(3600.0) == 2
+    assert a.count(4200.0) == 2
+    assert b.count(4200.0) == 2
+    assert 3490.0 not in a
+    assert 3490.0 not in b
+
+
+def test_notched_wall_fill_hashes_as_one_traced_run():
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    from pb_layered_wall_doorway_room_ring_shadow import _orthogonal_wall_fill_strips
+
+    pts = (
+        (100.0, 180.0), (100.0, 80.0), (102.0, 80.0), (102.0, 90.0),
+        (101.4, 90.0), (101.4, 110.0), (102.0, 110.0), (102.0, 180.0),
+    )
+    fill = ShapelyPolygon(pts)
+    bars = _orthogonal_wall_fill_strips(9, fill)
+    assert bars
+    v = _dim("v1", "vertical", (120.0, 80.0), (120.0, 180.0), value_mm=2400.0)
+    lengths = unique_hashed_traced_strip_lengths((), [v], fill_polygons=((9, fill),))
+    assert 2400.0 in lengths
+    empty = unique_hashed_traced_strip_lengths((), [v], fill_polygons=())
+    assert 2400.0 not in empty
+
+
+def test_degenerate_ring_vertex_does_not_split_a_hashed_wall():
+    face = (
+        (100.0, 80.0), (250.0, 80.0), (250.0, 180.0),
+        (100.0, 180.0), (100.0, 130.0), (100.0, 130.0), (100.0, 80.0),
+    )
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400.0)
+    h = _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0), value_mm=3600.0)
+    lengths = unique_hashed_ring_wall_lengths(face, [h, v])
+    assert lengths.count(2400.0) == 2
+    assert lengths.count(3600.0) == 2
+
+
+def test_lining_cap_jog_does_not_split_a_hashed_wall():
+    # CAD paints the south lining 0.3 pt inboard of the finish cap.
+    face = (
+        (100.0, 80.0),
+        (145.6, 80.0), (145.6, 80.3), (177.7, 80.3), (177.7, 80.0), (190.7, 80.0),
+        (190.7, 180.0),
+        (100.0, 180.0),
+    )
+    h = _dim("h1", "horizontal", (100.0, 70.0), (190.7, 70.0), value_mm=1590.0)
+    v = _dim("v1", "vertical", (210.0, 80.0), (210.0, 180.0), value_mm=2400.0)
+    lengths = unique_hashed_ring_wall_lengths(face, [h, v])
+    assert lengths.count(1590.0) == 2
+    assert lengths.count(2400.0) == 2
+
+
+def test_lining_face_walls_take_the_shared_3p6m_on_both_rooms():
+    from pb_layered_wall_doorway_room_ring_shadow import KIND_STROKE
+    from tests.test_layered_wall_doorway_room_ring_shadow_v1 import _cavity_wall_two_rooms
+
+    result = build_layered_wall_doorway_room_rings(_cavity_wall_two_rooms(), source_sha256="ab" * 32, page_index=0)
+    rings = [r for r in result.rings if r.status is EvidenceResolutionStatus.CANDIDATE]
+    assert len(rings) == 2
+    depth = _dim("v36", "vertical", (220.0, 2.0), (220.0, 98.0), value_mm=3600.0)
+    width_a = _dim("ha", "horizontal", (2.0, 110.0), (98.0, 110.0), value_mm=2400.0)
+    width_b = _dim("hb", "horizontal", (102.0, 110.0), (198.0, 110.0), value_mm=2400.0)
+    for ring in rings:
+        lengths = unique_hashed_ring_wall_lengths(
+            ring.polygon_pdf_pts, [depth, width_a, width_b], edge_owner_ids=ring.edge_owner_ids,
+        )
+        assert lengths.count(3600.0) == 2
+    assert all(c.kind != KIND_STROKE or (c.gap_interval[1] - c.gap_interval[0]) < 50.0 for c in result.closures)
+
+
+def test_every_wall_takes_the_hashed_chain_that_matches_its_ends():
+    face = ((100.0, 80.0), (250.0, 80.0), (250.0, 180.0), (100.0, 180.0))
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400.0)
+    left = _dim("h1", "horizontal", (100.0, 70.0), (160.0, 70.0), value_mm=1440.0)
+    right = _dim("h2", "horizontal", (160.0, 70.0), (250.0, 70.0), value_mm=2160.0)
+    window = _dim("w1", "horizontal", (120.0, 200.0), (170.0, 200.0), value_mm=1200.0)
+    dimensions = [left, right, v, window]
+    north = unique_hashed_wall_length_mm(100.0, 250.0, dimensions, orientation="horizontal", face_polygon=face)
+    south = unique_hashed_wall_length_mm(100.0, 250.0, dimensions, orientation="horizontal", face_polygon=face)
+    west = unique_hashed_wall_length_mm(80.0, 180.0, dimensions, orientation="vertical", face_polygon=face)
+    east = unique_hashed_wall_length_mm(80.0, 180.0, dimensions, orientation="vertical", face_polygon=face)
+    assert north == pytest.approx(3600.0)
+    assert south == north
+    assert west == pytest.approx(2400.0)
+    assert east == west
+    assert unique_hashed_wall_length_mm(100.0, 160.0, dimensions, orientation="horizontal", face_polygon=face) == pytest.approx(1440.0)
+    assert unique_hashed_ring_wall_lengths(face, dimensions) == (3600.0, 2400.0, 3600.0, 2400.0)
+    chord_owners = (("layered_wall_strip:1",), ("layered_doorway_closure:d1",), ("layered_wall_strip:2",), ("layered_wall_strip:3",))
+    with_door = unique_hashed_ring_wall_lengths(face, dimensions, edge_owner_ids=chord_owners)
+    assert with_door == (3600.0, 3600.0, 2400.0)
+    over_door = (
+        (100.0, 80.0), (160.0, 80.0), (190.0, 80.0), (250.0, 80.0),
+        (250.0, 180.0), (100.0, 180.0),
+    )
+    over_door_owners = (
+        ("layered_wall_strip:n0",),
+        ("layered_doorway_closure:d1",),
+        ("layered_wall_strip:n1",),
+        ("layered_wall_strip:e",),
+        ("layered_wall_strip:s",),
+        ("layered_wall_strip:w",),
+    )
+    assert unique_hashed_ring_wall_lengths(over_door, dimensions, edge_owner_ids=over_door_owners) == (
+        3600.0, 2400.0, 3600.0, 2400.0,
+    )
+    overall = _dim("h0", "horizontal", (100.0, 50.0), (250.0, 50.0), value_mm=3600.0)
+    assert unique_hashed_wall_length_mm(100.0, 250.0, [left, right, overall, v], orientation="horizontal") == pytest.approx(3600.0)
+    disagree = _dim("h9", "horizontal", (100.0, 50.0), (250.0, 50.0), value_mm=3500.0)
+    assert unique_hashed_wall_length_mm(100.0, 250.0, [left, right, disagree, v], orientation="horizontal") is None
+    ticks = ((100.0, 70.0), (160.0, 70.0), (250.0, 70.0))
+    assert bracket_hashed_figure_endpoints("horizontal", (120.0, 64.0, 140.0, 76.0), ticks) == (
+        (100.0, 70.0), (160.0, 70.0),
+    )
+    assert bracket_hashed_figure_endpoints("horizontal", (190.0, 64.0, 220.0, 76.0), ticks) == (
+        (160.0, 70.0), (250.0, 70.0),
+    )
+    assert bracket_hashed_figure_endpoints("horizontal", (155.0, 64.0, 165.0, 76.0), ticks) is None
+
+
+def test_traced_walls_match_end_hashes_and_add_the_parts_between():
+    from shapely.geometry import box as shapely_box
+
+    from pb_layered_wall_doorway_room_ring_shadow import LayeredDoorwayClosure, _Strip
+
+    left_strip = _Strip(1, 100.0, 76.0, 160.0, 80.0, shapely_box(100.0, 76.0, 160.0, 80.0))
+    right_strip = _Strip(2, 190.0, 76.0, 250.0, 80.0, shapely_box(190.0, 76.0, 250.0, 80.0))
+    east = _Strip(3, 250.0, 80.0, 254.0, 180.0, shapely_box(250.0, 80.0, 254.0, 180.0))
+    door = LayeredDoorwayClosure(
+        closure_id="d1", kind="swing", horizontal=True, band=(76.0, 80.0),
+        gap_interval=(160.0, 190.0), native_path_indices=(), wall_path_indices=(1, 2),
+    )
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400.0)
+    left = _dim("h1", "horizontal", (100.0, 70.0), (160.0, 70.0), value_mm=1440.0)
+    right = _dim("h2", "horizontal", (160.0, 70.0), (250.0, 70.0), value_mm=2160.0)
+    window = _dim("w1", "horizontal", (120.0, 200.0), (170.0, 200.0), value_mm=1200.0)
+    lengths = unique_hashed_traced_strip_lengths(
+        (left_strip, right_strip, east), (left, right, v, window), closures=(door,),
+    )
+    assert 3600.0 in lengths
+    assert 2400.0 in lengths
+    assert 1200.0 not in lengths
+    split = unique_hashed_traced_strip_lengths(
+        (left_strip, right_strip, east), (left, right, v), closures=(),
+    )
+    assert 1440.0 in split
+    assert 3600.0 not in split
+
+
+def _frame_tick_room_pdf() -> bytes:
+    """Inner box (100,80)-(250,180); left wall is 8 pt so a 3600 tick at x=96 sits in the strip."""
+    doc = fitz.open()
+    page = doc.new_page(width=400.0, height=300.0)
+    oc = doc.add_ocg("Enclosure_WallInternal", on=True)
+
+    def rect(x0, y0, x1, y1):
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=None, fill=(0, 0, 0), oc=oc)
+
+    rect(92, 76, 254, 80)
+    rect(92, 180, 254, 184)
+    rect(92, 80, 100, 180)
+    rect(250, 80, 254, 180)
+    page.draw_line((96.0, 70.0), (250.0, 70.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((96.0, 62.0), (96.0, 92.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((250.0, 62.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
+    page.insert_text((164.0, 67.0), "3600", fontsize=9.0)
+    page.draw_line((290.0, 80.0), (290.0, 180.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((250.0, 80.0), (298.0, 80.0), color=(0, 0, 0), width=1.0)
+    page.draw_line((278.0, 180.0), (298.0, 180.0), color=(0, 0, 0), width=1.0)
+    page.insert_text((287.0, 147.0), "2400", fontsize=9.0, rotate=90)
+    page.insert_text((150.0, 130.0), "BED 2", fontsize=10.0)
+    return doc.tobytes()
+
+
+def test_a_frame_tick_in_the_owning_wall_still_corroborates_the_ring_face():
+    data = _frame_tick_room_pdf()
+    sha = hashlib.sha256(data).hexdigest()
+    ring_result = build_from_pdf_bytes(data, source_sha256=sha, page_index=0)
+    cand = [r for r in ring_result.rings if r.status is EvidenceResolutionStatus.CANDIDATE]
+    assert len(cand) == 1
+    ring = cand[0]
+    dims = [
+        _dim("h1", "horizontal", (96.0, 70.0), (250.0, 70.0)),
+        _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0)),
+    ]
+    kwargs = dict(document_id="d", revision_id="r", source_sha256=sha, snapshot_id="s", page_id="1",
+                  decision_scope_id="wall-source:page-1")
+    assert figured_box_pair_count(ring.bbox_pdf_pts, dims) == 0
+    assert figured_box_pair_count(ring.bbox_pdf_pts, dims, face_polygon=ring.polygon_pdf_pts) == 1
+    absent = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims[:1])
+    assert absent is None or absent.records == ()
+    scope = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims)
+    assert scope is not None and len(scope.records) == 1
+
+
+def test_parallel_prints_still_corroborate_a_closed_ring_as_one_face():
+    data = layered_room_pdf(vertical_pairs="full_only")
+    sha = hashlib.sha256(data).hexdigest()
+    ring_result = build_from_pdf_bytes(data, source_sha256=sha, page_index=0)
+    kwargs = dict(document_id="d", revision_id="r", source_sha256=sha, snapshot_id="s", page_id="1",
+                  decision_scope_id="wall-source:page-1")
+    dims = [
+        _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0)),
+        _dim("h2", "horizontal", (100.0, 50.0), (250.0, 50.0)),
+        _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0)),
+    ]
+    scope = layered_ring_room_face_scope(ring_result, **kwargs, corroborating_dimensions=dims)
+    assert scope is not None and len(scope.records) == 1
 
 
 def test_ring_corroboration_tolerance_matches_the_same_view_selection_tolerance():
@@ -399,16 +733,19 @@ def test_a_face_that_is_not_its_rectangle_loses_the_documented_route_but_a_true_
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert not any(code.startswith(RING_NOT_A_RECTANGLE_PREFIX) for code in scope.reason_codes)
     assert _area(source, rooms, selection=True).records[0].area_evidence.normalized_value == pytest.approx(8.64)
-    # the same room with a wall return inside it: the ring still matches its figured box, but the box is not its area
+    # the same room with a wall return inside it: width x depth is withdrawn; the face polygon is measured
     source, _p, _w, rooms = _chain(layered_room_pdf(vertical_pairs="both", stub=True), rings=True)
     room = rooms.rooms[0]
     scope = rooms.room_face_authority_binding_for(room).authority.resolve_scope(SourceRoomFaceSelector(
         document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
-    refused = _area(source, rooms, selection=True)
-    assert refused.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+    selected = _area(source, rooms, selection=True)
+    evidence = selected.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
 
 
 @pytest.mark.parametrize("depth", [10.0, 1.0])
@@ -421,9 +758,12 @@ def test_a_shallow_wall_return_is_spatial_content_and_withdraws_the_documented_a
         document_id=room.document_id, revision_id=room.revision_id, source_sha256=room.source_sha256,
         snapshot_id=room.snapshot_id, page_id=room.page_id, decision_scope_id=room.decision_scope_id))
     assert f"{RING_NOT_A_RECTANGLE_PREFIX}{room.source_room_face_record_id}" in scope.reason_codes
-    refused = _area(source, rooms, selection=True)
-    assert refused.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in refused.unresolved_first_failure_codes}
+    selected = _area(source, rooms, selection=True)
+    evidence = selected.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
 
 
 def _notched(width, depth):
@@ -500,5 +840,8 @@ def test_wardrobe_front_splits_the_alcove_frees_the_label_and_withdraws_the_docu
     ys = [p[1] for p in room.polygon_pdf_pts]
     assert (min(xs), min(ys), max(xs), max(ys)) == (100.0, 80.0, 250.0, 180.0)
     area = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish(layered_ring_box_selection_shadow=True)
-    assert area.records == ()
-    assert "same_view_layered_ring_not_a_rectangle" in {c for _r, c in area.unresolved_first_failure_codes}
+    evidence = area.records[0].area_evidence
+    face_m2 = Polygon(room.polygon_pdf_pts).area * 24.0 * 24.0 / 1_000_000.0
+    assert evidence.normalized_value == pytest.approx(face_m2)
+    assert evidence.normalized_value < 8.64
+    assert evidence.metadata["face_polygon_area"] is True
