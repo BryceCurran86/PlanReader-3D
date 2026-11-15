@@ -301,18 +301,33 @@ def _is_room_enclosed_by_walls(page, label: str) -> bool:
         if not (h_above and h_below and v_left and v_right):
             continue
 
-        corners_met = 0
+        found = False
         tol = 4.0
-        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_above for v in v_left):
-            corners_met += 1
-        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_above for v in v_right):
-            corners_met += 1
-        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_below for v in v_left):
-            corners_met += 1
-        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_below for v in v_right):
-            corners_met += 1
+        for ht in h_above:
+            for hb in h_below:
+                left_x = max(ht[0], hb[0])
+                right_x = min(ht[1], hb[1])
+                if right_x - left_x < 30.0:
+                    continue
+                vl_matches = [
+                    vl for vl in v_left
+                    if abs(vl[0] - left_x) <= tol
+                    and vl[1] <= ht[2] + tol and vl[2] >= hb[2] - tol
+                ]
+                if not vl_matches:
+                    continue
+                vr_matches = [
+                    vr for vr in v_right
+                    if abs(vr[0] - right_x) <= tol
+                    and vr[1] <= ht[2] + tol and vr[2] >= hb[2] - tol
+                ]
+                if vr_matches:
+                    found = True
+                    break
+            if found:
+                break
 
-        if corners_met >= 2:
+        if found:
             return True
 
     return False
