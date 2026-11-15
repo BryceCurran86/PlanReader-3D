@@ -488,3 +488,71 @@ def test_outer_first_includes_source_heavy_black_stroke_ring_without_hull():
     assert got.graph.component_count>=1
     assert got.physical_wall_authenticated is False
     assert got.measurement_authorized is False
+
+
+def test_source_wall_near_miss_reports_original_paths_without_minting_join():
+    """A 1pt gap is a witnessed candidate, never a new physical segment."""
+    from types import SimpleNamespace
+    from shapely.geometry import box
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+
+    def strip(source_id, bounds):
+        return SimpleNamespace(
+            polygon=box(*bounds),
+            native_path_indices=lambda: (source_id,),
+        )
+
+    separated = inspect_native_wall_graph((
+        strip(101, (0, 0, 10, 1)),
+        strip(102, (11, 0, 21, 1)),
+    ))
+    assert separated.component_count == 2
+    assert separated.endpoint_near_miss_total >= 1
+    candidate = next(hit for hit in separated.endpoint_near_misses
+                     if hit.native_path_ids == (101,))
+    assert candidate.nearby_native_path_ids == (102,)
+    assert candidate.tip_pdf_pts == (10.0, 0.5)
+    assert candidate.separation_pdf_pts == 1.0
+    assert candidate.physical_join_authenticated is False
+    assert candidate.measurement_authorized is False
+
+    far = inspect_native_wall_graph((
+        strip(101, (0, 0, 10, 1)),
+        strip(102, (18, 0, 28, 1)),
+    ))
+    assert far.component_count == 2
+    assert far.endpoint_near_miss_total == 0
+    touched = inspect_native_wall_graph((
+        strip(101, (0, 0, 10, 1)),
+        strip(102, (10, 0, 20, 1)),
+    ))
+    assert touched.component_count == 1
+    assert touched.endpoint_near_miss_total == 0
+
+
+def test_source_wall_near_miss_resists_source_path_identity_alias():
+    from types import SimpleNamespace
+    from shapely.geometry import box
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+    same_source_renderings = (
+        SimpleNamespace(polygon=box(0, 0, 10, 1),
+                        native_path_indices=lambda: (55,)),
+        SimpleNamespace(polygon=box(11, 0, 21, 1),
+                        native_path_indices=lambda: (55,)),
+    )
+    result = inspect_native_wall_graph(same_source_renderings)
+    assert result.component_count == 2
+    assert result.endpoint_near_miss_total == 0
+
+
+def test_source_wall_near_miss_rejects_nonslender_fills():
+    from types import SimpleNamespace
+    from shapely.geometry import box
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+    bars = (
+        SimpleNamespace(polygon=box(0, 0, 4, 4), native_path_indices=lambda: (9,)),
+        SimpleNamespace(polygon=box(5, 0, 9, 4), native_path_indices=lambda: (10,)),
+    )
+    result = inspect_native_wall_graph(bars)
+    assert result.endpoint_near_miss_total == 0
+    assert result.component_count == 2
