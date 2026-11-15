@@ -31,7 +31,12 @@ def _body(
     source_id: int, bounds: tuple[float, float, float, float]
 ) -> SourceWallBodyRecord:
     prov = SourcePathProvenance(
-        (source_id,), ("Enclosure_WallExternal",), "vp1", GEOMETRY_OBSERVED, "wall"
+        native_path_ids=(source_id,),
+        native_source_layers=("Enclosure_WallExternal",),
+        viewport_id="vp1",
+        page_index=0,
+        geometry_kind=GEOMETRY_OBSERVED,
+        role="exterior_outer_face_candidate",
     )
     return SourceWallBodyRecord(
         body_id=f"body:{source_id}",
