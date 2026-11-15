@@ -36,7 +36,28 @@ jamb caps permits one **footprint-only** garage opening span. The two caps
 must be separately anchored at the wall ends. Do not use the printed width
 alone to create a wall or deduct a customer opening quantity.
 
+### Standard hinged / swing entry door
+
+A source-painted swing-door arc, two same-layer dark exterior wall host faces,
+and two separate original jamb-cap rectangles form a 2D footprint-only
+threshold aperture. Preserve the original wall, swing and jamb path IDs.
+Authentic jamb-side wall stubs can be short: omission by an unrelated
+commercial wall-band collector must not veto their independent source proof.
+If a host, cap, swing or viewport identity is missing or contradictory,
+ABSTAIN. Door gaps are never filled as billable opaque wall; floor finish
+transitions end at the doorway threshold, subject to original room finish
+evidence.
+
 ### Outside boundary vs. envelope of the sheet
+
+For the 3Laurel original p3, the ALFRESCO and PORCH are not in the enclosed
+building footprint. The actual outer wall runs alongside the Bed 5 and
+Living room faces. Do not confuse a roof outline, open external area,
+freestanding timber post or internal wall junction with the outer building
+wall. On the original review overlay the three missed hosted swing doors
+were numbered 4, 5 and 6; their native arc path IDs are 3336, 1163
+and 1912 respectively. These are acceptance witnesses, never a
+plan-specific production coordinate rule.
 
 Do not use a page bounding rectangle, convex hull, or nearest-endpoint snap
 to claim closure. The original selected floor plan can contain open alcoves,
