@@ -286,6 +286,25 @@ def test_window_continuity_without_unique_jambs_abstains():
     assert all(item.provenance_geometry_kind == GEOMETRY_INFERRED for item in edges)
 
 
+def test_wide_unhosted_window_span_is_aperture_continuity_not_a_wall():
+    bars = (_strip(0, (0, 0, 10, 1)), _strip(1, (35.8, 0, 50, 1)))
+    drawings = (_drawing(), _drawing())
+    _bodies, junctions = classify_source_wall_body_junctions(bars, drawings)
+    cycle = audit_source_native_exterior_cycle(bars, drawings, page_index=2)
+    edges = classify_window_continuity_edges(
+        junctions, drawings, page_index=2,
+        open_endpoints=cycle["open_endpoints"],
+    )
+    assert edges
+    assert all(item.junction_kind == JUNCTION_WINDOW_CONTINUITY for item in edges)
+    assert all(item.status is EvidenceResolutionStatus.ABSTAINED for item in edges)
+    assert all(item.reason == REASON_WINDOW_NO_UNIQUE_JAMB for item in edges)
+    owners = {frozenset((*item.left_path_ids, *item.right_path_ids)) for item in edges}
+    assert frozenset((0, 1)) in owners
+    assert all(item.measurement_authorized is False for item in edges)
+    assert all(item.physical_join_authenticated is False for item in edges)
+
+
 def test_window_continuity_unique_hosts_jambs_sill_is_topology_only():
     drawings = tuple(_drawing() for _ in range(6))
     status, reason = authenticate_window_continuity_topology(

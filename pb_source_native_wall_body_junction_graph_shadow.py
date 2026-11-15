@@ -57,7 +57,7 @@ REASON_UNCLOSED_EXTERIOR = "unclosed_exterior_endpoint_no_unique_jamb"
 REASON_DUPLICATE_PATH_OWNER = "duplicate_native_path_owner"
 REASON_LAYER_NOT_PHYSICAL = "exterior_layer_name_is_not_physical_wall"
 REASON_WINDOW_NO_UNIQUE_JAMB = "window_gap_missing_unique_hosted_jamb_pair"
-JUNCTION_WINDOW_CONTINUITY = "window_continuity_topology_only"
+JUNCTION_WINDOW_CONTINUITY = "window_aperture_continuity"
 
 
 def _path_ids(bar: Any) -> tuple[int, ...]:
@@ -454,19 +454,18 @@ def classify_window_continuity_edges(
     *,
     page_index: int = -1,
     opening_witnesses: Sequence[Mapping[str, Any]] = (),
+    open_endpoints: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[SourceJunctionRecord, ...]:
-    """Collinear exterior gaps stay unsnapped unless unique jamb/host/sill exist."""
+    """Window gaps stay topology-only. Length, ASW text, and nearest snap are not hosts."""
     by_hosts = {
         (tuple(row.get("left_host_path_ids") or ()), tuple(row.get("right_host_path_ids") or ())): row
         for row in opening_witnesses
         if isinstance(row, Mapping)
     }
-    out: list[SourceJunctionRecord] = []
-    for item in junctions:
-        if item.junction_kind != JUNCTION_COLLINEAR_GAP:
-            continue
-        key = (item.left_path_ids, item.right_path_ids)
-        mirror = (item.right_path_ids, item.left_path_ids)
+
+    def _edge(left_ids, right_ids, sep, contact, left_body="", right_body=""):
+        key = (tuple(left_ids), tuple(right_ids))
+        mirror = (tuple(right_ids), tuple(left_ids))
         witness = by_hosts.get(key) or by_hosts.get(mirror) or {}
         status, reason = authenticate_window_continuity_topology(
             left_host_path_ids=witness.get("left_host_path_ids") or (),
@@ -476,21 +475,51 @@ def classify_window_continuity_edges(
             sill_or_floor_path_ids=witness.get("sill_or_floor_path_ids") or (),
             drawings=drawings,
         )
-        out.append(SourceJunctionRecord(
+        return SourceJunctionRecord(
             junction_kind=JUNCTION_WINDOW_CONTINUITY,
-            left_body_id=item.left_body_id,
-            right_body_id=item.right_body_id,
-            left_path_ids=item.left_path_ids,
-            right_path_ids=item.right_path_ids,
-            separation_pdf_pts=item.separation_pdf_pts,
-            contact_pdf_pts=item.contact_pdf_pts,
+            left_body_id=left_body,
+            right_body_id=right_body,
+            left_path_ids=tuple(left_ids),
+            right_path_ids=tuple(right_ids),
+            separation_pdf_pts=float(sep),
+            contact_pdf_pts=tuple(contact),
             page_index=page_index,
             provenance_geometry_kind=GEOMETRY_INFERRED,
             status=status,
             reason=reason if status is EvidenceResolutionStatus.ABSTAINED else (
                 "window_continuity_topology_only_not_wall"
             ),
+        )
+
+    out: list[SourceJunctionRecord] = []
+    seen: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
+    for item in junctions:
+        if item.junction_kind != JUNCTION_COLLINEAR_GAP:
+            continue
+        pair = tuple(sorted((item.left_path_ids, item.right_path_ids)))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        out.append(_edge(
+            item.left_path_ids, item.right_path_ids, item.separation_pdf_pts,
+            item.contact_pdf_pts, item.left_body_id, item.right_body_id,
         ))
+    for row in open_endpoints:
+        if not isinstance(row, Mapping):
+            continue
+        left_ids = tuple(int(v) for v in (row.get("native_path_ids") or ()))
+        right_ids = tuple(int(v) for v in (row.get("nearby_native_path_ids") or ()))
+        sep = row.get("separation_pdf_pts")
+        if not left_ids or not right_ids or sep is None or float(sep) <= CONTACT_PT:
+            continue
+        pair = tuple(sorted((left_ids, right_ids)))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        tip = tuple(float(v) for v in (row.get("tip_pdf_pts") or (0.0, 0.0)))
+        if len(tip) != 2:
+            tip = (0.0, 0.0)
+        out.append(_edge(left_ids, right_ids, sep, tip))
     return tuple(out)
 
 
@@ -584,7 +613,10 @@ def build_source_native_wall_body_junction_graph(
         bars, drawings, page_index=page_index, bodies=bodies,
     )
     window_edges = classify_window_continuity_edges(
-        junctions, drawings, page_index=page_index,
+        junctions,
+        drawings,
+        page_index=page_index,
+        open_endpoints=cycle.get("open_endpoints") or (),
     )
     inferred = sum(1 for item in junctions if item.provenance_geometry_kind == GEOMETRY_INFERRED)
     joined = sum(
