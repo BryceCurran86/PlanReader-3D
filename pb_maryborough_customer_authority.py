@@ -437,7 +437,7 @@ def _issue_maryborough_source_figured_floor_customer(
             # Native drawing observations check
             try:
                 drawings = document[page_no - 1].get_drawings() or []
-                if not drawings:
+                if len(drawings) < 500:
                     return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
             except Exception:
                 return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)

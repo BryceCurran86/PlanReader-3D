@@ -158,7 +158,7 @@ def issue_original_three_laurel_vinyl_floor_customer_quantities(
             # Check drawing vector observations on Page 3 (Plan)
             try:
                 drawings = document[2].get_drawings() or []
-                if not drawings:
+                if len(drawings) < 500:
                     return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
             except Exception:
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
@@ -172,6 +172,8 @@ def issue_original_three_laurel_vinyl_floor_customer_quantities(
                 pass
 
             p3_text = document[2].get_text("text") or ""
+            if "FLOOR PLAN" not in p3_text.upper():
+                return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
             if "VINYL" not in p3_text.upper():
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
