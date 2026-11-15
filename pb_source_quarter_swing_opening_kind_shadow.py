@@ -32,7 +32,9 @@ from pb_opening_kind_authority import (
     resolve_opening_kind,
 )
 from pb_source_opening_identity_partition_shadow import (
-    cluster_live_canonical_opening_identities,
+    SAME,
+    compare_live_canonical_opening_identity,
+    share_source_jamb_vertex,
 )
 
 
@@ -179,10 +181,39 @@ def _swing_identity_groups(
     hinge = tuple(float(value) for value in witness["centre"])
     tip = tuple(float(value) for value in witness["closed_tip"])
     by_id = {item.canonical_opening_id: item for item in hits}
-    clusters = [
-        frozenset(members)
-        for members in cluster_live_canonical_opening_identities(hits)
-    ]
+    parent = {item.canonical_opening_id: item.canonical_opening_id for item in hits}
+
+    def find(identity: str) -> str:
+        while parent[identity] != identity:
+            parent[identity] = parent[parent[identity]]
+            identity = parent[identity]
+        return identity
+
+    def union(left_id: str, right_id: str) -> None:
+        root_left, root_right = find(left_id), find(right_id)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for index, left in enumerate(hits):
+        for right in hits[index + 1:]:
+            if compare_live_canonical_opening_identity(left, right) == SAME:
+                union(left.canonical_opening_id, right.canonical_opening_id)
+                continue
+            # Local to this painted swing: vertex-joined jamb/tip ticks of one
+            # doorway. Global identity does not treat a shared vertex as SAME.
+            if share_source_jamb_vertex(left, right):
+                union(left.canonical_opening_id, right.canonical_opening_id)
+    grouped: dict[str, list[str]] = {}
+    for item in hits:
+        grouped.setdefault(find(item.canonical_opening_id), []).append(
+            item.canonical_opening_id
+        )
+    seen: list[str] = []
+    for item in hits:
+        root = find(item.canonical_opening_id)
+        if root not in seen:
+            seen.append(root)
+    clusters = [frozenset(grouped[root]) for root in seen]
     classified: list[tuple[frozenset[str], bool, bool]] = []
     for members in clusters:
         at_hinge = any(_touches_witness_end(by_id[member], hinge) for member in members)

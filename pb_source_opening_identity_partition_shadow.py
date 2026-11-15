@@ -5,10 +5,12 @@ This helper only reads source geometries already on the canonical objects; it
 does not mint openings, hosts, kinds or quantities.
 
 A jamb-bounded two-face interruption is often stored as three records: a short
-hinge tick, the hosted wall-band cut, and the closed-leaf tip. Those records
-are SAME when their segments share a vertex and do not cross. Records whose
-source segments are farther apart than the production 2.5 pt snap, and that
-do not share a vertex, are DISTINCT. Everything else stays AMBIGUOUS.
+hinge tick, the hosted wall-band cut, and the closed-leaf tip. Global SAME
+requires matching document/revision/SHA/snapshot/page/viewport plus issued
+host/frame ownership. Shared vertices alone stay AMBIGUOUS. Distance beyond
+the production 2.5 pt snap is not DISTINCT without an independently bounded
+aperture. A painted-swing consumer may still union vertex-joined hits local
+to that witness.
 """
 from __future__ import annotations
 
@@ -68,6 +70,52 @@ def _vertex_join(left: LiveCanonicalOpeningObject, right: LiveCanonicalOpeningOb
     ) <= _SHARED_JAMB_VERTEX_PT
 
 
+def _source_scope(
+    opening: LiveCanonicalOpeningObject,
+) -> tuple[str, str, str, str, str]:
+    return (
+        str(opening.document_id),
+        str(opening.revision_id),
+        str(opening.source_sha256),
+        str(opening.snapshot_id),
+        str(opening.page_id),
+    )
+
+
+def _viewport_token(opening: LiveCanonicalOpeningObject) -> str | None:
+    token = str(opening.viewport_id or "").strip()
+    return token or None
+
+
+def share_source_jamb_vertex(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+) -> bool:
+    """True when two source segments share a CAD jamb vertex.
+
+    This is a local doorway-face witness, not global SAME identity.
+    """
+    return _vertex_join(left, right)
+
+
+def _issued_aperture_ownership(
+    left: LiveCanonicalOpeningObject,
+    right: LiveCanonicalOpeningObject,
+) -> bool:
+    left_binding = str(left.host_binding_record_id or "").strip()
+    right_binding = str(right.host_binding_record_id or "").strip()
+    if (
+        left_binding
+        and left_binding == right_binding
+        and left_binding in left.evidence_ids
+        and right_binding in right.evidence_ids
+    ):
+        return True
+    left_frame = str(left.host_frame_record_id or "").strip()
+    right_frame = str(right.host_frame_record_id or "").strip()
+    return bool(left_frame and left_frame == right_frame)
+
+
 def compare_live_canonical_opening_identity(
     left: LiveCanonicalOpeningObject,
     right: LiveCanonicalOpeningObject,
@@ -75,11 +123,28 @@ def compare_live_canonical_opening_identity(
     """Source-geometry identity of two live canonical openings.
 
     Unique ID strings are ignored except as a SAME shortcut when they match.
+    Document/revision/SHA/snapshot/page/viewport must agree before any
+    geometry shortcut. Shared vertices alone are not SAME.
     """
     if type(left) is not LiveCanonicalOpeningObject:
         raise TypeError("left must be LiveCanonicalOpeningObject")
     if type(right) is not LiveCanonicalOpeningObject:
         raise TypeError("right must be LiveCanonicalOpeningObject")
+    if _source_scope(left) != _source_scope(right):
+        return DISTINCT
+    left_viewport = _viewport_token(left)
+    right_viewport = _viewport_token(right)
+    if left_viewport is None or right_viewport is None:
+        if left.canonical_opening_id == right.canonical_opening_id:
+            return SAME
+        if (
+            left.physical_opening_id
+            and left.physical_opening_id == right.physical_opening_id
+        ):
+            return SAME
+        return AMBIGUOUS
+    if left_viewport != right_viewport:
+        return DISTINCT
     if left.canonical_opening_id == right.canonical_opening_id:
         return SAME
     if (
@@ -96,9 +161,11 @@ def compare_live_canonical_opening_identity(
     if left_line.crosses(right_line):
         return AMBIGUOUS
     if _vertex_join(left, right):
-        return SAME
+        if _issued_aperture_ownership(left, right):
+            return SAME
+        return AMBIGUOUS
     if left_line.distance(right_line) > _DISTINCT_SEPARATION_PT:
-        return DISTINCT
+        return AMBIGUOUS
     return AMBIGUOUS
 
 

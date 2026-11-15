@@ -2,10 +2,11 @@
 
 Generated ``opening_host_binding_group_*`` / ``opening_host_binding_v3_*``
 strings are nominations. Quantity publication already refuses them unless the
-issued record_id is on evidence. This helper copies a CORROBORATED producer
-result onto the matching canonical opening and puts that record_id on
-evidence_ids. Blocked publish results stay nominations; they never become
-quantities.
+issued record_id is on evidence. This helper resolves the sealed
+``OpeningHostBindingAuthority`` with a complete target selector, keeps the
+producer receipt unchanged, and puts that record_id on evidence_ids. Caller
+maps, reconstructed traces, and foreign/forged records stay nominations; they
+never become quantities.
 """
 from __future__ import annotations
 
@@ -19,9 +20,11 @@ from pb_live_physical_opening_void_composition import (
 from pb_live_wall_opening_authority_composition import LiveOpeningHostTrace
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_host_binding_authority import (
+    OpeningHostBindingAuthority,
     OpeningHostBindingProducer,
     OpeningHostBindingRecord,
     OpeningHostBindingResult,
+    OpeningHostBindingSelector,
     OpeningHostWallUniverseSelector,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -52,71 +55,119 @@ def first_failing_live_host_trace_gate(
     if type(opening) is not LiveCanonicalOpeningObject:
         raise TypeError("opening must be LiveCanonicalOpeningObject")
     physical_id = str(opening.physical_opening_id or "").strip()
+    page_id = str(opening.page_id or "").strip()
+    observation_id = str(opening.representative_observation_id or "").strip()
     for trace in traces:
         if str(trace.opening_identity_id or "") != physical_id:
             continue
+        if str(trace.page_id or "").strip() != page_id:
+            return "opening_host_trace_page_mismatch"
+        if str(trace.representative_observation_id or "").strip() != observation_id:
+            return "opening_host_trace_observation_mismatch"
         if (
             trace.status is EvidenceResolutionStatus.CORROBORATED
             and str(trace.record_id or "").strip()
             and str(trace.host_wall_id or "").strip()
         ):
-            return ""
+            return "opening_host_trace_not_producer_receipt"
         if trace.reason_codes:
             return str(trace.reason_codes[0])
         return "opening_host_binding_unavailable"
     return "opening_host_trace_missing"
 
 
-def _result_from_live_host_trace(
+def binding_selector_for_opening(
     opening: LiveCanonicalOpeningObject,
-    traces: Sequence[LiveOpeningHostTrace],
-) -> OpeningHostBindingResult | None:
-    """Rebuild the producer receipt already on the live wall-opening trace."""
+) -> OpeningHostBindingSelector:
+    """Complete target scope already owned by the canonical opening."""
+    if type(opening) is not LiveCanonicalOpeningObject:
+        raise TypeError("opening must be LiveCanonicalOpeningObject")
     physical_id = str(opening.physical_opening_id or "").strip()
-    for trace in traces:
-        if str(trace.opening_identity_id or "") != physical_id:
-            continue
-        if first_failing_live_host_trace_gate(opening, (trace,)):
-            return None
-        record_id = str(trace.record_id or "").strip()
-        host_wall_id = str(trace.host_wall_id or "").strip()
-        record = OpeningHostBindingRecord(
-            record_id=record_id,
-            document_id=str(opening.document_id),
-            revision_id=str(opening.revision_id),
-            source_sha256=str(opening.source_sha256),
-            snapshot_id=str(opening.snapshot_id),
-            page_id=str(opening.page_id),
-            decision_scope_id=f"wall-source:page-{opening.page_id}",
-            opening_identity_id=physical_id,
-            host_wall_id=host_wall_id,
-            member_wall_candidate_ids=tuple(trace.member_wall_candidate_ids or ()),
-            member_candidate_identity_ids=(),
-            member_equivalence_groups=(),
-            source_observation_ids=tuple(opening.source_observation_ids or ()),
-        )
-        return OpeningHostBindingResult(
-            status=trace.status,
-            reason_codes=tuple(trace.reason_codes),
-            record=record,
-        )
-    return None
+    if not physical_id:
+        raise ValueError("physical_opening_id required")
+    return OpeningHostBindingSelector(
+        document_id=str(opening.document_id),
+        revision_id=str(opening.revision_id),
+        source_sha256=str(opening.source_sha256),
+        snapshot_id=str(opening.snapshot_id),
+        page_id=str(opening.page_id),
+        decision_scope_id=f"wall-source:page-{opening.page_id}",
+        opening_identity_id=physical_id,
+    )
+
+
+def _receipt_matches_opening(
+    record: OpeningHostBindingRecord,
+    opening: LiveCanonicalOpeningObject,
+) -> bool:
+    opening_ids = {
+        str(opening.physical_opening_id or "").strip(),
+        str(opening.canonical_opening_id or "").strip(),
+    }
+    opening_ids.discard("")
+    if str(record.opening_identity_id) not in opening_ids:
+        return False
+    if (
+        str(record.document_id) != str(opening.document_id)
+        or str(record.revision_id) != str(opening.revision_id)
+        or str(record.source_sha256) != str(opening.source_sha256)
+        or str(record.snapshot_id) != str(opening.snapshot_id)
+        or str(record.page_id) != str(opening.page_id)
+        or str(record.decision_scope_id) != f"wall-source:page-{opening.page_id}"
+    ):
+        return False
+    record_obs = {
+        str(item).strip() for item in record.source_observation_ids if str(item).strip()
+    }
+    opening_obs = {
+        str(item).strip() for item in opening.source_observation_ids if str(item).strip()
+    }
+    representative = str(opening.representative_observation_id or "").strip()
+    if representative:
+        opening_obs.add(representative)
+    if not record_obs or record_obs.isdisjoint(opening_obs):
+        return False
+    if not tuple(record.member_wall_candidate_ids):
+        return False
+    if not tuple(record.member_candidate_identity_ids):
+        return False
+    if not tuple(record.member_equivalence_groups):
+        return False
+    return True
+
+
+def _selector_matches_opening(
+    selector: OpeningHostBindingSelector,
+    opening: LiveCanonicalOpeningObject,
+) -> bool:
+    try:
+        expected = binding_selector_for_opening(opening)
+    except ValueError:
+        return False
+    return selector == expected
 
 
 def apply_corroborated_live_host_traces(
     composition: LivePhysicalOpeningVoidComposition,
     traces: Sequence[LiveOpeningHostTrace],
+    *,
+    authority: OpeningHostBindingAuthority | None = None,
+    binding_selectors: Mapping[str, OpeningHostBindingSelector] | None = None,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Install already-published host traces; do not re-call publish."""
+    """Install already-published host receipts. Trace strings are not issuance."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
-    issued: dict[str, OpeningHostBindingResult] = {}
-    for opening in composition.canonical_openings:
-        result = _result_from_live_host_trace(opening, traces)
-        if first_failing_host_publish_gate(result):
-            continue
-        issued[str(opening.physical_opening_id)] = result
-    return apply_issued_opening_host_binding_receipts(composition, issued)
+    if traces is not None and not isinstance(traces, Sequence):
+        raise TypeError("traces must be a sequence")
+    if authority is None:
+        return composition
+    if type(authority) is not OpeningHostBindingAuthority:
+        raise TypeError("authority must be OpeningHostBindingAuthority")
+    return apply_issued_opening_host_binding_receipts(
+        composition,
+        authority,
+        binding_selectors=binding_selectors,
+    )
 
 
 def observation_selector_for_opening(
@@ -139,20 +190,34 @@ def observation_selector_for_opening(
 
 def apply_issued_opening_host_binding_receipts(
     composition: LivePhysicalOpeningVoidComposition,
-    issued_by_physical_id: Mapping[str, OpeningHostBindingResult],
+    authority: OpeningHostBindingAuthority,
+    *,
+    binding_selectors: Mapping[str, OpeningHostBindingSelector] | None = None,
 ) -> LivePhysicalOpeningVoidComposition:
     """Install producer-issued host receipts; leave blocked nominations unbilled."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    if type(authority) is not OpeningHostBindingAuthority:
+        raise TypeError("authority must be OpeningHostBindingAuthority")
     updated: dict[str, LiveCanonicalOpeningObject] = {}
     for opening in composition.canonical_openings:
-        result = issued_by_physical_id.get(opening.physical_opening_id)
-        if result is None:
-            result = issued_by_physical_id.get(opening.canonical_opening_id)
+        try:
+            selector = binding_selector_for_opening(opening)
+        except ValueError:
+            continue
+        if binding_selectors:
+            mapped = binding_selectors.get(opening.physical_opening_id)
+            if mapped is None:
+                mapped = binding_selectors.get(opening.canonical_opening_id)
+            if mapped is not None and not _selector_matches_opening(mapped, opening):
+                continue
+        result = authority.resolve(selector)
         if first_failing_host_publish_gate(result):
             continue
         assert result is not None and result.record is not None
         record = result.record
+        if not _receipt_matches_opening(record, opening):
+            continue
         evidence_ids = tuple(
             dict.fromkeys((*opening.evidence_ids, record.record_id))
         )
@@ -181,12 +246,13 @@ def republish_nominated_hosts(
 
     Left and right selectors are the opening's own representative observation.
     The first failing reason is the producer receipt, not a generated hash.
+    Issued receipts are then resolved from producer.authority(), never from a
+    caller-keyed result map.
     """
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
     if type(producer) is not OpeningHostBindingProducer:
         raise TypeError("producer must be OpeningHostBindingProducer")
-    issued: dict[str, OpeningHostBindingResult] = {}
     for opening in composition.canonical_openings:
         host_wall_id = str(opening.host_wall_id or "")
         if not host_wall_id.startswith(NOMINATED_HOST_WALL_PREFIX):
@@ -194,7 +260,7 @@ def republish_nominated_hosts(
         if not str(opening.representative_observation_id or "").strip():
             continue
         selector = observation_selector_for_opening(opening)
-        result = producer.publish(
+        producer.publish(
             opening_left_selector=selector,
             opening_right_selector=selector,
             host_universe_selector=OpeningHostWallUniverseSelector(
@@ -206,5 +272,7 @@ def republish_nominated_hosts(
                 decision_scope_id=f"wall-source:page-{opening.page_id}",
             ),
         )
-        issued[str(opening.physical_opening_id)] = result
-    return apply_issued_opening_host_binding_receipts(composition, issued)
+    return apply_issued_opening_host_binding_receipts(
+        composition,
+        producer.authority(),
+    )

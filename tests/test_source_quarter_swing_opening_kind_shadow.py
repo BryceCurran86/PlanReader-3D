@@ -271,6 +271,7 @@ def test_original_garage_swing_on_captured_opening_population() -> None:
         pytest.skip("captured 3Laurel openings not provisioned")
     import pickle
     from pb_source_opening_identity_partition_shadow import (
+        AMBIGUOUS,
         SAME,
         compare_live_canonical_opening_identity,
     )
@@ -293,7 +294,8 @@ def test_original_garage_swing_on_captured_opening_population() -> None:
         for item in openings
         if str(item.physical_opening_id).endswith("d47384cc7a33")
     )
-    assert compare_live_canonical_opening_identity(target, hinge) == SAME
+    assert compare_live_canonical_opening_identity(target, hinge) != SAME
+    assert compare_live_canonical_opening_identity(target, hinge) == AMBIGUOUS
     assert compare_live_canonical_opening_identity(target, tip) != SAME
     with fitz.open(original) as doc:
         drawings = tuple(doc[2].get_drawings())

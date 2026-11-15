@@ -1253,13 +1253,14 @@ def _collect_live_physical_net_wall_claim(
         )
     if source_unique_swing_opening_host or layered_sliding_leaf_closure:
         from pb_source_issued_host_binding_rebind_shadow import (
-            apply_corroborated_live_host_traces,
+            apply_issued_opening_host_binding_receipts,
             republish_nominated_hosts,
         )
 
-        physical_void = apply_corroborated_live_host_traces(
+        physical_void = apply_issued_opening_host_binding_receipts(
             physical_void,
-            wall_opening.opening_bindings,
+            wall_opening.opening_host_binding_authority,
+            binding_selectors=wall_opening.binding_selectors,
         )
         producer = getattr(wall_opening, "opening_host_binding_producer", None)
         if producer is not None:
