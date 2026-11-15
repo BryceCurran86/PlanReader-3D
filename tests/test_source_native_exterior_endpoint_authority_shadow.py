@@ -10,6 +10,9 @@ from pb_new_wall_graph_diagnostic import NativeWallEndpointNearMiss, inspect_nat
 from pb_source_native_exterior_endpoint_authority_shadow import (
     REASON_COMPETING,
     REASON_CONTACT_CANDIDATE,
+    REASON_FOREIGN_VIEW,
+    REASON_INVALID_SEPARATION,
+    REASON_MISSING_NATIVE_PATH_OWNER,
     REASON_NEAR_MISS,
     REASON_OPENING_TOPOLOGY,
     authenticate_external_wall_junction,
@@ -114,7 +117,7 @@ def test_two_point_one_four_eight_pt_is_not_commercial_snap_join():
         _drawing("Enclosure_WallExternal"),
     )
     status, reason = authenticate_external_wall_junction(
-        native_path_ids=(1027,), nearby_native_path_ids=(1708,),
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
         separation_pdf_pts=2.1448, drawings=drawings,
     )
     assert status is EvidenceResolutionStatus.ABSTAINED
@@ -122,12 +125,84 @@ def test_two_point_one_four_eight_pt_is_not_commercial_snap_join():
 
 
 def test_unwitnessed_222pt_span_is_not_authenticated_as_a_door():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
     status, reason = authenticate_external_wall_junction(
-        native_path_ids=(4000,), nearby_native_path_ids=(5848,),
-        separation_pdf_pts=222.624, drawings=(),
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=222.624, drawings=drawings,
     )
     assert status is EvidenceResolutionStatus.ABSTAINED
     assert reason == REASON_NEAR_MISS
+
+
+def test_missing_both_native_path_ids_is_not_a_candidate_join():
+    valid = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(99,), nearby_native_path_ids=(100,),
+        separation_pdf_pts=0.02, drawings=(),
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_MISSING_NATIVE_PATH_OWNER
+    empty_status, empty_reason = authenticate_external_wall_junction(
+        native_path_ids=(), nearby_native_path_ids=(0,),
+        separation_pdf_pts=0.02, drawings=(valid,),
+    )
+    assert empty_status is EvidenceResolutionStatus.ABSTAINED
+    assert empty_reason == REASON_MISSING_NATIVE_PATH_OWNER
+
+
+def test_missing_one_native_path_id_is_not_a_candidate_join():
+    valid = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(99,),
+        separation_pdf_pts=0.02, drawings=(valid,),
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_MISSING_NATIVE_PATH_OWNER
+
+
+def test_negative_separation_is_not_a_candidate_join():
+    valid = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=-1.0, drawings=(valid, valid),
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_INVALID_SEPARATION
+
+
+def test_foreign_view_path_index_collision_stays_unjoined():
+    left = {
+        "layer": "Enclosure_WallExternal",
+        "fill": (0, 0, 0),
+        "viewport_id": "plan-a",
+    }
+    right = {
+        "layer": "Enclosure_WallExternal",
+        "fill": (0, 0, 0),
+        "viewport_id": "plan-b",
+    }
+    missing_view = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+    collision_status, collision_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=(left, right),
+    )
+    assert collision_status is EvidenceResolutionStatus.ABSTAINED
+    assert collision_reason == REASON_FOREIGN_VIEW
+    missing_status, missing_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=(left, missing_view),
+    )
+    assert missing_status is EvidenceResolutionStatus.ABSTAINED
+    assert missing_reason == REASON_FOREIGN_VIEW
+    same_view_status, same_view_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=(left, dict(right, viewport_id="plan-a")),
+    )
+    assert same_view_status is EvidenceResolutionStatus.CANDIDATE
+    assert same_view_reason == REASON_CONTACT_CANDIDATE
 
 
 def test_graph_near_miss_receipts_never_apply_commercial_snap_join():

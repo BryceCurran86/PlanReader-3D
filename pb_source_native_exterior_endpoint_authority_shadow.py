@@ -27,6 +27,9 @@ REASON_COMPETING = "competing_non_wall_source_role"
 REASON_CONTACT_CANDIDATE = "representation_contact_needs_physical_wall_proof"
 REASON_OPENING_TOPOLOGY = "opening_chassis_topology_only_not_wall_join"
 REASON_UNWITNESSED_GAP = "unwitnessed_collinear_span_not_a_door"
+REASON_MISSING_NATIVE_PATH_OWNER = "native_source_path_owner_missing"
+REASON_INVALID_SEPARATION = "negative_or_nonfinite_separation_not_contact"
+REASON_FOREIGN_VIEW = "foreign_view_path_index_collision"
 
 
 def _layer_compact(layer: str) -> str:
@@ -77,17 +80,42 @@ class ExteriorEndpointReceipt:
         }
 
 
+def _is_path_index(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _rows_for_paths(
     drawings: Sequence[Mapping[str, Any] | object],
     paths: Sequence[int],
-) -> tuple[Mapping[str, Any] | None, ...]:
-    out = []
+) -> tuple[Mapping[str, Any], ...] | None:
+    if not paths:
+        return None
+    owned: list[Mapping[str, Any]] = []
     for index in paths:
-        if 0 <= index < len(drawings) and isinstance(drawings[index], Mapping):
-            out.append(drawings[index])
-        else:
-            out.append(None)
-    return tuple(out)
+        if not _is_path_index(index):
+            return None
+        if not (0 <= index < len(drawings)):
+            return None
+        row = drawings[index]
+        if not isinstance(row, Mapping):
+            return None
+        owned.append(row)
+    return tuple(owned)
+
+
+def _viewport_identity(row: Mapping[str, Any]) -> str:
+    for key in (
+        "source_viewport_id",
+        "source_viewport_ownership_id",
+        "viewport_id",
+    ):
+        value = row.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
 
 
 def authenticate_external_wall_junction(
@@ -101,18 +129,24 @@ def authenticate_external_wall_junction(
     """Unique-or-abstain join. Near-miss distance is never a wall."""
     left_rows = _rows_for_paths(drawings, native_path_ids)
     right_rows = _rows_for_paths(drawings, nearby_native_path_ids)
-    left_layers = tuple(str(row.get("layer") or "") for row in left_rows if row)
-    right_layers = tuple(str(row.get("layer") or "") for row in right_rows if row)
+    if left_rows is None or right_rows is None:
+        return EvidenceResolutionStatus.ABSTAINED, REASON_MISSING_NATIVE_PATH_OWNER
+    left_layers = tuple(str(row.get("layer") or "") for row in left_rows)
+    right_layers = tuple(str(row.get("layer") or "") for row in right_rows)
     if any(_competing_non_wall_layer(layer) for layer in (*left_layers, *right_layers)):
         return EvidenceResolutionStatus.ABSTAINED, REASON_COMPETING
+    viewports = tuple(_viewport_identity(row) for row in (*left_rows, *right_rows))
+    if any(viewports) and (not all(viewports) or len(set(viewports)) != 1):
+        return EvidenceResolutionStatus.ABSTAINED, REASON_FOREIGN_VIEW
     if opening_chassis_witness:
         return EvidenceResolutionStatus.ABSTAINED, REASON_OPENING_TOPOLOGY
-    if not math.isfinite(separation_pdf_pts) or separation_pdf_pts > CONTACT_PT:
+    if not math.isfinite(separation_pdf_pts) or separation_pdf_pts < 0:
+        return EvidenceResolutionStatus.ABSTAINED, REASON_INVALID_SEPARATION
+    if separation_pdf_pts > CONTACT_PT:
         return EvidenceResolutionStatus.ABSTAINED, REASON_NEAR_MISS
     if not (
-        left_rows and right_rows
-        and all(_is_painted_exterior_layer(row) for row in left_rows if row)
-        and all(_is_painted_exterior_layer(row) for row in right_rows if row)
+        all(_is_painted_exterior_layer(row) for row in left_rows)
+        and all(_is_painted_exterior_layer(row) for row in right_rows)
     ):
         return EvidenceResolutionStatus.ABSTAINED, REASON_NEAR_MISS
     return EvidenceResolutionStatus.CANDIDATE, REASON_CONTACT_CANDIDATE
@@ -155,7 +189,16 @@ def audit_source_native_exterior_endpoints(
     )
     joined = sum(1 for item in receipts if item.status is EvidenceResolutionStatus.CANDIDATE)
     competing = sum(1 for item in receipts if item.reason == REASON_COMPETING)
-    unresolved = sum(1 for item in receipts if item.reason == REASON_NEAR_MISS)
+    unresolved = sum(
+        1
+        for item in receipts
+        if item.reason in (
+            REASON_NEAR_MISS,
+            REASON_MISSING_NATIVE_PATH_OWNER,
+            REASON_INVALID_SEPARATION,
+            REASON_FOREIGN_VIEW,
+        )
+    )
     return {
         "exterior_preflight_status": attempt.status,
         "exterior_preflight_reason": attempt.reason,
