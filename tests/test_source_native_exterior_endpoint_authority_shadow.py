@@ -15,7 +15,12 @@ from pb_source_native_exterior_endpoint_authority_shadow import (
     REASON_MISSING_NATIVE_PATH_OWNER,
     REASON_NEAR_MISS,
     REASON_OPENING_TOPOLOGY,
+    ROLE_DIAGONAL_BRIDGE,
+    ROLE_EXCLUSION,
+    ROLE_EXTERIOR_OUTER_FACE,
+    ROLE_INTERNAL_WALL,
     authenticate_external_wall_junction,
+    classify_source_native_path_role,
     receipt_from_near_miss,
 )
 
@@ -228,3 +233,39 @@ def test_graph_near_miss_receipts_never_apply_commercial_snap_join():
     assert receipt.native_path_ids[0] in (0, 1)
     assert receipt.nearby_native_path_ids[0] in (0, 1)
     assert receipt.native_source_layers == ("Enclosure_WallExternal",)
+
+
+def _line(layer, a, b, **extra):
+    row = {
+        "layer": layer,
+        "fill": extra.pop("fill", (0.0, 0.0, 0.0)),
+        "color": extra.pop("color", (0.0, 0.0, 0.0)),
+        "dashes": extra.pop("dashes", ""),
+        "items": (("l", a, b),),
+    }
+    row.update(extra)
+    return row
+
+
+def test_native_roles_reject_exclusion_and_diagonal_without_raster_hull():
+    assert classify_source_native_path_role(
+        _line("Enclosure_WallExternal", (0, 0), (80, 0), dashes="[3 2] 0"),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("A-WALL", (0, 10), (80, 10), color=(0.1, 0.9, 0.1), fill=None),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("A-ANNO-DIMS", (0, 20), (80, 20)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("Interior_Joinery", (0, 30), (80, 30)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("Enclosure_WallExternal", (210, 130), (800, 490)),
+    ) == ROLE_DIAGONAL_BRIDGE
+    assert classify_source_native_path_role(
+        _line("Enclosure_WallExternal", (0, 0), (80, 0)),
+    ) == ROLE_EXTERIOR_OUTER_FACE
+    assert classify_source_native_path_role(
+        _line("A-WALL", (0, 0), (80, 0)),
+    ) == ROLE_INTERNAL_WALL

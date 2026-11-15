@@ -12,9 +12,11 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+from pb_layered_wall_doorway_room_ring_shadow import _owner_excluded_green_ink
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
 from pb_new_wall_graph_diagnostic import NativeWallEndpointNearMiss
+from pb_wall_layer_evidence_shadow import is_explicit_wall_layer_name
 
 CONTACT_PT = 0.03
 _COMPETING_TOKENS = (
@@ -31,6 +33,13 @@ REASON_MISSING_NATIVE_PATH_OWNER = "native_source_path_owner_missing"
 REASON_INVALID_SEPARATION = "negative_or_nonfinite_separation_not_contact"
 REASON_FOREIGN_VIEW = "foreign_view_path_index_collision"
 
+ROLE_EXTERIOR_OUTER_FACE = "exterior_outer_face_candidate"
+ROLE_INTERNAL_WALL = "internal_wall_candidate"
+ROLE_EXCLUSION = "exclusion_site_roof_hatch_title_green"
+ROLE_DIAGONAL_BRIDGE = "rejected_diagonal_bridge"
+ROLE_UNKNOWN = "unknown"
+_AXIS_PT = 2.0
+
 
 def _layer_compact(layer: str) -> str:
     return "".join(c for c in str(layer).lower() if c.isalnum())
@@ -46,6 +55,52 @@ def _is_painted_exterior_layer(row: Mapping[str, Any] | None) -> bool:
         return False
     compact = _layer_compact(str(row.get("layer") or ""))
     return "wall" in compact and "external" in compact
+
+
+def _dashed(row: Mapping[str, Any]) -> bool:
+    token = "".join(str(row.get("dashes") or "").split())
+    return token not in {"", "[]0"}
+
+
+def _xy(point: Any) -> tuple[float, float]:
+    if hasattr(point, "x"):
+        return float(point.x), float(point.y)
+    return float(point[0]), float(point[1])
+
+
+def _is_diagonal_row(row: Mapping[str, Any]) -> bool:
+    items = list(row.get("items") or ())
+    if not items:
+        return False
+    lines = [item for item in items if item and item[0] == "l" and len(item) >= 3]
+    if not lines or any(item[0] not in {"l", "re", "qu"} for item in items if item):
+        return False
+    for item in lines:
+        start, end = _xy(item[1]), _xy(item[2])
+        if abs(start[0] - end[0]) > _AXIS_PT and abs(start[1] - end[1]) > _AXIS_PT:
+            return True
+    return False
+
+
+def classify_source_native_path_role(row: Mapping[str, Any] | object) -> str:
+    """Unique-or-abstain source role. Raster hulls and snap joins are not roles."""
+    if not isinstance(row, Mapping):
+        return ROLE_UNKNOWN
+    if _owner_excluded_green_ink(row.get("fill")) or _owner_excluded_green_ink(row.get("color")):
+        return ROLE_EXCLUSION
+    if _dashed(row):
+        return ROLE_EXCLUSION
+    layer = str(row.get("layer") or "")
+    if _competing_non_wall_layer(layer):
+        return ROLE_EXCLUSION
+    if _is_diagonal_row(row):
+        return ROLE_DIAGONAL_BRIDGE
+    compact = _layer_compact(layer)
+    if "wall" in compact and "external" in compact:
+        return ROLE_EXTERIOR_OUTER_FACE
+    if is_explicit_wall_layer_name(layer):
+        return ROLE_INTERNAL_WALL
+    return ROLE_UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -199,6 +254,12 @@ def audit_source_native_exterior_endpoints(
             REASON_FOREIGN_VIEW,
         )
     )
+    role_counts: dict[str, int] = {}
+    for raw in drawings:
+        if not isinstance(raw, Mapping) or not raw.get("items"):
+            continue
+        role = classify_source_native_path_role(raw)
+        role_counts[role] = role_counts.get(role, 0) + 1
     return {
         "exterior_preflight_status": attempt.status,
         "exterior_preflight_reason": attempt.reason,
@@ -210,6 +271,9 @@ def audit_source_native_exterior_endpoints(
         "joined_candidate_count": joined,
         "competing_non_wall_count": competing,
         "unresolved_near_miss_count": unresolved,
+        "path_role_counts": role_counts,
+        "rejected_diagonal_bridge_count": role_counts.get(ROLE_DIAGONAL_BRIDGE, 0),
+        "exclusion_count": role_counts.get(ROLE_EXCLUSION, 0),
         "physical_wall_authenticated": False,
         "measurement_authorized": False,
         "commercial_publishable": False,

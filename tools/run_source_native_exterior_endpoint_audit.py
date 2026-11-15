@@ -48,6 +48,9 @@ def main() -> int:
         "joined_candidates": report["joined_candidate_count"],
         "competing_non_wall": report["competing_non_wall_count"],
         "unresolved_near_miss": report["unresolved_near_miss_count"],
+        "path_role_counts": report.get("path_role_counts") or {},
+        "rejected_diagonals": report.get("rejected_diagonal_bridge_count") or 0,
+        "exclusions": report.get("exclusion_count") or 0,
         "measurement_authorized": False,
     }, indent=2))
     return 0
