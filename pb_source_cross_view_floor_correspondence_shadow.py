@@ -2482,42 +2482,50 @@ def _authenticate_p11_pwd_dimension_witness_box(
     if not support_segments or not words_sup:
         return None
 
+    # Native word identities select figure candidates; no PDF-page x/y crop
+    # can assert which word is in this room. The finished witness box below
+    # must bind exactly one room label after BOTH painted figure axes agree.
     w_pwd = [
         w for w in words_sup
-        if len(w) >= 5
-        and str(w[4]).strip().upper() == "PWD"
-        and 400.0 <= float(w[0]) <= 525.0
-        and 1380.0 <= float(w[1]) <= 1590.0
+        if len(w) >= 5 and str(w[4]).strip().upper() == "PWD"
     ]
     w_v_dim = [
         w for w in words_sup
         if len(w) >= 5
         and str(w[4]).strip() == str(int(round(dim_v_val_mm)))
-        and 130.0 <= float(w[0]) <= 165.0
-        and 1460.0 <= float(w[1]) <= 1515.0
     ]
     w_h_dim = [
         w for w in words_sup
         if len(w) >= 5
         and str(w[4]).strip() == str(int(round(dim_h_val_mm)))
-        and 440.0 <= float(w[0]) <= 485.0
-        and 2000.0 <= float(w[1]) <= 2040.0
     ]
-    if len(w_pwd) != 1 or len(w_v_dim) != 1 or len(w_h_dim) != 1:
+    if not w_pwd or len(w_v_dim) != 1 or len(w_h_dim) != 1:
         return None
+    v_word, h_word = w_v_dim[0], w_h_dim[0]
+    v_mid_y = (float(v_word[1]) + float(v_word[3])) / 2
+    h_mid_x = (float(h_word[0]) + float(h_word[2])) / 2
+    h_mid_y = (float(h_word[1]) + float(h_word[3])) / 2
 
     lines_sup = build_lines(support_segments, min_len=1.0)
     index_sup = LineIndex(lines_sup)
 
-    # 1. Authenticate vertical dimension shaft (3570) on x_dim ~= 156.96 and its witness lines
+    # Select a vertical source shaft by its figured word and physical
+    # witness lines, without a fixed drawing-coordinate crop.
     v_shafts: list[tuple[float, float, float]] = []
     v_all_on_x: list[tuple[float, float, float]] = []
     for s in support_segments:
         sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
-        if abs(sx2 - sx1) < AXIS_TOL and 155.0 <= sx1 <= 159.0:
+        if (
+            abs(sx2 - sx1) < AXIS_TOL
+            and float(v_word[2]) <= sx1 <= float(v_word[2]) + 45.0
+        ):
             ylo, yhi = min(sy1, sy2), max(sy1, sy2)
             v_all_on_x.append((sx1, ylo, yhi))
-            if 1370.0 <= ylo < yhi <= 1600.0 and (yhi - ylo) >= 150.0:
+            if (
+                50.0 <= yhi - ylo <= 500.0
+                and ylo <= v_mid_y <= yhi
+                and abs(v_mid_y - (ylo + yhi) / 2) <= (yhi - ylo) * 0.2
+            ):
                 has_ylo = any(
                     lo <= sx1 - 5.0 and hi >= sx1 + 5.0
                     for ky in index_sup.near("H", ylo, 0.15)
@@ -2546,15 +2554,21 @@ def _authenticate_p11_pwd_dimension_witness_box(
     if not (has_top_wall_tick and has_bot_wall_tick):
         return None
 
-    # 2. Authenticate horizontal dimension shaft (2200) on y_dim ~= 2009.60 and its witness lines
+    # The horizontal figured word independently identifies a painted
+    # shaft under the room. Bind the shaft to its end witnesses, not a
+    # saved source-native coordinate window.
     h_shafts: list[tuple[float, float, float]] = []
     h_all_on_y: list[tuple[float, float, float]] = []
     for s in support_segments:
         sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
-        if abs(sy2 - sy1) < AXIS_TOL and 2007.5 <= sy1 <= 2011.5:
+        if abs(sy2 - sy1) < AXIS_TOL and abs(sy1 - h_mid_y) <= 18.0:
             xlo, xhi = min(sx1, sx2), max(sx1, sx2)
             h_all_on_y.append((sy1, xlo, xhi))
-            if 395.0 <= xlo < xhi <= 530.0 and (xhi - xlo) >= 100.0:
+            if (
+                50.0 <= xhi - xlo <= 500.0
+                and xlo <= h_mid_x <= xhi
+                and abs(h_mid_x - (xlo + xhi) / 2) <= (xhi - xlo) * 0.3
+            ):
                 has_xlo = any(
                     lo <= sy1 - 5.0 and hi >= sy1 + 5.0
                     for kx in index_sup.near("V", xlo, 0.15)
@@ -2583,6 +2597,17 @@ def _authenticate_p11_pwd_dimension_witness_box(
     if not (has_left_wall_tick and has_right_wall_tick):
         return None
 
+    # The two independently witnessed dimension spans must enclose
+    # exactly one matching room name. The second PWD text outside this
+    # physical enclosure cannot be mistaken for its room ownership.
+    owning_labels = [
+        word for word in w_pwd
+        if box_x0 < (float(word[0]) + float(word[2])) / 2 < box_x1
+        and box_y0 < (float(word[1]) + float(word[3])) / 2 < box_y1
+    ]
+    if len(owning_labels) != 1 or x_dim >= box_x0 or y_dim <= box_y1:
+        return None
+
     scale_v = (box_y1 - box_y0) / dim_v_val_mm
     scale_h = (box_x1 - box_x0) / dim_h_val_mm
     if max(scale_v, scale_h) <= 0.0:
@@ -2590,10 +2615,8 @@ def _authenticate_p11_pwd_dimension_witness_box(
     if abs(scale_v - scale_h) / max(scale_v, scale_h) > 0.005:
         return None
 
-    nominal_scale_ratio = (scale_v * 25.4) / 72.0
-    if not (0.018 <= nominal_scale_ratio <= 0.022):
-        return None
-
+    # The two figured millimetre spans establish the local page scale
+    # directly. No preselected title-block scale or coordinate window.
     return (round(box_x0, 2), round(box_y0, 2), round(box_x1, 2), round(box_y1, 2))
 
 
