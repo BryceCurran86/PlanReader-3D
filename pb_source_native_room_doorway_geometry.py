@@ -80,18 +80,44 @@ def authenticate_source_native_room_doorway(
                 continue
             # The clear frame opening is found from independent painted
             # returns, not an expected coordinate or scheduled area.
-            inner_left = [
-                x for x, lo, hi in tv
-                if left + 0.5 < x < left + 5.0
-                and lo >= outside_y - 0.2 and hi <= inside_y + 0.2
-                and hi - lo >= depth - 0.4
-            ]
-            inner_right = [
-                x for x, lo, hi in tv
-                if right - 5.0 < x < right - 0.5
-                and lo >= outside_y - 0.2 and hi <= inside_y + 0.2
-                and hi - lo >= depth - 0.4
-            ]
+            def continuous_inner_returns(x_min, x_max):
+                # CAD wall/jamb ink is frequently split into multiple
+                # collinear strokes at frame-layer intersections. Require
+                # complete endpoint-to-endpoint paint, not one long segment.
+                found = []
+                xs = sorted({x for x, _, _ in tv if x_min < x < x_max})
+                for x in xs:
+                    intervals = sorted(
+                        (lo, hi) for vx, lo, hi in tv
+                        if close(vx, x, 1.05)
+                        and lo >= outside_y - 0.2
+                        and hi <= inside_y + 0.2
+                    )
+                    if not intervals or intervals[0][0] > outside_y + 0.2:
+                        continue
+                    covered = intervals[0][1]
+                    for lo, hi in intervals[1:]:
+                        if lo > covered + 0.2:
+                            break
+                        covered = max(covered, hi)
+                    if covered >= inside_y - 0.2:
+                        # Both frame endpoints must be painted on this
+                        # same anchored jamb axis. Nearby layer fragments
+                        # can bridge the middle, but cannot invent an axis.
+                        has_outer_anchor = any(
+                            close(vx, x, 0.12) and close(lo, outside_y, 0.2)
+                            for vx, lo, hi in tv
+                        )
+                        has_inner_anchor = any(
+                            close(vx, x, 0.12) and close(hi, inside_y, 0.2)
+                            for vx, lo, hi in tv
+                        )
+                        if has_outer_anchor and has_inner_anchor:
+                            found.append(x)
+                return found
+
+            inner_left = continuous_inner_returns(left + 0.5, left + 5.0)
+            inner_right = continuous_inner_returns(right - 5.0, right - 0.5)
             for ix0 in inner_left:
                 for ix1 in inner_right:
                     clear_pt = ix1 - ix0

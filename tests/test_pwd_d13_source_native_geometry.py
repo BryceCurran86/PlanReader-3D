@@ -72,3 +72,34 @@ def test_d13_physical_gate_rejects_unbound_room_label():
     c = _case()
     c["words_tgt"] = (c["words_tgt"][1],)
     assert m._authenticate_d13_physical_doorway_boundary(**c) is None
+
+
+def test_d13_accepts_connected_staggered_frame_strokes_not_missing_middle():
+    baseline = m._authenticate_d13_physical_doorway_boundary(**_case())
+    assert baseline is not None
+    c = _case()
+    segments = []
+    for s in c["target_segments"]:
+        if s == _segment(52.8, 93.5, 52.8, 100):
+            segments.extend([
+                _segment(52.8, 93.5, 52.8, 95.9),
+                _segment(53.52, 95.9, 53.52, 97.58),
+                _segment(52.8, 97.58, 52.8, 100),
+            ])
+        elif s == _segment(117.2, 93.5, 117.2, 100):
+            segments.extend([
+                _segment(117.2, 93.5, 117.2, 95.9),
+                _segment(116.24, 95.9, 116.24, 97.58),
+                _segment(117.2, 97.58, 117.2, 100),
+            ])
+        else:
+            segments.append(s)
+    c["target_segments"] = segments
+    matched = m._authenticate_d13_physical_doorway_boundary(**c)
+    assert matched == baseline
+
+    c["target_segments"] = [
+        s for s in segments
+        if s != _segment(53.52, 95.9, 53.52, 97.58)
+    ]
+    assert m._authenticate_d13_physical_doorway_boundary(**c) is None
