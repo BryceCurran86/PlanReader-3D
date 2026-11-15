@@ -22,13 +22,13 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_next_wall_ring_preview import (
     _collect_cavity_multi_face_strips,
     _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
     _collect_source_wide_face_pairs,
 )
-from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_source_native_exterior_endpoint_authority_shadow import (
     CONTACT_PT,
     REASON_COMPETING,
@@ -667,6 +667,23 @@ def audit_source_native_exterior_cycle(
     }
 
 
+def _is_freestanding_post(bar: Any, all_bars: Sequence[Any]) -> bool:
+    """Detect isolated freestanding timber post / column (e.g. 140x140 post path 4102)."""
+    if getattr(bar, "polygon", None) is None or bar.polygon.is_empty:
+        return False
+    bx0, by0, bx1, by1 = bar.polygon.bounds
+    w, h = bx1 - bx0, by1 - by0
+    span, girth = max(w, h), min(w, h)
+    if girth <= 0.01 or span > 8.0 or (span / girth) > 1.8:
+        return False
+    # Must be isolated: not contacting any other wall bar within 5.0 pt
+    return all(
+        bar.polygon.distance(other.polygon) > 5.0
+        for other in all_bars
+        if other is not bar and getattr(other, "polygon", None) is not None
+    )
+
+
 def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> list[Any]:
     wall_ink = _source_wall_ink_candidate_drawings(drawings)[0]
     named, _other = _collect_strips(wall_ink)
@@ -684,7 +701,8 @@ def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> 
             continue
         key = (int(bar.path_index), *(round(float(v), 4) for v in bar.polygon.bounds))
         unique[key] = bar
-    return list(unique.values())
+    unique_bars = list(unique.values())
+    return [b for b in unique_bars if not _is_freestanding_post(b, unique_bars)]
 
 
 def build_source_native_wall_body_junction_graph(

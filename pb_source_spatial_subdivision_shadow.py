@@ -26,6 +26,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_numbered_space_key import NumberedSpaceKeyResult
 from pb_source_native_wall_body_junction_graph_shadow import (
     CONTACT_PT,
+    _is_freestanding_post,
     _unique_source_wall_bars,
     classify_source_wall_body_junctions,
 )
@@ -203,6 +204,8 @@ def build_source_spatial_subdivision(
     """Subdivide sheet space into outside, interior, courtyards, and outdoor."""
     if bars is None:
         bars = _unique_source_wall_bars(drawings)
+    else:
+        bars = [b for b in bars if not _is_freestanding_post(b, bars)]
     bodies, _ = classify_source_wall_body_junctions(bars, drawings)
 
     if len(bars) < 4 or len(bodies) < 4:

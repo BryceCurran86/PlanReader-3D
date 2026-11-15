@@ -391,3 +391,29 @@ def test_alfresco_classified_as_attached_outdoor_and_excluded_from_living():
         f for f in res.boundary_faces if "body:2:" in f.wall_body_id  # bar 2
     )
     assert shared_face.is_exterior_envelope is True
+
+
+def test_isolated_freestanding_post_excluded_from_wall_bars_and_exterior_cycle():
+    """Isolated timber post (e.g. 140x140 post path 4102) is excluded and does not pollute walls."""
+    bars = [
+        _strip(1, (100.0, 100.0, 300.0, 110.0)),
+        _strip(2, (100.0, 290.0, 300.0, 300.0)),
+        _strip(3, (100.0, 100.0, 110.0, 300.0)),
+        _strip(4, (290.0, 100.0, 300.0, 300.0)),
+        # Isolated 4x4 pt timber post located 100 pt away in the porch/alfresco
+        _strip(5, (400.0, 400.0, 404.0, 404.0)),
+    ]
+    res = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    assert res.primary_building_body_count == 4
+    assert res.interior_room_count == 1
+    assert res.disconnected_decoy_count == 0
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    # Path 5 (the timber post) must NOT appear in any building room or boundary face
+    for r in res.regions:
+        assert 5 not in r.bounding_native_path_ids
+    for f in res.boundary_faces:
+        assert 5 not in f.native_path_ids

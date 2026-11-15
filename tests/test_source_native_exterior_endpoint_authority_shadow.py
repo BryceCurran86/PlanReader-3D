@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from shapely.geometry import box
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_new_wall_graph_diagnostic import NativeWallEndpointNearMiss, inspect_native_wall_graph
+from pb_new_wall_graph_diagnostic import (
+    NativeWallEndpointNearMiss,
+    inspect_native_wall_graph,
+)
 from pb_source_native_exterior_endpoint_authority_shadow import (
     REASON_COMPETING,
     REASON_CONTACT_CANDIDATE,
@@ -306,3 +309,13 @@ def test_native_roles_reject_exclusion_and_diagonal_without_raster_hull():
     assert classify_source_native_path_role(
         _line("A-WALL", (0, 0), (80, 0)),
     ) == ROLE_INTERNAL_WALL
+
+
+def test_freestanding_timber_post_classified_as_role_exclusion():
+    """Isolated square timber post (e.g. 140x140 path 4102) is excluded from exterior walls."""
+    post_drawing = {
+        "layer": "Enclosure_WallExternal",
+        "rect": (400.0, 400.0, 404.0, 404.0),
+        "fill": (0.0, 0.0, 0.0),
+    }
+    assert classify_source_native_path_role(post_drawing) == ROLE_EXCLUSION
