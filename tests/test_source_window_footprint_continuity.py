@@ -120,6 +120,26 @@ def test_source_painted_inset_window_sash_does_not_count_as_through_wall():
 
 
 
+def test_genuine_short_wall_stubs_are_still_window_hosts_not_guessed_walls():
+    drawings, words = _window_setup()
+    # Original vector wall stubs on both sides can each be only 2-4
+    # thicknesses long. Unique native frame marker and ASW still required.
+    drawings[0] = _wall((5.1, 0, 10, 2))
+    drawings[1] = _wall((20, 0, 24.9, 2))
+    result = detect_exterior_window_footprint_bridges(drawings, words)
+    assert len(result) == 1
+    assert (result[0].left_host_path_id, result[0].right_host_path_id) == (0, 1)
+    assert result[0].bounds_pdf_pts == (10., 0., 20., 2.)
+    assert result[0].measurement_authorized is False
+    # The same tiny stubs without independently matched printed code are
+    # NOT authorised merely because they align around a missing wall span.
+    assert detect_exterior_window_footprint_bridges(drawings, ()) == ()
+    assert detect_exterior_window_footprint_bridges(drawings[:-1], words) == ()
+    assert detect_exterior_window_footprint_bridges(
+        drawings, words + [(13, 9, 19, 13, "D01")],
+    ) == ()
+
+
 def test_missing_opening_identity_never_promotes_collinear_wall_gap():
     drawings, _words = _window_setup()
     # A nearby unrelated W-like label is not enough without its symbol.
