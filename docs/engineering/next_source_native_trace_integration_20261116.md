@@ -85,3 +85,49 @@ Observed original Q5446 PDF:
 - 3Laurel, Maryborough, Lot16 and Acacia stay on the same new engine code; full unchanged-original replay is underway. Original source PDFs and generated page overlays reside locally on the authorized PC only.
 
 The initial restoration also ported the source 1.92-pt property only as a diagnostic; no signed BOQ quantities or frozen denominator changed.
+
+
+## AntiGravity source modality / wall recovery handoff — integrated and adversarially tested
+
+Source: AntiGravity's local wall_tracing_complete_recovery_architecture_20261116.md (Bryce PC) and original PDFs, not copied code. This follow-up adds only original source diagnostic tracing; the separate commercial customer issue pipeline is unchanged.
+
+### Verified real PDF facts
+- **Lot16 selected floor plan** is original PDF page index **2** (third PDF page), with 1,234 native drawings but approximately 100% raster image-tile coverage. Actual page has **11 displayed image instances** (10 dominant architectural tiles + separate reflected title/logo), 9 unique XREFs. The handoff's "page 2 / 9 raster tiles / 1,234 drawings" is a page-number/xref-count conflation. The architectural walls are in image pixels, not the 1,234 native vector paths.
+- **Acacia page index 1** native strokes exported in near-neutral RGB 0.09/0.10; the stricter original wall-owner gate rejected **1,458 native paths**. The new tracing shadow only now recovers 1,458 via opacity, channel spread <=0.015 and max 0.12, without widening original customer wall-ink authority.
+- **Q5446** native single-heavy 1.92 pt black strokes remain supported; 3Laurel and Maryborough use native filled/paired wall evidence and must not regress.
+
+### New code
+1. **Source modality BEFORE wall topology**: pb_new_source_modality_router.classify_source_page_modality uses original PDF image XREF placements and union coverage. A sheet with >=74% large tiled raster coverage and >=4 substantial image placements is routed to tiled_raster_underlay; a logo or normal CAD drawing stays native vector. Frozen original 20,000 native primitive safety gate is untouched.
+2. **Actual raster image bytes, not old page envelope**: pb_new_raster_source_wall_trace.trace_source_raster_wall_lines reconstructs original raster tile pixels (actual extract_image bytes, including repeated tile XREF placement), excludes native vector dimensions and reflected title-block logos, finds axis-aligned source-ink line candidates, and records image XREF lineage and page coordinates. It does not guess a hull, wall role, door gap, enclosing room or area. Raster line candidate cap = 2,500. Unsupported significant transformed tiles explicitly abstain instead of faking a page render.
+3. **Neutral-dark source CAD strokes**: pb_new_source_dark_ink_scope re-admits original source-stroke rows only when RGB neutral within .015, channel max <=.12, and visible opaque paint. Colors, green, white, weak-alpha, short marks remain negative. Original path index preserved. New source-native wall pairing and heavy stroke producers accept the neutral-dark candidate ink; original commercial producer remains unchanged.
+4. **Cavity and wider source-faced candidates**: _collect_cavity_multi_face_strips recovers 3–4 source parallel CAD faces with overlapping native straight spans, <=16 pt total wall band, and >=3 distinct source paths; _collect_source_wide_face_pairs handles 8–16 pt isolated two-face spans. Both retain original path owner IDs and are displayed in distinct colours. **Crucial regression guard:** they DO NOT enter the room barrier producer until authenticated source wall family/endpoint ownership is established. A first replay that forced them directly into barriers lowered 3Laurel candidate regions from 16 to 9; the incorrect admission has been removed.
+5. **Two-stage CAD joining diagnostic**: pb_new_wall_graph_diagnostic preserves first-stage .03pt native identity connectivity and reports only source proximity join proposals at .50pt for distinct connected components, recording two endpoint coords, source paths and distance. Proposals are never actually snapped or admitted into quantities.
+6. The original drawing app displays source modality and an explicit raster warning, showing magenta source-image candidate ink and no old envelope fallback.
+
+### Remaining gates (not claimed complete)
+- Continuous physical **external-wall perimeter** remains source-ABSTAINED; the raster/vector/near-grey candidate stages identify evidence but cannot certify the building outer face cycle.
+- Aperture/window jamb/slider host attribution and source-bounded thermal-envelope graph walk require independent original-source proof. Merely closing an unowned 222.624 pt opening risks false rooms.
+- Three-/four-face cavity bands, wider faces and .5pt snaps are **unverified diagnostics only**; they must not silently modify original customer wall/room quantities.
+- Dual Python 3.13/3.14 CI and source-protected four-project customer retention needed before merge. Current local PC has Python 3.13 and 3.9 only; 3.14 must run on CI. No frozen120 score changes, no private original PDFs committed.
+
+Source diagnostic outputs under Bryce PC private_packets/external_house_acacia_20261116/new_engine_five_job_20261116. Original protected replay waits on GPT1 source-first integration and GPT MAX validation per owner instruction.
+
+
+### Protected source replay — 6 floor sheets after regression guard
+
+Source: unchanged original PDFs on Bryce's PC, same new tracing preview, no old envelope fallback. These are unclassified candidate values, not official score.
+
+| Original floor-plan sheet | Source lane | Existing room-barrier candidates | Newly visible (but not admitted) source faces | Candidate rooms | Exterior |
+|---|---|---:|---:|---:|---|
+| Lot16 PDF page 3 | tiled raster JPEG | 0 vector walls; 250 source raster line segments | source raster pixels, not vector dimensions | 0 | ABSTAINED |
+| Q5446 ground | native vector | 77 wall bands | 39 cavity + 2 wide paired bands | 1 | ABSTAINED |
+| Q5446 upper | native vector | 66 wall bands | 34 cavity + 2 wide paired bands | 2 | ABSTAINED |
+| 3Laurel | native vector | 404 wall bands, 48 temporary closures | 40 cavity + 12 wide face proposals | 16 | ABSTAINED |
+| Maryborough | native vector | 88 wall bands, 2 temporary closures | 74 cavity + 19 wide face proposals | 5 | ABSTAINED |
+| Acacia | native vector | 38 wall bands | 1,458 neutral dark paths, 5 cavity + 2 wide face proposals | 0 | ABSTAINED |
+
+Regression was observed and repaired: when NEW cavity/wide-face proposals were mistakenly added to room barriers, 3Laurel candidate rings fell from 16 to 9, while Q5446 proposals increased. The final guarded code prevents those unverified classes entering room topology. These extra faces are for visual evidence and the exterior diagnostic ONLY pending physical validation. Original 3Laurel 16 and Maryborough 5 preserved.
+
+Raster extraction additionally uses the PDF XObject source image bytes rather than a composited page pixmap: a synthetic separate native dimension line at y=80 must never appear as a raster candidate. A reflected title-block logo on the same sheet cannot invalidate the ten actual architectural tiles; on real Lot16 the original-source-only raster tracer found 250 line segments, down from 324 when vector overlays were incorrectly present in the render. The image-only result is the trusted candidate diagnostic, not a building footprint.
+
+Original source PDFs/screenshots are retained only on Bryce's PC, outside this PR. Details in private_packets/external_house_acacia_20261116/new_engine_five_job_20261116/guarded_handoff_6sheet_summary.json.

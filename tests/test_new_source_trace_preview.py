@@ -488,3 +488,280 @@ def test_outer_first_includes_source_heavy_black_stroke_ring_without_hull():
     assert got.graph.component_count>=1
     assert got.physical_wall_authenticated is False
     assert got.measurement_authorized is False
+
+
+def test_neutral_dark_vector_stroke_ink_recovers_source_gray_without_green_or_white():
+    import fitz
+    from pb_new_source_dark_ink_scope import (
+        include_source_neutral_dark_strokes,is_source_neutral_dark,
+    )
+    from pb_next_wall_ring_preview import _collect_stroke_pair_strips
+
+    def stroke(y,colour,opacity=1.):
+        return {"type":"s","layer":"","fill":None,"color":colour,
+                "width":.48,"stroke_opacity":opacity,
+                "rect":fitz.Rect(90,y,400,y),
+                "items":(("l",fitz.Point(90,y),fitz.Point(400,y)),)}
+    original=(
+        stroke(100,(.1,.1,.1)),
+        stroke(104,(.09,.09,.09)),
+        stroke(130,(.1,.5,.1)),
+        stroke(140,(.9,.9,.9)),
+        stroke(145,(.10,.1,.1),.5),
+    )
+    blank={"fill":None,"color":None,"items":()}
+    included, count=include_source_neutral_dark_strokes(
+        original,(blank,)*len(original),
+    )
+    assert count==2
+    assert included[0] is original[0] and included[1] is original[1]
+    assert all(not row.get("items") for row in included[2:])
+    assert len(_collect_stroke_pair_strips(included))>=1
+    assert is_source_neutral_dark((.1,.1,.1))
+    assert not is_source_neutral_dark((.1,.21,.1))
+    assert not is_source_neutral_dark((.13,.13,.13))
+    assert not is_source_neutral_dark((.1,.9,.1))
+
+
+def test_source_dark_stroke_scope_does_not_change_original_length_or_path_id():
+    from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
+    row={"type":"s","fill":None,"color":(.1,.1,.1),"items":(("c",0,1),)}
+    old={"color":None,"fill":None,"items":()}
+    result,count=include_source_neutral_dark_strokes((old,row),(old,old))
+    assert count==1
+    assert len(result)==2
+    assert result[1] is row
+    with pytest.raises(ValueError,match="path_identity"):
+        include_source_neutral_dark_strokes((row,),())
+
+
+def test_new_modality_router_routes_tiled_raster_original_and_ignores_single_logo(tmp_path):
+    import io
+    from PIL import Image, ImageDraw
+    from pb_new_source_modality_router import classify_source_page_modality
+    from pb_new_raster_source_wall_trace import trace_source_raster_wall_lines
+
+    image=Image.new("RGB",(1000,700),"white")
+    d=ImageDraw.Draw(image)
+    d.rectangle((120,115,860,570),outline="black",width=9)
+    d.line((460,115,460,570),fill="black",width=7)
+    pdf=tmp_path/"raster_native.pdf"
+    with fitz.open() as doc:
+        page=doc.new_page(width=1000,height=700)
+        # Four independent raster source image tiles cover the architectural
+        # drawing. The source pixel ink is NOT native vector wall geometry.
+        for ix in range(2):
+            for iy in range(2):
+                crop=image.crop((500*ix,350*iy,500*(ix+1),350*(iy+1)))
+                out=io.BytesIO()
+                crop.save(out,format="PNG")
+                page.insert_image(
+                    fitz.Rect(500*ix,350*iy,500*(ix+1),350*(iy+1)),
+                    stream=out.getvalue(),
+                )
+        # A separate rotated title-block image is not the raster plan. Its
+        # transformation must not disqualify four intact wall source tiles.
+        logo=Image.new("RGB",(220,130),"white")
+        ImageDraw.Draw(logo).text((20,30),"LOGO",fill="black")
+        raw_logo=io.BytesIO()
+        logo.save(raw_logo,format="PNG")
+        page.insert_image(
+            fitz.Rect(40,575,220,690),stream=raw_logo.getvalue(),
+            rotate=180,
+        )
+        # One unrelated native dimension overlay should NOT act as a wall.
+        page.draw_line((50,80),(900,80),color=(0,0,0),width=.4)
+        doc.save(pdf)
+    with fitz.open(pdf) as doc:
+        page=doc[0]
+        modality=classify_source_page_modality(page)
+        assert modality.route=="tiled_raster_underlay"
+        assert modality.raster_coverage_fraction>.99
+        assert modality.raster_image_instances==5
+        attempt=trace_source_raster_wall_lines(
+            page,source_page_index=0,
+            source_raster_xrefs=modality.raster_unique_xrefs,
+        )
+        assert attempt.status=="CANDIDATE"
+        assert len(attempt.candidate_axis_segments_pdf_pts)>=4
+        assert len(attempt.source_raster_xrefs)==4  # reflected logo excluded
+        # A separate VECTOR dimension line was drawn at y=80 on top of the
+        # raster imagery. It must not enter source-raster wall candidates.
+        assert not any(
+            abs(y0-80.)<1. and abs(y1-80.)<1.
+            and x1-x0>200.
+            for x0,y0,x1,y1 in attempt.candidate_axis_segments_pdf_pts
+        )
+        assert not attempt.exterior_wall_authenticated
+        assert not attempt.commercial_publishable
+    result,png=source_native_trace_preview(pdf,0)
+    assert result["source_modality"]["route"]=="tiled_raster_underlay"
+    assert result["raster_source_trace"]["status"]=="CANDIDATE"
+    assert result["wall_strip_count"]==0
+    assert result["external_wall_trace_status"]=="ABSTAINED"
+    assert not result["quantity_authorized"]
+    assert png[:8]==b"\x89PNG\r\n\x1a\n"
+
+
+def test_native_vector_page_does_not_route_through_raster(tmp_path):
+    from pb_new_source_modality_router import classify_source_page_modality
+    path=_floor_plan(tmp_path)
+    with fitz.open(path) as pdf:
+        status=classify_source_page_modality(pdf[0])
+    assert status.route=="native_vector"
+    assert status.raster_coverage_fraction==0
+    summary,png=source_native_trace_preview(path,0)
+    assert summary["source_modality"]["route"]=="native_vector"
+    assert summary["raster_source_trace"]["candidate_axis_segments_pdf_pts"]==[]
+    assert summary["legacy_fallback_allowed"] is False
+
+
+def test_cavity_multi_face_recovers_three_and_four_original_source_faces():
+    from pb_next_wall_ring_preview import _collect_cavity_multi_face_strips
+
+    def stroke(index,y,color=(0.,0.,0.)):
+        return {
+            "type":"s","layer":"","fill":None,"color":color,
+            "width":.48,"stroke_opacity":1.,
+            "rect":fitz.Rect(100,y,400,y),
+            "items":(("l",fitz.Point(100,y),fitz.Point(400,y)),),
+        }
+    triple=[stroke(i,y) for i,y in enumerate((100,103,106))]
+    quadruple=[stroke(i,y) for i,y in enumerate((100,103,106,109))]
+    for rows in (triple,quadruple):
+        got=_collect_cavity_multi_face_strips(rows)
+        assert got
+        assert any(len(s.native_path_indices())>=3 for s in got)
+        assert all(not s.polygon.is_empty for s in got)
+        assert all(98<=s.polygon.bounds[1]<=111 for s in got)
+    five=[stroke(i,y) for i,y in enumerate((100,103,106,109,112))]
+    assert _collect_cavity_multi_face_strips(five)==[]
+    assert _collect_cavity_multi_face_strips([
+        stroke(0,100,color=(0.,.8,0.)),
+        stroke(1,103,color=(0.,.8,0.)),
+        stroke(2,106,color=(0.,.8,0.)),
+    ])==[]
+
+
+def test_cavity_multi_face_remains_noncommercial_without_exterior_ownership():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+
+    def stroke(y):
+        return {"type":"s","layer":"","fill":None,"color":(0.,0.,0.),
+                "width":.48,"stroke_opacity":1.,
+                "rect":fitz.Rect(100,y,400,y),
+                "items":(("l",fitz.Point(100,y),fitz.Point(400,y)),)}
+    got=attempt_source_native_outer_wall_first([stroke(y) for y in (100,103,106)])
+    assert got.source_cavity_multi_face_band_count>=1
+    assert got.status=="ABSTAINED"
+    assert got.measurement_authorized is False
+    assert got.internal_wall_filter_authorized is False
+
+
+def test_two_isolated_wide_source_wall_faces_without_tracing_furniture_hatch():
+    from pb_next_wall_ring_preview import _collect_source_wide_face_pairs
+
+    def stroke(y,x0=100,x1=400,color=(0.,0.,0.)):
+        return {"type":"s","layer":"","fill":None,"color":color,
+                "width":.48,"stroke_opacity":1.,
+                "rect":fitz.Rect(x0,y,x1,y),
+                "items":(("l",fitz.Point(x0,y),fitz.Point(x1,y)),)}
+    pair=[stroke(100),stroke(112)]
+    strips=_collect_source_wide_face_pairs(pair)
+    assert strips and len(strips[0].native_path_indices())==2
+    assert strips[0].polygon.bounds==(100.,100.,400.,112.)
+    assert _collect_source_wide_face_pairs([stroke(100),stroke(117)])==[]
+    assert _collect_source_wide_face_pairs([stroke(100),stroke(112,350,500)])==[]
+    # A third source face is a cavity or a repeated hatch, not a unique
+    # two-face span. Never force-pair across the middle face.
+    assert _collect_source_wide_face_pairs([
+        stroke(100),stroke(106),stroke(112)
+    ])==[]
+    assert _collect_source_wide_face_pairs([
+        stroke(100,color=(0.,.6,0.)),
+        stroke(112,color=(0.,.6,0.)),
+    ])==[]
+
+
+def test_wide_pair_exterior_first_never_authorizes_areas():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    def row(y):
+        return {"type":"s","layer":"","fill":None,"color":(0.,0.,0.),
+                "width":.48,"stroke_opacity":1.,
+                "rect":fitz.Rect(100,y,400,y),
+                "items":(("l",fitz.Point(100,y),fitz.Point(400,y)),)}
+    r=attempt_source_native_outer_wall_first([row(100),row(112)])
+    assert r.source_wide_face_pair_band_count>=1
+    assert r.status=="ABSTAINED"
+    assert not r.measurement_authorized
+
+
+def test_second_stage_cad_05pt_join_is_reported_but_never_applied():
+    from pb_next_wall_ring_preview import _collect_source_heavy_stroke_strips
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+
+    def row(x0,x1,y):
+        return {"type":"s","layer":"","fill":None,"color":(0.,0.,0.),
+                "width":2.,"stroke_opacity":1.,
+                "rect":fitz.Rect(x0,y,x1,y),
+                "items":(("l",fitz.Point(x0,y),fitz.Point(x1,y)),)}
+    bars=_collect_source_heavy_stroke_strips([
+        row(100,150,100),row(150.25,210,100),
+    ])
+    g=inspect_native_wall_graph(bars)
+    assert g.component_count==2
+    assert g.second_stage_05pt_join_proposals
+    assert any(.2<=j[4]<=.3 for j in g.second_stage_05pt_join_proposals)
+    assert len(g.second_stage_05pt_join_proposals)==len(g.second_stage_join_source_paths)
+    assert g.second_stage_join_applied is False
+    assert g.measurement_authorized is False
+    far=inspect_native_wall_graph(_collect_source_heavy_stroke_strips([
+        row(100,150,100),row(151,210,100),
+    ]))
+    assert far.component_count==2
+    assert not far.second_stage_05pt_join_proposals
+
+
+def test_second_stage_nearby_strokes_wrong_family_remain_separate_and_unissued():
+    from pb_next_wall_ring_preview import _collect_source_heavy_stroke_strips
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+    # Ink close in x, but separated by 40 pt in y is not CAD junction
+    def row(x0,x1,y):
+        return {"type":"s","layer":"","fill":None,"color":(0.,0.,0.),
+                "width":1.8,"stroke_opacity":1.,
+                "rect":fitz.Rect(x0,y,x1,y),
+                "items":(("l",fitz.Point(x0,y),fitz.Point(x1,y)),)}
+    result=inspect_native_wall_graph(_collect_source_heavy_stroke_strips([
+        row(100,150,100),row(150.2,210,140),
+    ]))
+    assert result.component_count==2
+    assert result.second_stage_05pt_join_proposals==()
+
+
+def test_unverified_cavity_and_wide_face_families_never_modify_room_barrier(monkeypatch):
+    import pb_next_wall_ring_preview as builder
+    from tests.test_original_live_dark_filled_wall_rooms_20261112 import (
+        _dark_rect_room,
+    )
+    from tests.test_layered_wall_doorway_room_ring_shadow_v1 import SHA
+
+    def no_candidate_barrier(*args, **kwargs):
+        raise AssertionError("unverified source face family was added to room topology")
+
+    monkeypatch.setattr(builder,"_collect_cavity_multi_face_strips",no_candidate_barrier)
+    monkeypatch.setattr(builder,"_collect_source_wide_face_pairs",no_candidate_barrier)
+    result=builder.build_layered_wall_doorway_room_rings(
+        _dark_rect_room(),source_sha256=SHA,page_index=0,
+        stroke_pair_wall_faces=True,
+    )
+    assert len(result.rings)==1
+    assert all(not ring.commercial_projection_allowed for ring in result.rings)
+
+
+def test_null_source_opacity_never_admits_neutral_dark_wall_candidate():
+    from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
+    row={"fill":None,"color":(.1,.1,.1),"stroke_opacity":None,
+         "items":(("l",fitz.Point(1,1),fitz.Point(50,1)),)}
+    inert={"fill":None,"color":None,"items":()}
+    result,count=include_source_neutral_dark_strokes((row,),(inert,))
+    assert count==0 and result==(inert,)

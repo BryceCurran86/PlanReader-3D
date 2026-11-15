@@ -17,6 +17,8 @@ from pb_next_wall_ring_preview import (
     _collect_strips,
     _collect_stroke_pair_strips,
     _collect_source_heavy_stroke_strips,
+    _collect_cavity_multi_face_strips,
+    _collect_source_wide_face_pairs,
     build_layered_wall_doorway_room_rings,
 )
 from pb_layered_wall_doorway_room_ring_shadow import (
@@ -27,6 +29,13 @@ from pb_new_exterior_wall_preflight import (
     attempt_source_native_outer_wall_first,
 )
 from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
+from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
+from pb_new_source_modality_router import classify_source_page_modality
+from pb_new_raster_source_wall_trace import (
+    RasterSourceSegmentTrace,
+    trace_source_raster_wall_lines,
+)
+from pb_new_exterior_wall_preflight import SourceNativeOuterWallAttempt
 from pb_new_numbered_space_key import (
     NumberedSpaceKeyResult,
     detect_numbered_space_key,
@@ -68,6 +77,15 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         page = document[page_index]
         drawings = page.get_drawings()
         rect = page.rect
+        # Source representation must be checked BEFORE choosing a physical
+        # tracing lane. A full tiled raster architectural page does not gain
+        # physical wall authority from its unrelated vector dimensions.
+        source_modality = classify_source_page_modality(
+            page, vector_path_count=len(drawings),
+        )
+        raster_trace = RasterSourceSegmentTrace(
+            "ABSTAINED", "not_raster_source_page", page_index, 0.,
+        )
         # Preflight source hygiene is not a physical tracing stage:
         # remove only source-proven non-wall vector glyphs and green ink,
         # keeping native path IDs and original bytes unchanged.
@@ -75,10 +93,29 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         wall_drawings, source_wall_ink_count, green_path_exclusions = (
             _source_wall_ink_candidate_drawings(vector_scope.drawings)
         )
-        # MANDATORY FIRST GEOMETRY: try to trace the physical external walls
-        # from source fill AND double-stroke pairs before any room operations.
-        # This remains diagnostic-only until the source wall owner is proved.
-        outer_wall = attempt_source_native_outer_wall_first(wall_drawings)
+        wall_drawings, neutral_dark_added = include_source_neutral_dark_strokes(
+            vector_scope.drawings, wall_drawings,
+        )
+        if source_modality.route == "tiled_raster_underlay":
+            # First geometry is from raster SOURCE PIXELS. Do not silently
+            # misclassify native dimension overlays as architectural walls.
+            raster_trace = trace_source_raster_wall_lines(
+                page,source_page_index=page_index,
+                source_raster_xrefs=source_modality.raster_unique_xrefs,
+            )
+            # Preserve every native path offset, but mask ALL native-vector
+            # wall candidates for this image-backed plan page.
+            blank = {"layer":"","fill":None,"color":None,"items":()}
+            wall_drawings = tuple(blank for _ in wall_drawings)
+            source_wall_ink_count = 0
+            neutral_dark_added = 0
+            outer_wall = SourceNativeOuterWallAttempt(
+                "ABSTAINED", "source_raster_exterior_wall_not_authenticated",
+            )
+        else:
+            # MANDATORY FIRST GEOMETRY on native-vector source: structural
+            # wall-band outer attempt before internal wall/room work.
+            outer_wall = attempt_source_native_outer_wall_first(wall_drawings)
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
         # a failed exterior trace. Missing key evidence is explicitly shown.
@@ -129,6 +166,8 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     + _collect_dark_painted_source_wall_strips(clipped)
                 ), (0.75, 0.20, 0.80)),
                 ("source_heavy_stroke", _collect_source_heavy_stroke_strips(clipped), (0.93,0.3,0.12)),
+                ("source_cavity_multi_face", _collect_cavity_multi_face_strips(clipped), (0.46,0.29,0.87)),
+                ("source_wide_face_pair", _collect_source_wide_face_pairs(clipped), (0.59,0.4,0.93)),
             )
             for kind, strips, color in candidates:
                 for strip in strips:
@@ -146,6 +185,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                         canvas.draw_polyline(points, color=color, width=1.7, stroke_opacity=0.78)
                     except (ValueError, TypeError, AttributeError):
                         continue
+        # Raster branch shows actual source image line-candidate geometry,
+        # not any native-vector page furniture or old envelope contour.
+        # The render is a diagnostic: magenta may include dimension lines.
+        for x0,y0,x1,y1 in raster_trace.candidate_axis_segments_pdf_pts[:1200]:
+            canvas.draw_line(
+                fitz.Point(x0,y0),fitz.Point(x1,y1),
+                color=(.88,.07,.55),width=.75,stroke_opacity=.68,
+            )
         # Show an outer boundary ONLY if the source actually traces a joined
         # wall-band perimeter. A boxed drawing/landscape hull is never shown.
         if outer_wall.polygon_pdf_pts:
@@ -157,6 +204,15 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 outer_pts + [outer_pts[0]],
                 color=(0.95, 0.07, 0.13),
                 width=2.8,
+            )
+        # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
+        # applied to native geometry and never counted as physical walls.
+        for ax,ay,bx,by,distance in (
+            outer_wall.graph.second_stage_05pt_join_proposals[:128]
+        ):
+            canvas.draw_line(
+                fitz.Point(ax,ay),fitz.Point(bx,by),
+                color=(0.,.95,.95),width=1.8,
             )
         # Native source-backed FREE ENDPOINTS from the connected wall network
         # are diagnostic only, not authenticated openings or outside walls.
@@ -186,8 +242,12 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             "producer": "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings",
             "legacy_envelope_used": False,
             "legacy_fallback_allowed": False,
+            "source_modality": source_modality.to_dict(),
+            "raster_source_trace": raster_trace.to_dict(),
             "stage_order": (
-                "attempt_source_native_exterior_wall_trace_first",
+                "attempt_raster_source_walls_first"
+                if source_modality.route == "tiled_raster_underlay"
+                else "attempt_source_native_exterior_wall_trace_first",
                 "trace_source_native_internal_wall_candidates",
                 "temporarily_close_source_evidenced_doorways",
                 "find_candidate_room_rings",
@@ -202,6 +262,10 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 outer_wall.source_stroke_pair_band_count,
             "external_wall_heavy_native_stroke_candidates":
                 outer_wall.source_heavy_stroke_band_count,
+            "external_wall_cavity_multi_face_candidates":
+                outer_wall.source_cavity_multi_face_band_count,
+            "external_wall_wide_native_face_pair_candidates":
+                outer_wall.source_wide_face_pair_band_count,
             "external_wall_source_path_candidates":
                 outer_wall.source_wall_path_count,
             "numbered_space_key": space_key.to_dict(),
@@ -217,9 +281,18 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     list(pt) for pt in outer_wall.graph.largest_component_open_endpoints_pdf_pts
                 ],
                 "outside_ink_filter_authorized": False,
+                "stage_two_0_5pt_join_proposals": [
+                    list(pt) for pt in outer_wall.graph.second_stage_05pt_join_proposals
+                ],
+                "stage_two_join_source_paths": [
+                    [list(a),list(b)]
+                    for a,b in outer_wall.graph.second_stage_join_source_paths
+                ],
+                "stage_two_join_applied": False,
             },
             "source_wall_ink_paths_retained": source_wall_ink_count,
             "green_source_paths_excluded": green_path_exclusions,
+            "source_neutral_dark_stroke_paths_added": neutral_dark_added,
             "external_wall_path_points": [
                 list(p) for p in outer_wall.polygon_pdf_pts
             ],
@@ -251,6 +324,10 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 "cyan": "stroke-pair wall candidates; may include dimensions",
                 "purple": "dark-fill wall candidates",
                 "red_orange": "source-heavy black stroke wall candidate, not verified",
+                "magenta": "tiled raster original-source candidate ink, not physical wall",
+                "violet": "three/four native CAD parallel-face wall candidates only",
+                "lavender": "two isolated native faces 8–16 PDF pt apart; candidates only",
+                "light_cyan": "proposed source 0.5pt CAD connection; not applied",
                 "orange": "temporary topology-only doorway closures",
                 "green": "candidate room enclosure",
             },

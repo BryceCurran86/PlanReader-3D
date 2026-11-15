@@ -11,6 +11,8 @@ import math
 from typing import Sequence
 
 from shapely.strtree import STRtree
+from shapely.geometry import Point, LineString
+from shapely.ops import nearest_points
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,13 @@ class NativeWallGraphDiagnostic:
     largest_component_bbox_pdf_pts: tuple[float, float, float, float] | None = None
     largest_component_open_endpoints_pdf_pts: tuple[tuple[float, float], ...] = ()
     connectivity_status: str = "unavailable"
+    second_stage_05pt_join_proposals: tuple[
+        tuple[float,float,float,float,float], ...
+    ] = ()
+    second_stage_join_source_paths: tuple[
+        tuple[tuple[int, ...],tuple[int, ...]], ...
+    ] = ()
+    second_stage_join_applied: bool = False
     measurement_authorized: bool = False
     outside_ink_filter_authorized: bool = False
 
@@ -93,7 +102,6 @@ def inspect_native_wall_graph(bars: Sequence[object]) -> NativeWallGraphDiagnost
                     (((x0+x1)/2,y1),(x0,y1,x1,y1)))
         for point, edge in tips:
             # A tip must touch ANOTHER source bar to count as joined.
-            from shapely.geometry import LineString
             x_a,y_a,x_b,y_b = edge
             tip_edge = LineString(((x_a,y_a),(x_b,y_b)))
             connected = any(
@@ -102,6 +110,52 @@ def inspect_native_wall_graph(bars: Sequence[object]) -> NativeWallGraphDiagnost
             )
             if not connected:
                 endpoints.append(tuple(round(v,3) for v in point))
+    # SECOND-STAGE source-near-join diagnostic: never actually move, extend
+    # or snap a source stroke. A 0.50-pt proximity is only proposed when the
+    # FIRST 0.03-pt connectivity stage left TWO DIFFERENT components, and the
+    # endpoint physically approaches the other source wall band. This is
+    # important for typical CAD corner mitres, but 0.5 pt is NOT a wall gate.
+    join_proposals=[]
+    joins_source=[]
+    join_keys=set()
+    for i, strip in enumerate(valid):
+        x0,y0,x1,y1=(float(q) for q in strip.polygon.bounds)
+        if x1-x0>y1-y0:
+            tip_points=[(x0,(y0+y1)/2),(x1,(y0+y1)/2)]
+        else:
+            tip_points=[((x0+x1)/2,y0),((x0+x1)/2,y1)]
+        for x,y in tip_points:
+            point=Point(x,y)
+            neighbors=tree.query(point.buffer(.5))
+            for index in neighbors:
+                j=int(index)
+                if i==j or find(i)==find(j):
+                    continue
+                distance=float(point.distance(valid[j].polygon))
+                if not .03 < distance <= .5:
+                    continue
+                nearest=nearest_points(point,valid[j].polygon)[1]
+                # Must approach another real bar, not an unrelated sheet
+                # bbox or image hull. No adjustment is performed.
+                key=(min(i,j),max(i,j),round(x,2),round(y,2))
+                if key in join_keys:
+                    continue
+                join_keys.add(key)
+                join_proposals.append((
+                    round(x,3),round(y,3),
+                    round(nearest.x,3),round(nearest.y,3),
+                    round(distance,4),
+                ))
+                joins_source.append((
+                    tuple(sorted(strip.native_path_indices())),
+                    tuple(sorted(valid[j].native_path_indices())),
+                ))
+                if len(join_proposals)>=256:
+                    break
+            if len(join_proposals)>=256:
+                break
+        if len(join_proposals)>=256:
+            break
     return NativeWallGraphDiagnostic(
         component_count=len(parts),
         largest_component_band_count=len(main),
@@ -112,4 +166,7 @@ def inspect_native_wall_graph(bars: Sequence[object]) -> NativeWallGraphDiagnost
             "source_native_network_open"
             if endpoints else "source_native_network_endpoints_joined_not_exterior_verified"
         ),
+        second_stage_05pt_join_proposals=tuple(join_proposals),
+        second_stage_join_source_paths=tuple(joins_source),
+        second_stage_join_applied=False,
     )

@@ -6379,6 +6379,20 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         pxpm=to_float(page.get("px_per_m"))
         st.markdown("### New source-native wall trace — first stage")
         native_report=native_trace.get("summary") or {}
+        source_mode=(native_report.get("source_modality") or {}).get("route")
+        if source_mode == "tiled_raster_underlay":
+            raster_count=len(
+                (native_report.get("raster_source_trace") or {}).get(
+                    "candidate_axis_segments_pdf_pts",[]
+                )
+            )
+            st.warning(
+                "Original PDF geometry is a TILED RASTER UNDERLAY, not native "
+                f"vector walls. New raster-source tracer found {raster_count} "
+                "unclassified source-ink line candidates (magenta). It cannot "
+                "prove physical external walls, rooms or measurements. "
+                "The legacy envelope detector is disabled."
+            )
         native_codes=native_report.get("reason_codes") or ["new_trace_no_result"]
         if native_trace.get("png"):
             st.image(native_trace["png"],use_container_width=True,

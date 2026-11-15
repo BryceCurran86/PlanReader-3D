@@ -48,6 +48,7 @@ from shapely.ops import unary_union
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_layer_evidence_shadow import is_explicit_wall_layer_name
+from pb_new_source_dark_ink_scope import is_source_neutral_dark
 # Port PR #4300 source-ink safeguards into the new tracer rather than
 # running an obsolete source-painted prototype. These original-producer
 # functions preserve native path indices; their results remain topology-only.
@@ -551,7 +552,7 @@ def expand_labelled_stroke_pair_viewports(
 
 def _is_wall_stroke_color(color: Any) -> bool:
     """Default CAD stroke (None) or opaque black. Grey grid and green hatch are not walls."""
-    return color is None or _is_black(color)
+    return color is None or is_source_neutral_dark(color)
 
 
 def _axis_strokes(
@@ -669,6 +670,138 @@ def _merged_along_spans(
         else:
             merged.append((lo, hi))
     return merged
+
+
+def _collect_source_wide_face_pairs(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Native two-face walls with 8–16pt source separation, review-only.
+
+    Original narrower 1.2–8pt pairing remains unchanged. Wider wall-face
+    pairs can be real at larger sheet scales; require two isolated,
+    reciprocally matching original source face runs, not a page hull or a
+    chain of 3+ hatch lines. No source length extension is permitted.
+    """
+    strokes=_axis_strokes(drawings)
+    found=[]
+    seen=set()
+    for horiz in (True,False):
+        pool=[v for v in strokes if v[1] is horiz and v[4]-v[3]>=30.]
+        for source in pool:
+            near=[]
+            for other in pool:
+                if other==source or other[0]==source[0]:
+                    continue
+                gap=abs(other[2]-source[2])
+                if not 1.0<=gap<=16.0:
+                    continue
+                overlap=min(source[4],other[4])-max(source[3],other[3])
+                length=min(source[4]-source[3],other[4]-other[3])
+                if length>0 and overlap>=.8*length:
+                    near.append(other)
+            groups=_cluster_strokes_by_perp([source]+near)
+            if len(groups)!=2:
+                continue
+            a,b=groups[0],groups[-1]
+            spacing=b[0]-a[0]
+            if not 8.0<spacing<=16.0:
+                continue
+            face0=max(a[1],key=lambda item:item[4]-item[3])
+            face1=max(b[1],key=lambda item:item[4]-item[3])
+            lo=max(face0[3],face1[3]);hi=min(face0[4],face1[4])
+            if hi-lo<30.:
+                continue
+            if hi-lo<.8*min(face0[4]-face0[3],face1[4]-face1[3]):
+                continue
+            if horiz:
+                x0,x1,y0,y1=lo,hi,a[0],b[0]
+            else:
+                x0,x1,y0,y1=a[0],b[0],lo,hi
+            key=tuple(round(z,2) for z in (x0,y0,x1,y1))
+            if key in seen:
+                continue
+            seen.add(key)
+            paths=tuple(sorted({item[0] for group in groups
+                                for item in group[1]}))
+            if len(paths)<2:
+                continue
+            found.append(_Strip(paths[0],x0,y0,x1,y1,
+                                box(x0,y0,x1,y1),path_indices=paths))
+    return found
+
+
+def _collect_cavity_multi_face_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Three/four aligned original CAD faces as topology-only wall candidates.
+
+    A narrow Australian cavity wall often has stud, cavity, brick and
+    plasterboard strokes. The existing 2-face function intentionally rejects
+    that as ambiguous. Preserve the old rule; recover a second *candidate*
+    family only where 3–4 distinct native face levels overlap on one long
+    unbroken wall run with the same structural direction.
+    """
+    strokes = _axis_strokes(drawings)
+    out: list[_Strip] = []
+    seen: set[tuple[float,float,float,float]] = set()
+    for horiz in (True,False):
+        pool=[item for item in strokes if item[1] is horiz]
+        for source in pool:
+            src_lo,src_hi=source[3:5]
+            if src_hi-src_lo < 15.:
+                continue
+            close_strokes=[]
+            for other in pool:
+                gap=abs(other[2]-source[2])
+                if gap>16.0:
+                    continue
+                overlap=min(src_hi,other[4])-max(src_lo,other[3])
+                shortest=min(src_hi-src_lo,other[4]-other[3])
+                if shortest<=0 or overlap < .80*shortest:
+                    continue
+                close_strokes.append(other)
+            grouped=_cluster_strokes_by_perp(close_strokes)
+            if not (3<=len(grouped)<=4):
+                continue
+            first,last=grouped[0],grouped[-1]
+            low_perp,high_perp=first[0],last[0]
+            if not 1.2<=high_perp-low_perp<=16.0:
+                continue
+            # Do not choose from the interior: the two outside faces are
+            # actual represented source strokes, never extrapolated edges.
+            if abs(source[2]-low_perp)>.8 and abs(source[2]-high_perp)>.8:
+                continue
+            # Require all 3/4 face levels to have a real source stroke
+            # covering a substantial common span. Extra strokes beyond
+            # these clusters make this family ambiguous, so abstain.
+            representatives=[
+                max(members,key=lambda item:(item[4]-item[3],-item[0]))
+                for _perp,members in grouped
+            ]
+            lo=max(item[3] for item in representatives)
+            hi=min(item[4] for item in representatives)
+            if hi-lo<15.:
+                continue
+            if hi-lo < .70*min(item[4]-item[3] for item in representatives):
+                continue
+            if horiz:
+                x0,x1,y0,y1=lo,hi,low_perp,high_perp
+            else:
+                x0,x1,y0,y1=low_perp,high_perp,lo,hi
+            key=tuple(round(v,2) for v in (x0,y0,x1,y1))
+            if key in seen:
+                continue
+            seen.add(key)
+            paths=tuple(sorted({
+                item[0] for _perp,members in grouped
+                for item in members
+                if min(item[4],hi)-max(item[3],lo)>5.
+            }))
+            if len(paths)<3:
+                continue
+            out.append(_Strip(paths[0],x0,y0,x1,y1,box(x0,y0,x1,y1),
+                              path_indices=paths))
+    return out
 
 
 def _collect_stroke_pair_strips(
@@ -813,7 +946,7 @@ def _collect_source_heavy_stroke_strips(
     for index, row in enumerate(drawings):
         if row is None or row.get("fill") is not None:
             continue
-        if row.get("color") is None or not _is_black(row.get("color")):
+        if row.get("color") is None or not is_source_neutral_dark(row.get("color")):
             continue
         opacity = row.get("stroke_opacity", 1.0)
         if type(opacity) not in (int, float) or opacity < .95:
@@ -2017,6 +2150,12 @@ def build_layered_wall_doorway_room_rings(
             + _collect_dark_fill_strips(indexed)
             + recovered_dark
             + _collect_source_heavy_stroke_strips(indexed)
+            # Cavity and >8pt wide-face candidates are SOURCE diagnostic
+            # overlays and exterior-graph evidence only. They do NOT join
+            # or split room barriers until their actual physical role and
+            # endpoint ownership is independently authenticated. The
+            # original 3Laurel suite regressed from 16 to 9 rings when
+            # these unverified bands were forced into room topology.
         )
         keys: set[tuple] = set()
         unique = []
