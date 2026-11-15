@@ -222,6 +222,13 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 fitz.Point(x,y), radius=2.4,
                 color=(.98,.12,.17), fill=(1.,.88,.07), width=0.8,
             )
+        # Magenta: separate native wall components whose ORIGINAL endpoints
+        # are near each other; NEVER an inferred physical wall or doorway.
+        for hit in outer_wall.graph.endpoint_near_misses:
+            canvas.draw_circle(
+                fitz.Point(*hit.tip_pdf_pts), radius=4.0,
+                color=(0.70, 0.08, 0.72), width=1.5,
+            )
         for closure in result.closures:
             lo, hi = closure.gap_interval
             a, b = closure.band
@@ -289,6 +296,25 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     for a,b in outer_wall.graph.second_stage_join_source_paths
                 ],
                 "stage_two_join_applied": False,
+                "source_endpoint_near_miss_total": (
+                    outer_wall.graph.endpoint_near_miss_total
+                ),
+                "source_endpoint_near_misses": [
+                    {
+                        "tip_pdf_pts": list(hit.tip_pdf_pts),
+                        "native_path_ids": list(hit.native_path_ids),
+                        "nearby_native_path_ids": list(hit.nearby_native_path_ids),
+                        "separation_pdf_pts": hit.separation_pdf_pts,
+                        "native_source_layers": list(hit.native_source_layers),
+                        "nearby_source_layers": list(hit.nearby_source_layers),
+                        "same_painted_exterior_layer_hint": (
+                            hit.same_painted_exterior_layer_hint
+                        ),
+                        "physical_join_authenticated": False,
+                        "measurement_authorized": False,
+                    }
+                    for hit in outer_wall.graph.endpoint_near_misses
+                ],
             },
             "source_wall_ink_paths_retained": source_wall_ink_count,
             "green_source_paths_excluded": green_path_exclusions,
@@ -329,6 +355,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 "lavender": "two isolated native faces 8–16 PDF pt apart; candidates only",
                 "light_cyan": "proposed source 0.5pt CAD connection; not applied",
                 "orange": "temporary topology-only doorway closures",
+                "magenta_circle": "native wall endpoint near misses, not verified",
                 "green": "candidate room enclosure",
             },
         }
