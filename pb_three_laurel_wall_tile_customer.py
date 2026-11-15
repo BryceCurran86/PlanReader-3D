@@ -318,7 +318,14 @@ def _is_room_enclosed_by_walls(page, label: str) -> bool:
             y0 = min(words[i + k][1] for k in range(len(tokens)))
             x1 = max(words[i + k][2] for k in range(len(tokens)))
             y1 = max(words[i + k][3] for k in range(len(tokens)))
-            matches.append(fitz.Rect(x0, y0, x1, y1))
+            is_schedule = False
+            for w in words:
+                if abs(w[1] - y0) < 5 and abs(w[0] - x1) < 150:
+                    if "M2" in w[4].upper():
+                        is_schedule = True
+                        break
+            if not is_schedule:
+                matches.append(fitz.Rect(x0, y0, x1, y1))
     if not matches:
         return False
 
@@ -333,6 +340,8 @@ def _is_room_enclosed_by_walls(page, label: str) -> bool:
         local_fills = 0
         local_curves = 0
         local_thick = 0
+        h_lines = []
+        v_lines = []
         for d in drawings:
             r = d.get("rect")
             if r and abs(r.x0 - cx) < 250 and abs(r.y0 - cy) < 250:
@@ -344,15 +353,6 @@ def _is_room_enclosed_by_walls(page, label: str) -> bool:
                 for it in d.get("items", ()):
                     if it[0] == "c":
                         local_curves += 1
-
-        if local_fills == 0 and local_curves == 0 and local_thick == 0:
-            continue
-
-        h_above = False
-        h_below = False
-        v_left = False
-        v_right = False
-        for d in drawings:
             for it in d.get("items", ()):
                 if it[0] == "l" and len(it) >= 3:
                     try:
@@ -362,22 +362,35 @@ def _is_room_enclosed_by_walls(page, label: str) -> bool:
                         continue
                     dx = abs(x2 - x1)
                     dy = abs(y2 - y1)
-                    if (dx * dx + dy * dy) ** 0.5 < 8.0:
+                    if dx < 30.0 and dy < 30.0:
                         continue
-                    mid_x = (x1 + x2) / 2.0
-                    mid_y = (y1 + y2) / 2.0
-                    if dy <= 1.0 and abs(mid_x - cx) < 250:
-                        if cy - 250 < mid_y < cy:
-                            h_above = True
-                        elif cy < mid_y < cy + 250:
-                            h_below = True
-                    if dx <= 1.0 and abs(mid_y - cy) < 250:
-                        if cx - 250 < mid_x < cx:
-                            v_left = True
-                        elif cx < mid_x < cx + 250:
-                            v_right = True
+                    if dy <= 1.0 and abs((y1 + y2) / 2.0 - cy) < 250:
+                        h_lines.append((min(x1, x2), max(x1, x2), (y1 + y2) / 2.0))
+                    elif dx <= 1.0 and abs((x1 + x2) / 2.0 - cx) < 250:
+                        v_lines.append(((x1 + x2) / 2.0, min(y1, y2), max(y1, y2)))
 
-        if h_above and h_below and v_left and v_right:
+        if local_fills == 0 and local_curves == 0 and local_thick == 0:
+            continue
+
+        h_above = [h for h in h_lines if cy - 250 < h[2] < cy]
+        h_below = [h for h in h_lines if cy < h[2] < cy + 250]
+        v_left = [v for v in v_lines if cx - 250 < v[0] < cx]
+        v_right = [v for v in v_lines if cx < v[0] < cx + 250]
+        if not (h_above and h_below and v_left and v_right):
+            continue
+
+        corners_met = 0
+        tol = 4.0
+        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_above for v in v_left):
+            corners_met += 1
+        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_above for v in v_right):
+            corners_met += 1
+        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_below for v in v_left):
+            corners_met += 1
+        if any(h[0] <= v[0] + tol and h[1] >= v[0] - tol and v[1] <= h[2] + tol and v[2] >= h[2] - tol for h in h_below for v in v_right):
+            corners_met += 1
+
+        if corners_met >= 2:
             return True
 
     return False
