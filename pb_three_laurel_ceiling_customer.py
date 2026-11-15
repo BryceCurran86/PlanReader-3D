@@ -191,6 +191,48 @@ def _parse_schedule_table(p3: fitz.Page) -> dict[str, Decimal]:
     return parsed
 
 
+def _is_authentic_cad_page(page, *, min_drawings: int = 500, min_words: int = 20) -> bool:
+    try:
+        drawings = page.get_drawings() or []
+        valid_drawings = [
+            d for d in drawings
+            if isinstance(d, dict)
+            and isinstance(d.get("items"), (list, tuple))
+            and d["items"]
+            and all(
+                isinstance(it, (tuple, list))
+                and len(it) >= 2
+                and not any(isinstance(coord, str) for coord in it[1:])
+                for it in d["items"]
+            )
+        ]
+        if len(valid_drawings) < min_drawings:
+            return False
+    except Exception:
+        return False
+
+    try:
+        words = page.get_text("words") or []
+        if len(words) < min_words:
+            return False
+        if not any(
+            isinstance(w, (tuple, list))
+            and len(w) >= 5
+            and isinstance(w[0], (int, float))
+            and isinstance(w[1], (int, float))
+            and isinstance(w[2], (int, float))
+            and isinstance(w[3], (int, float))
+            and w[2] > w[0]
+            and w[3] > w[1]
+            for w in words
+        ):
+            return False
+    except Exception:
+        return False
+
+    return True
+
+
 def issue_original_three_laurel_ceiling_customer_quantities(
     pdf_path: str | Path,
     *,
@@ -221,13 +263,9 @@ def issue_original_three_laurel_ceiling_customer_quantities(
             if document.page_count < 18:
                 return _blocked("three_laurel_page_count_too_short")
 
-            # Check drawing vector observations on Page 3 (Plan) and Page 7 (Section A-A)
+            # Check authentic CAD geometry and word observations on Page 3 (Plan) and Page 7 (Section A-A)
             for p_idx in (2, 6):
-                try:
-                    drawings = document[p_idx].get_drawings() or []
-                    if len(drawings) < 500:
-                        return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
-                except Exception:
+                if not _is_authentic_cad_page(document[p_idx]):
                     return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             # Raster backend check
