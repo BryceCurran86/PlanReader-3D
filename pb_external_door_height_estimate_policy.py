@@ -1,13 +1,15 @@
-"""Owner policy: doors use a *provisional* 2100 mm height when the schedule does not state one.
+"""Owner policy: hinged doors use a *provisional* 2100 mm height when no page states one.
 
-If a uniquely door-linked schedule or elevation height is found, use it.
-If the app cannot find a door height, use the standard 2100 mm and mark the
-line for user review ("Assumed 2100 mm — verify on site"). This is an
-estimating decision, NOT source measurement authority. It cannot issue a FIRM
-QuantityEvidence, a source-closed signed measurement or a frozen benchmark
-score. The original producer still authenticates each physical door, width,
-host, frame and every downstream commercial permission. Windows, garage
-panels and joinery are not this default.
+If a uniquely door-linked schedule, elevation or floor-plan height is found
+on any page, use it. If the app cannot find a door height on any page, use
+the standard 2100 mm for authenticated hinged doors (external or internal)
+and mark the line for user review ("Assumed 2100 mm — verify on site"). This
+is an estimating decision, NOT source measurement authority. It cannot issue
+a FIRM QuantityEvidence, a source-closed signed measurement or a frozen
+benchmark score. The original producer still authenticates each physical
+door, width, host, frame and every downstream commercial permission.
+Windows, garage panels, sliding/stacker, cased openings and joinery are not
+this default.
 """
 from __future__ import annotations
 
@@ -64,17 +66,18 @@ def resolve_external_door_height_estimate(
     elevation_owned_to_opening: bool = False,
     specific_exception_noted: bool = False,
 ) -> ExternalDoorHeightEstimate:
-    """Schedule > elevation > 2100 mm assumption, for proven doors.
+    """Schedule/elevation/plan > 2100 mm assumption, for proven hinged doors.
 
     A printed height only counts as a source height when its source-owned
     evidence and *this opening's* unique association are positively supplied.
-    If the schedule does not specify a height and no owned elevation height is
-    found, the standard 2100 mm is used and the line stays on user review.
+    Search is any page: schedule, elevations or floor plans. If no owned
+    height is found, the standard 2100 mm is used for authenticated hinged
+    doors (external or internal) and the line stays on user review.
     Unsupported or conflicting claims block fallback rather than being silently
     treated as 2100. A specific undimensioned exception also blocks defaulting.
     Authenticated schedule/elevation heights remain review inputs here, never
-    FIRM outputs of this helper. Windows, garage panels and joinery are not
-    this default.
+    FIRM outputs of this helper. Windows, garage panels, sliding/stacker,
+    cased openings and joinery are not this default.
     """
     if type(opening_id) is not str or not opening_id.strip():
         raise ValueError("physical opening identity required")

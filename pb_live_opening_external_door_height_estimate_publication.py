@@ -1,11 +1,11 @@
 """Apply the owner 2100 mm door-height estimate after wall roles exist.
 
-An authenticated door hosted on a unique EXTERNAL or INTERNAL whole-wall may
-receive a labelled provisional area when the door schedule does not state a
-height and the plans print one width. The line is always user review:
-"Assumed 2100 mm — verify on site". This does not mint FIRM source
+An authenticated hinged door hosted on a unique EXTERNAL or INTERNAL
+whole-wall may receive a labelled provisional area when no page of the plans
+states a height and the plans print one width. The line is always user
+review: "Assumed 2100 mm — verify on site". This does not mint FIRM source
 measurement, invent a host/frame/kind/width, or grant a frozen120 score.
-Windows, garage panels and sliding/stacker joinery stay blocked.
+Windows, garage panels, sliding/stacker and cased openings stay blocked.
 """
 from __future__ import annotations
 

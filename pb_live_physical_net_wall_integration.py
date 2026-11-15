@@ -1332,19 +1332,29 @@ def _collect_live_physical_net_wall_claim(
     )
     if source_unique_swing_opening_host:
         from pb_source_unique_swing_opening_host_shadow import (
+            apply_source_interior_footprint_internal_roles,
             apply_source_one_room_envelope_external_roles,
         )
 
-        roles = apply_source_one_room_envelope_external_roles(
-            roles,
-            physical_void,
-            drawings_by_page_id=swing_drawings_by_page,
+        role_kwargs = {
             **({"sliding_leaf_frame_closure": True}
                if layered_sliding_leaf_closure else {}),
             **({"dark_painted_wall_source": True}
                if layered_dark_painted_wall_source else {}),
             **({"wall_end_stroke_closures": True}
                if layered_wall_end_stroke_closures else {}),
+        }
+        roles = apply_source_one_room_envelope_external_roles(
+            roles,
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            **role_kwargs,
+        )
+        roles = apply_source_interior_footprint_internal_roles(
+            roles,
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            **role_kwargs,
         )
     publication = compose_live_external_physical_net_wall_publication(
         wall_opening_composition=wall_opening,
@@ -1352,8 +1362,8 @@ def _collect_live_physical_net_wall_claim(
         gross_wall_composition=gross,
         whole_wall_role_composition=roles,
     )
-    # Owner 2100 mm estimate needs EXTERNAL whole-wall identity, which exists
-    # only after roles. Figured two-axis areas are unchanged.
+    # Owner 2100 mm estimate needs a unique EXTERNAL or INTERNAL whole-wall
+    # identity, which exists only after roles. Figured two-axis areas stay.
     physical_void = apply_live_external_door_height_estimates(
         composition=physical_void,
         whole_wall_role_composition=roles,

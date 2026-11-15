@@ -21,6 +21,8 @@ from pb_live_whole_wall_role_composition import (
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_quarter_swing_opening_kind_shadow import apply_source_quarter_swing_opening_kinds
 from pb_source_unique_swing_opening_host_shadow import (
+    SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE,
+    apply_source_interior_footprint_internal_roles,
     apply_source_one_room_envelope_external_roles,
     apply_source_sliding_leaf_opening_hosts,
     apply_source_unique_swing_opening_hosts,
@@ -261,6 +263,77 @@ def test_internal_wall_between_two_rooms_is_not_external() -> None:
     )
 
 
+def test_internal_party_wall_door_gets_internal_role_and_2100_review() -> None:
+    opening = replace(
+        _unhosted(geom=(97.2, 40.0, 100.5, 40.0), kind="door"),
+        host_wall_id="opening_host_binding_group_party",
+        host_binding_record_id="host-binding-1",
+        figured_single_axis_mm=870.0,
+        area_m2=None,
+        area_basis=None,
+        figured_area_record_id="figured-1",
+    )
+    drawings = _two_rooms_shared_partition()
+    roles = apply_source_one_room_envelope_external_roles(
+        _empty_roles(),
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    roles = apply_source_interior_footprint_internal_roles(
+        roles,
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    matching = [
+        trace for trace in roles.traces
+        if trace.physical_wall_id == opening.host_wall_id
+    ]
+    assert matching
+    assert all(trace.role is WallRoleClassification.INTERNAL for trace in matching)
+    assert all(
+        SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE in trace.reason_codes
+        for trace in matching
+    )
+    estimated = apply_live_external_door_height_estimates(
+        composition=_composition(opening),
+        whole_wall_role_composition=roles,
+    )
+    updated = estimated.canonical_openings[0]
+    assert updated.area_basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert updated.area_m2 == pytest.approx(870.0 * 2100.0 / 1_000_000.0)
+    assert updated.height_m is None
+    quantity = _opening_quantity(updated)
+    assert quantity is not None
+    assert quantity.metadata["commercial_review_required"] is True
+    assert "Assumed 2100 mm — verify on site" in quantity.metadata["element"]
+
+
+def test_envelope_door_is_not_stamped_internal() -> None:
+    drawings = _walled_room()
+    opening = replace(
+        _unhosted(geom=(97.2, 40.0, 100.5, 40.0), kind="door"),
+        host_wall_id="opening_host_binding_group_synthetic",
+        host_binding_record_id="opening_host_binding_v3_synthetic",
+    )
+    roles = apply_source_one_room_envelope_external_roles(
+        _empty_roles(),
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    roles = apply_source_interior_footprint_internal_roles(
+        roles,
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    matching = [
+        trace for trace in roles.traces
+        if trace.physical_wall_id == opening.host_wall_id
+    ]
+    assert matching
+    assert all(trace.role is WallRoleClassification.EXTERNAL for trace in matching)
+    assert all(trace.role is not WallRoleClassification.INTERNAL for trace in matching)
+
+
 def test_envelope_external_door_with_printed_width_gets_the_2100_estimate() -> None:
     drawings = _walled_room()
     opening = replace(
@@ -295,6 +368,11 @@ def test_swing_without_a_closed_room_is_not_external() -> None:
     )
     roles = apply_source_one_room_envelope_external_roles(
         _empty_roles(),
+        _composition(opening),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    roles = apply_source_interior_footprint_internal_roles(
+        roles,
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
     )

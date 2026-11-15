@@ -19,7 +19,9 @@ EXTERNAL whole-wall role for that host when the hinge sits on the outer
 contour of the morphologically closed wall-ink footprint. Closing uses half
 the existing 140 pt doorway/leaf maximum so rooms fill and doorways close;
 the hinge must then lie within two stroke-pair wall thicknesses of that
-outer contour. That is envelope topology, not a CAD layer name, thickness
+outer contour. ``apply_source_interior_footprint_internal_roles`` records
+INTERNAL when the unique hinge sits inside those rooms and not on the
+envelope. That is envelope topology, not a CAD layer name, thickness
 rank, or bounding-box perimeter. Internal hinges stay inside the footprint.
 """
 from __future__ import annotations
@@ -60,6 +62,7 @@ from pb_wall_role_authority import WallRoleClassification
 
 SOURCE_UNIQUE_SWING_OPENING_HOST = "source_unique_swing_opening_host"
 SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE = "source_envelope_external_wall_role"
+SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE = "source_interior_footprint_internal_wall_role"
 # Half of the existing 10–140 pt doorway/leaf span filter. Morphological
 # closing at this radius fills rooms and doorways; it is not a measurement.
 _ENVELOPE_CLOSE_PT = 70.0
@@ -232,6 +235,69 @@ def _hinge_on_envelope(
     return distance <= _ENVELOPE_WALL_BAND_PT
 
 
+def _hinge_interior_to_footprint(
+    hinge: tuple[float, float],
+    footprint,
+) -> bool:
+    """True when the hinge sits in the closed wall-ink rooms, not on the envelope."""
+    if footprint is None or _hinge_on_envelope(hinge, footprint):
+        return False
+    point = Point(hinge)
+    return bool(
+        footprint.contains(point)
+        or footprint.covers(point)
+        or point.distance(footprint) <= _ENVELOPE_WALL_BAND_PT
+    )
+
+
+def _unique_door_hinge(
+    opening: LiveCanonicalOpeningObject,
+    witnesses: Sequence[Mapping[str, Any]],
+) -> tuple[float, float] | None:
+    hits = [
+        tuple(float(value) for value in witness["centre"])
+        for witness in witnesses
+        if _opening_distance(opening, tuple(float(value) for value in witness["centre"]))
+        <= _SWING_OPENING_BIND_PT
+    ]
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
+def _corroborated_role_hosts(
+    roles: LiveWholeWallRoleComposition,
+    *,
+    role: WallRoleClassification,
+) -> set[str]:
+    return {
+        str(trace.physical_wall_id)
+        for trace in roles.traces
+        if (
+            str(trace.physical_wall_id or "").strip()
+            and trace.role is role
+            and trace.status is EvidenceResolutionStatus.CORROBORATED
+        )
+    }
+
+
+def _conflicting_role_hosts(
+    roles: LiveWholeWallRoleComposition,
+    *,
+    role: WallRoleClassification,
+) -> set[str]:
+    return {
+        str(trace.physical_wall_id)
+        for trace in roles.traces
+        if (
+            str(trace.physical_wall_id or "").strip()
+            and trace.status is EvidenceResolutionStatus.CORROBORATED
+            and trace.role is not None
+            and trace.role is not role
+        )
+    }
+
+
 def apply_source_one_room_envelope_external_roles(
     roles: LiveWholeWallRoleComposition,
     composition: LivePhysicalOpeningVoidComposition,
@@ -260,25 +326,12 @@ def apply_source_one_room_envelope_external_roles(
         wall_end_stroke_closures,
     )
 
-    existing_external = {
-        str(trace.physical_wall_id)
-        for trace in roles.traces
-        if (
-            str(trace.physical_wall_id or "").strip()
-            and trace.role is WallRoleClassification.EXTERNAL
-            and trace.status is EvidenceResolutionStatus.CORROBORATED
-        )
-    }
-    conflicting_hosts = {
-        str(trace.physical_wall_id)
-        for trace in roles.traces
-        if (
-            str(trace.physical_wall_id or "").strip()
-            and trace.status is EvidenceResolutionStatus.CORROBORATED
-            and trace.role is not None
-            and trace.role is not WallRoleClassification.EXTERNAL
-        )
-    }
+    existing_external = _corroborated_role_hosts(
+        roles, role=WallRoleClassification.EXTERNAL,
+    )
+    conflicting_hosts = _conflicting_role_hosts(
+        roles, role=WallRoleClassification.EXTERNAL,
+    )
     by_page: dict[str, list[LiveCanonicalOpeningObject]] = defaultdict(list)
     for opening in composition.canonical_openings:
         by_page[str(opening.page_id)].append(opening)
@@ -303,14 +356,8 @@ def apply_source_one_room_envelope_external_roles(
             host_wall_id = str(opening.host_wall_id)
             if host_wall_id in existing_external or host_wall_id in conflicting_hosts:
                 continue
-            hinge_hits = []
-            for witness in witnesses:
-                hinge = tuple(float(value) for value in witness["centre"])
-                if _opening_distance(opening, hinge) <= _SWING_OPENING_BIND_PT:
-                    hinge_hits.append(hinge)
-            if len(hinge_hits) != 1:
-                continue
-            if not _hinge_on_envelope(hinge_hits[0], footprint):
+            hinge = _unique_door_hinge(opening, witnesses)
+            if hinge is None or not _hinge_on_envelope(hinge, footprint):
                 continue
             record_id = stable_contract_id(
                 SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE,
@@ -348,6 +395,113 @@ def apply_source_one_room_envelope_external_roles(
         reason_codes=tuple(
             dict.fromkeys(
                 (reason_status, *roles.reason_codes, SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE)
+            )
+        ),
+        traces=traces,
+        role_selectors=MappingProxyType(dict(roles.role_selectors)),
+    )
+
+
+def apply_source_interior_footprint_internal_roles(
+    roles: LiveWholeWallRoleComposition,
+    composition: LivePhysicalOpeningVoidComposition,
+    *,
+    drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    sliding_leaf_frame_closure: bool = False,
+    dark_painted_wall_source: bool = False,
+    wall_end_stroke_closures: bool = False,
+) -> LiveWholeWallRoleComposition:
+    """Stamp INTERNAL on unique swing hosts that sit inside the wall-ink rooms.
+
+    Envelope hinges stay EXTERNAL. This is topology for the owner 2100 mm
+    hinged-door review estimate when no page states a height; it is not FIRM
+    measurement and does not mint a host.
+    """
+    if type(roles) is not LiveWholeWallRoleComposition:
+        raise TypeError("roles must be LiveWholeWallRoleComposition")
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    if type(sliding_leaf_frame_closure) is not bool:
+        raise TypeError("sliding_leaf_frame_closure must be an explicit boolean")
+    if type(dark_painted_wall_source) is not bool:
+        raise TypeError("dark_painted_wall_source must be an explicit boolean")
+    if type(wall_end_stroke_closures) is not bool:
+        raise TypeError("wall_end_stroke_closures must be an explicit boolean")
+    _ = (
+        sliding_leaf_frame_closure,
+        dark_painted_wall_source,
+        wall_end_stroke_closures,
+    )
+
+    existing_internal = _corroborated_role_hosts(
+        roles, role=WallRoleClassification.INTERNAL,
+    )
+    conflicting_hosts = _conflicting_role_hosts(
+        roles, role=WallRoleClassification.INTERNAL,
+    )
+    by_page: dict[str, list[LiveCanonicalOpeningObject]] = defaultdict(list)
+    for opening in composition.canonical_openings:
+        by_page[str(opening.page_id)].append(opening)
+
+    extra: list[LiveWholeWallRoleTrace] = []
+    for page_id, openings in by_page.items():
+        drawings = drawings_by_page_id.get(page_id)
+        if not drawings:
+            continue
+        hosted = tuple(
+            item for item in openings
+            if str(item.host_wall_id or "").strip()
+            and str(item.opening_kind or "").strip().lower() == "door"
+        )
+        if not hosted:
+            continue
+        footprint = _closed_wall_footprint(drawings)
+        if footprint is None:
+            continue
+        witnesses = _witnesses(drawings)
+        for opening in hosted:
+            host_wall_id = str(opening.host_wall_id)
+            if host_wall_id in existing_internal or host_wall_id in conflicting_hosts:
+                continue
+            hinge = _unique_door_hinge(opening, witnesses)
+            if hinge is None or not _hinge_interior_to_footprint(hinge, footprint):
+                continue
+            record_id = stable_contract_id(
+                SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE,
+                {
+                    "page_id": page_id,
+                    "host_wall_id": host_wall_id,
+                    "canonical_opening_id": opening.canonical_opening_id,
+                },
+                digest_chars=32,
+            )
+            extra.append(
+                LiveWholeWallRoleTrace(
+                    physical_wall_id=host_wall_id,
+                    page_id=page_id,
+                    decision_scope_id=f"live-page-{page_id}",
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    reason_codes=(SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE,),
+                    record_id=record_id,
+                    role=WallRoleClassification.INTERNAL,
+                )
+            )
+            existing_internal.add(host_wall_id)
+
+    if not extra:
+        return roles
+    traces = tuple((*roles.traces, *extra))
+    reason_status = (
+        LIVE_WHOLE_WALL_ROLE_PARTIAL
+        if roles.traces
+        else LIVE_WHOLE_WALL_ROLE_RESOLVED
+    )
+    return replace(
+        roles,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=tuple(
+            dict.fromkeys(
+                (reason_status, *roles.reason_codes, SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE)
             )
         ),
         traces=traces,
@@ -504,8 +658,10 @@ def apply_source_sliding_leaf_opening_hosts(
 
 
 __all__ = [
+    "SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE",
     "SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE",
     "SOURCE_UNIQUE_SWING_OPENING_HOST",
+    "apply_source_interior_footprint_internal_roles",
     "apply_source_one_room_envelope_external_roles",
     "apply_source_sliding_leaf_opening_hosts",
     "apply_source_unique_swing_opening_hosts",

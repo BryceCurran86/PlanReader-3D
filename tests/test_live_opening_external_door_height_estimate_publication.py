@@ -125,7 +125,7 @@ def test_authenticated_external_door_with_one_printed_width_gets_labelled_custom
     assert rows[0]["quantity_status"] == "To review"
 
 
-def test_internal_host_with_unstated_schedule_height_gets_labelled_review_area():
+def test_internal_host_with_no_height_on_any_page_gets_labelled_review_area():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(_bare_external_door()),
         whole_wall_role_composition=_roles(

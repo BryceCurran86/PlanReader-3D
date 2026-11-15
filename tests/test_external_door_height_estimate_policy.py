@@ -28,7 +28,7 @@ def assert_review_only(result, *, labelled_provisional_customer=False):
     assert result.can_issue_labelled_provisional_customer is labelled_provisional_customer
 
 
-def test_default_for_authentic_external_door_without_specific_height():
+def test_default_for_authentic_door_when_no_page_states_a_height():
     result = estimate()
     assert result.height_mm == OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM == 2100
     assert result.basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
