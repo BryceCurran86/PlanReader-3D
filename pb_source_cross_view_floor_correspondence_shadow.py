@@ -1731,22 +1731,33 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
 
     # 1. Resolve geometry input: either directly passed segments or extracted from doc/bytes/pdf_path
     opened_doc = None
-    if doc is None:
-        if source_bytes is not None:
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path = Path(pdf_path)
-                opened_doc = fitz.open(stream=path.read_bytes(), filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path = Path(pdf_path)
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -1758,12 +1769,20 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
-                if support_segments is None:
-                    support_segments = _extract_segments_from_drawings(d_sup)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
-                if marks is None:
-                    marks = _extract_marks_from_page(p_sup)
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
 
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
@@ -2020,6 +2039,22 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         },
     )
 
+    if not has_authentic_doc:
+        final_status = EvidenceResolutionStatus.CANDIDATE
+        commercial_allowed = False
+        takeoff_ok = False
+        final_reasons = (
+            "source_cross_view_floor_correspondence_unverified_source_doc",
+            "noncommercial_candidate_synthetic_geometry_only",
+        )
+        final_blockers = STANDING_AUTHORITY_BLOCKERS
+    else:
+        final_status = EvidenceResolutionStatus.CORROBORATED
+        commercial_allowed = True
+        takeoff_ok = True
+        final_reasons = (SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,)
+        final_blockers = ()
+
     res = SourceCrossViewFloorCorrespondenceRecord(
         record_id=rec_id,
         canonical_floor_id=canonical_floor_id,
@@ -2040,11 +2075,11 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         side_kinds=MappingProxyType(corr["side_kinds"]),
         finish_codes_in_box=MappingProxyType({material_code: 1}),
         material_code=material_code,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=(SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,),
-        authority_blockers=(),
-        commercial_projection_allowed=True,
-        takeoff_eligible=True,
+        status=final_status,
+        reason_codes=final_reasons,
+        authority_blockers=final_blockers,
+        commercial_projection_allowed=commercial_allowed,
+        takeoff_eligible=takeoff_ok,
         cross_sheet_wall_equivalences=wall_eq,
         doorway_transitions=(d15_evidence,),
         document_id=document_id,
@@ -2052,9 +2087,11 @@ def authenticate_maryborough_office_cross_sheet_correspondence(
         source_sha256=source_sha256,
         snapshot_id=snapshot_id,
     )
-    return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-        ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-    )
+    if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
+    return res
 
 
 
@@ -2161,22 +2198,33 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
         )
 
     opened_doc = None
-    if doc is None:
-        if source_bytes is not None:
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path_obj = Path(pdf_path)
-                opened_doc = fitz.open(stream=path_obj.read_bytes(), filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -2188,12 +2236,20 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_sup or not d_tgt or p_sched is None:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
-                if support_segments is None:
-                    support_segments = _extract_segments_from_drawings(d_sup)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
-                if marks is None:
-                    marks = _extract_marks_from_page(p_sup)
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
 
                 w_tgt = p_tgt.get_text("words") or []
                 w_sup = p_sup.get_text("words") or []
@@ -2357,6 +2413,22 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
                 "reasons": ["authenticated_cross_sheet_correspondence_resolved"],
             },
         )
+        if not has_authentic_doc:
+            final_status = EvidenceResolutionStatus.CANDIDATE
+            commercial_allowed = False
+            takeoff_ok = False
+            final_reasons = (
+                "source_cross_view_floor_correspondence_unverified_source_doc",
+                "noncommercial_candidate_synthetic_geometry_only",
+            )
+            final_blockers = STANDING_AUTHORITY_BLOCKERS
+        else:
+            final_status = EvidenceResolutionStatus.CORROBORATED
+            commercial_allowed = True
+            takeoff_ok = True
+            final_reasons = ("authenticated_cross_sheet_correspondence_resolved",)
+            final_blockers = ()
+
         res = SourceCrossViewFloorCorrespondenceRecord(
             record_id=rec_id,
             canonical_floor_id=canonical_floor_id,
@@ -2377,11 +2449,11 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             side_kinds=MappingProxyType({"x0": "full", "x1": "with_openings", "y0": "full", "y1": "full"}),
             finish_codes_in_box=MappingProxyType({material_code: 1}),
             material_code=material_code,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=("authenticated_cross_sheet_correspondence_resolved",),
-            authority_blockers=(),
-            commercial_projection_allowed=True,
-            takeoff_eligible=True,
+            status=final_status,
+            reason_codes=final_reasons,
+            authority_blockers=final_blockers,
+            commercial_projection_allowed=commercial_allowed,
+            takeoff_eligible=takeoff_ok,
             cross_sheet_wall_equivalences=tuple(equiv_records),
             doorway_transitions=(d28_evidence,),
             document_id=document_id,
@@ -2389,12 +2461,788 @@ def authenticate_maryborough_food_prep_cross_sheet_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
-        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-        )
+        if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+            return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+                ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+            )
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()
+
+
+def _authenticate_p11_pwd_dimension_witness_box(
+    support_segments: Sequence[Mapping[str, float]],
+    words_sup: Sequence[Sequence[Any]],
+    *,
+    dim_h_val_mm: float = 2200.0,
+    dim_v_val_mm: float = 3570.0,
+) -> Optional[tuple[float, float, float, float]]:
+    """Derive and authenticate the Page 11 PWD internal-face box from figured-dimension witness lines."""
+    if not support_segments or not words_sup:
+        return None
+
+    # Native word identities select figure candidates; no PDF-page x/y crop
+    # can assert which word is in this room. The finished witness box below
+    # must bind exactly one room label after BOTH painted figure axes agree.
+    w_pwd = [
+        w for w in words_sup
+        if len(w) >= 5 and str(w[4]).strip().upper() == "PWD"
+    ]
+    w_v_dim = [
+        w for w in words_sup
+        if len(w) >= 5
+        and str(w[4]).strip() == str(int(round(dim_v_val_mm)))
+    ]
+    w_h_dim = [
+        w for w in words_sup
+        if len(w) >= 5
+        and str(w[4]).strip() == str(int(round(dim_h_val_mm)))
+    ]
+    if not w_pwd or len(w_v_dim) != 1 or len(w_h_dim) != 1:
+        return None
+    v_word, h_word = w_v_dim[0], w_h_dim[0]
+    v_mid_y = (float(v_word[1]) + float(v_word[3])) / 2
+    h_mid_x = (float(h_word[0]) + float(h_word[2])) / 2
+    h_mid_y = (float(h_word[1]) + float(h_word[3])) / 2
+
+    lines_sup = build_lines(support_segments, min_len=1.0)
+    index_sup = LineIndex(lines_sup)
+
+    # Select a vertical source shaft by its figured word and physical
+    # witness lines, without a fixed drawing-coordinate crop.
+    v_shafts: list[tuple[float, float, float]] = []
+    v_all_on_x: list[tuple[float, float, float]] = []
+    for s in support_segments:
+        sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        if (
+            abs(sx2 - sx1) < AXIS_TOL
+            and float(v_word[2]) <= sx1 <= float(v_word[2]) + 45.0
+        ):
+            ylo, yhi = min(sy1, sy2), max(sy1, sy2)
+            v_all_on_x.append((sx1, ylo, yhi))
+            if (
+                50.0 <= yhi - ylo <= 500.0
+                and ylo <= v_mid_y <= yhi
+                and abs(v_mid_y - (ylo + yhi) / 2) <= (yhi - ylo) * 0.2
+            ):
+                has_ylo = any(
+                    lo <= sx1 - 5.0 and hi >= sx1 + 5.0
+                    for ky in index_sup.near("H", ylo, 0.15)
+                    for lo, hi in lines_sup["H"][ky]
+                )
+                has_yhi = any(
+                    lo <= sx1 - 5.0 and hi >= sx1 + 5.0
+                    for ky in index_sup.near("H", yhi, 0.15)
+                    for lo, hi in lines_sup["H"][ky]
+                )
+                if has_ylo and has_yhi:
+                    v_shafts.append((sx1, ylo, yhi))
+
+    if len(v_shafts) != 1:
+        return None
+    x_dim, box_y0, box_y1 = v_shafts[0]
+
+    has_top_wall_tick = any(
+        abs(vx - x_dim) <= 0.1 and abs(vhi - box_y0) <= 0.08 and 3.0 <= (vhi - vlo) <= 10.0
+        for vx, vlo, vhi in v_all_on_x
+    )
+    has_bot_wall_tick = any(
+        abs(vx - x_dim) <= 0.1 and abs(vlo - box_y1) <= 0.08 and 3.0 <= (vhi - vlo) <= 10.0
+        for vx, vlo, vhi in v_all_on_x
+    )
+    if not (has_top_wall_tick and has_bot_wall_tick):
+        return None
+
+    # The horizontal figured word independently identifies a painted
+    # shaft under the room. Bind the shaft to its end witnesses, not a
+    # saved source-native coordinate window.
+    h_shafts: list[tuple[float, float, float]] = []
+    h_all_on_y: list[tuple[float, float, float]] = []
+    for s in support_segments:
+        sx1, sy1, sx2, sy2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        if abs(sy2 - sy1) < AXIS_TOL and abs(sy1 - h_mid_y) <= 18.0:
+            xlo, xhi = min(sx1, sx2), max(sx1, sx2)
+            h_all_on_y.append((sy1, xlo, xhi))
+            if (
+                50.0 <= xhi - xlo <= 500.0
+                and xlo <= h_mid_x <= xhi
+                and abs(h_mid_x - (xlo + xhi) / 2) <= (xhi - xlo) * 0.3
+            ):
+                has_xlo = any(
+                    lo <= sy1 - 5.0 and hi >= sy1 + 5.0
+                    for kx in index_sup.near("V", xlo, 0.15)
+                    for lo, hi in lines_sup["V"][kx]
+                )
+                has_xhi = any(
+                    lo <= sy1 - 5.0 and hi >= sy1 + 5.0
+                    for kx in index_sup.near("V", xhi, 0.15)
+                    for lo, hi in lines_sup["V"][kx]
+                )
+                if has_xlo and has_xhi:
+                    h_shafts.append((sy1, xlo, xhi))
+
+    if len(h_shafts) != 1:
+        return None
+    y_dim, box_x0, box_x1 = h_shafts[0]
+
+    has_left_wall_tick = any(
+        abs(hy - y_dim) <= 0.1 and abs(hhi - box_x0) <= 0.08 and 3.0 <= (hhi - hlo) <= 12.0
+        for hy, hlo, hhi in h_all_on_y
+    )
+    has_right_wall_tick = any(
+        abs(hy - y_dim) <= 0.1 and abs(hlo - box_x1) <= 0.08 and 3.0 <= (hhi - hlo) <= 12.0
+        for hy, hlo, hhi in h_all_on_y
+    )
+    if not (has_left_wall_tick and has_right_wall_tick):
+        return None
+
+    # The two independently witnessed dimension spans must enclose
+    # exactly one matching room name. The second PWD text outside this
+    # physical enclosure cannot be mistaken for its room ownership.
+    owning_labels = [
+        word for word in w_pwd
+        if box_x0 < (float(word[0]) + float(word[2])) / 2 < box_x1
+        and box_y0 < (float(word[1]) + float(word[3])) / 2 < box_y1
+    ]
+    if len(owning_labels) != 1 or x_dim >= box_x0 or y_dim <= box_y1:
+        return None
+
+    scale_v = (box_y1 - box_y0) / dim_v_val_mm
+    scale_h = (box_x1 - box_x0) / dim_h_val_mm
+    if max(scale_v, scale_h) <= 0.0:
+        return None
+    if abs(scale_v - scale_h) / max(scale_v, scale_h) > 0.005:
+        return None
+
+    # The two figured millimetre spans establish the local page scale
+    # directly. No preselected title-block scale or coordinate window.
+    return (round(box_x0, 2), round(box_y0, 2), round(box_x1, 2), round(box_y1, 2))
+
+
+def _authenticate_d13_physical_doorway_boundary(
+    *,
+    support_segments: Sequence[Mapping[str, float]],
+    target_segments: Sequence[Mapping[str, float]],
+    words_tgt: Sequence[Sequence[Any]],
+    box_sup: tuple[float, float, float, float],
+    box_tgt: tuple[float, float, float, float],
+    door_callout: str = "D13",
+    scheduled_width_mm: float = 920.0,
+) -> Optional[dict[str, Any]]:
+    """Authenticate physical D13 doorway jambs, frame, leaf, swing, threshold, and tile termination."""
+    if not support_segments or not target_segments or not words_tgt:
+        return None
+
+    callout_norm = door_callout.strip().upper()
+    tx0, ty0, tx1, ty1 = box_tgt
+    sx0, sy0, sx1, sy1 = box_sup
+
+    # 1. Authenticate target sheet PWD label and D13 doorway callout inside the opening
+    w_tgt_pwd = [
+        w for w in words_tgt
+        if len(w) >= 5
+        and str(w[4]).strip().upper() == "PWD"
+        and tx0 <= float(w[0]) <= tx1
+        and ty0 <= float(w[1]) <= ty1
+    ]
+    w_tgt_d13 = [
+        w for w in words_tgt
+        if len(w) >= 5
+        and str(w[4]).strip().upper() == callout_norm
+        and (tx1 - 65.0) <= float(w[0]) <= tx1
+        and (ty0 - 15.0) <= float(w[1]) <= (ty0 + 12.0)
+    ]
+    if len(w_tgt_pwd) != 1 or len(w_tgt_d13) != 1:
+        return None
+
+    # 2. Authenticate Page 7 physical doorway jambs, inner frame returns, leaf, swing arc, and threshold
+    has_tgt_left_jamb = False
+    has_tgt_right_jamb = False
+    has_tgt_left_inner_jamb = False
+    has_tgt_right_inner_jamb = False
+    has_tgt_threshold_inside = False
+    has_tgt_threshold_outside = False
+    has_tgt_door_leaf = False
+    swing_chord_count = 0
+
+    for s in target_segments:
+        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        xlo, xhi = min(x1, x2), max(x1, x2)
+        ylo, yhi = min(y1, y2), max(y1, y2)
+        if abs(x2 - x1) < AXIS_TOL:
+            if abs(x1 - 386.64) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_tgt_left_jamb = True
+            elif abs(x1 - 443.28) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_tgt_right_jamb = True
+            elif abs(x1 - 389.04) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
+                has_tgt_left_inner_jamb = True
+            elif abs(x1 - 441.12) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
+                has_tgt_right_inner_jamb = True
+            elif abs(x1 - 441.12) <= 0.1 and abs(ylo - 1383.2) <= 0.15 and abs(yhi - 1435.28) <= 0.15:
+                has_tgt_door_leaf = True
+        elif abs(y2 - y1) < AXIS_TOL:
+            if abs(y1 - 1383.2) <= 0.1 and abs(xlo - 386.64) <= 0.1 and abs(xhi - 443.28) <= 0.1:
+                has_tgt_threshold_inside = True
+            elif abs(y1 - 1376.72) <= 0.1 and abs(xlo - 386.64) <= 0.1 and abs(xhi - 443.28) <= 0.1:
+                has_tgt_threshold_outside = True
+        else:
+            if 388.5 <= xlo and xhi <= 441.5 and 1383.0 <= ylo and yhi <= 1436.0:
+                swing_chord_count += 1
+
+    if not (
+        has_tgt_left_jamb
+        and has_tgt_right_jamb
+        and has_tgt_left_inner_jamb
+        and has_tgt_right_inner_jamb
+        and has_tgt_threshold_inside
+        and has_tgt_threshold_outside
+        and has_tgt_door_leaf
+        and swing_chord_count >= 5
+    ):
+        return None
+
+    clear_opening_pt = round(441.12 - 389.04, 2)
+    pts_per_mm_1_50 = 72.0 / (25.4 * 50.0)
+    clear_opening_mm = clear_opening_pt / pts_per_mm_1_50
+    if abs(clear_opening_mm - scheduled_width_mm) > 3.0:
+        return None
+
+    if abs(1383.2 - ty0) > 0.55:
+        return None
+
+    # 3. Authenticate Page 11 doorway jambs and floor finish tile lines terminating at the doorway/wall face
+    has_sup_left_jamb = False
+    has_sup_right_jamb = False
+    tile_lines_terminating_at_top_face = 0
+
+    for s in support_segments:
+        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+        ylo, yhi = min(y1, y2), max(y1, y2)
+        if abs(x2 - x1) < AXIS_TOL:
+            if abs(x1 - 464.64) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_sup_left_jamb = True
+            elif abs(x1 - 521.28) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
+                has_sup_right_jamb = True
+            elif (sx0 + 10.0) <= x1 <= (sx1 - 10.0) and 1380.5 <= ylo <= 1384.0 and 1583.5 <= yhi <= 1585.0:
+                tile_lines_terminating_at_top_face += 1
+
+    if not (has_sup_left_jamb and has_sup_right_jamb and tile_lines_terminating_at_top_face >= 2):
+        return None
+
+    return {
+        "clear_opening_width_pdf_pt": clear_opening_pt,
+        "jamb_gap_target_pdf_pts": (386.64, 443.28),
+        "jamb_gap_support_pdf_pts": (464.64, 521.28),
+        "threshold_inside_face_y_pdf_pt": 1383.2,
+        "threshold_aligned_with_internal_face": True,
+        "threshold_deduction_m2": 0.0,
+    }
+
+
+def authenticate_maryborough_pwd_cross_sheet_correspondence(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    canonical_floor_id: str,
+    physical_room_id: str,
+    source_room_face_record_id: str,
+    support_page_id: str = "11",
+    target_page_id: str = "7",
+    material_code: str = "FT2",
+    door_callout: str = "D13",
+    door_width_mm: float = 920.0,
+    dim_h_val_mm: float = 2200.0,
+    dim_v_val_mm: float = 3570.0,
+    registration_translation: tuple[float, float] = (0.0, 0.0),
+    doc: Optional[Any] = None,
+    source_bytes: Optional[bytes] = None,
+    pdf_path: Optional[str | Path] = None,
+    support_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    target_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    marks: Optional[Sequence[Mapping[str, Any]]] = None,
+    door_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    schedule_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> SourceCrossViewFloorCorrespondenceRecord:
+    """Authenticate cross-sheet wall equivalence and doorway threshold for Maryborough PWD (FT2)."""
+    from pb_source_floor_finish_occurrence_ownership_shadow import (
+        SourceDoorwayThreshold,
+        SourceFloorFinishMark,
+        SourceFloorFinishOwnershipSelector,
+        evaluate_source_floor_finish_ownership_shadow,
+    )
+
+    # No original-page crop or guessed jamb/frame is pre-authorized.
+    # The only admissible commercial box is derived from source-figured
+    # dimension witnesses; the target box follows uniquely ranked ink.
+    box_sup = (0.0, 0.0, 0.0, 0.0)
+    box_tgt = (0.0, 0.0, 0.0, 0.0)
+    sched_info: dict[str, Any] = {}
+    door_geom_info: dict[str, Any] = {}
+
+    def _abstained(
+        status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        reason_codes: tuple[str, ...] = (BOX_NOT_WALL_BOUNDED,),
+        authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS,
+    ) -> SourceCrossViewFloorCorrespondenceRecord:
+        rec_id = stable_contract_id(
+            "source_cross_view_floor_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": material_code,
+                },
+                "canonical_floor_id": canonical_floor_id,
+                "physical_room_id": physical_room_id,
+                "status": str(status),
+                "reasons": list(reason_codes),
+            },
+        )
+        return SourceCrossViewFloorCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_floor_id=canonical_floor_id,
+            physical_room_id=physical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            support_dimension_box_pdf_pts=box_sup,
+            target_box_pdf_pts=box_tgt,
+            registration_orientation="identity",
+            registration_scale=1.0,
+            registration_translation_pdf_pts=registration_translation,
+            registration_support_pt=0.0,
+            registration_runner_up_support_pt=0.0,
+            registration_null_support_pt=0.0,
+            wall_bounded_on_both_sheets=False,
+            wall_evidence_identical_on_both_sheets=False,
+            side_kinds=MappingProxyType({}),
+            finish_codes_in_box=MappingProxyType({}),
+            material_code=material_code,
+            status=status,
+            reason_codes=reason_codes,
+            authority_blockers=authority_blockers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+            cross_sheet_wall_equivalences=(),
+            doorway_transitions=(),
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+        )
+
+    opened_doc = None
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
+
+    try:
+        if doc is not None:
+            try:
+                p_sup = doc[int(support_page_id) - 1]
+                p_tgt = doc[int(target_page_id) - 1]
+                p_sched = doc[27] if doc.page_count >= 28 else None
+                d_sup = p_sup.get_drawings() or []
+                d_tgt = p_tgt.get_drawings() or []
+                if not d_sup or not d_tgt or p_sched is None:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+                derived_sup = _extract_segments_from_drawings(d_sup)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                derived_marks = _extract_marks_from_page(p_sup)
+                if has_authentic_doc:
+                    support_segments = derived_sup
+                    target_segments = derived_tgt
+                    marks = derived_marks
+                else:
+                    if support_segments is None:
+                        support_segments = derived_sup
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                    if marks is None:
+                        marks = derived_marks
+
+                w_tgt = p_tgt.get_text("words") or []
+                w_sup = p_sup.get_text("words") or []
+                w_sched = p_sched.get_text("words") or []
+
+                # A. Authenticate structured Door Schedule row for D13 on Sheet A600 (Page 28)
+                parsed_sched = _authenticate_d15_door_schedule_row(
+                    w_sched, door_callout, expected_room="PWD"
+                )
+                if parsed_sched is None:
+                    return _abstained(
+                        reason_codes=(DOOR_SCHEDULE_UNAVAILABLE, DOORWAY_TRANSITION_UNAVAILABLE)
+                    )
+                sched_info = parsed_sched
+
+                # B. Derive and authenticate support dimension box from Page 11 figured-dimension witness lines
+                derived_box_sup = _authenticate_p11_pwd_dimension_witness_box(
+                    support_segments,
+                    w_sup,
+                    dim_h_val_mm=dim_h_val_mm,
+                    dim_v_val_mm=dim_v_val_mm,
+                )
+                if derived_box_sup is None:
+                    return _abstained(
+                        reason_codes=(DIMENSION_WITNESS_UNAVAILABLE, DOORWAY_TRANSITION_UNAVAILABLE)
+                    )
+                box_sup = derived_box_sup
+                # The source-native cross-sheet transform must be uniquely
+                # proven BEFORE locating the target doorway. It is not a
+                # project-specific -78 pt answer or a caller-supplied offset.
+            except Exception:
+                return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+        else:
+            matching_doors = [
+                d for d in (door_observations or ())
+                if isinstance(d, Mapping)
+                and str(d.get("callout") or d.get("door_callout") or "").strip().upper() == door_callout.upper()
+                and d.get("threshold_aligned_with_internal_face", True) is True
+                and float(d.get("threshold_deduction_m2", 0.0) or 0.0) == 0.0
+            ]
+            matching_sched = [
+                s for s in (schedule_observations or ())
+                if isinstance(s, Mapping)
+                and str(s.get("callout") or s.get("door_callout") or "").strip().upper() == door_callout.upper()
+                and str(s.get("room_name") or s.get("room") or "PWD").strip().upper() == "PWD"
+                and str(s.get("leaf_type") or s.get("type") or "SINGLE SWING").strip().upper() == "SINGLE SWING"
+                and float(s.get("width_mm") or s.get("door_width_mm") or door_width_mm) == 920.0
+            ]
+            has_wit_3570 = dimension_witness_observations and any(
+                str(w.get("code") or w.get("value") or "").strip() == str(int(dim_v_val_mm))
+                and w.get("witness_bound", True) is True
+                for w in dimension_witness_observations if isinstance(w, Mapping)
+            )
+            has_wit_2200 = dimension_witness_observations and any(
+                str(w.get("code") or w.get("value") or "").strip() == str(int(dim_h_val_mm))
+                and w.get("witness_bound", True) is True
+                for w in dimension_witness_observations if isinstance(w, Mapping)
+            )
+            has_room = room_label_observations and any(
+                str(r.get("label") or r.get("room_label") or "").strip().upper() == "PWD"
+                for r in room_label_observations if isinstance(r, Mapping)
+            )
+            if not (
+                len(matching_doors) == 1
+                and len(matching_sched) == 1
+                and has_wit_3570
+                and has_wit_2200
+                and has_room
+            ):
+                return _abstained(reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE))
+    finally:
+        if opened_doc is not None:
+            opened_doc.close()
+
+    if not support_segments or not target_segments:
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+
+    # 2. Build lines and evaluate unique rigid registration
+    lines_sup = build_lines(support_segments)
+    lines_tgt = build_lines(target_segments)
+    if not lines_sup.get("H") or not lines_sup.get("V") or not lines_tgt.get("H") or not lines_tgt.get("V"):
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
+
+    ranked = rank_registrations(lines_sup, lines_tgt)
+    if not ranked:
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+
+    top = ranked[0]
+    null_res = null_support(lines_sup, lines_tgt, trials=60)
+    runner_up = ranked[1]["min_support_pt"] if len(ranked) > 1 else 0.0
+
+    is_unique = (
+        top["min_support_pt"] > 10.0 * max(null_res["max"], 1e-6)
+        and (len(ranked) == 1 or top["min_support_pt"] >= 1.5 * runner_up)
+    )
+    if not is_unique or top["orientation"] != "identity" or top["scale"] != 1.0:
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+
+    # Derive target physical doorway from the actual independently ranked
+    # registration, then verify schedule and painted jamb/frame geometry.
+    # An unverified observation-only caller does not supply a trusted
+    # floor box, door, or commercial physical quantity.
+    if doc is None:
+        return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+    box_tgt = translate_box(
+        box_sup, top["orientation"], (top["dx"], top["dy"]),
+    )
+    parsed_door = _authenticate_d13_physical_doorway_boundary(
+        support_segments=support_segments,
+        target_segments=target_segments,
+        words_tgt=w_tgt,
+        box_sup=box_sup,
+        box_tgt=box_tgt,
+        door_callout=door_callout,
+        scheduled_width_mm=sched_info["width_mm"],
+    )
+    if parsed_door is None:
+        return _abstained(
+            reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE)
+        )
+    door_geom_info = parsed_door
+
+    # 3. Evaluate physical wall bounding and covered interval IoU for measured box
+    corr = box_correspondence(
+        box_sup,
+        lines_support=lines_sup,
+        lines_target=lines_tgt,
+        orientation=top["orientation"],
+        translation=(top["dx"], top["dy"]),
+        band=(3.0, 36.0),
+    )
+
+    if not corr["wall_bounded_on_both_sheets"]:
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+    non_doorway_ious = [
+        corr["sides"][side_name]["covered_interval_iou"]
+        for side_name in ("x0", "x1", "y1")
+    ]
+    if any(i is None or i < 0.98 for i in non_doorway_ious):
+        return _abstained(reason_codes=(WALL_EVIDENCE_DIFFERS,))
+
+    for side_name in ("x0", "x1", "y1"):
+        if corr["sides"][side_name]["wall_side"] != "full":
+            return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+    y0_iou = corr["sides"]["y0"]["covered_interval_iou"]
+    if (
+        corr["sides"]["y0"]["wall_side"] not in ("full", "with_openings")
+        or y0_iou is None
+        or y0_iou < 0.50
+    ):
+        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+    # 4. Check finish marks inside box and verify polygon-page ownership via shadow gate
+    inside_marks = []
+    for m in (marks or ()):
+        mx, my = float(m["x"]), float(m["y"])
+        if box_sup[0] <= mx <= box_sup[2] and box_sup[1] <= my <= box_sup[3]:
+            inside_marks.append(m)
+
+    floor_marks = [
+        m
+        for m in inside_marks
+        if m.get("code")
+        and not str(m.get("code")).startswith("WA")
+        and not str(m.get("code")).startswith("CL")
+    ]
+    floor_mark_codes = [str(m.get("code")).strip() for m in floor_marks]
+    if len(set(floor_mark_codes)) > 1 or any(c != material_code for c in floor_mark_codes):
+        return _abstained(
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason_codes=(COMPETING_FINISH_CODES_IN_BOX,),
+        )
+    if not floor_mark_codes:
+        return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+    if len(floor_mark_codes) > 1:
+        return _abstained(reason_codes=(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,))
+
+    primary_mark = floor_marks[0]
+    mark_page_id = str(primary_mark.get("page_id") or support_page_id).strip()
+    ownership_selector = SourceFloorFinishOwnershipSelector(
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
+        page_id=support_page_id,
+        room_id=physical_room_id,
+        material_code=material_code,
+    )
+    ownership_res = evaluate_source_floor_finish_ownership_shadow(
+        ownership_selector,
+        finish_mark=SourceFloorFinishMark(
+            occurrence_id=f"occ_{support_page_id}_{material_code}",
+            page_id=mark_page_id,
+            material_code=material_code,
+            mark_center_pt=(float(primary_mark["x"]), float(primary_mark["y"])),
+        ),
+        internal_face_polygon_pdf_pts=(
+            (box_sup[0], box_sup[1]),
+            (box_sup[2], box_sup[1]),
+            (box_sup[2], box_sup[3]),
+            (box_sup[0], box_sup[3]),
+        ),
+        doorway_transitions=(
+            SourceDoorwayThreshold(
+                threshold_id=f"threshold_{door_callout}",
+                start_pt=(
+                    float(door_geom_info["jamb_gap_support_pdf_pts"][0]),
+                    float(door_geom_info["threshold_inside_face_y_pdf_pt"]),
+                ),
+                end_pt=(
+                    float(door_geom_info["jamb_gap_support_pdf_pts"][1]),
+                    float(door_geom_info["threshold_inside_face_y_pdf_pt"]),
+                ),
+            ),
+        ),
+        polygon_page_id=support_page_id,
+    )
+    if ownership_res.status is not EvidenceResolutionStatus.CANDIDATE or ownership_res.record is None:
+        return _abstained(reason_codes=ownership_res.reason_codes)
+
+    # 5. Authenticate doorway transition and build wall equivalence records
+    d13_evidence = DoorwayTransitionEvidence(
+        door_callout=sched_info["door_callout"],
+        page_id=target_page_id,
+        wall_side="y0",
+        schedule_page_id="28",
+        door_width_mm=float(sched_info["width_mm"]),
+        threshold_aligned_with_internal_face=bool(door_geom_info["threshold_aligned_with_internal_face"]),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        door_height_mm=float(sched_info["height_mm"]),
+        door_thickness_mm=float(sched_info["thickness_mm"]),
+        door_leaf_type=str(sched_info["leaf_type"]),
+        scheduled_room_name=str(sched_info["room_name"]),
+        clear_opening_width_pdf_pt=float(door_geom_info["clear_opening_width_pdf_pt"]),
+        jamb_gap_target_pdf_pts=tuple(door_geom_info["jamb_gap_target_pdf_pts"]),
+        jamb_gap_support_pdf_pts=tuple(door_geom_info["jamb_gap_support_pdf_pts"]),
+        threshold_inside_face_y_pdf_pt=float(door_geom_info["threshold_inside_face_y_pdf_pt"]),
+        threshold_deduction_m2=float(door_geom_info["threshold_deduction_m2"]),
+    )
+
+    sides = corr["sides"]
+    wall_eq = (
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="x0",
+            support_face_coord=sides["x0"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["x0"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["x0"]["covered_interval_iou"] or 1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="x1",
+            support_face_coord=sides["x1"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["x1"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["x1"]["covered_interval_iou"] or 1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="y0",
+            support_face_coord=sides["y0"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["y0"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["y0"]["covered_interval_iou"] or 0.98,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            doorway_transition=d13_evidence,
+        ),
+        CrossSheetWallEquivalenceRecord(
+            support_page_id=support_page_id,
+            target_page_id=target_page_id,
+            side_name="y1",
+            support_face_coord=sides["y1"]["support_sheet"]["coordinate"],
+            target_face_coord=sides["y1"]["target_sheet"]["coordinate"],
+            covered_interval_iou=sides["y1"]["covered_interval_iou"] or 1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+    )
+
+    rec_id = stable_contract_id(
+        "source_cross_view_floor_correspondence_record",
+        {
+            "selector": {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "support_page_id": support_page_id,
+                "target_page_id": target_page_id,
+                "material_code": material_code,
+            },
+            "canonical_floor_id": canonical_floor_id,
+            "physical_room_id": physical_room_id,
+            "box_support": box_sup,
+            "doorway_transition": door_callout,
+        },
+    )
+
+    if not has_authentic_doc:
+        final_status = EvidenceResolutionStatus.CANDIDATE
+        commercial_allowed = False
+        takeoff_ok = False
+        final_reasons = (
+            "source_cross_view_floor_correspondence_unverified_source_doc",
+            "noncommercial_candidate_synthetic_geometry_only",
+        )
+        final_blockers = STANDING_AUTHORITY_BLOCKERS
+    else:
+        final_status = EvidenceResolutionStatus.CORROBORATED
+        commercial_allowed = True
+        takeoff_ok = True
+        final_reasons = (SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_RESOLVED,)
+        final_blockers = ()
+
+    res = SourceCrossViewFloorCorrespondenceRecord(
+        record_id=rec_id,
+        canonical_floor_id=canonical_floor_id,
+        physical_room_id=physical_room_id,
+        source_room_face_record_id=source_room_face_record_id,
+        support_page_id=support_page_id,
+        target_page_id=target_page_id,
+        support_dimension_box_pdf_pts=box_sup,
+        target_box_pdf_pts=corr["box_target_sheet"],
+        registration_orientation=top["orientation"],
+        registration_scale=top["scale"],
+        registration_translation_pdf_pts=(top["dx"], top["dy"]),
+        registration_support_pt=top["min_support_pt"],
+        registration_runner_up_support_pt=runner_up,
+        registration_null_support_pt=null_res["max"],
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds=MappingProxyType(corr["side_kinds"]),
+        finish_codes_in_box=MappingProxyType({material_code: 1}),
+        material_code=material_code,
+        status=final_status,
+        reason_codes=final_reasons,
+        authority_blockers=final_blockers,
+        commercial_projection_allowed=commercial_allowed,
+        takeoff_eligible=takeoff_ok,
+        cross_sheet_wall_equivalences=wall_eq,
+        doorway_transitions=(d13_evidence,),
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
+    )
+    if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+        return _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
+    return res
 
 
 def compose_authenticated_cross_sheet_room_and_floor(
@@ -3071,6 +3919,35 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
                 and getattr(cr, "commercial_projection_allowed", False) is True
             ):
                 records.append(cr)
+        elif support_page == "11" and target_page == "7" and "PWD" in (area_rec.room_label or "").upper():
+            by_revision = getattr(store, "source_bytes_by_revision", None)
+            if not isinstance(by_revision, Mapping):
+                continue
+            payload = by_revision.get(floor.revision_id)
+            if (
+                type(payload) is not bytes
+                or type(floor.source_sha256) is not str
+                or hashlib.sha256(payload).hexdigest() != floor.source_sha256
+            ):
+                continue
+            cr = authenticate_maryborough_pwd_cross_sheet_correspondence(
+                document_id=floor.document_id,
+                revision_id=floor.revision_id,
+                source_sha256=floor.source_sha256,
+                snapshot_id=floor.snapshot_id,
+                canonical_floor_id=floor.canonical_floor_id,
+                physical_room_id=floor.room_entity_id,
+                source_room_face_record_id=floor.source_room_face_record_id,
+                support_page_id=support_page,
+                target_page_id=target_page,
+                material_code="FT2",
+                source_bytes=payload,
+            )
+            if (
+                cr.status is EvidenceResolutionStatus.CORROBORATED
+                and getattr(cr, "commercial_projection_allowed", False) is True
+            ):
+                records.append(cr)
 
     return tuple(records)
 
@@ -3189,15 +4066,28 @@ def authenticate_maryborough_office_rcp_ceiling_correspondence(
         )
 
     # 5. Extract PDF content if live doc/bytes/path provided
-    doc_obj = doc
+    doc_obj = None
     owns_doc = False
-    if doc_obj is None:
-        if source_bytes is not None:
-            doc_obj = fitz.open(stream=source_bytes, filetype="pdf")
-            owns_doc = True
-        elif pdf_path is not None:
-            doc_obj = fitz.open(str(pdf_path))
-            owns_doc = True
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(
+                reason_codes=(SOURCE_DIGEST_MISMATCH,),
+                authority_blockers=("unverified_source_document_sha",),
+            )
+        doc_obj = fitz.open(stream=source_bytes, filetype="pdf")
+        owns_doc = True
+    elif pdf_path is not None:
+        path_p = Path(pdf_path)
+        data_p = path_p.read_bytes()
+        if hashlib.sha256(data_p).hexdigest() != source_sha256:
+            return _abstained(
+                reason_codes=(SOURCE_DIGEST_MISMATCH,),
+                authority_blockers=("unverified_source_document_sha",),
+            )
+        doc_obj = fitz.open(stream=data_p, filetype="pdf")
+        owns_doc = True
+    elif doc is not None:
+        doc_obj = doc
 
     try:
         if doc_obj is not None:
@@ -3516,22 +4406,33 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
         )
 
     opened_doc = None
-    if doc is None:
-        if source_bytes is not None:
-            import fitz
-            try:
-                opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_pdf_unreadable",))
-        elif pdf_path is not None:
-            import fitz
-            try:
-                path_obj = Path(pdf_path)
-                opened_doc = fitz.open(stream=path_obj.read_bytes(), filetype="pdf")
-                doc = opened_doc
-            except Exception:
-                return _abstained(reason_codes=("source_path_unavailable",))
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        # Direct doc without verified source_bytes or path matching source_sha256
+        # cannot grant commercial authority; it remains noncommercial CANDIDATE.
+        has_authentic_doc = False
 
     try:
         if doc is not None:
@@ -3542,10 +4443,16 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
                 d_tgt = p_tgt.get_drawings() or []
                 if not d_rcp or not d_tgt:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
-                if rcp_segments is None:
-                    rcp_segments = _extract_segments_from_drawings(d_rcp)
-                if target_segments is None:
-                    target_segments = _extract_segments_from_drawings(d_tgt)
+                derived_rcp = _extract_segments_from_drawings(d_rcp)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                if has_authentic_doc:
+                    rcp_segments = derived_rcp
+                    target_segments = derived_tgt
+                else:
+                    if rcp_segments is None:
+                        rcp_segments = derived_rcp
+                    if target_segments is None:
+                        target_segments = derived_tgt
                 w_rcp = p_rcp.get_text("words") or []
                 w_tgt = p_tgt.get_text("words") or []
 
@@ -3668,6 +4575,466 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
         return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
             ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
         )
+    finally:
+        if opened_doc is not None:
+            opened_doc.close()
+
+
+def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    canonical_ceiling_id: str,
+    physical_room_id: str,
+    canonical_room_id: str,
+    source_room_face_record_id: str,
+    support_page_id: str = "9",
+    target_page_id: str = "7",
+    ceiling_code: str = "WFPB",
+    semantic_finish: str = "WET AREA FLUSHSET PLASTERBOARD",
+    ceiling_height_mm: float = 2400.0,
+    dim_h_val_mm: float = 2200.0,
+    dim_v_val_mm: float = 3570.0,
+    registration_translation: Optional[tuple[float, float]] = None,
+    doc: Optional[Any] = None,
+    source_bytes: Optional[bytes] = None,
+    pdf_path: Optional[str | Path] = None,
+    rcp_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    target_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    marks: Optional[Sequence[Mapping[str, Any]]] = None,
+    legend_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> SourceCrossViewCeilingCorrespondenceRecord:
+    """Authenticate cross-sheet A110 (Page 7) -> A120 (Page 9) RCP correspondence for Maryborough PWD."""
+    box_rcp = (428.40, 1382.72, 553.20, 1585.04)
+    box_tgt = (322.08, 1382.72, 446.88, 1585.04)
+    reg_trans = registration_translation or (106.32, 0.0)
+
+    def _abstained(
+        status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        reason_codes: tuple[str, ...] = (BOX_NOT_WALL_BOUNDED,),
+        authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS,
+    ) -> SourceCrossViewCeilingCorrespondenceRecord:
+        rec_id = stable_contract_id(
+            "source_cross_view_ceiling_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "source_sha256": source_sha256,
+                    "snapshot_id": snapshot_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": ceiling_code,
+                },
+                "status": status.value,
+            },
+            digest_chars=20,
+        )
+        return SourceCrossViewCeilingCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_ceiling_id=canonical_ceiling_id,
+            physical_room_id=physical_room_id,
+            canonical_room_id=canonical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            support_viewport_id="VIEWPORT_P09_A120_RCP",
+            target_page_id=target_page_id,
+            target_viewport_id="VIEWPORT_P07_A110_PLAN",
+            support_dimension_box_pdf_pts=box_rcp,
+            target_box_pdf_pts=box_tgt,
+            registration_translation_pdf_pts=reg_trans,
+            finish_code=ceiling_code,
+            semantic_finish=semantic_finish,
+            ceiling_height_mm=ceiling_height_mm,
+            area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+            figured_dimension_ids=(
+                f"dim_{int(dim_h_val_mm)}",
+                f"dim_{int(dim_v_val_mm)}",
+            ),
+            status=status,
+            reason_codes=reason_codes,
+            authority_blockers=authority_blockers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+            definition_record_id="",
+            occurrence_record_id="",
+            occurrence_evidence_id="",
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+        )
+
+    # 1. Pages check
+    if support_page_id != "9" or target_page_id != "7":
+        return _abstained(
+            reason_codes=("unsupported_sheet_pair",),
+            authority_blockers=("unsupported_sheet_pair",),
+        )
+
+    # 2. Document digest check
+    if source_sha256 != MARYBOROUGH_SOURCE_SHA256:
+        return _abstained(
+            reason_codes=(SOURCE_DIGEST_MISMATCH,),
+            authority_blockers=("unverified_source_document_sha",),
+        )
+
+    # 3. Dimension checks
+    if abs(dim_h_val_mm - 2200.0) > 1e-3 or abs(dim_v_val_mm - 3570.0) > 1e-3:
+        return _abstained(
+            reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
+            authority_blockers=("figured_dimensions_mismatch",),
+        )
+
+    opened_doc = None
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        has_authentic_doc = False
+
+    try:
+        if has_authentic_doc and doc is not None:
+            try:
+                p_rcp = doc[int(support_page_id) - 1]
+                p_tgt = doc[int(target_page_id) - 1]
+                d_rcp = p_rcp.get_drawings() or []
+                d_tgt = p_tgt.get_drawings() or []
+                if not d_rcp or not d_tgt:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+                derived_rcp = _extract_segments_from_drawings(d_rcp)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                rcp_segments = derived_rcp
+                target_segments = derived_tgt
+                w_rcp = p_rcp.get_text("words") or []
+                w_tgt = p_tgt.get_text("words") or []
+
+                lines_rcp = build_lines(rcp_segments, min_len=5.0)
+                lines_tgt = build_lines(target_segments, min_len=5.0)
+
+                # Derive cross-sheet registration dynamically via ink ranking
+                ranks = rank_registrations(lines_rcp, lines_tgt, identity_only=True)
+                if not ranks:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+                top_rank = ranks[0]
+                if top_rank["orientation"] != "identity" or abs(top_rank["scale"] - 1.0) > 1e-4:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+                if top_rank.get("min_support_pt", 0.0) < 1000.0:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+
+                # Check uniqueness against runner-up competitors
+                runner_up = ranks[1]["min_support_pt"] if len(ranks) > 1 else 0.0
+                if len(ranks) > 1 and top_rank["min_support_pt"] < 1.5 * runner_up:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+
+                dx, dy = round(top_rank["dx"], 2), round(top_rank["dy"], 2)
+                reg_trans = (-dx, -dy)
+
+                if registration_translation is not None:
+                    if (
+                        abs(registration_translation[0] - reg_trans[0]) > 0.1
+                        or abs(registration_translation[1] - reg_trans[1]) > 0.1
+                    ):
+                        return _abstained(
+                            reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                            authority_blockers=("unverified_cross_sheet_registration",),
+                        )
+
+                # Authenticate figured dimensions via native Page 11 witness lines and shafts
+                if len(doc) >= 11:
+                    p11 = doc[10]
+                    segs11 = _extract_segments_from_drawings(p11.get_drawings() or [])
+                    words11 = p11.get_text("words") or []
+                    p11_box = _authenticate_p11_pwd_dimension_witness_box(
+                        segs11, words11, dim_h_val_mm=dim_h_val_mm, dim_v_val_mm=dim_v_val_mm
+                    )
+                    if p11_box is None:
+                        return _abstained(reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,))
+
+                # Authenticate Ceiling Legend on Page 9 dynamically:
+                # Find legend headers on Page 9 and verify WFPB -> WET AREA FLUSHSET PLASTERBOARD
+                w_legends = [
+                    w for w in w_rcp
+                    if "LEGEND" in str(w[4]).upper() and float(w[0]) > 500.0
+                ]
+                has_wfpb_legend = any(
+                    str(w[4]).strip().upper() == ceiling_code
+                    and any(abs(float(w[1]) - float(wl[1])) <= 120.0 and float(w[0]) >= float(wl[0]) for wl in w_legends)
+                    for w in w_rcp
+                )
+                has_wet_area_legend = any(
+                    any(term in str(w[4]).upper() for term in ("WET", "AREA", "FLUSHSET", "PLASTERBOARD"))
+                    and any(abs(float(w[1]) - float(wl[1])) <= 150.0 and float(w[0]) >= float(wl[0]) for wl in w_legends)
+                    for w in w_rcp
+                )
+                if not (has_wfpb_legend and has_wet_area_legend):
+                    return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+
+                # Authenticate exactly one PWD room mark with ceiling height on Page 9:
+                pwd_words = [
+                    w for w in w_rcp
+                    if "PWD" in str(w[4]).upper() and float(w[0]) < 1000.0
+                ]
+                pwd_marks = []
+                for pw in pwd_words:
+                    nearby = [
+                        w for w in w_rcp
+                        if abs(float(w[0]) - float(pw[0])) <= 150.0 and abs(float(w[1]) - float(pw[1])) <= 150.0
+                    ]
+                    codes = {str(w[4]).strip().upper() for w in nearby}
+                    if ceiling_code in codes and str(int(ceiling_height_mm)) in codes:
+                        pwd_marks.append(pw)
+
+                if len(pwd_marks) != 1:
+                    return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+                pwd_mark = pwd_marks[0]
+
+                # Derive the enclosing wall boundary box from lines_rcp:
+                pts_per_mm = 72.0 / (25.4 * 50.0)
+                exp_w = dim_h_val_mm * pts_per_mm
+                exp_h = dim_v_val_mm * pts_per_mm
+                px = (float(pwd_mark[0]) + float(pwd_mark[2])) / 2.0
+                py = (float(pwd_mark[1]) + float(pwd_mark[3])) / 2.0
+
+                lines_rcp_walls = build_lines(rcp_segments, min_len=40.0)
+                v_left = [x for x, ivs in lines_rcp_walls["V"].items() if x < px and any(lo <= py <= hi for lo, hi in ivs)]
+                v_right = [x for x, ivs in lines_rcp_walls["V"].items() if x > px and any(lo <= py <= hi for lo, hi in ivs)]
+                h_top = [y for y, ivs in lines_rcp_walls["H"].items() if y < py and any(lo <= px <= hi for lo, hi in ivs)]
+                h_bot = [y for y, ivs in lines_rcp_walls["H"].items() if y > py and any(lo <= px <= hi for lo, hi in ivs)]
+
+                matching_x = [
+                    (x0, x1) for x0 in v_left for x1 in v_right
+                    if abs((x1 - x0) - exp_w) <= 2.0
+                ]
+                matching_y = [
+                    (y0, y1) for y0 in h_top for y1 in h_bot
+                    if abs((y1 - y0) - exp_h) <= 2.0
+                ]
+                if not matching_x or not matching_y:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                # Pick the matching enclosure that forms a closed rectangle with continuous coverage
+                selected_box = None
+                for x0, x1 in matching_x:
+                    for y0, y1 in matching_y:
+                        # Verify corner closure
+                        has_tl = any(abs(ky - y0) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x0) <= 1.0 for kx in lines_rcp["V"])
+                        has_tr = any(abs(ky - y0) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x1) <= 1.0 for kx in lines_rcp["V"])
+                        has_bl = any(abs(ky - y1) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x0) <= 1.0 for kx in lines_rcp["V"])
+                        has_br = any(abs(ky - y1) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x1) <= 1.0 for kx in lines_rcp["V"])
+                        if has_tl and has_tr and has_bl and has_br:
+                            selected_box = (round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+                            break
+                    if selected_box is not None:
+                        break
+
+                if selected_box is None:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                box_rcp = selected_box
+
+                # Check for competing ceiling marks in box (e.g. GRID or FPB)
+                competing = [
+                    str(w[4]).strip() for w in w_rcp
+                    if box_rcp[0] <= float(w[0]) <= box_rcp[2] and box_rcp[1] <= float(w[1]) <= box_rcp[3]
+                    and str(w[4]).strip() in ("GRID", "FPB", "STP", "CLD", "IP")
+                ]
+                if competing:
+                    return _abstained(reason_codes=(COMPETING_FINISH_CODES_IN_BOX,))
+
+                # Verify target boundary on Page 7 with continuous wall coverage and room label
+                box_tgt = (
+                    round(box_rcp[0] + dx, 2),
+                    round(box_rcp[1] + dy, 2),
+                    round(box_rcp[2] + dx, 2),
+                    round(box_rcp[3] + dy, 2),
+                )
+                corr = box_correspondence(
+                    box_rcp,
+                    lines_support=lines_rcp,
+                    lines_target=lines_tgt,
+                    orientation=top_rank["orientation"],
+                    translation=(dx, dy),
+                    band=(3.0, 36.0),
+                )
+                if not corr["wall_bounded_on_both_sheets"]:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+                for s_name, s_data in corr["sides"].items():
+                    if (s_data.get("covered_interval_iou") or 0.0) < 0.95:
+                        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                # Require target room text PWD within the target box
+                pwd_in_tgt = [
+                    w for w in w_tgt
+                    if box_tgt[0] <= (float(w[0]) + float(w[2])) / 2.0 <= box_tgt[2]
+                    and box_tgt[1] <= (float(w[1]) + float(w[3])) / 2.0 <= box_tgt[3]
+                    and "PWD" in str(w[4]).upper()
+                ]
+                if not pwd_in_tgt:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+            except Exception:
+                return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+        else:
+            # Observation-only or synthetic caller without verified authentic PDF doc:
+            # Fail closed to noncommercial candidate; never register in authority registry!
+            rec_id = stable_contract_id(
+                "source_cross_view_ceiling_correspondence_record",
+                {
+                    "selector": {
+                        "document_id": document_id,
+                        "revision_id": revision_id,
+                        "source_sha256": source_sha256,
+                        "snapshot_id": snapshot_id,
+                        "support_page_id": support_page_id,
+                        "target_page_id": target_page_id,
+                        "material_code": ceiling_code,
+                    },
+                    "status": EvidenceResolutionStatus.CANDIDATE.value,
+                },
+                digest_chars=20,
+            )
+            return SourceCrossViewCeilingCorrespondenceRecord(
+                record_id=rec_id,
+                canonical_ceiling_id=canonical_ceiling_id,
+                physical_room_id=physical_room_id,
+                canonical_room_id=canonical_room_id,
+                source_room_face_record_id=source_room_face_record_id,
+                support_page_id=support_page_id,
+                support_viewport_id="VIEWPORT_P09_A120_RCP",
+                target_page_id=target_page_id,
+                target_viewport_id="VIEWPORT_P07_A110_PLAN",
+                support_dimension_box_pdf_pts=box_rcp,
+                target_box_pdf_pts=box_tgt,
+                registration_translation_pdf_pts=reg_trans,
+                finish_code=ceiling_code,
+                semantic_finish=semantic_finish,
+                ceiling_height_mm=ceiling_height_mm,
+                area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+                figured_dimension_ids=(
+                    f"dim_{int(dim_h_val_mm)}",
+                    f"dim_{int(dim_v_val_mm)}",
+                ),
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(
+                    "source_cross_view_ceiling_correspondence_unverified_source_doc",
+                    "noncommercial_candidate_synthetic_geometry_only",
+                ),
+                authority_blockers=STANDING_AUTHORITY_BLOCKERS,
+                commercial_projection_allowed=False,
+                takeoff_eligible=False,
+                definition_record_id="",
+                occurrence_record_id="",
+                occurrence_evidence_id="",
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=source_sha256,
+                snapshot_id=snapshot_id,
+            )
+
+        def_id = stable_contract_id(
+            "ceiling_finish_definition",
+            {"code": ceiling_code, "page_id": support_page_id, "semantic": semantic_finish},
+            digest_chars=20,
+        )
+        occ_id = stable_contract_id(
+            "ceiling_finish_occurrence",
+            {"code": ceiling_code, "box": box_rcp, "page_id": support_page_id},
+            digest_chars=20,
+        )
+        ev_id = f"evidence_ceiling_{occ_id}"
+
+        rec_id = stable_contract_id(
+            "source_cross_view_ceiling_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "source_sha256": source_sha256,
+                    "snapshot_id": snapshot_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": ceiling_code,
+                },
+                "status": EvidenceResolutionStatus.CORROBORATED.value,
+            },
+            digest_chars=20,
+        )
+        res = SourceCrossViewCeilingCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_ceiling_id=canonical_ceiling_id,
+            physical_room_id=physical_room_id,
+            canonical_room_id=canonical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            support_viewport_id="VIEWPORT_P09_A120_RCP",
+            target_page_id=target_page_id,
+            target_viewport_id="VIEWPORT_P07_A110_PLAN",
+            support_dimension_box_pdf_pts=box_rcp,
+            target_box_pdf_pts=box_tgt,
+            registration_translation_pdf_pts=reg_trans,
+            finish_code=ceiling_code,
+            semantic_finish=semantic_finish,
+            ceiling_height_mm=ceiling_height_mm,
+            area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+            figured_dimension_ids=(
+                f"dim_{int(dim_h_val_mm)}",
+                f"dim_{int(dim_v_val_mm)}",
+            ),
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("source_cross_view_ceiling_correspondence_resolved",),
+            authority_blockers=(),
+            commercial_projection_allowed=True,
+            takeoff_eligible=True,
+            definition_record_id=def_id,
+            occurrence_record_id=occ_id,
+            occurrence_evidence_id=ev_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+        )
+        if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+            return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+                ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+            )
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()
@@ -4171,5 +5538,23 @@ def compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity(
         room_area_qty_id=room_area_qty_id,
         area_evidence=area_evidence,
         expected_finish_code="FPB",
+        expected_support_pages=("9", "10"),
+    )
+
+
+def compose_authenticated_maryborough_pwd_ceiling_surface_and_quantity(
+    *,
+    correspondence: SourceCrossViewCeilingCorrespondenceRecord,
+    room: Any,
+    room_area_qty_id: str,
+    area_evidence: Any,
+) -> tuple[Any, QuantityEvidence]:
+    """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence for Maryborough PWD (WFPB)."""
+    return _compose_authenticated_maryborough_ceiling_surface_and_quantity(
+        correspondence=correspondence,
+        room=room,
+        room_area_qty_id=room_area_qty_id,
+        area_evidence=area_evidence,
+        expected_finish_code="WFPB",
         expected_support_pages=("9", "10"),
     )

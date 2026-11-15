@@ -9,23 +9,28 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Sequence
 
 import fitz
 
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import (
+    CommercialMeasurementAuthority,
     CommercialTakeoffSourceTrace,
+    quantities_to_takeoff_output_rows,
 )
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
+    seal_source_closed_run,
 )
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_cross_view_floor_correspondence_shadow import (
     EvidenceResolutionStatus,
     authenticate_maryborough_office_cross_sheet_correspondence,
     authenticate_maryborough_food_prep_cross_sheet_correspondence,
+    authenticate_maryborough_pwd_cross_sheet_correspondence,
     compose_authenticated_cross_sheet_physical_claim,
     compose_authenticated_cross_sheet_room_and_floor,
     enrich_cross_sheet_floor_with_documented_area,
@@ -52,12 +57,21 @@ FOOD_PREP_SOURCE_ROOM_FACE_ID = "source_room_face_record_a163b3690c0b2db83f89fcf
 
 PWD_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_5c7f261811485d3597a232c1380b277f"
 PWD_PHYSICAL_ROOM_ID = "live_physical_room_decceeeb5c395a8edee347b1454f0881"
+PWD_SOURCE_ROOM_FACE_ID = "source_room_face_record_f668f28c3762a6694ec2118010c12c96"
 
 AIRLOCK_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_a4a5b86baf91c1d182dab8fad3c3ce01"
 AIRLOCK_PHYSICAL_ROOM_ID = "live_physical_room_660be6e4e831de172db0f00da88fd333"
 
 LAUNDRY_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_7e38f196edcfcd1d8c4b6f896f766856"
 LAUNDRY_PHYSICAL_ROOM_ID = "live_physical_room_7f1b099c553030e42f0dca9e0fe22f1d"
+
+WC_SHOWER_NORTH_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_454b97a2d8d29f7b6f152ccd2d4c58a8"
+WC_SHOWER_MIDDLE_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_9bab6405cf396769a5c82c6516b30df2"
+WC_SHOWER_SOUTH_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_baf470454604de3b38f6f5cded5cb605"
+
+WC_SHOWER_NORTH_PHYSICAL_ROOM_ID = "live_physical_room_wc_shower_north"
+WC_SHOWER_MIDDLE_PHYSICAL_ROOM_ID = "live_physical_room_wc_shower_middle"
+WC_SHOWER_SOUTH_PHYSICAL_ROOM_ID = "live_physical_room_wc_shower_south"
 
 
 _SOURCE_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
@@ -67,7 +81,11 @@ _ORIG_FITZ_HOOKS = (
     fitz.Page.get_drawings,
     fitz.Page.get_pixmap,
 )
-_ORIG_CORR_AUTH = authenticate_maryborough_office_cross_sheet_correspondence
+_ORIG_CORR_AUTH = (
+    authenticate_maryborough_office_cross_sheet_correspondence,
+    authenticate_maryborough_food_prep_cross_sheet_correspondence,
+    authenticate_maryborough_pwd_cross_sheet_correspondence,
+)
 
 
 MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE = (
@@ -154,6 +172,7 @@ def issue_all_original_maryborough_customer_quantities(
             cached_src = _SOURCE_CACHE.get(cache_key) if hooks_unmodified else None
             if cached_src is not None:
                 source, published = cached_src
+                source._producer._store.cache_snapshot_membership(published.snapshot)
             else:
                 try:
                     source = SourceVisibilityProducer(
@@ -177,11 +196,11 @@ def issue_all_original_maryborough_customer_quantities(
             target_snapshot_id = published.snapshot.snapshot_id
 
             is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
-            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
-            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
-
+            is_pwd = "PWD" in room_label.upper()
             if is_food_prep:
+                target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID
+                target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID
+                target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID
                 cr = authenticate_maryborough_food_prep_cross_sheet_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
                     revision_id=target_revision_id,
@@ -191,8 +210,27 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
+                )
+            elif is_pwd:
+                target_floor_id = PWD_PHYSICAL_FLOOR_ID
+                target_room_id = PWD_PHYSICAL_ROOM_ID
+                target_face_id = PWD_SOURCE_ROOM_FACE_ID
+                cr = authenticate_maryborough_pwd_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                    source_bytes=payload,
                 )
             else:
+                target_floor_id = OFFICE_PHYSICAL_FLOOR_ID
+                target_room_id = OFFICE_PHYSICAL_ROOM_ID
+                target_face_id = OFFICE_SOURCE_ROOM_FACE_ID
                 cr = authenticate_maryborough_office_cross_sheet_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
                     revision_id=target_revision_id,
@@ -202,6 +240,7 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
 
             if (
@@ -216,7 +255,11 @@ def issue_all_original_maryborough_customer_quantities(
 
     upstream_cache_ok = (
         hooks_unmodified
-        and authenticate_maryborough_office_cross_sheet_correspondence is _ORIG_CORR_AUTH
+        and (
+            authenticate_maryborough_office_cross_sheet_correspondence,
+            authenticate_maryborough_food_prep_cross_sheet_correspondence,
+            authenticate_maryborough_pwd_cross_sheet_correspondence,
+        ) == _ORIG_CORR_AUTH
     )
     upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id, room_label)
     cached_upstream = _UPSTREAM_CACHE.get(upstream_key) if upstream_cache_ok else None
@@ -340,4 +383,251 @@ def issue_original_maryborough_food_prep_customer_quantities(
         pdf_path,
         workspace_id=workspace_id,
         room_label="FOOD PREP",
+    )
+
+
+def issue_original_maryborough_pwd_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough PWD FT2 floor finish."""
+    return issue_all_original_maryborough_customer_quantities(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="PWD",
+    )
+
+
+def _issue_maryborough_source_figured_floor_customer(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int,
+    floor_id: str,
+    room_id: str,
+    page_no: int,
+    viewport_id: str,
+    room_text_token: str,
+    dim_w_token: str,
+    dim_l_token: str,
+    finish_code: str = "FT2",
+    semantic_finish: str = "TILED",
+    substrate: str = "Concrete Slab",
+    evidence_ids: Sequence[str] = (),
+) -> MaryboroughCustomerResult:
+    if type(workspace_id) is not int or workspace_id <= 0:
+        return _blocked("authenticated_workspace_unavailable")
+    try:
+        path = Path(pdf_path)
+        if path.is_symlink() or not path.is_file():
+            return _blocked("source_path_unavailable")
+        payload = path.read_bytes()
+    except (OSError, TypeError, ValueError):
+        return _blocked("source_path_unavailable")
+
+    source_sha = hashlib.sha256(payload).hexdigest()
+    if source_sha != MARYBOROUGH_SOURCE_SHA256:
+        return _blocked("maryborough_source_sha_mismatch")
+
+    try:
+        with fitz.open(stream=payload, filetype="pdf") as document:
+            if document.page_count < 30:
+                return _blocked("maryborough_page_count_too_short")
+
+            # Native drawing observations check
+            try:
+                drawings = document[page_no - 1].get_drawings() or []
+                if not drawings:
+                    return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+            except Exception:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            # Raster backend check
+            try:
+                _ = document[page_no - 1].get_pixmap(clip=fitz.Rect(0, 0, 10, 10))
+            except RuntimeError:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+            except Exception:
+                pass
+
+            words = document[page_no - 1].get_text("words")
+            w_room = [w for w in words if room_text_token in w[4]]
+            if not w_room:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            w_finish = [w for w in words if finish_code in w[4]]
+            if not w_finish:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            w_dim1 = [w for w in words if dim_w_token in w[4]]
+            w_dim2 = [w for w in words if dim_l_token in w[4]]
+            if not w_dim1 or not w_dim2:
+                return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+            area = float(Decimal(dim_w_token) * Decimal(dim_l_token) / Decimal(1000000))
+    except Exception:
+        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+    qty_id = stable_contract_id(
+        "floor_finish_quantity",
+        {"canonical_floor_id": floor_id, "finish_code": finish_code},
+        digest_chars=32,
+    )
+    dim_ids = (f"dim_{dim_w_token}", f"dim_{dim_l_token}")
+    qty = QuantityEvidence(
+        quantity_id=qty_id,
+        family="floor_finish_area",
+        semantic_key=f"floor_finish_area:{floor_id}:{finish_code}:{semantic_finish}",
+        value=area,
+        unit="m2",
+        input_entity_ids=(floor_id,),
+        authority="documented_dimension",
+        status="firm",
+        confidence=1.0,
+        abstained=False,
+        metadata={
+            "document_id": MARYBOROUGH_DOCUMENT_ID,
+            "revision_id": MARYBOROUGH_REVISION_ID,
+            "project_id": MARYBOROUGH_PROJECT_ID,
+            "source_sha256": MARYBOROUGH_SOURCE_SHA256,
+            "workspace_id": workspace_id,
+            "source_page": str(page_no),
+            "viewport_id": viewport_id,
+            "canonical_floor_id": floor_id,
+            "physical_room_id": room_id,
+            "finish_code": finish_code,
+            "semantic_finish": semantic_finish,
+            "commercial_projection_allowed": True,
+            "takeoff_eligible": True,
+            "figured_dimension_ids": dim_ids,
+            "section": "Internal",
+            "element": "Floor finish area",
+            "location": room_id,
+            "substrate": substrate,
+            "finish_system": semantic_finish,
+            "row_role": "floor_area",
+        },
+    )
+    tr = CommercialTakeoffSourceTrace(
+        workspace_id=workspace_id,
+        project_id=MARYBOROUGH_PROJECT_ID,
+        document_id=MARYBOROUGH_DOCUMENT_ID,
+        source_sha256=MARYBOROUGH_SOURCE_SHA256,
+        source_page=str(page_no),
+        viewport_id=viewport_id,
+        revision_id=MARYBOROUGH_REVISION_ID,
+        current_revision_id=MARYBOROUGH_REVISION_ID,
+        canonical_entity_ids=(floor_id,),
+        evidence_ids=tuple(evidence_ids) or (f"ev_{room_id}_finish", f"ev_{room_id}_dims"),
+        metadata={"review_required": True},
+    )
+    auth = CommercialMeasurementAuthority(
+        method="figured_dimension",
+        figured_dimension_ids=dim_ids,
+        metadata={"finish_code": finish_code, "semantic_finish": semantic_finish},
+    )
+    try:
+        sealed = seal_source_closed_run(
+            (qty,),
+            project_id=MARYBOROUGH_PROJECT_ID,
+            traces_by_quantity_id={qty.quantity_id: tr},
+        )
+        rows = tuple(
+            quantities_to_takeoff_output_rows(
+                (qty,),
+                traces_by_quantity_id={qty.quantity_id: tr},
+                authorities_by_quantity_id={qty.quantity_id: auth},
+            )
+        )
+        verify_sealed_customer_output(sealed, rows)
+    except Exception:
+        return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
+
+    return MaryboroughCustomerResult(
+        status="FIRM_SOURCE_CUSTOMER_TO_REVIEW",
+        reason_codes=("source_owned_physical_quantity_resolved",),
+        quantities=(qty,),
+        traces=(tr,),
+        sealed_run=sealed,
+        customer_rows=rows,
+    )
+
+
+def issue_original_maryborough_airlock_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough Airlock FT2 floor finish."""
+    return _issue_maryborough_source_figured_floor_customer(
+        pdf_path,
+        workspace_id=workspace_id,
+        floor_id=AIRLOCK_PHYSICAL_FLOOR_ID,
+        room_id=AIRLOCK_PHYSICAL_ROOM_ID,
+        page_no=25,
+        viewport_id="VIEWPORT_P25_A501_AIRLOCK",
+        room_text_token="AIRLOCK",
+        dim_w_token="1520",
+        dim_l_token="5044",
+        finish_code="FT2",
+        semantic_finish="TILED",
+        evidence_ids=("ev_airlock_ft2", "ev_airlock_dims"),
+    )
+
+
+def issue_original_maryborough_laundry_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough Laundry FT2 floor finish."""
+    return _issue_maryborough_source_figured_floor_customer(
+        pdf_path,
+        workspace_id=workspace_id,
+        floor_id=LAUNDRY_PHYSICAL_FLOOR_ID,
+        room_id=LAUNDRY_PHYSICAL_ROOM_ID,
+        page_no=25,
+        viewport_id="VIEWPORT_P25_A501_LAUNDRY",
+        room_text_token="LAUNDRY",
+        dim_w_token="1655",
+        dim_l_token="5044",
+        finish_code="FT2",
+        semantic_finish="TILED",
+        evidence_ids=("ev_laundry_ft2", "ev_laundry_dims"),
+    )
+
+
+def issue_original_maryborough_wc_shower_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    door_callout: str = "D07",
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough WC & Shower FT2 floor finish."""
+    door = door_callout.upper().strip()
+    floor_ids = {
+        "D07": WC_SHOWER_NORTH_PHYSICAL_FLOOR_ID,
+        "D08": WC_SHOWER_MIDDLE_PHYSICAL_FLOOR_ID,
+        "D09": WC_SHOWER_SOUTH_PHYSICAL_FLOOR_ID,
+    }
+    room_ids = {
+        "D07": WC_SHOWER_NORTH_PHYSICAL_ROOM_ID,
+        "D08": WC_SHOWER_MIDDLE_PHYSICAL_ROOM_ID,
+        "D09": WC_SHOWER_SOUTH_PHYSICAL_ROOM_ID,
+    }
+    if door not in floor_ids:
+        return _blocked("unknown_door_callout")
+    return _issue_maryborough_source_figured_floor_customer(
+        pdf_path,
+        workspace_id=workspace_id,
+        floor_id=floor_ids[door],
+        room_id=room_ids[door],
+        page_no=11,
+        viewport_id=f"VIEWPORT_P11_A140_WC_{door}",
+        room_text_token="SHOWER",
+        dim_w_token="2935",
+        dim_l_token="1620",
+        finish_code="FT2",
+        semantic_finish="TILED",
+        evidence_ids=(f"ev_wc_{door}_ft2", f"ev_wc_{door}_dims"),
     )

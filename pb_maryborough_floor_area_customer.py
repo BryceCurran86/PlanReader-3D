@@ -16,6 +16,9 @@ from pb_maryborough_customer_authority import (
     MARYBOROUGH_SOURCE_SHA256,
     OFFICE_PHYSICAL_FLOOR_ID,
     OFFICE_PHYSICAL_ROOM_ID,
+    PWD_PHYSICAL_FLOOR_ID,
+    PWD_PHYSICAL_ROOM_ID,
+    PWD_SOURCE_ROOM_FACE_ID,
     issue_all_original_maryborough_customer_quantities,
 )
 from pb_maryborough_customer_authority import (
@@ -32,9 +35,13 @@ __all__ = [
     "MARYBOROUGH_SOURCE_SHA256",
     "OFFICE_PHYSICAL_FLOOR_ID",
     "OFFICE_PHYSICAL_ROOM_ID",
+    "PWD_PHYSICAL_FLOOR_ID",
+    "PWD_PHYSICAL_ROOM_ID",
+    "PWD_SOURCE_ROOM_FACE_ID",
     "OriginalMaryboroughFloorCustomerResult",
     "issue_original_maryborough_floor_customer_areas",
     "issue_original_maryborough_food_prep_floor_customer_areas",
+    "issue_original_maryborough_pwd_floor_customer_areas",
 ]
 
 
@@ -74,7 +81,13 @@ def issue_original_maryborough_floor_customer_areas(
         and result.customer_rows
     ):
         is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-        target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
+        is_pwd = "PWD" in room_label.upper()
+        if is_food_prep:
+            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID
+        elif is_pwd:
+            target_floor_id = PWD_PHYSICAL_FLOOR_ID
+        else:
+            target_floor_id = OFFICE_PHYSICAL_FLOOR_ID
         floor_quantities = tuple(
             q for q in result.quantities
             if isinstance(q, QuantityEvidence)
@@ -129,4 +142,17 @@ def issue_original_maryborough_food_prep_floor_customer_areas(
         pdf_path,
         workspace_id=workspace_id,
         room_label="FOOD PREP",
+    )
+
+
+def issue_original_maryborough_pwd_floor_customer_areas(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalMaryboroughFloorCustomerResult:
+    """Return authentic PWD (FT2) floor subset with dedicated 1-to-1 sealed run."""
+    return issue_original_maryborough_floor_customer_areas(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="PWD",
     )

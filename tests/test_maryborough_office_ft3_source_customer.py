@@ -540,6 +540,9 @@ def test_authenticated_d15_doorway_transition_details_on_genuine_pdf(maryborough
             physical_room_id=authority.OFFICE_PHYSICAL_ROOM_ID,
             source_room_face_record_id=authority.OFFICE_SOURCE_ROOM_FACE_ID,
             doc=doc,
+            # The changed producer requires original-byte provenance, even when
+            # an authentic fitz document object has been opened by the caller.
+            source_bytes=maryborough_pdf_path.read_bytes(),
         )
     assert cr.status is EvidenceResolutionStatus.CORROBORATED
     assert len(cr.doorway_transitions) == 1
