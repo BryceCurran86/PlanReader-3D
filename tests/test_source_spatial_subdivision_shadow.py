@@ -237,3 +237,38 @@ def test_zero_quantities_and_zero_frozen120_score():
     for r in d["regions"]:
         assert r["physical_space_authenticated"] is False
         assert r["measurement_authorized"] is False
+
+
+def test_closed_detached_wall_cycle_is_decoy_only_not_conditioned_interior():
+    """A complete detached structure is not also a primary enclosed room."""
+    bars = [
+        # Four genuinely connected source-owned primary building wall bars.
+        _strip(1, (100.0, 100.0, 300.0, 110.0)),
+        _strip(2, (100.0, 290.0, 300.0, 300.0)),
+        _strip(3, (100.0, 100.0, 110.0, 300.0)),
+        _strip(4, (290.0, 100.0, 300.0, 300.0)),
+        # Four fully closed, isolated decoy wall bars. Unlike two detached
+        # strokes these make a second free-space polygon and previously
+        # leaked into INTERIOR_ENCLOSED_ROOM candidates.
+        _strip(5, (750.0, 750.0, 850.0, 760.0)),
+        _strip(6, (750.0, 840.0, 850.0, 850.0)),
+        _strip(7, (750.0, 750.0, 760.0, 850.0)),
+        _strip(8, (840.0, 750.0, 850.0, 850.0)),
+    ]
+    res = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    rooms = [r for r in res.regions if r.kind == SpatialRegionKind.INTERIOR_ENCLOSED_ROOM]
+    decoys = [r for r in res.regions if r.kind == SpatialRegionKind.DISCONNECTED_STRUCTURE_OR_DECOY]
+    assert res.primary_building_body_count == 4
+    assert res.interior_room_count == 1
+    assert res.disconnected_decoy_count == 1
+    assert len(rooms) == 1 and len(decoys) == 1
+    assert set(rooms[0].bounding_native_path_ids) == {1, 2, 3, 4}
+    assert set(decoys[0].bounding_native_path_ids) == {5, 6, 7, 8}
+    assert not set(rooms[0].bounding_native_path_ids) & set(decoys[0].bounding_native_path_ids)
+    assert rooms[0].measurement_authorized is False
+    assert decoys[0].measurement_authorized is False
+    assert res.official_frozen120_score_change == 0

@@ -259,6 +259,10 @@ def build_source_spatial_subdivision(
             disconnected_body_ids.append(bodies[b_idx].body_id)
             disconnected_path_ids.extend(bodies[b_idx].provenance.native_path_ids)
 
+    # A free-space polygon cannot become a primary-building room if its
+    # enclosing wall owners belong exclusively to detached components.
+    disconnected_body_set = frozenset(disconnected_body_ids)
+
     # 3. Planar Free Space Subdivision
     free_space = canvas_box.difference(wall_union)
     free_geoms = (
@@ -345,6 +349,15 @@ def build_source_spatial_subdivision(
 
         touching_body_ids = tuple(sorted(set(touching_body_ids)))
         touching_path_ids = tuple(sorted(set(touching_path_ids)))
+
+        # Detached closed wall loops also bound free-space polygons. They
+        # are not conditioned/interior rooms of the primary structure. Keep
+        # their source paths in the existing disconnected-decoy ABSTAIN
+        # record below rather than publishing the same paths as both kinds.
+        if not touching_body_ids or all(
+            body_id in disconnected_body_set for body_id in touching_body_ids
+        ):
+            continue
 
         # Find any space label inside this geometry
         matched_label = None
