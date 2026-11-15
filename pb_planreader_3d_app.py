@@ -6458,6 +6458,87 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 "Numbered space key not authenticated: "
                 + str(space_key.get("reason"))
             )
+        # Source-native closed geometry is a read-only REVIEW lane. Keep it
+        # opt-in: running this automatically adds an expensive second source
+        # scan to every Streamlit rerun and does not authenticate rooms.
+        spatial_key=f"native_spatial_review_{int(page['id'])}"
+        with st.expander("Source-enclosed regions — unverified review", expanded=False):
+            st.caption(
+                "Inspect original PDF wall geometry, not estimated floor areas. "
+                "No region here becomes a take-off, wall, ceiling or customer quantity."
+            )
+            if st.button(
+                "Inspect original enclosed geometry",
+                key=f"native_spatial_review_run_{page['id']}",
+            ):
+                source_digest=native_trace.get("digest")
+                altered=(
+                    "original_pdf_changed_since_document_registration"
+                    in (native_report.get("reason_codes") or [])
+                )
+                if not (doc_path and doc_path.is_file() and source_digest) or altered:
+                    st.warning("A registered, unchanged original PDF is required.")
+                else:
+                    try:
+                        import fitz
+                        from pb_source_spatial_subdivision_shadow import (
+                            build_source_spatial_subdivision,
+                        )
+                        with st.spinner("Reading source-owned enclosed geometry..."):
+                            with fitz.open(doc_path) as original_document:
+                                original_page=original_document[int(page["page_no"])-1]
+                                rect=original_page.rect
+                                spatial_report=build_source_spatial_subdivision(
+                                    original_page.get_drawings(),
+                                    page_rect=(
+                                        float(rect.x0),float(rect.y0),
+                                        float(rect.x1),float(rect.y1),
+                                    ),
+                                    text_words=original_page.get_text("words"),
+                                ).to_dict()
+                        st.session_state[spatial_key]={
+                            "digest":source_digest,"report":spatial_report,
+                        }
+                    except Exception as spatial_error:
+                        st.session_state[spatial_key]={
+                            "digest":source_digest,
+                            "report":{
+                                "status":"abstained",
+                                "reason":"source_spatial_review_failed:"
+                                +type(spatial_error).__name__,
+                            },
+                        }
+            spatial_cached=st.session_state.get(spatial_key) or {}
+            if spatial_cached.get("digest")==native_trace.get("digest"):
+                spatial_summary=spatial_cached.get("report") or {}
+                st.caption(
+                    "Unverified enclosed shapes: "
+                    +str(spatial_summary.get("unverified_enclosed_count",0))
+                    +"; conditioned physical rooms are NOT authenticated. "
+                    "Areas and scale are not released."
+                )
+                spatial_rows=[
+                    {
+                        "Region":rec.get("region_id"),
+                        "Status":rec.get("status"),
+                        "Kind":rec.get("kind"),
+                        "Original path IDs":", ".join(
+                            map(str,(rec.get("bounding_native_path_ids") or [])[:16])
+                        ),
+                    }
+                    for rec in (spatial_summary.get("regions") or [])
+                    if rec.get("kind")=="unverified_enclosed_candidate"
+                ]
+                if spatial_rows:
+                    st.dataframe(
+                        pd.DataFrame(spatial_rows),
+                        use_container_width=True,hide_index=True,
+                    )
+                elif spatial_summary.get("reason"):
+                    st.caption(
+                        "Source spatial diagnostic: "
+                        +str(spatial_summary["reason"])
+                    )
         st.markdown("### Draw take-off measurements on the plan")
         st.caption("Pick a take-off row, choose **Line** (walls, doors, frames, skirting — click two points) or **Outline** (building footprint, ceilings — click each corner then double-click to close), then click directly on the plan. Drawn lengths and areas are measured from the saved drawing scale.")
         detected=auto_detect_scale(page)
