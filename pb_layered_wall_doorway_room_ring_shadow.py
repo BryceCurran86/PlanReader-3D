@@ -38,10 +38,11 @@ quantity is issued. Imported by no live path.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union

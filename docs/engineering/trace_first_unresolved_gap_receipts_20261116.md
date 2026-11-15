@@ -46,3 +46,13 @@ area/host promotion, plus exclusion of a truly swing-closed gap. The original
 CLI test continues to require zero customer rows. Owner-held frozen120
 benchmark must wait for complete tracing-first integration and final
 Acacia source-to-customer replay.
+
+## Bounded performance improvement (no measurement/geometry logic change)
+Replaced module-level typing.Mapping runtime isinstance checks with
+collections.abc.Mapping. A same-original Acacia diagnostic cProfile run
+fell from 4.14s to 2.53s with byte-equivalent JSON; the 3Laurel same-process
+comparison (18.82s vs 18.96s) showed no meaningful gain, so this is NOT
+claimed as universal speed improvement. The second debug-only optimisation
+batches up to 1,600 blue source-candidate overlay lines into one PyMuPDF
+shape commit instead of 1,600 content stream rewrites. Original PDF native
+path reading, closure/wall/room algorithms and customer output are unchanged.

@@ -32,6 +32,10 @@ def _draw_source_overlay(page, original, trace, scope, ring):
     page.show_pdf_page(page.rect, original, trace.page_index)
     candidate_count = 0
     if scope.status == "CANDIDATE":
+        # One shape/commit for source-candidate diagnostics. Repeated
+        # page.draw_line() rebuilt the PDF content stream 1,600 times on a
+        # typical A0 drawing and dominated debug rendering time.
+        blue_shape = page.new_shape()
         filtered, _count, _greens = _source_wall_ink_candidate_drawings(
             scope.drawings
         )
@@ -49,11 +53,14 @@ def _draw_source_overlay(page, original, trace, scope, ring):
                     continue
                 if candidate_count >= 1600:
                     break
-                page.draw_line(p, q, color=(.0, .2, .9), width=.4,
-                               stroke_opacity=.55)
+                blue_shape.draw_line(p, q)
                 candidate_count += 1
             if candidate_count >= 1600:
                 break
+        if candidate_count:
+            blue_shape.finish(color=(.0, .2, .9), width=.4,
+                              stroke_opacity=.55)
+            blue_shape.commit()
     if ring is not None:
         for closure in ring.closures:
             lo, hi = closure.gap_interval
