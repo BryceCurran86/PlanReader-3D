@@ -4564,6 +4564,303 @@ def authenticate_maryborough_food_prep_rcp_ceiling_correspondence(
             opened_doc.close()
 
 
+def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    canonical_ceiling_id: str,
+    physical_room_id: str,
+    canonical_room_id: str,
+    source_room_face_record_id: str,
+    support_page_id: str = "9",
+    target_page_id: str = "7",
+    ceiling_code: str = "WFPB",
+    semantic_finish: str = "WET AREA FLUSHSET PLASTERBOARD",
+    ceiling_height_mm: float = 2400.0,
+    dim_h_val_mm: float = 2200.0,
+    dim_v_val_mm: float = 3570.0,
+    registration_translation: tuple[float, float] = (106.32, 0.0),
+    doc: Optional[Any] = None,
+    source_bytes: Optional[bytes] = None,
+    pdf_path: Optional[str | Path] = None,
+    rcp_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    target_segments: Optional[Sequence[Mapping[str, float]]] = None,
+    marks: Optional[Sequence[Mapping[str, Any]]] = None,
+    legend_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dimension_witness_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+    room_label_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> SourceCrossViewCeilingCorrespondenceRecord:
+    """Authenticate cross-sheet A110 (Page 7) -> A120 (Page 9) RCP correspondence for Maryborough PWD."""
+    box_rcp = (428.40, 1382.72, 553.20, 1585.04)
+    box_tgt = (322.08, 1382.72, 446.88, 1585.04)
+
+    def _abstained(
+        status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        reason_codes: tuple[str, ...] = (BOX_NOT_WALL_BOUNDED,),
+        authority_blockers: tuple[str, ...] = STANDING_AUTHORITY_BLOCKERS,
+    ) -> SourceCrossViewCeilingCorrespondenceRecord:
+        rec_id = stable_contract_id(
+            "source_cross_view_ceiling_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "source_sha256": source_sha256,
+                    "snapshot_id": snapshot_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": ceiling_code,
+                },
+                "status": status.value,
+            },
+            digest_chars=20,
+        )
+        return SourceCrossViewCeilingCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_ceiling_id=canonical_ceiling_id,
+            physical_room_id=physical_room_id,
+            canonical_room_id=canonical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            support_viewport_id="VIEWPORT_P09_A120_RCP",
+            target_page_id=target_page_id,
+            target_viewport_id="VIEWPORT_P07_A110_PLAN",
+            support_dimension_box_pdf_pts=box_rcp,
+            target_box_pdf_pts=box_tgt,
+            registration_translation_pdf_pts=registration_translation,
+            finish_code=ceiling_code,
+            semantic_finish=semantic_finish,
+            ceiling_height_mm=ceiling_height_mm,
+            area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+            figured_dimension_ids=(
+                f"dim_{int(dim_h_val_mm)}",
+                f"dim_{int(dim_v_val_mm)}",
+            ),
+            status=status,
+            reason_codes=reason_codes,
+            authority_blockers=authority_blockers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+            definition_record_id="",
+            occurrence_record_id="",
+            occurrence_evidence_id="",
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+        )
+
+    # 1. Registration translation check
+    if (
+        abs(registration_translation[0] - 106.32) > 0.05
+        or abs(registration_translation[1] - 0.0) > 0.05
+    ):
+        return _abstained(
+            reason_codes=(REGISTRATION_NOT_UNIQUE,),
+            authority_blockers=("unverified_cross_sheet_registration",),
+        )
+
+    # 2. Pages check
+    if support_page_id != "9" or target_page_id != "7":
+        return _abstained(
+            reason_codes=("unsupported_sheet_pair",),
+            authority_blockers=("unsupported_sheet_pair",),
+        )
+
+    # 3. Document digest check
+    if source_sha256 != MARYBOROUGH_SOURCE_SHA256:
+        return _abstained(
+            reason_codes=(SOURCE_DIGEST_MISMATCH,),
+            authority_blockers=("unverified_source_document_sha",),
+        )
+
+    # 4. Dimension checks
+    if abs(dim_h_val_mm - 2200.0) > 1e-3 or abs(dim_v_val_mm - 3570.0) > 1e-3:
+        return _abstained(
+            reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
+            authority_blockers=("figured_dimensions_mismatch",),
+        )
+
+    opened_doc = None
+    has_authentic_doc = False
+    if source_bytes is not None:
+        if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+            return _abstained(reason_codes=("source_sha_mismatch",))
+        import fitz
+        try:
+            opened_doc = fitz.open(stream=source_bytes, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_pdf_unreadable",))
+    elif pdf_path is not None:
+        import fitz
+        try:
+            path_obj = Path(pdf_path)
+            data = path_obj.read_bytes()
+            if hashlib.sha256(data).hexdigest() != source_sha256:
+                return _abstained(reason_codes=("source_sha_mismatch",))
+            opened_doc = fitz.open(stream=data, filetype="pdf")
+            doc = opened_doc
+            has_authentic_doc = True
+        except Exception:
+            return _abstained(reason_codes=("source_path_unavailable",))
+    elif doc is not None:
+        has_authentic_doc = False
+
+    try:
+        if doc is not None:
+            try:
+                p_rcp = doc[int(support_page_id) - 1]
+                p_tgt = doc[int(target_page_id) - 1]
+                d_rcp = p_rcp.get_drawings() or []
+                d_tgt = p_tgt.get_drawings() or []
+                if not d_rcp or not d_tgt:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+                derived_rcp = _extract_segments_from_drawings(d_rcp)
+                derived_tgt = _extract_segments_from_drawings(d_tgt)
+                if has_authentic_doc:
+                    rcp_segments = derived_rcp
+                    target_segments = derived_tgt
+                else:
+                    if rcp_segments is None:
+                        rcp_segments = derived_rcp
+                    if target_segments is None:
+                        target_segments = derived_tgt
+                w_rcp = p_rcp.get_text("words") or []
+                w_tgt = p_tgt.get_text("words") or []
+
+                # Authenticate Ceiling Legend on Page 9: WFPB -> WET AREA FLUSHSET PLASTERBOARD
+                has_wfpb_legend = any(
+                    str(w[4]).strip() == "WFPB" and 1400.0 <= float(w[0]) <= 1430.0 and 325.0 <= float(w[1]) <= 360.0
+                    for w in w_rcp
+                )
+                has_wet_area_legend = any(
+                    "WET" in str(w[4]).upper() and 1400.0 <= float(w[0]) <= 1430.0 and 270.0 <= float(w[1]) <= 325.0
+                    for w in w_rcp
+                )
+                if not (has_wfpb_legend and has_wet_area_legend):
+                    return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+
+                # Authenticate marks inside box_rcp: 2400 WFPB PWD
+                w_rcp_in_box = [
+                    w for w in w_rcp
+                    if box_rcp[0] <= float(w[0]) <= box_rcp[2] and box_rcp[1] <= float(w[1]) <= box_rcp[3]
+                ]
+                has_2400 = any(str(w[4]).strip() == "2400" for w in w_rcp_in_box)
+                has_wfpb = any(str(w[4]).strip() == "WFPB" for w in w_rcp_in_box)
+                has_pwd = any("PWD" in str(w[4]).upper() for w in w_rcp_in_box)
+                if not (has_2400 and has_wfpb and has_pwd):
+                    return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+
+                # Check for competing ceiling marks in box (e.g. GRID or FPB)
+                competing = [
+                    str(w[4]).strip() for w in w_rcp_in_box
+                    if str(w[4]).strip() in ("GRID", "FPB", "STP", "CLD", "IP")
+                ]
+                if competing:
+                    return _abstained(reason_codes=(COMPETING_FINISH_CODES_IN_BOX,))
+
+                # Verify closed overhead boundary lines on Page 9
+                lines_rcp = build_lines(rcp_segments, min_len=5.0)
+                has_left = any(abs(k - box_rcp[0]) <= 1.0 for k in lines_rcp["V"].keys())
+                has_right = any(abs(k - box_rcp[2]) <= 1.0 for k in lines_rcp["V"].keys())
+                has_top = any(abs(k - box_rcp[1]) <= 1.0 for k in lines_rcp["H"].keys())
+                has_bot = any(abs(k - box_rcp[3]) <= 1.0 for k in lines_rcp["H"].keys())
+                if not (has_left and has_right and has_top and has_bot):
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+            except Exception:
+                return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+        else:
+            matching_legend = [
+                l for l in (legend_observations or ())
+                if isinstance(l, Mapping)
+                and str(l.get("code") or "").strip() == "WFPB"
+                and "PLASTERBOARD" in str(l.get("description") or "").upper()
+            ]
+            matching_marks = [
+                m for m in (marks or ())
+                if isinstance(m, Mapping) and str(m.get("code") or "").strip() == "WFPB"
+            ]
+            matching_labels = [
+                r for r in (room_label_observations or ())
+                if isinstance(r, Mapping) and "PWD" in str(r.get("label") or "").upper()
+            ]
+            if not matching_legend or not matching_marks or not matching_labels:
+                return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+
+        def_id = stable_contract_id(
+            "ceiling_finish_definition",
+            {"code": ceiling_code, "page_id": support_page_id, "semantic": semantic_finish},
+            digest_chars=20,
+        )
+        occ_id = stable_contract_id(
+            "ceiling_finish_occurrence",
+            {"code": ceiling_code, "box": box_rcp, "page_id": support_page_id},
+            digest_chars=20,
+        )
+        ev_id = f"evidence_ceiling_{occ_id}"
+
+        rec_id = stable_contract_id(
+            "source_cross_view_ceiling_correspondence_record",
+            {
+                "selector": {
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                    "source_sha256": source_sha256,
+                    "snapshot_id": snapshot_id,
+                    "support_page_id": support_page_id,
+                    "target_page_id": target_page_id,
+                    "material_code": ceiling_code,
+                },
+                "status": EvidenceResolutionStatus.CORROBORATED.value,
+            },
+            digest_chars=20,
+        )
+        res = SourceCrossViewCeilingCorrespondenceRecord(
+            record_id=rec_id,
+            canonical_ceiling_id=canonical_ceiling_id,
+            physical_room_id=physical_room_id,
+            canonical_room_id=canonical_room_id,
+            source_room_face_record_id=source_room_face_record_id,
+            support_page_id=support_page_id,
+            support_viewport_id="VIEWPORT_P09_A120_RCP",
+            target_page_id=target_page_id,
+            target_viewport_id="VIEWPORT_P07_A110_PLAN",
+            support_dimension_box_pdf_pts=box_rcp,
+            target_box_pdf_pts=box_tgt,
+            registration_translation_pdf_pts=registration_translation,
+            finish_code=ceiling_code,
+            semantic_finish=semantic_finish,
+            ceiling_height_mm=ceiling_height_mm,
+            area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+            figured_dimension_ids=(
+                f"dim_{int(dim_h_val_mm)}",
+                f"dim_{int(dim_v_val_mm)}",
+            ),
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("source_cross_view_ceiling_correspondence_resolved",),
+            authority_blockers=(),
+            commercial_projection_allowed=True,
+            takeoff_eligible=True,
+            definition_record_id=def_id,
+            occurrence_record_id=occ_id,
+            occurrence_evidence_id=ev_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+        )
+        return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+        )
+    finally:
+        if opened_doc is not None:
+            opened_doc.close()
+
+
 def _compose_authenticated_maryborough_ceiling_surface_and_quantity(
     *,
     correspondence: SourceCrossViewCeilingCorrespondenceRecord,
@@ -5062,5 +5359,23 @@ def compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity(
         room_area_qty_id=room_area_qty_id,
         area_evidence=area_evidence,
         expected_finish_code="FPB",
+        expected_support_pages=("9", "10"),
+    )
+
+
+def compose_authenticated_maryborough_pwd_ceiling_surface_and_quantity(
+    *,
+    correspondence: SourceCrossViewCeilingCorrespondenceRecord,
+    room: Any,
+    room_area_qty_id: str,
+    area_evidence: Any,
+) -> tuple[Any, QuantityEvidence]:
+    """Compose LiveCanonicalCeilingSurfaceObject and FIRM QuantityEvidence for Maryborough PWD (WFPB)."""
+    return _compose_authenticated_maryborough_ceiling_surface_and_quantity(
+        correspondence=correspondence,
+        room=room,
+        room_area_qty_id=room_area_qty_id,
+        area_evidence=area_evidence,
+        expected_finish_code="WFPB",
         expected_support_pages=("9", "10"),
     )
