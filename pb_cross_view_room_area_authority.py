@@ -1509,6 +1509,44 @@ def _quarantine_reused_cross_view_dimensions(
     )
 
 
+def _exclude_shadow_dimension_claims_using_strong_owners(
+    records: Sequence[CrossViewRoomAreaRecord],
+    one_axis_fallback_room_ids: frozenset[str],
+) -> tuple[list[CrossViewRoomAreaRecord], set[str]]:
+    """A one-axis fallback cannot displace an independently bound room witness.
+
+    This is a source-identity reservation, not a confidence, nearest-room, or
+    expected-area tie-break. Reserve *all* strong sources, even when two strong
+    rooms conflict: that original ambiguity must still fail closed in the
+    existing cross-room owner quarantine. Competing fallbacks are also left
+    for that quarantine; never choose among them.
+    """
+    strong_sources = {
+        (str(rec.source_dimension_page_id), str(dimension_id))
+        for rec in records
+        if str(rec.physical_room_id) not in one_axis_fallback_room_ids
+        for dimension_id in (
+            rec.horizontal_dimension_id,
+            rec.vertical_dimension_id,
+        )
+    }
+    excluded = {
+        str(rec.physical_room_id)
+        for rec in records
+        if str(rec.physical_room_id) in one_axis_fallback_room_ids
+        and (
+            (str(rec.source_dimension_page_id), str(rec.horizontal_dimension_id))
+            in strong_sources
+            or (str(rec.source_dimension_page_id), str(rec.vertical_dimension_id))
+            in strong_sources
+        )
+    }
+    return (
+        [rec for rec in records if str(rec.physical_room_id) not in excluded],
+        excluded,
+    )
+
+
 class CrossViewRoomAreaProducer:
     def __init__(
         self,
@@ -1737,6 +1775,7 @@ class CrossViewRoomAreaProducer:
             for room_id in duplicate_face_room_ids
         })
         conflict_seen = bool(duplicate_room_ids or conflicted_ids)
+        one_axis_fallback_room_ids: set[str] = set()
 
         for label, grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
@@ -1750,6 +1789,7 @@ class CrossViewRoomAreaProducer:
                     _TrustedBoundDimension,
                 ]
             ] = []
+            one_axis_fallback_keys: set[tuple[str, str, str]] = set()
             for page_id, trusted_lines in sorted(page_lines.items()):
                 if page_id == str(room.page_id):
                     continue
@@ -1920,6 +1960,7 @@ class CrossViewRoomAreaProducer:
                                     if key in seen_annotation_pairs:
                                         continue
                                     seen_annotation_pairs.add(key)
+                                    one_axis_fallback_keys.add(key)
                                     support_lines = tuple(
                                         dict.fromkeys(
                                             (horizontal_line, in_room_line)
@@ -1975,6 +2016,7 @@ class CrossViewRoomAreaProducer:
                                     if key in seen_annotation_pairs:
                                         continue
                                     seen_annotation_pairs.add(key)
+                                    one_axis_fallback_keys.add(key)
                                     support_lines = tuple(
                                         dict.fromkeys(
                                             (in_room_line, vertical_line)
@@ -2164,6 +2206,27 @@ class CrossViewRoomAreaProducer:
                     _seal=_RECORD_SEAL,
                 )
             )
+            if (
+                (str(dimension_page_id), horizontal.dimension_id, vertical.dimension_id)
+                in one_axis_fallback_keys
+            ):
+                one_axis_fallback_room_ids.add(str(room.physical_room_id))
+
+        # Keep independently bound original rooms ahead of weaker one-axis
+        # cross-view guesses. The source-ID reservation is applied only to
+        # fallback candidates; the strict full-owner quarantine below remains
+        # intact for conflicting strong records and for competing fallbacks.
+        records, displaced_fallbacks = _exclude_shadow_dimension_claims_using_strong_owners(
+            records,
+            frozenset(one_axis_fallback_room_ids),
+        )
+        if displaced_fallbacks:
+            unresolved.update(displaced_fallbacks)
+            first_failures.update({
+                room_id: "cross_view_dimension_source_owner_conflict"
+                for room_id in displaced_fallbacks
+            })
+            conflict_seen = True
 
         # Across distinct physical rooms, an original producer-owned native
         # figured dimension observation may support at most one whole-room
