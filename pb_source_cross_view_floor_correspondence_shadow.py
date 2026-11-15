@@ -4597,7 +4597,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
     ceiling_height_mm: float = 2400.0,
     dim_h_val_mm: float = 2200.0,
     dim_v_val_mm: float = 3570.0,
-    registration_translation: tuple[float, float] = (106.32, 0.0),
+    registration_translation: Optional[tuple[float, float]] = None,
     doc: Optional[Any] = None,
     source_bytes: Optional[bytes] = None,
     pdf_path: Optional[str | Path] = None,
@@ -4611,6 +4611,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
     """Authenticate cross-sheet A110 (Page 7) -> A120 (Page 9) RCP correspondence for Maryborough PWD."""
     box_rcp = (428.40, 1382.72, 553.20, 1585.04)
     box_tgt = (322.08, 1382.72, 446.88, 1585.04)
+    reg_trans = registration_translation or (106.32, 0.0)
 
     def _abstained(
         status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
@@ -4645,7 +4646,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
             target_viewport_id="VIEWPORT_P07_A110_PLAN",
             support_dimension_box_pdf_pts=box_rcp,
             target_box_pdf_pts=box_tgt,
-            registration_translation_pdf_pts=registration_translation,
+            registration_translation_pdf_pts=reg_trans,
             finish_code=ceiling_code,
             semantic_finish=semantic_finish,
             ceiling_height_mm=ceiling_height_mm,
@@ -4668,31 +4669,21 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
             snapshot_id=snapshot_id,
         )
 
-    # 1. Registration translation check
-    if (
-        abs(registration_translation[0] - 106.32) > 0.05
-        or abs(registration_translation[1] - 0.0) > 0.05
-    ):
-        return _abstained(
-            reason_codes=(REGISTRATION_NOT_UNIQUE,),
-            authority_blockers=("unverified_cross_sheet_registration",),
-        )
-
-    # 2. Pages check
+    # 1. Pages check
     if support_page_id != "9" or target_page_id != "7":
         return _abstained(
             reason_codes=("unsupported_sheet_pair",),
             authority_blockers=("unsupported_sheet_pair",),
         )
 
-    # 3. Document digest check
+    # 2. Document digest check
     if source_sha256 != MARYBOROUGH_SOURCE_SHA256:
         return _abstained(
             reason_codes=(SOURCE_DIGEST_MISMATCH,),
             authority_blockers=("unverified_source_document_sha",),
         )
 
-    # 4. Dimension checks
+    # 3. Dimension checks
     if abs(dim_h_val_mm - 2200.0) > 1e-3 or abs(dim_v_val_mm - 3570.0) > 1e-3:
         return _abstained(
             reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,),
@@ -4727,7 +4718,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
         has_authentic_doc = False
 
     try:
-        if doc is not None:
+        if has_authentic_doc and doc is not None:
             try:
                 p_rcp = doc[int(support_page_id) - 1]
                 p_tgt = doc[int(target_page_id) - 1]
@@ -4737,75 +4728,207 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
                 derived_rcp = _extract_segments_from_drawings(d_rcp)
                 derived_tgt = _extract_segments_from_drawings(d_tgt)
-                if has_authentic_doc:
-                    rcp_segments = derived_rcp
-                    target_segments = derived_tgt
-                else:
-                    if rcp_segments is None:
-                        rcp_segments = derived_rcp
-                    if target_segments is None:
-                        target_segments = derived_tgt
+                rcp_segments = derived_rcp
+                target_segments = derived_tgt
                 w_rcp = p_rcp.get_text("words") or []
                 w_tgt = p_tgt.get_text("words") or []
 
-                # Authenticate Ceiling Legend on Page 9: WFPB -> WET AREA FLUSHSET PLASTERBOARD
+                lines_rcp = build_lines(rcp_segments, min_len=5.0)
+                lines_tgt = build_lines(target_segments, min_len=5.0)
+
+                # Derive cross-sheet registration dynamically via ink ranking
+                ranks = rank_registrations(lines_rcp, lines_tgt, identity_only=True)
+                if not ranks:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+                top_rank = ranks[0]
+                if top_rank["orientation"] != "identity" or abs(top_rank["scale"] - 1.0) > 1e-4:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+                if top_rank.get("min_support_pt", 0.0) < 1000.0:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+                dx, dy = round(top_rank["dx"], 2), round(top_rank["dy"], 2)
+                reg_trans = (-dx, -dy)
+
+                if registration_translation is not None:
+                    if (
+                        abs(registration_translation[0] - reg_trans[0]) > 0.1
+                        or abs(registration_translation[1] - reg_trans[1]) > 0.1
+                    ):
+                        return _abstained(
+                            reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                            authority_blockers=("unverified_cross_sheet_registration",),
+                        )
+
+                # Authenticate Ceiling Legend on Page 9 dynamically:
+                # Find legend headers on Page 9 and verify WFPB -> WET AREA FLUSHSET PLASTERBOARD
+                w_legends = [
+                    w for w in w_rcp
+                    if "LEGEND" in str(w[4]).upper() and float(w[0]) > 500.0
+                ]
                 has_wfpb_legend = any(
-                    str(w[4]).strip() == "WFPB" and 1400.0 <= float(w[0]) <= 1430.0 and 325.0 <= float(w[1]) <= 360.0
+                    str(w[4]).strip().upper() == ceiling_code
+                    and any(abs(float(w[1]) - float(wl[1])) <= 120.0 and float(w[0]) >= float(wl[0]) for wl in w_legends)
                     for w in w_rcp
                 )
                 has_wet_area_legend = any(
-                    "WET" in str(w[4]).upper() and 1400.0 <= float(w[0]) <= 1430.0 and 270.0 <= float(w[1]) <= 325.0
+                    any(term in str(w[4]).upper() for term in ("WET", "AREA", "FLUSHSET", "PLASTERBOARD"))
+                    and any(abs(float(w[1]) - float(wl[1])) <= 150.0 and float(w[0]) >= float(wl[0]) for wl in w_legends)
                     for w in w_rcp
                 )
                 if not (has_wfpb_legend and has_wet_area_legend):
                     return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
 
-                # Authenticate marks inside box_rcp: 2400 WFPB PWD
-                w_rcp_in_box = [
+                # Authenticate PWD room mark and ceiling height on Page 9:
+                pwd_words = [
                     w for w in w_rcp
-                    if box_rcp[0] <= float(w[0]) <= box_rcp[2] and box_rcp[1] <= float(w[1]) <= box_rcp[3]
+                    if "PWD" in str(w[4]).upper() and float(w[0]) < 1000.0
                 ]
-                has_2400 = any(str(w[4]).strip() == "2400" for w in w_rcp_in_box)
-                has_wfpb = any(str(w[4]).strip() == "WFPB" for w in w_rcp_in_box)
-                has_pwd = any("PWD" in str(w[4]).upper() for w in w_rcp_in_box)
-                if not (has_2400 and has_wfpb and has_pwd):
+                pwd_mark = None
+                for pw in pwd_words:
+                    nearby = [
+                        w for w in w_rcp
+                        if abs(float(w[0]) - float(pw[0])) <= 150.0 and abs(float(w[1]) - float(pw[1])) <= 150.0
+                    ]
+                    codes = {str(w[4]).strip().upper() for w in nearby}
+                    if ceiling_code in codes and str(int(ceiling_height_mm)) in codes:
+                        pwd_mark = pw
+                        break
+                if pwd_mark is None:
                     return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+
+                # Derive the enclosing wall boundary box from lines_rcp:
+                pts_per_mm = 72.0 / (25.4 * 50.0)
+                exp_w = dim_h_val_mm * pts_per_mm
+                exp_h = dim_v_val_mm * pts_per_mm
+                px = (float(pwd_mark[0]) + float(pwd_mark[2])) / 2.0
+                py = (float(pwd_mark[1]) + float(pwd_mark[3])) / 2.0
+
+                lines_rcp_walls = build_lines(rcp_segments, min_len=40.0)
+                v_left = [x for x, ivs in lines_rcp_walls["V"].items() if x < px and any(lo <= py <= hi for lo, hi in ivs)]
+                v_right = [x for x, ivs in lines_rcp_walls["V"].items() if x > px and any(lo <= py <= hi for lo, hi in ivs)]
+                h_top = [y for y, ivs in lines_rcp_walls["H"].items() if y < py and any(lo <= px <= hi for lo, hi in ivs)]
+                h_bot = [y for y, ivs in lines_rcp_walls["H"].items() if y > py and any(lo <= px <= hi for lo, hi in ivs)]
+
+                matching_x = [
+                    (x0, x1) for x0 in v_left for x1 in v_right
+                    if abs((x1 - x0) - exp_w) <= 2.0
+                ]
+                matching_y = [
+                    (y0, y1) for y0 in h_top for y1 in h_bot
+                    if abs((y1 - y0) - exp_h) <= 2.0
+                ]
+                if not matching_x or not matching_y:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                # Pick the matching enclosure that forms a closed rectangle
+                selected_box = None
+                for x0, x1 in matching_x:
+                    for y0, y1 in matching_y:
+                        # Verify corner closure
+                        has_tl = any(abs(ky - y0) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x0) <= 1.0 for kx in lines_rcp["V"])
+                        has_tr = any(abs(ky - y0) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x1) <= 1.0 for kx in lines_rcp["V"])
+                        has_bl = any(abs(ky - y1) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x0) <= 1.0 for kx in lines_rcp["V"])
+                        has_br = any(abs(ky - y1) <= 1.0 for ky in lines_rcp["H"]) and any(abs(kx - x1) <= 1.0 for kx in lines_rcp["V"])
+                        if has_tl and has_tr and has_bl and has_br:
+                            selected_box = (round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+                            break
+                    if selected_box is not None:
+                        break
+
+                if selected_box is None:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                box_rcp = selected_box
 
                 # Check for competing ceiling marks in box (e.g. GRID or FPB)
                 competing = [
-                    str(w[4]).strip() for w in w_rcp_in_box
-                    if str(w[4]).strip() in ("GRID", "FPB", "STP", "CLD", "IP")
+                    str(w[4]).strip() for w in w_rcp
+                    if box_rcp[0] <= float(w[0]) <= box_rcp[2] and box_rcp[1] <= float(w[1]) <= box_rcp[3]
+                    and str(w[4]).strip() in ("GRID", "FPB", "STP", "CLD", "IP")
                 ]
                 if competing:
                     return _abstained(reason_codes=(COMPETING_FINISH_CODES_IN_BOX,))
 
-                # Verify closed overhead boundary lines on Page 9
-                lines_rcp = build_lines(rcp_segments, min_len=5.0)
-                has_left = any(abs(k - box_rcp[0]) <= 1.0 for k in lines_rcp["V"].keys())
-                has_right = any(abs(k - box_rcp[2]) <= 1.0 for k in lines_rcp["V"].keys())
-                has_top = any(abs(k - box_rcp[1]) <= 1.0 for k in lines_rcp["H"].keys())
-                has_bot = any(abs(k - box_rcp[3]) <= 1.0 for k in lines_rcp["H"].keys())
-                if not (has_left and has_right and has_top and has_bot):
+                # Verify target boundary on Page 7
+                box_tgt = (
+                    round(box_rcp[0] + dx, 2),
+                    round(box_rcp[1] + dy, 2),
+                    round(box_rcp[2] + dx, 2),
+                    round(box_rcp[3] + dy, 2),
+                )
+                has_tgt_left = any(abs(k - box_tgt[0]) <= 1.5 for k in lines_tgt["V"].keys())
+                has_tgt_right = any(abs(k - box_tgt[2]) <= 1.5 for k in lines_tgt["V"].keys())
+                has_tgt_top = any(abs(k - box_tgt[1]) <= 1.5 for k in lines_tgt["H"].keys())
+                has_tgt_bot = any(abs(k - box_tgt[3]) <= 1.5 for k in lines_tgt["H"].keys())
+                if not (has_tgt_left and has_tgt_right and has_tgt_top and has_tgt_bot):
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
             except Exception:
                 return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
         else:
-            matching_legend = [
-                l for l in (legend_observations or ())
-                if isinstance(l, Mapping)
-                and str(l.get("code") or "").strip() == "WFPB"
-                and "PLASTERBOARD" in str(l.get("description") or "").upper()
-            ]
-            matching_marks = [
-                m for m in (marks or ())
-                if isinstance(m, Mapping) and str(m.get("code") or "").strip() == "WFPB"
-            ]
-            matching_labels = [
-                r for r in (room_label_observations or ())
-                if isinstance(r, Mapping) and "PWD" in str(r.get("label") or "").upper()
-            ]
-            if not matching_legend or not matching_marks or not matching_labels:
-                return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+            # Observation-only or synthetic caller without verified authentic PDF doc:
+            # Fail closed to noncommercial candidate; never register in authority registry!
+            rec_id = stable_contract_id(
+                "source_cross_view_ceiling_correspondence_record",
+                {
+                    "selector": {
+                        "document_id": document_id,
+                        "revision_id": revision_id,
+                        "source_sha256": source_sha256,
+                        "snapshot_id": snapshot_id,
+                        "support_page_id": support_page_id,
+                        "target_page_id": target_page_id,
+                        "material_code": ceiling_code,
+                    },
+                    "status": EvidenceResolutionStatus.CANDIDATE.value,
+                },
+                digest_chars=20,
+            )
+            return SourceCrossViewCeilingCorrespondenceRecord(
+                record_id=rec_id,
+                canonical_ceiling_id=canonical_ceiling_id,
+                physical_room_id=physical_room_id,
+                canonical_room_id=canonical_room_id,
+                source_room_face_record_id=source_room_face_record_id,
+                support_page_id=support_page_id,
+                support_viewport_id="VIEWPORT_P09_A120_RCP",
+                target_page_id=target_page_id,
+                target_viewport_id="VIEWPORT_P07_A110_PLAN",
+                support_dimension_box_pdf_pts=box_rcp,
+                target_box_pdf_pts=box_tgt,
+                registration_translation_pdf_pts=reg_trans,
+                finish_code=ceiling_code,
+                semantic_finish=semantic_finish,
+                ceiling_height_mm=ceiling_height_mm,
+                area_m2=round((dim_h_val_mm * dim_v_val_mm) / 1_000_000.0, 5),
+                figured_dimension_ids=(
+                    f"dim_{int(dim_h_val_mm)}",
+                    f"dim_{int(dim_v_val_mm)}",
+                ),
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(
+                    "source_cross_view_ceiling_correspondence_unverified_source_doc",
+                    "noncommercial_candidate_synthetic_geometry_only",
+                ),
+                authority_blockers=STANDING_AUTHORITY_BLOCKERS,
+                commercial_projection_allowed=False,
+                takeoff_eligible=False,
+                definition_record_id="",
+                occurrence_record_id="",
+                occurrence_evidence_id="",
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=source_sha256,
+                snapshot_id=snapshot_id,
+            )
 
         def_id = stable_contract_id(
             "ceiling_finish_definition",
@@ -4847,7 +4970,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
             target_viewport_id="VIEWPORT_P07_A110_PLAN",
             support_dimension_box_pdf_pts=box_rcp,
             target_box_pdf_pts=box_tgt,
-            registration_translation_pdf_pts=registration_translation,
+            registration_translation_pdf_pts=reg_trans,
             finish_code=ceiling_code,
             semantic_finish=semantic_finish,
             ceiling_height_mm=ceiling_height_mm,
@@ -4869,9 +4992,11 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
             source_sha256=source_sha256,
             snapshot_id=snapshot_id,
         )
-        return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
-            ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
-        )
+        if res.status is EvidenceResolutionStatus.CORROBORATED and res.commercial_projection_allowed:
+            return _REGISTERED_CEILING_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+                ((str(snapshot_id), str(rec_id)), (str(revision_id), str(rec_id))), res,
+            )
+        return res
     finally:
         if opened_doc is not None:
             opened_doc.close()

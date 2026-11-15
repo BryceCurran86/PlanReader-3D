@@ -222,3 +222,128 @@ def test_tampered_source_sha_abstains(tmp_path, maryborough_pdf_path):
     )
     assert result.status == "ABSTAIN"
     assert result.reason_codes == ("maryborough_source_sha_mismatch",)
+
+
+def test_omission_negative_fails_closed_and_not_registered():
+    """Omitting doc, source_bytes and pdf_path must fail closed to noncommercial CANDIDATE and never register."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+        get_authenticated_ceiling_correspondence,
+        EvidenceResolutionStatus,
+        MARYBOROUGH_SOURCE_SHA256,
+    )
+    rec = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+        document_id="doc_maryborough",
+        revision_id="rev_0",
+        source_sha256=MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap_omission_test",
+        canonical_ceiling_id="ceil_pwd",
+        physical_room_id="room_pwd",
+        canonical_room_id="croom_pwd",
+        source_room_face_record_id="face_pwd",
+        marks=[{"code": "WFPB"}],
+        legend_observations=[{"code": "WFPB", "description": "PLASTERBOARD"}],
+        room_label_observations=[{"label": "PWD"}],
+    )
+    assert rec.status is EvidenceResolutionStatus.CANDIDATE
+    assert not rec.commercial_projection_allowed
+    assert not rec.takeoff_eligible
+    assert get_authenticated_ceiling_correspondence("snap_omission_test", rec.record_id) is None
+
+
+def test_bare_doc_without_verified_bytes_fails_closed_and_not_registered():
+    """Supplying a bare doc without verified source_bytes or path must not gain commercial authority."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+        get_authenticated_ceiling_correspondence,
+        EvidenceResolutionStatus,
+        MARYBOROUGH_SOURCE_SHA256,
+    )
+    mock_doc = fitz.open()
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    mock_doc.new_page(width=1000, height=2000)
+    rec = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+        document_id="doc_maryborough",
+        revision_id="rev_0",
+        source_sha256=MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap_bare_doc_test",
+        canonical_ceiling_id="ceil_pwd",
+        physical_room_id="room_pwd",
+        canonical_room_id="croom_pwd",
+        source_room_face_record_id="face_pwd",
+        doc=mock_doc,
+    )
+    assert rec.status is EvidenceResolutionStatus.CANDIDATE
+    assert not rec.commercial_projection_allowed
+    assert not rec.takeoff_eligible
+    assert get_authenticated_ceiling_correspondence("snap_bare_doc_test", rec.record_id) is None
+    mock_doc.close()
+
+
+def test_foreign_source_sha_abstains_and_not_registered():
+    """Supplying a foreign source document SHA must fail closed to ABSTAINED and never register."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+        get_authenticated_ceiling_correspondence,
+        EvidenceResolutionStatus,
+    )
+    rec = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+        document_id="doc_maryborough",
+        revision_id="rev_0",
+        source_sha256="f" * 64,
+        snapshot_id="snap_foreign_test",
+        canonical_ceiling_id="ceil_pwd",
+        physical_room_id="room_pwd",
+        canonical_room_id="croom_pwd",
+        source_room_face_record_id="face_pwd",
+    )
+    assert rec.status is EvidenceResolutionStatus.ABSTAINED
+    assert not rec.commercial_projection_allowed
+    assert not rec.takeoff_eligible
+    assert get_authenticated_ceiling_correspondence("snap_foreign_test", rec.record_id) is None
+
+
+def test_competing_material_in_box_abstains_and_not_registered(maryborough_pdf_path, monkeypatch):
+    """A competing ceiling finish code (e.g. GRID) inside PWD overhead enclosure must fail closed."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+        get_authenticated_ceiling_correspondence,
+        EvidenceResolutionStatus,
+        COMPETING_FINISH_CODES_IN_BOX,
+        MARYBOROUGH_SOURCE_SHA256,
+    )
+    orig_get_text = fitz.Page.get_text
+
+    def inject_grid_word(page_self, *args, **kwargs):
+        words = orig_get_text(page_self, *args, **kwargs)
+        if kwargs.get("text") == "words" or (args and args[0] == "words"):
+            if page_self.number == 8: # Page 9
+                injected = list(words)
+                injected.append((450.0, 1450.0, 480.0, 1465.0, "GRID", 0, 0, 0))
+                return injected
+        return words
+
+    monkeypatch.setattr(fitz.Page, "get_text", inject_grid_word)
+    rec = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+        document_id="doc_maryborough",
+        revision_id="rev_0",
+        source_sha256=MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap_competing_test",
+        canonical_ceiling_id="ceil_pwd",
+        physical_room_id="room_pwd",
+        canonical_room_id="croom_pwd",
+        source_room_face_record_id="face_pwd",
+        pdf_path=maryborough_pdf_path,
+    )
+    assert rec.status is EvidenceResolutionStatus.ABSTAINED
+    assert COMPETING_FINISH_CODES_IN_BOX in rec.reason_codes
+    assert not rec.commercial_projection_allowed
+    assert get_authenticated_ceiling_correspondence("snap_competing_test", rec.record_id) is None
+
