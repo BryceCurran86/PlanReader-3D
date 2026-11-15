@@ -1286,11 +1286,63 @@ class GenericPlanReaderExtractor:
                 physical_floor_plan_page_flags[page_index] = bool(cached)
             return bool(cached)
 
+        # Owner-required first geometry stage. The external footprint is
+        # attempted immediately after identifying actual FLOOR PLAN sheets:
+        # never wait for the later wall/opening/room/finish collector. A missing
+        # or ambiguous footprint is visible as ABSTAINED, not silently dropped.
+        # Original signed source quantities are independently authoritative;
+        # this source-ink overlay cannot modify their commercial status.
+        self.external_footprint_trace_live = {
+            "status": "abstained",
+            "reason_codes": ["external_footprint_no_floor_plan_sheet"],
+            "traces": [],
+        }
+        first_plan_pages = tuple(
+            sorted({i for i in target_pages if 0 <= i < len(doc)
+                    and _is_physical_floor_plan_page(i)})
+        )
+        if first_plan_pages:
+            try:
+                from pb_external_footprint_first_trace import (
+                    trace_external_footprint_first,
+                )
+
+                footprint_source_bytes = p_path.read_bytes()
+                footprint_source_sha = hashlib.sha256(
+                    footprint_source_bytes
+                ).hexdigest()
+                first_traces = trace_external_footprint_first(
+                    footprint_source_bytes,
+                    source_sha256=footprint_source_sha,
+                    page_indices=first_plan_pages,
+                )
+                missing = tuple(
+                    t.reason for t in first_traces if t.status != "CANDIDATE"
+                )
+                self.external_footprint_trace_live = {
+                    "status": "candidate" if not missing else "abstained",
+                    "reason_codes": list(missing) if missing else [
+                        "external_footprint_source_ink_candidate_not_physical_authority"
+                    ],
+                    "traces": [t.to_dict() for t in first_traces],
+                }
+            except Exception as exc:
+                self.external_footprint_trace_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        f"external_footprint_first_trace_exception:{type(exc).__name__}"
+                    ],
+                    "traces": [],
+                }
+
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.
         self._ocr_text_by_page = {}
         self._ocr_pages_attempted = set()
-        self.extraction_status = {}
+        self.extraction_status = {
+            "external_footprint_first_trace":
+                self.external_footprint_trace_live["status"],
+        }
         self.declared_floor_area_claims = []
         self.coverage_registry_summaries_live = ()
         self.coverage_family_gaps_live = {}
@@ -4055,6 +4107,23 @@ class GenericPlanReaderExtractor:
                     ),
                     "floors": canonical_floor_objects,
                 }
+                collector_footprint_traces = tuple(
+                    getattr(physical_wall_result, "footprint_first_traces", ())
+                )
+                if collector_footprint_traces:
+                    early = self.external_footprint_trace_live.get("traces", ())
+                    if early and any(
+                        item.get("source_sha256") != collector_footprint_traces[0].source_sha256
+                        for item in early
+                    ):
+                        self.external_footprint_trace_live = {
+                            "status": "abstained",
+                            "reason_codes": [
+                                "external_footprint_original_source_changed_between_stages"
+                            ],
+                            "traces": [],
+                        }
+
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
                     "reason_codes": list(physical_wall_result.reason_codes),
@@ -4066,6 +4135,10 @@ class GenericPlanReaderExtractor:
                     ),
                     "evidence_ids": list(physical_wall_result.evidence_ids),
                     "quantity_id": physical_wall_result.quantity_id,
+                    # Viewer/report consumers can display the first-stage
+                    # exterior overlay without using it as a measured wall.
+                    "external_footprint_first_trace":
+                        self.external_footprint_trace_live,
                 }
                 self.extraction_status["physical_net_wall_live"] = (
                     physical_wall_result.status.value
