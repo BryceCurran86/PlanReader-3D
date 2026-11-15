@@ -816,6 +816,7 @@ def compose_live_canonical_rooms(
     unresolved_wall_candidate_ids: Optional[Collection[str]] = None,
     layered_doorway_room_rings: bool = False,
     layered_sliding_leaf_closure: bool = False,
+    layered_stacker_leaf_closure: bool = False,
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_dark_painted_wall_source: bool = False,
@@ -834,6 +835,10 @@ def compose_live_canonical_rooms(
         raise ValueError("layered_sliding_leaf_closure must be an explicit boolean")
     if layered_sliding_leaf_closure and not layered_doorway_room_rings:
         raise ValueError("layered_sliding_leaf_closure needs layered_doorway_room_rings")
+    if type(layered_stacker_leaf_closure) is not bool:
+        raise ValueError("layered_stacker_leaf_closure must be an explicit boolean")
+    if layered_stacker_leaf_closure and not layered_sliding_leaf_closure:
+        raise ValueError("layered_stacker_leaf_closure needs layered_sliding_leaf_closure")
     if type(layered_partition_witness) is not bool:
         raise ValueError("layered_partition_witness must be an explicit boolean")
     if layered_partition_witness and not layered_sliding_leaf_closure:
@@ -884,6 +889,7 @@ def compose_live_canonical_rooms(
             revision_id=wall_opening_composition.revision_id,
             page_ids=wall_opening_composition.page_ids,
             sliding_leaf_frame_closure=layered_sliding_leaf_closure,
+            stacker_leaf_frame_closure=layered_stacker_leaf_closure,
             partition_witness=layered_partition_witness,
             finished_face_gate=layered_finished_face_gate,
             dark_painted_wall_source=layered_dark_painted_wall_source,

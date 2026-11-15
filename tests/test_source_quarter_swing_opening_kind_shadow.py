@@ -29,13 +29,17 @@ def _point(xy: tuple[float, float]) -> fitz.Point:
     return fitz.Point(xy[0], xy[1])
 
 
-def _stroke(kind: str, *points: tuple[float, float], layer: str = "Enclosure_WallExternal"):
-    return {
+def _stroke(kind: str, *points: tuple[float, float], layer: str = "Enclosure_WallExternal",
+            stroke_opacity: float | None = None):
+    row = {
         "layer": layer,
         "fill": None,
         "color": (0.0, 0.0, 0.0),
         "items": [(kind, *(_point(p) for p in points))],
     }
+    if stroke_opacity is not None:
+        row["stroke_opacity"] = stroke_opacity
+    return row
 
 
 def _quarter_swing_drawings() -> list[dict]:
@@ -84,6 +88,60 @@ def test_two_hosted_openings_at_the_same_swing_abstain() -> None:
     )
     assert composition.canonical_openings[0].opening_kind is None
     assert composition.canonical_openings[1].opening_kind is None
+
+
+def test_a_typed_neighbour_at_the_same_swing_keeps_the_unkinded_opening_unkinded() -> None:
+    unkinded = _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-unkinded")
+    typed_door = _hosted(geom=(50.0, 49.2, 50.0, 52.5), kind="door", opening_id="opening-door")
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(unkinded, typed_door),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-unkinded"].opening_kind is None
+    assert by_id["opening-door"].opening_kind == "door"
+
+
+def test_a_typed_window_neighbour_at_the_same_swing_is_not_invisible_to_uniqueness() -> None:
+    unkinded = _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-unkinded")
+    typed_window = _hosted(geom=(50.0, 49.2, 50.0, 52.5), kind="window", opening_id="opening-window")
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(unkinded, typed_window),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-unkinded"].opening_kind is None
+    assert by_id["opening-window"].opening_kind == "window"
+
+
+def test_zero_opacity_wall_stroke_does_not_classify_a_door() -> None:
+    opening = _hosted(geom=(20.0, 20.0, 20.0, 17.5))
+    drawings = [
+        _stroke("l", (20.0, 20.0), (44.66, 44.66), layer="Enclosure_WallInternal", stroke_opacity=0.0)
+    ]
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    assert composition.canonical_openings[0].opening_kind is None
+
+
+def test_zero_opacity_cubic_swing_does_not_classify_a_door() -> None:
+    opening = _hosted(geom=(49.2, 50.0, 52.5, 50.0))
+    drawings = [
+        replace_opacity(row, 0.0) for row in _quarter_swing_drawings()
+    ]
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    assert composition.canonical_openings[0].opening_kind is None
+
+
+def replace_opacity(row: dict, opacity: float) -> dict:
+    updated = dict(row)
+    updated["stroke_opacity"] = opacity
+    return updated
 
 
 def test_unhosted_opening_at_the_swing_stays_unkinded() -> None:

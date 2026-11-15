@@ -34,6 +34,7 @@ from shapely.ops import unary_union
 
 from pb_layered_wall_doorway_room_ring_shadow import (
     KIND_SLIDING_LEAF,
+    KIND_STACKER_LEAF,
     _STROKE_PAIR_THICK_MAX,
     _collect_strips,
     build_layered_wall_doorway_room_rings,
@@ -172,6 +173,9 @@ def apply_source_unique_swing_opening_hosts(
                 },
                 digest_chars=32,
             )
+            # Nomination only. OpeningHostBindingProducer.publish still owns
+            # the issued binding. Never copy host_binding_record_id into
+            # evidence_ids: that would fake the quantity consumer's receipt.
             updated[opening.canonical_opening_id] = replace(
                 opening,
                 host_wall_id=host_wall_id,
@@ -256,13 +260,23 @@ def apply_source_one_room_envelope_external_roles(
         wall_end_stroke_closures,
     )
 
-    existing = {
+    existing_external = {
         str(trace.physical_wall_id)
         for trace in roles.traces
         if (
             str(trace.physical_wall_id or "").strip()
             and trace.role is WallRoleClassification.EXTERNAL
             and trace.status is EvidenceResolutionStatus.CORROBORATED
+        )
+    }
+    conflicting_hosts = {
+        str(trace.physical_wall_id)
+        for trace in roles.traces
+        if (
+            str(trace.physical_wall_id or "").strip()
+            and trace.status is EvidenceResolutionStatus.CORROBORATED
+            and trace.role is not None
+            and trace.role is not WallRoleClassification.EXTERNAL
         )
     }
     by_page: dict[str, list[LiveCanonicalOpeningObject]] = defaultdict(list)
@@ -287,7 +301,7 @@ def apply_source_one_room_envelope_external_roles(
         witnesses = _witnesses(drawings)
         for opening in hosted:
             host_wall_id = str(opening.host_wall_id)
-            if host_wall_id in existing:
+            if host_wall_id in existing_external or host_wall_id in conflicting_hosts:
                 continue
             hinge_hits = []
             for witness in witnesses:
@@ -318,7 +332,7 @@ def apply_source_one_room_envelope_external_roles(
                     role=WallRoleClassification.EXTERNAL,
                 )
             )
-            existing.add(host_wall_id)
+            existing_external.add(host_wall_id)
 
     if not extra:
         return roles
@@ -374,12 +388,15 @@ def apply_source_sliding_leaf_opening_hosts(
     composition: LivePhysicalOpeningVoidComposition,
     *,
     drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    stacker_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Host the unique door-kinded opening in a unique sliding-leaf closure."""
+    """Host the unique door-kinded opening in a unique sliding or stacker leaf closure."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    if type(stacker_leaf_frame_closure) is not bool:
+        raise TypeError("stacker_leaf_frame_closure must be an explicit boolean")
     if type(dark_painted_wall_source) is not bool:
         raise TypeError("dark_painted_wall_source must be an explicit boolean")
     if type(wall_end_stroke_closures) is not bool:
@@ -404,11 +421,13 @@ def apply_source_sliding_leaf_opening_hosts(
             source_sha256=source_sha256,
             page_index=page_index,
             sliding_leaf_frame_closure=True,
+            stacker_leaf_frame_closure=stacker_leaf_frame_closure,
             dark_painted_wall_source=dark_painted_wall_source,
             wall_end_stroke_closures=wall_end_stroke_closures,
         )
+        hosted_kinds = (KIND_SLIDING_LEAF, KIND_STACKER_LEAF) if stacker_leaf_frame_closure else (KIND_SLIDING_LEAF,)
         sliding = tuple(
-            closure for closure in rings.closures if closure.kind == KIND_SLIDING_LEAF
+            closure for closure in rings.closures if closure.kind in hosted_kinds
         )
         if not sliding:
             continue
@@ -430,12 +449,17 @@ def apply_source_sliding_leaf_opening_hosts(
                 continue
             if opening.canonical_opening_id in updated:
                 continue
+            host_kind = (
+                "source_stacker_leaf_opening_host"
+                if closure.kind == KIND_STACKER_LEAF
+                else "source_sliding_leaf_opening_host"
+            )
             host_wall_id = stable_contract_id(
                 "opening_host_binding_group",
                 {
                     "page_id": page_id,
                     "closure_id": closure.closure_id,
-                    "kind": KIND_SLIDING_LEAF,
+                    "kind": closure.kind,
                 },
                 digest_chars=32,
             )
@@ -449,7 +473,7 @@ def apply_source_sliding_leaf_opening_hosts(
                 digest_chars=32,
             )
             evidence_id = stable_contract_id(
-                "source_sliding_leaf_opening_host",
+                host_kind,
                 {
                     "page_id": page_id,
                     "canonical_opening_id": opening.canonical_opening_id,

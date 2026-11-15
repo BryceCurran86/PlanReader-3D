@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
     _swing_arcs,
+    _visible_source_stroke_paint,
     _wall_rows,
     _xy,
 )
@@ -84,7 +85,7 @@ def _collect_diagonal_leaves(
 ) -> tuple[dict[str, Any], ...]:
     leaves: list[dict[str, Any]] = []
     for index, row in _wall_rows(drawings):
-        if row.get("fill") is not None:
+        if row.get("fill") is not None or not _visible_source_stroke_paint(row):
             continue
         items = list(row.get("items", ()))
         if len(items) != 1 or items[0][0] != "l":
@@ -128,13 +129,24 @@ def _unique_bindings(
     openings: Sequence[LiveCanonicalOpeningObject],
     witnesses: Sequence[Mapping[str, Any]],
 ) -> Mapping[str, Mapping[str, Any]]:
-    pool = tuple(item for item in openings if _hosted_unkinded(item))
+    """Unique painted swing owns one opening; typed neighbours still consume it.
+
+    Uniqueness looks at every opening on the page that sits on the hinge or
+    closed tip. Only an already-hosted unkinded record may be updated. An
+    already-typed door or window at that swing keeps the witness; it is not
+    freed for another opening.
+    """
+    by_id = {
+        item.canonical_opening_id: item
+        for item in openings
+        if type(item) is LiveCanonicalOpeningObject
+    }
     witness_hits: list[tuple[Mapping[str, Any], tuple[str, ...]]] = []
     for witness in witnesses:
         hinge = tuple(float(v) for v in witness["centre"])
         tip = tuple(float(v) for v in witness["closed_tip"])
         hits = []
-        for opening in pool:
+        for opening in by_id.values():
             near_hinge = _opening_distance(opening, hinge) <= _SWING_OPENING_BIND_PT
             near_tip = _opening_distance(opening, tip) <= _SWING_OPENING_BIND_PT
             far_hinge = _opening_distance(opening, hinge)
@@ -156,6 +168,9 @@ def _unique_bindings(
     by_opening: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for witness, hits in witness_hits:
         if len(hits) != 1:
+            continue
+        target = by_id.get(hits[0])
+        if target is None or not _hosted_unkinded(target):
             continue
         by_opening[hits[0]].append(witness)
     return {

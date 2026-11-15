@@ -802,6 +802,14 @@ def test_sliding_leaf_control_needs_the_ring_control_and_explicit_booleans(tmp_p
         collect_live_physical_net_wall_claim("unused.pdf", layered_sliding_leaf_closure=True)
     with pytest.raises(ValueError):
         collect_live_physical_net_wall_claim("unused.pdf", layered_doorway_room_rings=True, layered_sliding_leaf_closure="yes")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        collect_live_physical_net_wall_claim("unused.pdf", layered_stacker_leaf_closure=True)
+    with pytest.raises(ValueError):
+        compose_live_canonical_rooms(
+            source_visibility_producer=source, wall_opening_composition=None,  # type: ignore[arg-type]
+            layered_doorway_room_rings=True, layered_sliding_leaf_closure=True,
+            layered_stacker_leaf_closure=1,  # type: ignore[arg-type]
+        )
 
 
 def _chain_with(data: bytes, *, sliding: bool):

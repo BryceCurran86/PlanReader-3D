@@ -1346,6 +1346,7 @@ def layered_ring_scope_overrides(
     page_ids: Sequence[str],
     require_figured_box: bool = True,
     sliding_leaf_frame_closure: bool = False,
+    stacker_leaf_frame_closure: bool = False,
     partition_witness: bool = False,
     finished_face_gate: bool = False,
     dark_painted_wall_source: bool = False,
@@ -1371,6 +1372,10 @@ def layered_ring_scope_overrides(
         raise ValueError("wall_end_stroke_closures must be an explicit boolean")
     if wall_end_stroke_closures and not dark_painted_wall_source:
         raise ValueError("wall_end_stroke_closures requires dark_painted_wall_source")
+    if type(stacker_leaf_frame_closure) is not bool:
+        raise ValueError("stacker_leaf_frame_closure must be an explicit boolean")
+    if stacker_leaf_frame_closure and not sliding_leaf_frame_closure:
+        raise ValueError("stacker_leaf_frame_closure requires sliding_leaf_frame_closure")
     if partition_witness and not (sliding_leaf_frame_closure and require_figured_box):
         raise ValueError("partition_witness requires sliding_leaf_frame_closure and require_figured_box")
     from pb_cross_view_ceiling_finish_authority import _source_bytes
@@ -1389,6 +1394,7 @@ def layered_ring_scope_overrides(
         ring_result = build_from_pdf_bytes(
             payload, source_sha256=published.revision.source_sha256, page_index=int(page) - 1,
             sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+            stacker_leaf_frame_closure=stacker_leaf_frame_closure,
             dark_painted_wall_source=dark_painted_wall_source,
             wall_end_stroke_closures=wall_end_stroke_closures,
         )

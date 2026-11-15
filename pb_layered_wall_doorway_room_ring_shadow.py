@@ -19,6 +19,11 @@ What counts as evidence (all of it is original native ink on an explicit wall la
   it painted over by a later opaque fill. A missing, duplicated, shifted or non-overlapping frame or
   leaf, ink on another layer, one stroke shared by two openings, or a second doorway claim in the same
   interruption all abstain;
+* a stacker-leaf opening (its OWN default-off control, ``stacker_leaf_frame_closure``, which
+  requires the sliding control): a unique cluster of three or more collinear white frame boxes on
+  one wall band, overlapping or closer than an opening span, with named wall-fill ink outside the
+  outermost frames and not filling the interval. Two frames stay on the sliding path. A shared
+  frame across two clusters, or a second doorway claim in the same interruption, abstains;
 * a swing doorway: a single circular quarter-arc (``c``) with a leaf stroke from its centre
   to one arc end; the other arc end is the closed-door tip. The doorway is the MAXIMAL
   interruption of the wall line (between two wall strips of one band) that contains the
@@ -81,6 +86,9 @@ REASON_UNLABELLED_SOURCE_PRIMITIVE_CAP = (
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
+KIND_STACKER_LEAF = "stacker_leaf_frame_closure"
+_STACKER_CLUSTER_SPLIT_PT = 10.0  # smaller than an opening; existing jamb/window min span
+_STACKER_MIN_FRAMES = 3
 
 _RECORD_SEAL = object()
 
@@ -951,13 +959,13 @@ def _swing_arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]
     rejected = 0
     leaves: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
     for index, row in _wall_rows(drawings):
-        if row.get("fill") is not None:
+        if row.get("fill") is not None or not _visible_source_stroke_paint(row):
             continue
         items = list(row.get("items", ()))
         if len(items) == 1 and items[0][0] == "l":
             leaves.append((index, _xy(items[0][1]), _xy(items[0][2])))
     for index, row in _wall_rows(drawings):
-        if row.get("fill") is not None:
+        if row.get("fill") is not None or not _visible_source_stroke_paint(row):
             continue
         items = list(row.get("items", ()))
         if len(items) != 1 or items[0][0] != "c":
@@ -1656,6 +1664,122 @@ def _sliding_leaf_evidence(drawings: Sequence[Mapping[str, Any]], gap: _Gap) -> 
     return tuple(sorted({low[0][2], high[0][2], first[3], second[3]}))
 
 
+def _stacker_cluster_gaps(
+    drawings: Sequence[Mapping[str, Any]], union: Any,
+) -> list[tuple[_Gap, tuple[int, ...]]]:
+    """Unique 3+ collinear white-frame clusters bounded by named wall-fill ink.
+
+    Frames on one wall band stay in one cluster while they overlap or sit closer
+    than ``_STACKER_CLUSTER_SPLIT_PT``. A two-frame pair is a sliding candidate,
+    not a stacker. Shared frames across two clusters abstain both. Fill-union
+    only: dark stroke-pair paint inside a multi-panel opening is not wall.
+    """
+    boxes = _white_frame_boxes(drawings)
+    found: list[tuple[_Gap, tuple[int, ...]]] = []
+    for horizontal in (True, False):
+        members: list[tuple[float, float, float, float, int]] = []
+        for x0, y0, x1, y1, index in boxes:
+            lo, hi = (x0, x1) if horizontal else (y0, y1)
+            p0, p1 = (y0, y1) if horizontal else (x0, x1)
+            if hi - lo <= NOISE_PT or p1 - p0 <= NOISE_PT:
+                continue
+            members.append((lo, hi, p0, p1, index))
+        members.sort()
+        used = [False] * len(members)
+        bands: list[tuple[float, float, list[tuple[float, float, float, float, int]]]] = []
+        for i, member in enumerate(members):
+            if used[i]:
+                continue
+            group = [member]
+            used[i] = True
+            gp0, gp1 = member[2], member[3]
+            changed = True
+            while changed:
+                changed = False
+                for j, other in enumerate(members):
+                    if used[j]:
+                        continue
+                    overlap = min(gp1, other[3]) - max(gp0, other[2])
+                    if overlap > NOISE_PT:
+                        used[j] = True
+                        group.append(other)
+                        gp0, gp1 = min(gp0, other[2]), max(gp1, other[3])
+                        changed = True
+            bands.append((gp0, gp1, group))
+        for gp0, gp1, group in bands:
+            group.sort()
+            clusters: list[list[tuple[float, float, float, float, int]]] = []
+            current = [group[0]]
+            for nxt in group[1:]:
+                if nxt[0] - current[-1][1] <= _STACKER_CLUSTER_SPLIT_PT:
+                    current.append(nxt)
+                else:
+                    clusters.append(current)
+                    current = [nxt]
+            clusters.append(current)
+            for cluster in clusters:
+                native = tuple(sorted({item[4] for item in cluster}))
+                if len(native) < _STACKER_MIN_FRAMES:
+                    continue
+                lo1, hi2 = cluster[0][0], cluster[-1][1]
+                span = hi2 - lo1
+                if not (_STROKE_PAIR_MIN_SPAN <= span <= 140.0):
+                    continue
+                abut: list[tuple[float, float]] = []
+                for edge, direction in ((lo1, -1), (hi2, 1)):
+                    a, b = (edge - 0.1, edge) if direction < 0 else (edge, edge + 0.1)
+                    slab = box(a, gp0, b, gp1) if horizontal else box(gp0, a, gp1, b)
+                    inter = union.intersection(slab)
+                    if inter.is_empty or inter.area < 0.5 * slab.area:
+                        abut = []
+                        break
+                    bx0, by0, bx1, by1 = inter.bounds
+                    abut.append((by0, by1) if horizontal else (bx0, bx1))
+                if len(abut) != 2 or not (
+                    _close(abut[0][0], abut[1][0], 0.02)
+                    and _close(abut[0][1], abut[1][1], 0.02)
+                ):
+                    continue
+                band = abut[0]
+                if band[1] - band[0] <= NOISE_PT:
+                    continue
+                gap = _Gap(horizontal, band, lo1, hi2, (), (), True)
+                rect = gap.rect()
+                door_area = rect.area
+                if door_area <= NOISE_PT:
+                    continue
+                if rect.intersection(union).area > max(
+                    NOISE_PT * 2.0 * (band[1] - band[0]), 0.25 * door_area,
+                ):
+                    continue
+                mid = (lo1 + hi2) / 2.0
+                probes = (
+                    (Point(mid, band[0] - 2 * NOISE_PT), Point(mid, band[1] + 2 * NOISE_PT))
+                    if horizontal
+                    else (Point(band[0] - 2 * NOISE_PT, mid), Point(band[1] + 2 * NOISE_PT, mid))
+                )
+                if any(union.contains(probe) for probe in probes):
+                    continue
+                found.append((gap, native))
+    uses = Counter(index for _gap, native in found for index in native)
+    return [(gap, native) for gap, native in found if all(uses[index] == 1 for index in native)]
+
+
+def _same_gap(left: _Gap, right: _Gap, *, tol: float = 0.5) -> bool:
+    """Same interruption: matching span, overlapping wall band.
+
+    Named fill-runs and white-frame clusters often report the same opening on
+    bands that differ by a lining sliver. Exact band equality would mint both a
+    stroke closure and a stacker on one doorway.
+    """
+    if left.horizontal != right.horizontal:
+        return False
+    if not (_close(left.lo, right.lo, tol) and _close(left.hi, right.hi, tol)):
+        return False
+    overlap = min(left.band[1], right.band[1]) - max(left.band[0], right.band[0])
+    return overlap > NOISE_PT
+
+
 def _closed_union(polygons: Iterable[Polygon]) -> Any:
     merged = unary_union([p.buffer(_CLOSING_PT, join_style=2) for p in polygons])
     return merged.buffer(-_CLOSING_PT, join_style=2)
@@ -1739,6 +1863,7 @@ def build_layered_wall_doorway_room_rings(
     source_sha256: str,
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
+    stacker_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
 ) -> LayeredRoomRingResult:
@@ -1746,12 +1871,18 @@ def build_layered_wall_doorway_room_rings(
 
     ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    ``stacker_leaf_frame_closure`` (default False; requires the sliding control) closes a unique
+    cluster of three or more collinear white frames on one band. Two-frame sliding stays sliding.
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
+    if type(stacker_leaf_frame_closure) is not bool:
+        raise ValueError("stacker_leaf_frame_closure must be an explicit boolean")
+    if stacker_leaf_frame_closure and not sliding_leaf_frame_closure:
+        raise ValueError("stacker_leaf_frame_closure requires sliding_leaf_frame_closure")
     if type(dark_painted_wall_source) is not bool:
         raise ValueError("dark_painted_wall_source must be an explicit boolean")
     if type(wall_end_stroke_closures) is not bool:
@@ -1782,6 +1913,10 @@ def build_layered_wall_doorway_room_rings(
                 (), (), 0, 0, 0, 0, 0, 0,
             )
     strips, other_fills = _collect_strips(drawings)
+    fill_union = (
+        _closed_union([s.polygon for s in strips] + [polygon for _index, polygon in other_fills])
+        if strips or other_fills else None
+    )
     if dark_painted_wall_source:
         # Owner: black paired-line walls, dark filled wall strips and true
         # named wall ink are the structural wall hypothesis sources.
@@ -1883,7 +2018,29 @@ def build_layered_wall_doorway_room_rings(
         # one native stroke or box may evidence only ONE interruption; a shared one is a one-to-many span
         uses = Counter(index for evidence in sliding_by_gap.values() for index in evidence)
         sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
+    stacker_by_gap: dict[int, tuple[int, ...]] = {}
+    consumed_by_stacker: set[int] = set()
+    if stacker_leaf_frame_closure and fill_union is not None:
+        for cluster_gap, native in _stacker_cluster_gaps(drawings, fill_union):
+            matches = [
+                index for index, known in enumerate(gaps)
+                if _same_gap(known, cluster_gap)
+            ]
+            if not matches:
+                match_index = len(gaps)
+                gaps.append(cluster_gap)
+                stacker_by_gap[match_index] = native
+                continue
+            best = max(
+                matches,
+                key=lambda index: min(gaps[index].band[1], cluster_gap.band[1])
+                - max(gaps[index].band[0], cluster_gap.band[0]),
+            )
+            stacker_by_gap[best] = native
+            consumed_by_stacker.update(index for index in matches if index != best)
     for gap_index, gap in enumerate(gaps):
+        if gap_index in consumed_by_stacker:
+            continue
         swing = swing_by_gap.get(gap_index)
         host_wall = (gap.band[1] - gap.band[0]) >= _STROKE_PAIR_THICK_MIN
         stroke = None
@@ -1901,10 +2058,16 @@ def build_layered_wall_doorway_room_rings(
         if stroke is None and swing is None and host_wall:
             stroke = jamb_by_id.get(id(gap))
         sliding = sliding_by_gap.get(gap_index)
-        if sliding is not None and (swing is not None or stroke is not None):
-            unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
+        stacker = stacker_by_gap.get(gap_index)
+        if stacker is not None and stroke is not None:
+            # A head/sill stroke spanning the cluster is the stacker's own ink,
+            # not a second doorway. Swing or sliding on the same interruption still abstains.
+            stroke = None
+        claims = [item for item in (swing, stroke, sliding, stacker) if item is not None]
+        if len(claims) > 1:
+            unresolved.append(gap)  # competing doorway evidence in one interruption: none is chosen
             continue
-        if swing is None and stroke is None and sliding is None:
+        if not claims:
             unresolved.append(gap)
             continue
         if swing is not None:
@@ -1914,8 +2077,10 @@ def build_layered_wall_doorway_room_rings(
             }))
         elif stroke is not None:
             kind, native = KIND_STROKE, tuple(stroke)
-        else:
+        elif sliding is not None:
             kind, native = KIND_SLIDING_LEAF, tuple(sliding)
+        else:
+            kind, native = KIND_STACKER_LEAF, tuple(stacker)
         closure_id = stable_contract_id(
             "layered_doorway_closure",
             {
@@ -2033,6 +2198,7 @@ def build_layered_wall_doorway_room_rings(
 
 def build_from_pdf_bytes(
     source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
+    stacker_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
 ) -> LayeredRoomRingResult:
@@ -2049,6 +2215,7 @@ def build_from_pdf_bytes(
     return build_layered_wall_doorway_room_rings(
         drawings, source_sha256=source_sha256, page_index=page_index,
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+        stacker_leaf_frame_closure=stacker_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
         wall_end_stroke_closures=wall_end_stroke_closures,
     )
@@ -2057,6 +2224,7 @@ def build_from_pdf_bytes(
 __all__ = [
     "KIND_STROKE",
     "KIND_SLIDING_LEAF",
+    "KIND_STACKER_LEAF",
     "KIND_SWING",
     "LAYERED_ROOM_RING_SCHEMA_VERSION",
     "LayeredDoorwayClosure",

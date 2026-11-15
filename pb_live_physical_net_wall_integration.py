@@ -428,6 +428,7 @@ def _collect_live_physical_net_wall_claim(
     single_width_uniform_page_door_height_shadow: bool = False,
     layered_doorway_room_rings: bool = False,
     layered_sliding_leaf_closure: bool = False,
+    layered_stacker_leaf_closure: bool = False,
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
@@ -464,6 +465,10 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("layered sliding leaf closure must be an explicit boolean")
     if layered_sliding_leaf_closure and not layered_doorway_room_rings:
         raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_stacker_leaf_closure) is not bool:
+        raise ValueError("layered stacker leaf closure must be an explicit boolean")
+    if layered_stacker_leaf_closure and not layered_sliding_leaf_closure:
+        raise ValueError("layered stacker leaf closure needs layered sliding leaf closure")
     if type(layered_partition_witness) is not bool:
         raise ValueError("layered partition witness must be an explicit boolean")
     if layered_partition_witness and not layered_sliding_leaf_closure:
@@ -545,6 +550,7 @@ def _collect_live_physical_net_wall_claim(
             source_quarter_swing_opening_kind
             or source_unique_swing_opening_host
             or layered_sliding_leaf_closure
+            or layered_stacker_leaf_closure
         ):
             swing_drawings_by_page = {
                 str(index + 1): tuple(doc[index].get_drawings())
@@ -647,6 +653,8 @@ def _collect_live_physical_net_wall_claim(
            if layered_doorway_room_rings else {}),
         **({"layered_sliding_leaf_closure": True}
            if layered_sliding_leaf_closure else {}),
+        **({"layered_stacker_leaf_closure": True}
+           if layered_stacker_leaf_closure else {}),
         **({"layered_partition_witness": True}
            if layered_partition_witness else {}),
         **({"layered_finished_face_gate": True}
@@ -1227,6 +1235,8 @@ def _collect_live_physical_net_wall_claim(
         physical_void = apply_source_sliding_leaf_opening_hosts(
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+            **({"stacker_leaf_frame_closure": True}
+               if layered_stacker_leaf_closure else {}),
             **({"dark_painted_wall_source": True}
                if layered_dark_painted_wall_source else {}),
             **({"wall_end_stroke_closures": True}
@@ -1513,6 +1523,7 @@ def collect_live_physical_net_wall_claim(
     single_width_uniform_page_door_height_shadow: bool = False,
     layered_doorway_room_rings: bool = False,
     layered_sliding_leaf_closure: bool = False,
+    layered_stacker_leaf_closure: bool = False,
     layered_partition_witness: bool = False,
     layered_finished_face_gate: bool = False,
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
@@ -1546,6 +1557,10 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("layered sliding leaf closure must be an explicit boolean")
     if layered_sliding_leaf_closure and not layered_doorway_room_rings:
         raise ValueError("layered sliding leaf closure needs layered doorway room rings")
+    if type(layered_stacker_leaf_closure) is not bool:
+        raise ValueError("layered stacker leaf closure must be an explicit boolean")
+    if layered_stacker_leaf_closure and not layered_sliding_leaf_closure:
+        raise ValueError("layered stacker leaf closure needs layered sliding leaf closure")
     if type(layered_partition_witness) is not bool:
         raise ValueError("layered partition witness must be an explicit boolean")
     if layered_partition_witness and not layered_sliding_leaf_closure:
@@ -1607,6 +1622,8 @@ def collect_live_physical_net_wall_claim(
            if layered_doorway_room_rings else {}),
         **({"layered_sliding_leaf_closure": True}
            if layered_sliding_leaf_closure else {}),
+        **({"layered_stacker_leaf_closure": True}
+           if layered_stacker_leaf_closure else {}),
         **({"layered_partition_witness": True}
            if layered_partition_witness else {}),
         **({"layered_finished_face_gate": True}

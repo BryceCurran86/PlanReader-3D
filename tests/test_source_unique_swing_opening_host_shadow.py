@@ -10,10 +10,14 @@ import fitz
 import pytest
 
 from pb_external_door_height_estimate_policy import OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+from pb_live_opening_area_quantity_publication import _opening_quantity
 from pb_live_opening_external_door_height_estimate_publication import (
     apply_live_external_door_height_estimates,
 )
-from pb_live_whole_wall_role_composition import LiveWholeWallRoleComposition
+from pb_live_whole_wall_role_composition import (
+    LiveWholeWallRoleComposition,
+    LiveWholeWallRoleTrace,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_quarter_swing_opening_kind_shadow import apply_source_quarter_swing_opening_kinds
 from pb_source_unique_swing_opening_host_shadow import (
@@ -21,7 +25,7 @@ from pb_source_unique_swing_opening_host_shadow import (
     apply_source_sliding_leaf_opening_hosts,
     apply_source_unique_swing_opening_hosts,
 )
-from tests.test_layered_wall_doorway_room_ring_shadow_v1 import robe_room
+from tests.test_layered_wall_doorway_room_ring_shadow_v1 import robe_room, stacker_room
 from pb_wall_role_authority import WallRoleClassification
 from tests.test_layered_wall_doorway_room_ring_shadow_v1 import room as _walled_room
 from tests.test_live_opening_area_quantity_publication import _composition, _opening
@@ -135,6 +139,75 @@ def test_window_interruption_without_a_leaf_stays_unhosted() -> None:
         drawings_by_page_id={"3": drawings},
     )
     assert composition.canonical_openings[0].host_wall_id is None
+
+
+def test_corroborated_internal_host_is_not_stamped_external() -> None:
+    drawings = _walled_room()
+    opening = replace(
+        _unhosted(geom=(97.2, 40.0, 100.5, 40.0), kind="door"),
+        host_wall_id="opening_host_binding_group_synthetic",
+        host_binding_record_id="opening_host_binding_v3_synthetic",
+    )
+    internal = LiveWholeWallRoleComposition(
+        revision_id="rev-1",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("live_whole_wall_role_composition_resolved",),
+        traces=(
+            LiveWholeWallRoleTrace(
+                physical_wall_id=opening.host_wall_id,
+                page_id="3",
+                decision_scope_id="live-page-3",
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("existing_internal",),
+                record_id="internal-role-1",
+                role=WallRoleClassification.INTERNAL,
+            ),
+        ),
+        whole_wall_role_authority=None,
+        role_selectors=MappingProxyType({}),
+    )
+    roles = apply_source_one_room_envelope_external_roles(
+        internal,
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    assert all(trace.role is not WallRoleClassification.EXTERNAL for trace in roles.traces)
+    estimated = apply_live_external_door_height_estimates(
+        composition=_composition(replace(opening, figured_single_axis_mm=870.0)),
+        whole_wall_role_composition=roles,
+    )
+    assert estimated.canonical_openings[0].area_basis != OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert estimated.canonical_openings[0].area_m2 is None
+
+
+def test_zero_opacity_swing_does_not_host_an_opening() -> None:
+    opening = _unhosted(geom=(49.2, 50.0, 52.5, 50.0))
+    drawings = [{**row, "stroke_opacity": 0.0} for row in _quarter_swing_drawings()]
+    composition = apply_source_unique_swing_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+    )
+    assert composition.canonical_openings[0].host_wall_id is None
+
+
+def test_generated_swing_host_binding_is_not_a_quantity_receipt() -> None:
+    opening = _unhosted(geom=(49.2, 50.0, 52.5, 50.0), kind="door")
+    hosted = apply_source_unique_swing_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    updated = hosted.canonical_openings[0]
+    assert updated.host_wall_id
+    assert updated.host_binding_record_id
+    assert updated.host_binding_record_id not in updated.evidence_ids
+    billed = replace(
+        updated,
+        opening_kind="door",
+        area_m2=1.827,
+        area_basis="figured_opening_label",
+        figured_area_record_id="figured-1",
+    )
+    assert _opening_quantity(billed) is None
 
 
 def test_one_room_envelope_wall_gets_an_external_role() -> None:
@@ -281,3 +354,27 @@ def test_unkinded_tick_beside_a_unique_sliding_door_does_not_block_it() -> None:
     by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
     assert by_id["opening-door"].host_wall_id
     assert by_id["opening-tick"].host_wall_id is None
+
+
+def test_unique_door_in_a_stacker_leaf_closure_gets_a_host() -> None:
+    opening = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door")
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": stacker_room()},
+        stacker_leaf_frame_closure=True,
+    )
+    updated = composition.canonical_openings[0]
+    assert updated.host_wall_id
+    assert any(
+        item.startswith("source_stacker_leaf_opening_host_")
+        for item in updated.evidence_ids
+    )
+
+
+def test_stacker_host_stays_off_unless_its_own_control_is_set() -> None:
+    opening = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door")
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": stacker_room()},
+    )
+    assert composition.canonical_openings[0].host_wall_id is None

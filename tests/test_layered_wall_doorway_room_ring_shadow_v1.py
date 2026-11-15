@@ -11,6 +11,7 @@ import pytest
 from pb_layered_wall_doorway_room_ring_shadow import (
     KIND_STROKE,
     KIND_SLIDING_LEAF,
+    KIND_STACKER_LEAF,
     KIND_SWING,
     LayeredRoomRingRecord,
     REASON_OPEN_EXTERIOR,
@@ -692,3 +693,76 @@ def test_swing_through_a_thick_open_pier_closes_the_opening():
     assert KIND_SWING in {c.kind for c in result.closures}
     boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
     assert len(boxes) == 2
+
+
+def stacker_room(tf=identity, *, frames=3):
+    """Alcove opening x 44.4..94 on band y 28..30 filled by overlapping white frames, not two sliding leaves."""
+    rows = room(tf) + strip(40, 2, 42, 30, tf) + strip(40, 28, 44.4, 30, tf) + strip(94, 28, 98, 30, tf)
+    boxes = (
+        (44.4, 27.72, 62.0, 30.28),
+        (58.0, 27.72, 78.0, 30.28),
+        (74.0, 27.72, 94.0, 30.28),
+    )
+    for item in boxes[:frames]:
+        rows.append(white_box(*item, tf))
+    return rows
+
+
+def stacker(rows, **kw):
+    return build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0,
+        sliding_leaf_frame_closure=True, stacker_leaf_frame_closure=True, **kw,
+    )
+
+
+def test_three_overlapping_white_frames_close_as_a_stacker_only_under_their_own_control():
+    on = stacker(stacker_room())
+    assert KIND_STACKER_LEAF in {c.kind for c in on.closures}
+    assert KIND_SLIDING_LEAF not in {c.kind for c in on.closures}
+    assert sorted(c.kind for c in on.closures) == sorted([KIND_SWING, KIND_STACKER_LEAF])
+    off = build_layered_wall_doorway_room_rings(stacker_room(), source_sha256=SHA, page_index=0)
+    assert KIND_STACKER_LEAF not in {c.kind for c in off.closures}
+    sliding_only = sliding(stacker_room())
+    assert KIND_STACKER_LEAF not in {c.kind for c in sliding_only.closures}
+    with pytest.raises(ValueError):
+        build_layered_wall_doorway_room_rings(
+            stacker_room(), source_sha256=SHA, page_index=0, stacker_leaf_frame_closure=True,
+        )
+    with pytest.raises(ValueError):
+        build_layered_wall_doorway_room_rings(
+            stacker_room(), source_sha256=SHA, page_index=0,
+            sliding_leaf_frame_closure=True, stacker_leaf_frame_closure=1,
+        )
+
+
+def test_two_white_frames_are_not_a_stacker_and_two_leaf_sliding_is_not_stolen():
+    assert KIND_STACKER_LEAF not in {c.kind for c in stacker(stacker_room(frames=2)).closures}
+    both = stacker(robe_room())
+    assert KIND_SLIDING_LEAF in {c.kind for c in both.closures}
+    assert KIND_STACKER_LEAF not in {c.kind for c in both.closures}
+
+
+def test_a_competing_doorway_in_the_same_stacker_interruption_abstains():
+    competing = stacker_room() + swing((46.0, 29.0), (46.0, 5.0), (70.0, 29.0))
+    result = stacker(competing)
+    assert KIND_STACKER_LEAF not in {c.kind for c in result.closures}
+
+
+def test_a_head_sill_stroke_on_a_stacker_is_the_units_own_ink_not_a_second_doorway():
+    rows = stacker_room() + [line((44.4, 29.0), (94.0, 29.0))]
+    result = stacker(rows)
+    assert KIND_STACKER_LEAF in {c.kind for c in result.closures}
+    stackers = [c for c in result.closures if c.kind == KIND_STACKER_LEAF]
+    assert len(stackers) == 1
+    assert not any(
+        c.kind == KIND_STROKE and abs(c.gap_interval[0] - 44.4) < 0.5 and abs(c.gap_interval[1] - 94.0) < 0.5
+        for c in result.closures
+    )
+
+
+def test_stacker_closure_is_invariant_to_rigid_motion():
+    base = stacker(stacker_room())
+    rotated = stacker(stacker_room(lambda x, y: (-y + 500.0, x + 40.0)))
+    moved = stacker(stacker_room(lambda x, y: (x + 317.25, y - 88.5)))
+    for other in (rotated, moved):
+        assert sorted(c.kind for c in other.closures) == sorted(c.kind for c in base.closures)
