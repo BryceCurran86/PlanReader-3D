@@ -72,3 +72,16 @@ The **new numbered-space source reader** also runs automatically inside the same
 - Original Q5446 and Lot16 remain exterior ABSTAINED; connected network diagnostics help pinpoint source-path stitching rather than guessed contour fixes.
 
 **Remaining:** full authenticated exterior source path graph and doorway ownership. The number-to-name key cannot substitute for a physical exterior / room face chain; original production customer issuer still needs full independent source acceptance. This PR is draft.
+
+
+## Later source-native heavy-wall recovery (third commit)
+
+Q5446's actual original PDF carries many real walls as **single opaque 1.92-pt BLACK vector strokes**, not native wall-layer filled rectangles and not paired thin faces. The Next donor had no such source representation. New generic \`_collect_source_heavy_stroke_strips\` admits ONLY original visible black, opaque, axis-aligned, >=12-pt spans with source stroke width 1.2–6.0 pts and retains original source path index and actual source paint thickness. Thin 0.48-pt glyph/dimension ink, green annotation, weak alpha and short marks fail the negative tests. This is *unclassified tracing evidence*, never a customer wall.
+
+Observed original Q5446 PDF:
+- Ground floor: previously 22 wall-strip candidates and zero region candidates; **77 and 1** after source-heavy strokes.
+- Upper floor: previously 20 and zero; **66 and 2** after source-heavy strokes.
+- Physical exterior remains **ABSTAINED** on both. The visual overlays still reveal a few thick title-block lines; no building-only crop or outdoor filter is falsely claimed.
+- 3Laurel, Maryborough, Lot16 and Acacia stay on the same new engine code; full unchanged-original replay is underway. Original source PDFs and generated page overlays reside locally on the authorized PC only.
+
+The initial restoration also ported the source 1.92-pt property only as a diagnostic; no signed BOQ quantities or frozen denominator changed.

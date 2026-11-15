@@ -16,6 +16,7 @@ from pb_next_wall_ring_preview import (
     _collect_dark_fill_strips,
     _collect_strips,
     _collect_stroke_pair_strips,
+    _collect_source_heavy_stroke_strips,
     build_layered_wall_doorway_room_rings,
 )
 from pb_layered_wall_doorway_room_ring_shadow import (
@@ -127,6 +128,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     _collect_dark_fill_strips(clipped)
                     + _collect_dark_painted_source_wall_strips(clipped)
                 ), (0.75, 0.20, 0.80)),
+                ("source_heavy_stroke", _collect_source_heavy_stroke_strips(clipped), (0.93,0.3,0.12)),
             )
             for kind, strips, color in candidates:
                 for strip in strips:
@@ -198,6 +200,8 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             "external_wall_band_candidates": outer_wall.source_wall_band_count,
             "external_wall_stroke_pair_candidates":
                 outer_wall.source_stroke_pair_band_count,
+            "external_wall_heavy_native_stroke_candidates":
+                outer_wall.source_heavy_stroke_band_count,
             "external_wall_source_path_candidates":
                 outer_wall.source_wall_path_count,
             "numbered_space_key": space_key.to_dict(),
@@ -246,6 +250,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 "blue": "source-filled native wall candidates",
                 "cyan": "stroke-pair wall candidates; may include dimensions",
                 "purple": "dark-fill wall candidates",
+                "red_orange": "source-heavy black stroke wall candidate, not verified",
                 "orange": "temporary topology-only doorway closures",
                 "green": "candidate room enclosure",
             },

@@ -797,6 +797,53 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
     return _attach_caps(strips), other
 
 
+def _collect_source_heavy_stroke_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Opaque BLACK heavy native line paint as candidate wall bands.
+
+    Q5446-class vector drawings can paint real walls as ONE 1.92-pt source
+    stroke, not dark fills and not two separate thin-line faces. The native
+    PDF gives the actual stroke width and original path index. Only
+    axis-aligned, long, source-black, opaque paint becomes a candidate wall
+    band. Never infer missing lines, page hulls, or commercial wall faces.
+    """
+    result: list[_Strip] = []
+    seen: set[tuple[int, float, float, float, float]] = set()
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if row.get("color") is None or not _is_black(row.get("color")):
+            continue
+        opacity = row.get("stroke_opacity", 1.0)
+        if type(opacity) not in (int, float) or opacity < .95:
+            continue
+        width = row.get("width", 0)
+        if type(width) not in (int, float) or not math.isfinite(width) or not (1.2 <= width <= 6.0):
+            continue
+        half = width / 2.
+        for item in row.get("items", ()):
+            if item[0] != "l":
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if not all(math.isfinite(v) for v in (ax,ay,bx,by)):
+                continue
+            if abs(ay - by) < .08 and abs(ax-bx) >= 12.0:
+                x0,x1 = sorted((ax,bx))
+                y0,y1 = (ay+by)/2-half,(ay+by)/2+half
+            elif abs(ax - bx) < .08 and abs(ay-by) >= 12.0:
+                y0,y1 = sorted((ay,by))
+                x0,x1 = (ax+bx)/2-half,(ax+bx)/2+half
+            else:
+                continue
+            key = (index, *(round(v,4) for v in (x0,y0,x1,y1)))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(_Strip(index,x0,y0,x1,y1,box(x0,y0,x1,y1)))
+    return result
+
+
 def _collect_dark_fill_strips(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
@@ -1969,6 +2016,7 @@ def build_layered_wall_doorway_room_rings(
             + _collect_stroke_pair_strips(indexed)
             + _collect_dark_fill_strips(indexed)
             + recovered_dark
+            + _collect_source_heavy_stroke_strips(indexed)
         )
         keys: set[tuple] = set()
         unique = []

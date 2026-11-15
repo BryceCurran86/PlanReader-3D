@@ -19,7 +19,10 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_strips,
     _source_wall_ink_candidate_drawings,
 )
-from pb_next_wall_ring_preview import _collect_stroke_pair_strips
+from pb_next_wall_ring_preview import (
+    _collect_stroke_pair_strips,
+    _collect_source_heavy_stroke_strips,
+)
 from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic, inspect_native_wall_graph
 
 
@@ -34,6 +37,7 @@ class SourceNativeOuterWallAttempt:
     measurement_authorized: bool = False
     source_wall_band_count: int = 0
     source_stroke_pair_band_count: int = 0
+    source_heavy_stroke_band_count: int = 0
     source_wall_path_count: int = 0
     graph: NativeWallGraphDiagnostic = field(default_factory=NativeWallGraphDiagnostic)
 
@@ -55,7 +59,10 @@ def attempt_source_native_outer_wall_first(
     # filled rectangles. The original preflight omitted them entirely.
     # Source paired faces are candidates, NEVER automatically physical walls.
     paired = _collect_stroke_pair_strips(wall_ink)
-    bars = named + dark + paired
+    # Preserve native thick-line paint. Those source strokes are physical
+    # wall candidates, not inferred or double-line approximations.
+    thick = _collect_source_heavy_stroke_strips(wall_ink)
+    bars = named + dark + paired + thick
     unique_bars = {}
     for bar in bars:
         if bar.polygon is None or bar.polygon.is_empty or not bar.polygon.is_valid:
@@ -71,6 +78,7 @@ def attempt_source_native_outer_wall_first(
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
+        source_heavy_stroke_band_count=len(thick),
         source_wall_path_count=len({
             path for bar in bars for path in bar.native_path_indices()
         }),
@@ -127,6 +135,7 @@ def attempt_source_native_outer_wall_first(
         points, sources,
         source_wall_band_count=counts["source_wall_band_count"],
         source_stroke_pair_band_count=counts["source_stroke_pair_band_count"],
+        source_heavy_stroke_band_count=counts["source_heavy_stroke_band_count"],
         source_wall_path_count=counts["source_wall_path_count"],
         graph=graph,
     )

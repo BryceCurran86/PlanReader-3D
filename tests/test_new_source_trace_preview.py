@@ -433,3 +433,58 @@ def test_tracing_attempts_exterior_before_numbered_key_and_room(tmp_path,monkeyp
     assert order == ["exterior","key","rooms"]
     assert summary["numbered_space_key"]["reason"]=="mock_no_source_key"
     assert summary["quantity_authorized"] is False and png[:8]==b"\x89PNG\r\n\x1a\n"
+
+
+def test_source_heavy_black_strokes_are_wall_bands_not_double_line_dependent():
+    from pb_next_wall_ring_preview import (
+        _collect_source_heavy_stroke_strips,
+        build_layered_wall_doorway_room_rings,
+    )
+    from tests.test_layered_wall_doorway_room_ring_shadow_v1 import SHA
+
+    def row(x0,y0,x1,y1, *, width=1.92, color=(0.,0.,0.), opacity=1.):
+        return {
+            "type":"s","layer":"","fill":None,"color":color,
+            "width":width,"stroke_opacity":opacity,
+            "rect":fitz.Rect(min(x0,x1),min(y0,y1),max(x0,x1),max(y0,y1)),
+            "items":(("l",fitz.Point(x0,y0),fitz.Point(x1,y1)),),
+        }
+    walls=[
+        row(100,100,400,100),row(400,100,400,350),
+        row(400,350,100,350),row(100,350,100,100),
+    ]
+    assert len(_collect_source_heavy_stroke_strips(walls))==4
+    result=build_layered_wall_doorway_room_rings(
+        walls,source_sha256=SHA,page_index=0,stroke_pair_wall_faces=True,
+    )
+    assert result.wall_strip_count>=4
+    assert len(result.rings)>=1
+    assert all(not x.commercial_projection_allowed for x in result.rings)
+    negatives=[
+        row(0,0,50,0,width=.48),
+        row(0,10,60,10,color=(.1,.9,.1)),
+        row(0,20,60,20,opacity=.5),
+        row(0,30,60,30,width=1.92,color=(.8,.1,0)),
+        row(0,40,10,40,width=1.92),
+    ]
+    assert _collect_source_heavy_stroke_strips(negatives)==[]
+
+
+def test_outer_first_includes_source_heavy_black_stroke_ring_without_hull():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    walls=[]
+    for x0,y0,x1,y1 in (
+        (100,100,400,100),(400,100,400,350),
+        (400,350,100,350),(100,350,100,100),
+    ):
+        walls.append({
+            "type":"s","layer":"","fill":None,"color":(0.,0.,0.),
+            "width":1.92,"stroke_opacity":1.,
+            "rect":fitz.Rect(min(x0,x1),min(y0,y1),max(x0,x1),max(y0,y1)),
+            "items":(("l",fitz.Point(x0,y0),fitz.Point(x1,y1)),),
+        })
+    got=attempt_source_native_outer_wall_first(walls)
+    assert got.source_heavy_stroke_band_count>=4
+    assert got.graph.component_count>=1
+    assert got.physical_wall_authenticated is False
+    assert got.measurement_authorized is False
