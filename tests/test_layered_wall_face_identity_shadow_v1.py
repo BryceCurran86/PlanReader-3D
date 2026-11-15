@@ -34,6 +34,7 @@ from pb_layered_wall_face_identity_shadow import (
     apply_lined_finished_face_polygon,
     classify_ring_face_identity,
     wall_strip_facts,
+    _edge_class,
 )
 
 K = 0.5522847498
@@ -176,9 +177,9 @@ def test_unknown_unclassified_and_mixed_owners_are_each_a_distinct_unresolved_cl
     other_layer = {**facts, 999: WallStripFact(999, "Interior_Joinery", True, 4.0)}
     assert CLASS_LAYER_NOT_CLASSIFIED in classify_ring_face_identity(
         with_owner(("layered_wall_strip:999",)), strip_facts=other_layer, statements=[statement()], mm_per_pt=MM_PER_PT).reason_codes
-    external = {**facts, 998: WallStripFact(998, "Enclosure_WallExternal", True, 5.0)}
+    joinery = {**facts, 998: WallStripFact(998, "Interior_Joinery", True, 5.0)}
     mixed = classify_ring_face_identity(
-        with_owner((first_owner, "layered_wall_strip:998")), strip_facts=external, statements=[statement()], mm_per_pt=MM_PER_PT)
+        with_owner((first_owner, "layered_wall_strip:998")), strip_facts=joinery, statements=[statement()], mm_per_pt=MM_PER_PT)
     assert CLASS_OWNERS_MIXED in mixed.reason_codes
     # a malformed owner id is an unknown owner, not an exception
     assert CLASS_OWNER_UNKNOWN in classify_ring_face_identity(
@@ -624,3 +625,37 @@ def test_an_unpaired_lining_stroke_without_a_statement_is_not_guessed(base):
     assert identity.verdict == VERDICT_UNRESOLVED
     assert CLASS_OWNER_UNKNOWN in identity.reason_codes
     assert identity.lined_edge_offsets_mm == ()
+
+
+def test_coplanar_internal_frame_and_external_inner_face_are_one_room_face():
+    facts = {
+        1: WallStripFact(1, "Enclosure_WallInternal", True, 4.0),
+        2: WallStripFact(2, "Enclosure_WallExternal", True, 6.0),
+    }
+    klass = _edge_class(
+        ("layered_wall_strip:1", "layered_wall_strip:2"),
+        facts,
+        first=(0.0, 0.0),
+        second=(0.0, 80.0),
+        frame_mm=70.0,
+        lining_mm=10.0,
+        mm_per_pt=MM_PER_PT,
+    )
+    assert klass == CLASS_LINED_INTERNAL_FRAME_FACE
+
+
+def test_internal_frame_and_a_mismatched_thickness_stay_mixed():
+    facts = {
+        1: WallStripFact(1, "Enclosure_WallInternal", True, 4.0),
+        2: WallStripFact(2, "Enclosure_WallInternal", True, 50.0 / MM_PER_PT),
+    }
+    klass = _edge_class(
+        ("layered_wall_strip:1", "layered_wall_strip:2"),
+        facts,
+        first=(0.0, 0.0),
+        second=(0.0, 80.0),
+        frame_mm=70.0,
+        lining_mm=10.0,
+        mm_per_pt=MM_PER_PT,
+    )
+    assert klass == CLASS_OWNERS_MIXED

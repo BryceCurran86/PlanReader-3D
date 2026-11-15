@@ -22,6 +22,9 @@ from pb_physical_opening_authority import (
     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
 )
 
+SOURCE_QUARTER_SWING_AND_RADIAL_LEAF = "source_quarter_swing_and_radial_leaf"
+SOURCE_DIAGONAL_DOOR_LEAF = "source_diagonal_door_leaf"
+
 
 OPENING_KIND_SCHEMA_VERSION = "1.0.0"
 OPENING_KIND_STRUCTURAL_DOOR = "opening_kind_structural_door"
@@ -35,6 +38,8 @@ OPENING_KIND_UNAVAILABLE = "opening_kind_unavailable"
 _STRUCTURAL_KIND = {
     GAP_CORROBORATED_DOOR_JAMB_LEAF: "door",
     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION: "door",
+    SOURCE_QUARTER_SWING_AND_RADIAL_LEAF: "door",
+    SOURCE_DIAGONAL_DOOR_LEAF: "door",
     GAP_CORROBORATED_WINDOW_JAMB_PAIR: "window",
 }
 
@@ -132,6 +137,8 @@ __all__ = [
     "OPENING_KIND_STRUCTURAL_DOOR",
     "OPENING_KIND_STRUCTURAL_WINDOW",
     "OPENING_KIND_UNAVAILABLE",
+    "SOURCE_DIAGONAL_DOOR_LEAF",
+    "SOURCE_QUARTER_SWING_AND_RADIAL_LEAF",
     "OpeningKindResolution",
     "resolve_opening_kind",
 ]

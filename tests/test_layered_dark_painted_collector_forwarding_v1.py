@@ -125,6 +125,8 @@ def test_collector_and_compose_need_explicit_bools_and_parent_gates():
             call("does-not-exist.pdf", layered_doorway_room_rings=True,
                  layered_finished_face_gate=True, layered_dark_painted_wall_source=True,
                  layered_wall_end_stroke_closures="yes")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="quarter swing"):
+            call("does-not-exist.pdf", source_quarter_swing_opening_kind="yes")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="dark painted"):
         collect_live_physical_net_wall_claim(
             "does-not-exist.pdf", recover_additional_opening_areas=True,

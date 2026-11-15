@@ -538,6 +538,23 @@ def _edge_class(
         ):
             return CLASS_DRAWN_LINING_FACE
         return only
+    # Coplanar internal lining/frame and external inner face of ONE wall are
+    # the same room face, not competing wall types. Innermost resolved class
+    # wins. A mismatch or unknown owner still abstains.
+    wall_resolved = {
+        CLASS_LINED_INTERNAL_FRAME_FACE,
+        CLASS_DRAWN_FINISHED_BUILD_UP,
+        CLASS_DRAWN_LINING_FACE,
+        CLASS_EXTERNAL_DRAWN_INNER_FACE,
+    }
+    if classes and classes <= wall_resolved:
+        if CLASS_DRAWN_LINING_FACE in classes:
+            return CLASS_DRAWN_LINING_FACE
+        if CLASS_DRAWN_FINISHED_BUILD_UP in classes:
+            return CLASS_DRAWN_FINISHED_BUILD_UP
+        if CLASS_LINED_INTERNAL_FRAME_FACE in classes:
+            return CLASS_LINED_INTERNAL_FRAME_FACE
+        return CLASS_EXTERNAL_DRAWN_INNER_FACE
     return CLASS_OWNERS_MIXED
 
 

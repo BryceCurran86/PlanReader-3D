@@ -433,6 +433,7 @@ def _collect_live_physical_net_wall_claim(
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
+    source_quarter_swing_opening_kind: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -487,6 +488,8 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
         )
+    if type(source_quarter_swing_opening_kind) is not bool:
+        raise ValueError("source quarter swing opening kind must be an explicit boolean")
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -534,6 +537,12 @@ def _collect_live_physical_net_wall_claim(
             )
             for index in topology_selected
         }
+        swing_drawings_by_page: dict[str, tuple] = {}
+        if source_quarter_swing_opening_kind:
+            swing_drawings_by_page = {
+                str(index + 1): tuple(doc[index].get_drawings())
+                for index in topology_selected
+            }
     finally:
         doc.close()
 
@@ -1194,6 +1203,15 @@ def _collect_live_physical_net_wall_claim(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
+    if source_quarter_swing_opening_kind:
+        from pb_source_quarter_swing_opening_kind_shadow import (
+            apply_source_quarter_swing_opening_kinds,
+        )
+
+        physical_void = apply_source_quarter_swing_opening_kinds(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+        )
     # Original measured frame/physical axes only. Area-only figured products
     # are not inverted to invent widths or heights. Remains independent of
     # the signed m² opening-area family and customer permission.
@@ -1455,6 +1473,7 @@ def collect_live_physical_net_wall_claim(
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
+    source_quarter_swing_opening_kind: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1506,6 +1525,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
         )
+    if type(source_quarter_swing_opening_kind) is not bool:
+        raise ValueError("source quarter swing opening kind must be an explicit boolean")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1548,6 +1569,8 @@ def collect_live_physical_net_wall_claim(
            if layered_dark_painted_wall_source else {}),
         **({"layered_wall_end_stroke_closures": True}
            if layered_wall_end_stroke_closures else {}),
+        **({"source_quarter_swing_opening_kind": True}
+           if source_quarter_swing_opening_kind else {}),
     )
     if recovery_page_id is None:
         return claim
