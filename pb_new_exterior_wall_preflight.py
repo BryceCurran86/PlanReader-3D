@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Any, Mapping, Sequence
 
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 from pb_layered_wall_doorway_room_ring_shadow import (
@@ -26,6 +26,13 @@ from pb_next_wall_ring_preview import (
     _collect_source_wide_face_pairs,
 )
 from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic, inspect_native_wall_graph
+from pb_source_window_footprint_continuity import (
+    WindowFootprintBridge, detect_exterior_window_footprint_bridges,
+)
+from pb_source_garage_door_footprint_continuity import (
+    GarageDoorFootprintBridge,
+    detect_exterior_garage_door_footprint_bridges,
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,8 @@ class SourceNativeOuterWallAttempt:
     source_wide_face_pair_band_count: int = 0
     source_wall_path_count: int = 0
     graph: NativeWallGraphDiagnostic = field(default_factory=NativeWallGraphDiagnostic)
+    window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
+    garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
 
 
 def attempt_source_native_outer_wall_first(
@@ -51,6 +60,8 @@ def attempt_source_native_outer_wall_first(
     *,
     baseline_source_drawings: Sequence[Mapping[str, Any]] | None = None,
     source_ink_already_scoped: bool = False,
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
+    window_source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
 ) -> SourceNativeOuterWallAttempt:
     """Find one joined perimeter in *source wall fills*, NOT the sheet bbox.
 
@@ -101,7 +112,30 @@ def attempt_source_native_outer_wall_first(
         unique_bars[key] = bar
     bars = list(unique_bars.values())
     graph = inspect_native_wall_graph(bars, source_drawings=wall_ink)
+    # Windows are holes in wall paint but NOT holes in the exterior footprint.
+    # The synthetic bridging solids below exist only in this topology union;
+    # they are never emitted as wall, frame, length or customer quantities.
+    opening_drawings = window_source_drawings if window_source_drawings is not None else wall_ink
+    window_bridges = detect_exterior_window_footprint_bridges(
+        opening_drawings, source_words,
+    ) if source_words else ()
+    garage_bridges = detect_exterior_garage_door_footprint_bridges(
+        opening_drawings, source_words,
+    ) if source_words else ()
+    source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
+    window_bridges = tuple(
+        bridge for bridge in window_bridges
+        if bridge.left_host_path_id in source_bar_paths
+        and bridge.right_host_path_id in source_bar_paths
+    )
+    garage_bridges = tuple(
+        bridge for bridge in garage_bridges
+        if bridge.start_host_path_id in source_bar_paths
+        and bridge.end_host_path_id in source_bar_paths
+    )
     counts = dict(
+        window_footprint_bridges=window_bridges,
+        garage_door_footprint_bridges=garage_bridges,
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
@@ -117,7 +151,11 @@ def attempt_source_native_outer_wall_first(
             "ABSTAINED", "source_exterior_continuous_wall_band_not_found",
             **counts,
         )
-    union = unary_union([bar.polygon for bar in bars])
+    union = unary_union(
+        [bar.polygon for bar in bars]
+        + [box(*bridge.bounds_pdf_pts) for bridge in window_bridges]
+        + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
+    )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
     # dimension ticks and boxed landscape art cannot be promoted by hull.
@@ -169,4 +207,6 @@ def attempt_source_native_outer_wall_first(
         source_wide_face_pair_band_count=counts["source_wide_face_pair_band_count"],
         source_wall_path_count=counts["source_wall_path_count"],
         graph=graph,
+        window_footprint_bridges=window_bridges,
+        garage_door_footprint_bridges=garage_bridges,
     )
