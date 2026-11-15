@@ -20,6 +20,9 @@ from pb_source_opening_identity_partition_shadow import (
 )
 from pb_source_quarter_swing_opening_kind_shadow import (
     apply_source_quarter_swing_opening_kinds,
+    drawing_viewport_id_for_page,
+    opening_matches_drawing_viewport,
+    unique_authenticated_drawing_viewport_ids,
 )
 from tests.test_live_opening_area_quantity_publication import _composition, _opening
 
@@ -420,3 +423,24 @@ def test_window_interruption_without_a_leaf_stays_unkinded() -> None:
         drawings_by_page_id={"3": drawings},
     )
     assert composition.canonical_openings[0].opening_kind is None
+
+
+def test_unique_authenticated_drawing_viewport_requires_one_owned_viewport() -> None:
+    native = _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-native")
+    foreign = replace(
+        _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-foreign"),
+        viewport_id="foreign-unrelated",
+    )
+    blank = replace(
+        _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-blank"),
+        viewport_id="",
+    )
+    assert unique_authenticated_drawing_viewport_ids((native,)) == {"3": "vp-floor-1"}
+    assert unique_authenticated_drawing_viewport_ids((native, foreign)) == {}
+    assert unique_authenticated_drawing_viewport_ids((blank,)) == {}
+    assert opening_matches_drawing_viewport(native, "vp-floor-1")
+    assert not opening_matches_drawing_viewport(foreign, "vp-floor-1")
+    assert not opening_matches_drawing_viewport(blank, "vp-floor-1")
+    assert drawing_viewport_id_for_page("3", None) == ""
+    assert drawing_viewport_id_for_page("3", {}) == ""
+    assert drawing_viewport_id_for_page("3", {"3": "vp-floor-1"}) == "vp-floor-1"

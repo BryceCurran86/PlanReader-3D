@@ -1218,14 +1218,22 @@ def _collect_live_physical_net_wall_claim(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
+    drawing_viewports: dict[str, str] = {}
     if swing_drawings_by_page:
         from pb_source_dashed_outer_line_cased_opening_shadow import (
             apply_source_dashed_outer_line_cased_openings,
         )
+        from pb_source_quarter_swing_opening_kind_shadow import (
+            unique_authenticated_drawing_viewport_ids,
+        )
 
+        drawing_viewports = unique_authenticated_drawing_viewport_ids(
+            physical_void.canonical_openings
+        )
         physical_void = apply_source_dashed_outer_line_cased_openings(
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+            drawing_viewport_id_by_page_id=drawing_viewports,
         )
     if source_unique_swing_opening_host:
         from pb_source_unique_swing_opening_host_shadow import (
@@ -1236,6 +1244,7 @@ def _collect_live_physical_net_wall_claim(
         physical_void = apply_source_unique_swing_opening_hosts(
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+            drawing_viewport_id_by_page_id=drawing_viewports,
         )
         # Sliding/stacker hosts are drawing-leaf closures, not room-area rings.
         physical_void = apply_source_sliding_leaf_opening_hosts(
@@ -1348,12 +1357,14 @@ def _collect_live_physical_net_wall_claim(
             roles,
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+            drawing_viewport_id_by_page_id=drawing_viewports,
             **role_kwargs,
         )
         roles = apply_source_interior_footprint_internal_roles(
             roles,
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+            drawing_viewport_id_by_page_id=drawing_viewports,
             **role_kwargs,
         )
     publication = compose_live_external_physical_net_wall_publication(

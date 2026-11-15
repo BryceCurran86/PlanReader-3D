@@ -93,6 +93,7 @@ def test_blocked_publish_keeps_the_nomination_unbilled() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     blocked = OpeningHostBindingResult(
         status=EvidenceResolutionStatus.ABSTAINED,
@@ -116,6 +117,7 @@ def test_issued_publish_receipt_replaces_the_nomination() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     issued = _issued_result(opening_id=target.physical_opening_id)
@@ -140,6 +142,7 @@ def test_foreign_document_receipt_stays_unbilled() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     foreign = _issued_result(
@@ -168,6 +171,7 @@ def test_foreign_selector_does_not_install_a_target_receipt() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     issued = _issued_result(opening_id=target.physical_opening_id)
@@ -196,6 +200,7 @@ def test_trace_only_host_strings_stay_unbilled() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     issued = _issued_result(opening_id=nominated.canonical_openings[0].physical_opening_id)
     trace = LiveOpeningHostTrace(
@@ -223,6 +228,7 @@ def test_wrong_page_trace_is_not_a_receipt() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     trace = LiveOpeningHostTrace(
@@ -249,6 +255,7 @@ def test_empty_member_lineage_receipt_stays_unbilled() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     reconstructed = _issued_result(
@@ -274,6 +281,7 @@ def test_garage_source_positive_receipt_bills() -> None:
     nominated = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id={"3": "vp-floor-1"},
     )
     target = nominated.canonical_openings[0]
     issued = _issued_result(

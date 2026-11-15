@@ -56,6 +56,8 @@ from pb_source_quarter_swing_opening_kind_shadow import (
     _SWING_OPENING_BIND_PT,
     _opening_distance,
     _witnesses,
+    drawing_viewport_id_for_page,
+    opening_matches_drawing_viewport,
 )
 from pb_wall_role_authority import WallRoleClassification
 
@@ -145,6 +147,7 @@ def apply_source_unique_swing_opening_hosts(
     composition: LivePhysicalOpeningVoidComposition,
     *,
     drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    drawing_viewport_id_by_page_id: Mapping[str, str] | None = None,
 ) -> LivePhysicalOpeningVoidComposition:
     """Fill host identity on the unique unhosted opening at a source swing hinge."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
@@ -157,10 +160,20 @@ def apply_source_unique_swing_opening_hosts(
     updated: dict[str, LiveCanonicalOpeningObject] = {}
     for page_id, openings in by_page.items():
         drawings = drawings_by_page_id.get(page_id)
-        if not drawings:
+        drawing_viewport_id = drawing_viewport_id_for_page(
+            page_id, drawing_viewport_id_by_page_id,
+        )
+        if not drawings or not drawing_viewport_id:
             continue
-        bindings = _unique_hinge_hosts(openings, _witnesses(drawings))
-        for opening in openings:
+        scoped = [
+            item
+            for item in openings
+            if opening_matches_drawing_viewport(item, drawing_viewport_id)
+        ]
+        if not scoped:
+            continue
+        bindings = _unique_hinge_hosts(scoped, _witnesses(drawings))
+        for opening in scoped:
             witness = bindings.get(opening.canonical_opening_id)
             if witness is None:
                 continue
@@ -171,6 +184,7 @@ def apply_source_unique_swing_opening_hosts(
                 SOURCE_UNIQUE_SWING_OPENING_HOST,
                 {
                     "page_id": page_id,
+                    "viewport_id": drawing_viewport_id,
                     "canonical_opening_id": opening.canonical_opening_id,
                     "host_wall_id": host_wall_id,
                 },
@@ -303,6 +317,7 @@ def apply_source_one_room_envelope_external_roles(
     composition: LivePhysicalOpeningVoidComposition,
     *,
     drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    drawing_viewport_id_by_page_id: Mapping[str, str] | None = None,
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
@@ -339,12 +354,16 @@ def apply_source_one_room_envelope_external_roles(
     extra: list[LiveWholeWallRoleTrace] = []
     for page_id, openings in by_page.items():
         drawings = drawings_by_page_id.get(page_id)
-        if not drawings:
+        drawing_viewport_id = drawing_viewport_id_for_page(
+            page_id, drawing_viewport_id_by_page_id,
+        )
+        if not drawings or not drawing_viewport_id:
             continue
         hosted = tuple(
             item for item in openings
             if str(item.host_wall_id or "").strip()
             and str(item.opening_kind or "").strip().lower() == "door"
+            and opening_matches_drawing_viewport(item, drawing_viewport_id)
         )
         if not hosted:
             continue
@@ -363,6 +382,7 @@ def apply_source_one_room_envelope_external_roles(
                 SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE,
                 {
                     "page_id": page_id,
+                    "viewport_id": drawing_viewport_id,
                     "host_wall_id": host_wall_id,
                     "canonical_opening_id": opening.canonical_opening_id,
                 },
@@ -407,6 +427,7 @@ def apply_source_interior_footprint_internal_roles(
     composition: LivePhysicalOpeningVoidComposition,
     *,
     drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    drawing_viewport_id_by_page_id: Mapping[str, str] | None = None,
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
@@ -446,12 +467,16 @@ def apply_source_interior_footprint_internal_roles(
     extra: list[LiveWholeWallRoleTrace] = []
     for page_id, openings in by_page.items():
         drawings = drawings_by_page_id.get(page_id)
-        if not drawings:
+        drawing_viewport_id = drawing_viewport_id_for_page(
+            page_id, drawing_viewport_id_by_page_id,
+        )
+        if not drawings or not drawing_viewport_id:
             continue
         hosted = tuple(
             item for item in openings
             if str(item.host_wall_id or "").strip()
             and str(item.opening_kind or "").strip().lower() == "door"
+            and opening_matches_drawing_viewport(item, drawing_viewport_id)
         )
         if not hosted:
             continue
@@ -470,6 +495,7 @@ def apply_source_interior_footprint_internal_roles(
                 SOURCE_INTERIOR_FOOTPRINT_INTERNAL_ROLE,
                 {
                     "page_id": page_id,
+                    "viewport_id": drawing_viewport_id,
                     "host_wall_id": host_wall_id,
                     "canonical_opening_id": opening.canonical_opening_id,
                 },

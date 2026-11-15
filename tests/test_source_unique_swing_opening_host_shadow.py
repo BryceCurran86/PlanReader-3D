@@ -27,8 +27,8 @@ from pb_source_unique_swing_opening_host_shadow import (
     apply_source_sliding_leaf_opening_hosts,
     apply_source_unique_swing_opening_hosts,
 )
-from tests.test_layered_wall_doorway_room_ring_shadow_v1 import robe_room, stacker_room
 from pb_wall_role_authority import WallRoleClassification
+from tests.test_layered_wall_doorway_room_ring_shadow_v1 import robe_room, stacker_room
 from tests.test_layered_wall_doorway_room_ring_shadow_v1 import room as _walled_room
 from tests.test_live_opening_area_quantity_publication import _composition, _opening
 from tests.test_source_quarter_swing_opening_kind_shadow import (
@@ -38,6 +38,8 @@ from tests.test_source_quarter_swing_opening_kind_shadow import (
     _quarter_swing_drawings,
     _stroke,
 )
+
+_DRAWING_VIEWPORTS = {"3": "vp-floor-1"}
 
 
 def _unhosted(*, geom, kind=None, opening_id="opening-1"):
@@ -65,6 +67,7 @@ def test_unique_unhosted_opening_at_the_hinge_gets_a_host() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     updated = composition.canonical_openings[0]
     assert updated.host_wall_id
@@ -83,6 +86,7 @@ def test_two_unhosted_openings_at_the_same_hinge_abstain() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(first, second),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id is None
     assert composition.canonical_openings[1].host_wall_id is None
@@ -94,6 +98,7 @@ def test_already_hosted_opening_at_the_hinge_blocks_a_second_host() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(hosted, extra),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
     assert by_id["opening-hosted"].host_wall_id == hosted.host_wall_id
@@ -105,6 +110,7 @@ def test_closed_tip_opening_is_not_hosted_from_the_hinge() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id is None
     assert CLOSED_TIP[1] == 25.0
@@ -116,6 +122,7 @@ def test_window_stays_unhosted_even_at_the_hinge() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id is None
     assert composition.canonical_openings[0].opening_kind == "window"
@@ -129,6 +136,7 @@ def test_unique_diagonal_leaf_hosts_the_opening_at_its_hinge() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id
 
@@ -139,6 +147,7 @@ def test_window_interruption_without_a_leaf_stays_unhosted() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id is None
 
@@ -172,6 +181,7 @@ def test_corroborated_internal_host_is_not_stamped_external() -> None:
         internal,
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert all(trace.role is not WallRoleClassification.EXTERNAL for trace in roles.traces)
     estimated = apply_live_external_door_height_estimates(
@@ -189,6 +199,7 @@ def test_zero_opacity_swing_does_not_host_an_opening() -> None:
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id is None
 
@@ -198,6 +209,7 @@ def test_generated_swing_host_binding_is_not_a_quantity_receipt() -> None:
     hosted = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     updated = hosted.canonical_openings[0]
     assert updated.host_wall_id
@@ -225,6 +237,7 @@ def test_one_room_envelope_wall_gets_an_external_role() -> None:
         _empty_roles(),
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert roles.traces
     assert roles.traces[0].physical_wall_id == opening.host_wall_id
@@ -256,6 +269,7 @@ def test_internal_wall_between_two_rooms_is_not_external() -> None:
         _empty_roles(),
         _composition(opening),
         drawings_by_page_id={"3": _two_rooms_shared_partition()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert all(
         trace.physical_wall_id != opening.host_wall_id
@@ -278,11 +292,13 @@ def test_internal_party_wall_door_gets_internal_role_and_2100_review() -> None:
         _empty_roles(),
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     roles = apply_source_interior_footprint_internal_roles(
         roles,
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     matching = [
         trace for trace in roles.traces
@@ -319,11 +335,13 @@ def test_envelope_door_is_not_stamped_internal() -> None:
         _empty_roles(),
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     roles = apply_source_interior_footprint_internal_roles(
         roles,
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     matching = [
         trace for trace in roles.traces
@@ -341,13 +359,18 @@ def test_envelope_external_door_with_printed_width_gets_the_2100_estimate() -> N
         figured_single_axis_mm=870.0,
     )
     hosted = apply_source_unique_swing_opening_hosts(
-        _composition(opening), drawings_by_page_id={"3": drawings},
+        _composition(opening),
+        drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     kinded = apply_source_quarter_swing_opening_kinds(
         hosted, drawings_by_page_id={"3": drawings},
     )
     roles = apply_source_one_room_envelope_external_roles(
-        _empty_roles(), kinded, drawings_by_page_id={"3": drawings},
+        _empty_roles(),
+        kinded,
+        drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     estimated = apply_live_external_door_height_estimates(
         composition=kinded, whole_wall_role_composition=roles,
@@ -370,11 +393,13 @@ def test_swing_without_a_closed_room_is_not_external() -> None:
         _empty_roles(),
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     roles = apply_source_interior_footprint_internal_roles(
         roles,
         _composition(opening),
         drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert roles.traces == ()
 
@@ -394,8 +419,47 @@ def test_original_unhosted_opening_at_a_detected_swing_hinge_gets_a_host() -> No
     composition = apply_source_unique_swing_opening_hosts(
         _composition(opening),
         drawings_by_page_id={"3": drawings},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
     )
     assert composition.canonical_openings[0].host_wall_id
+
+
+def test_same_page_foreign_viewport_opening_stays_unhosted() -> None:
+    opening = replace(
+        _unhosted(geom=(49.2, 50.0, 52.5, 50.0)),
+        viewport_id="foreign-unrelated",
+    )
+    composition = apply_source_unique_swing_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
+    )
+    assert composition.canonical_openings[0].host_wall_id is None
+
+
+def test_missing_drawing_viewport_does_not_host_a_swing() -> None:
+    opening = _unhosted(geom=(49.2, 50.0, 52.5, 50.0))
+    composition = apply_source_unique_swing_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    assert composition.canonical_openings[0].host_wall_id is None
+
+
+def test_foreign_viewport_party_wall_is_not_stamped_internal() -> None:
+    opening = replace(
+        _unhosted(geom=(97.2, 40.0, 100.5, 40.0), kind="door"),
+        host_wall_id="opening_host_binding_group_party",
+        host_binding_record_id="host-binding-1",
+        viewport_id="foreign-unrelated",
+    )
+    roles = apply_source_interior_footprint_internal_roles(
+        _empty_roles(),
+        _composition(opening),
+        drawings_by_page_id={"3": _two_rooms_shared_partition()},
+        drawing_viewport_id_by_page_id=_DRAWING_VIEWPORTS,
+    )
+    assert roles.traces == ()
 
 
 def test_unique_door_in_a_sliding_leaf_closure_gets_a_host() -> None:

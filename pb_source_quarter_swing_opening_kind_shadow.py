@@ -181,6 +181,47 @@ def _authenticated_same_viewport(
     return bool(left_viewport and right_viewport and left_viewport == right_viewport)
 
 
+def opening_matches_drawing_viewport(
+    opening: LiveCanonicalOpeningObject,
+    drawing_viewport_id: object,
+) -> bool:
+    """True only when both sides carry the same authenticated viewport."""
+    if type(opening) is not LiveCanonicalOpeningObject:
+        return False
+    owned = str(opening.viewport_id or "").strip()
+    drawing = str(drawing_viewport_id or "").strip()
+    return bool(owned and drawing and owned == drawing)
+
+
+def unique_authenticated_drawing_viewport_ids(
+    openings: Sequence[LiveCanonicalOpeningObject],
+) -> dict[str, str]:
+    """Page -> viewport when that page has exactly one authenticated viewport."""
+    by_page: dict[str, set[str]] = {}
+    for opening in openings:
+        if type(opening) is not LiveCanonicalOpeningObject:
+            continue
+        page_id = str(opening.page_id or "").strip()
+        viewport_id = str(opening.viewport_id or "").strip()
+        if not page_id or not viewport_id:
+            continue
+        by_page.setdefault(page_id, set()).add(viewport_id)
+    return {
+        page_id: next(iter(ids))
+        for page_id, ids in by_page.items()
+        if len(ids) == 1
+    }
+
+
+def drawing_viewport_id_for_page(
+    page_id: object,
+    drawing_viewport_id_by_page_id: Mapping[str, str] | None,
+) -> str:
+    if drawing_viewport_id_by_page_id is None:
+        return ""
+    return str(drawing_viewport_id_by_page_id.get(str(page_id), "") or "").strip()
+
+
 def _local_swing_face_join(
     left: LiveCanonicalOpeningObject,
     right: LiveCanonicalOpeningObject,
@@ -515,4 +556,7 @@ __all__ = [
     "SOURCE_DIAGONAL_DOOR_LEAF",
     "SOURCE_QUARTER_SWING_AND_RADIAL_LEAF",
     "apply_source_quarter_swing_opening_kinds",
+    "drawing_viewport_id_for_page",
+    "opening_matches_drawing_viewport",
+    "unique_authenticated_drawing_viewport_ids",
 ]

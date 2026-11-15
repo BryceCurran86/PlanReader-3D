@@ -21,7 +21,11 @@ from pb_live_physical_opening_void_composition import (
     LivePhysicalOpeningVoidComposition,
 )
 from pb_migration_contracts import stable_contract_id
-from pb_source_quarter_swing_opening_kind_shadow import _SWING_OPENING_BIND_PT
+from pb_source_quarter_swing_opening_kind_shadow import (
+    _SWING_OPENING_BIND_PT,
+    drawing_viewport_id_for_page,
+    opening_matches_drawing_viewport,
+)
 
 
 SOURCE_DASHED_OUTER_LINE_CASED_OPENING = "source_dashed_outer_line_cased_opening"
@@ -53,7 +57,10 @@ def _opening_midpoints(
 def _opening_in_cased(
     opening: LiveCanonicalOpeningObject,
     cased: Any,
+    drawing_viewport_id: object,
 ) -> bool:
+    if not opening_matches_drawing_viewport(opening, drawing_viewport_id):
+        return False
     rect = cased.wall_rect()
     return any(
         rect.distance(Point(mid)) <= _SWING_OPENING_BIND_PT
@@ -80,6 +87,7 @@ def _near_span_end(opening: LiveCanonicalOpeningObject, cased: Any, end: float) 
 def _unique_cased_hits(
     openings: Sequence[LiveCanonicalOpeningObject],
     cased: Any,
+    drawing_viewport_id: object,
 ) -> tuple[LiveCanonicalOpeningObject, ...]:
     """One interruption, or the two jamb ticks of this one cased span."""
     hits = tuple(
@@ -88,7 +96,7 @@ def _unique_cased_hits(
         if type(item) is LiveCanonicalOpeningObject
         and str(item.opening_kind or "").strip().lower() != "door"
         and not opening_has_cased_opening_evidence(item)
-        and _opening_in_cased(item, cased)
+        and _opening_in_cased(item, cased, drawing_viewport_id)
     )
     if len(hits) == 1:
         return hits
@@ -110,8 +118,14 @@ def apply_source_dashed_outer_line_cased_openings(
     composition: LivePhysicalOpeningVoidComposition,
     *,
     drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    drawing_viewport_id_by_page_id: Mapping[str, str] | None = None,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Stamp cased-opening evidence; never classify the record as a door."""
+    """Stamp cased-opening evidence; never classify the record as a door.
+
+    Page ink is not a viewport. Callers must supply the authenticated
+    drawing viewport for that page. Openings with a missing, blank or
+    foreign viewport stay untagged.
+    """
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
 
@@ -122,7 +136,17 @@ def apply_source_dashed_outer_line_cased_openings(
     updated: dict[str, LiveCanonicalOpeningObject] = {}
     for page_id, openings in by_page.items():
         drawings = drawings_by_page_id.get(page_id)
-        if not drawings:
+        drawing_viewport_id = drawing_viewport_id_for_page(
+            page_id, drawing_viewport_id_by_page_id,
+        )
+        if not drawings or not drawing_viewport_id:
+            continue
+        scoped = tuple(
+            item
+            for item in openings
+            if opening_matches_drawing_viewport(item, drawing_viewport_id)
+        )
+        if not scoped:
             continue
         cased_openings = collect_dashed_outer_line_cased_openings(drawings)
         if not cased_openings:
@@ -130,7 +154,7 @@ def apply_source_dashed_outer_line_cased_openings(
         claimed: dict[str, int] = {}
         unique: list[tuple[Any, LiveCanonicalOpeningObject]] = []
         for cased in cased_openings:
-            hits = _unique_cased_hits(openings, cased)
+            hits = _unique_cased_hits(scoped, cased, drawing_viewport_id)
             if not hits:
                 continue
             for opening in hits:
@@ -147,6 +171,7 @@ def apply_source_dashed_outer_line_cased_openings(
                 SOURCE_DASHED_OUTER_LINE_CASED_OPENING,
                 {
                     "page_id": page_id,
+                    "viewport_id": drawing_viewport_id,
                     "canonical_opening_id": opening.canonical_opening_id,
                     "band": [round(v, 5) for v in cased.band],
                     "span": [round(cased.lo, 5), round(cased.hi, 5)],
