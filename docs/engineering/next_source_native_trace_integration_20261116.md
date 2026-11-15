@@ -49,3 +49,26 @@ The 3Laurel candidate count improved from 12 to 16 after correcting the source-g
 - Run original protected four-project full acceptance and dual-Python 3.13/3.14 CI against the PR's exact HEAD. Preserve frozen 120 and signed Lot16 eight opening areas.
 
 Tests: 111 passed, 4 skipped across relevant new-preview, anonymous black PR, original room rings, Q5446 vector-negative and original gap-regression suites (Python 3.13, before final UI-warning-only change); compilation, Ruff F821/F823, diff whitespace checked. **No official accuracy claim.**
+
+
+## Follow-up: source native wall connectivity + automatic numbered room key
+
+**Exact original real-world diagnostic on Bryce's PC** (unchanged originals, review-only):
+
+| Project / floor | Native candidate wall bands | Source-connected wall components | Largest connected network | Free native band endpoints |
+|---|---:|---:|---:|---:|
+| Lot16 | 50 | 45 | 4 bars | 8 |
+| Q5446 ground | 23 | 18 | 2 bars | 1 |
+| Q5446 upper | 20 | 16 | 3 bars | 2 |
+| Acacia | 43 | 21 | 6 bars | 4 |
+
+These graph facts are obtained from the actual **source path strips**, not a guessed exterior bounding rectangle. The largest components are NOT proven exterior. The topology uses 0.03 pt representation-noise contact, never extends lines or uses a 2.5 pt commercial snap. The app draws yellow-centred red tip circles only where source-native wall bands in the largest connected network have unjoined long-axis endpoints. These diagnostics reveal why a full exterior cannot yet be authenticated.
+
+The **new numbered-space source reader** also runs automatically inside the same new preview after outer wall preflight and before inner room topology. It reads the actual PDF's vector outlined room KEY using the existing portable RapidOCR backend, dynamically cropping from a detected KEY/LEGEND header (no job names, fixed page coordinates, or hard-coded room numbers). Number/name pairs must share a source row and a consecutive sequence. It reports key entries, match status and generic indoor/outdoor/service candidate role, but does NOT create boundaries or m².
+
+- Acacia original page 2: **15/15 printed room-key names read**, including courtyards, carport and service/tank areas, **10 unique on-plan numeric markers**, 5 unmatched. Same result from the fully integrated new app preview in ~13.1s (including wall tracing and portable OCR).
+- Room/key semantic candidates are NOT wall authority, cannot rehabilitate failed physical exterior, and never authorize a billable room/floor/ceiling quantity.
+- Pages with genuinely sparse native ink and no glyph text bypass the heavy OCR backend. The native original PDF byte hash and page index are retained.
+- Original Q5446 and Lot16 remain exterior ABSTAINED; connected network diagnostics help pinpoint source-path stitching rather than guessed contour fixes.
+
+**Remaining:** full authenticated exterior source path graph and doorway ownership. The number-to-name key cannot substitute for a physical exterior / room face chain; original production customer issuer still needs full independent source acceptance. This PR is draft.

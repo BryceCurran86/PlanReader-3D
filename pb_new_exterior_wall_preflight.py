@@ -7,7 +7,7 @@ quantities and no guessed envelope filters inner walls.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Any, Mapping, Sequence
 
@@ -20,6 +20,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _source_wall_ink_candidate_drawings,
 )
 from pb_next_wall_ring_preview import _collect_stroke_pair_strips
+from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic, inspect_native_wall_graph
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class SourceNativeOuterWallAttempt:
     source_wall_band_count: int = 0
     source_stroke_pair_band_count: int = 0
     source_wall_path_count: int = 0
+    graph: NativeWallGraphDiagnostic = field(default_factory=NativeWallGraphDiagnostic)
 
 
 def attempt_source_native_outer_wall_first(
@@ -64,7 +66,9 @@ def attempt_source_native_outer_wall_first(
         )
         unique_bars[key] = bar
     bars = list(unique_bars.values())
+    graph = inspect_native_wall_graph(bars)
     counts = dict(
+        graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
         source_wall_path_count=len({
@@ -124,4 +128,5 @@ def attempt_source_native_outer_wall_first(
         source_wall_band_count=counts["source_wall_band_count"],
         source_stroke_pair_band_count=counts["source_stroke_pair_band_count"],
         source_wall_path_count=counts["source_wall_path_count"],
+        graph=graph,
     )

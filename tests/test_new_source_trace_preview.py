@@ -305,3 +305,131 @@ def test_item_viewport_clip_returns_inert_source_rows_not_none():
     assert result[0]["items"] == ()
     assert len(result[1]["items"]) == 1
     assert outside["items"] and inside["items"]
+
+
+def test_original_exterior_wall_graph_reports_actual_free_source_endpoints():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    partial = attempt_source_native_outer_wall_first(
+        _unfilled_double_wall_drawings(open_right=True)
+    )
+    graph = partial.graph
+    assert partial.status == "ABSTAINED"
+    assert graph.component_count >= 1
+    assert graph.largest_component_band_count >= 2
+    assert graph.largest_component_open_endpoints_pdf_pts
+    assert graph.measurement_authorized is False
+    assert graph.outside_ink_filter_authorized is False
+    assert all(
+        99 <= pt[0] <= 401 and 99 <= pt[1] <= 351
+        for pt in graph.largest_component_open_endpoints_pdf_pts
+    )
+
+
+def test_exterior_graph_does_not_call_bbox_a_traced_building():
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    rival = attempt_source_native_outer_wall_first(
+        _unfilled_double_wall_drawings(extra_box=True)
+    )
+    assert rival.status == "ABSTAINED"
+    assert rival.graph.component_count >= 2
+    assert not rival.polygon_pdf_pts
+    assert not rival.graph.outside_ink_filter_authorized
+
+
+def test_wall_graph_inert_path_preserves_false_authentication():
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+    assert inspect_native_wall_graph(()).component_count == 0
+    assert inspect_native_wall_graph(()).measurement_authorized is False
+
+
+def test_numbered_source_key_generic_pairing_indoor_outdoor_unissued():
+    from pb_new_numbered_space_key import parse_numbered_key
+    from pb_portable_raster_ocr_authority import OCRLine
+
+    def line(t, x, y, w=12., h=8.):
+        return OCRLine(text=t, confidence=.99, bbox_px=(x,y,x+w,y+h),
+                       bbox_pt=(x,y,x+w,y+h))
+    # Local crop is anchored by a real source KEY; source page coords
+    # have a nonzero offset and must not be reinterpreted as page origin.
+    crop = [
+        line("1",3,10,5), line("LIVING",20,10,36),
+        line("2",3,22,5), line("COURTYARD",20,22,52),
+        line("3",3,34,5), line("BEDROOM",20,34,44),
+    ]
+    full = [
+        line("1",300,150,5), line("2",450,275,5),
+        line("3",570,320,5),
+    ]
+    got = parse_numbered_key(
+        crop,full,anchor_bbox_pdf_pts=(40.,45.,65.,52.),
+        crop_origin_pdf_pts=(40.,48.),
+        source_sha256="a"*64,page_index=5,
+    )
+    assert got.status=="CANDIDATE"
+    assert [(e.number,e.name) for e in got.entries]==[
+        (1,"LIVING"),(2,"COURTYARD"),(3,"BEDROOM"),
+    ]
+    assert got.matched_number_count==3
+    assert got.entries[1].semantic_role=="outdoor_or_nonroom_candidate"
+    assert all(not e.physical_room_authenticated and not e.area_authorized for e in got.entries)
+    assert not got.commercial_publishable
+    assert got.entries[0].key_label_bbox_pdf_pts[0]==60.
+
+
+def test_numbered_key_conflicting_name_and_skipped_number_vetoes():
+    from pb_new_numbered_space_key import parse_numbered_key
+    from pb_portable_raster_ocr_authority import OCRLine
+
+    def line(t,x,y):
+        return OCRLine(t,.99,(x,y,x+6,y+6),(x,y,x+6,y+6))
+    shared=dict(anchor_bbox_pdf_pts=(0.,0.,20.,8.),
+                crop_origin_pdf_pts=(0.,0.),
+                source_sha256="b"*64,page_index=0)
+    conflicting=[
+        line("1",5,18),line("LOUNGE",30,18),line("1",5,28),
+        line("GARAGE",30,28),line("2",5,38),line("BATHROOM",30,38),
+        line("3",5,48),line("BEDROOM",30,48),
+    ]
+    assert "conflict" in parse_numbered_key(conflicting,(),**shared).reason
+    nonconsecutive=[
+        line("1",5,18),line("LOUNGE",30,18),line("5",5,28),
+        line("GARAGE",30,28),line("9",5,38),line("BATHROOM",30,38),
+    ]
+    assert "sequence" in parse_numbered_key(nonconsecutive,(),**shared).reason
+
+
+def test_sparse_original_plan_does_not_start_ocr(tmp_path,monkeypatch):
+    from pb_new_numbered_space_key import detect_numbered_space_key
+    import pb_portable_raster_ocr_authority as ocr
+    monkeypatch.setattr(ocr,"RapidOCRBackend",
+        lambda: (_ for _ in ()).throw(AssertionError("unexpected OCR")))
+    with fitz.open(_floor_plan(tmp_path)) as source:
+        got = detect_numbered_space_key(
+            source[0],page_index=0,source_sha256="c"*64)
+    assert got.status=="ABSTAINED"
+    assert got.reason=="numbered_key_no_source_printed_glyph_evidence"
+
+
+def test_tracing_attempts_exterior_before_numbered_key_and_room(tmp_path,monkeypatch):
+    import pb_new_source_trace_preview as preview
+    from pb_new_numbered_space_key import NumberedSpaceKeyResult
+    order=[]
+    outer=preview.attempt_source_native_outer_wall_first
+    inner=preview.build_layered_wall_doorway_room_rings
+    def first(drawings):
+        order.append("exterior")
+        return outer(drawings)
+    def second(page,*,page_index,source_sha256):
+        order.append("key")
+        return NumberedSpaceKeyResult(
+            "ABSTAINED","mock_no_source_key",page_index,source_sha256)
+    def third(*args,**kwargs):
+        order.append("rooms")
+        return inner(*args,**kwargs)
+    monkeypatch.setattr(preview,"attempt_source_native_outer_wall_first",first)
+    monkeypatch.setattr(preview,"detect_numbered_space_key",second)
+    monkeypatch.setattr(preview,"build_layered_wall_doorway_room_rings",third)
+    summary,png=preview.source_native_trace_preview(_floor_plan(tmp_path),0)
+    assert order == ["exterior","key","rooms"]
+    assert summary["numbered_space_key"]["reason"]=="mock_no_source_key"
+    assert summary["quantity_authorized"] is False and png[:8]==b"\x89PNG\r\n\x1a\n"

@@ -6412,6 +6412,38 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 "New engine found candidate enclosed regions only; "
                 "physical wall ownership and customer areas remain unverified."
             )
+        # Numbered plan keys are recovered automatically from original
+        # native text / vector-outline OCR and bound to on-sheet markers.
+        # They name source spaces; they are NEVER proof of enclosing walls,
+        # dimensions or chargeable room areas.
+        space_key = native_report.get("numbered_space_key") or {}
+        if space_key.get("status") == "CANDIDATE":
+            entries = space_key.get("entries") or []
+            st.caption(
+                f"Source numbered space key: {len(entries)} named spaces; "
+                f"{space_key.get('matched_number_count', 0)} numbers located "
+                "on the drawing. Unmatched numbers and all measurements "
+                "remain unverified."
+            )
+            with st.expander("Numbered rooms / outside areas from the plan", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([{
+                        "No.": entry.get("number"),
+                        "Printed name": entry.get("name"),
+                        "Source role": entry.get("semantic_role"),
+                        "On-plan marker": entry.get("number_marker_status"),
+                    } for entry in entries]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        elif space_key.get("reason") not in (
+            None, "source_numbered_key_anchor_not_found",
+            "native_text_page_no_numbered_key_ocr_not_required",
+        ):
+            st.caption(
+                "Numbered space key not authenticated: "
+                + str(space_key.get("reason"))
+            )
         st.markdown("### Draw take-off measurements on the plan")
         st.caption("Pick a take-off row, choose **Line** (walls, doors, frames, skirting — click two points) or **Outline** (building footprint, ceilings — click each corner then double-click to close), then click directly on the plan. Drawn lengths and areas are measured from the saved drawing scale.")
         detected=auto_detect_scale(page)

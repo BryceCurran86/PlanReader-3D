@@ -26,6 +26,10 @@ from pb_new_exterior_wall_preflight import (
     attempt_source_native_outer_wall_first,
 )
 from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
+from pb_new_numbered_space_key import (
+    NumberedSpaceKeyResult,
+    detect_numbered_space_key,
+)
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -74,6 +78,19 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
         # from source fill AND double-stroke pairs before any room operations.
         # This remains diagnostic-only until the source wall owner is proved.
         outer_wall = attempt_source_native_outer_wall_first(wall_drawings)
+        # Room semantics are an automatic READ of source-printed numbered
+        # key entries. This stage cannot draw walls, create areas, or override
+        # a failed exterior trace. Missing key evidence is explicitly shown.
+        try:
+            space_key = detect_numbered_space_key(
+                page, page_index=page_index, source_sha256=sha,
+            )
+        except Exception as exc:
+            space_key = NumberedSpaceKeyResult(
+                "ABSTAINED",
+                "numbered_source_key_reader_failed:" + type(exc).__name__,
+                page_index, sha,
+            )
         panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
@@ -139,6 +156,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 color=(0.95, 0.07, 0.13),
                 width=2.8,
             )
+        # Native source-backed FREE ENDPOINTS from the connected wall network
+        # are diagnostic only, not authenticated openings or outside walls.
+        # Do NOT render a bounding rectangle as the external wall footprint.
+        for x, y in outer_wall.graph.largest_component_open_endpoints_pdf_pts[:300]:
+            canvas.draw_circle(
+                fitz.Point(x,y), radius=2.4,
+                color=(.98,.12,.17), fill=(1.,.88,.07), width=0.8,
+            )
         for closure in result.closures:
             lo, hi = closure.gap_interval
             a, b = closure.band
@@ -175,6 +200,20 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 outer_wall.source_stroke_pair_band_count,
             "external_wall_source_path_candidates":
                 outer_wall.source_wall_path_count,
+            "numbered_space_key": space_key.to_dict(),
+            "exterior_source_wall_network": {
+                "status": outer_wall.graph.connectivity_status,
+                "connected_components": outer_wall.graph.component_count,
+                "largest_source_wall_band_count":
+                    outer_wall.graph.largest_component_band_count,
+                "largest_network_source_path_ids": list(
+                    outer_wall.graph.largest_component_source_paths
+                ),
+                "unjoined_native_wall_endpoints_pdf_pts": [
+                    list(pt) for pt in outer_wall.graph.largest_component_open_endpoints_pdf_pts
+                ],
+                "outside_ink_filter_authorized": False,
+            },
             "source_wall_ink_paths_retained": source_wall_ink_count,
             "green_source_paths_excluded": green_path_exclusions,
             "external_wall_path_points": [
