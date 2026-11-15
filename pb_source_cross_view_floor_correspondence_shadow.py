@@ -2756,7 +2756,7 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
     door_width_mm: float = 920.0,
     dim_h_val_mm: float = 2200.0,
     dim_v_val_mm: float = 3570.0,
-    registration_translation: tuple[float, float] = (-78.0, 0.0),
+    registration_translation: tuple[float, float] = (0.0, 0.0),
     doc: Optional[Any] = None,
     source_bytes: Optional[bytes] = None,
     pdf_path: Optional[str | Path] = None,
@@ -2776,24 +2776,13 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         evaluate_source_floor_finish_ownership_shadow,
     )
 
-    box_sup = (400.08, 1382.72, 524.88, 1585.04)
-    box_tgt = (322.08, 1382.72, 446.88, 1585.04)
-    sched_info: dict[str, Any] = {
-        "door_callout": door_callout.strip().upper(),
-        "room_name": "PWD",
-        "leaf_type": "SINGLE SWING",
-        "width_mm": float(door_width_mm),
-        "height_mm": 2040.0,
-        "thickness_mm": 40.0,
-    }
-    door_geom_info: dict[str, Any] = {
-        "clear_opening_width_pdf_pt": 52.08,
-        "jamb_gap_target_pdf_pts": (386.64, 443.28),
-        "jamb_gap_support_pdf_pts": (464.64, 521.28),
-        "threshold_inside_face_y_pdf_pt": 1383.2,
-        "threshold_aligned_with_internal_face": True,
-        "threshold_deduction_m2": 0.0,
-    }
+    # No original-page crop or guessed jamb/frame is pre-authorized.
+    # The only admissible commercial box is derived from source-figured
+    # dimension witnesses; the target box follows uniquely ranked ink.
+    box_sup = (0.0, 0.0, 0.0, 0.0)
+    box_tgt = (0.0, 0.0, 0.0, 0.0)
+    sched_info: dict[str, Any] = {}
+    door_geom_info: dict[str, Any] = {}
 
     def _abstained(
         status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
@@ -2929,23 +2918,9 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
                         reason_codes=(DIMENSION_WITNESS_UNAVAILABLE, DOORWAY_TRANSITION_UNAVAILABLE)
                     )
                 box_sup = derived_box_sup
-                box_tgt = translate_box(box_sup, "identity", registration_translation)
-
-                # C. Authenticate physical D13 doorway jambs, frame, leaf, swing, threshold, and tile boundary
-                parsed_door = _authenticate_d13_physical_doorway_boundary(
-                    support_segments=support_segments,
-                    target_segments=target_segments,
-                    words_tgt=w_tgt,
-                    box_sup=box_sup,
-                    box_tgt=box_tgt,
-                    door_callout=door_callout,
-                    scheduled_width_mm=sched_info["width_mm"],
-                )
-                if parsed_door is None:
-                    return _abstained(
-                        reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE)
-                    )
-                door_geom_info = parsed_door
+                # The source-native cross-sheet transform must be uniquely
+                # proven BEFORE locating the target doorway. It is not a
+                # project-specific -78 pt answer or a caller-supplied offset.
             except Exception:
                 return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED, REGISTRATION_NOT_UNIQUE))
         else:
@@ -3014,11 +2989,29 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
     if not is_unique or top["orientation"] != "identity" or top["scale"] != 1.0:
         return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
 
-    if (
-        abs(top["dx"] - registration_translation[0]) > 0.5
-        or abs(top["dy"] - registration_translation[1]) > 0.5
-    ):
+    # Derive target physical doorway from the actual independently ranked
+    # registration, then verify schedule and painted jamb/frame geometry.
+    # An unverified observation-only caller does not supply a trusted
+    # floor box, door, or commercial physical quantity.
+    if doc is None:
         return _abstained(reason_codes=(REGISTRATION_NOT_UNIQUE,))
+    box_tgt = translate_box(
+        box_sup, top["orientation"], (top["dx"], top["dy"]),
+    )
+    parsed_door = _authenticate_d13_physical_doorway_boundary(
+        support_segments=support_segments,
+        target_segments=target_segments,
+        words_tgt=w_tgt,
+        box_sup=box_sup,
+        box_tgt=box_tgt,
+        door_callout=door_callout,
+        scheduled_width_mm=sched_info["width_mm"],
+    )
+    if parsed_door is None:
+        return _abstained(
+            reason_codes=(DOORWAY_TRANSITION_UNAVAILABLE, DIMENSION_WITNESS_UNAVAILABLE)
+        )
+    door_geom_info = parsed_door
 
     # 3. Evaluate physical wall bounding and covered interval IoU for measured box
     corr = box_correspondence(
