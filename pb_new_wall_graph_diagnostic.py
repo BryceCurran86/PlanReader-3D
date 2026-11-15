@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from shapely.strtree import STRtree
 from shapely.geometry import Point
@@ -22,6 +22,9 @@ class NativeWallEndpointNearMiss:
     native_path_ids: tuple[int, ...]
     nearby_native_path_ids: tuple[int, ...]
     separation_pdf_pts: float
+    native_source_layers: tuple[str, ...] = ()
+    nearby_source_layers: tuple[str, ...] = ()
+    same_painted_exterior_layer_hint: bool = False
     physical_join_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -40,7 +43,11 @@ class NativeWallGraphDiagnostic:
     endpoint_near_miss_total: int = 0
 
 
-def inspect_native_wall_graph(bars: Sequence[object]) -> NativeWallGraphDiagnostic:
+def inspect_native_wall_graph(
+    bars: Sequence[object],
+    *,
+    source_drawings: Sequence[Mapping[str, Any]] | None = None,
+) -> NativeWallGraphDiagnostic:
     """Source structural candidates only; diagnostic if an outer ring fails.
 
     Endpoints are where the long-axis native wall-band ends do NOT meet any
@@ -166,6 +173,51 @@ def inspect_native_wall_graph(bars: Sequence[object]) -> NativeWallGraphDiagnost
                 nearby_native_path_ids=other_paths,
                 separation_pdf_pts=round(distance, 4),
             )
+    # Native layer and paint are audit-ranking hints, never wall authority.
+    if source_drawings is not None:
+        def path_layers(paths):
+            return tuple(sorted({
+                str(source_drawings[k].get("layer", "")).strip()
+                for k in paths
+                if 0 <= k < len(source_drawings)
+                and isinstance(source_drawings[k], Mapping)
+                and str(source_drawings[k].get("layer", "")).strip()
+            }))
+
+        def painted_external(paths):
+            if not paths:
+                return False
+            for k in paths:
+                if not (0 <= k < len(source_drawings)):
+                    return False
+                drawing = source_drawings[k]
+                if not isinstance(drawing, Mapping) or drawing.get("fill") is None:
+                    return False
+                compact = "".join(
+                    c for c in str(drawing.get("layer", "")).lower() if c.isalnum()
+                )
+                if not ("wall" in compact and "external" in compact):
+                    return False
+            return True
+
+        near_misses = {
+            key: NativeWallEndpointNearMiss(
+                tip_pdf_pts=m.tip_pdf_pts,
+                native_path_ids=m.native_path_ids,
+                nearby_native_path_ids=m.nearby_native_path_ids,
+                separation_pdf_pts=m.separation_pdf_pts,
+                native_source_layers=path_layers(m.native_path_ids),
+                nearby_source_layers=path_layers(m.nearby_native_path_ids),
+                same_painted_exterior_layer_hint=(
+                    len(path_layers(m.native_path_ids)) == 1
+                    and path_layers(m.native_path_ids)
+                    == path_layers(m.nearby_native_path_ids)
+                    and painted_external(m.native_path_ids)
+                    and painted_external(m.nearby_native_path_ids)
+                ),
+            )
+            for key, m in near_misses.items()
+        }
     ordered_near_misses = tuple(sorted(
         near_misses.values(),
         key=lambda m: (

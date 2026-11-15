@@ -556,3 +556,36 @@ def test_source_wall_near_miss_rejects_nonslender_fills():
     result = inspect_native_wall_graph(bars)
     assert result.endpoint_near_miss_total == 0
     assert result.component_count == 2
+
+
+def test_wall_nearmiss_source_layer_and_paint_are_hints_not_joins():
+    from types import SimpleNamespace
+    from shapely.geometry import box
+    from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
+
+    def wall(i, bounds):
+        return SimpleNamespace(
+            polygon=box(*bounds), native_path_indices=lambda: (i,),
+        )
+
+    bars = (wall(0, (0, 0, 10, 1)), wall(1, (10.5, 0, 20.5, 1)))
+    drawings = (
+        {"layer": "Enclosure_WallExternal", "fill": (0.0, 0.0, 0.0)},
+        {"layer": "Enclosure_WallExternal", "fill": (0.0, 0.0, 0.0)},
+    )
+    result = inspect_native_wall_graph(bars, source_drawings=drawings)
+    assert result.component_count == 2
+    assert any(m.same_painted_exterior_layer_hint for m in result.endpoint_near_misses)
+    assert all(not m.physical_join_authenticated and
+               not m.measurement_authorized for m in result.endpoint_near_misses)
+
+    unrelated = (drawings[0], {"layer": "Interior_Joinery", "fill": (0.,0.,0.)})
+    result2 = inspect_native_wall_graph(bars, source_drawings=unrelated)
+    assert result2.component_count == 2
+    assert all(not m.same_painted_exterior_layer_hint
+               for m in result2.endpoint_near_misses)
+
+    unfilled = (drawings[0], {"layer": "Enclosure_WallExternal", "fill": None})
+    result3 = inspect_native_wall_graph(bars, source_drawings=unfilled)
+    assert all(not m.same_painted_exterior_layer_hint
+               for m in result3.endpoint_near_misses)

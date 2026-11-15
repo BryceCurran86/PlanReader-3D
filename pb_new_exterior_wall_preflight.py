@@ -73,7 +73,7 @@ def attempt_source_native_outer_wall_first(
         )
         unique_bars[key] = bar
     bars = list(unique_bars.values())
-    graph = inspect_native_wall_graph(bars)
+    graph = inspect_native_wall_graph(bars, source_drawings=wall_ink)
     counts = dict(
         graph=graph,
         source_wall_band_count=len(bars),

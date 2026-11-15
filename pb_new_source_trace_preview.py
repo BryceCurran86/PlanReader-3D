@@ -233,6 +233,11 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                         "native_path_ids": list(hit.native_path_ids),
                         "nearby_native_path_ids": list(hit.nearby_native_path_ids),
                         "separation_pdf_pts": hit.separation_pdf_pts,
+                        "native_source_layers": list(hit.native_source_layers),
+                        "nearby_source_layers": list(hit.nearby_source_layers),
+                        "same_painted_exterior_layer_hint": (
+                            hit.same_painted_exterior_layer_hint
+                        ),
                         "physical_join_authenticated": False,
                         "measurement_authorized": False,
                     }

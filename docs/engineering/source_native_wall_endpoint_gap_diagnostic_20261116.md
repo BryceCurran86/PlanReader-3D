@@ -33,3 +33,17 @@ To promote physical joins, independently inspect source path owners,
 wall family/thickness, actual junction/door/host evidence and
 the real exterior boundary. Near endpoints alone never satisfy
 source or commercial physical wall authority.
+
+## Source layer and original fill audit hints
+
+Near misses additionally include exact original PDF source layer names.
+Only when all source paths on both sides share one external-wall-named
+layer AND their native drawing paths have a fill does the record set
+same_painted_exterior_layer_hint=True. That is source classification
+evidence for prioritization, not a real wall or closure permission.
+Other near misses involving mixed Interior_Joinery, slabs or annotations
+remain unjoined and untrusted even if they are very close.
+
+Original 3Laurel native path pairs 1708/1704 (0.4252 PDF pt)
+and 1192/1195 (0.8504 PDF pt) are both filled black rectangles
+on Enclosure_WallExternal. No code is hardcoded to those IDs.
