@@ -154,3 +154,93 @@ def trace_external_footprint_first(
                 measurement_authorized=False,
             ))
     return tuple(results)
+
+@dataclass(frozen=True)
+class BoundedFootprintDrawingScope:
+    """Source-index-preserving diagnostics, never commercial physical walls."""
+
+    status: str
+    reason: str
+    page_index: int
+    drawings: tuple[dict | object, ...]
+    selected_source_path_indices: tuple[int, ...]
+    wall_native_primitive_count: int
+    source_total_paths: int
+    commercial_publishable: bool = False
+
+
+def bound_native_drawings_to_footprint(
+    drawings: Sequence[object],
+    *,
+    trace: ExternalFootprintTrace,
+    expected_source_sha256: str,
+) -> BoundedFootprintDrawingScope:
+    """Scope the EXISTING native path list by a source-hashed exterior candidate.
+
+    Keep the exact original path indices with inert rows outside the selected
+    window. This is a candidate room-tracing *diagnostic* only. It cannot
+    transform missing wall identity into proven exterior geometry. Cropping a
+    dense page does not enlarge the 20,000-primitive owner limit.
+    """
+    from collections.abc import Mapping
+
+    if trace.source_sha256 != expected_source_sha256:
+        raise ValueError("footprint_source_revision_mismatch")
+    if trace.status != "CANDIDATE" or trace.bbox_pdf_pts is None:
+        return BoundedFootprintDrawingScope(
+            "ABSTAINED", "footprint_candidate_required",
+            trace.page_index, (), (), 0, len(drawings),
+        )
+    x0, y0, x1, y1 = trace.bbox_pdf_pts
+    if not all(math.isfinite(n) for n in (x0, y0, x1, y1)) or not (
+        x0 < x1 and y0 < y1
+    ):
+        raise ValueError("footprint_nonfinite_or_invalid_bbox")
+    # Source-PDF points, never a physical mm scale inference. Expand enough
+    # to keep the wall's drawn stroke outside the visual envelope.
+    padx = min(24.0, max(3.0, (x1 - x0) * .02))
+    pady = min(24.0, max(3.0, (y1 - y0) * .02))
+    inert = {"layer": "", "fill": None, "color": None, "items": ()}
+    retained: list[object] = []
+    indices: list[int] = []
+    for index, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or not row.get("items"):
+            retained.append(inert)
+            continue
+        box = row.get("rect")
+        if box is None:
+            retained.append(inert)
+            continue
+        try:
+            a, b, c, d = map(float, (box.x0, box.y0, box.x1, box.y1))
+        except (TypeError, ValueError, AttributeError):
+            retained.append(inert)
+            continue
+        if not all(math.isfinite(v) for v in (a, b, c, d)):
+            retained.append(inert)
+            continue
+        if c < x0 - padx or a > x1 + padx or d < y0 - pady or b > y1 + pady:
+            retained.append(inert)
+            continue
+        indices.append(index)
+        retained.append(row)
+
+    # Count the exact primitives that the unchanged existing wall tracer
+    # considers wall ink, rather than trusting path container count.
+    from pb_layered_wall_doorway_room_ring_shadow import (
+        _source_wall_ink_candidate_drawings,
+    )
+
+    wall_ink, _count, _green = _source_wall_ink_candidate_drawings(retained)
+    primitives = sum(len(row.get("items", ())) for row in wall_ink)
+    status = "CANDIDATE" if primitives <= 20_000 else "ABSTAINED"
+    reason = (
+        "bounded_footprint_trace_only_needs_physical_wall_proof"
+        if status == "CANDIDATE"
+        else "bounded_source_viewport_exceeds_20000_primitive_cap"
+    )
+    return BoundedFootprintDrawingScope(
+        status, reason, trace.page_index, tuple(retained) if status == "CANDIDATE" else (),
+        tuple(indices) if status == "CANDIDATE" else (),
+        primitives, len(drawings),
+    )

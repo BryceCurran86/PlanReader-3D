@@ -50,3 +50,19 @@ Original historical ledger: `docs/engineering/historical_pr_audit_20261110/pr_le
 - Run full dual-Python CI, real original customer retention and independent source accuracy before releasing or claiming a score gain.
 
 Tests at time of writing: 8/8 new negative/positive trace contract tests, plus 11/11 focused tests including original extractor publication. Some broad tests can take much longer due protected original OCR and are **not claimed** here.
+
+## Bounded original-native viewport diagnostic — follow-up
+
+New `bound_native_drawings_to_footprint` keeps **every source PDF drawing path index** unchanged, replaces outside-path rows by inert blanks and refuses a scope over the existing 20,000-wall-ink-primitive limit. This is a source viewport *candidate*, NOT a proof that the red outline is actually a physical building boundary or that blue lines are verified internal walls.
+
+Run against any **new** PDF with:
+
+```powershell
+py -3.13 tools/run_original_footprint_first.py --pdf "C:\\path\\to\\house.pdf" --page 1 --out-dir "C:\\private\\footprint-report"
+```
+
+The CLI writes JSON plus a visual PDF-page PNG without copying the original source: red = unverified outer contour, blue = native ink candidate lines, orange = topology-only doorway closures. It never invokes customer quantity publication.
+
+**Acacia exact original source:** 6,917 native drawing paths on page 2 (0-based page 1), 80,276 candidate wall native primitives across the whole sheet; native source indices retained in a building-ink viewport holding 12,773 candidate wall primitives under the unchanged 20k cap. The existing room-ring producer then completed and returned **ABSTAINED / `open_to_exterior`, 0 room rings, 6 temporary doorway closures**. That failure must not be silently promoted or advertised as measured accuracy.
+
+Private local outputs: `C:\\Users\\bryce\\private_packets\\external_house_acacia_20261116\\footprint_first_v2\\page_2_footprint_first.json` and `page_2_footprint_first.png`. This establishes that **scope and primitive-cap handling** work on the unfamiliar source; it does NOT repair missing exterior physical wall owner/doorway identity. Protected original source-to-customer and full dual-Python CI remain release gates.

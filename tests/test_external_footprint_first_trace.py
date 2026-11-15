@@ -97,3 +97,88 @@ def test_original_production_collector_calls_exterior_before_wall_or_room(tmp_pa
     with pytest.raises(StopAfterFirstGeometry):
         live.collect_live_physical_net_wall_claim(path, pages=(0,), topology_pages=(0,))
     assert calls == ["exterior", "wall_opening"]
+
+def test_bounded_source_viewport_preserves_original_path_indices(tmp_path):
+    from pb_external_footprint_first_trace import (
+        bound_native_drawings_to_footprint,
+    )
+
+    path = _plan(tmp_path, walls=True)
+    raw = path.read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    (trace,) = trace_external_footprint_first(
+        raw, source_sha256=sha, page_indices=(0,),
+    )
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        original_drawings = tuple(doc[0].get_drawings())
+    cropped = bound_native_drawings_to_footprint(
+        original_drawings, trace=trace, expected_source_sha256=sha,
+    )
+    assert cropped.status == "CANDIDATE"
+    assert len(cropped.drawings) == len(original_drawings)
+    assert cropped.selected_source_path_indices
+    for i in range(len(original_drawings)):
+        if i in cropped.selected_source_path_indices:
+            assert cropped.drawings[i] is original_drawings[i]
+        else:
+            assert cropped.drawings[i].get("items") == ()
+    assert cropped.source_total_paths == len(original_drawings)
+    assert cropped.commercial_publishable is False
+
+
+def test_bounded_viewport_rejects_foreign_revision(tmp_path):
+    from pb_external_footprint_first_trace import (
+        bound_native_drawings_to_footprint,
+    )
+
+    raw = _plan(tmp_path, walls=True).read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    trace = trace_external_footprint_first(
+        raw, source_sha256=sha, page_indices=(0,),
+    )[0]
+    with pytest.raises(ValueError, match="source_revision_mismatch"):
+        bound_native_drawings_to_footprint(
+            (), trace=trace, expected_source_sha256="f" * 64,
+        )
+
+
+def test_bounded_viewport_does_not_bypass_20000_source_primitives(tmp_path):
+    from pb_external_footprint_first_trace import (
+        bound_native_drawings_to_footprint,
+    )
+
+    raw = _plan(tmp_path, walls=True).read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    trace = trace_external_footprint_first(
+        raw, source_sha256=sha, page_indices=(0,),
+    )[0]
+    # One authentic path index with 20001 candidate item operations:
+    # the cap is on primitives, NOT count of path containers.
+    heavy = {
+        "rect": fitz.Rect(250, 150, 330, 240),
+        "layer": "WALL",
+        "fill": None,
+        "color": (0, 0, 0),
+        "items": (("l", (0, 0), (1, 1)),) * 20_001,
+    }
+    result = bound_native_drawings_to_footprint(
+        (heavy,), trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.wall_native_primitive_count > 20_000
+    assert result.drawings == ()
+    assert result.selected_source_path_indices == ()
+    assert result.reason == "bounded_source_viewport_exceeds_20000_primitive_cap"
+
+def test_read_only_original_footprint_first_cli_does_not_mint_quantities(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    pdf = _plan(tmp_path, walls=True)
+    result, json_path, png_path = run(pdf, 0, tmp_path / "private_result")
+    assert result["stage_order"][0] == "source_hashed_exterior_ink_contour"
+    assert result["bounded_source"]["source_path_indices_preserved"] is True
+    assert result["commercial_quantity_rows"] == 0
+    assert result["topology"]["room_quantity_authorized"] is False
+    assert json_path.exists() and json_path.stat().st_size > 200
+    assert png_path.exists() and png_path.stat().st_size > 200
+    assert result["exterior"]["source_sha256"] == hashlib.sha256(pdf.read_bytes()).hexdigest()
