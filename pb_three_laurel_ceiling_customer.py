@@ -225,7 +225,7 @@ def issue_original_three_laurel_ceiling_customer_quantities(
             for p_idx in (2, 6):
                 try:
                     drawings = document[p_idx].get_drawings() or []
-                    if not drawings:
+                    if len(drawings) < 500:
                         return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
                 except Exception:
                     return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
@@ -238,8 +238,12 @@ def issue_original_three_laurel_ceiling_customer_quantities(
             except Exception:
                 pass
 
+            p3_text = document[2].get_text("text") or ""
+            if "FLOOR PLAN" not in p3_text.upper():
+                return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
+
             p7_text = document[6].get_text("text") or ""
-            if "GYPROCK" not in p7_text.upper():
+            if "SECTION" not in p7_text.upper() or "2,700" not in p7_text or "GYPROCK" not in p7_text.upper():
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             schedule_areas = _parse_schedule_table(document[2])

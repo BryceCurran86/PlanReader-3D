@@ -59,7 +59,6 @@ def _synthetic_source(monkeypatch, module, tmp_path, doc):
     return path
 
 
-@pytest.mark.xfail(strict=True, reason="3Laurel vinyl lacks room-to-figured-dimension ownership")
 def test_vinyl_page_tokens_without_room_faces_must_not_publish(monkeypatch, tmp_path):
     # All token strings exist but no room-bound wall faces, dimension leaders,
     # finish ownership, or physical room geometry exists anywhere.
@@ -70,7 +69,6 @@ def test_vinyl_page_tokens_without_room_faces_must_not_publish(monkeypatch, tmp_
     assert not result.customer_rows
 
 
-@pytest.mark.xfail(strict=True, reason="3Laurel ceiling uses floor area schedule without ceiling-plane ownership")
 def test_floor_area_schedule_must_not_prove_ceiling_lining(monkeypatch, tmp_path):
     doc = _Document("GROUND FLOOR PLAN AREA SCHEDULE", p7_text="GYPROCK")
     path = _synthetic_source(monkeypatch, ceiling, tmp_path, doc)
@@ -89,7 +87,6 @@ import pb_three_laurel_wet_area_floor_customer as wet
 import pb_three_laurel_wall_tile_customer as wall
 
 
-@pytest.mark.xfail(strict=True, reason="3Laurel tile dimensions are not associated with physical room faces")
 def test_wet_area_page_tokens_without_finished_faces_must_not_publish(monkeypatch, tmp_path):
     doc = _Document("TILES")
     for spec in wet._WET_FLOOR_SPECS.values():
@@ -100,7 +97,6 @@ def test_wet_area_page_tokens_without_finished_faces_must_not_publish(monkeypatc
     assert not result.customer_rows
 
 
-@pytest.mark.xfail(strict=True, reason="3Laurel wall tile dimensions/niche lack source surface and ownership")
 def test_wall_tile_tokens_without_wall_faces_must_not_publish(monkeypatch, tmp_path):
     doc = _Document("NOT A WALL PLAN", p7_text="GYPROCK 2,700")
     for spec in wall._WALL_TILE_SPECS.values():

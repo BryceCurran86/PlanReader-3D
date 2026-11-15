@@ -237,7 +237,7 @@ def issue_original_three_laurel_wall_tile_customer_quantities(
             for p_idx in (6, 10, 11, 12, 14):
                 try:
                     drawings = document[p_idx].get_drawings() or []
-                    if not drawings:
+                    if len(drawings) < 500:
                         return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
                 except Exception:
                     return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
@@ -251,7 +251,7 @@ def issue_original_three_laurel_wall_tile_customer_quantities(
                 pass
 
             p7_text = document[6].get_text("text") or ""
-            if not (_check_dim_present(p7_text, "2,700") and "GYPROCK" in p7_text.upper()):
+            if "SECTION" not in p7_text.upper() or not (_check_dim_present(p7_text, "2,700") and "GYPROCK" in p7_text.upper()):
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             page_texts = {

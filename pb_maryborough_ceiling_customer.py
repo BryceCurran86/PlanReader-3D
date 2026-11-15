@@ -471,7 +471,7 @@ def _issue_maryborough_source_figured_ceiling_customer(
             try:
                 drawings_rcp = document[rcp_page_no - 1].get_drawings() or []
                 drawings_dim = document[dim_page_no - 1].get_drawings() or []
-                if not drawings_rcp or not drawings_dim:
+                if len(drawings_rcp) < 500 or len(drawings_dim) < 500:
                     return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)
             except Exception:
                 return _blocked(MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE)

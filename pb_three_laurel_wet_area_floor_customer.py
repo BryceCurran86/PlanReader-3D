@@ -188,7 +188,7 @@ def issue_original_three_laurel_wet_area_floor_customer_quantities(
             for p_idx in (2, 10, 12, 14):
                 try:
                     drawings = document[p_idx].get_drawings() or []
-                    if not drawings:
+                    if len(drawings) < 500:
                         return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
                 except Exception:
                     return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
@@ -202,7 +202,7 @@ def issue_original_three_laurel_wet_area_floor_customer_quantities(
                 pass
 
             p3_text = document[2].get_text("text") or ""
-            if "TILES" not in p3_text.upper():
+            if "FLOOR PLAN" not in p3_text.upper() or "TILES" not in p3_text.upper():
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             page_texts = {
