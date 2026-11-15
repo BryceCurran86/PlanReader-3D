@@ -347,3 +347,38 @@ def test_competing_material_in_box_abstains_and_not_registered(maryborough_pdf_p
     assert not rec.commercial_projection_allowed
     assert get_authenticated_ceiling_correspondence("snap_competing_test", rec.record_id) is None
 
+
+def test_tied_registrations_abstain_and_not_registered(maryborough_pdf_path, monkeypatch):
+    """Tied or competing cross-sheet registrations must fail closed to REGISTRATION_NOT_UNIQUE and never register."""
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+        get_authenticated_ceiling_correspondence,
+        EvidenceResolutionStatus,
+        REGISTRATION_NOT_UNIQUE,
+        MARYBOROUGH_SOURCE_SHA256,
+    )
+    import pb_source_cross_view_floor_correspondence_shadow as p
+
+    good = {"orientation": "identity", "scale": 1.0, "dx": -106.32, "dy": 0.0, "min_support_pt": 5000.0}
+    tied = {"orientation": "identity", "scale": 1.0, "dx": 20.0, "dy": 0.0, "min_support_pt": 5000.0}
+
+    monkeypatch.setattr(p, "rank_registrations", lambda *_a, **_k: [good, tied])
+
+    rec = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+        document_id="doc_maryborough",
+        revision_id="rev_0",
+        source_sha256=MARYBOROUGH_SOURCE_SHA256,
+        snapshot_id="snap_tied_reg_test",
+        canonical_ceiling_id="ceil_pwd",
+        physical_room_id="room_pwd",
+        canonical_room_id="croom_pwd",
+        source_room_face_record_id="face_pwd",
+        pdf_path=maryborough_pdf_path,
+    )
+    assert rec.status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_NOT_UNIQUE in rec.reason_codes
+    assert not rec.commercial_projection_allowed
+    assert not rec.takeoff_eligible
+    assert get_authenticated_ceiling_correspondence("snap_tied_reg_test", rec.record_id) is None
+
+

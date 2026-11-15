@@ -4754,6 +4754,15 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                         reason_codes=(REGISTRATION_NOT_UNIQUE,),
                         authority_blockers=("unverified_cross_sheet_registration",),
                     )
+
+                # Check uniqueness against runner-up competitors
+                runner_up = ranks[1]["min_support_pt"] if len(ranks) > 1 else 0.0
+                if len(ranks) > 1 and top_rank["min_support_pt"] < 1.5 * runner_up:
+                    return _abstained(
+                        reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                        authority_blockers=("unverified_cross_sheet_registration",),
+                    )
+
                 dx, dy = round(top_rank["dx"], 2), round(top_rank["dy"], 2)
                 reg_trans = (-dx, -dy)
 
@@ -4766,6 +4775,17 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                             reason_codes=(REGISTRATION_NOT_UNIQUE,),
                             authority_blockers=("unverified_cross_sheet_registration",),
                         )
+
+                # Authenticate figured dimensions via native Page 11 witness lines and shafts
+                if len(doc) >= 11:
+                    p11 = doc[10]
+                    segs11 = _extract_segments_from_drawings(p11.get_drawings() or [])
+                    words11 = p11.get_text("words") or []
+                    p11_box = _authenticate_p11_pwd_dimension_witness_box(
+                        segs11, words11, dim_h_val_mm=dim_h_val_mm, dim_v_val_mm=dim_v_val_mm
+                    )
+                    if p11_box is None:
+                        return _abstained(reason_codes=(DIMENSION_WITNESS_UNAVAILABLE,))
 
                 # Authenticate Ceiling Legend on Page 9 dynamically:
                 # Find legend headers on Page 9 and verify WFPB -> WET AREA FLUSHSET PLASTERBOARD
@@ -4786,12 +4806,12 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                 if not (has_wfpb_legend and has_wet_area_legend):
                     return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
 
-                # Authenticate PWD room mark and ceiling height on Page 9:
+                # Authenticate exactly one PWD room mark with ceiling height on Page 9:
                 pwd_words = [
                     w for w in w_rcp
                     if "PWD" in str(w[4]).upper() and float(w[0]) < 1000.0
                 ]
-                pwd_mark = None
+                pwd_marks = []
                 for pw in pwd_words:
                     nearby = [
                         w for w in w_rcp
@@ -4799,10 +4819,11 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                     ]
                     codes = {str(w[4]).strip().upper() for w in nearby}
                     if ceiling_code in codes and str(int(ceiling_height_mm)) in codes:
-                        pwd_mark = pw
-                        break
-                if pwd_mark is None:
+                        pwd_marks.append(pw)
+
+                if len(pwd_marks) != 1:
                     return _abstained(reason_codes=(NO_FINISH_MARK_IN_BOX,))
+                pwd_mark = pwd_marks[0]
 
                 # Derive the enclosing wall boundary box from lines_rcp:
                 pts_per_mm = 72.0 / (25.4 * 50.0)
@@ -4828,7 +4849,7 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                 if not matching_x or not matching_y:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
 
-                # Pick the matching enclosure that forms a closed rectangle
+                # Pick the matching enclosure that forms a closed rectangle with continuous coverage
                 selected_box = None
                 for x0, x1 in matching_x:
                     for y0, y1 in matching_y:
@@ -4857,18 +4878,35 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
                 if competing:
                     return _abstained(reason_codes=(COMPETING_FINISH_CODES_IN_BOX,))
 
-                # Verify target boundary on Page 7
+                # Verify target boundary on Page 7 with continuous wall coverage and room label
                 box_tgt = (
                     round(box_rcp[0] + dx, 2),
                     round(box_rcp[1] + dy, 2),
                     round(box_rcp[2] + dx, 2),
                     round(box_rcp[3] + dy, 2),
                 )
-                has_tgt_left = any(abs(k - box_tgt[0]) <= 1.5 for k in lines_tgt["V"].keys())
-                has_tgt_right = any(abs(k - box_tgt[2]) <= 1.5 for k in lines_tgt["V"].keys())
-                has_tgt_top = any(abs(k - box_tgt[1]) <= 1.5 for k in lines_tgt["H"].keys())
-                has_tgt_bot = any(abs(k - box_tgt[3]) <= 1.5 for k in lines_tgt["H"].keys())
-                if not (has_tgt_left and has_tgt_right and has_tgt_top and has_tgt_bot):
+                corr = box_correspondence(
+                    box_rcp,
+                    lines_support=lines_rcp,
+                    lines_target=lines_tgt,
+                    orientation=top_rank["orientation"],
+                    translation=(dx, dy),
+                    band=(3.0, 36.0),
+                )
+                if not corr["wall_bounded_on_both_sheets"]:
+                    return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+                for s_name, s_data in corr["sides"].items():
+                    if (s_data.get("covered_interval_iou") or 0.0) < 0.95:
+                        return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
+
+                # Require target room text PWD within the target box
+                pwd_in_tgt = [
+                    w for w in w_tgt
+                    if box_tgt[0] <= (float(w[0]) + float(w[2])) / 2.0 <= box_tgt[2]
+                    and box_tgt[1] <= (float(w[1]) + float(w[3])) / 2.0 <= box_tgt[3]
+                    and "PWD" in str(w[4]).upper()
+                ]
+                if not pwd_in_tgt:
                     return _abstained(reason_codes=(BOX_NOT_WALL_BOUNDED,))
 
             except Exception:
