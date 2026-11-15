@@ -14,6 +14,7 @@ from typing import Any
 from shapely.geometry import box
 
 _WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw)$", re.IGNORECASE)
+_DOOR_CODE = re.compile(r"^(?:d[- ]?\d+[a-z]*|door|sgd|stacker)$", re.IGNORECASE)
 _EXTERIOR_WALL_LAYER = re.compile(r"(?:wall.*extern|extern.*wall|wall.*exterior|exterior.*wall)", re.IGNORECASE)
 
 
@@ -76,7 +77,11 @@ def _line(row: Mapping[str, Any]) -> tuple[tuple[float, float], tuple[float, flo
     return a, b
 
 
-def _words(words: Sequence[Mapping[str, Any] | Sequence[Any]]) -> list[tuple[str, tuple[float, float, float, float]]]:
+def _words(
+    words: Sequence[Mapping[str, Any] | Sequence[Any]],
+    *,
+    pattern: re.Pattern[str] = _WINDOW_CODE,
+) -> list[tuple[str, tuple[float, float, float, float]]]:
     out = []
     for word in words:
         try:
@@ -86,7 +91,7 @@ def _words(words: Sequence[Mapping[str, Any] | Sequence[Any]]) -> list[tuple[str
             else:
                 raw = str(word[4])
                 bounds = tuple(float(x) for x in word[:4])
-            if _WINDOW_CODE.fullmatch(raw.strip()) and len(bounds) == 4 and all(map(math.isfinite, bounds)):
+            if pattern.fullmatch(raw.strip()) and len(bounds) == 4 and all(map(math.isfinite, bounds)):
                 out.append((raw, bounds))
         except (KeyError, IndexError, TypeError, ValueError):
             continue
@@ -106,6 +111,7 @@ def detect_exterior_window_footprint_bridges(
     blank gaps, dimension marks and competing host wall runs are never closed.
     """
     labels = _words(source_words)
+    door_labels = _words(source_words, pattern=_DOOR_CODE)
     if not labels:
         return ()
     walls: list[tuple[int, str, tuple[float, float, float, float]]] = []
@@ -210,7 +216,25 @@ def detect_exterior_window_footprint_bridges(
                         if (bounds[1]-1 <= (w[1]+w[3])/2 <= bounds[3]+1
                             and min(abs(w[0]-mx),abs(w[2]-mx)) < 35)
                     ]
-                    if len(matching)==1:
+                    # A printed door/stacker callout occupying this same
+                    # gap conflicts with the window label. Never resolve
+                    # the identity by choosing the first word encountered.
+                    # Only a door code clearly centered in THIS opening
+                    # competes with its window label. Near-jamb DOOR notes
+                    # can describe an adjacent opening (3Laurel original).
+                    # Do not close the source window merely because such
+                    # independent text occurs within the broad label radius.
+                    label_margin = max(2.0, 0.15 * gap)
+                    door_competitors = [
+                        raw for raw, w in door_labels
+                        if bounds[0]+label_margin <= (w[0]+w[2])/2 <= bounds[2]-label_margin
+                        and min(abs(w[1]-my),abs(w[3]-my)) < 35
+                    ] if axis == "h" else [
+                        raw for raw, w in door_labels
+                        if bounds[1]+label_margin <= (w[1]+w[3])/2 <= bounds[3]-label_margin
+                        and min(abs(w[0]-mx),abs(w[2]-mx)) < 35
+                    ]
+                    if len(matching)==1 and not door_competitors:
                         candidates.append((i,j,bounds,matching[0]))
             # Select the two immediately adjacent native wall faces, not a
             # distant bar that happens to be collinear behind the window.
@@ -237,6 +261,18 @@ def detect_exterior_window_footprint_bridges(
             if len(close_rivals) != 1:
                 continue
             i,j,bounds,label = ranked[0]
+            # A source page may contain distinct overlaid CAD viewports
+            # sharing the same wall layer. Never join owners with explicit
+            # contradictory viewport identities.
+            scopes = {
+                str(drawings[k].get("viewport_id")
+                    or drawings[k].get("source_viewport_id") or "").strip()
+                for k in (i, j, a_path, b_path)
+                if isinstance(drawings[k], Mapping)
+            }
+            scopes.discard("")
+            if len(scopes) > 1:
+                continue
             if (i,j) in seen_hosts:
                 continue
             seen_hosts.add((i,j))

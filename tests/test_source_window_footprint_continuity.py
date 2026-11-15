@@ -82,6 +82,31 @@ def test_intervening_wall_and_nearest_but_unmarked_gap_remain_open():
     assert detect_exterior_window_footprint_bridges(drawings, words) == ()
 
 
+def test_competing_door_callout_never_masquerades_as_fixed_window():
+    drawings, words = _window_setup()
+    for door_code in ("D01", "SGD", "STACKER"):
+        conflict = words + [(13, 9, 19, 13, door_code)]
+        assert detect_exterior_window_footprint_bridges(drawings, conflict) == ()
+
+
+def test_neighbouring_door_note_near_jamb_does_not_erase_source_window():
+    drawings, words = _window_setup()
+    # A separate door note just outside the span's central aperture
+    # does not disprove the source chevron and explicit ASW label.
+    adjacent_door = [(9, 9, 12, 13, "DOOR")]
+    bridges = detect_exterior_window_footprint_bridges(drawings, words + adjacent_door)
+    assert len(bridges) == 1
+    assert (bridges[0].left_host_path_id, bridges[0].right_host_path_id) == (0, 1)
+    assert bridges[0].measurement_authorized is False
+
+
+def test_cross_viewport_wall_owners_never_form_one_window():
+    drawings, words = _window_setup()
+    drawings[0]["viewport_id"] = "ground-floor-plan"
+    drawings[1]["viewport_id"] = "elevation"
+    assert detect_exterior_window_footprint_bridges(drawings, words) == ()
+
+
 def test_missing_opening_identity_never_promotes_collinear_wall_gap():
     drawings, _words = _window_setup()
     # A nearby unrelated W-like label is not enough without its symbol.
