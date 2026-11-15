@@ -125,7 +125,7 @@ def test_authenticated_external_door_with_one_printed_width_gets_labelled_custom
     assert rows[0]["quantity_status"] == "To review"
 
 
-def test_internal_host_cannot_receive_the_2100_assumption():
+def test_internal_host_with_unstated_schedule_height_gets_labelled_review_area():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(_bare_external_door()),
         whole_wall_role_composition=_roles(
@@ -133,8 +133,24 @@ def test_internal_host_cannot_receive_the_2100_assumption():
         ),
     )
     opening = composition.canonical_openings[0]
-    assert opening.area_m2 is None
-    assert _opening_quantity(opening) is None
+    assert opening.area_basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert opening.area_m2 == pytest.approx(870.0 * 2100.0 / 1_000_000.0)
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    assert quantity.metadata["commercial_review_required"] is True
+    assert quantity.metadata["inclusion_status"] == "PROVISIONAL"
+    assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL in quantity.metadata["element"]
+    claim = replace(
+        _claim(),
+        canonical_openings=(opening,),
+        opening_quantity_evidence=(quantity,),
+    )
+    rows = project_live_opening_customer_rows(
+        claim, workspace_id=7, project_id="source-project",
+    )
+    assert len(rows) == 1
+    assert rows[0]["quantity_status"] == "To review"
+    assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL in rows[0]["element"]
 
 
 def test_window_cannot_receive_the_2100_assumption():

@@ -373,8 +373,8 @@ def _opening_quantity(
                         "authenticated printed door width * owner-approved height"
                         if basis == "owner_approved_second_axis"
                         else (
-                            "authenticated printed external-door width * "
-                            "owner-assumed 2100 mm height (verify on site)"
+                            "authenticated printed door width * "
+                            "assumed 2100 mm height (user review)"
                             if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
                             else "authenticated physical opening width * height"
                         )
@@ -400,7 +400,7 @@ def _opening_quantity(
             else (
                 (
                     LIVE_OPENING_AREA_QUANTITY_RESOLVED,
-                    "external_door_height_not_specified_owner_2100_assumption",
+                    "door_height_not_found_standard_2100_user_review",
                 )
                 if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
                 else (LIVE_OPENING_AREA_QUANTITY_RESOLVED,)

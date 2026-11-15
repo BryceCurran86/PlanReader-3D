@@ -1,9 +1,11 @@
-"""Apply the owner 2100 mm external-door height estimate after wall roles exist.
+"""Apply the owner 2100 mm door-height estimate after wall roles exist.
 
-An authenticated door hosted on a unique EXTERNAL whole-wall may receive a
-labelled provisional area when the plans print one width and no height. This
-does not mint FIRM source measurement, invent a host/frame/kind/width, or
-grant a frozen120 score.
+An authenticated door hosted on a unique EXTERNAL or INTERNAL whole-wall may
+receive a labelled provisional area when the door schedule does not state a
+height and the plans print one width. The line is always user review:
+"Assumed 2100 mm — verify on site". This does not mint FIRM source
+measurement, invent a host/frame/kind/width, or grant a frozen120 score.
+Windows, garage panels and sliding/stacker joinery stay blocked.
 """
 from __future__ import annotations
 
@@ -68,7 +70,15 @@ def _blocked_non_personnel_door(opening: LiveCanonicalOpeningObject) -> bool:
     return bool(_NON_PERSONNEL_DOOR_RE.search(blob))
 
 
-def _external_wall_role_record_ids(
+_PERSONNEL_DOOR_WALL_ROLES = frozenset(
+    {
+        WallRoleClassification.EXTERNAL,
+        WallRoleClassification.INTERNAL,
+    }
+)
+
+
+def _personnel_door_wall_role_record_ids(
     whole_wall_role_composition: LiveWholeWallRoleComposition,
 ) -> Mapping[str, str]:
     mapping: dict[str, str] = {}
@@ -79,7 +89,7 @@ def _external_wall_role_record_ids(
         if (
             not wall_id
             or not record_id
-            or trace.role is not WallRoleClassification.EXTERNAL
+            or trace.role not in _PERSONNEL_DOOR_WALL_ROLES
             or trace.status is not EvidenceResolutionStatus.CORROBORATED
         ):
             continue
@@ -117,7 +127,7 @@ def _estimate_area_m2(width_mm: float) -> float:
 def _apply_one(
     opening: LiveCanonicalOpeningObject,
     *,
-    external_wall_role_record_ids: Mapping[str, str],
+    wall_role_record_ids: Mapping[str, str],
 ) -> LiveCanonicalOpeningObject:
     if type(opening) is not LiveCanonicalOpeningObject:
         raise TypeError("opening must be LiveCanonicalOpeningObject")
@@ -143,7 +153,7 @@ def _apply_one(
             role_id
             for key in (host_wall_id, framed_wall_id)
             if key
-            for role_id in (_clean(external_wall_role_record_ids.get(key)),)
+            for role_id in (_clean(wall_role_record_ids.get(key)),)
             if role_id
         )
     )
@@ -201,7 +211,7 @@ def apply_live_external_door_height_estimates(
     composition: LivePhysicalOpeningVoidComposition,
     whole_wall_role_composition: LiveWholeWallRoleComposition,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Stamp labelled 2100 mm provisional areas onto qualifying external doors."""
+    """Stamp labelled 2100 mm provisional areas onto qualifying doors."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
     if type(whole_wall_role_composition) is not LiveWholeWallRoleComposition:
@@ -209,14 +219,14 @@ def apply_live_external_door_height_estimates(
             "whole_wall_role_composition must be LiveWholeWallRoleComposition"
         )
 
-    external_ids = _external_wall_role_record_ids(whole_wall_role_composition)
-    if not external_ids:
+    role_ids = _personnel_door_wall_role_record_ids(whole_wall_role_composition)
+    if not role_ids:
         return composition
 
     updated = tuple(
         _apply_one(
             opening,
-            external_wall_role_record_ids=external_ids,
+            wall_role_record_ids=role_ids,
         )
         for opening in composition.canonical_openings
     )

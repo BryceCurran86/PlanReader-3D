@@ -1,12 +1,13 @@
-"""Owner policy: external doors use a *provisional* 2100 mm height when unstated.
+"""Owner policy: doors use a *provisional* 2100 mm height when the schedule does not state one.
 
-This is an estimating decision, NOT source measurement authority. It cannot
-issue a FIRM QuantityEvidence, a source-closed signed measurement or a frozen
-benchmark score. The assumption case may be consumed as a labelled provisional
-customer costing line ("Assumed 2100 mm — verify on site") by the live opening
-issuer. The original producer still authenticates each physical door, width,
-host, frame, schedule/elevation evidence and every downstream commercial
-permission.
+If a uniquely door-linked schedule or elevation height is found, use it.
+If the app cannot find a door height, use the standard 2100 mm and mark the
+line for user review ("Assumed 2100 mm — verify on site"). This is an
+estimating decision, NOT source measurement authority. It cannot issue a FIRM
+QuantityEvidence, a source-closed signed measurement or a frozen benchmark
+score. The original producer still authenticates each physical door, width,
+host, frame and every downstream commercial permission. Windows, garage
+panels and joinery are not this default.
 """
 from __future__ import annotations
 
@@ -63,16 +64,17 @@ def resolve_external_door_height_estimate(
     elevation_owned_to_opening: bool = False,
     specific_exception_noted: bool = False,
 ) -> ExternalDoorHeightEstimate:
-    """Schedule > elevation > 2100 mm assumption, for proven external doors.
+    """Schedule > elevation > 2100 mm assumption, for proven doors.
 
     A printed height only counts as a source height when its source-owned
     evidence and *this opening's* unique association are positively supplied.
+    If the schedule does not specify a height and no owned elevation height is
+    found, the standard 2100 mm is used and the line stays on user review.
     Unsupported or conflicting claims block fallback rather than being silently
-    ignored. A specific undimensioned exception also blocks defaulting.
+    treated as 2100. A specific undimensioned exception also blocks defaulting.
     Authenticated schedule/elevation heights remain review inputs here, never
-    FIRM outputs of this helper. The unstated-height assumption may be consumed
-    as a labelled provisional customer costing line. No assumption applies to
-    internal doors, windows, garage panels or joinery.
+    FIRM outputs of this helper. Windows, garage panels and joinery are not
+    this default.
     """
     if type(opening_id) is not str or not opening_id.strip():
         raise ValueError("physical opening identity required")
@@ -132,7 +134,7 @@ def resolve_external_door_height_estimate(
     return ExternalDoorHeightEstimate(
         opening_id, float(OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM),
         OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
-        "external_door_height_not_specified_owner_2100_assumption",
+        "door_height_not_found_standard_2100_user_review",
         (external_door_identity_evidence_id.strip(),),
         False, True, True,
         can_issue_labelled_provisional_customer=True,
