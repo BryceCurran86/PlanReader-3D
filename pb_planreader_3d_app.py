@@ -6496,8 +6496,15 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                                     ),
                                     text_words=original_page.get_text("words"),
                                 ).to_dict()
+                                from pb_source_spatial_candidate_overlay import (
+                                    render_unverified_enclosures,
+                                )
+                                spatial_overlay_png=render_unverified_enclosures(
+                                    original_page, spatial_report,
+                                )
                         st.session_state[spatial_key]={
                             "digest":source_digest,"report":spatial_report,
+                            "png":spatial_overlay_png,
                         }
                     except Exception as spatial_error:
                         st.session_state[spatial_key]={
@@ -6511,11 +6518,18 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
             spatial_cached=st.session_state.get(spatial_key) or {}
             if spatial_cached.get("digest")==native_trace.get("digest"):
                 spatial_summary=spatial_cached.get("report") or {}
+                if spatial_cached.get("png"):
+                    st.image(
+                        spatial_cached["png"],use_container_width=True,
+                        caption="Coloured source-enclosed candidates only. "
+                        "Not proven rooms or billable floor/wall areas.",
+                    )
                 st.caption(
-                    "Unverified enclosed shapes: "
+                    "Unverified room-sized shapes: "
                     +str(spatial_summary.get("unverified_enclosed_count",0))
-                    +"; conditioned physical rooms are NOT authenticated. "
-                    "Areas and scale are not released."
+                    +"; small wall-ink voids (not rooms): "
+                    +str(spatial_summary.get("micro_source_void_count",0))
+                    +". No physical rooms authenticated or quantities released."
                 )
                 spatial_rows=[
                     {
@@ -6534,6 +6548,26 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                         pd.DataFrame(spatial_rows),
                         use_container_width=True,hide_index=True,
                     )
+                elif spatial_summary.get("micro_source_void_count",0):
+                    st.info(
+                        "No room-sized enclosure is established by this source "
+                        "graph. Only tiny native wall-ink voids were retained "
+                        "for diagnosis, so no coloured room outline is shown."
+                    )
+                    with st.expander("Small source-ink void path receipts", expanded=False):
+                        st.dataframe(
+                            pd.DataFrame([
+                                {
+                                    "Source void":rec.get("region_id"),
+                                    "Native path IDs":", ".join(map(
+                                        str,(rec.get("bounding_native_path_ids") or [])[:16]
+                                    )),
+                                }
+                                for rec in spatial_summary.get("regions") or []
+                                if rec.get("kind")=="native_source_micro_void"
+                            ]),
+                            use_container_width=True,hide_index=True,
+                        )
                 elif spatial_summary.get("reason"):
                     st.caption(
                         "Source spatial diagnostic: "
