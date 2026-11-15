@@ -436,14 +436,16 @@ def apply_source_sliding_leaf_opening_hosts(
         for closure in sliding:
             door_hits = tuple(
                 item for item in openings
-                if _unhosted_non_window(item)
-                and str(item.opening_kind or "").strip().lower() == "door"
+                if str(item.opening_kind or "").strip().lower() == "door"
                 and _opening_in_closure(item, closure)
             )
             if len(door_hits) != 1:
                 continue
-            unique_doors.append((closure, door_hits[0]))
-            claimed[door_hits[0].canonical_opening_id] += 1
+            opening = door_hits[0]
+            if not _unhosted_non_window(opening):
+                continue
+            unique_doors.append((closure, opening))
+            claimed[opening.canonical_opening_id] += 1
         for closure, opening in unique_doors:
             if claimed[opening.canonical_opening_id] != 1:
                 continue

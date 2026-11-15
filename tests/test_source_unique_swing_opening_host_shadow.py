@@ -344,6 +344,39 @@ def test_two_doors_in_the_same_sliding_closure_abstain() -> None:
     assert composition.canonical_openings[1].host_wall_id is None
 
 
+def test_already_hosted_door_in_a_sliding_closure_consumes_it() -> None:
+    unhosted = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door", opening_id="opening-a")
+    hosted = replace(
+        _unhosted(geom=(94.0, 28.0, 94.0, 30.0), kind="door", opening_id="opening-b"),
+        host_wall_id="wall-existing",
+        host_binding_record_id="bind-existing",
+    )
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(unhosted, hosted),
+        drawings_by_page_id={"3": robe_room()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-a"].host_wall_id is None
+    assert by_id["opening-b"].host_wall_id == "wall-existing"
+
+
+def test_already_hosted_door_in_a_stacker_closure_consumes_it() -> None:
+    unhosted = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door", opening_id="opening-a")
+    hosted = replace(
+        _unhosted(geom=(94.0, 28.0, 94.0, 30.0), kind="door", opening_id="opening-b"),
+        host_wall_id="wall-existing",
+        host_binding_record_id="bind-existing",
+    )
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(unhosted, hosted),
+        drawings_by_page_id={"3": stacker_room()},
+        stacker_leaf_frame_closure=True,
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-a"].host_wall_id is None
+    assert by_id["opening-b"].host_wall_id == "wall-existing"
+
+
 def test_unkinded_tick_beside_a_unique_sliding_door_does_not_block_it() -> None:
     door = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door", opening_id="opening-door")
     tick = _unhosted(geom=(45.0, 28.0, 46.2, 28.0), opening_id="opening-tick")
