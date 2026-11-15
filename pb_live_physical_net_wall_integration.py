@@ -541,7 +541,11 @@ def _collect_live_physical_net_wall_claim(
             for index in topology_selected
         }
         swing_drawings_by_page: dict[str, tuple] = {}
-        if source_quarter_swing_opening_kind or source_unique_swing_opening_host:
+        if (
+            source_quarter_swing_opening_kind
+            or source_unique_swing_opening_host
+            or layered_sliding_leaf_closure
+        ):
             swing_drawings_by_page = {
                 str(index + 1): tuple(doc[index].get_drawings())
                 for index in topology_selected
@@ -1214,6 +1218,19 @@ def _collect_live_physical_net_wall_claim(
         physical_void = apply_source_unique_swing_opening_hosts(
             physical_void,
             drawings_by_page_id=swing_drawings_by_page,
+        )
+    if layered_sliding_leaf_closure:
+        from pb_source_unique_swing_opening_host_shadow import (
+            apply_source_sliding_leaf_opening_hosts,
+        )
+
+        physical_void = apply_source_sliding_leaf_opening_hosts(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            **({"dark_painted_wall_source": True}
+               if layered_dark_painted_wall_source else {}),
+            **({"wall_end_stroke_closures": True}
+               if layered_wall_end_stroke_closures else {}),
         )
     if source_quarter_swing_opening_kind:
         from pb_source_quarter_swing_opening_kind_shadow import (

@@ -29,12 +29,14 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 from shapely.ops import unary_union
 
 from pb_layered_wall_doorway_room_ring_shadow import (
+    KIND_SLIDING_LEAF,
     _STROKE_PAIR_THICK_MAX,
     _collect_strips,
+    build_layered_wall_doorway_room_rings,
 )
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
@@ -339,9 +341,146 @@ def apply_source_one_room_envelope_external_roles(
     )
 
 
+def _page_index(page_id: str) -> int | None:
+    text = str(page_id or "").strip()
+    if not text.isascii() or not text.isdecimal() or text.startswith("0"):
+        return None
+    return int(text) - 1
+
+
+def _closure_rect(closure: Any):
+    lo, hi = closure.gap_interval
+    band0, band1 = closure.band
+    if closure.horizontal:
+        return box(lo, band0, hi, band1)
+    return box(band0, lo, band1, hi)
+
+
+def _opening_in_closure(opening: LiveCanonicalOpeningObject, closure: Any) -> bool:
+    rect = _closure_rect(closure)
+    geoms = opening.source_geometries or ()
+    if not geoms:
+        return False
+    for geom in geoms:
+        if len(geom) < 4:
+            continue
+        mid = Point((float(geom[0]) + float(geom[2])) / 2.0, (float(geom[1]) + float(geom[3])) / 2.0)
+        if rect.distance(mid) <= _SWING_OPENING_BIND_PT:
+            return True
+    return False
+
+
+def apply_source_sliding_leaf_opening_hosts(
+    composition: LivePhysicalOpeningVoidComposition,
+    *,
+    drawings_by_page_id: Mapping[str, Sequence[Mapping[str, Any]]],
+    dark_painted_wall_source: bool = False,
+    wall_end_stroke_closures: bool = False,
+) -> LivePhysicalOpeningVoidComposition:
+    """Host the unique door-kinded opening in a unique sliding-leaf closure."""
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
+    if type(dark_painted_wall_source) is not bool:
+        raise TypeError("dark_painted_wall_source must be an explicit boolean")
+    if type(wall_end_stroke_closures) is not bool:
+        raise TypeError("wall_end_stroke_closures must be an explicit boolean")
+
+    by_page: dict[str, list[LiveCanonicalOpeningObject]] = defaultdict(list)
+    for opening in composition.canonical_openings:
+        by_page[str(opening.page_id)].append(opening)
+
+    updated: dict[str, LiveCanonicalOpeningObject] = {}
+    for page_id, openings in by_page.items():
+        drawings = drawings_by_page_id.get(page_id)
+        page_index = _page_index(page_id)
+        source_sha256 = next(
+            (str(item.source_sha256) for item in openings if item.source_sha256),
+            "",
+        )
+        if not drawings or page_index is None or len(source_sha256) != 64:
+            continue
+        rings = build_layered_wall_doorway_room_rings(
+            drawings,
+            source_sha256=source_sha256,
+            page_index=page_index,
+            sliding_leaf_frame_closure=True,
+            dark_painted_wall_source=dark_painted_wall_source,
+            wall_end_stroke_closures=wall_end_stroke_closures,
+        )
+        sliding = tuple(
+            closure for closure in rings.closures if closure.kind == KIND_SLIDING_LEAF
+        )
+        if not sliding:
+            continue
+        unique_doors: list[tuple[Any, LiveCanonicalOpeningObject]] = []
+        claimed: dict[str, int] = defaultdict(int)
+        for closure in sliding:
+            door_hits = tuple(
+                item for item in openings
+                if _unhosted_non_window(item)
+                and str(item.opening_kind or "").strip().lower() == "door"
+                and _opening_in_closure(item, closure)
+            )
+            if len(door_hits) != 1:
+                continue
+            unique_doors.append((closure, door_hits[0]))
+            claimed[door_hits[0].canonical_opening_id] += 1
+        for closure, opening in unique_doors:
+            if claimed[opening.canonical_opening_id] != 1:
+                continue
+            if opening.canonical_opening_id in updated:
+                continue
+            host_wall_id = stable_contract_id(
+                "opening_host_binding_group",
+                {
+                    "page_id": page_id,
+                    "closure_id": closure.closure_id,
+                    "kind": KIND_SLIDING_LEAF,
+                },
+                digest_chars=32,
+            )
+            host_binding_record_id = stable_contract_id(
+                "opening_host_binding_v3",
+                {
+                    "canonical_opening_id": opening.canonical_opening_id,
+                    "host_wall_id": host_wall_id,
+                    "closure_id": closure.closure_id,
+                },
+                digest_chars=32,
+            )
+            evidence_id = stable_contract_id(
+                "source_sliding_leaf_opening_host",
+                {
+                    "page_id": page_id,
+                    "canonical_opening_id": opening.canonical_opening_id,
+                    "closure_id": closure.closure_id,
+                },
+                digest_chars=32,
+            )
+            updated[opening.canonical_opening_id] = replace(
+                opening,
+                host_wall_id=host_wall_id,
+                host_binding_record_id=host_binding_record_id,
+                evidence_ids=tuple(
+                    dict.fromkeys((*opening.evidence_ids, evidence_id))
+                ),
+            )
+
+    if not updated:
+        return composition
+    return replace(
+        composition,
+        canonical_openings=tuple(
+            updated.get(item.canonical_opening_id, item)
+            for item in composition.canonical_openings
+        ),
+    )
+
+
 __all__ = [
     "SOURCE_ONE_ROOM_ENVELOPE_EXTERNAL_ROLE",
     "SOURCE_UNIQUE_SWING_OPENING_HOST",
     "apply_source_one_room_envelope_external_roles",
+    "apply_source_sliding_leaf_opening_hosts",
     "apply_source_unique_swing_opening_hosts",
 ]

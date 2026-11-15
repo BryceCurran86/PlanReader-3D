@@ -18,8 +18,10 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_quarter_swing_opening_kind_shadow import apply_source_quarter_swing_opening_kinds
 from pb_source_unique_swing_opening_host_shadow import (
     apply_source_one_room_envelope_external_roles,
+    apply_source_sliding_leaf_opening_hosts,
     apply_source_unique_swing_opening_hosts,
 )
+from tests.test_layered_wall_doorway_room_ring_shadow_v1 import robe_room
 from pb_wall_role_authority import WallRoleClassification
 from tests.test_layered_wall_doorway_room_ring_shadow_v1 import room as _walled_room
 from tests.test_live_opening_area_quantity_publication import _composition, _opening
@@ -242,3 +244,40 @@ def test_original_unhosted_opening_at_a_detected_swing_hinge_gets_a_host() -> No
         drawings_by_page_id={"3": drawings},
     )
     assert composition.canonical_openings[0].host_wall_id
+
+
+def test_unique_door_in_a_sliding_leaf_closure_gets_a_host() -> None:
+    opening = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door")
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(opening),
+        drawings_by_page_id={"3": robe_room()},
+    )
+    updated = composition.canonical_openings[0]
+    assert updated.host_wall_id
+    assert any(
+        item.startswith("source_sliding_leaf_opening_host_")
+        for item in updated.evidence_ids
+    )
+
+
+def test_two_doors_in_the_same_sliding_closure_abstain() -> None:
+    first = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door", opening_id="opening-a")
+    second = _unhosted(geom=(94.0, 28.0, 94.0, 30.0), kind="door", opening_id="opening-b")
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(first, second),
+        drawings_by_page_id={"3": robe_room()},
+    )
+    assert composition.canonical_openings[0].host_wall_id is None
+    assert composition.canonical_openings[1].host_wall_id is None
+
+
+def test_unkinded_tick_beside_a_unique_sliding_door_does_not_block_it() -> None:
+    door = _unhosted(geom=(44.4, 28.0, 44.4, 30.0), kind="door", opening_id="opening-door")
+    tick = _unhosted(geom=(45.0, 28.0, 46.2, 28.0), opening_id="opening-tick")
+    composition = apply_source_sliding_leaf_opening_hosts(
+        _composition(door, tick),
+        drawings_by_page_id={"3": robe_room()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-door"].host_wall_id
+    assert by_id["opening-tick"].host_wall_id is None
