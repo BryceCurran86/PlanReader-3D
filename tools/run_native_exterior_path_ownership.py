@@ -26,6 +26,9 @@ from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     enrich_open_to_exterior_span,
     own_exterior_contour_native_paths,
 )
+from pb_source_native_wall_role_and_junction_shadow import (  # noqa: E402
+    identify_source_wall_junctions_and_roles,
+)
 
 
 def main() -> int:
@@ -52,6 +55,7 @@ def main() -> int:
             sliding_leaf_frame_closure=True,
             dark_painted_wall_source=True,
             wall_end_stroke_closures=False,
+            source_heavy_stroke_wall_bands=True,
         )
     owned = own_exterior_contour_native_paths(
         scope.drawings if scope.status == "CANDIDATE" else drawings,
@@ -64,6 +68,18 @@ def main() -> int:
             scope.drawings, ring.unresolved_gap_witnesses[0],
             closures=ring.closures,
         )
+    page_rect = None
+    import fitz as _fitz
+    with _fitz.open(stream=raw, filetype="pdf") as doc:
+        rect = doc[args.page].rect
+        page_rect = (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+    roles = identify_source_wall_junctions_and_roles(
+        scope.drawings if scope.status == "CANDIDATE" else drawings,
+        source_sha256=sha,
+        page_index=args.page,
+        trace=trace,
+        page_bounds=page_rect,
+    )
     payload = {
         "source_sha256": sha,
         "page_index_0based": args.page,
@@ -73,6 +89,7 @@ def main() -> int:
         "first_open_to_exterior_span": None if first_span is None else first_span.to_dict(),
         "temporary_doorway_closures": 0 if ring is None else len(ring.closures),
         "candidate_room_rings": 0 if ring is None else len(ring.rings),
+        "wall_roles_and_junctions": roles.to_dict(),
         "commercial_quantity_rows": 0,
         "official_frozen120_score_change": 0,
     }
@@ -88,6 +105,10 @@ def main() -> int:
         "first_span_paths": None if first_span is None else list(
             first_span.adjacent_wall_native_path_indices
         ),
+        "role_counts": payload["wall_roles_and_junctions"]["role_counts"],
+        "unresolved_spans": len(payload["wall_roles_and_junctions"]["unresolved_open_spans"]),
+        "rejected_diagonals": payload["wall_roles_and_junctions"]["rejected_diagonal_bridge_count"],
+        "invented_door_bridges": payload["wall_roles_and_junctions"]["invented_door_bridge_count"],
     }, indent=2))
     return 0
 

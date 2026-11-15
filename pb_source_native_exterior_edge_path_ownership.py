@@ -349,6 +349,9 @@ def first_unsupported_open_to_exterior_span(
     *,
     source_sha256: str,
     page_index: int,
+    sliding_leaf_frame_closure: bool = False,
+    dark_painted_wall_source: bool = False,
+    source_heavy_stroke_wall_bands: bool = False,
 ) -> OpenToExteriorSpanReceipt | None:
     """First unresolved collinear gap in existing ring topology; never a door.
 
@@ -357,6 +360,9 @@ def first_unsupported_open_to_exterior_span(
     """
     result = build_layered_wall_doorway_room_rings(
         drawings, source_sha256=source_sha256, page_index=page_index,
+        sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+        dark_painted_wall_source=dark_painted_wall_source,
+        source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
     )
     if not result.unresolved_gap_witnesses:
         return None

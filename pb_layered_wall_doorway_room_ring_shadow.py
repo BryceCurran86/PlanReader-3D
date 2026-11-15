@@ -752,6 +752,59 @@ def _merged_along_spans(
             merged.append((lo, hi))
     return merged
 
+def _collect_source_heavy_stroke_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Opaque black heavy native line paint as topology-only wall-band candidates.
+
+    Some CAD sheets paint a wall as one 1.2–6 pt source stroke instead of a
+    fill or a paired face. Axis-aligned, long, source-black, opaque strokes
+    become candidate bands with their original path index. Hairline drafting
+    ink, green, faint, short, and diagonal strokes are not walls. This does
+    not mint a physical wall, close a gap, or issue area.
+    """
+    found: list[_Strip] = []
+    seen: set[tuple[int, float, float, float, float]] = set()
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _is_black(row.get("color")):
+            continue
+        opacity = row.get("stroke_opacity", 1.0)
+        if type(opacity) is bool or type(opacity) not in (int, float):
+            continue
+        if not math.isfinite(opacity) or opacity < 0.95:
+            continue
+        width = row.get("width", 0)
+        if type(width) is bool or type(width) not in (int, float):
+            continue
+        if not math.isfinite(width) or not (1.2 <= float(width) <= 6.0):
+            continue
+        half = float(width) / 2.0
+        for item in row.get("items") or ():
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if not all(math.isfinite(v) for v in (ax, ay, bx, by)):
+                continue
+            if abs(ay - by) < 0.08 and abs(ax - bx) >= 12.0:
+                x0, x1 = sorted((ax, bx))
+                mid_y = (ay + by) / 2.0
+                y0, y1 = mid_y - half, mid_y + half
+            elif abs(ax - bx) < 0.08 and abs(ay - by) >= 12.0:
+                y0, y1 = sorted((ay, by))
+                mid_x = (ax + bx) / 2.0
+                x0, x1 = mid_x - half, mid_x + half
+            else:
+                continue
+            key = (index, round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4))
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(_Strip(index, x0, y0, x1, y1, box(x0, y0, x1, y1)))
+    return found
+
+
 def _collect_stroke_pair_strips(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
@@ -1853,6 +1906,7 @@ def build_layered_wall_doorway_room_rings(
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
+    source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -1861,6 +1915,9 @@ def build_layered_wall_doorway_room_rings(
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
+    ``source_heavy_stroke_wall_bands`` (default False) admits one opaque 1.2–6 pt
+    black axis-aligned stroke as a topology-only wall band. It is not a pair,
+    not a raster hull, and not a billed wall.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
@@ -1868,6 +1925,8 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("dark_painted_wall_source must be an explicit boolean")
     if type(wall_end_stroke_closures) is not bool:
         raise ValueError("wall_end_stroke_closures must be an explicit boolean")
+    if type(source_heavy_stroke_wall_bands) is not bool:
+        raise ValueError("source_heavy_stroke_wall_bands must be an explicit boolean")
     if wall_end_stroke_closures and not dark_painted_wall_source:
         raise ValueError("wall_end_stroke_closures requires dark_painted_wall_source")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
@@ -1906,6 +1965,8 @@ def build_layered_wall_doorway_room_rings(
         )
         if wall_end_stroke_closures:
             strips = strips + _collect_wall_end_closing_strips(drawings, strips)
+    if source_heavy_stroke_wall_bands:
+        strips = strips + _collect_source_heavy_stroke_strips(drawings)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -2149,9 +2210,10 @@ def build_layered_wall_doorway_room_rings(
 
 
 def build_from_pdf_bytes(
-    source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
+    source_bytes: bytes, *,     source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
+    source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -2168,6 +2230,7 @@ def build_from_pdf_bytes(
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
         wall_end_stroke_closures=wall_end_stroke_closures,
+        source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
     )
 
 
