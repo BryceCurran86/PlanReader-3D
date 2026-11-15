@@ -41,6 +41,10 @@ from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
 )
+from pb_source_neutral_wall_seam_continuity import (
+    SourceNeutralWallSeam,
+    detect_source_neutral_wall_seams,
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,7 @@ class SourceNativeOuterWallAttempt:
     garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
     swing_door_footprint_bridges: tuple[ExteriorSwingDoorFootprintBridge, ...] = ()
     sliding_door_footprint_bridges: tuple[ExteriorSlidingDoorFootprintBridge, ...] = ()
+    neutral_wall_seams: tuple[SourceNeutralWallSeam, ...] = ()
 
 
 def attempt_source_native_outer_wall_first(
@@ -138,6 +143,7 @@ def attempt_source_native_outer_wall_first(
     sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
         opening_drawings, source_words,
     )
+    seam_candidates = detect_source_neutral_wall_seams(opening_drawings)
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
         bridge for bridge in window_bridges
@@ -176,6 +182,20 @@ def attempt_source_native_outer_wall_first(
             for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
         )
     )
+    # A native GREY wall infill is actual source paint, not a distance
+    # snap. Preserve only when all its path owners survive the original
+    # page source filter and remain on the same source wall layer.
+    neutral_seams = tuple(
+        seam for seam in seam_candidates
+        if all(
+            0 <= idx < len(wall_ink)
+            and isinstance(wall_ink[idx], Mapping)
+            and wall_ink[idx].get("fill") is not None
+            and .3 < min(wall_ink[idx]["fill"][:3]) < .75
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in seam.neutral_fill_path_ids
+        )
+    )
     # Only source-dark verified jamb-side bodies are included in this
     # TOPOLOGY union, never in customer wall area or published quantities.
     door_host_ink = tuple(
@@ -192,6 +212,7 @@ def attempt_source_native_outer_wall_first(
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
         sliding_door_footprint_bridges=sliding_bridges,
+        neutral_wall_seams=neutral_seams,
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
@@ -213,6 +234,7 @@ def attempt_source_native_outer_wall_first(
         + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in swing_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in sliding_bridges]
+        + [box(*seam.bounds_pdf_pts) for seam in neutral_seams]
         + list(door_host_ink)
     )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
@@ -270,4 +292,5 @@ def attempt_source_native_outer_wall_first(
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
         sliding_door_footprint_bridges=sliding_bridges,
+        neutral_wall_seams=neutral_seams,
     )
