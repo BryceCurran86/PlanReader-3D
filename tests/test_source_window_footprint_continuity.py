@@ -107,6 +107,19 @@ def test_cross_viewport_wall_owners_never_form_one_window():
     assert detect_exterior_window_footprint_bridges(drawings, words) == ()
 
 
+
+def test_source_painted_inset_window_sash_does_not_count_as_through_wall():
+    drawings, words = _window_setup()
+    # The original 3Laurel native source paints a narrow inner sash
+    # inside the opening on the wall layer. It is not solid masonry.
+    drawings.append(_wall((13, 0, 17, 1.4)))
+    bridges = detect_exterior_window_footprint_bridges(drawings, words)
+    assert len(bridges) == 1
+    assert bridges[0].bounds_pdf_pts == (10., 0., 20., 2.)
+    assert bridges[0].measurement_authorized is False
+
+
+
 def test_missing_opening_identity_never_promotes_collinear_wall_gap():
     drawings, _words = _window_setup()
     # A nearby unrelated W-like label is not enough without its symbol.
