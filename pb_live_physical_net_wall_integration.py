@@ -434,6 +434,7 @@ def _collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     source_quarter_swing_opening_kind: bool = False,
+    source_unique_swing_opening_host: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -490,6 +491,8 @@ def _collect_live_physical_net_wall_claim(
         )
     if type(source_quarter_swing_opening_kind) is not bool:
         raise ValueError("source quarter swing opening kind must be an explicit boolean")
+    if type(source_unique_swing_opening_host) is not bool:
+        raise ValueError("source unique swing opening host must be an explicit boolean")
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -538,7 +541,7 @@ def _collect_live_physical_net_wall_claim(
             for index in topology_selected
         }
         swing_drawings_by_page: dict[str, tuple] = {}
-        if source_quarter_swing_opening_kind:
+        if source_quarter_swing_opening_kind or source_unique_swing_opening_host:
             swing_drawings_by_page = {
                 str(index + 1): tuple(doc[index].get_drawings())
                 for index in topology_selected
@@ -1203,6 +1206,15 @@ def _collect_live_physical_net_wall_claim(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
     )
+    if source_unique_swing_opening_host:
+        from pb_source_unique_swing_opening_host_shadow import (
+            apply_source_unique_swing_opening_hosts,
+        )
+
+        physical_void = apply_source_unique_swing_opening_hosts(
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+        )
     if source_quarter_swing_opening_kind:
         from pb_source_quarter_swing_opening_kind_shadow import (
             apply_source_quarter_swing_opening_kinds,
@@ -1232,6 +1244,22 @@ def _collect_live_physical_net_wall_claim(
     roles = compose_live_whole_wall_roles(
         gross_wall_composition=gross,
     )
+    if source_unique_swing_opening_host:
+        from pb_source_unique_swing_opening_host_shadow import (
+            apply_source_one_room_envelope_external_roles,
+        )
+
+        roles = apply_source_one_room_envelope_external_roles(
+            roles,
+            physical_void,
+            drawings_by_page_id=swing_drawings_by_page,
+            **({"sliding_leaf_frame_closure": True}
+               if layered_sliding_leaf_closure else {}),
+            **({"dark_painted_wall_source": True}
+               if layered_dark_painted_wall_source else {}),
+            **({"wall_end_stroke_closures": True}
+               if layered_wall_end_stroke_closures else {}),
+        )
     publication = compose_live_external_physical_net_wall_publication(
         wall_opening_composition=wall_opening,
         physical_void_composition=physical_void,
@@ -1474,6 +1502,7 @@ def collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     source_quarter_swing_opening_kind: bool = False,
+    source_unique_swing_opening_host: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1527,6 +1556,8 @@ def collect_live_physical_net_wall_claim(
         )
     if type(source_quarter_swing_opening_kind) is not bool:
         raise ValueError("source quarter swing opening kind must be an explicit boolean")
+    if type(source_unique_swing_opening_host) is not bool:
+        raise ValueError("source unique swing opening host must be an explicit boolean")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1571,6 +1602,8 @@ def collect_live_physical_net_wall_claim(
            if layered_wall_end_stroke_closures else {}),
         **({"source_quarter_swing_opening_kind": True}
            if source_quarter_swing_opening_kind else {}),
+        **({"source_unique_swing_opening_host": True}
+           if source_unique_swing_opening_host else {}),
     )
     if recovery_page_id is None:
         return claim
