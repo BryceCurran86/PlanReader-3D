@@ -29,6 +29,10 @@ from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic, inspect_nati
 from pb_source_window_footprint_continuity import (
     WindowFootprintBridge, detect_exterior_window_footprint_bridges,
 )
+from pb_source_garage_door_footprint_continuity import (
+    GarageDoorFootprintBridge,
+    detect_exterior_garage_door_footprint_bridges,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class SourceNativeOuterWallAttempt:
     source_wall_path_count: int = 0
     graph: NativeWallGraphDiagnostic = field(default_factory=NativeWallGraphDiagnostic)
     window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
+    garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
 
 
 def attempt_source_native_outer_wall_first(
@@ -110,9 +115,12 @@ def attempt_source_native_outer_wall_first(
     # Windows are holes in wall paint but NOT holes in the exterior footprint.
     # The synthetic bridging solids below exist only in this topology union;
     # they are never emitted as wall, frame, length or customer quantities.
+    opening_drawings = window_source_drawings if window_source_drawings is not None else wall_ink
     window_bridges = detect_exterior_window_footprint_bridges(
-        window_source_drawings if window_source_drawings is not None else wall_ink,
-        source_words,
+        opening_drawings, source_words,
+    ) if source_words else ()
+    garage_bridges = detect_exterior_garage_door_footprint_bridges(
+        opening_drawings, source_words,
     ) if source_words else ()
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
@@ -120,8 +128,14 @@ def attempt_source_native_outer_wall_first(
         if bridge.left_host_path_id in source_bar_paths
         and bridge.right_host_path_id in source_bar_paths
     )
+    garage_bridges = tuple(
+        bridge for bridge in garage_bridges
+        if bridge.start_host_path_id in source_bar_paths
+        and bridge.end_host_path_id in source_bar_paths
+    )
     counts = dict(
         window_footprint_bridges=window_bridges,
+        garage_door_footprint_bridges=garage_bridges,
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
@@ -140,6 +154,7 @@ def attempt_source_native_outer_wall_first(
     union = unary_union(
         [bar.polygon for bar in bars]
         + [box(*bridge.bounds_pdf_pts) for bridge in window_bridges]
+        + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
     )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
@@ -193,4 +208,5 @@ def attempt_source_native_outer_wall_first(
         source_wall_path_count=counts["source_wall_path_count"],
         graph=graph,
         window_footprint_bridges=window_bridges,
+        garage_door_footprint_bridges=garage_bridges,
     )

@@ -196,6 +196,32 @@ def detect_exterior_window_footprint_bridges(
                             overlaps = min(bounds[3],other[3])-max(bounds[1],other[1])
                             centered = abs((other[0]+other[2])-(first[0]+first[2]))/2 < .3
                         if overlaps > .3 and centered:
+                            # A native *sash* may sit inside the aperture on
+                            # the same CAD layer. It is not a through-wall:
+                            # its cross-section is narrower than the host
+                            # band and its ends stop within the opening.
+                            # A full-thickness partition still vetoes closure.
+                            cross_span = (
+                                other[3]-other[1] if axis=="h"
+                                else other[2]-other[0]
+                            )
+                            host_span = min(thick1,thick2)
+                            if axis=="h":
+                                inset = (
+                                    other[0] > bounds[0]+.1*host_span
+                                    and other[2] < bounds[2]-.1*host_span
+                                    and other[1] >= first[1]-.2*host_span
+                                    and other[3] <= first[3]+.2*host_span
+                                )
+                            else:
+                                inset = (
+                                    other[1] > bounds[1]+.1*host_span
+                                    and other[3] < bounds[3]-.1*host_span
+                                    and other[0] >= first[0]-.2*host_span
+                                    and other[2] <= first[2]+.2*host_span
+                                )
+                            if cross_span < .8*host_span and inset:
+                                continue
                             intervening = True
                             break
                     if intervening:
