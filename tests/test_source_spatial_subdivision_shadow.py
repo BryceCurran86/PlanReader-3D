@@ -10,16 +10,17 @@ Validates:
 from __future__ import annotations
 
 from types import SimpleNamespace
+
 from shapely.geometry import box
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_numbered_space_key import NumberedSpaceKeyResult, SpaceKeyEntry
 from pb_source_spatial_subdivision_shadow import (
-    SpatialRegionKind,
-    build_source_spatial_subdivision,
     REASON_DISCONNECTED_DECOY,
     REASON_INSUFFICIENT_WALLS,
     REASON_SPATIAL_OK,
+    SpatialRegionKind,
+    build_source_spatial_subdivision,
 )
 
 
@@ -318,3 +319,75 @@ def test_tiny_enclosed_wall_ink_void_is_not_room_sized_candidate():
     assert tiny[0].measurement_authorized is False
     assert result.commercial_publishable is False
     assert result.official_frozen120_score_change == 0
+
+
+def test_partial_building_ring_with_adjacent_outside_walls_abstains_and_emits_no_rooms():
+    """Unclosed building cycle with adjacent outside walls abstains and emits zero rooms."""
+    # Left ring (bars 1..4): x100..300, y100..300
+    # Right wing (bars 5..8): x325..525, y100..300 (gap = 25 pt, doorway scale)
+    bars = [
+        _strip(1, (100.0, 100.0, 300.0, 110.0)),
+        _strip(2, (100.0, 290.0, 300.0, 300.0)),
+        _strip(3, (100.0, 100.0, 110.0, 300.0)),
+        _strip(4, (290.0, 100.0, 300.0, 300.0)),
+        _strip(5, (325.0, 100.0, 525.0, 110.0)),
+        _strip(6, (325.0, 290.0, 525.0, 300.0)),
+        _strip(7, (325.0, 100.0, 335.0, 300.0)),
+        _strip(8, (515.0, 100.0, 525.0, 300.0)),
+    ]
+    res = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert res.reason == "source_exterior_other_wall_ink_outside_candidate"
+    assert res.interior_room_count == 0
+    assert res.unverified_enclosed_count >= 1
+    assert res.commercial_publishable is False
+    assert res.official_frozen120_score_change == 0
+    for r in res.regions:
+        assert r.physical_space_authenticated is False
+        assert r.measurement_authorized is False
+        if r.kind == SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE:
+            assert r.is_conditioned_living is False
+            assert r.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_alfresco_classified_as_attached_outdoor_and_excluded_from_living():
+    """Outdoor alfresco is classified as attached outdoor and excluded from living footprint."""
+    # Main living room (bars 1..4): x100..300, y100..300
+    # Attached alfresco (bars 2, 5, 6, 7): x100..300, y300..450 sharing wall 2 at y=290..300
+    bars = [
+        _strip(1, (100.0, 100.0, 300.0, 110.0)),
+        _strip(2, (100.0, 295.0, 300.0, 305.0)),  # shared wall
+        _strip(3, (100.0, 100.0, 110.0, 305.0)),
+        _strip(4, (290.0, 100.0, 300.0, 305.0)),
+        _strip(5, (100.0, 440.0, 300.0, 450.0)),  # outer alfresco edge
+        _strip(6, (100.0, 305.0, 110.0, 450.0)),
+        _strip(7, (290.0, 305.0, 300.0, 450.0)),
+    ]
+    words = [
+        (150.0, 180.0, 220.0, 200.0, "LIVING"),
+        (150.0, 360.0, 230.0, 380.0, "ALFRESCO"),
+    ]
+    res = build_source_spatial_subdivision(
+        [_drawing() for _ in bars],
+        bars=bars,
+        page_rect=(0.0, 0.0, 1000.0, 1000.0),
+        text_words=words,
+    )
+    outdoor = [
+        r for r in res.regions
+        if r.kind == SpatialRegionKind.ATTACHED_OUTDOOR_REGION
+    ]
+    assert len(outdoor) == 1
+    assert outdoor[0].label == "ALFRESCO"
+    assert outdoor[0].is_conditioned_living is False
+    assert outdoor[0].is_hole_in_building is False
+    assert outdoor[0].measurement_authorized is False
+    # The dividing wall between living and alfresco is an exterior thermal envelope wall
+    shared_face = next(
+        f for f in res.boundary_faces if "body:2:" in f.wall_body_id  # bar 2
+    )
+    assert shared_face.is_exterior_envelope is True
