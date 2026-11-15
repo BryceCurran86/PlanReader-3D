@@ -2077,6 +2077,46 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
     )
 
 
+def _collect_monotonic_source_stroke_pairs(
+    drawings: Sequence[Mapping[str, Any] | None],
+    baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
+) -> list[_Strip]:
+    """Keep source-verified original black-ink pairs when grey ink is added.
+
+    A newly discovered grey/near-black line may make a former unique face
+    pair ambiguous to the expanded pairing algorithm. That must never erase
+    the original source-backed *candidate*. Merge the two detections by
+    exact PDF path IDs and geometry. This is diagnostic topology ONLY.
+    """
+    current_pairs = _collect_stroke_pair_strips(drawings)
+    if baseline_drawings is None:
+        return current_pairs
+    if len(drawings) != len(baseline_drawings):
+        raise ValueError("source_pair_baseline_path_identity_length_mismatch")
+    for index, (active, strict) in enumerate(zip(drawings, baseline_drawings)):
+        if strict is None or not strict.get("items"):
+            continue
+        if active is None or active.get("items") != strict.get("items"):
+            raise ValueError(
+                "source_pair_baseline_original_path_replaced:" + str(index)
+            )
+    # Baseline candidates go FIRST, so their source geometry/identity wins
+    # any equivalent supplemental match. No fuzzy coordinate deduplication.
+    all_pairs = _collect_stroke_pair_strips(baseline_drawings) + current_pairs
+    seen: set[tuple] = set()
+    out: list[_Strip] = []
+    for strip in all_pairs:
+        key = (
+            strip.native_path_indices(),
+            round(strip.x0, 5), round(strip.y0, 5),
+            round(strip.x1, 5), round(strip.y1, 5),
+        )
+        if key not in seen:
+            seen.add(key)
+            out.append(strip)
+    return out
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2087,6 +2127,7 @@ def build_layered_wall_doorway_room_rings(
     source_words: Sequence[Mapping[str, Any]] = (),
     stroke_pair_wall_faces: bool = False,
     wall_end_stroke_closures: bool = False,
+    source_pair_baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
@@ -2125,6 +2166,7 @@ def build_layered_wall_doorway_room_rings(
                         source_words=source_words,
                         stroke_pair_wall_faces=True,
                         wall_end_stroke_closures=wall_end_stroke_closures,
+                        source_pair_baseline_drawings=source_pair_baseline_drawings,
                         viewport_pdf_pts=box,
                     )
                     for box in viewports
@@ -2138,6 +2180,20 @@ def build_layered_wall_doorway_room_rings(
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
             )
+    strict_indexed = None
+    if source_pair_baseline_drawings is not None:
+        if not stroke_pair_wall_faces:
+            raise ValueError("source_pair_baseline_requires_stroke_pair_mode")
+        if len(source_pair_baseline_drawings) != len(drawings):
+            raise ValueError("source_pair_baseline_path_identity_length_mismatch")
+        strict_indexed = _clip_drawing_items(
+            source_pair_baseline_drawings, viewport_pdf_pts,
+        )
+        if _selected_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
+            return LayeredRoomRingResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
+            )
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
         # The November 12 original PR #4300 did not exist in the donor
@@ -2146,7 +2202,7 @@ def build_layered_wall_doorway_room_rings(
         recovered_dark = _original_source_dark_bars(indexed)
         candidate_strips = (
             strips
-            + _collect_stroke_pair_strips(indexed)
+            + _collect_monotonic_source_stroke_pairs(indexed, strict_indexed)
             + _collect_dark_fill_strips(indexed)
             + recovered_dark
             + _collect_source_heavy_stroke_strips(indexed)
