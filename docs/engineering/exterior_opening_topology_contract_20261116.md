@@ -55,6 +55,17 @@ ABSTAIN. Door gaps are never filled as billable opaque wall; floor finish
 transitions end at the doorway threshold, subject to original room finish
 evidence.
 
+### ASD / SGD sliding door
+
+A native printed ASD or SGD callout, two unique dark external wall ends, two
+distinct native jamb caps and source-painted sliding-track segments in both
+halves of the aperture permit a *footprint-only* virtual door threshold.
+The track receipt retains native path IDs and source callout. ASW/SGW window
+labels are competing identities, not a reason to guess the door type. Missing
+jambs, one-sided tracks, cross-viewport hosts and an intervening full-thickness
+wall must all abstain. This bridge may not become solid wall, frame material,
+floor finish ownership or any commercial quantity.
+
 ### Outside boundary vs. envelope of the sheet
 
 For the 3Laurel original p3, the ALFRESCO and PORCH are not in the enclosed
