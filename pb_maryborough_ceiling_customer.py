@@ -27,7 +27,10 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     authenticate_maryborough_office_rcp_ceiling_correspondence,
     authenticate_maryborough_food_prep_cross_sheet_correspondence,
     authenticate_maryborough_food_prep_rcp_ceiling_correspondence,
+    authenticate_maryborough_pwd_cross_sheet_correspondence,
+    authenticate_maryborough_pwd_rcp_ceiling_correspondence,
     compose_authenticated_maryborough_food_prep_ceiling_surface_and_quantity,
+    compose_authenticated_maryborough_pwd_ceiling_surface_and_quantity,
     compose_authenticated_cross_sheet_physical_claim,
     compose_authenticated_cross_sheet_room_and_floor,
     compose_authenticated_maryborough_office_ceiling_surface_and_quantity,
@@ -43,6 +46,9 @@ from pb_maryborough_customer_authority import (
     FOOD_PREP_PHYSICAL_FLOOR_ID,
     FOOD_PREP_PHYSICAL_ROOM_ID,
     FOOD_PREP_SOURCE_ROOM_FACE_ID,
+    PWD_PHYSICAL_FLOOR_ID,
+    PWD_PHYSICAL_ROOM_ID,
+    PWD_SOURCE_ROOM_FACE_ID,
     MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE,
     MaryboroughCustomerResult,
 )
@@ -50,6 +56,7 @@ from pb_migration_contracts import stable_contract_id
 
 OFFICE_PHYSICAL_CEILING_ID = "physical_room_ceiling_surface_51d714d064b18ae6eea0768817076cf6"
 FOOD_PREP_PHYSICAL_CEILING_ID = "physical_room_ceiling_surface_27af899923f33c4afa64f069c171d55b"
+PWD_PHYSICAL_CEILING_ID = "physical_room_ceiling_surface_12e238cc9e77a990fe62d5d152086f47"
 OriginalMaryboroughCeilingCustomerResult = MaryboroughCustomerResult
 
 _SOURCE_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
@@ -119,10 +126,22 @@ def issue_original_maryborough_ceiling_customer_quantities(
                 pass
 
             is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-            target_ceiling_id = FOOD_PREP_PHYSICAL_CEILING_ID if is_food_prep else OFFICE_PHYSICAL_CEILING_ID
-            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
-            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
-            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
+            is_pwd = "PWD" in room_label.upper()
+            if is_food_prep:
+                target_ceiling_id = FOOD_PREP_PHYSICAL_CEILING_ID
+                target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID
+                target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID
+                target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID
+            elif is_pwd:
+                target_ceiling_id = PWD_PHYSICAL_CEILING_ID
+                target_room_id = PWD_PHYSICAL_ROOM_ID
+                target_face_id = PWD_SOURCE_ROOM_FACE_ID
+                target_floor_id = PWD_PHYSICAL_FLOOR_ID
+            else:
+                target_ceiling_id = OFFICE_PHYSICAL_CEILING_ID
+                target_room_id = OFFICE_PHYSICAL_ROOM_ID
+                target_face_id = OFFICE_SOURCE_ROOM_FACE_ID
+                target_floor_id = OFFICE_PHYSICAL_FLOOR_ID
 
             hooks_unmodified = (
                 fitz.Page.get_text,
@@ -173,6 +192,19 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     doc=document,
                     source_bytes=payload,
                 )
+            elif is_pwd:
+                cr = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_ceiling_id=target_ceiling_id,
+                    physical_room_id=target_room_id,
+                    canonical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                    source_bytes=payload,
+                )
             else:
                 cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
@@ -197,6 +229,18 @@ def issue_original_maryborough_ceiling_customer_quantities(
             # Also authenticate floor correspondence to establish canonical wall boundaries on Page 7
             if is_food_prep:
                 cr_floor = authenticate_maryborough_food_prep_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                    source_bytes=payload,
+                )
+            elif is_pwd:
+                cr_floor = authenticate_maryborough_pwd_cross_sheet_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
                     revision_id=target_revision_id,
                     source_sha256=source_sha,
@@ -286,6 +330,13 @@ def issue_original_maryborough_ceiling_customer_quantities(
                 room_area_qty_id=room_area_qty_id,
                 area_evidence=area_ev,
             )
+        elif is_pwd:
+            canonical_ceiling, ceiling_qty = compose_authenticated_maryborough_pwd_ceiling_surface_and_quantity(
+                correspondence=cr,
+                room=room,
+                room_area_qty_id=room_area_qty_id,
+                area_evidence=area_ev,
+            )
         else:
             canonical_ceiling, ceiling_qty = compose_authenticated_maryborough_office_ceiling_surface_and_quantity(
                 correspondence=cr,
@@ -355,10 +406,25 @@ def issue_original_maryborough_food_prep_ceiling_customer_quantities(
     )
 
 
+def issue_original_maryborough_pwd_ceiling_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough PWD WFPB ceiling lining."""
+    return issue_original_maryborough_ceiling_customer_quantities(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="PWD",
+    )
+
+
 __all__ = [
     "OFFICE_PHYSICAL_CEILING_ID",
     "FOOD_PREP_PHYSICAL_CEILING_ID",
+    "PWD_PHYSICAL_CEILING_ID",
     "OriginalMaryboroughCeilingCustomerResult",
     "issue_original_maryborough_ceiling_customer_quantities",
     "issue_original_maryborough_food_prep_ceiling_customer_quantities",
+    "issue_original_maryborough_pwd_ceiling_customer_quantities",
 ]
