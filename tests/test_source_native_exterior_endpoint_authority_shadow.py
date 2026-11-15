@@ -1,0 +1,155 @@
+"""Unique-or-abstain exterior endpoint receipts; near-miss is never a join."""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from shapely.geometry import box
+
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_new_wall_graph_diagnostic import NativeWallEndpointNearMiss, inspect_native_wall_graph
+from pb_source_native_exterior_endpoint_authority_shadow import (
+    REASON_COMPETING,
+    REASON_CONTACT_CANDIDATE,
+    REASON_NEAR_MISS,
+    REASON_OPENING_TOPOLOGY,
+    authenticate_external_wall_junction,
+    receipt_from_near_miss,
+)
+
+
+def _miss(*, sep, left=(1708,), right=(1704,), layers_left=("Enclosure_WallExternal",), layers_right=("Enclosure_WallExternal",)):
+    return NativeWallEndpointNearMiss(
+        tip_pdf_pts=(10.0, 0.5),
+        native_path_ids=left,
+        nearby_native_path_ids=right,
+        separation_pdf_pts=sep,
+        native_source_layers=layers_left,
+        nearby_source_layers=layers_right,
+        same_painted_exterior_layer_hint=False,
+        physical_join_authenticated=False,
+        measurement_authorized=False,
+    )
+
+
+def _drawing(layer, *, fill=(0.0, 0.0, 0.0)):
+    return {"layer": layer, "fill": fill}
+
+
+def test_point4252_exterior_near_miss_is_not_a_wall_join():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.4252, drawings=drawings,
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_NEAR_MISS
+    receipt = receipt_from_near_miss(
+        _miss(sep=0.4252, left=(0,), right=(1,)), drawings,
+    )
+    assert receipt.physical_join_authenticated is False
+    assert receipt.can_issue_area is False
+    assert receipt.measurement_authorized is False
+
+
+def test_joinery_and_annotation_competitors_stay_unjoined():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Interior_Joinery"),
+        _drawing("A-ANNO-TEXT"),
+        _drawing("Floor_Slab"),
+    )
+    joinery_status, joinery_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert joinery_status is EvidenceResolutionStatus.ABSTAINED
+    assert joinery_reason == REASON_COMPETING
+    anno_status, anno_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(2,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert anno_status is EvidenceResolutionStatus.ABSTAINED
+    assert anno_reason == REASON_COMPETING
+    slab_status, slab_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(3,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert slab_status is EvidenceResolutionStatus.ABSTAINED
+    assert slab_reason == REASON_COMPETING
+
+
+def test_representation_contact_same_exterior_paint_is_candidate_not_firm():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert status is EvidenceResolutionStatus.CANDIDATE
+    assert reason == REASON_CONTACT_CANDIDATE
+
+
+def test_opening_chassis_is_topology_only_not_a_wall_join():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=drawings,
+        opening_chassis_witness=True,
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_OPENING_TOPOLOGY
+
+
+def test_two_point_one_four_eight_pt_is_not_commercial_snap_join():
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(1027,), nearby_native_path_ids=(1708,),
+        separation_pdf_pts=2.1448, drawings=drawings,
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_NEAR_MISS
+
+
+def test_unwitnessed_222pt_span_is_not_authenticated_as_a_door():
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(4000,), nearby_native_path_ids=(5848,),
+        separation_pdf_pts=222.624, drawings=(),
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_NEAR_MISS
+
+
+def test_graph_near_miss_receipts_never_apply_commercial_snap_join():
+    def strip(source_id, bounds):
+        return SimpleNamespace(
+            polygon=box(*bounds),
+            native_path_indices=lambda: (source_id,),
+        )
+
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+    )
+    graph = inspect_native_wall_graph(
+        (strip(0, (0, 0, 10, 1)), strip(1, (10.4252, 0, 20.4252, 1))),
+        source_drawings=drawings,
+    )
+    assert graph.second_stage_join_applied is False
+    assert graph.endpoint_near_miss_total >= 1
+    receipt = receipt_from_near_miss(graph.endpoint_near_misses[0], drawings)
+    assert receipt.status is EvidenceResolutionStatus.ABSTAINED
+    assert receipt.reason == REASON_NEAR_MISS
+    assert receipt.native_path_ids[0] in (0, 1)
+    assert receipt.nearby_native_path_ids[0] in (0, 1)
+    assert receipt.native_source_layers == ("Enclosure_WallExternal",)
