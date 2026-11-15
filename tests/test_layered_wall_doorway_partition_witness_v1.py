@@ -17,6 +17,9 @@ import pytest
 from shapely.geometry import Polygon
 
 from pb_layered_wall_doorway_partition_witness_shadow import (
+    LEAF_WIDTH_NOT_FLOOR_DIMENSION,
+    OWN_BOX_STILL_GROUP_AREA,
+    PARTITION_PART_METRIC_UNPROVEN,
     REASON_CHORD,
     REASON_FOREIGN,
     REASON_HOLE,
@@ -25,6 +28,8 @@ from pb_layered_wall_doorway_partition_witness_shadow import (
     REASON_MIXED,
     REASON_OPEN_MEMBER,
     REASON_OVERLAP,
+    UNION_PAIR_NOT_PART_AREA,
+    adjoining_finish_scope_handoff,
     adjoining_sliding_floor_components,
     partition_groups,
 )
@@ -209,6 +214,61 @@ def test_adjoining_sliding_floor_components_keep_separate_face_identities():
     ids = [member["ring_record_id"] for member in group["members"]]
     assert ids[0] != ids[1]
     assert "area_m2" not in group["members"][0]
+
+
+def test_finish_handoff_keeps_two_faces_and_never_assigns_part_area():
+    _data, sha, result, *_ = _base()
+    packets = adjoining_finish_scope_handoff(
+        result, source_sha256=sha, page_index=0, corroborating_dimensions=(H_FULL, V_FULL),
+    )
+    assert len(packets) == 1
+    packet = packets[0]
+    assert packet["valid"] is True
+    assert packet["can_issue_area"] is False
+    assert packet["envelope_cover_is_topology_only"] is True
+    assert packet["envelope_figured_pair_count"] == 1
+    assert len(packet["members"]) == 2
+    assert packet["members"][0]["ring_record_id"] != packet["members"][1]["ring_record_id"]
+    assert packet["sliding_closure_ids"]
+    for member in packet["members"]:
+        assert member["can_issue_area"] is False
+        assert member["first_failing_metric_gate"] == UNION_PAIR_NOT_PART_AREA
+        assert "area_m2" not in member
+        assert member["polygon_pdf_pts"]
+
+
+def test_finish_handoff_does_not_treat_a_part_own_box_as_area():
+    _data, sha, result, *_ = _base()
+    packets = adjoining_finish_scope_handoff(
+        result, source_sha256=sha, page_index=0, corroborating_dimensions=(H_FULL, V_BEDROOM),
+    )
+    packet = packets[0]
+    assert packet["envelope_figured_pair_count"] != 1
+    gates = {member["first_failing_metric_gate"] for member in packet["members"]}
+    assert OWN_BOX_STILL_GROUP_AREA in gates
+    assert PARTITION_PART_METRIC_UNPROVEN in gates
+    assert all(member["can_issue_area"] is False for member in packet["members"])
+
+
+def test_finish_handoff_rejects_a_sliding_leaf_span_as_a_floor_dimension():
+    _data, sha, result, *_ = _base()
+    closure = result.closures[0]
+    lo, hi = closure.gap_interval
+    if closure.horizontal:
+        y = sum(closure.band) / 2.0
+        leaf = _dim("leaf", "horizontal", (lo, y), (hi, y))
+    else:
+        x = sum(closure.band) / 2.0
+        leaf = _dim("leaf", "vertical", (x, lo), (x, hi))
+    packets = adjoining_finish_scope_handoff(
+        result, source_sha256=sha, page_index=0, corroborating_dimensions=(leaf,),
+    )
+    packet = packets[0]
+    assert packet["can_issue_area"] is False
+    assert all(
+        member["first_failing_metric_gate"] == LEAF_WIDTH_NOT_FLOOR_DIMENSION
+        for member in packet["members"]
+    )
 
 
 def test_default_off_is_byte_identical_and_a_box_that_equals_no_part_yields_nothing():

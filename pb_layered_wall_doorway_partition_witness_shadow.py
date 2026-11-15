@@ -22,7 +22,10 @@ the caller against an independently authenticated figured pair. Nothing here is 
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from typing import Sequence
+
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
@@ -45,6 +48,11 @@ REASON_HOLE = "partition_region_has_unexplained_void"
 REASON_MIXED = "partition_joined_by_a_non_sliding_chord"
 REASON_OPEN_MEMBER = "partition_member_not_a_closed_face"
 REASON_ID_COLLISION = "partition_source_record_id_collision"
+UNION_PAIR_NOT_PART_AREA = "union_pair_not_part_area"
+OWN_BOX_STILL_GROUP_AREA = "partition_part_own_box_not_group_area"
+PARTITION_PART_METRIC_UNPROVEN = "same_view_layered_ring_partition_part"
+LEAF_WIDTH_NOT_FLOOR_DIMENSION = "door_leaf_width_not_floor_dimension"
+_LEAF_WIDTH_PT = 0.5
 
 
 @dataclass(frozen=True)
@@ -265,8 +273,133 @@ def adjoining_sliding_floor_components(
     return tuple(components)
 
 
+def _dimension_span_pt(dimension: object) -> float | None:
+    endpoints = getattr(dimension, "endpoints_pt", None)
+    if endpoints is None or len(endpoints) != 2:
+        return None
+    (x0, y0), (x1, y1) = endpoints
+    length = math.hypot(float(x1) - float(x0), float(y1) - float(y0))
+    if not math.isfinite(length) or length <= 0.0:
+        return None
+    return length
+
+
+def _leaf_span_pt(closure: LayeredDoorwayClosure) -> float:
+    return abs(float(closure.gap_interval[1]) - float(closure.gap_interval[0]))
+
+
+def _is_leaf_width_dimension(
+    dimension: object,
+    closures: Sequence[LayeredDoorwayClosure],
+) -> bool:
+    span = _dimension_span_pt(dimension)
+    if span is None:
+        return False
+    return any(abs(span - _leaf_span_pt(closure)) <= _LEAF_WIDTH_PT for closure in closures)
+
+
+def adjoining_finish_scope_handoff(
+    ring_result: LayeredRoomRingResult,
+    *,
+    source_sha256: str,
+    page_index: int,
+    corroborating_dimensions: Sequence[object] = (),
+) -> tuple[dict[str, object], ...]:
+    """AntiGravity finish-scope packet: two faces, sliding transition, no part area.
+
+    The union envelope pair is a topology cross-check only. A unique pair that
+    equals one part's own box is still not that part's area. A sliding-leaf
+    span is not a floor dimension. ``can_issue_area`` is always False here.
+    """
+    from pb_layered_wall_doorway_room_face_scope_shadow import (
+        figured_box_pair_count,
+        unique_figured_box_axis_covers,
+    )
+
+    components = adjoining_sliding_floor_components(
+        ring_result, source_sha256=source_sha256, page_index=page_index,
+    )
+    closures = {
+        closure.closure_id: closure
+        for closure in ring_result.closures
+        if closure.kind == KIND_SLIDING_LEAF
+    }
+    dimensions = tuple(corroborating_dimensions or ())
+    packets: list[dict[str, object]] = []
+    for group in components:
+        sliding = tuple(
+            closures[item]
+            for item in group["sliding_closure_ids"]
+            if item in closures
+        )
+        envelope = group["envelope"]
+        envelope_pair_count = 0
+        envelope_cover = None
+        if group["valid"] and envelope is not None and dimensions:
+            envelope_pair_count = figured_box_pair_count(envelope, dimensions)
+            if envelope_pair_count == 1:
+                envelope_cover = unique_figured_box_axis_covers(envelope, dimensions)
+        leaf_only = bool(dimensions) and all(
+            _is_leaf_width_dimension(item, sliding) for item in dimensions
+        )
+        members = []
+        for member in group["members"]:
+            own_count = 0
+            own_cover = None
+            if dimensions:
+                own_count = figured_box_pair_count(
+                    member["bbox_pdf_pts"],
+                    dimensions,
+                    face_polygon=member["polygon_pdf_pts"],
+                )
+                if own_count == 1:
+                    own_cover = unique_figured_box_axis_covers(
+                        member["bbox_pdf_pts"],
+                        dimensions,
+                        face_polygon=member["polygon_pdf_pts"],
+                    )
+            if not group["valid"]:
+                gate = str(group["reason"])
+            elif leaf_only:
+                gate = LEAF_WIDTH_NOT_FLOOR_DIMENSION
+            elif envelope_pair_count == 1:
+                gate = UNION_PAIR_NOT_PART_AREA
+            elif own_count == 1:
+                gate = OWN_BOX_STILL_GROUP_AREA
+            else:
+                gate = PARTITION_PART_METRIC_UNPROVEN
+            members.append(
+                {
+                    **member,
+                    "can_issue_area": False,
+                    "first_failing_metric_gate": gate,
+                    "own_figured_pair_count": own_count,
+                    "own_figured_cover": own_cover,
+                }
+            )
+        packets.append(
+            {
+                "valid": group["valid"],
+                "reason": group["reason"],
+                "sliding_closure_ids": group["sliding_closure_ids"],
+                "envelope": envelope,
+                "envelope_figured_pair_count": envelope_pair_count,
+                "envelope_figured_cover": envelope_cover,
+                "envelope_cover_is_topology_only": envelope_pair_count == 1,
+                "can_issue_area": False,
+                "members": tuple(members),
+            }
+        )
+    return tuple(packets)
+
+
 __all__ = [
+    "LEAF_WIDTH_NOT_FLOOR_DIMENSION",
+    "OWN_BOX_STILL_GROUP_AREA",
+    "PARTITION_PART_METRIC_UNPROVEN",
     "PartitionGroup",
+    "UNION_PAIR_NOT_PART_AREA",
+    "adjoining_finish_scope_handoff",
     "adjoining_sliding_floor_components",
     "partition_groups",
 ]
