@@ -1,14 +1,15 @@
 """Source-neutral Q5446 role dispatch regression; original positives stay private."""
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from pb_combine_source_closed_runs import load_verified_sealed_run
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_gpt1_q5446_alfresco_original_customer import OriginalQ5446AlfrescoCustomerResult
 from pb_quantity_takeoff_adapter import (
@@ -17,9 +18,8 @@ from pb_quantity_takeoff_adapter import (
     quantity_evidence_to_takeoff_output_row,
 )
 from pb_source_closed_run_export import seal_source_closed_run
-from pb_combine_source_closed_runs import load_verified_sealed_run
-from tests.test_source_closed_project_handoff import _quantity
 from tests.test_gpt3_owner_all_source_role_handoff import _fake_sources
+from tests.test_source_closed_project_handoff import _quantity
 from tools import gpt3_owner_all_source_role_handoff as roles
 from tools import q5446_source_role_customer_runtime as runtime
 
@@ -126,7 +126,7 @@ def test_actual_seal_customer_verifier_and_canonical_role_files(tmp_path, monkey
 def test_negative_source_role_never_manufactures_customer_quantity(
     tmp_path, monkeypatch, failure,
 ):
-    source, sha, project, receipt = _setup(tmp_path, monkeypatch)
+    source, _sha, project, receipt = _setup(tmp_path, monkeypatch)
     kwargs = {}
     if failure == "wrong_project":
         project = "foreign-project"
@@ -256,5 +256,8 @@ def test_private_sha_original_single_role_optional(tmp_path):
         output_dir=role, workspace_id=14,
     )
     assert result["status"] == "sealed"
-    assert result["verified_customer_row_count"] == 1
+    expected_families = (
+        2 if runtime._authenticated_companion_roles(source) is not None else 1
+    )
+    assert result["verified_customer_row_count"] == expected_families
     assert result["benchmark_score_granted"] is False

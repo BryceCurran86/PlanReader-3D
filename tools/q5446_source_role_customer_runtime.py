@@ -27,6 +27,11 @@ from pb_gpt1_q5446_source_declared_area_firm_handoff import (
     Q5446_DOCUMENT_ID,
     Q5446_PROJECT_ID,
 )
+from pb_gptmax_q5446_finish_support_shadow import SOURCE_IDS
+from pb_gptmax_q5446_original_family_customer_append import (
+    Q5446TwoFamilyCustomerResult,
+    issue_original_q5446_alfresco_plus_ensuite_customer,
+)
 
 
 def source_owned_role_module(source_sha256: str, *, family_group: str) -> str:
@@ -49,6 +54,40 @@ def _digest(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
+
+
+def _authenticated_companion_roles(plan_path: Path) -> tuple[Path, Path] | None:
+    """Find independently SHA-authenticated material-role PDFs alongside the plan.
+
+    Source identity, never a file title or expected quantity, selects each role.
+    Missing, renamed, duplicated, or tampered companions cannot mint an area;
+    the already-authenticated standalone ALFRESCO issuer remains available.
+    """
+    wanted = {
+        role: SOURCE_IDS[role]
+        for role in ("standard_inclusions", "scope_and_allowance_reference")
+    }
+    if len(set(wanted.values())) != len(wanted):
+        return None
+    found: dict[str, list[Path]] = {role: [] for role in wanted}
+    try:
+        for candidate in plan_path.parent.iterdir():
+            if (
+                candidate == plan_path
+                or candidate.is_symlink()
+                or not candidate.is_file()
+                or candidate.suffix.casefold() != ".pdf"
+            ):
+                continue
+            digest = _digest(candidate)
+            for role, expected in wanted.items():
+                if digest == expected:
+                    found[role].append(candidate)
+    except OSError:
+        return None
+    if any(len(paths) != 1 for paths in found.values()):
+        return None
+    return found["standard_inclusions"][0], found["scope_and_allowance_reference"][0]
 
 
 def _write_new(path: Path, value: str) -> None:
@@ -147,6 +186,58 @@ def produce_q5446_source_role(
         ):
             _summary(output_dir, result)
             return result
+        # A second independently authenticated source/finish family is optional.
+        # Its inclusion/sales documents may support finish semantics, never a
+        # second architectural scale or a completed six-role source universe.
+        customer_rows = tuple(receipt.customer_rows)
+        family_counts = {"floor_area": 1}
+        companion_roles = _authenticated_companion_roles(pdf_path)
+        if companion_roles is not None:
+            supplemental = issue_original_q5446_alfresco_plus_ensuite_customer(
+                pdf_path, *companion_roles, workspace_id=workspace_id,
+            )
+            if type(supplemental) is not Q5446TwoFamilyCustomerResult:
+                raise TypeError("supplemental source family contract unavailable")
+            if supplemental.status == "TWO_INDEPENDENT_SOURCE_FAMILIES_CUSTOMER_VERIFIED":
+                combined = supplemental.combined_sealed_run
+                if (
+                    supplemental.source_role_coverage_verified is not False
+                    or supplemental.original_alfresco is None
+                    or supplemental.original_tiled_room is None
+                    or combined is None
+                    or combined.project_id != project_id
+                    or set(combined.source_sha256s) != {SOURCE_SHA256}
+                    or len(combined.quantities) != 2
+                    or {q.family for q in combined.quantities}
+                       != {"floor_area", "floor_finish_area"}
+                    or any(q.abstained or not q.lineage_ok for q in combined.quantities)
+                    or len(supplemental.customer_rows) != 2
+                    or supplemental.original_alfresco.sealed_run is None
+                    or supplemental.original_alfresco.sealed_run.quantities[0].to_dict()
+                       != sealed.quantities[0].to_dict()
+                    or supplemental.original_alfresco.customer_rows
+                       != tuple(receipt.customer_rows)
+                    or not any(q.to_dict() == sealed.quantities[0].to_dict()
+                               for q in combined.quantities)
+                    or tuple(supplemental.customer_rows[:1])
+                       != tuple(receipt.customer_rows)
+                ):
+                    raise ValueError("supplemental family cannot retain original source customer")
+                corroborated = verify_sealed_customer_output(
+                    combined, supplemental.customer_rows,
+                )
+                if (
+                    corroborated.customer_row_count != 2
+                    or set(corroborated.verified_quantity_ids)
+                       != {q.quantity_id for q in combined.quantities}
+                ):
+                    raise ValueError("supplemental customer verification unavailable")
+                sealed = combined
+                customer_rows = tuple(supplemental.customer_rows)
+                family_counts = {"floor_area": 1, "floor_finish_area": 1}
+            elif supplemental.status != "ABSTAIN":
+                raise ValueError("supplemental family status unsupported")
+
         # Everything below is an authenticated, ordinary canonical role
         # output consumed by the *existing* exact-bijection aggregate reader.
         # Never label one original document as a completed six-role project.
@@ -158,9 +249,9 @@ def produce_q5446_source_role(
         if (reloaded.run_id != sealed.run_id
                 or set(reloaded.source_sha256s) != {SOURCE_SHA256}):
             raise ValueError("serialized original role seal differs")
-        verify_sealed_customer_output(reloaded, receipt.customer_rows)
+        verify_sealed_customer_output(reloaded, customer_rows)
         _write_new(
-            rows_path, json.dumps(list(receipt.customer_rows), sort_keys=True) + "\n",
+            rows_path, json.dumps(list(customer_rows), sort_keys=True) + "\n",
         )
     except (OSError, ValueError, TypeError, RuntimeError):
         # A failed issuer or seal cannot be converted into a commercial row.
@@ -176,10 +267,11 @@ def produce_q5446_source_role(
         "combined_run_file": str(seal_path),
         "customer_rows_file": str(rows_path),
         "customer_rows_verified": True,
-        "verified_customer_row_count": 1,
+        "verified_customer_row_count": len(customer_rows),
         "full_project_customer_first_gate": "PROJECT_VERIFIED",
-        "combined_quantity_count": 1,
-        "family_counts": {"floor_area": 1},
+        "combined_quantity_count": len(sealed.quantities),
+        "family_counts": family_counts,
+        "source_role_coverage_verified": False,
     })
     _summary(output_dir, result)
     return result
