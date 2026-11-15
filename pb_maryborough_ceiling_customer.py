@@ -433,9 +433,9 @@ def issue_original_maryborough_pwd_ceiling_customer_quantities(
 def _is_authentic_cad_page(
     page,
     *,
-    min_drawings: int = 1000,
-    min_orthogonal: int = 50,
-    min_long_lines: int = 50,
+    min_drawings: int = 50,
+    min_orthogonal: int = 10,
+    min_long_lines: int = 10,
     min_words: int = 20,
     min_spread_x: float = 300.0,
     min_spread_y: float = 200.0,
@@ -449,10 +449,17 @@ def _is_authentic_cad_page(
         v_lines = 0
         long_lines = 0
         valid_drawing_count = 0
+        fills = 0
+        c_curves = 0
+        thick_strokes = 0
 
         for d in drawings:
             if not isinstance(d, dict):
                 continue
+            if d.get("fill") is not None:
+                fills += 1
+            if d.get("width") and d["width"] > 0.4:
+                thick_strokes += 1
             items = d.get("items")
             if not isinstance(items, (list, tuple)) or not items:
                 continue
@@ -465,7 +472,9 @@ def _is_authentic_cad_page(
                 if any(isinstance(coord, str) for coord in it[1:]):
                     items_valid = False
                     break
-                if it[0] == "l" and len(it) >= 3:
+                if it[0] == "c":
+                    c_curves += 1
+                elif it[0] == "l" and len(it) >= 3:
                     p1, p2 = it[1], it[2]
                     try:
                         x1, y1 = float(p1[0]), float(p1[1])
@@ -488,6 +497,10 @@ def _is_authentic_cad_page(
         if valid_drawing_count < min_drawings:
             return False
         if h_lines < min_orthogonal or v_lines < min_orthogonal or long_lines < min_long_lines:
+            return False
+        # Authentic CAD architectural pages require structural features:
+        # door swing curves, filled wall cavities/hatches, or diverse line weights.
+        if fills == 0 and c_curves == 0 and thick_strokes == 0:
             return False
     except Exception:
         return False
