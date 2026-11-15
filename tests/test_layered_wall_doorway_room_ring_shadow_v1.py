@@ -157,7 +157,9 @@ def test_unclosed_source_collinear_gap_reports_native_owner_witness_without_publ
     assert len(evidence) == 1
     witness = evidence[0]
     assert set(witness["adjacent_wall_native_path_indices"]) == {3, 4}
-    assert witness["source_path_side_partition_proven"] is False
+    assert witness["left_wall_native_path_indices"] == (3,)
+    assert witness["right_wall_native_path_indices"] == (4,)
+    assert witness["source_path_side_partition_proven"] is True
     assert witness["physical_wall_authenticated"] is False
     assert witness["opening_authenticated"] is False
     assert witness["can_issue_area"] is False

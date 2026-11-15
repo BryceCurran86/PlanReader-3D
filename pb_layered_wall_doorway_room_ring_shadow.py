@@ -892,6 +892,30 @@ def _runs(strips: Sequence[_Strip], horizontal: bool) -> list[tuple[tuple[float,
     return out
 
 
+def _unique_collinear_run_end_paths(
+    same_band_runs: Sequence[tuple],
+    lo: float,
+    hi: float,
+) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
+    """Unique-or-abstain collinear owners of a gap's two run ends.
+
+    A collinear interruption is the free interval between two runs of one
+    band. Left is the unique run that ends at ``lo``; right is the unique run
+    that starts at ``hi``. Two 0.02-close rival bands, or a missing end,
+    leave both sides empty so callers keep the unsided touching inventory
+    and do not invent a host. This does not close the gap.
+    """
+    left_runs = [run for run in same_band_runs if _close(run[2], lo)]
+    right_runs = [run for run in same_band_runs if _close(run[1], hi)]
+    if len(left_runs) != 1 or len(right_runs) != 1:
+        return (), (), False
+    return (
+        tuple(sorted(left_runs[0][3])),
+        tuple(sorted(right_runs[0][3])),
+        True,
+    )
+
+
 def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     """Maximal bounded interruptions of every wall band.
 
@@ -950,7 +974,14 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                     for run in runs
                 ]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
-                found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
+                left_paths, right_paths, _unique_ends = _unique_collinear_run_end_paths(
+                    same_band, a, b,
+                )
+                if not _unique_ends:
+                    # Unsided touching inventory is adjacent-path evidence only.
+                    # It is not left/right host ownership.
+                    left_paths, right_paths = touching, ()
+                found[key] = _Gap(horizontal, band, a, b, left_paths, right_paths, collinear)
     return list(found.values())
 
 
@@ -1771,8 +1802,8 @@ def _source_unresolved_gap_witnesses(
 
     Source native path indices are original page indices, including when the
     drawing list was bounded by the footprint diagnostic with inert placeholders.
-    The legacy _gaps producer puts touching wall paths in one unsided set.
-    Do not fabricate separate left/right host ownership from that inventory.
+    Left/right owners are recorded only when each collinear run end is unique.
+    An unsided touching inventory is adjacent-path evidence, not a host.
     Sampling is presentation-only: all such gaps stay unclosed, regardless of
     whether their receipt makes the bounded diagnostic list.
     """
@@ -1791,6 +1822,7 @@ def _source_unresolved_gap_witnesses(
         )
         left = tuple(sorted(set(int(i) for i in gap.left_path_indices)))
         right = tuple(sorted(set(int(i) for i in gap.right_path_indices)))
+        partitioned = bool(left) and bool(right)
         adjacent_paths = tuple(sorted(set(left) | set(right)))
         key = (*geometry, adjacent_paths)
         if key in unique:
@@ -1800,7 +1832,9 @@ def _source_unresolved_gap_witnesses(
             "band_pdf_pts": (geometry[1], geometry[2]),
             "gap_interval_pdf_pts": (geometry[3], geometry[4]),
             "adjacent_wall_native_path_indices": adjacent_paths,
-            "source_path_side_partition_proven": False,
+            "left_wall_native_path_indices": left if partitioned else (),
+            "right_wall_native_path_indices": right if partitioned else (),
+            "source_path_side_partition_proven": partitioned,
             "topology_only": True,
             "physical_wall_authenticated": False,
             "opening_authenticated": False,
