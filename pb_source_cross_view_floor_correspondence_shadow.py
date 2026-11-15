@@ -2627,117 +2627,24 @@ def _authenticate_d13_physical_doorway_boundary(
     words_tgt: Sequence[Sequence[Any]],
     box_sup: tuple[float, float, float, float],
     box_tgt: tuple[float, float, float, float],
-    door_callout: str = "D13",
-    scheduled_width_mm: float = 920.0,
+    door_callout: str,
+    scheduled_width_mm: float,
+    room_width_mm: float,
 ) -> Optional[dict[str, Any]]:
-    """Authenticate physical D13 doorway jambs, frame, leaf, swing, threshold, and tile termination."""
-    if not support_segments or not target_segments or not words_tgt:
-        return None
+    """Prove D13 from authenticated painted frame, leaf and support finish ink."""
+    from pb_source_native_room_doorway_geometry import authenticate_source_native_room_doorway
 
-    callout_norm = door_callout.strip().upper()
-    tx0, ty0, tx1, ty1 = box_tgt
-    sx0, sy0, sx1, sy1 = box_sup
-
-    # 1. Authenticate target sheet PWD label and D13 doorway callout inside the opening
-    w_tgt_pwd = [
-        w for w in words_tgt
-        if len(w) >= 5
-        and str(w[4]).strip().upper() == "PWD"
-        and tx0 <= float(w[0]) <= tx1
-        and ty0 <= float(w[1]) <= ty1
-    ]
-    w_tgt_d13 = [
-        w for w in words_tgt
-        if len(w) >= 5
-        and str(w[4]).strip().upper() == callout_norm
-        and (tx1 - 65.0) <= float(w[0]) <= tx1
-        and (ty0 - 15.0) <= float(w[1]) <= (ty0 + 12.0)
-    ]
-    if len(w_tgt_pwd) != 1 or len(w_tgt_d13) != 1:
-        return None
-
-    # 2. Authenticate Page 7 physical doorway jambs, inner frame returns, leaf, swing arc, and threshold
-    has_tgt_left_jamb = False
-    has_tgt_right_jamb = False
-    has_tgt_left_inner_jamb = False
-    has_tgt_right_inner_jamb = False
-    has_tgt_threshold_inside = False
-    has_tgt_threshold_outside = False
-    has_tgt_door_leaf = False
-    swing_chord_count = 0
-
-    for s in target_segments:
-        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
-        xlo, xhi = min(x1, x2), max(x1, x2)
-        ylo, yhi = min(y1, y2), max(y1, y2)
-        if abs(x2 - x1) < AXIS_TOL:
-            if abs(x1 - 386.64) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
-                has_tgt_left_jamb = True
-            elif abs(x1 - 443.28) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
-                has_tgt_right_jamb = True
-            elif abs(x1 - 389.04) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
-                has_tgt_left_inner_jamb = True
-            elif abs(x1 - 441.12) <= 0.1 and 1376.6 <= ylo < yhi <= 1383.3:
-                has_tgt_right_inner_jamb = True
-            elif abs(x1 - 441.12) <= 0.1 and abs(ylo - 1383.2) <= 0.15 and abs(yhi - 1435.28) <= 0.15:
-                has_tgt_door_leaf = True
-        elif abs(y2 - y1) < AXIS_TOL:
-            if abs(y1 - 1383.2) <= 0.1 and abs(xlo - 386.64) <= 0.1 and abs(xhi - 443.28) <= 0.1:
-                has_tgt_threshold_inside = True
-            elif abs(y1 - 1376.72) <= 0.1 and abs(xlo - 386.64) <= 0.1 and abs(xhi - 443.28) <= 0.1:
-                has_tgt_threshold_outside = True
-        else:
-            if 388.5 <= xlo and xhi <= 441.5 and 1383.0 <= ylo and yhi <= 1436.0:
-                swing_chord_count += 1
-
-    if not (
-        has_tgt_left_jamb
-        and has_tgt_right_jamb
-        and has_tgt_left_inner_jamb
-        and has_tgt_right_inner_jamb
-        and has_tgt_threshold_inside
-        and has_tgt_threshold_outside
-        and has_tgt_door_leaf
-        and swing_chord_count >= 5
-    ):
-        return None
-
-    clear_opening_pt = round(441.12 - 389.04, 2)
-    pts_per_mm_1_50 = 72.0 / (25.4 * 50.0)
-    clear_opening_mm = clear_opening_pt / pts_per_mm_1_50
-    if abs(clear_opening_mm - scheduled_width_mm) > 3.0:
-        return None
-
-    if abs(1383.2 - ty0) > 0.55:
-        return None
-
-    # 3. Authenticate Page 11 doorway jambs and floor finish tile lines terminating at the doorway/wall face
-    has_sup_left_jamb = False
-    has_sup_right_jamb = False
-    tile_lines_terminating_at_top_face = 0
-
-    for s in support_segments:
-        x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
-        ylo, yhi = min(y1, y2), max(y1, y2)
-        if abs(x2 - x1) < AXIS_TOL:
-            if abs(x1 - 464.64) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
-                has_sup_left_jamb = True
-            elif abs(x1 - 521.28) <= 0.1 and abs(ylo - 1376.72) <= 0.1 and abs(yhi - 1383.2) <= 0.1:
-                has_sup_right_jamb = True
-            elif (sx0 + 10.0) <= x1 <= (sx1 - 10.0) and 1380.5 <= ylo <= 1384.0 and 1583.5 <= yhi <= 1585.0:
-                tile_lines_terminating_at_top_face += 1
-
-    if not (has_sup_left_jamb and has_sup_right_jamb and tile_lines_terminating_at_top_face >= 2):
-        return None
-
-    return {
-        "clear_opening_width_pdf_pt": clear_opening_pt,
-        "jamb_gap_target_pdf_pts": (386.64, 443.28),
-        "jamb_gap_support_pdf_pts": (464.64, 521.28),
-        "threshold_inside_face_y_pdf_pt": 1383.2,
-        "threshold_aligned_with_internal_face": True,
-        "threshold_deduction_m2": 0.0,
-    }
+    return authenticate_source_native_room_doorway(
+        support_segments=support_segments,
+        target_segments=target_segments,
+        words_tgt=words_tgt,
+        box_sup=box_sup,
+        box_tgt=box_tgt,
+        door_callout=door_callout,
+        scheduled_width_mm=scheduled_width_mm,
+        room_width_mm=room_width_mm,
+        room_label="PWD",
+    )
 
 
 def authenticate_maryborough_pwd_cross_sheet_correspondence(
@@ -3006,6 +2913,7 @@ def authenticate_maryborough_pwd_cross_sheet_correspondence(
         box_tgt=box_tgt,
         door_callout=door_callout,
         scheduled_width_mm=sched_info["width_mm"],
+        room_width_mm=dim_h_val_mm,
     )
     if parsed_door is None:
         return _abstained(
