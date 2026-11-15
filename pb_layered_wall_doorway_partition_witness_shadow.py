@@ -223,7 +223,50 @@ def _validate(member_ids, closure_ids, rings, closures, collisions, source_sha25
     return PartitionGroup(member_ids, closure_ids, True, "partition_membership_exact", envelope)
 
 
+def adjoining_sliding_floor_components(
+    ring_result: LayeredRoomRingResult,
+    *,
+    source_sha256: str,
+    page_index: int,
+) -> tuple[dict[str, object], ...]:
+    """Source-instance identities of sliding-split floor faces (topology only).
+
+    Each valid group is one printed room split by a sliding leaf into a main
+    face and an adjoining wardrobe/alcove face. A door-leaf width is not a
+    floor dimension. Areas are not assigned here.
+    """
+    components: list[dict[str, object]] = []
+    rings = {ring.record_id: ring for ring in ring_result.rings}
+    for group in partition_groups(
+        ring_result, source_sha256=source_sha256, page_index=page_index,
+    ):
+        members = []
+        for record_id in group.ring_record_ids:
+            ring = rings.get(record_id)
+            if ring is None:
+                continue
+            members.append(
+                {
+                    "ring_record_id": ring.record_id,
+                    "polygon_pdf_pts": tuple(ring.polygon_pdf_pts),
+                    "bbox_pdf_pts": tuple(ring.bbox_pdf_pts),
+                    "status": str(ring.status),
+                }
+            )
+        components.append(
+            {
+                "valid": group.valid,
+                "reason": group.reason,
+                "sliding_closure_ids": group.sliding_closure_ids,
+                "envelope": group.envelope,
+                "members": tuple(members),
+            }
+        )
+    return tuple(components)
+
+
 __all__ = [
     "PartitionGroup",
+    "adjoining_sliding_floor_components",
     "partition_groups",
 ]

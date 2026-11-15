@@ -25,6 +25,7 @@ from pb_layered_wall_doorway_partition_witness_shadow import (
     REASON_MIXED,
     REASON_OPEN_MEMBER,
     REASON_OVERLAP,
+    adjoining_sliding_floor_components,
     partition_groups,
 )
 from pb_layered_wall_doorway_room_face_scope_shadow import (
@@ -196,6 +197,18 @@ def test_original_like_split_with_two_nonrectangular_parts_and_one_unique_union_
     assert sorted(round(r.area_page_pts2, 1) for r in scope.records) == [4170.0, 10440.0]
     assert all(r.area_page_pts2 != box_area for r in scope.records)
     assert sum(r.area_page_pts2 for r in scope.records) < box_area  # the wall front between them is not room
+
+
+def test_adjoining_sliding_floor_components_keep_separate_face_identities():
+    _data, sha, result, *_ = _base()
+    components = adjoining_sliding_floor_components(result, source_sha256=sha, page_index=0)
+    assert components
+    group = components[0]
+    assert group["valid"] is True
+    assert len(group["members"]) == 2
+    ids = [member["ring_record_id"] for member in group["members"]]
+    assert ids[0] != ids[1]
+    assert "area_m2" not in group["members"][0]
 
 
 def test_default_off_is_byte_identical_and_a_box_that_equals_no_part_yields_nothing():

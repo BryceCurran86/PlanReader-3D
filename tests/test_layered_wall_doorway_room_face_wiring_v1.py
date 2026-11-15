@@ -19,6 +19,7 @@ from pb_layered_wall_doorway_room_face_scope_shadow import (
     layered_ring_room_face_scope,
     layered_ring_scope_overrides,
     ring_face_bounding_box,
+    unique_figured_box_axis_covers,
     unique_figured_box_mm_per_pt,
     unique_hashed_ring_wall_lengths,
     unique_hashed_traced_strip_lengths,
@@ -269,6 +270,19 @@ def _dim(dimension_id, orientation, a, b, value_mm=None):
     return SimpleNamespace(
         dimension_id=dimension_id, orientation=orientation, endpoints_pt=(a, b), value_mm=value_mm,
     )
+
+
+def test_unique_figured_box_axis_covers_are_the_issuer_input_when_the_pair_is_unique():
+    box_ = (100.0, 80.0, 250.0, 180.0)
+    h = _dim("h1", "horizontal", (100.0, 70.0), (250.0, 70.0), value_mm=3600)
+    v = _dim("v1", "vertical", (290.0, 80.0), (290.0, 180.0), value_mm=2400)
+    assert figured_box_pair_count(box_, [h, v]) == 1
+    covers = unique_figured_box_axis_covers(box_, [h, v])
+    assert covers is not None
+    (width_mm, width_pt), (height_mm, height_pt) = covers
+    assert (width_mm, height_mm) == (3600.0, 2400.0)
+    assert width_pt > 0.0 and height_pt > 0.0
+    assert unique_figured_box_axis_covers(box_, [h]) is None
 
 
 def test_figured_box_pair_count_is_exact_equality_within_a_hard_tolerance():

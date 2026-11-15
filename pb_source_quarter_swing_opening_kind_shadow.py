@@ -31,6 +31,9 @@ from pb_opening_kind_authority import (
     SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
     resolve_opening_kind,
 )
+from pb_source_opening_identity_partition_shadow import (
+    cluster_live_canonical_opening_identities,
+)
 
 
 # Production 2.5 pt snap: CAD hinge/jamb endpoints sit this far from the
@@ -125,6 +128,77 @@ def _witnesses(
     return cubic + _collect_diagonal_leaves(drawings)
 
 
+def _touches_witness_end(
+    opening: LiveCanonicalOpeningObject,
+    point: tuple[float, float],
+) -> bool:
+    return _opening_distance(opening, point) <= _SWING_OPENING_BIND_PT
+
+
+def _witness_hits(
+    openings: Sequence[LiveCanonicalOpeningObject],
+    witness: Mapping[str, Any],
+) -> tuple[LiveCanonicalOpeningObject, ...]:
+    hinge = tuple(float(value) for value in witness["centre"])
+    tip = tuple(float(value) for value in witness["closed_tip"])
+    hits: list[LiveCanonicalOpeningObject] = []
+    for opening in openings:
+        near_hinge = _touches_witness_end(opening, hinge)
+        near_tip = _touches_witness_end(opening, tip)
+        far_hinge = _opening_distance(opening, hinge)
+        far_tip = _opening_distance(opening, tip)
+        # A leaf must touch the interruption at exactly one end. A cubic
+        # swing may have the hinge on the jamb and the closed tip on the
+        # other jamb of the same interruption, so either end is enough
+        # when the other end is not a second opening.
+        if not (near_hinge or near_tip):
+            continue
+        if witness.get("pattern") == SOURCE_DIAGONAL_DOOR_LEAF:
+            if not (
+                min(far_hinge, far_tip) <= _SWING_OPENING_BIND_PT
+                < max(far_hinge, far_tip)
+            ):
+                continue
+        hits.append(opening)
+    return tuple(hits)
+
+
+def _swing_identity_groups(
+    hits: Sequence[LiveCanonicalOpeningObject],
+    witness: Mapping[str, Any],
+) -> tuple[frozenset[str], ...]:
+    """Count physical doorways, not record IDs, at one painted swing.
+
+    Vertex-joined jamb ticks collapse to one doorway. One hinge-only cluster
+    and one tip-only cluster of the same swing are the two faces of that
+    doorway. Two clusters at the same end remain competitors. Typed
+    neighbours still consume the witness.
+    """
+    if not hits:
+        return ()
+    hinge = tuple(float(value) for value in witness["centre"])
+    tip = tuple(float(value) for value in witness["closed_tip"])
+    by_id = {item.canonical_opening_id: item for item in hits}
+    clusters = [
+        frozenset(members)
+        for members in cluster_live_canonical_opening_identities(hits)
+    ]
+    classified: list[tuple[frozenset[str], bool, bool]] = []
+    for members in clusters:
+        at_hinge = any(_touches_witness_end(by_id[member], hinge) for member in members)
+        at_tip = any(_touches_witness_end(by_id[member], tip) for member in members)
+        classified.append((members, at_hinge, at_tip))
+    hinge_only = [item for item in classified if item[1] and not item[2]]
+    tip_only = [item for item in classified if item[2] and not item[1]]
+    if (
+        len(classified) == 2
+        and len(hinge_only) == 1
+        and len(tip_only) == 1
+    ):
+        return (hinge_only[0][0] | tip_only[0][0],)
+    return tuple(item[0] for item in classified)
+
+
 def _unique_bindings(
     openings: Sequence[LiveCanonicalOpeningObject],
     witnesses: Sequence[Mapping[str, Any]],
@@ -132,47 +206,37 @@ def _unique_bindings(
     """Unique painted swing owns one opening; typed neighbours still consume it.
 
     Uniqueness looks at every opening on the page that sits on the hinge or
-    closed tip. Only an already-hosted unkinded record may be updated. An
-    already-typed door or window at that swing keeps the witness; it is not
-    freed for another opening.
+    closed tip, then collapses proven-SAME jamb/tip records of one doorway.
+    Only an already-hosted unkinded record may be updated. An already-typed
+    door or window at that swing keeps the witness; it is not freed for
+    another opening. Unique IDs alone never prove DISTINCT.
     """
     by_id = {
         item.canonical_opening_id: item
         for item in openings
         if type(item) is LiveCanonicalOpeningObject
     }
-    witness_hits: list[tuple[Mapping[str, Any], tuple[str, ...]]] = []
-    for witness in witnesses:
-        hinge = tuple(float(v) for v in witness["centre"])
-        tip = tuple(float(v) for v in witness["closed_tip"])
-        hits = []
-        for opening in by_id.values():
-            near_hinge = _opening_distance(opening, hinge) <= _SWING_OPENING_BIND_PT
-            near_tip = _opening_distance(opening, tip) <= _SWING_OPENING_BIND_PT
-            far_hinge = _opening_distance(opening, hinge)
-            far_tip = _opening_distance(opening, tip)
-            # A leaf must touch the interruption at exactly one end. A cubic
-            # swing may have the hinge on the jamb and the closed tip on the
-            # other jamb of the same interruption, so either end is enough
-            # when the other end is not a second opening.
-            if near_hinge or near_tip:
-                if witness.get("pattern") == SOURCE_DIAGONAL_DOOR_LEAF:
-                    if not (
-                        min(far_hinge, far_tip) <= _SWING_OPENING_BIND_PT
-                        < max(far_hinge, far_tip)
-                    ):
-                        continue
-                hits.append(opening.canonical_opening_id)
-        witness_hits.append((witness, tuple(hits)))
-
+    page_openings = tuple(by_id.values())
     by_opening: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-    for witness, hits in witness_hits:
-        if len(hits) != 1:
+    for witness in witnesses:
+        hits = _witness_hits(page_openings, witness)
+        groups = _swing_identity_groups(hits, witness)
+        if len(groups) != 1:
             continue
-        target = by_id.get(hits[0])
-        if target is None or not _hosted_unkinded(target):
+        members = groups[0]
+        typed = [
+            by_id[member]
+            for member in members
+            if str(by_id[member].opening_kind or "").strip()
+        ]
+        if typed:
             continue
-        by_opening[hits[0]].append(witness)
+        hosted_unkinded = [
+            by_id[member] for member in members if _hosted_unkinded(by_id[member])
+        ]
+        if len(hosted_unkinded) != 1:
+            continue
+        by_opening[hosted_unkinded[0].canonical_opening_id].append(witness)
     return {
         opening_id: bound[0]
         for opening_id, bound in by_opening.items()

@@ -1242,6 +1242,14 @@ def _collect_live_physical_net_wall_claim(
             **({"wall_end_stroke_closures": True}
                if layered_wall_end_stroke_closures else {}),
         )
+    if source_unique_swing_opening_host or layered_sliding_leaf_closure:
+        producer = getattr(wall_opening, "opening_host_binding_producer", None)
+        if producer is not None:
+            from pb_source_issued_host_binding_rebind_shadow import (
+                republish_nominated_hosts,
+            )
+
+            physical_void = republish_nominated_hosts(physical_void, producer)
     if source_quarter_swing_opening_kind:
         from pb_source_quarter_swing_opening_kind_shadow import (
             apply_source_quarter_swing_opening_kinds,

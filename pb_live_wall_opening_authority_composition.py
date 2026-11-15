@@ -123,6 +123,7 @@ class LiveWallOpeningAuthorityComposition:
     evidence_page_ids: tuple[str, ...] = ()
     schema_version: str = LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION
     supplemental_physical_wall_candidate_authority: Optional[PhysicalWallCandidateAuthority] = None
+    opening_host_binding_producer: Optional[OpeningHostBindingProducer] = None
 
 
 def _clean_page_ids(page_ids: Sequence[str]) -> tuple[str, ...]:
@@ -654,6 +655,7 @@ def compose_live_wall_opening_authority(
         binding_selectors=MappingProxyType(dict(binding_selectors)),
         host_frame_selectors=MappingProxyType(dict(host_frame_selectors)),
         evidence_page_ids=evidence_pages,
+        opening_host_binding_producer=binding_producer,
     )
 
 

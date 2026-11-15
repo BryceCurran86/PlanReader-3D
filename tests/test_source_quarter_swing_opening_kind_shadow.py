@@ -204,6 +204,47 @@ def test_two_diagonal_leaves_on_one_opening_abstain() -> None:
     assert composition.canonical_openings[0].opening_kind is None
 
 
+def test_hinge_jamb_and_closed_tip_of_one_swing_are_one_doorway() -> None:
+    hosted = _hosted(geom=(49.72, 50.0, 52.5, 50.0), opening_id="opening-hosted")
+    hinge_tick = replace(
+        _hosted(geom=(50.0, 50.0, 50.0, 50.85), opening_id="opening-hinge"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+    )
+    tip = replace(
+        _hosted(geom=(49.72, 25.0, 52.5, 25.0), opening_id="opening-tip"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+    )
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hinge_tick, hosted, tip),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-hosted"].opening_kind == "door"
+    assert by_id["opening-hinge"].opening_kind is None
+    assert by_id["opening-tip"].opening_kind is None
+
+
+def test_crossing_unhosted_competitor_is_not_a_same_jamb() -> None:
+    hosted = _hosted(geom=(49.2, 50.0, 52.5, 50.0), opening_id="opening-hosted")
+    unhosted = replace(
+        _hosted(geom=(50.0, 49.2, 50.0, 52.5), opening_id="opening-unhosted"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+    )
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(hosted, unhosted),
+        drawings_by_page_id={"3": _quarter_swing_drawings()},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id["opening-hosted"].opening_kind is None
+    assert by_id["opening-unhosted"].opening_kind is None
+
+
 def test_original_hosted_opening_at_a_detected_swing_becomes_a_door() -> None:
     from pb_layered_wall_doorway_room_ring_shadow import _swing_arcs
 
@@ -221,6 +262,49 @@ def test_original_hosted_opening_at_a_detected_swing_becomes_a_door() -> None:
         drawings_by_page_id={"3": drawings},
     )
     assert composition.canonical_openings[0].opening_kind == "door"
+
+
+def test_original_garage_swing_on_captured_opening_population() -> None:
+    pickle_path = Path("_diag_claim_jog.pkl")
+    original = os.environ.get("PLANREADER_3LAUREL_ORIGINAL_PDF")
+    if not original or not Path(original).is_file() or not pickle_path.is_file():
+        pytest.skip("captured 3Laurel openings not provisioned")
+    import pickle
+    from pb_source_opening_identity_partition_shadow import (
+        SAME,
+        compare_live_canonical_opening_identity,
+    )
+
+    claim = pickle.loads(pickle_path.read_bytes())
+    openings = tuple(claim.canonical_openings)
+    assert len(openings) >= 3
+    target = next(
+        item
+        for item in openings
+        if str(item.physical_opening_id).endswith("08939d4dc1b3")
+    )
+    hinge = next(
+        item
+        for item in openings
+        if str(item.physical_opening_id).endswith("49a41692305e")
+    )
+    tip = next(
+        item
+        for item in openings
+        if str(item.physical_opening_id).endswith("d47384cc7a33")
+    )
+    assert compare_live_canonical_opening_identity(target, hinge) == SAME
+    assert compare_live_canonical_opening_identity(target, tip) != SAME
+    with fitz.open(original) as doc:
+        drawings = tuple(doc[2].get_drawings())
+    composition = apply_source_quarter_swing_opening_kinds(
+        _composition(*openings),
+        drawings_by_page_id={"3": drawings},
+    )
+    by_id = {item.canonical_opening_id: item for item in composition.canonical_openings}
+    assert by_id[target.canonical_opening_id].opening_kind == "door"
+    assert by_id[hinge.canonical_opening_id].opening_kind is None
+    assert by_id[tip.canonical_opening_id].opening_kind is None
 
 
 def test_window_interruption_without_a_leaf_stays_unkinded() -> None:
