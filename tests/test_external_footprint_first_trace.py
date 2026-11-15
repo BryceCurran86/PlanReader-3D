@@ -179,6 +179,12 @@ def test_read_only_original_footprint_first_cli_does_not_mint_quantities(tmp_pat
     assert result["bounded_source"]["source_path_indices_preserved"] is True
     assert result["commercial_quantity_rows"] == 0
     assert result["topology"]["room_quantity_authorized"] is False
+    assert result["topology"]["source_gap_witness_count"] >= 0
+    assert len(result["topology"]["source_gap_witnesses_sample"]) <= 64
+    assert all(w["can_issue_area"] is False and
+               w["source_path_side_partition_proven"] is False
+               for w in result["topology"]["source_gap_witnesses_sample"])
+    assert "magenta" in result["overlay"]["legend"]
     assert json_path.exists() and json_path.stat().st_size > 200
     assert png_path.exists() and png_path.stat().st_size > 200
     assert result["exterior"]["source_sha256"] == hashlib.sha256(pdf.read_bytes()).hexdigest()

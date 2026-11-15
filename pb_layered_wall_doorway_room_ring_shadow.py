@@ -369,6 +369,10 @@ class LayeredRoomRingResult:
     # openings, hosted frames or customer wall geometry.
     source_segmented_swing_witnesses: tuple[Mapping[str, Any], ...] = ()
     source_owned_doorway_chords: tuple[Mapping[str, Any], ...] = ()
+    # Candidate-only original-path witnesses for each unclosed collinear wall
+    # interruption. No hosts, closures, lengths, room quantities or FIRM.
+    unresolved_gap_witnesses: tuple[Mapping[str, Any], ...] = ()
+    unresolved_gap_witness_count: int = 0
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -1758,6 +1762,54 @@ def _unresolved_collinear_gap_breaches_outer_ring(part: Polygon, gap: _Gap) -> b
     return outer.distance(first) <= NOISE_PT and outer.distance(last) <= NOISE_PT
 
 
+
+def _source_unresolved_gap_witnesses(
+    unresolved: Sequence[_Gap], *, limit: int = 64,
+) -> tuple[tuple[Mapping[str, Any], ...], int]:
+    """Report exact existing wall-run endpoints; never invent an opening or wall.
+
+    Source native path indices are original page indices, including when the
+    drawing list was bounded by the footprint diagnostic with inert placeholders.
+    The legacy _gaps producer puts touching wall paths in one unsided set.
+    Do not fabricate separate left/right host ownership from that inventory.
+    Sampling is presentation-only: all such gaps stay unclosed, regardless of
+    whether their receipt makes the bounded diagnostic list.
+    """
+    unique: dict[tuple[Any, ...], Mapping[str, Any]] = {}
+    for gap in unresolved:
+        if not gap.collinear or not (gap.left_path_indices or gap.right_path_indices):
+            continue
+        if gap.hi <= gap.lo:
+            continue
+        geometry = (
+            bool(gap.horizontal),
+            round(float(gap.band[0]), 4),
+            round(float(gap.band[1]), 4),
+            round(float(gap.lo), 4),
+            round(float(gap.hi), 4),
+        )
+        left = tuple(sorted(set(int(i) for i in gap.left_path_indices)))
+        right = tuple(sorted(set(int(i) for i in gap.right_path_indices)))
+        adjacent_paths = tuple(sorted(set(left) | set(right)))
+        key = (*geometry, adjacent_paths)
+        if key in unique:
+            continue
+        unique[key] = {
+            "horizontal": geometry[0],
+            "band_pdf_pts": (geometry[1], geometry[2]),
+            "gap_interval_pdf_pts": (geometry[3], geometry[4]),
+            "adjacent_wall_native_path_indices": adjacent_paths,
+            "source_path_side_partition_proven": False,
+            "topology_only": True,
+            "physical_wall_authenticated": False,
+            "opening_authenticated": False,
+            "can_issue_area": False,
+            "reason_code": "unresolved_source_collinear_wall_gap",
+        }
+    ordered = tuple(unique[key] for key in sorted(unique))
+    return ordered[:limit], len(ordered)
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2046,6 +2098,7 @@ def build_layered_wall_doorway_room_rings(
     rings.sort(key=lambda r: r.record_id)
     closures.sort(key=lambda c: c.closure_id)
     candidate = any(r.status is EvidenceResolutionStatus.CANDIDATE for r in rings)
+    gap_witnesses, gap_witness_count = _source_unresolved_gap_witnesses(unresolved)
     return LayeredRoomRingResult(
         status=EvidenceResolutionStatus.CANDIDATE if candidate else EvidenceResolutionStatus.ABSTAINED,
         reason_codes=(REASON_RING_CLOSED,) if candidate else (REASON_OPEN_EXTERIOR,),
@@ -2055,6 +2108,8 @@ def build_layered_wall_doorway_room_rings(
         sliver_region_count=sliver_count,
         source_segmented_swing_witnesses=segmented_witnesses,
         source_owned_doorway_chords=sourced_doorway_chords,
+        unresolved_gap_witnesses=gap_witnesses,
+        unresolved_gap_witness_count=gap_witness_count,
     )
 
 

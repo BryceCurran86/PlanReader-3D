@@ -61,6 +61,15 @@ def _draw_source_overlay(page, original, trace, scope, ring):
             rect = (fitz.Rect(lo, band0, hi, band1) if closure.horizontal
                     else fitz.Rect(band0, lo, band1, hi))
             page.draw_rect(rect, color=(1., .45, 0.), width=1.0)
+    if ring is not None:
+        # Magenta is an UNRESOLVED original-wall-run interruption, never a
+        # filled closure. Show at most a small deterministic diagnostic sample.
+        for witness in ring.unresolved_gap_witnesses[:24]:
+            lo, hi = witness["gap_interval_pdf_pts"]
+            band0, band1 = witness["band_pdf_pts"]
+            rect = (fitz.Rect(lo, band0, hi, band1) if witness["horizontal"]
+                    else fitz.Rect(band0, lo, band1, hi))
+            page.draw_rect(rect, color=(.7, .0, .65), width=.75)
     if trace.polygon_pdf_pts:
         points = [fitz.Point(x, y) for x, y in trace.polygon_pdf_pts]
         if len(points) >= 3:
@@ -121,6 +130,11 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 ],
                 "candidate_room_rings": len(ring.rings) if ring else 0,
                 "temporary_doorway_closures": len(ring.closures) if ring else 0,
+                "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else 0,
+                "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else 0,
+                "source_gap_witnesses_sample": [
+                    dict(w) for w in ring.unresolved_gap_witnesses
+                ] if ring else [],
                 "commercial_publishable": False,
                 "room_quantity_authorized": False,
             },
@@ -136,6 +150,7 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 "red": "unverified external contour candidate",
                 "blue": "raw dark ink candidate line, not proven internal wall",
                 "orange": "topology-only temporary doorway closure",
+                "magenta": "source-indexed UNRESOLVED gap; never an accepted wall/closure",
             },
             "wall_ink_segments_shown": shown,
             "all_segments_shown": shown < 1600,
