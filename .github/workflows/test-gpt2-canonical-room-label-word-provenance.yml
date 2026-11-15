@@ -10,8 +10,13 @@ on:
       - "tests/test_raster_text_corroboration_authority_v1.py"
       - "tests/test_gpt2_canonical_room_label_lineage.py"
       - ".github/workflows/test-gpt2-canonical-room-label-word-provenance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 concurrency:
-  group: gpt2-canonical-word-${{ github.event.pull_request.number }}
+  group: gpt2-canonical-word-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   focused:
@@ -35,12 +40,21 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
   original-maryborough:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+      - name: Provision SHA-authenticated private original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -51,7 +65,7 @@ jobs:
           set -euo pipefail
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           printf '%s  %s\n' 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007' "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u - <<'PY'
+          PYTHONPATH=. python -u - <<'PY' > "$RUNNER_TEMP/mary-original-private.log" 2>&1
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           source=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
@@ -78,3 +92,6 @@ jobs:
               assert not room.metric_geometry_complete
           print('GPT2_ORIGINAL_CANONICAL_LABELS_PRESERVED',sorted(rooms))
           PY
+      - name: Destroy authenticated private originals and diagnostics
+        if: ${{ always() }}
+        run: rm -rf documents/sources "$RUNNER_TEMP/mary-original-private.log"

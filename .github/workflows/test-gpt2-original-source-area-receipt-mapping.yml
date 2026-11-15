@@ -8,8 +8,13 @@ on:
       - "tests/test_gpt2_source_room_area_result_index.py"
       - ".github/workflows/test-gpt2-original-source-area-receipt-mapping.yml"
       - "docs/engineering/gpt2_original_source_area_mapping.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 concurrency:
-  group: gpt2-source-area-mapping-${{ github.event.pull_request.number }}
+  group: gpt2-source-area-mapping-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   focused:
@@ -34,12 +39,21 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
   original-maryborough:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+      - name: Provision SHA-authenticated private original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -51,7 +65,7 @@ jobs:
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u - <<'PY'
+          PYTHONPATH=. python -u - <<'PY' > "$RUNNER_TEMP/mary-original-private.log" 2>&1
           import json,math
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
@@ -81,3 +95,6 @@ jobs:
                 len(claim.canonical_floors),
                 len(claim.floor_finish_quantity_evidence))
           PY
+      - name: Destroy authenticated private originals and diagnostics
+        if: ${{ always() }}
+        run: rm -rf documents/sources "$RUNNER_TEMP/mary-original-private.log"
