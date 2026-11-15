@@ -176,8 +176,9 @@ def test_corroborated_internal_host_is_not_stamped_external() -> None:
         composition=_composition(replace(opening, figured_single_axis_mm=870.0)),
         whole_wall_role_composition=roles,
     )
-    assert estimated.canonical_openings[0].area_basis != OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
-    assert estimated.canonical_openings[0].area_m2 is None
+    assert all(trace.role is WallRoleClassification.INTERNAL for trace in roles.traces)
+    assert estimated.canonical_openings[0].area_basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert estimated.canonical_openings[0].area_m2 == pytest.approx(870.0 * 2100.0 / 1_000_000.0)
 
 
 def test_zero_opacity_swing_does_not_host_an_opening() -> None:
