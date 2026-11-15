@@ -264,6 +264,104 @@ def test_two_rooms_sharing_a_door_are_two_separate_rings():
     assert boxes == [(2.0, 2.0, 98.0, 98.0), (100.0, 2.0, 198.0, 98.0)]
 
 
+def _notched_vertical_wall(x0, y0, x1, y1, notch_lo, notch_hi, inset=0.6):
+    """8-line U-notch on the +x face: CAD wall with a door/slider pocket, not a rectangle."""
+    pts = [
+        (x0, y1), (x0, y0), (x1, y0), (x1, notch_lo),
+        (x1 - inset, notch_lo), (x1 - inset, notch_hi),
+        (x1, notch_hi), (x1, y1),
+    ]
+    items = [("l", fitz.Point(*pts[i]), fitz.Point(*pts[(i + 1) % 8])) for i in range(8)]
+    return [{"layer": WALL, "fill": (0.0, 0.0, 0.0), "items": items}]
+
+
+def _white_frame(x0, y0, x1, y1):
+    c = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    items = [("l", fitz.Point(*c[i]), fitz.Point(*c[(i + 1) % 4])) for i in range(4)]
+    return [{"layer": WALL, "fill": (1.0, 1.0, 1.0), "items": items}]
+
+
+def test_notched_host_wall_with_swing_splits_two_rooms():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += _notched_vertical_wall(98, 2, 100, 40, 10, 30)
+    rows += _notched_vertical_wall(98, 64, 100, 98, 74, 90)
+    rows += swing((98, 40), (74, 40), (98, 64))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert len(boxes) == 2
+    assert boxes[0][2] <= 100.5 and boxes[1][0] >= 97.5
+    assert KIND_SWING in {c.kind for c in result.closures}
+
+
+def test_corner_hinged_swing_splits_two_rooms():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(98, 40, 100, 98)
+    rows += swing((98, 2.4), (60.4, 2.4), (98, 40.0))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert len(boxes) == 2
+    assert KIND_SWING in {c.kind for c in result.closures}
+
+
+def test_notched_host_wall_without_door_evidence_does_not_invent_a_partition():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += _notched_vertical_wall(98, 2, 100, 40, 10, 30)
+    rows += _notched_vertical_wall(98, 64, 100, 98, 74, 90)
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert len(candidates(result)) == 1
+    assert result.closures == ()
+
+
+def test_white_frames_at_both_ends_of_an_opening_split_two_rooms():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(98, 2, 100, 40) + strip(98, 64, 100, 98)
+    rows += _white_frame(98, 39.2, 100, 40.0) + _white_frame(98, 64.0, 100, 64.8)
+    # CAD often draws both faces of one jamb as two white boxes.
+    rows += _white_frame(98.2, 39.2, 99.8, 40.0)
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert len(boxes) == 2
+    assert KIND_STROKE in {c.kind for c in result.closures}
+
+
+def test_mixed_width_jambs_on_a_notched_wall_split_two_rooms():
+    """Cavity slider: full-thickness jamb at one end, two face-caps at the other.
+
+    The host is a notched fill, so run-gaps never see the opening. A long white
+    infill in the opening is glazing, not a third jamb.
+    """
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += _notched_vertical_wall(98, 2, 100, 40, 10, 30)
+    rows += _notched_vertical_wall(98, 64, 100, 98, 74, 90)
+    rows += _white_frame(98, 39.2, 100, 40.0)
+    rows += _white_frame(98, 64.0, 98.7, 64.8)
+    rows += _white_frame(99.3, 64.0, 100, 64.8)
+    rows += _white_frame(98.2, 44.0, 98.8, 60.0)
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert len(boxes) == 2
+    assert boxes[0][2] <= 100.5 and boxes[1][0] >= 97.5
+    assert KIND_STROKE in {c.kind for c in result.closures}
+    off = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert len(candidates(off)) == 1
+
+
+def test_long_white_infill_alone_does_not_invent_a_jamb_opening():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += _notched_vertical_wall(98, 2, 100, 40, 10, 30)
+    rows += _notched_vertical_wall(98, 64, 100, 98, 74, 90)
+    rows += _white_frame(98.2, 44.0, 98.8, 60.0)
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert len(candidates(result)) == 1
+    assert result.closures == ()
+
+
 def test_deterministic_replay_and_stable_ids():
     first = build_layered_wall_doorway_room_rings(room(window=True), source_sha256=SHA, page_index=3)
     second = build_layered_wall_doorway_room_rings(room(window=True), source_sha256=SHA, page_index=3)
@@ -529,3 +627,68 @@ def test_frame_anchored_opening_abstains_for_thin_end_ink_a_continuing_wall_and_
     assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(thin).closures}
     assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(side_wall=True)).closures}
     assert KIND_SLIDING_LEAF not in {c.kind for c in sliding(real_like_robe_room(frame_fill=(0.5, 0.5, 0.5))).closures}
+
+
+def _cavity_wall_two_rooms():
+    """Two rooms sharing a cavity wall: lining caps, face strokes, a core that does not back the lining.
+
+    The 0.4 pt cavity beside each lining leaves both sides of the lining band free, so a face
+    stroke would otherwise be stored as a doorway chord of the whole room.
+    """
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(99.5, 2, 100.5, 98)
+    rows += strip(98, 2, 99.1, 12) + strip(98, 88, 99.1, 98)
+    rows += strip(100.9, 2, 102, 12) + strip(100.9, 88, 102, 98)
+    rows.append(line((98, 12), (98, 88)))
+    rows.append(line((102, 12), (102, 88)))
+    return rows
+
+
+def test_lining_face_stroke_is_a_wall_not_a_doorway():
+    result = build_layered_wall_doorway_room_rings(_cavity_wall_two_rooms(), source_sha256=SHA, page_index=0)
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert boxes == [(2.0, 2.0, 98.0, 98.0), (102.0, 2.0, 198.0, 98.0)]
+    assert all(c.kind != KIND_STROKE or (c.gap_interval[1] - c.gap_interval[0]) < 50.0 for c in result.closures)
+    for ring in candidates(result):
+        shared = []
+        pts = ring.polygon_pdf_pts
+        for index, start in enumerate(pts):
+            end = pts[(index + 1) % len(pts)]
+            if abs(start[0] - end[0]) > 0.05:
+                continue
+            if abs(start[0] - 98.0) <= 0.05 or abs(start[0] - 102.0) <= 0.05:
+                shared.append(ring.edge_owner_ids[index])
+        assert shared
+        assert all(
+            not any(str(owner).startswith("layered_doorway_closure:") for owner in owners)
+            for owners in shared
+        )
+
+
+def test_window_stroke_on_a_host_wall_still_closes_as_a_doorway():
+    result = build_layered_wall_doorway_room_rings(room(door=False, window=True), source_sha256=SHA, page_index=0)
+    assert [c.kind for c in result.closures] == [KIND_STROKE]
+    assert len(candidates(result)) == 1
+
+
+def test_swing_picks_the_host_wall_gap_not_a_lining_sliver():
+    rows = strip(0, 0, 100, 2) + strip(0, 98, 100, 100) + strip(0, 2, 2, 98)
+    rows += strip(98, 2, 100, 40) + strip(98, 64, 100, 98)
+    rows += strip(97.72, 2, 98.0, 30) + strip(97.72, 70, 98.0, 98)
+    rows += swing((98, 40), (74, 40), (98, 64))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert result.ambiguous_swing_count == 0
+    assert KIND_SWING in {c.kind for c in result.closures}
+    swing_closures = [c for c in result.closures if c.kind == KIND_SWING]
+    assert len(swing_closures) == 1
+    assert abs((swing_closures[0].band[1] - swing_closures[0].band[0]) - 2.0) < 0.1
+
+
+def test_swing_through_a_thick_open_pier_closes_the_opening():
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(90, 2, 106, 30) + strip(90, 64, 106, 98)
+    rows += swing((98, 30), (64, 30), (98, 64))
+    result = build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0)
+    assert KIND_SWING in {c.kind for c in result.closures}
+    boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
+    assert len(boxes) == 2
