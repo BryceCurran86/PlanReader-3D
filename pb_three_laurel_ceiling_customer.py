@@ -194,9 +194,9 @@ def _parse_schedule_table(p3: fitz.Page) -> dict[str, Decimal]:
 def _is_authentic_cad_page(
     page,
     *,
-    min_drawings: int = 1000,
-    min_orthogonal: int = 50,
-    min_long_lines: int = 50,
+    min_drawings: int = 50,
+    min_orthogonal: int = 10,
+    min_long_lines: int = 10,
     min_words: int = 20,
     min_spread_x: float = 300.0,
     min_spread_y: float = 200.0,
@@ -210,10 +210,17 @@ def _is_authentic_cad_page(
         v_lines = 0
         long_lines = 0
         valid_drawing_count = 0
+        fills = 0
+        c_curves = 0
+        thick_strokes = 0
 
         for d in drawings:
             if not isinstance(d, dict):
                 continue
+            if d.get("fill") is not None:
+                fills += 1
+            if d.get("width") and d["width"] > 0.4:
+                thick_strokes += 1
             items = d.get("items")
             if not isinstance(items, (list, tuple)) or not items:
                 continue
@@ -226,7 +233,9 @@ def _is_authentic_cad_page(
                 if any(isinstance(coord, str) for coord in it[1:]):
                     items_valid = False
                     break
-                if it[0] == "l" and len(it) >= 3:
+                if it[0] == "c":
+                    c_curves += 1
+                elif it[0] == "l" and len(it) >= 3:
                     p1, p2 = it[1], it[2]
                     try:
                         x1, y1 = float(p1[0]), float(p1[1])
@@ -249,6 +258,10 @@ def _is_authentic_cad_page(
         if valid_drawing_count < min_drawings:
             return False
         if h_lines < min_orthogonal or v_lines < min_orthogonal or long_lines < min_long_lines:
+            return False
+        # Authentic CAD architectural pages require structural features:
+        # door swing curves, filled wall cavities/hatches, or diverse line weights.
+        if fills == 0 and c_curves == 0 and thick_strokes == 0:
             return False
     except Exception:
         return False
@@ -280,6 +293,56 @@ def _is_authentic_cad_page(
         return False
 
     return True
+
+
+def _is_room_enclosed_by_walls(page, label: str) -> bool:
+    """Verify that the room label is physically enclosed by orthogonal wall lines."""
+    words = page.get_text("words") or []
+    tokens = label.split()
+    label_rect = None
+    for i in range(len(words) - len(tokens) + 1):
+        if all(tokens[k].upper() == words[i + k][4].upper() for k in range(len(tokens))):
+            x0 = min(words[i + k][0] for k in range(len(tokens)))
+            y0 = min(words[i + k][1] for k in range(len(tokens)))
+            x1 = max(words[i + k][2] for k in range(len(tokens)))
+            y1 = max(words[i + k][3] for k in range(len(tokens)))
+            label_rect = fitz.Rect(x0, y0, x1, y1)
+            break
+    if label_rect is None:
+        return False
+
+    cx = (label_rect.x0 + label_rect.x1) / 2.0
+    cy = (label_rect.y0 + label_rect.y1) / 2.0
+    drawings = page.get_drawings() or []
+    h_above = False
+    h_below = False
+    v_left = False
+    v_right = False
+    for d in drawings:
+        for it in d.get("items", ()):
+            if it[0] == "l" and len(it) >= 3:
+                try:
+                    x1, y1 = float(it[1][0]), float(it[1][1])
+                    x2, y2 = float(it[2][0]), float(it[2][1])
+                except (TypeError, ValueError, IndexError, AttributeError):
+                    continue
+                dx = abs(x2 - x1)
+                dy = abs(y2 - y1)
+                if (dx * dx + dy * dy) ** 0.5 < 8.0:
+                    continue
+                mid_x = (x1 + x2) / 2.0
+                mid_y = (y1 + y2) / 2.0
+                if dy <= 1.0 and abs(mid_x - cx) < 300:
+                    if cy - 300 < mid_y < cy:
+                        h_above = True
+                    elif cy < mid_y < cy + 300:
+                        h_below = True
+                if dx <= 1.0 and abs(mid_y - cy) < 300:
+                    if cx - 300 < mid_x < cx:
+                        v_left = True
+                    elif cx < mid_x < cx + 300:
+                        v_right = True
+    return bool(h_above and h_below and v_left and v_right)
 
 
 def issue_original_three_laurel_ceiling_customer_quantities(
@@ -327,6 +390,8 @@ def issue_original_three_laurel_ceiling_customer_quantities(
 
             p3_text = document[2].get_text("text") or ""
             if "FLOOR PLAN" not in p3_text.upper():
+                return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
+            if not _is_room_enclosed_by_walls(document[2], "LIVING") or not _is_room_enclosed_by_walls(document[2], "GARAGE"):
                 return _blocked(THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE)
 
             p7_text = document[6].get_text("text") or ""
