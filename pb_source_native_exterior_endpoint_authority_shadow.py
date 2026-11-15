@@ -32,6 +32,7 @@ REASON_UNWITNESSED_GAP = "unwitnessed_collinear_span_not_a_door"
 REASON_MISSING_NATIVE_PATH_OWNER = "native_source_path_owner_missing"
 REASON_INVALID_SEPARATION = "negative_or_nonfinite_separation_not_contact"
 REASON_FOREIGN_VIEW = "foreign_view_path_index_collision"
+REASON_SELF_PATH_COLLISION = "native_path_owners_not_disjoint"
 
 ROLE_EXTERIOR_OUTER_FACE = "exterior_outer_face_candidate"
 ROLE_INTERNAL_WALL = "internal_wall_candidate"
@@ -186,6 +187,14 @@ def authenticate_external_wall_junction(
     right_rows = _rows_for_paths(drawings, nearby_native_path_ids)
     if left_rows is None or right_rows is None:
         return EvidenceResolutionStatus.ABSTAINED, REASON_MISSING_NATIVE_PATH_OWNER
+    left_ids = tuple(native_path_ids)
+    right_ids = tuple(nearby_native_path_ids)
+    if (
+        len(left_ids) != len(set(left_ids))
+        or len(right_ids) != len(set(right_ids))
+        or not set(left_ids).isdisjoint(set(right_ids))
+    ):
+        return EvidenceResolutionStatus.ABSTAINED, REASON_SELF_PATH_COLLISION
     left_layers = tuple(str(row.get("layer") or "") for row in left_rows)
     right_layers = tuple(str(row.get("layer") or "") for row in right_rows)
     if any(_competing_non_wall_layer(layer) for layer in (*left_layers, *right_layers)):
@@ -252,6 +261,7 @@ def audit_source_native_exterior_endpoints(
             REASON_MISSING_NATIVE_PATH_OWNER,
             REASON_INVALID_SEPARATION,
             REASON_FOREIGN_VIEW,
+            REASON_SELF_PATH_COLLISION,
         )
     )
     role_counts: dict[str, int] = {}

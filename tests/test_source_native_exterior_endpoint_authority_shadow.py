@@ -15,6 +15,7 @@ from pb_source_native_exterior_endpoint_authority_shadow import (
     REASON_MISSING_NATIVE_PATH_OWNER,
     REASON_NEAR_MISS,
     REASON_OPENING_TOPOLOGY,
+    REASON_SELF_PATH_COLLISION,
     ROLE_DIAGONAL_BRIDGE,
     ROLE_EXCLUSION,
     ROLE_EXTERIOR_OUTER_FACE,
@@ -208,6 +209,42 @@ def test_foreign_view_path_index_collision_stays_unjoined():
     )
     assert same_view_status is EvidenceResolutionStatus.CANDIDATE
     assert same_view_reason == REASON_CONTACT_CANDIDATE
+
+
+def test_identical_native_path_cannot_witness_a_cross_path_junction():
+    valid = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+    status, reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(0,),
+        separation_pdf_pts=0.0, drawings=(valid,),
+    )
+    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert reason == REASON_SELF_PATH_COLLISION
+
+
+def test_partial_path_id_overlap_is_not_a_candidate_join():
+    drawings = (
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)},
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)},
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)},
+    )
+    overlap_status, overlap_reason = authenticate_external_wall_junction(
+        native_path_ids=(0, 1), nearby_native_path_ids=(1, 2),
+        separation_pdf_pts=0.0, drawings=drawings,
+    )
+    assert overlap_status is EvidenceResolutionStatus.ABSTAINED
+    assert overlap_reason == REASON_SELF_PATH_COLLISION
+    duplicate_status, duplicate_reason = authenticate_external_wall_junction(
+        native_path_ids=(0, 0), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert duplicate_status is EvidenceResolutionStatus.ABSTAINED
+    assert duplicate_reason == REASON_SELF_PATH_COLLISION
+    disjoint_status, disjoint_reason = authenticate_external_wall_junction(
+        native_path_ids=(0,), nearby_native_path_ids=(1,),
+        separation_pdf_pts=0.02, drawings=drawings,
+    )
+    assert disjoint_status is EvidenceResolutionStatus.CANDIDATE
+    assert disjoint_reason == REASON_CONTACT_CANDIDATE
 
 
 def test_graph_near_miss_receipts_never_apply_commercial_snap_join():
