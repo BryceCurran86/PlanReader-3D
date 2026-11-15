@@ -849,12 +849,9 @@ def compose_live_canonical_rooms(
         raise ValueError("layered_finished_face_gate needs layered_doorway_room_rings")
     if type(layered_dark_painted_wall_source) is not bool:
         raise ValueError("layered_dark_painted_wall_source must be an explicit boolean")
-    if layered_dark_painted_wall_source and not (
-        layered_doorway_room_rings and layered_finished_face_gate
-    ):
+    if layered_dark_painted_wall_source and not layered_doorway_room_rings:
         raise ValueError(
             "layered_dark_painted_wall_source requires layered_doorway_room_rings"
-            " and layered_finished_face_gate"
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered_wall_end_stroke_closures must be an explicit boolean")

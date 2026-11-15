@@ -481,12 +481,9 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face statement pages need the finished face gate")
     if type(layered_dark_painted_wall_source) is not bool:
         raise ValueError("layered dark painted wall source must be an explicit boolean")
-    if layered_dark_painted_wall_source and not (
-        layered_doorway_room_rings and layered_finished_face_gate
-    ):
+    if layered_dark_painted_wall_source and not layered_doorway_room_rings:
         raise ValueError(
             "layered dark painted wall source needs layered doorway room rings"
-            " and the finished face gate"
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered wall end stroke closures must be an explicit boolean")
@@ -1596,12 +1593,9 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("layered finished face statement pages need the finished face gate")
     if type(layered_dark_painted_wall_source) is not bool:
         raise ValueError("layered dark painted wall source must be an explicit boolean")
-    if layered_dark_painted_wall_source and not (
-        layered_doorway_room_rings and layered_finished_face_gate
-    ):
+    if layered_dark_painted_wall_source and not layered_doorway_room_rings:
         raise ValueError(
             "layered dark painted wall source needs layered doorway room rings"
-            " and the finished face gate"
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered wall end stroke closures must be an explicit boolean")

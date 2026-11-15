@@ -112,9 +112,6 @@ def test_collector_and_compose_need_explicit_bools_and_parent_gates():
     for call in (collect_live_physical_net_wall_claim, _collect_live_physical_net_wall_claim):
         with pytest.raises(ValueError, match="dark painted"):
             call("does-not-exist.pdf", layered_dark_painted_wall_source=True)
-        with pytest.raises(ValueError, match="dark painted"):
-            call("does-not-exist.pdf", layered_doorway_room_rings=True,
-                 layered_dark_painted_wall_source=True)
         with pytest.raises(ValueError, match="explicit boolean"):
             call("does-not-exist.pdf", layered_doorway_room_rings=True,
                  layered_finished_face_gate=True, layered_dark_painted_wall_source="yes")  # type: ignore[arg-type]
@@ -197,6 +194,23 @@ def test_unnamed_dark_fills_close_a_room_only_when_the_collector_opts_in(tmp_pat
     # finished-face gate still withholds area: dark paint is not lining identity
     assert on.room_area_quantity_evidence == ()
     assert publish_live_floor_area_quantities(on) == ()
+
+
+def test_dark_fills_issue_the_unique_figured_pair_when_finished_face_gate_is_off(tmp_path):
+    path = _write(tmp_path, _dark_closed_room_pdf())
+    claim = collect_live_physical_net_wall_claim(
+        path,
+        pages=(0,),
+        topology_pages=(0,),
+        surface_semantic_pages=(0,),
+        layered_doorway_room_rings=True,
+        layered_dark_painted_wall_source=True,
+    )
+    assert len(claim.room_area_quantity_evidence) == 1
+    quantity = claim.room_area_quantity_evidence[0]
+    assert quantity.value == pytest.approx(8.64)
+    assert not quantity.abstained
+    assert publish_live_floor_area_quantities(claim)
 
 
 def test_wall_end_stroke_reaches_the_claim_only_with_both_flags(tmp_path):

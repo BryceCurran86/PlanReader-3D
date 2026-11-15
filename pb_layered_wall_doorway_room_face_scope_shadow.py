@@ -1366,8 +1366,6 @@ def layered_ring_scope_overrides(
         raise ValueError("finished_face_gate must be an explicit boolean")
     if type(dark_painted_wall_source) is not bool:
         raise ValueError("dark_painted_wall_source must be an explicit boolean")
-    if dark_painted_wall_source and not finished_face_gate:
-        raise ValueError("dark_painted_wall_source requires finished_face_gate")
     if type(wall_end_stroke_closures) is not bool:
         raise ValueError("wall_end_stroke_closures must be an explicit boolean")
     if wall_end_stroke_closures and not dark_painted_wall_source:
