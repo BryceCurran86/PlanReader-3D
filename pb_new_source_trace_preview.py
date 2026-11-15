@@ -252,6 +252,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 color=(0.74, 0.05, 0.56), fill=(0.95, 0.31, 0.72),
                 fill_opacity=0.20, width=2.2,
             )
+        # Indigo denotes native ASD/SGD SLIDING doors: verified jamb
+        # caps + track path receipts, never billable wall/door quantities.
+        for bridge in outer_wall.sliding_door_footprint_bridges:
+            canvas.draw_rect(
+                fitz.Rect(*bridge.bounds_pdf_pts),
+                color=(0.30, 0.23, 0.87), fill=(0.48, 0.43, 0.99),
+                fill_opacity=0.19, width=2.2,
+            )
         # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
         # applied to native geometry and never counted as physical walls.
         for ax,ay,bx,by,distance in (
@@ -311,6 +319,11 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             "source_window_footprint_continuity_count": len(outer_wall.window_footprint_bridges),
             "source_garage_door_footprint_continuity_count": len(outer_wall.garage_door_footprint_bridges),
             "source_swing_door_footprint_continuity_count": len(outer_wall.swing_door_footprint_bridges),
+            "source_sliding_door_footprint_continuity_count": len(outer_wall.sliding_door_footprint_bridges),
+            "source_sliding_door_footprint_continuity": [
+                bridge.to_dict() for bridge in outer_wall.sliding_door_footprint_bridges
+            ],
+            "source_sliding_door_continuity_billing_authorized": False,
             "source_swing_door_footprint_continuity": [
                 bridge.to_dict() for bridge in outer_wall.swing_door_footprint_bridges
             ],
