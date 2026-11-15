@@ -1,0 +1,298 @@
+name: Trusted original Maryborough legacy replay (manual, owner-only)
+
+# Explicitly separate privilege boundary. No PR/push/pull_request_target triggers,
+# and no untrusted ref is checked out. Original PDFs remain ephemeral.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Verify a source role, or all four original proof paths
+        required: true
+        type: choice
+        default: all
+        options: [all, q01, area, label, raster]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-mary-legacy-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  original_q01:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' && (inputs.target == 'all' || inputs.target == 'q01') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen evaluator and source-provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Public PR source-owner contract regression (NO original source claim)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_cross_view_room_area_authority_v1.py tests/test_same_view_room_area_authority_v1.py
+          echo "PR-only source-neutral contracts passed; authentic original retention NOT run here."
+      - name: Provision original sources on trusted owner-triggered main only
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - name: Install original-source OCR on trusted owner-triggered main only
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Authenticate original Maryborough three FIRM measurements
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          test -f "$PDF"
+          mkdir -p "$RUNNER_TEMP/q01-original"
+          # Original geometry/room reports remain ephemeral and are never uploaded.
+          PYTHONPATH=. python -u tools/diag_gpt2_room_measurement_gates.py \
+            --pdf "$PDF" \
+            --expected-sha256 "$SHA" \
+            --pages 6 --topology-pages 6 --support-pages 10 \
+            --output "$RUNNER_TEMP/q01-original/original-source.json" \
+            > "$RUNNER_TEMP/q01-original/private-console.log" 2>&1 || {
+              echo "::error::Private original source run failed (details withheld)."
+              exit 1
+            }
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])/"q01-original"
+          report=json.loads((root/"original-source.json").read_text())
+          expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert report["source_sha256"]==expected_sha
+          rooms=report["rooms"]
+          verified={"FOOD PREP":13.270425,"OFFICE":9.05352,"COLD ROOM":25.37875}
+          for name,area in verified.items():
+              matches=[r for r in rooms if r["room_label"]==name]
+              assert len(matches)==1,(name,len(matches))
+              row=matches[0]
+              assert row["firm_documented_area_receipt"]
+              assert row["metric_area_m2"]==area,(name,row["metric_area_m2"])
+              assert row["floor_area_reissued_quantity_id"]
+              assert row["canonical_room_area_reissued_quantity_id"]
+          for name in ("FREEZER","SALES","AIRLOCK","PWD","LAUNDRY"):
+              matches=[r for r in rooms if r["room_label"]==name]
+              if len(matches)==1:
+                  assert matches[0]["metric_area_m2"] is None,(name,matches[0])
+          assert report["reissued_floor_area_quantity_count"]==3
+          assert report["reissued_canonical_room_area_quantity_count"]==3
+          print("Source-authenticated original Maryborough three-area retention passed.")
+          PY
+      - name: Destroy original PDF files and private source diagnostics
+        if: ${{ always() }}
+        run: |
+          rm -rf documents/sources "$RUNNER_TEMP/q01-original"
+  original_area:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' && (inputs.target == 'all' || inputs.target == 'area') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Provision SHA-authenticated private original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Preserve original source PDF bytes and three existing firm source area receipts
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY' > "$RUNNER_TEMP/mary-original-private.log" 2>&1
+          import json,math
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          sha='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          claim=collect_live_physical_net_wall_claim(
+              Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'),
+              pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          expected={
+             'qty_be2a3b3108220d48f6f5':13.270425,
+             'qty_9795d69439e85c35b01c':25.37875,
+             'qty_29e71bd466a9e5fa1783':9.05352,
+          }
+          found={q.quantity_id:q for q in claim.room_area_quantity_evidence}
+          for ident,value in expected.items():
+              assert ident in found,ident
+              q=found[ident]
+              assert not q.abstained and str(q.status).lower()=='firm'
+              assert q.value is not None and math.isclose(q.value,value,abs_tol=1e-8)
+              assert q.metadata.get('source_sha256')==sha
+              assert q.evidence_ids and q.input_entity_ids
+          print('GPT2_ORIGINAL_SHA_AREA_RECEIPTS',
+                json.dumps({k:found[k].value for k in expected},sort_keys=True))
+          print('GPT2_ORIGINAL_ROOM_COUNTS',len(claim.canonical_rooms),
+                len(claim.canonical_floors),
+                len(claim.floor_finish_quantity_evidence))
+          PY
+      - name: Destroy authenticated private originals and diagnostics
+        if: ${{ always() }}
+        run: rm -rf documents/sources "$RUNNER_TEMP/mary-original-private.log"
+  original_label:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' && (inputs.target == 'all' || inputs.target == 'label') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Provision SHA-authenticated private original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: SHA-verified original physical room and native word positive controls
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          printf '%s  %s\n' 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007' "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY' > "$RUNNER_TEMP/mary-original-private.log" 2>&1
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          source=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
+          result=collect_live_physical_net_wall_claim(
+              source,pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          exact={
+              'FOOD PREP': 'source_room_face_record_a163b3690c0b2db83f89fcf7465bd831',
+              'COLD ROOM': 'source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129',
+              'OFFICE': 'source_room_face_record_735f9b309cca70f513c9fcd9390e3e10',
+              'FREEZER': 'source_room_face_record_e6faa5d761bcc11de70f4d3a21e94571',
+              'PWD': 'source_room_face_record_6722d55c0ce8c8a8706cdcc6094860f9',
+              'AIRLOCK': 'source_room_face_record_a0f786d8997e532c332b1a1c28980d14',
+              'LAUNDRY': 'source_room_face_record_dde9e143bdd9627f96b7d5aaaea51f7f',
+          }
+          rooms={r.room_label:r for r in result.canonical_rooms if r.room_label}
+          for name,face in exact.items():
+              assert name in rooms,(name,sorted(rooms))
+              room=rooms[name]
+              assert room.source_room_face_record_id==face,(name,room.source_room_face_record_id)
+              assert room.room_label_binding_record_id
+              assert room.room_label_evidence_ids
+              assert room.source_sha256=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+              assert not room.metric_geometry_complete
+          print('GPT2_ORIGINAL_CANONICAL_LABELS_PRESERVED',sorted(rooms))
+          PY
+      - name: Destroy authenticated private originals and diagnostics
+        if: ${{ always() }}
+        run: rm -rf documents/sources "$RUNNER_TEMP/mary-original-private.log"
+  original_raster:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' && (inputs.target == 'all' || inputs.target == 'raster') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Provision SHA-authenticated private original on trusted main only
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: SHA-verified original source exact face/label lineage (not material quantities)
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY' > "$RUNNER_TEMP/mary-original-private.log" 2>&1
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          source=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
+          result=collect_live_physical_net_wall_claim(
+              source,pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          expected={
+              'AIRLOCK': 'source_room_face_record_a0f786d8997e532c332b1a1c28980d14',
+              'COLD ROOM': 'source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129',
+              'FOOD PREP': 'source_room_face_record_a163b3690c0b2db83f89fcf7465bd831',
+              'FREEZER': 'source_room_face_record_e6faa5d761bcc11de70f4d3a21e94571',
+              'LAUNDRY': 'source_room_face_record_dde9e143bdd9627f96b7d5aaaea51f7f',
+              'OFFICE': 'source_room_face_record_735f9b309cca70f513c9fcd9390e3e10',
+              'PWD': 'source_room_face_record_6722d55c0ce8c8a8706cdcc6094860f9',
+              'SALES': 'source_room_face_record_42bef3e350b3cc042f17107fe610f0d8',
+          }
+          rooms={r.room_label:r for r in result.canonical_rooms if r.room_label}
+          diagnostic={
+              'original_source_sha256':'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007',
+              'source_owned_expected_faces':expected,
+              'canonical_source_label_faces':{
+                  name:room.source_room_face_record_id
+                  for name,room in sorted(rooms.items())
+              },
+              'canonical_unlabelled_sales_face_count':sum(
+                  r.source_room_face_record_id==expected['SALES'] and not r.room_label
+                  for r in result.canonical_rooms
+              ),
+              'metric_area_or_finish_published_by_this_test':False,
+              'benchmark_accuracy':None,
+          }
+          Path('gpt2-original-raster-line-canonical-sales-proof.json').write_text(
+              json.dumps(diagnostic,sort_keys=True,indent=2)+'\n'
+          )
+          print('GPT2_ORIGINAL_RASTER_LINE_CANONICAL',json.dumps(diagnostic,sort_keys=True))
+          assert len({r.source_room_face_record_id for r in result.canonical_rooms}) == len(result.canonical_rooms)
+          for name,face_receipt in expected.items():
+              assert name in rooms,(name,sorted(rooms),diagnostic)
+              room=rooms[name]
+              assert room.source_room_face_record_id==face_receipt,(name,diagnostic)
+              assert room.room_label_binding_record_id and room.room_label_evidence_ids
+              assert room.source_sha256==diagnostic['original_source_sha256']
+              assert room.metric_geometry_complete is False
+          PY
+      - name: Destroy authenticated private originals and diagnostics
+        if: ${{ always() }}
+        run: rm -rf documents/sources "$RUNNER_TEMP/mary-original-private.log"

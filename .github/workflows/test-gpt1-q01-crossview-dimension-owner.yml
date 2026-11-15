@@ -1,34 +1,26 @@
 name: GPT1 Q01 CrossView Dimension Owner Source
-
-# PRs never receive private original-source credentials or bytes.
-# The existing owner-only provisioner is used exclusively on trusted main
-# during a manual run. The public PR job validates producer/authority contracts
-# but does not claim a fresh original-source acceptance.
+# Public PR contracts only; source-bearing original jobs are in the dedicated
+# owner-only secure-maryborough-original-source-replays.yml workflow.
 on:
   pull_request:
     paths:
       - pb_cross_view_room_area_authority.py
       - tests/test_cross_view_room_area_authority_v1.py
       - .github/workflows/test-gpt1-q01-crossview-dimension-owner.yml
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   maryborough-original-source-quantity-retention:
-    if: >-
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/main' &&
-       github.actor == 'BryceCurran86' &&
-       github.triggering_actor == 'BryceCurran86')
+    # Historical required-check name retained. This PR check NEVER claims
+    # the separate genuine original source replay has been executed.
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -36,72 +28,9 @@ jobs:
           cache: pip
       - name: Install pinned dependencies
         run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Frozen evaluator and source-provider isolation
-        run: |
-          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
-      - name: Public PR source-owner contract regression (NO original source claim)
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Public source-owner contracts (NO original-PDF validation)
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_cross_view_room_area_authority_v1.py tests/test_same_view_room_area_authority_v1.py
-          echo "PR-only source-neutral contracts passed; authentic original retention NOT run here."
-      - name: Provision original sources on trusted owner-triggered main only
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
-        uses: ./.github/actions/provision-original-sources
-        with:
-          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
-          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
-          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
-          names: |
-            Arch_Combined_Maryborough_Service_Station.pdf
-      - name: Install original-source OCR on trusted owner-triggered main only
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
-      - name: Authenticate original Maryborough three FIRM measurements
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
-        run: |
-          set -euo pipefail
-          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
-          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          test -f "$PDF"
-          mkdir -p "$RUNNER_TEMP/q01-original"
-          # Original geometry/room reports remain ephemeral and are never uploaded.
-          PYTHONPATH=. python -u tools/diag_gpt2_room_measurement_gates.py \
-            --pdf "$PDF" \
-            --expected-sha256 "$SHA" \
-            --pages 6 --topology-pages 6 --support-pages 10 \
-            --output "$RUNNER_TEMP/q01-original/original-source.json" \
-            > "$RUNNER_TEMP/q01-original/private-console.log" 2>&1 || {
-              echo "::error::Private original source run failed (details withheld)."
-              exit 1
-            }
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          root=Path(os.environ["RUNNER_TEMP"])/"q01-original"
-          report=json.loads((root/"original-source.json").read_text())
-          expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-          assert report["source_sha256"]==expected_sha
-          rooms=report["rooms"]
-          verified={"FOOD PREP":13.270425,"OFFICE":9.05352,"COLD ROOM":25.37875}
-          for name,area in verified.items():
-              matches=[r for r in rooms if r["room_label"]==name]
-              assert len(matches)==1,(name,len(matches))
-              row=matches[0]
-              assert row["firm_documented_area_receipt"]
-              assert row["metric_area_m2"]==area,(name,row["metric_area_m2"])
-              assert row["floor_area_reissued_quantity_id"]
-              assert row["canonical_room_area_reissued_quantity_id"]
-          for name in ("FREEZER","SALES","AIRLOCK","PWD","LAUNDRY"):
-              matches=[r for r in rooms if r["room_label"]==name]
-              if len(matches)==1:
-                  assert matches[0]["metric_area_m2"] is None,(name,matches[0])
-          assert report["reissued_floor_area_quantity_count"]==3
-          assert report["reissued_canonical_room_area_quantity_count"]==3
-          print("Source-authenticated original Maryborough three-area retention passed.")
-          PY
-      - name: Destroy original PDF files and private source diagnostics
-        if: ${{ always() }}
-        run: |
-          rm -rf documents/sources "$RUNNER_TEMP/q01-original"
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          echo "Only source-neutral PR contracts ran; authentic private source retention is separate."
