@@ -291,6 +291,19 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 fill_opacity=0.13,
                 width=2.8,
             )
+        # The TRUE outside-facing walk can enclose multiple dwellings while
+        # the internally shared PARTY wall remains purple. Draw blue only
+        # after both source dwelling regions are demonstrably enclosed.
+        outside_walk = outer_wall.source_outside_face_walk
+        if outside_walk is not None and outside_walk.status == "CANDIDATE":
+            polyline = [
+                fitz.Point(float(x), float(y))
+                for x, y in outside_walk.clockwise_pdf_pts
+            ]
+            if len(polyline) >= 5:
+                canvas.draw_polyline(
+                    polyline, color=(0.02, 0.42, 0.97), width=3.0,
+                )
         # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
         # applied to native geometry and never counted as physical walls.
         for ax,ay,bx,by,distance in (
@@ -371,6 +384,10 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 for divider in outer_wall.shared_dwelling_divider_candidates
             ],
             "source_party_wall_bounded_unit_loop_count": outer_wall.diagnostic_party_wall_bounded_unit_loops,
+            "source_unbounded_outside_face_walk": (
+                outer_wall.source_outside_face_walk.to_dict()
+                if outer_wall.source_outside_face_walk is not None else None
+            ),
             "shared_dwelling_building_footprint_authenticated": False,
             "shared_dwelling_party_wall_billing_authorized": False,
             "external_source_path_ids_outside_rejected_loop_sample": list(
