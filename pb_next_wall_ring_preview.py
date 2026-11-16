@@ -936,10 +936,12 @@ def _collect_source_heavy_stroke_strips(
     """Opaque BLACK heavy native line paint as candidate wall bands.
 
     Q5446-class vector drawings can paint real walls as ONE 1.92-pt source
-    stroke, not dark fills and not two separate thin-line faces. The native
-    PDF gives the actual stroke width and original path index. Only
-    axis-aligned, long, source-black, opaque paint becomes a candidate wall
-    band. Never infer missing lines, page hulls, or commercial wall faces.
+    stroke. 3Laurel uses many native 0.71-pt strokes on explicitly named
+    Enclosure_WallInternal / Enclosure_WallExternal layers: those are heavier
+    than its 0.37-0.43-pt annotation / floor paint but were lost behind
+    the generic 1.2-pt threshold. Require the original WALL layer for the
+    lower width class; never promote other thin art, hatch lines, page
+    hulls or any stroke to a commercial physical wall.
     """
     result: list[_Strip] = []
     seen: set[tuple[int, float, float, float, float]] = set()
@@ -952,7 +954,17 @@ def _collect_source_heavy_stroke_strips(
         if type(opacity) not in (int, float) or opacity < .95:
             continue
         width = row.get("width", 0)
-        if type(width) not in (int, float) or not math.isfinite(width) or not (1.2 <= width <= 6.0):
+        native_layer = str(row.get("layer") or "")
+        # 3Laurel's genuine CAD wall-face strokes are 0.71 PDF pt, whereas
+        # floor finish and annotation lines are generally 0.37-0.43 PDF pt.
+        # The lower width is safe only in the actual SOURCE wall family.
+        # Keep the existing 1.2-pt gate for all untyped/other drawings.
+        min_width = (
+            0.65
+            if native_layer in ("Enclosure_WallInternal", "Enclosure_WallExternal")
+            else 1.2
+        )
+        if type(width) not in (int, float) or not math.isfinite(width) or not (min_width <= width <= 6.0):
             continue
         half = width / 2.
         for item in row.get("items", ()):
