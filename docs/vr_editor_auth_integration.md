@@ -36,6 +36,18 @@ ownership, return no authenticated scene or mark those objects unresolved:
 **do not attach a hash to them because the files happen to be in the same
 workspace**.
 
+The scene compiler now requires an explicit `VerifiedSourceWitness` for each
+object before it may show `renderState=verified` (and even then the scene
+remains noncommercial). The loader must acquire this witness from an
+independent original-source/canonical lineage authority. Its document ID,
+revision ID, 64-character original SHA, source file ID, page, sheet and
+**original native geometry ref** must match the workspace and object exactly.
+`AuthorizedSceneWorkspace.source_witnesses` defaults to empty, which
+deliberately leaves all objects in REVIEW; a generic `model_masses` row or
+a finish/door schedule definition is not such a witness. Do not manufacture
+one from matching room names, drawing proximity or an unrelated workspace
+document hash.
+
 This is a scoped **read-only** renderer DTO. It never grants billable
 measurement authority, computes a customer quantity or changes geometry.
 
