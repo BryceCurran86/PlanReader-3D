@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
 from pb_editable_3d_correction_model import EditableGeometryObject
-from pb_vr_editor_scene_manifest import EditorWorkspaceScope
+from pb_vr_editor_scene_manifest import EditorWorkspaceScope, VerifiedSourceWitness
 from pb_vr_editor_readonly_wsgi import (
     EditorPrincipal, AuthorizedSceneWorkspace, make_editor_readonly_wsgi_app,
 )
@@ -133,3 +134,37 @@ def test_malformed_workspace_id_and_private_provider_failure_are_masked():
 def test_provider_hooks_required_by_factory():
     with pytest.raises(ValueError, match="requires auth"):
         make_editor_readonly_wsgi_app(None, lambda p, w: None)
+
+
+def test_provider_must_supply_matching_native_source_receipt_for_verified_scene():
+    base = _workspace()
+    wall = replace(
+        base.objects[0], source_file_id="original-file-1",
+        authority_status="firm",
+    )
+    receipt = VerifiedSourceWitness(
+        document_id="document-1", revision_id="revision-1",
+        source_sha256="a" * 64, source_file_id="original-file-1",
+        source_page=3, source_sheet="A101",
+        original_geometry_ref="native:d2i3",
+    )
+    verified = replace(base, objects=[wall], source_witnesses={"wall-1": receipt})
+    app = make_editor_readonly_wsgi_app(
+        lambda env: _principal(),
+        lambda principal, workspace: verified,
+    )
+    status, _, result = _test_call(app)
+    assert status.startswith("200")
+    assert result["objects"][0]["renderState"] == "verified"
+
+    mismatch = replace(verified, source_witnesses={
+        "wall-1": replace(receipt, revision_id="unrelated-revision"),
+    })
+    app = make_editor_readonly_wsgi_app(
+        lambda env: _principal(),
+        lambda principal, workspace: mismatch,
+    )
+    status, _, result = _test_call(app)
+    assert status.startswith("200")
+    assert result["objects"][0]["renderState"] == "review"
+    assert "source_ownership_unverified" in result["objects"][0]["unresolvedIssues"]
