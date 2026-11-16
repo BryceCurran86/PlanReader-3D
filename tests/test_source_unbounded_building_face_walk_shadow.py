@@ -541,3 +541,84 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
         and set(bar.native_path_indices()).isdisjoint(party)
     ]
     assert east, "right-house/garage source bars must remain available"
+
+
+def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
+    # A far native annotation mark can resemble wall paint. Its source
+    # layer disqualifies it as a wall; all real outside paths still survive.
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert result.status == "CANDIDATE"
+    assert result.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+    assert result.other_source_wall_band_count == 0
+    assert result.source_proven_nonwall_band_count == 0  # CANDIDATE keeps no veto metrics
+    assert result.measurement_authorized is False
+
+
+def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    for sources, words in (
+        (rows[:-1], _source_words()),  # missing native path ID
+        ([*rows[:12], {"layer": "", "fill": (0, 0, 0)}], _source_words()),
+        (rows, (*_source_words(), (280, 50, 283, 60, "GARAGE", 0, 0, 0))),
+    ):
+        result = walk_source_unbounded_building_face(
+            bars, words, shared_dividers=(_party(),), source_drawings=sources,
+        )
+        assert result.status == "ABSTAINED"
+        assert result.reason == "source_other_structural_walls_outside_candidate"
+        assert result.other_source_wall_band_count == 1
+        assert result.source_proven_nonwall_band_count == 0
+        assert result.source_outside_band_count_before_role_audit == 1
+        assert result.to_dict()["source_outside_role_audit_noncommercial"] is True
+        assert result.clockwise_pdf_pts == ()
+        assert not result.building_footprint_authenticated
+        assert not result.measurement_authorized
+
+
+def test_outside_composite_conflicting_wall_or_viewport_remains_unresolved():
+    class CompositeBar:
+        def __init__(self):
+            self.polygon = box(280, 20, 283, 90)
+        def native_path_indices(self):
+            return (12, 13)
+    bars = (*_building_bars(), CompositeBar())
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(14)]
+    rows[12] = {"layer": "Annotation_General", "fill": (0, 0, 0), "viewport_id": "floor"}
+    rows[13] = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"}
+    mixed = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert mixed.status == "ABSTAINED"
+    rows[13] = {"layer": "Annotation_General", "fill": (0, 0, 0), "viewport_id": "elevation"}
+    wrong_view = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert wrong_view.status == "ABSTAINED"
+    assert wrong_view.other_source_wall_band_count == 1
+
+
+def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
+    bars = (*_building_bars(),
+            SourceBar(box(280, 20, 283, 90), 12),
+            SourceBar(box(350, 20, 353, 90), 13))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(14)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    rows[13] = {"layer": "", "fill": (0, 0, 0)}
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.source_outside_band_count_before_role_audit == 2
+    assert walk.source_proven_nonwall_band_count == 1
+    assert walk.clockwise_pdf_pts == ()
+    assert walk.outer_wall_native_path_ids == ()
+    assert not walk.measurement_authorized

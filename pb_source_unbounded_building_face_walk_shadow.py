@@ -38,6 +38,10 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Native role audit never manufactures exterior wall evidence.
+    source_outside_band_count_before_role_audit: int = 0
+    source_proven_nonwall_band_count: int = 0
+    source_outside_role_audit_applied: bool = False
     # Shadow trace for review when other source-wall components remain.
     # Never use this ring to issue a customer quantity or report FIRM.
     diagnostic_unsealed_ring_pdf_pts: tuple[tuple[float, float], ...] = ()
@@ -64,6 +68,12 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        if self.source_outside_role_audit_applied:
+            payload["source_outside_band_count_before_role_audit"] = (
+                self.source_outside_band_count_before_role_audit
+            )
+            payload["source_proven_nonwall_band_count"] = self.source_proven_nonwall_band_count
+            payload["source_outside_role_audit_noncommercial"] = True
         # Preserve byte-compatible old receipts when no unsealed preview
         # exists. Only outside-component ABSTAIN adds a diagnostic field.
         if self.diagnostic_unsealed_ring_pdf_pts:
@@ -214,6 +224,7 @@ def walk_source_unbounded_building_face(
     *,
     shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
     source_wall_union: Any | None = None,
+    source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
 ) -> OutsideFacingBuildingWalk:
     """Walk OUTSIDE-facing source wall network; fail closed on unjoined zones.
 
@@ -314,7 +325,55 @@ def walk_source_unbounded_building_face(
     # not the wall-paint polygon (whose holes would falsely eject it).
     # Truly outside structural bodies remain a hard abstention.
     candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
-    extra = sum(1 for geom, _ in owners if not candidate_outer_domain.covers(geom))
+    # Original p3 includes remote black annotation, slab and service paint
+    # which can be collected as wall-shaped geometry. Existing source role
+    # classification independently distinguishes those non-wall natives.
+    # The same physical exterior walker and union remain unchanged; this
+    # check never crops coordinates or creates a missing wall.
+    outside = [
+        (bar, owned) for bar in wall_bars
+        if (owned := _owner(bar)) is not None
+        and not candidate_outer_domain.covers(owned[0])
+    ]
+    excluded_nonwall = 0
+    unresolved = []
+    if source_drawings is not None:
+        from pb_source_outer_house_continuity_shadow import (
+            ROLE_OUTDOOR, ROLE_POST, classify_outside_envelope_role,
+        )
+        for bar, (geom, ids) in outside:
+            # A stale/partial native-path index or conflicting viewport
+            # makes the candidate unresolved. Never trust one excluded
+            # owner in a mixed structural/unknown composite.
+            valid = all(
+                type(idx) is int and 0 <= idx < len(source_drawings)
+                and isinstance(source_drawings[idx], Mapping)
+                for idx in ids
+            )
+            if not valid:
+                unresolved.append((bar, ids))
+                continue
+            viewports = {
+                str(
+                    source_drawings[idx].get("source_viewport_id")
+                    or source_drawings[idx].get("viewport_id")
+                    or ""
+                ).strip()
+                for idx in ids
+            }
+            if len(viewports) != 1:
+                unresolved.append((bar, ids))
+                continue
+            role, _reason = classify_outside_envelope_role(
+                bar, source_drawings, source_words,
+            )
+            if role in (ROLE_OUTDOOR, ROLE_POST):
+                excluded_nonwall += 1
+            else:
+                unresolved.append((bar, ids))
+    else:
+        unresolved = [(bar, ids) for bar, (_geom, ids) in outside]
+    extra = len(unresolved)
     if extra:
         # Both occupied dwelling zones are independently enclosed, but
         # unresolved source-wall components exist beyond the outer ring.
@@ -327,6 +386,9 @@ def walk_source_unbounded_building_face(
             enclosed_region_count=len(holes),
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
+            source_outside_band_count_before_role_audit=len(outside),
+            source_proven_nonwall_band_count=excluded_nonwall,
+            source_outside_role_audit_applied=source_drawings is not None,
             internal_party_wall_native_path_ids=party_ids,
             diagnostic_unsealed_ring_pdf_pts=(
                 preview_ring if 5 <= len(preview_ring) <= 20_000 else ()

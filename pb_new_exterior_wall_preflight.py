@@ -367,6 +367,9 @@ def attempt_source_native_outer_wall_first(
             bars, source_words,
             shared_dividers=party_dividers,
             source_wall_union=union,
+            # Preserve original native path indices, layers and viewport
+            # identity for source-positive non-wall role discrimination.
+            source_drawings=opening_drawings,
         )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
