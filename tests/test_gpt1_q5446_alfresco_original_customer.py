@@ -21,6 +21,7 @@ from pb_gpt1_q5446_alfresco_figure_authority import (
 from pb_gpt1_q5446_alfresco_original_customer import (
     issue_original_q5446_alfresco_customer_area,
 )
+from tests.original_source_q5446 import require_original_q5446
 
 
 def _ink(bounds, *, count=1, width=.72, first=None):
@@ -124,9 +125,7 @@ def test_bad_workspace_never_issues_original_customer_area(workspace):
 
 
 def test_original_sha_alfresco_has_independent_physical_owner_and_customer():
-    private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not private:
-        pytest.skip("private source not in public checkout: no original-positive claim")
+    private = require_original_q5446()
     import hashlib
     from pathlib import Path
     from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
@@ -163,9 +162,7 @@ def test_original_sha_alfresco_has_independent_physical_owner_and_customer():
 
 
 def test_original_sha_open_bay_primitive_mutations_must_abstain():
-    private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not private:
-        pytest.skip("private original source unavailable; cannot claim source positivity")
+    private = require_original_q5446()
     from pb_source_native_rectangular_footprint_authority import (
         corroborate_source_labeled_rectangular_footprint as binder,
     )
