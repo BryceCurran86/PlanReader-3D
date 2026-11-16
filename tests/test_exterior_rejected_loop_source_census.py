@@ -204,5 +204,3 @@ def test_banksia_brisbane_east_wall_unification_across_t_junction():
     assert 8730 in east.path_indices
     assert 8702 in east.path_indices
     assert 8729 in east.path_indices
-
-

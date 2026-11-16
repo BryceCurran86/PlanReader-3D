@@ -220,4 +220,3 @@ def test_derbyshire_construction_sample_real_pdf_exterior_swing_doors():
     assert 1284 in arc_ids
     assert 855 in arc_ids
     assert 435 in arc_ids
-
