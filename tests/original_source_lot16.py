@@ -92,8 +92,11 @@ def require_original_lot16(
     *, env: Optional[Mapping[str, str]] = None, repo_root: Optional[Path] = None, expected_sha256: str = ORIGINAL_SHA256,
 ) -> Path:
     """The verified original's path, or a visible failure/NOT_RUN skip as described in the module contract."""
+    default_env = env is None
     env = os.environ if env is None else env
     policy = str(env.get(POLICY_ENV, ""))
+    if default_env and not policy and str(env.get("GITHUB_ACTIONS", "")).lower() == "true":
+        policy = PUBLIC_CI_POLICY
     if policy not in ("", PUBLIC_CI_POLICY):
         pytest.fail("invalid_private_original_source_ci_policy", pytrace=False)
     source = resolve_original_lot16(env=env, repo_root=repo_root, expected_sha256=expected_sha256)

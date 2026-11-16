@@ -15,7 +15,9 @@ from pb_gpt1_q5446_alfresco_original_customer import (
     issue_original_q5446_alfresco_customer_area,
 )
 from pb_gptmax_q5446_original_tiled_floor_customer import (
+    issue_original_q5446_first_ensuite_tiled_floor,
     issue_original_q5446_ground_ensuite_tiled_floor,
+    issue_original_q5446_ground_laundry_tiled_floor,
 )
 from pb_source_native_tiled_room_face_authority import (
     find_unique_native_tiled_room_face,
@@ -25,17 +27,8 @@ from pb_customer_output_verification import verify_sealed_customer_output
 
 @pytest.fixture
 def originals():
-    root = Path(os.environ.get(
-        "PLANREADER_Q5446_ORIGINAL_SOURCE_DIR", "documents/sources",
-    ))
-    ps = (
-        root / "Q5446_Standard_Plans_V1_20220320.pdf",
-        root / "Q5446_Standard_Inclusions_V1_20220313.pdf",
-        root / "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
-    )
-    if not all(p.is_file() for p in ps):
-        pytest.skip("Q5446 private original plan and two supporting source PDFs absent")
-    return ps
+    from tests.original_source_q5446 import require_original_q5446_triple
+    return require_original_q5446_triple()
 
 
 def test_source_native_ground_ensuite_complete_tiled_customer(originals):
@@ -144,3 +137,45 @@ def test_missing_source_owned_face_prevents_customer(originals, monkeypatch):
         "source_tiled_ensuite_finished_face_unavailable",
     )
     assert result.sealed_run is None and result.customer_rows == ()
+
+
+def test_source_native_ground_laundry_complete_tiled_customer(originals):
+    result = issue_original_q5446_ground_laundry_tiled_floor(*originals)
+    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW", result.reason_codes
+    q = result.quantity
+    assert q is not None and q.status == "firm" and not q.abstained
+    assert q.family == "floor_finish_area"
+    assert q.unit == "m2"
+    assert q.value == 4.210609
+    assert q.metadata["room_label"] == "LDRY"
+    assert q.metadata["semantic_finish"] == "tile"
+    assert q.metadata["tiled_floor_finish_authorized"] is True
+    assert q.metadata["net_internal_finished_face_authorized"] is True
+    assert q.metadata["original_source_page_role"] == "ground_floor_plan"
+    assert q.metadata["source_face_boundary_path_ids"]
+    assert result.sealed_run is not None
+    assert len(result.sealed_run.quantities) == 1
+    assert result.sealed_run.quantities[0].lineage_ok
+    assert len(result.customer_rows) == 1
+    assert result.customer_rows[0]["quantity"] == q.value
+    verify_sealed_customer_output(result.sealed_run, result.customer_rows)
+
+
+def test_source_native_first_floor_ensuite_complete_tiled_customer_with_same_page_scale(originals):
+    result = issue_original_q5446_first_ensuite_tiled_floor(*originals)
+    assert result.status == "FIRM_SOURCE_CUSTOMER_TO_REVIEW", result.reason_codes
+    q = result.quantity
+    assert q is not None and q.status == "firm" and not q.abstained
+    assert q.family == "floor_finish_area"
+    assert q.unit == "m2"
+    assert q.value == 5.966132
+    assert q.metadata["room_label"] == "ENS"
+    assert q.metadata["source_page"] == "2"
+    assert q.metadata["original_source_page_role"] == "first_floor_plan"
+    assert any("_p2_path_" in sid for sid in q.metadata["original_scale_source_path_ids"])
+    assert result.sealed_run is not None
+    assert len(result.sealed_run.quantities) == 1
+    assert result.sealed_run.quantities[0].lineage_ok
+    assert len(result.customer_rows) == 1
+    assert result.customer_rows[0]["quantity"] == q.value
+    verify_sealed_customer_output(result.sealed_run, result.customer_rows)

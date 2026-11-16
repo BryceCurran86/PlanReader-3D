@@ -242,12 +242,10 @@ def test_real_owner_roster_dispatches_only_sha_authenticated_matching_role(
 
 
 def test_private_sha_original_single_role_optional(tmp_path):
-    private = os.getenv("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not private:
-        pytest.skip("private original not in public CI; no source-positive claim")
+    from tests.original_source_q5446 import require_original_q5446
+    source = require_original_q5446()
     from pb_gpt1_q5446_original_area_schedule_shadow import SOURCE_SHA256
     from pb_gpt1_q5446_source_declared_area_firm_handoff import Q5446_PROJECT_ID
-    source = Path(private)
     assert hashlib.sha256(source.read_bytes()).hexdigest() == SOURCE_SHA256
     role = tmp_path / "real-role"
     role.mkdir()

@@ -17,13 +17,8 @@ from pb_customer_output_verification import verify_sealed_customer_output
 
 @pytest.fixture
 def original_paths():
-    p=Path(os.environ.get("PLANREADER_Q5446_ORIGINAL_SOURCE_DIR","documents/sources"))
-    sources=(p/"Q5446_Standard_Plans_V1_20220320.pdf",
-             p/"Q5446_Standard_Inclusions_V1_20220313.pdf",
-             p/"Q5446_Sales_Advice_Estimate_V1_20220320.pdf")
-    if not all(f.is_file() for f in sources):
-        pytest.skip("private original Q5446 source set unavailable")
-    return sources
+    from tests.original_source_q5446 import require_original_q5446_triple
+    return require_original_q5446_triple()
 
 
 def test_original_alfresco_plus_tiled_ensuite_is_distinct_verified_customer(original_paths):
@@ -124,3 +119,14 @@ def test_benchmark_reference_is_not_in_source_issuer():
     source=getsource(m.issue_original_q5446_alfresco_plus_ensuite_customer)
     for token in ("reference_takeoff","benchmark", "expected_quantity", "0.05"):
         assert token not in source
+
+
+def test_original_alfresco_plus_three_tiled_floors_is_distinct_verified_customer(original_paths):
+    result=m.issue_original_q5446_alfresco_plus_tiled_floors_customer(*original_paths)
+    assert result.status=="MULTI_ROOM_SOURCE_FAMILIES_CUSTOMER_VERIFIED",result.reason_codes
+    assert result.source_role_coverage_verified is False
+    assert len(result.tiled_rooms)==3
+    assert [r.quantity.value for r in result.tiled_rooms]==[4.247308, 4.210609, 5.966132]
+    assert len(result.customer_rows)==4
+    assert result.combined_sealed_run is not None and len(result.combined_sealed_run.quantities)==4
+    verify_sealed_customer_output(result.combined_sealed_run,result.customer_rows)
