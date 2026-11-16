@@ -174,7 +174,7 @@ export function App() {
                 </div>
                 <CommandPreview
                   key={selected.objectId}
-                  workspace={manifest}
+                  workspace={visible!}
                   object={selected}
                   authenticated={authenticatedSource}
                 />
