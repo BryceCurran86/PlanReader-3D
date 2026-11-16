@@ -591,3 +591,63 @@ class TestLiveAndCommercialStability:
         assert results["publishability"][0] is False
         assert results["pricing"][0] is False
         assert results["jobhub"][0] is False
+
+
+class TestSourceRevisionLineage:
+    def test_supplied_hash_and_revision_survive_w2_split_and_snap(self) -> None:
+        # Source identity is supplied by ingestion, never inferred by W2.
+        a = _seg(
+            "source-a", -5, 0, 5, 0,
+            document_id="doc-1", revision_id="revision-A",
+            source_sha256="a" * 64, page_id="page-2", viewport_id="floor",
+        )
+        b = _seg("cross", 0, -5, 0, 5)
+        graph = build_wall_graph_for_viewport([a, b])
+        children = [
+            edge for edge in graph["edges"]
+            if "source-a" in edge[LINEAGE_KEY]["source_primitive_ids"]
+        ]
+        assert len(children) == 2
+        for edge in children:
+            record = next(
+                row for row in edge[LINEAGE_KEY]["source_records"]
+                if row["id"] == "source-a"
+            )
+            assert record["document_id"] == "doc-1"
+            assert record["revision_id"] == "revision-A"
+            assert record["source_sha256"] == "a" * 64
+            assert record["page_id"] == "page-2"
+            assert record["viewport_id"] == "floor"
+            _assert_live_sentinels(edge)
+
+    def test_same_geometry_distinct_source_revisions_stay_distinct(self) -> None:
+        first = _seg(
+            "source-a", 0, 0, 10, 0,
+            source_sha256="a" * 64, revision_id="revision-A",
+        )
+        second = _seg(
+            "source-b", 0, 0, 10, 0,
+            source_sha256="b" * 64, revision_id="revision-B",
+        )
+        forward = build_wall_graph_for_viewport([first, second])
+        reverse = build_wall_graph_for_viewport([second, first])
+        for graph in (forward, reverse):
+            assert graph["edges"]
+            for edge in graph["edges"]:
+                lineage = edge[LINEAGE_KEY]
+                assert lineage["source_primitive_ids"] == ["source-a", "source-b"]
+                witnesses = {
+                    (row["id"], row["source_sha256"], row["revision_id"])
+                    for row in lineage["source_records"]
+                }
+                assert witnesses == {
+                    ("source-a", "a" * 64, "revision-A"),
+                    ("source-b", "b" * 64, "revision-B"),
+                }
+                _assert_live_sentinels(edge)
+
+    def test_absent_source_revision_not_fabricated(self) -> None:
+        lineage = lineage_from_source_segments([_seg("bare", 0, 0, 10, 0)])
+        (record,) = lineage["source_records"]
+        assert "revision_id" not in record
+        assert "source_sha256" not in record
