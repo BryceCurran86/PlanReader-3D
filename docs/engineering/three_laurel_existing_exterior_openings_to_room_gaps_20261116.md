@@ -44,13 +44,26 @@ along previously unsupported room boundary segments:
 - LIVING west: ASD sliding door jambs 1642/1643 and tracks 1646/1651/1658/1663
 - GARAGE: currently no verified closed `Finish_Floor` candidate in this diagnostic lane; it is NOT evidence the real garage is missing or that the garage panel-lift was not detected.
 
-These **7 source intersections are diagnostics**, NOT seven scored items or
-physical closure proofs. The private original PDF and its markup stay only
-on Bryce's PC. The user has confirmed alfresco and porch are outside the
-enclosed footprint, and timber post 4102 is not an exterior wall.
+The **existing internal swing-door producer** from merged PR #4382
+also emits seven source-authenticated, candidate-only internal doorway
+receipts on the original page. Without changing its detector, the same
+read-only boundary matcher associates two more:
+
+- BED 2 east: existing original internal swing arc path **2195**, jamb
+  paths **2196/2197**, ~26.93 PDF pt threshold
+- BED 3 west: existing original internal swing arc path **2591**, jamb
+  paths **2592/2593**, ~26.93 PDF pt threshold
+
+The combined audit now reports **nine source intersections**: seven
+external-window/door correspondences and two internal-door correspondences.
+These are **NOT nine scored items or room closure proofs**. They use only
+existing opening producers; this change adds no door/window detection rule.
+The private original PDF and JSON report stay only on Bryce's PC:
+`C:\Users\bryce\private_packets\gpt6_max_original_3laurel_9_hosted_room_witnesses_20261116.json`.
 
 **MAX action:** reuse these receipts in the typed room ownership graph after
-room side/host, remaining wall junction and source finish/scale checks; do
-not write another generic exterior door detector or loosen commercial
-requirements. Internal doors are a *separate* task for Cursor and must not
-be conflated with the 6 already traced exterior doors.
+room side/host, remaining wall junction and source finish/scale checks.
+Neither external nor internal thresholds are opaque material or floor finish
+on the far side of the entrance. Garage remains without a floor candidate in
+this diagnostic and requires independent source region correspondence. Do
+not reimplement any of the already detected doors.
