@@ -137,6 +137,24 @@ def test_alfresco_bounded_in_building_would_make_wrong_outside_trace():
     assert result.reason == "outdoor_space_inside_proposed_building"
 
 
+def test_detached_internal_wall_inside_room_hole_does_not_veto_outer_footprint():
+    # A native wall island inside one enclosed occupied zone is not outside
+    # the building just because it does not touch the painted outer ring.
+    # Old primary-wall-paint containment falsely rejected this original
+    # geometry. The authoritative test is exterior-ring containment.
+    bars = (*_building_bars(), SourceBar(box(35, 30, 38, 48), 25))
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+    )
+    assert result.status == "CANDIDATE"
+    assert result.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+    assert result.enclosed_dwelling_zone_count == 2
+    assert 25 not in result.outer_wall_native_path_ids
+    assert result.other_source_wall_band_count == 0
+    assert result.measurement_authorized is False
+    assert result.building_footprint_authenticated is False
+
+
 def test_far_unowned_structural_wall_or_separate_building_cannot_be_dropped():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
     result = walk_source_unbounded_building_face(
