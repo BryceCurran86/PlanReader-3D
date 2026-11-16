@@ -187,3 +187,30 @@ def test_unique_room_outline_reports_gap_free_candidate_without_approval():
     assert not gaps.room_enclosure_authenticated
     assert not gaps.measurement_authorized
     assert report.to_dict()["room_gap_audits"][0]["measurement_authorized"] is False
+
+
+
+def test_read_only_room_review_exposes_native_painted_corner_candidates():
+    drawings, words, window = _page()
+    review = review_source_room_opening_gaps(
+        drawings, words, (window,), page_index=2, source_sha256="a"*64,
+    )
+    assert len(review.painted_corner_reviews) == 1
+    corners = review.painted_corner_reviews[0]
+    assert corners.source_floor_path_id == 0
+    assert corners.expected_corner_count == 4
+    assert len(corners.observed_corners) == 4
+    assert not corners.measurement_authorized
+    assert not corners.physical_room_authenticated
+    assert review.to_dict()["painted_corner_reviews"][0]["measurement_authorized"] is False
+
+
+def test_shared_source_outline_does_not_emit_separate_corner_certificates():
+    drawings, words, window = _page()
+    words = [*words, (110, 140, 135, 150, "LIVING", 0, 1, 0)]
+    review = review_source_room_opening_gaps(
+        drawings, words, (window,), page_index=2, source_sha256="a"*64,
+    )
+    assert review.shared_source_floor_outline_labels
+    assert review.painted_corner_reviews == ()
+    assert review.measurement_authorized is False
