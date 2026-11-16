@@ -38,6 +38,11 @@ from pb_source_neutral_wall_seam_continuity import (
     SourceNeutralWallSeam,
     detect_source_neutral_wall_seams,
 )
+from pb_source_shared_dwelling_envelope_shadow import (
+    CandidateSharedBuildingDivider,
+    closed_loop_uses_interior_dwelling_divider,
+    detect_native_shared_dwelling_dividers,
+)
 from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
@@ -78,6 +83,10 @@ class SourceNativeOuterWallAttempt:
     diagnostic_wall_bands_outside_loop: int = 0
     diagnostic_outside_source_path_sample: tuple[int, ...] = ()
     neutral_wall_seams: tuple[SourceNeutralWallSeam, ...] = ()
+    # One connected BUILDING may contain two (or more) DWELLINGS. Never
+    # misclassify an annotated internal PARTY wall as outside envelope.
+    shared_dwelling_divider_candidates: tuple[CandidateSharedBuildingDivider, ...] = ()
+    diagnostic_party_wall_bounded_unit_loops: int = 0
 
 
 def attempt_source_native_outer_wall_first(
@@ -158,6 +167,15 @@ def attempt_source_native_outer_wall_first(
     ) if source_words else ()
     seam_candidates = detect_source_neutral_wall_seams(
         opening_drawings, page_index=source_page_index,
+    )
+    party_dividers = (
+        detect_native_shared_dwelling_dividers(
+            opening_drawings,
+            source_words,
+            source_page_index=source_page_index,
+        )
+        if source_words
+        else ()
     )
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
@@ -248,6 +266,7 @@ def attempt_source_native_outer_wall_first(
         "swing_door_footprint_bridges": swing_bridges,
         "sliding_door_footprint_bridges": sliding_bridges,
         "neutral_wall_seams": neutral_seams,
+        "shared_dwelling_divider_candidates": party_dividers,
         "graph": graph,
         "source_wall_band_count": len(bars),
         "source_stroke_pair_band_count": len(paired),
@@ -289,6 +308,21 @@ def attempt_source_native_outer_wall_first(
             **counts,
         )
     outer = closed[0]
+    # A building-wall union may have a fully closed VOID on either side
+    # of an internal party wall. Such an interior ring is not the shared
+    # outside footprint. Track this proof separately; NEVER promote the
+    # first/leftmost closed room loop to a building envelope.
+    divider_bounded_unit_loops = sum(
+        closed_loop_uses_interior_dwelling_divider(
+            Polygon(hole),
+            party_dividers,
+        )
+        for hole in outer.interiors
+    )
+    party_wall_misused_as_outer_boundary = closed_loop_uses_interior_dwelling_divider(
+        outer,
+        party_dividers,
+    )
     if outer.area <= 0 or not math.isfinite(outer.area):
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_perimeter_not_finite",
@@ -313,16 +347,30 @@ def attempt_source_native_outer_wall_first(
         # primitive paths. A bounded first-seen owner sample is readable on
         # the original drawing, and never authorizes any physical wall area.
         bbox = tuple(round(float(v), 3) for v in outer.bounds)
-        outside_source_paths = tuple(dict.fromkeys(
-            int(bar.path_index) for bar in structural_outside
-        ))
+        outside_source_paths = tuple(
+            dict.fromkeys(int(bar.path_index) for bar in structural_outside)
+        )
         return SourceNativeOuterWallAttempt(
-            "ABSTAINED", "source_exterior_other_wall_ink_outside_candidate",
+            "ABSTAINED",
+            (
+                "source_party_wall_is_internal_not_building_outer_boundary"
+                if party_wall_misused_as_outer_boundary
+                else "source_exterior_other_wall_ink_outside_candidate"
+            ),
             rejected_candidate_bbox_pdf_pts=bbox,
             diagnostic_closed_wall_loop_count=len(closed),
+            diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
             diagnostic_rejected_loop_bbox_pdf_pts=bbox,
             diagnostic_wall_bands_outside_loop=len(structural_outside),
             diagnostic_outside_source_path_sample=outside_source_paths[:32],
+            **counts,
+        )
+    if party_wall_misused_as_outer_boundary:
+        return SourceNativeOuterWallAttempt(
+            "ABSTAINED",
+            "source_party_wall_is_internal_not_building_outer_boundary",
+            diagnostic_closed_wall_loop_count=len(closed),
+            diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
             **counts,
         )
     points = tuple(
@@ -354,5 +402,6 @@ def attempt_source_native_outer_wall_first(
         sliding_door_footprint_bridges=sliding_bridges,
         neutral_wall_seams=neutral_seams,
         diagnostic_closed_wall_loop_count=len(closed),
+        diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
         diagnostic_wall_bands_outside_loop=0,
     )
