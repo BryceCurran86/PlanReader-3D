@@ -43,7 +43,16 @@ export function App() {
     try {
       const data: unknown = JSON.parse(await file.text());
       if (!isSceneManifest(data)) throw new Error("Manifest failed source/scope validation");
-      setManifest(data);
+      // Local files are user-supplied previews, NOT server-attested evidence.
+      // Never render their claimed "verified" status as trusted green/FIRM.
+      const localPreview: SceneManifest = {
+        ...data,
+        objects: data.objects.map(o => ({
+          ...o, renderState: "review" as const,
+          unresolvedIssues: [...new Set([...o.unresolvedIssues, "local_manifest_not_authenticated"])],
+        })),
+      };
+      setManifest(localPreview);
       setSelectedId(null);
       setLevel("all");
     } catch (e) {
