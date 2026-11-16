@@ -13,9 +13,9 @@ from typing import Any
 
 from shapely.geometry import box
 
-_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*)$", re.IGNORECASE)
+_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*|\d{1,2})$", re.IGNORECASE)
 _DOOR_CODE = re.compile(r"^(?:d[- ]?\d+[a-z]*|door|sgd|asd[- ]?\d*|sd[- ]?\d*|stacker)$", re.IGNORECASE)
-_EXTERIOR_WALL_LAYER = re.compile(r"(?:wall.*extern|extern.*wall|wall.*exterior|exterior.*wall)", re.IGNORECASE)
+_EXTERIOR_WALL_LAYER = re.compile(r"(?:wall.*extern|extern.*wall|wall.*exterior|exterior.*wall|\ba-wall\b|\ba-wall$)", re.IGNORECASE)
 _NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 
 
@@ -130,7 +130,7 @@ def detect_exterior_window_footprint_bridges(
         for r in drawings
         if isinstance(r, Mapping)
     )
-    if has_any_layers and not has_wall_layers:
+    if not wall_bars and has_any_layers and not has_wall_layers:
         return ()
     walls: list[tuple[int, str, tuple[float, float, float, float]]] = []
     filled_rectangles: list[tuple[int, str, tuple[float, float, float, float]]] = []
@@ -184,6 +184,15 @@ def detect_exterior_window_footprint_bridges(
                 p0, p1 = ln
                 if abs(p0[1] - p1[1]) < 0.1 or abs(p0[0] - p1[0]) < 0.1:
                     frame_lines.append((idx, layer, ln))
+    if not has_wall_layers and labels:
+        marker_lines = [
+            m for m in marker_lines
+            if any(
+                abs((m[2][0][0] + m[2][1][0]) / 2 - (w[0] + w[2]) / 2) < 60
+                and abs((m[2][0][1] + m[2][1][1]) / 2 - (w[1] + w[3]) / 2) < 60
+                for _, w in labels
+            )
+        ]
     results: list[WindowFootprintBridge] = []
     seen_hosts: set[tuple[int, int]] = set()
     for a_idx, (a_path, a_layer, (a0, a1)) in enumerate(marker_lines):
@@ -219,20 +228,64 @@ def detect_exterior_window_footprint_bridges(
                     if axis == "h":
                         if first[2] >= mx or second[0] <= mx:
                             continue
-                        gap = second[0]-first[2]
-                        thick1, thick2 = first[3]-first[1], second[3]-second[1]
-                        alignment = abs((first[1]+first[3])-(second[1]+second[3]))/2
-                        offset = min(abs(my-first[1]),abs(my-first[3]),abs(my-second[1]),abs(my-second[3]))
-                        bounds = (first[2],max(first[1],second[1]),second[0],min(first[3],second[3]))
+                        gap = second[0] - first[2]
+                        first_ortho = (first[3] - first[1]) > 1.2 * (first[2] - first[0])
+                        second_ortho = (second[3] - second[1]) > 1.2 * (second[2] - second[0])
+                        if not (first_ortho or second_ortho):
+                            thick1, thick2 = first[3] - first[1], second[3] - second[1]
+                            alignment = abs((first[1] + first[3]) - (second[1] + second[3])) / 2
+                            bounds = (first[2], max(first[1], second[1]), second[0], min(first[3], second[3]))
+                            offset = min(abs(my - first[1]), abs(my - first[3]), abs(my - second[1]), abs(my - second[3]))
+                            max_thick_diff = 0.6
+                        elif second_ortho and not first_ortho:
+                            thick1 = first[3] - first[1]
+                            thick2 = second[2] - second[0]
+                            spans_y = (second[1] <= first[3] + 1.0 and second[3] >= first[1] - 1.0)
+                            alignment = 0.0 if spans_y else 999.0
+                            bounds = (first[2], first[1], second[0], first[3])
+                            offset = min(abs(my - first[1]), abs(my - first[3]))
+                            max_thick_diff = 8.0
+                        elif first_ortho and not second_ortho:
+                            thick1 = first[2] - first[0]
+                            thick2 = second[3] - second[1]
+                            spans_y = (first[1] <= second[3] + 1.0 and first[3] >= second[1] - 1.0)
+                            alignment = 0.0 if spans_y else 999.0
+                            bounds = (first[2], second[1], second[0], second[3])
+                            offset = min(abs(my - second[1]), abs(my - second[3]))
+                            max_thick_diff = 8.0
+                        else:
+                            continue
                     else:
                         if first[3] >= my or second[1] <= my:
                             continue
-                        gap = second[1]-first[3]
-                        thick1, thick2 = first[2]-first[0], second[2]-second[0]
-                        alignment = abs((first[0]+first[2])-(second[0]+second[2]))/2
-                        offset = min(abs(mx-first[0]),abs(mx-first[2]),abs(mx-second[0]),abs(mx-second[2]))
-                        bounds = (max(first[0],second[0]),first[3],min(first[2],second[2]),second[1])
-                    if not 2 <= gap <= 160 or alignment > 0.5 or abs(thick1-thick2) > 0.6:
+                        gap = second[1] - first[3]
+                        first_ortho = (first[2] - first[0]) > 1.2 * (first[3] - first[1])
+                        second_ortho = (second[2] - second[0]) > 1.2 * (second[3] - second[1])
+                        if not (first_ortho or second_ortho):
+                            thick1, thick2 = first[2] - first[0], second[2] - second[0]
+                            alignment = abs((first[0] + first[2]) - (second[0] + second[2])) / 2
+                            bounds = (max(first[0], second[0]), first[3], min(first[2], second[2]), second[1])
+                            offset = min(abs(mx - first[0]), abs(mx - first[2]), abs(mx - second[0]), abs(mx - second[2]))
+                            max_thick_diff = 0.6
+                        elif second_ortho and not first_ortho:
+                            thick1 = first[2] - first[0]
+                            thick2 = second[3] - second[1]
+                            spans_x = (second[0] <= first[2] + 1.0 and second[2] >= first[0] - 1.0)
+                            alignment = 0.0 if spans_x else 999.0
+                            bounds = (first[0], first[3], first[2], second[1])
+                            offset = min(abs(mx - first[0]), abs(mx - first[2]))
+                            max_thick_diff = 8.0
+                        elif first_ortho and not second_ortho:
+                            thick1 = first[3] - first[1]
+                            thick2 = second[2] - second[0]
+                            spans_x = (first[0] <= second[2] + 1.0 and first[2] >= second[0] - 1.0)
+                            alignment = 0.0 if spans_x else 999.0
+                            bounds = (second[0], first[3], second[2], second[1])
+                            offset = min(abs(mx - second[0]), abs(mx - second[2]))
+                            max_thick_diff = 8.0
+                        else:
+                            continue
+                    if not 2 <= gap <= 160 or alignment > 0.5 or abs(thick1 - thick2) > max_thick_diff:
                         continue
                     if offset > 4*max(thick1,thick2) or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
                         continue
@@ -277,6 +330,21 @@ def detect_exterior_window_footprint_bridges(
                                     and other[2] <= first[2]+.2*host_span
                                 )
                             if cross_span < .8*host_span and inset:
+                                continue
+                            if any(
+                                (
+                                    abs((ln[0][1] + ln[1][1]) / 2 - (other[1] + other[3]) / 2) < 1.0
+                                    and min(ln[0][0], ln[1][0]) <= other[0] + 1.0
+                                    and max(ln[0][0], ln[1][0]) >= other[2] - 1.0
+                                )
+                                if axis == "h"
+                                else (
+                                    abs((ln[0][0] + ln[1][0]) / 2 - (other[0] + other[2]) / 2) < 1.0
+                                    and min(ln[0][1], ln[1][1]) <= other[1] + 1.0
+                                    and max(ln[0][1], ln[1][1]) >= other[3] - 1.0
+                                )
+                                for _, _, ln in frame_lines
+                            ):
                                 continue
                             intervening = True
                             break
@@ -501,4 +569,28 @@ def detect_exterior_window_footprint_bridges(
                         bounds_pdf_pts=bounds, axis=ax, page_index=page_index,
                     ))
 
-    return tuple(sorted(results, key=lambda r:(r.page_index,r.left_host_path_id,r.right_host_path_id)))
+    # If multiple candidates claim the same source label within 150pt,
+    # keep the tighter opening (the immediately adjacent hosts, not a wider rival).
+    deduped: list[WindowFootprintBridge] = []
+    for bridge in sorted(
+        results,
+        key=lambda r: (
+            r.bounds_pdf_pts[2] - r.bounds_pdf_pts[0]
+            if r.axis == "h"
+            else r.bounds_pdf_pts[3] - r.bounds_pdf_pts[1]
+        ),
+    ):
+        b = bridge.bounds_pdf_pts
+        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        lbl = bridge.label_text.upper()
+        rival = False
+        for kept in deduped:
+            if kept.label_text.upper() == lbl:
+                kb = kept.bounds_pdf_pts
+                kcx, kcy = (kb[0] + kb[2]) / 2, (kb[1] + kb[3]) / 2
+                if math.dist((cx, cy), (kcx, kcy)) < 150.0:
+                    rival = True
+                    break
+        if not rival:
+            deduped.append(bridge)
+    return tuple(sorted(deduped, key=lambda r: (r.page_index, r.left_host_path_id, r.right_host_path_id)))
