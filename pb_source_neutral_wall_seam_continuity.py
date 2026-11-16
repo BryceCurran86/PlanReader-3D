@@ -8,11 +8,11 @@ without issuing a material, area, window or frame quantity.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import math
 from typing import Any
 
 from shapely.geometry import box
