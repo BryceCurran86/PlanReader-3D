@@ -296,7 +296,14 @@ def walk_source_unbounded_building_face(
                 enclosed_dwelling_zone_count=dwelling_count,
                 internal_party_wall_native_path_ids=party_ids,
             )
-    extra = sum(1 for geom, _ in owners if not primary.buffer(0.05).covers(geom))
+    # The wall paint is a polygon with ROOM holes. An independently drawn
+    # internal physical partition or cabinet wall can occupy a room hole
+    # without touching the primary wall-paint network; it remains INSIDE
+    # the building exterior ring. Compare to the filled outer footprint,
+    # not the wall-paint polygon (whose holes would falsely eject it).
+    # Truly outside structural bodies remain a hard abstention.
+    candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
+    extra = sum(1 for geom, _ in owners if not candidate_outer_domain.covers(geom))
     if extra:
         return OutsideFacingBuildingWalk(
             "ABSTAINED",
