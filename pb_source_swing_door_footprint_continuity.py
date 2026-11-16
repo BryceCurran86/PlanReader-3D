@@ -141,6 +141,14 @@ def detect_exterior_swing_door_footprint_bridges(
                 continue
         elif _NON_WALL_LAYER.search(layer):
             continue
+        ln = _line(row)
+        if ln:
+            d = math.dist(*ln)
+            p0, p1 = ln
+            dx, dy = abs(p0[0] - p1[0]), abs(p0[1] - p1[1])
+            ln_bb = (min(p0[0], p1[0]), min(p0[1], p1[1]), max(p0[0], p1[0]), max(p0[1], p1[1]))
+            if 0.5 <= d <= 16.0 and (dx < 0.2 or dy < 0.2):
+                caps.append((idx, layer, (ln_bb[0], ln_bb[1] - 0.2, ln_bb[2], ln_bb[3] + 0.2)))
         bounds = _rect(row)
         if bounds is None:
             continue
@@ -157,14 +165,6 @@ def detect_exterior_swing_door_footprint_bridges(
                             walls.append((idx, layer, bounds))
                     elif min(tone) > 0.35 and max(dx, dy) < 16:
                         caps.append((idx, layer, bounds))
-        ln = _line(row)
-        if ln:
-            d = math.dist(*ln)
-            p0, p1 = ln
-            dx, dy = abs(p0[0] - p1[0]), abs(p0[1] - p1[1])
-            ln_bb = (min(p0[0], p1[0]), min(p0[1], p1[1]), max(p0[0], p1[0]), max(p0[1], p1[1]))
-            if 0.5 <= d <= 16.0 and (dx < 0.2 or dy < 0.2):
-                caps.append((idx, layer, (ln_bb[0], ln_bb[1] - 0.2, ln_bb[2], ln_bb[3] + 0.2)))
     if not arcs or not walls or not caps:
         return ()
     window_labels = _words(source_words)
@@ -197,7 +197,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             spans_y = (b[1] <= a[3] + 1.0 and b[3] >= a[1] - 1.0)
                             alignment = 0.0 if spans_y else 999.0
                             bounds = (a[2], a[1], b[0], a[3])
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         elif a_ortho and not b_ortho:
                             thick1 = a[2] - a[0]
@@ -205,7 +205,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             spans_y = (a[1] <= b[3] + 1.0 and a[3] >= b[1] - 1.0)
                             alignment = 0.0 if spans_y else 999.0
                             bounds = (a[2], b[1], b[0], b[3])
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         else:
                             thick1 = a[2] - a[0]
@@ -213,7 +213,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             overlap_y = min(a[3], b[3]) - max(a[1], b[1])
                             alignment = 0.0 if overlap_y > 0 else 999.0
                             bounds = (a[2], min(a[1], b[1]), b[0], max(a[3], b[3]))
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         arc_len = arc[2] - arc[0]
                         insets = (arc[0] - bounds[0], bounds[2] - arc[2])
@@ -222,6 +222,10 @@ def detect_exterior_swing_door_footprint_bridges(
                             abs(arc[1] - a[3]),
                             abs(arc[3] - a[1]),
                             abs(arc[3] - a[3]),
+                            abs(arc[1] - b[1]),
+                            abs(arc[1] - b[3]),
+                            abs(arc[3] - b[1]),
+                            abs(arc[3] - b[3]),
                         )
                         midpoint = (bounds[1] + bounds[3]) / 2
                     else:
@@ -242,7 +246,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             spans_x = (b[0] <= a[2] + 1.0 and b[2] >= a[0] - 1.0)
                             alignment = 0.0 if spans_x else 999.0
                             bounds = (a[0], a[3], a[2], b[1])
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         elif a_ortho and not b_ortho:
                             thick1 = a[3] - a[1]
@@ -250,7 +254,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             spans_x = (a[0] <= b[2] + 1.0 and a[2] >= b[0] - 1.0)
                             alignment = 0.0 if spans_x else 999.0
                             bounds = (b[0], a[3], b[2], b[1])
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         else:
                             thick1 = a[3] - a[1]
@@ -258,7 +262,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             overlap_x = min(a[2], b[2]) - max(a[0], b[0])
                             alignment = 0.0 if overlap_x > 0 else 999.0
                             bounds = (min(a[0], b[0]), a[3], max(a[2], b[2]), b[1])
-                            max_thick_diff = 8.0
+                            max_thick_diff = 14.0
                             max_align = 0.5
                         arc_len = arc[3] - arc[1]
                         insets = (arc[1] - bounds[1], bounds[3] - arc[3])
@@ -267,6 +271,10 @@ def detect_exterior_swing_door_footprint_bridges(
                             abs(arc[0] - a[2]),
                             abs(arc[2] - a[0]),
                             abs(arc[2] - a[2]),
+                            abs(arc[0] - b[0]),
+                            abs(arc[0] - b[2]),
+                            abs(arc[2] - b[0]),
+                            abs(arc[2] - b[2]),
                         )
                         midpoint = (bounds[0] + bounds[2]) / 2
                     thick = min(thick1, thick2)
@@ -280,7 +288,7 @@ def detect_exterior_swing_door_footprint_bridges(
                         or arc_len < gap * 0.75
                         or arc_len > gap * 1.15
                         or abs((gap - arc_len)) > 5.0
-                        or not all(-1.0 <= z <= 1.5 * max(thick, 4.0) for z in insets)
+                        or not all(-2.5 <= z <= 1.5 * max(thick, 4.0) for z in insets)
                         or cross_near > max(0.5 * thick, 2.5)
                     ):
                         continue
@@ -319,11 +327,12 @@ def detect_exterior_swing_door_footprint_bridges(
                         for k, klayer, c in caps:
                             if has_wall_layers and klayer != l1 and not bool(wall_pattern.search(klayer)):
                                 continue
+                            cap_edge_tol = 3.5 if (a_ortho or b_ortho) else 1.5
                             if axis == "h":
                                 on_edge = (
-                                    abs(c[0] - edge) < 1.5
+                                    abs(c[0] - edge) < cap_edge_tol
                                     if endpoint == 0
-                                    else abs(c[2] - edge) < 1.5
+                                    else abs(c[2] - edge) < cap_edge_tol
                                 )
                                 across = c[3] - c[1]
                                 along = c[2] - c[0]
@@ -334,9 +343,9 @@ def detect_exterior_swing_door_footprint_bridges(
                                 )
                             else:
                                 on_edge = (
-                                    abs(c[1] - edge) < 1.5
+                                    abs(c[1] - edge) < cap_edge_tol
                                     if endpoint == 0
-                                    else abs(c[3] - edge) < 1.5
+                                    else abs(c[3] - edge) < cap_edge_tol
                                 )
                                 across = c[2] - c[0]
                                 along = c[3] - c[1]
@@ -426,6 +435,45 @@ def detect_exterior_swing_door_footprint_bridges(
         }
         if len(unique) == 1:
             matches[arc_id] = list(unique.values())
+        elif len(unique) > 1:
+            c_list = list(unique.values())
+            # Group by opening locality: candidate bounds near the arc
+            arc_cx = (arc[0] + arc[2]) / 2
+            arc_cy = (arc[1] + arc[3]) / 2
+            filtered = [
+                c
+                for c in c_list
+                if (
+                    c.axis == "h"
+                    and abs((c.bounds_pdf_pts[0] + c.bounds_pdf_pts[2]) / 2 - arc_cx) < 20.0
+                )
+                or (
+                    c.axis == "v"
+                    and abs((c.bounds_pdf_pts[1] + c.bounds_pdf_pts[3]) / 2 - arc_cy) < 20.0
+                )
+            ]
+            if filtered:
+                ref_b = filtered[0].bounds_pdf_pts
+                ref_axis = filtered[0].axis
+                same_opening = all(
+                    c.axis == ref_axis
+                    and max(abs(c.bounds_pdf_pts[k] - ref_b[k]) for k in range(4)) < 15.0
+                    for c in filtered
+                )
+                if same_opening:
+                    arc_len = arc[2] - arc[0] if ref_axis == "h" else arc[3] - arc[1]
+                    best = min(
+                        filtered,
+                        key=lambda c: abs(
+                            (
+                                c.bounds_pdf_pts[2] - c.bounds_pdf_pts[0]
+                                if ref_axis == "h"
+                                else c.bounds_pdf_pts[3] - c.bounds_pdf_pts[1]
+                            )
+                            - arc_len
+                        ),
+                    )
+                    matches[arc_id] = [best]
     # Two different arcs competing for a host pair are not silently accepted.
     owner_pair_counts: dict[tuple[int, int], int] = {}
     for candidates in matches.values():

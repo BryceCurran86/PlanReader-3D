@@ -137,3 +137,72 @@ def test_internal_partition_wall_inside_envelope_does_not_fail_closure():
     assert result.diagnostic_closed_wall_loop_count == 1
     assert result.diagnostic_wall_bands_outside_loop == 0
 
+
+def test_exterior_wall_unifies_across_internal_t_junction_gap():
+    # An exterior wall with a continuous outer stroke (x=300, y=100..300)
+    # opposed by inner face strokes (x=290) interrupted by a 10pt internal
+    # partition T-junction gap at y=195..205.
+    def stroke(p0, p1, layer="Enclosure_WallExternal", width=0.8):
+        return {
+            "rect": fitz.Rect(
+                min(p0[0], p1[0]),
+                min(p0[1], p1[1]),
+                max(p0[0], p1[0]),
+                max(p0[1], p1[1]),
+            ),
+            "layer": layer,
+            "fill": None,
+            "color": (0.0, 0.0, 0.0),
+            "width": width,
+            "items": (("l", fitz.Point(*p0), fitz.Point(*p1)),),
+        }
+
+    drawings = [
+        _wall((100, 100, 300, 110)),
+        _wall((100, 290, 300, 300)),
+        _wall((100, 100, 110, 300)),
+        # Continuous exterior face stroke
+        stroke((300, 100), (300, 300)),
+        # Inner face strokes interrupted by T-junction gap
+        stroke((290, 100), (290, 195)),
+        stroke((290, 205), (290, 300)),
+        # Internal partition wall meeting the inner face
+        _wall((195, 195, 290, 205)),
+    ]
+    result = attempt_source_native_outer_wall_first(
+        drawings, source_ink_already_scoped=True,
+    )
+    assert result.status == "CANDIDATE"
+    assert result.diagnostic_closed_wall_loop_count == 1
+    assert result.diagnostic_wall_bands_outside_loop == 0
+
+
+def test_banksia_brisbane_east_wall_unification_across_t_junction():
+    import os
+    pdf_path = r"C:\Users\bryce\OneDrive\Desktop\documents\sources\other plans\05_banksia_brisbane.pdf"
+    if not os.path.exists(pdf_path):
+        return
+    from pb_new_exterior_wall_preflight import (
+        _source_wall_ink_candidate_drawings,
+        _collect_source_wide_face_pairs,
+    )
+    doc = fitz.open(pdf_path)
+    page = doc[1]
+    drawings = page.get_drawings()
+    wall_ink = _source_wall_ink_candidate_drawings(drawings)[0]
+    strips = _collect_source_wide_face_pairs(wall_ink)
+    east_strips = [
+        s for s in strips
+        if abs(s.polygon.bounds[0] - 941.458) < 0.2
+        and abs(s.polygon.bounds[2] - 949.783) < 0.2
+        and 280.0 <= s.polygon.bounds[1] <= 300.0
+    ]
+    assert len(east_strips) == 1
+    east = east_strips[0]
+    assert abs(east.polygon.bounds[1] - 291.414) < 0.2
+    assert abs(east.polygon.bounds[3] - 387.147) < 0.2
+    assert 8730 in east.path_indices
+    assert 8702 in east.path_indices
+    assert 8729 in east.path_indices
+
+

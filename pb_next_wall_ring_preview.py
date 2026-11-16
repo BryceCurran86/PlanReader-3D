@@ -672,6 +672,45 @@ def _merged_along_spans(
     return merged
 
 
+def _opposing_t_junction_span(
+    ext_face: tuple[int, bool, float, float, float],
+    opp_perp: float,
+    strokes: Sequence[tuple[int, bool, float, float, float]],
+    horiz: bool,
+    max_gap: float = 12.0,
+) -> tuple[float, float, tuple[int, ...]] | None:
+    lo_target, hi_target = ext_face[3], ext_face[4]
+    opp_strokes = [
+        s for s in strokes
+        if s[1] is horiz
+        and abs(s[2] - opp_perp) < 0.5
+        and min(hi_target, s[4]) > max(lo_target, s[3])
+    ]
+    if not opp_strokes:
+        return None
+    intervals = sorted((max(lo_target, s[3]), min(hi_target, s[4])) for s in opp_strokes)
+    merged = [intervals[0]]
+    for lo, hi in intervals[1:]:
+        prev_lo, prev_hi = merged[-1]
+        if lo <= prev_hi + 0.1:
+            merged[-1] = (prev_lo, max(prev_hi, hi))
+        else:
+            merged.append((lo, hi))
+    if merged[0][0] - lo_target > max_gap:
+        return None
+    for i in range(len(merged) - 1):
+        gap = merged[i + 1][0] - merged[i][1]
+        if gap > max_gap:
+            return None
+    if hi_target - merged[-1][1] > max_gap:
+        return None
+    covered = sum(hi - lo for lo, hi in merged)
+    if covered < 0.70 * (hi_target - lo_target):
+        return None
+    opp_paths = tuple(sorted({s[0] for s in opp_strokes}))
+    return lo_target, hi_target, opp_paths
+
+
 def _collect_source_wide_face_pairs(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
@@ -717,9 +756,18 @@ def _collect_source_wide_face_pairs(
                 face0=max(a[1],key=lambda item:item[4]-item[3])
                 face1=max(b[1],key=lambda item:item[4]-item[3])
                 lo=max(face0[3],face1[3]);hi=min(face0[4],face1[4])
+                extra_paths: tuple[int, ...] = ()
+                if face1[4] - face1[3] > face0[4] - face0[3]:
+                    t_ext = _opposing_t_junction_span(face1, a[0], strokes, horiz, max_gap=12.0)
+                    if t_ext is not None:
+                        lo, hi, extra_paths = t_ext
+                elif face0[4] - face0[3] > face1[4] - face1[3]:
+                    t_ext = _opposing_t_junction_span(face0, b[0], strokes, horiz, max_gap=12.0)
+                    if t_ext is not None:
+                        lo, hi, extra_paths = t_ext
                 if hi-lo<30.:
                     continue
-                if hi-lo<.8*min(face0[4]-face0[3],face1[4]-face1[3]):
+                if not extra_paths and hi-lo<.8*min(face0[4]-face0[3],face1[4]-face1[3]):
                     continue
                 if horiz:
                     x0,x1,y0,y1=lo,hi,a[0],b[0]
@@ -730,7 +778,7 @@ def _collect_source_wide_face_pairs(
                     continue
                 seen.add(key)
                 paths=tuple(sorted({item[0] for group in groups
-                                    for item in group[1]}))
+                                    for item in group[1]} | set(extra_paths)))
                 if len(paths)<2:
                     continue
                 found.append(_Strip(paths[0],x0,y0,x1,y1,
