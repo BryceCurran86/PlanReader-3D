@@ -474,7 +474,11 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
         after = (len(page.get_drawings()), len(page.get_text("words")))
     assert before == after
     assert attempt.measurement_authorized is False
-    assert len(attempt.sliding_door_footprint_bridges) >= 1
+    assert len(attempt.sliding_door_footprint_bridges) >= 2
+    assert any(
+        str(b.label_text).strip().upper().startswith("ASSD")
+        for b in attempt.sliding_door_footprint_bridges
+    )
     # Repeated ASW schedule codes must keep the living-north hosts 1709/1708.
     assert any(
         {b.left_host_path_id, b.right_host_path_id} == {1708, 1709}
