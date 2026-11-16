@@ -85,6 +85,38 @@ def test_p2_resegmented_collinear_path_same_id() -> None:
     assert walls_one[0].candidate_id == walls_three[0].candidate_id
 
 
+
+def test_p2_collinear_overshoot_and_return_retains_distinct_wall_identity() -> None:
+    # A -> B -> C is collinear, but B lies beyond C. The actual ink runs
+    # past the final endpoint and doubles back: it is NOT a rechunked A -> C.
+    direct = [(0.0, 0.0), (5.0, 0.0)]
+    backtrack = [(0.0, 0.0), (10.0, 0.0), (5.0, 0.0)]
+    straight_id = _canonical_wall_candidate_id("vp", direct)
+    return_id = _canonical_wall_candidate_id("vp", backtrack)
+    assert straight_id != return_id
+    assert canonical_path_fingerprint(backtrack) == canonical_path_fingerprint(
+        list(reversed(backtrack))
+    )
+    assert canonical_path_fingerprint(backtrack) != canonical_path_fingerprint(direct)
+
+
+def test_p2_collinear_full_u_turn_is_not_a_zero_length_wall() -> None:
+    u_turn = [(0.0, 0.0), (10.0, 0.0), (0.0, 0.0)]
+    assert canonical_path_fingerprint(u_turn) != canonical_path_fingerprint(
+        [(0.0, 0.0), (0.0, 0.0)]
+    )
+    assert canonical_path_fingerprint(u_turn) == canonical_path_fingerprint(
+        list(reversed(u_turn))
+    )
+
+
+def test_p2_forward_collinear_subdivision_still_stable() -> None:
+    straight = [(0.0, 0.0), (10.0, 0.0)]
+    chunks = [(0.0, 0.0), (2.0, 0.0), (7.0, 0.0), (10.0, 0.0)]
+    assert canonical_path_fingerprint(straight) == canonical_path_fingerprint(chunks)
+
+
+
 def test_p2_same_endpoints_different_interior_path_different_id() -> None:
     straight = _canonical_wall_candidate_id("vp", [(0.0, 0.0), (100.0, 0.0)])
     detour = _canonical_wall_candidate_id(
