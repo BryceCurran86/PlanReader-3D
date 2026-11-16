@@ -502,9 +502,14 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     assert walk is not None
     assert walk.measurement_authorized is False
     assert walk.status == "ABSTAINED"
-    assert walk.reason == "source_dwelling_region_still_open_to_outside"
-    assert walk.unclosed_dwelling_sides == ("right",)
-    assert walk.enclosed_dwelling_zone_count == 1
+    # All source-NAMED dwelling zones now close after ASSD and porch entry
+    # swing are independently hosted. Still fail closed for wall evidence
+    # elsewhere on this unscoped original sheet.
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.unclosed_dwelling_sides == ()
+    assert walk.enclosed_dwelling_zone_count == 2
+    assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
+    assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     assert receipt["measurement_authorized"] is False
     assert receipt["snap_join_applied"] is False
     assert receipt["undirected_degree_does_not_veto_outside_face"] is True
