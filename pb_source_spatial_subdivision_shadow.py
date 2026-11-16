@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import enum
+import math
 import re
 from statistics import median
 from typing import Any
