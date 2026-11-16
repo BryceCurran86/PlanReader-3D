@@ -7,14 +7,16 @@ are permitted to establish identity. No POST or model write route exists.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import unquote
 
 from pb_editable_3d_correction_model import EditableGeometryObject
-from pb_vr_editor_scene_manifest import EditorWorkspaceScope, compile_editor_scene
+from pb_vr_editor_scene_manifest import (
+    EditorWorkspaceScope, VerifiedSourceWitness, compile_editor_scene,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,9 @@ class AuthorizedSceneWorkspace:
     scope: EditorWorkspaceScope
     objects: Sequence[EditableGeometryObject]
     canonical_object_ids: Mapping[str, str]
+    # Only the trusted original-source resolver may provide these exact
+    # document/revision/native-path receipts. Default empty = all REVIEW.
+    source_witnesses: Mapping[str, VerifiedSourceWitness] = field(default_factory=dict)
 
 
 Authenticate = Callable[[Mapping[str, Any]], EditorPrincipal | None]
@@ -106,6 +111,7 @@ def make_editor_readonly_wsgi_app(
             scene = compile_editor_scene(
                 workspace.scope, workspace.objects,
                 canonical_object_ids=workspace.canonical_object_ids,
+                source_witnesses=workspace.source_witnesses,
             )
         except Exception:
             # Do not leak source SHA, private paths, object IDs, DB errors, or
