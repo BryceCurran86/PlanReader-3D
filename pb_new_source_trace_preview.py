@@ -7,6 +7,7 @@ are created by this preview.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from pathlib import Path
 
 import fitz
