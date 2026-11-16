@@ -451,6 +451,35 @@ def build_source_spatial_subdivision(
         touching_body_ids = tuple(sorted(set(touching_body_ids)))
         touching_path_ids = tuple(sorted(set(touching_path_ids)))
 
+        # Source wall ink may contain pinhole/rail-gap interiors inside the
+        # primary component as well as detached fragments. Never label an
+        # enclosure narrower than six native wall-band girths as a room.
+        span = min(
+            float(poly_bounds[2] - poly_bounds[0]),
+            float(poly_bounds[3] - poly_bounds[1]),
+        )
+        if (
+            touching_body_ids and minimum_room_candidate_span > 0
+            and span < minimum_room_candidate_span
+        ):
+            regions.append(SpatialRegionRecord(
+                region_id=f"region:micro-ink:{region_idx}",
+                kind=SpatialRegionKind.NATIVE_SOURCE_MICRO_VOID,
+                bounds_pdf_pts=poly_bounds,
+                polygon_pdf_pts=coords,
+                area_pdf_pts=area,
+                label=None,
+                semantic_role="small_source_wall_ink_void_not_room",
+                bounding_wall_body_ids=touching_body_ids,
+                bounding_native_path_ids=touching_path_ids,
+                is_hole_in_building=False,
+                is_conditioned_living=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=REASON_MICRO_SOURCE_VOID,
+            ))
+            region_idx += 1
+            continue
+
         # Detached closed wall loops also bound free-space polygons. They
         # are not conditioned/interior rooms of the primary structure. Keep
         # their source paths in the existing disconnected-decoy ABSTAIN
