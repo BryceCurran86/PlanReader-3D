@@ -78,8 +78,8 @@ def test_synthetic_text_only_decoy_without_cad_primitives_fails_closed():
     assert not is_room_enclosed_by_physical_wall_faces(page, "LAUNDRY")
 
 
-def test_synthetic_closed_four_sided_room_passes():
-    """Authentic-style closed rectangular room with connected corners and CAD primitives."""
+def test_synthetic_closed_untyped_strokes_are_not_a_source_owned_room():
+    """A closed rectangle without native wall-role evidence cannot issue a room."""
     doc = fitz.open()
     page = doc.new_page(width=600, height=600)
     cx, cy = 300.0, 300.0
@@ -91,14 +91,22 @@ def test_synthetic_closed_four_sided_room_passes():
     page.draw_line((cx - 35, cy - 30), (cx - 35, cy + 30), color=(0, 0, 0), width=0.5)
     page.draw_line((cx + 35, cy - 30), (cx + 35, cy + 30), color=(0, 0, 0), width=0.5)
 
-    assert is_room_enclosed_by_physical_wall_faces(page, "MEDIA")
+    assert not is_room_enclosed_by_physical_wall_faces(page, "MEDIA")
 
 
-def test_authentic_3laurel_page2_rooms_enclosed():
-    """Verify authentic rooms on 3Laurel Ground Floor Plan (page 2)."""
+def test_authentic_3laurel_floor_and_annotation_loops_not_wall_receipts():
+    """3Laurel floor paint and annotation loops do not prove physical faces.
+
+    Prior to this guard, MEDIA/BED2/BED3/LIVING positives originated in
+    Finish_Floor, and the GARAGE positive in Annotation_General (native path
+    census from unchanged p3). These rooms may truly exist, but the source
+    face authority remains unproven by this heuristic.
+    """
     pdf_path = require_original_3laurel()
     doc = fitz.open(pdf_path)
     page = doc[2]
 
     for room in ("MEDIA", "BED 2", "BED 3", "GARAGE", "LIVING"):
-        assert is_room_enclosed_by_physical_wall_faces(page, room), f"Room {room} must be enclosed"
+        assert not is_room_enclosed_by_physical_wall_faces(page, room), (
+            f"{room}: do not substitute floor paint/annotation for physical wall receipt"
+        )

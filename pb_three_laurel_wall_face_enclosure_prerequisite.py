@@ -19,6 +19,12 @@ from __future__ import annotations
 import fitz
 
 
+# Only original physical wall layers can support a wall-side candidate.
+# CAD annotations, plumbing, joinery, roof and untyped strokes can never
+# become finished wall-face evidence merely because they draw a rectangle.
+_WALL_LAYERS = frozenset({"Enclosure_WallExternal", "Enclosure_WallInternal"})
+
+
 def is_room_enclosed_by_physical_wall_faces(
     page: fitz.Page,
     label: str,
@@ -69,10 +75,15 @@ def is_room_enclosed_by_physical_wall_faces(
         local_fills = 0
         local_curves = 0
         local_thick = 0
-        h_lines: list[tuple[float, float, float]] = []
-        v_lines: list[tuple[float, float, float]] = []
+        h_lines: list[tuple[float, float, float, str]] = []
+        v_lines: list[tuple[float, float, float, str]] = []
 
         for d in drawings:
+            # Never allow a foreign drawing family to supply any of the
+            # four wall faces OR its unrelated local-fill authorization.
+            if str(d.get("layer") or "") not in _WALL_LAYERS:
+                continue
+            scope = str(d.get("source_viewport_id") or d.get("viewport_id") or "")
             r = d.get("rect")
             if r and abs(r.x0 - cx) < search_radius and abs(r.y0 - cy) < search_radius:
                 if d.get("fill") is not None:
@@ -96,9 +107,9 @@ def is_room_enclosed_by_physical_wall_faces(
                     if dx < min_span and dy < min_span:
                         continue
                     if dy <= 1.0 and abs((y1 + y2) / 2.0 - cy) < search_radius:
-                        h_lines.append((min(x1, x2), max(x1, x2), (y1 + y2) / 2.0))
+                        h_lines.append((min(x1, x2), max(x1, x2), (y1 + y2) / 2.0, scope))
                     elif dx <= 1.0 and abs((x1 + x2) / 2.0 - cx) < search_radius:
-                        v_lines.append(((x1 + x2) / 2.0, min(y1, y2), max(y1, y2)))
+                        v_lines.append(((x1 + x2) / 2.0, min(y1, y2), max(y1, y2), scope))
 
         # Reject text-only decoys with zero CAD primitives
         if local_fills == 0 and local_curves == 0 and local_thick == 0:
@@ -142,8 +153,22 @@ def is_room_enclosed_by_physical_wall_faces(
                     and vr[2] >= hb[2] - corner_tol
                 ]
                 if vr_matches:
-                    found = True
-                    break
+                    # Do not join wall sides from independently identified
+                    # floor-plan/elevation/upper-floor viewports.
+                    for vl in vl_matches:
+                        for vr in vr_matches:
+                            scopes = {
+                                row[3]
+                                for row in (ht, hb, vl, vr)
+                                if row[3]
+                            }
+                            if len(scopes) <= 1:
+                                found = True
+                                break
+                        if found:
+                            break
+                    if found:
+                        break
             if found:
                 break
 
