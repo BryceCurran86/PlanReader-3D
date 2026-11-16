@@ -325,6 +325,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             "source_window_footprint_continuity_count": len(outer_wall.window_footprint_bridges),
             "source_garage_door_footprint_continuity_count": len(outer_wall.garage_door_footprint_bridges),
             "source_swing_door_footprint_continuity_count": len(outer_wall.swing_door_footprint_bridges),
+            "source_sliding_door_footprint_continuity_count": len(
+                getattr(outer_wall, "sliding_door_footprint_bridges", ()) or ()
+            ),
+            "source_neutral_grey_wall_seam_count": len(
+                getattr(outer_wall, "neutral_wall_seams", ()) or ()
+            ),
+            "source_sliding_door_continuity_billing_authorized": False,
+            "source_neutral_grey_wall_seam_billing_authorized": False,
             "source_swing_door_footprint_continuity": [
                 bridge.to_dict() for bridge in outer_wall.swing_door_footprint_bridges
             ],
