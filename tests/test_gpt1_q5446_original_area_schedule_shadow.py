@@ -195,9 +195,8 @@ def test_native_6_cannot_be_mutated_into_a_9_or_borrowed_from_another_row():
 
 
 def test_private_original_positive_is_optional_not_mocked():
-    source = os.environ.get("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not source:
-        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: original-positive source gate not run")
+    from tests.original_source_q5446 import require_original_q5446
+    source = str(require_original_q5446())
     report = inspect_original_q5446_printed_area_schedule(source)
     assert report.status == "CANDIDATE", report.reason_codes
     assert report.actual_source_sha256 == SOURCE_SHA256

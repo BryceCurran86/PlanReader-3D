@@ -126,9 +126,8 @@ def test_preserved_source_primitive_ids_never_filtered_even_if_in_negative_run()
 
 
 def test_original_q5446_page_1_drops_below_cap_under_typed_negative_filter():
-    p = Path("C:/Users/bryce/PlanReader-3D/documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
-    if not p.is_file():
-        pytest.skip("Original Q5446 PDF unavailable")
+    from tests.original_source_q5446 import require_original_q5446
+    p = require_original_q5446()
     doc = fitz.open(p)
     page = doc[0]
     native = extract_native_page(page)
@@ -151,9 +150,8 @@ def test_original_q5446_page_1_drops_below_cap_under_typed_negative_filter():
 
 
 def test_original_q5446_wall_scope_resolves_under_typed_negative_shadow():
-    p = Path("C:/Users/bryce/PlanReader-3D/documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
-    if not p.is_file():
-        pytest.skip("Original Q5446 PDF unavailable")
+    from tests.original_source_q5446 import require_original_q5446
+    p = require_original_q5446()
     pdf_bytes = p.read_bytes()
 
     source = SourceVisibilityProducer(

@@ -17,7 +17,9 @@ from pb_gpt1_q5446_alfresco_original_customer import (
 )
 from pb_gptmax_q5446_original_tiled_floor_customer import (
     OriginalQ5446TiledFloorCustomerResult,
+    issue_original_q5446_first_ensuite_tiled_floor,
     issue_original_q5446_ground_ensuite_tiled_floor,
+    issue_original_q5446_ground_laundry_tiled_floor,
 )
 from pb_gpt1_q5446_source_declared_area_firm_handoff import (
     Q5446_PROJECT_ID, Q5446_DOCUMENT_ID,
@@ -151,6 +153,91 @@ def issue_original_q5446_alfresco_plus_ensuite_customer(
         source_role_coverage_verified=False,
         original_alfresco=previous,
         original_tiled_room=candidate,
+        combined_sealed_run=combined,
+        customer_rows=rows,
+    )
+
+
+@dataclass(frozen=True)
+class Q5446MultiRoomTiledCustomerResult:
+    status: str
+    reason_codes: tuple[str, ...]
+    source_role_coverage_verified: bool = False
+    original_alfresco: OriginalQ5446AlfrescoCustomerResult | None = None
+    tiled_rooms: tuple[OriginalQ5446TiledFloorCustomerResult, ...] = ()
+    combined_sealed_run: SealedSourceClosedRun | None = None
+    customer_rows: tuple[dict[str, Any], ...] = ()
+
+
+def issue_original_q5446_alfresco_plus_tiled_floors_customer(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> Q5446MultiRoomTiledCustomerResult:
+    """Combine independently source-closed Q5446 ALFRESCO + 3 verified tiled floor rooms."""
+    if type(workspace_id) is not int or workspace_id <= 0:
+        return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("authenticated_workspace_unavailable",))
+    if not isinstance(original_plan, (str, Path)):
+        return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_plan_path_unavailable",))
+
+    alf = issue_original_q5446_alfresco_customer_area(
+        str(original_plan), workspace_id=workspace_id,
+    )
+    if (
+        not isinstance(alf, OriginalQ5446AlfrescoCustomerResult)
+        or alf.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+        or alf.quantity is None
+        or alf.sealed_run is None
+        or len(alf.customer_rows) != 1
+    ):
+        return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_alfresco_signed_customer_retention_unavailable",))
+
+    ens1 = issue_original_q5446_ground_ensuite_tiled_floor(
+        original_plan, original_inclusions, original_sales_advice, workspace_id=workspace_id,
+    )
+    ldry1 = issue_original_q5446_ground_laundry_tiled_floor(
+        original_plan, original_inclusions, original_sales_advice, workspace_id=workspace_id,
+    )
+    ens2 = issue_original_q5446_first_ensuite_tiled_floor(
+        original_plan, original_inclusions, original_sales_advice, workspace_id=workspace_id,
+    )
+    tiled = (ens1, ldry1, ens2)
+    seen_qids = {alf.quantity.quantity_id}
+    seen_entities = set(alf.quantity.input_entity_ids)
+    for item in tiled:
+        if (
+            not isinstance(item, OriginalQ5446TiledFloorCustomerResult)
+            or item.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+            or item.quantity is None
+            or item.sealed_run is None
+            or len(item.customer_rows) != 1
+            or item.quantity.quantity_id in seen_qids
+            or seen_entities.intersection(item.quantity.input_entity_ids)
+        ):
+            return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_tiled_floor_signed_customer_retention_unavailable",))
+        seen_qids.add(item.quantity.quantity_id)
+        seen_entities.update(item.quantity.input_entity_ids)
+
+    try:
+        combined = combine_source_closed_runs(
+            (alf.sealed_run, *(t.sealed_run for t in tiled if t.sealed_run is not None)),
+            project_id=Q5446_PROJECT_ID,
+        )
+        rows = (*alf.customer_rows, *(r for t in tiled for r in t.customer_rows))
+        verified = verify_sealed_customer_output(combined, rows)
+        if len(combined.quantities) != 4 or verified.customer_row_count != 4:
+            return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("combined_original_family_retention_unavailable",))
+    except (ValueError, RuntimeError, TypeError, KeyError, SourceClosedRunConflictError):
+        return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("combined_original_family_seal_or_customer_conflict",))
+
+    return Q5446MultiRoomTiledCustomerResult(
+        status="MULTI_ROOM_SOURCE_FAMILIES_CUSTOMER_VERIFIED",
+        reason_codes=("original_alfresco_and_three_tiled_rooms_distinct_physical_owners",),
+        source_role_coverage_verified=False,
+        original_alfresco=alf,
+        tiled_rooms=tiled,
         combined_sealed_run=combined,
         customer_rows=rows,
     )

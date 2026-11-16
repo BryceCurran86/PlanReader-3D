@@ -28,9 +28,8 @@ def test_unauthenticated_pdf_cannot_claim_original_sheet_title():
 
 
 def test_original_vector_source_positive_but_no_producer_role_promotion():
-    source = Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
-    if not source.is_file():
-        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: no original proof")
+    from tests.original_source_q5446 import require_original_q5446
+    source = require_original_q5446()
     from hashlib import sha256
     pdf = source.read_bytes()
     assert sha256(pdf).hexdigest() == SHA

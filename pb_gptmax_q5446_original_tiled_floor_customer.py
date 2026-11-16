@@ -55,19 +55,122 @@ def _blocked(reason: str) -> OriginalQ5446TiledFloorCustomerResult:
     return OriginalQ5446TiledFloorCustomerResult("ABSTAIN", (reason,))
 
 
-def issue_original_q5446_ground_ensuite_tiled_floor(
+def _decode_vector_digit(rec: dict[str, Any], vertical: bool) -> str | None:
+    if rec.get("type") != "s" or rec.get("color") != (0.0, 0.0, 0.0):
+        return None
+    w_stroke = rec.get("width")
+    if not isinstance(w_stroke, (int, float)) or abs(float(w_stroke) - 0.72) > 0.05:
+        return None
+    r = rec.get("rect")
+    if r is None:
+        return None
+    w, h = float(r.x1 - r.x0), float(r.y1 - r.y0)
+    items = rec.get("items")
+    if not isinstance(items, (tuple, list)) or not items or items[0][0] != "l":
+        return None
+    n = len(items)
+    if vertical:
+        if not (5.4 < w < 6.2 and 1.0 < h < 4.2):
+            return None
+        if n == 3 and h < 2.0:
+            return "1"
+        if n == 3 and h >= 3.4:
+            return "4"
+    else:
+        if not (1.0 < w < 4.2 and 5.4 < h < 6.2):
+            return None
+        if n == 3 and w < 2.0:
+            return "1"
+        if n == 3 and w >= 3.0:
+            return "4"
+    if n == 13:
+        return "2"
+    if n == 14:
+        return "3"
+    if n == 16:
+        return "0"
+    if n == 28:
+        return "8"
+    return None
+
+
+def _corroborate_same_page_room_figure_scale(
+    drawings: list[dict[str, Any]],
+    face: NativeTiledRoomFace,
+    mm_per_pt_x: float,
+    mm_per_pt_y: float,
+) -> tuple[int, ...] | None:
+    x0, y0, x1, y1 = face.source_bbox_pts
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    h_groups: dict[float, list[tuple[float, int, str, float, float]]] = {}
+    v_groups: dict[float, list[tuple[float, int, str, float, float]]] = {}
+    for pid, rec in enumerate(drawings):
+        r = rec.get("rect")
+        if r is None:
+            continue
+        dh = _decode_vector_digit(rec, False)
+        if dh is not None:
+            h_groups.setdefault(round(float(r.y0), 1), []).append(
+                (float(r.x0), pid, dh, float(r.x0), float(r.x1))
+            )
+        dv = _decode_vector_digit(rec, True)
+        if dv is not None:
+            v_groups.setdefault(round(float(r.x0), 1), []).append(
+                (-float(r.y0), pid, dv, float(r.y0), float(r.y1))
+            )
+    matched_h: tuple[int, ...] | None = None
+    for row in h_groups.values():
+        row.sort()
+        for i in range(len(row) - 3):
+            window = row[i:i + 4]
+            if any(window[j + 1][1] != window[j][1] + 1 for j in range(3)):
+                continue
+            gx0, gx1 = min(w[3] for w in window), max(w[4] for w in window)
+            if abs((gx0 + gx1) / 2.0 - cx) > 1.0:
+                continue
+            val_mm = int("".join(w[2] for w in window))
+            if val_mm > 0 and abs((val_mm / face.finished_width_pts) / mm_per_pt_x - 1.0) <= 0.01:
+                matched_h = tuple(w[1] for w in window)
+                break
+        if matched_h is not None:
+            break
+    matched_v: tuple[int, ...] | None = None
+    for col in v_groups.values():
+        col.sort()
+        for i in range(len(col) - 3):
+            window = col[i:i + 4]
+            if any(window[j + 1][1] != window[j][1] + 1 for j in range(3)):
+                continue
+            gy0, gy1 = min(w[3] for w in window), max(w[4] for w in window)
+            if abs((gy0 + gy1) / 2.0 - cy) > 1.0:
+                continue
+            val_mm = int("".join(w[2] for w in window))
+            if val_mm > 0 and abs((val_mm / face.finished_depth_pts) / mm_per_pt_y - 1.0) <= 0.01:
+                matched_v = tuple(w[1] for w in window)
+                break
+        if matched_v is not None:
+            break
+    if matched_h is None or matched_v is None:
+        return None
+    return (*matched_h, *matched_v)
+
+
+def _issue_original_q5446_native_tiled_floor(
     original_plan: str | Path,
     original_inclusions: str | Path,
     original_sales_advice: str | Path,
     *,
     workspace_id: int = 1,
+    page_number: int = 1,
+    room_label: str = "ENS",
+    required_material_scope: str = "bathroom_and_ensuite_floor_tiles",
+    missing_material_reason: str = "authentic_ensuite_tiled_material_scope_unavailable",
+    missing_face_reason: str = "source_tiled_ensuite_finished_face_unavailable",
+    page_role: str = "ground_floor_plan",
+    viewport_id: str = "original_ground_floor_vector_plan",
+    element: str = "Ground-floor ensuite floor tiles",
+    location: str = "Ground-floor ensuite",
 ) -> OriginalQ5446TiledFloorCustomerResult:
-    """One source-verified room only, through ORIGINAL signed/customer adapters.
-
-    No benchmark value/ID and no caller OCR/geometry/metric claim enters here.
-    A different revision, absent finish source, ambiguous source face, missing
-    source-native scale, unsupported label, or lost commercial lineage ABSTAINS.
-    """
     if type(workspace_id) is not int or workspace_id <= 0:
         return _blocked("authenticated_workspace_unavailable")
     try:
@@ -94,26 +197,26 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
     ))
     if (
         finish.status != "SUPPORTING_SOURCE_CORROBORATED_NO_QUANTITY"
-        or "bathroom_and_ensuite_floor_tiles" not in finish.corroborated_material_scopes
+        or required_material_scope not in finish.corroborated_material_scopes
         or finish.authentic_finished_face_area is not False
         or finish.authenticated_customer_quantity is not False
     ):
-        return _blocked("authentic_ensuite_tiled_material_scope_unavailable")
+        return _blocked(missing_material_reason)
 
     try:
         with fitz.open(stream=payload, filetype="pdf") as document:
             if len(document) != 10:
                 return _blocked("source_plan_page_roster_unavailable")
-            page = document[0]
-            drawings = page.get_drawings()
-            if len(drawings) > 20_000:
+            page1 = document[0]
+            drawings1 = page1.get_drawings()
+            if len(drawings1) > 20_000:
                 return _blocked("source_primitive_cap")
             # Existing accepted original source figure+physical scope on THIS
-            # page is the independent mm/pt calibration. No assumed scale.
-            figured = original_alfresco_figure_witness(drawings)
+            # plan set is the independent mm/pt calibration. No assumed scale.
+            figured = original_alfresco_figure_witness(drawings1)
             footprint = (
                 corroborate_source_labeled_rectangular_footprint(
-                    drawings,
+                    drawings1,
                     source_label_path_ids=PLAN_ALFRESCO_LABEL_PATHS,
                     figured_width_mm=figured.horizontal_mm,
                     figured_depth_mm=figured.vertical_mm,
@@ -139,9 +242,24 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
                 or abs(mm_per_pt_x / mm_per_pt_y - 1.0) > 0.01
             ):
                 return _blocked("original_source_figured_scale_conflict")
+            target_page = document[page_number - 1]
+            target_drawings = target_page.get_drawings() if page_number != 1 else drawings1
+            if page_number != 1:
+                if target_page.rect != page1.rect:
+                    return _blocked("original_scale_invalid")
+                if len(target_drawings) > 20_000:
+                    return _blocked("source_primitive_cap")
             face = find_unique_native_tiled_room_face(
-                page=page, page_number=1, room_label="ENS",
+                page=target_page, page_number=page_number, room_label=room_label,
             )
+            same_page_scale_pids: tuple[int, ...] = ()
+            if page_number != 1 and isinstance(face, NativeTiledRoomFace):
+                corroborated_pids = _corroborate_same_page_room_figure_scale(
+                    target_drawings, face, mm_per_pt_x, mm_per_pt_y,
+                )
+                if corroborated_pids is None:
+                    return _blocked("original_same_page_figured_scale_unavailable")
+                same_page_scale_pids = corroborated_pids
     except (RuntimeError, OSError, ValueError, TypeError, KeyError, IndexError):
         return _blocked("source_native_face_extraction_unavailable")
 
@@ -149,12 +267,12 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
         not isinstance(face, NativeTiledRoomFace)
         or not face.physical_source_verified
         or face.commercial_permission
-        or face.room_label != "ENS"
-        or face.page_number != 1
+        or face.room_label != room_label
+        or face.page_number != page_number
         or not face.wall_support_source_path_ids
         or not face.hatch_support_source_path_ids
     ):
-        return _blocked("source_tiled_ensuite_finished_face_unavailable")
+        return _blocked(missing_face_reason)
 
     width_m = face.finished_width_pts * mm_per_pt_x / 1000.0
     depth_m = face.finished_depth_pts * mm_per_pt_y / 1000.0
@@ -167,22 +285,28 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
 
     # Source IDs are constructed ONLY from the actual original PDF path
     # indices, not from a benchmark item ID, prewritten answer or room bbox.
-    def plan_path(idx: int) -> str:
+    def scale_plan_path(idx: int) -> str:
         return f"q5446_original_{SOURCE_SHA256[:20]}_p1_path_{idx}"
 
-    boundary_ids = (plan_path(face.source_boundary_path_id),)
-    wall_ids = tuple(plan_path(i) for i in face.wall_support_source_path_ids)
-    hatch_ids = tuple(plan_path(i) for i in face.hatch_support_source_path_ids)
-    scale_ids = tuple(plan_path(i) for i in (
-        *figured.source_vector_path_ids, *footprint.boundary_source_path_ids,
-        *footprint.connector_source_path_ids,
-    ))
+    def face_plan_path(idx: int) -> str:
+        return f"q5446_original_{SOURCE_SHA256[:20]}_p{page_number}_path_{idx}"
+
+    boundary_ids = (face_plan_path(face.source_boundary_path_id),)
+    wall_ids = tuple(face_plan_path(i) for i in face.wall_support_source_path_ids)
+    hatch_ids = tuple(face_plan_path(i) for i in face.hatch_support_source_path_ids)
+    scale_ids = (
+        *(scale_plan_path(i) for i in (
+            *figured.source_vector_path_ids, *footprint.boundary_source_path_ids,
+            *footprint.connector_source_path_ids,
+        )),
+        *(face_plan_path(i) for i in same_page_scale_pids),
+    )
     source_roles = tuple(
         f"original_support_pdf_sha256_{sha}" for sha in finish.source_sha256s
     )
     physical_id = stable_contract_id(
         "original_source_native_tiled_finished_room_face",
-        {"document": SOURCE_SHA256, "page": 1, "room": face.room_label,
+        {"document": SOURCE_SHA256, "page": page_number, "room": face.room_label,
          "boundary": boundary_ids, "walls": list(wall_ids),
          "hatch": list(hatch_ids),
          "raster_render_dpis": face.raster_ocr_render_dpis},
@@ -212,9 +336,9 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
             "revision_id": Q5446_ORIGINAL_REVISION_ID,
             "source_sha256": SOURCE_SHA256,
             "workspace_id": workspace_id,
-            "source_page": "1",
-            "original_source_page_role": "ground_floor_plan",
-            "room_label": "ENS",
+            "source_page": str(page_number),
+            "original_source_page_role": page_role,
+            "room_label": room_label,
             "finished_floor_face_source_id": physical_id,
             "source_face_boundary_path_ids": list(boundary_ids),
             "original_scale_source_path_ids": list(scale_ids),
@@ -229,8 +353,8 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
             "tiled_floor_finish_authorized": True,
             "inclusion_status": "INCLUSION",
             "section": "Internal",
-            "element": "Ground-floor ensuite floor tiles",
-            "location": "Ground-floor ensuite",
+            "element": element,
+            "location": location,
             "substrate": "Unspecified",
             "finish_system": "tile",
             "row_role": "floor_area",
@@ -243,8 +367,8 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
         project_id=Q5446_PROJECT_ID,
         document_id=Q5446_DOCUMENT_ID,
         source_sha256=SOURCE_SHA256,
-        source_page="1",
-        viewport_id="original_ground_floor_vector_plan",
+        source_page=str(page_number),
+        viewport_id=viewport_id,
         revision_id=Q5446_ORIGINAL_REVISION_ID,
         current_revision_id=Q5446_ORIGINAL_REVISION_ID,
         evidence_ids=evidence,
@@ -270,7 +394,7 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
             metadata={
                 "source": "original_native_finished_face_calibrated_from_figured_plan",
                 "metric_authority": "source_native_metric",
-                "room_label": "ENS",
+                "room_label": room_label,
                 "source_label_dpis": face.raster_ocr_render_dpis,
             },
         )
@@ -288,4 +412,84 @@ def issue_original_q5446_ground_ensuite_tiled_floor(
         "FIRM_SOURCE_CUSTOMER_TO_REVIEW",
         ("source_owned_native_tiled_finished_face_and_material_correspondence",),
         quantity, trace, sealed, rows,
+    )
+
+
+def issue_original_q5446_ground_ensuite_tiled_floor(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalQ5446TiledFloorCustomerResult:
+    """One source-verified room only, through ORIGINAL signed/customer adapters.
+
+    No benchmark value/ID and no caller OCR/geometry/metric claim enters here.
+    A different revision, absent finish source, ambiguous source face, missing
+    source-native scale, unsupported label, or lost commercial lineage ABSTAINS.
+    """
+    return _issue_original_q5446_native_tiled_floor(
+        original_plan,
+        original_inclusions,
+        original_sales_advice,
+        workspace_id=workspace_id,
+        page_number=1,
+        room_label="ENS",
+        required_material_scope="bathroom_and_ensuite_floor_tiles",
+        missing_material_reason="authentic_ensuite_tiled_material_scope_unavailable",
+        missing_face_reason="source_tiled_ensuite_finished_face_unavailable",
+        page_role="ground_floor_plan",
+        viewport_id="original_ground_floor_vector_plan",
+        element="Ground-floor ensuite floor tiles",
+        location="Ground-floor ensuite",
+    )
+
+
+def issue_original_q5446_ground_laundry_tiled_floor(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalQ5446TiledFloorCustomerResult:
+    """Issue source-verified Q5446 ground-floor laundry tiled floor customer quantity."""
+    return _issue_original_q5446_native_tiled_floor(
+        original_plan,
+        original_inclusions,
+        original_sales_advice,
+        workspace_id=workspace_id,
+        page_number=1,
+        room_label="LDRY",
+        required_material_scope="laundry_floor_tiles",
+        missing_material_reason="authentic_laundry_tiled_material_scope_unavailable",
+        missing_face_reason="source_tiled_laundry_finished_face_unavailable",
+        page_role="ground_floor_plan",
+        viewport_id="original_ground_floor_vector_plan",
+        element="Ground-floor laundry floor tiles",
+        location="Ground-floor laundry",
+    )
+
+
+def issue_original_q5446_first_ensuite_tiled_floor(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalQ5446TiledFloorCustomerResult:
+    """Issue source-verified Q5446 first-floor ensuite tiled floor customer quantity."""
+    return _issue_original_q5446_native_tiled_floor(
+        original_plan,
+        original_inclusions,
+        original_sales_advice,
+        workspace_id=workspace_id,
+        page_number=2,
+        room_label="ENS",
+        required_material_scope="bathroom_and_ensuite_floor_tiles",
+        missing_material_reason="authentic_ensuite_tiled_material_scope_unavailable",
+        missing_face_reason="source_tiled_ensuite_finished_face_unavailable",
+        page_role="first_floor_plan",
+        viewport_id="original_first_floor_vector_plan",
+        element="First-floor ensuite floor tiles",
+        location="First-floor ensuite",
     )

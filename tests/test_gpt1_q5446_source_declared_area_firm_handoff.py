@@ -162,9 +162,8 @@ def test_scheduled_numeric_and_label_glyphs_must_be_distinct_original_source_pat
 
 
 def test_original_sha_positive_issues_five_firm_source_area_receipts_only():
-    private = os.environ.get("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not private:
-        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: no FIRM source-positive test in public CI")
+    from tests.original_source_q5446 import require_original_q5446
+    private = str(require_original_q5446())
     report = issue_original_q5446_scheduled_area_handoff(
         private, workspace_id=12,
     )

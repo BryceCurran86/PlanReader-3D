@@ -34,18 +34,30 @@ def title_from_ocr_text(text: str, expected: str) -> str | None:
 
 def _ocr_cropped_native_title(page) -> str:
     crop = page.get_pixmap(matrix=fitz.Matrix(3, 3), clip=SHEET_TITLE, alpha=False)
+    png_bytes = crop.tobytes("png")
     try:
         call = subprocess.run(
             ["tesseract", "stdin", "stdout", "--psm", "6"],
-            input=crop.tobytes("png"), capture_output=True, timeout=15, check=False,
+            input=png_bytes, capture_output=True, timeout=15, check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        if not call.returncode:
+            return call.stdout.decode("utf-8", errors="replace")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    try:
+        import io
+        from PIL import Image
+        from pb_portable_raster_ocr_authority import RapidOCRBackend
+        ocr = RapidOCRBackend()
+        if ocr.is_available():
+            image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            lines = ocr.extract_lines(image, dpi=216)
+            return "\n".join(line.text for line in lines if line.text)
+    except Exception as exc:
         raise RuntimeError(
             "bounded title OCR unavailable; source page role must abstain"
         ) from exc
-    if call.returncode:
-        raise RuntimeError("bounded title OCR failed; source page role must abstain")
-    return call.stdout.decode("utf-8", errors="replace")
+    raise RuntimeError("bounded title OCR failed; source page role must abstain")
 
 
 def source_title_candidates(original_pdf: bytes, *, ocr=_ocr_cropped_native_title):

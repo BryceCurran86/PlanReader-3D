@@ -33,9 +33,8 @@ def test_invalid_workspace_does_not_write_source_handoff(tmp_path):
 
 
 def test_original_positive_cli_private_receipt_is_not_customer_or_benchmark(tmp_path):
-    original = os.environ.get("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
-    if not original:
-        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: cannot certify source replay")
+    from tests.original_source_q5446 import require_original_q5446
+    original = str(require_original_q5446())
     dest = tmp_path / "q5446_architecture_source_sealed_run.json"
     assert main([
         "--source-pdf", original,
