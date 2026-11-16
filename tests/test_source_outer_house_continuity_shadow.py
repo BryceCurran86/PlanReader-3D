@@ -87,7 +87,10 @@ def test_unique_alfresco_label_excludes_only_that_bar():
     words = ((620, 99, 680, 104, "ALFRESCO"), (820, 99, 860, 104, "BED5"))
     outdoor_role, _ = classify_outside_envelope_role(outdoor, drawings, words)
     house_role, _ = classify_outside_envelope_role(house, drawings, words)
-    assert outdoor_role == ROLE_OUTDOOR
+    # The printed ALFRESCO label identifies the outdoor space, not the
+    # physically painted exterior wall face beside that space.
+    assert outdoor_role == ROLE_STRUCTURAL
+    assert bar_proven_outside_envelope(outdoor, drawings, words) is False
     assert house_role in {ROLE_STRUCTURAL, ROLE_UNPROVEN}
     assert bar_proven_outside_envelope(house, drawings, words) is False
 
@@ -186,3 +189,57 @@ def test_rejected_left_loop_keeps_4373_census_and_right_house():
     assert census["left_only_closed_loop_rejected"] is True
     assert census["naive_x_filter_applied"] is False
     assert census["measurement_authorized"] is False
+
+
+def test_true_master_bed_exterior_wall_beside_porch_text_is_not_discarded():
+    # Original 3Laurel top master-bedroom wall lies near a PORCH annotation.
+    # Label proximity must not remove its physical Enclosure_WallExternal ink.
+    bar = _strip(0, (884.629, 189.637, 989.511, 192.431))
+    drawings = (_drawing("Enclosure_WallExternal"),)
+    words = ((960, 188, 985, 193, "PORCH"),)
+    role, reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_STRUCTURAL
+    assert reason == "original_source_wall_kept_despite_outdoor_text"
+    assert bar_proven_outside_envelope(bar, drawings, words) is False
+
+
+def test_unknown_layer_outdoor_label_is_not_physical_exclusion_proof():
+    bar = _strip(0, (100, 100, 200, 103))
+    drawings = (_drawing("UnlabelledNativePaths"),)
+    words = ((110, 99, 150, 104, "ALFRESCO"),)
+    role, reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_UNPROVEN
+    assert reason == "outdoor_name_alone_does_not_exclude_wall"
+    assert bar_proven_outside_envelope(bar, drawings, words) is False
+
+
+def test_independent_roof_site_layer_can_still_exclude_non_wall_ink():
+    bar = _strip(0, (100, 100, 200, 103))
+    drawings = (_drawing("Site_Roof_Outline"),)
+    words = ((110, 99, 150, 104, "ALFRESCO"),)
+    role, reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_OUTDOOR
+    assert reason.startswith("source_exclusion_")
+    assert bar_proven_outside_envelope(bar, drawings, words) is True
+
+
+def test_composite_with_a_real_wall_owner_cannot_be_discarded_as_roof():
+    bar = SimpleNamespace(
+        polygon=box(100, 100, 200, 103),
+        path_index=0,
+        native_path_indices=lambda: (0, 1),
+    )
+    drawings = (_drawing("Site_Roof_Outline"), _drawing("Enclosure_WallExternal"))
+    words = ((110, 99, 150, 104, "ALFRESCO"),)
+    role, _reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_STRUCTURAL
+    assert bar_proven_outside_envelope(bar, drawings, words) is False
+
+
+def test_post_label_next_to_long_wall_does_not_turn_wall_into_post():
+    bar = _strip(0, (100, 100, 200, 103))
+    drawings = (_drawing("Enclosure_WallExternal"),)
+    words = ((110, 99, 145, 104, "POST"),)
+    role, _reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_STRUCTURAL
+    assert bar_proven_outside_envelope(bar, drawings, words) is False
