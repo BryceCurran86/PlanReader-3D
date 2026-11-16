@@ -340,6 +340,7 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
         str(b.label_text).strip().upper()
         for b in attempt.sliding_door_footprint_bridges
     }
+    assert all(lbl.startswith(("ASD", "ASSD")) for lbl in labels)
     assert any(lbl.startswith("ASD") for lbl in labels)
     assert any(lbl.startswith("ASSD") for lbl in labels)
     assert walk is not None
