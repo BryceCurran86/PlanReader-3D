@@ -278,6 +278,19 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 color=(0.77, 0.50, 0.03), fill=(0.99, 0.79, 0.21),
                 fill_opacity=0.22, width=2.2,
             )
+        # Purple identifies an original annotated PARTY wall candidate.
+        # This can separate two dwelling rooms INSIDE ONE building envelope;
+        # its inside-face loop MUST NOT become the outside footprint.
+        # Native wall ink + nearby PARTY WALL annotation + occupied zones
+        # on BOTH sides are required; still no authoritative building ring.
+        for divider in outer_wall.shared_dwelling_divider_candidates:
+            canvas.draw_rect(
+                fitz.Rect(*divider.wall_bounds_pdf_pts),
+                color=(0.55, 0.11, 0.77),
+                fill=(0.68, 0.34, 0.91),
+                fill_opacity=0.13,
+                width=2.8,
+            )
         # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
         # applied to native geometry and never counted as physical walls.
         for ax,ay,bx,by,distance in (
@@ -345,6 +358,21 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             ),
             "external_wall_bands_outside_rejected_loop":
                 outer_wall.diagnostic_wall_bands_outside_loop,
+            # One source building may contain multiple dwellings; a party
+            # wall is NOT the outside boundary of the shared envelope.
+            "building_scope": "one_building_multiple_dwelling_zones_candidate"
+            if outer_wall.shared_dwelling_divider_candidates
+            else "unresolved",
+            "source_shared_dwelling_divider_candidate_count": len(
+                outer_wall.shared_dwelling_divider_candidates
+            ),
+            "source_shared_dwelling_divider_candidates": [
+                divider.to_dict()
+                for divider in outer_wall.shared_dwelling_divider_candidates
+            ],
+            "source_party_wall_bounded_unit_loop_count": outer_wall.diagnostic_party_wall_bounded_unit_loops,
+            "shared_dwelling_building_footprint_authenticated": False,
+            "shared_dwelling_party_wall_billing_authorized": False,
             "external_source_path_ids_outside_rejected_loop_sample": list(
                 outer_wall.diagnostic_outside_source_path_sample
             ),
