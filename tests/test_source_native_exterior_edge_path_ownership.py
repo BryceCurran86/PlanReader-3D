@@ -174,3 +174,74 @@ def test_foreign_sha_still_does_not_publish_area_from_ownership():
     )
     assert all(edge.commercial_publishable is False for edge in owned)
     assert all(edge.can_issue_area is False for edge in owned)
+
+
+def test_partial_source_closure_at_gap_midpoint_cannot_authorize_whole_span():
+    """An actual 2pt frame inside a 20pt unresolved gap is not a 20pt door."""
+    from types import SimpleNamespace
+
+    from pb_source_native_exterior_edge_path_ownership import (
+        _closure_covers_edge,
+        enrich_open_to_exterior_span,
+    )
+
+    witness = {
+        "horizontal": True,
+        "band_pdf_pts": (100.0, 102.0),
+        "gap_interval_pdf_pts": (10.0, 30.0),
+        "adjacent_wall_native_path_indices": (),
+        "left_wall_native_path_indices": (),
+        "right_wall_native_path_indices": (),
+        "source_path_side_partition_proven": True,
+    }
+    partial = SimpleNamespace(
+        horizontal=True, band=(100.0, 102.0), gap_interval=(19.0, 21.0),
+    )
+    receipt = enrich_open_to_exterior_span((), witness, closures=(partial,))
+    assert receipt.missing_jamb_opening_evidence is True
+    assert receipt.swing_or_slider_or_stroke_witness is False
+    assert receipt.can_issue_area is False
+    assert not _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (partial,))
+    assert not _closure_covers_edge((30.0, 101.0), (10.0, 101.0), (partial,))
+
+
+def test_full_source_closure_covers_gap_both_directions_without_minting_area():
+    from types import SimpleNamespace
+
+    from pb_source_native_exterior_edge_path_ownership import (
+        _closure_covers_edge,
+        enrich_open_to_exterior_span,
+    )
+
+    horizontal = SimpleNamespace(
+        horizontal=True, band=(100.0, 102.0), gap_interval=(10.0, 30.0),
+    )
+    assert _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (horizontal,))
+    assert _closure_covers_edge((30.0, 101.0), (10.0, 101.0), (horizontal,))
+    witness = {
+        "horizontal": True,
+        "band_pdf_pts": (100.0, 102.0),
+        "gap_interval_pdf_pts": (10.0, 30.0),
+        "adjacent_wall_native_path_indices": (),
+        "left_wall_native_path_indices": (),
+        "right_wall_native_path_indices": (),
+    }
+    receipt = enrich_open_to_exterior_span((), witness, closures=(horizontal,))
+    assert receipt.swing_or_slider_or_stroke_witness is True
+    assert receipt.missing_jamb_opening_evidence is False
+    assert receipt.can_issue_area is False
+    vertical = SimpleNamespace(
+        horizontal=False, band=(40.0, 42.0), gap_interval=(10.0, 30.0),
+    )
+    assert _closure_covers_edge((41.0, 10.0), (41.0, 30.0), (vertical,))
+    assert not _closure_covers_edge((41.0, 5.0), (41.0, 30.0), (vertical,))
+
+
+def test_separate_partial_source_closures_do_not_union_into_opening_authority():
+    from types import SimpleNamespace
+
+    from pb_source_native_exterior_edge_path_ownership import _closure_covers_edge
+
+    left = SimpleNamespace(horizontal=True, band=(100., 102.), gap_interval=(10., 20.))
+    right = SimpleNamespace(horizontal=True, band=(100., 102.), gap_interval=(20., 30.))
+    assert not _closure_covers_edge((10., 101.), (30., 101.), (left, right))
