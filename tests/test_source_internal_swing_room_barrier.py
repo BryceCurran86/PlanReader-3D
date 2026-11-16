@@ -7,7 +7,32 @@ from pb_source_internal_swing_room_barrier import (
 from pb_source_swing_door_footprint_continuity import (
     detect_exterior_swing_door_footprint_bridges as detect_external,
 )
-from tests.test_source_swing_door_footprint_continuity import horizontal, arc
+def wall(bounds, fill=0.0, layer="Enclosure_WallExternal"):
+    return {
+        "layer": layer, "rect": fitz.Rect(*bounds),
+        "fill": (fill, fill, fill), "items": (),
+    }
+
+
+def arc(points, layer="Enclosure_WallExternal"):
+    return {
+        "layer": layer,
+        "rect": fitz.Rect(
+            min(p[0] for p in points), min(p[1] for p in points),
+            max(p[0] for p in points), max(p[1] for p in points),
+        ),
+        "fill": None,
+        "items": (("c", *(fitz.Point(*p) for p in points)),),
+    }
+
+
+def horizontal():
+    return [
+        wall((0, 20, 5, 22.5)), wall((30, 20, 35, 22.5)),
+        arc(((5.85, -3.6), (18.7, -3.6), (29.15, 6.85), (29.15, 19.7))),
+        wall((5, 19.7, 5.85, 22.2), fill=1),
+        wall((29.15, 19.7, 30, 22.2), fill=1),
+    ]
 
 
 def internal_door():
