@@ -18,11 +18,11 @@ from pb_opening_host_frame_authority import OpeningHostFrameProducer
 from pb_source_observation_authority import ObservationSelector
 
 
-def test_lot16_south_wall_frame_continuity():
-    pdf_path = Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
-    if not pdf_path.exists():
-        pytest.skip("Private Lot 16 original PDF not available in local workspace")
+from tests.original_source_lot16 import require_original_lot16
 
+
+def test_lot16_south_wall_frame_continuity():
+    pdf_path = require_original_lot16()
     source_bytes = pdf_path.read_bytes()
     source_sha = hashlib.sha256(source_bytes).hexdigest()
     assert source_sha == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
