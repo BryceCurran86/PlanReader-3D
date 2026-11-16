@@ -341,6 +341,15 @@ def walk_source_unbounded_building_face(
         from pb_source_outer_house_continuity_shadow import (
             ROLE_OUTDOOR, ROLE_POST, classify_outside_envelope_role,
         )
+        from pb_source_native_exterior_endpoint_authority_shadow import (
+            ROLE_EXCLUSION, classify_source_native_path_role,
+        )
+        from pb_source_sheet_frame_roles_shadow import (
+            source_sheet_frame_nonwall_path_ids,
+        )
+        sheet_nonwall = source_sheet_frame_nonwall_path_ids(
+            source_drawings, source_words,
+        )
         for bar, (geom, ids) in outside:
             # A stale/partial native-path index or conflicting viewport
             # makes the candidate unresolved. Never trust one excluded
@@ -368,6 +377,14 @@ def walk_source_unbounded_building_face(
                 bar, source_drawings, source_words,
             )
             if role in (ROLE_OUTDOOR, ROLE_POST):
+                excluded_nonwall += 1
+            elif sheet_nonwall and all(
+                idx in sheet_nonwall
+                or classify_source_native_path_role(source_drawings[idx]) == ROLE_EXCLUSION
+                for idx in ids
+            ):
+                # A layerless sheet frame + annotation composite is neither
+                # a house wall nor an excuse to drop a mixed physical owner.
                 excluded_nonwall += 1
             else:
                 unresolved.append((bar, ids))
