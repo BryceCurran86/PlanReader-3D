@@ -78,6 +78,15 @@ def test_window_not_silent_slider_and_competing_window_label_blocks_join():
     assert detect(d, [(19, 6, 24, 10, "ASD"), (19, 6, 24, 10, "ASW")]) == ()
 
 
+def test_figured_two_digit_dimension_does_not_block_unique_asd():
+    d = _horizontal()
+    rows = detect(d, [(19, 6, 24, 10, "ASD"), (19, 11, 22, 14, "21")])
+    assert len(rows) == 1
+    assert rows[0].label_text == "ASD"
+    assert rows[0].measurement_authorized is False
+    assert rows[0].physical_wall_authenticated is False
+
+
 def test_source_viewport_collision_and_intervening_wall_fail_closed():
     d = _horizontal()
     d[0]["viewport_id"] = "floor-plan"

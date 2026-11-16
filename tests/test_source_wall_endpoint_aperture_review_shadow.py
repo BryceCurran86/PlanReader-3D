@@ -330,6 +330,12 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
     assert review.source_hosted_aperture_terminal_count == 1
     assert attempt.garage_door_footprint_bridges
     assert attempt.window_footprint_bridges
+    # Figured dimensions like "21" must not silence unique printed ASD labels.
+    assert len(attempt.sliding_door_footprint_bridges) >= 1
+    assert all(
+        str(b.label_text).strip().upper().startswith("ASD")
+        for b in attempt.sliding_door_footprint_bridges
+    )
     # Raw graph still has the original open tips; review does not join them.
     assert len(graph.largest_component_open_endpoints_pdf_pts) == 7
     raw_review_pts = {

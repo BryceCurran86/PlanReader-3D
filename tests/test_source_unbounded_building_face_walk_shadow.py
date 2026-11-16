@@ -11,6 +11,8 @@ from shapely.ops import unary_union
 
 from pb_source_shared_dwelling_envelope_shadow import CandidateSharedBuildingDivider
 from pb_source_unbounded_building_face_walk_shadow import (
+    _AABB_FILM_PT,
+    _SNAP_PT,
     CONTACT_PT,
     diagnose_source_outside_face_neighbors,
     walk_source_unbounded_building_face,
@@ -189,6 +191,32 @@ def test_open_dwelling_plus_far_cavity_is_open_to_outside_not_unique_closed():
     assert result.unclosed_dwelling_sides == ("right",)
     assert result.clockwise_pdf_pts == ()
     assert result.measurement_authorized is False
+
+
+def test_aabb_outdoor_film_is_not_a_dwelling_leak_or_snap():
+    # A short outer jamb expands the union AABB 0.4 pt beyond the continuous
+    # outer face. That outdoor film is not a dwelling opening and must not be
+    # closed by the 2.5 pt commercial snap.
+    bars = (
+        SourceBar(box(0.4, 0.4, 239.6, 3.4), 0),
+        SourceBar(box(0.4, 116.6, 239.6, 119.6), 1),
+        SourceBar(box(0.4, 0.4, 3.4, 119.6), 2),
+        SourceBar(box(236.6, 0.4, 239.6, 119.6), 3),
+        SourceBar(box(118.0, 0.4, 122.0, 119.6), 4),
+        SourceBar(box(0.0, 50.0, 0.4, 55.0), 5),
+    )
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+        source_wall_union=unary_union([bar.polygon for bar in bars]),
+    )
+    assert _AABB_FILM_PT < _SNAP_PT
+    assert result.status == "CANDIDATE"
+    assert result.enclosed_dwelling_zone_count == 2
+    assert result.unclosed_dwelling_sides == ()
+    assert result.measurement_authorized is False
+    assert result.to_dict()["snap_join_applied"] is False
 
 
 def test_original_wall_source_ids_required_and_nonfinite_or_empty_abstains():
@@ -446,10 +474,12 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
         after = (len(page.get_drawings()), len(page.get_text("words")))
     assert before == after
     assert attempt.measurement_authorized is False
+    assert len(attempt.sliding_door_footprint_bridges) >= 1
     walk = attempt.source_outside_face_walk
     assert walk is not None
     assert walk.measurement_authorized is False
     assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_dwelling_region_still_open_to_outside"
     assert receipt["measurement_authorized"] is False
     assert receipt["snap_join_applied"] is False
     assert receipt["undirected_degree_does_not_veto_outside_face"] is True

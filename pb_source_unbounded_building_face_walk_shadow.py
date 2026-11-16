@@ -22,6 +22,9 @@ from pb_source_shared_dwelling_envelope_shadow import (
 
 CONTACT_PT = 0.03
 _SNAP_PT = 2.5  # commercial snap is never a join here
+# Union AABB can sit a fraction of a point outside the outer wall face.
+# That outdoor film is not a dwelling leak and is not a 2.5 pt snap.
+_AABB_FILM_PT = 0.5
 
 
 @dataclass(frozen=True)
@@ -174,9 +177,14 @@ def _bounded_free_space_faces(primary: Polygon) -> tuple[Polygon, ...]:
 
     Wall-cavity pinholes are valid polygons with interiors, but they are not
     dwelling rooms. Rooms live in the complement of the painted bars. A face
-    that reaches the bbox edge is still open to the page / outdoors.
+    that reaches the inset clip edge is still open to the page / outdoors.
+    The inset drops only the AABB-to-wall outdoor film; it is smaller than
+    SNAP_PT and smaller than a source opening.
     """
-    clip = box(*primary.bounds)
+    x0, y0, x1, y1 = primary.bounds
+    if (x1 - x0) <= 2 * _AABB_FILM_PT or (y1 - y0) <= 2 * _AABB_FILM_PT:
+        return ()
+    clip = box(x0 + _AABB_FILM_PT, y0 + _AABB_FILM_PT, x1 - _AABB_FILM_PT, y1 - _AABB_FILM_PT)
     free = clip.difference(primary)
     edge = clip.boundary
     faces = []

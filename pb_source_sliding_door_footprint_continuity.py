@@ -16,7 +16,6 @@ from typing import Any
 
 from pb_source_window_footprint_continuity import (
     _EXTERIOR_WALL_LAYER,
-    _WINDOW_CODE,
     _line,
     _rect,
     _words,
@@ -24,6 +23,12 @@ from pb_source_window_footprint_continuity import (
 
 _SLIDING_LABEL = re.compile(r"^(?:asd[- ]?\d*|sgd[- ]?\d*|[s5]d[- ]?\d*|stacker)$", re.IGNORECASE)
 _NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
+# Window competing-identity for a slider. The shared window code also
+# matches bare 1-2 digit strings; those are figured dimensions on this
+# detector, not ASW/SGW. A unique printed ASD is not a window.
+_COMPETING_WINDOW_LABEL = re.compile(
+    r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*)$", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -91,7 +96,7 @@ def detect_exterior_sliding_door_footprint_bridges(
     )
     if has_any_layers and not has_wall_layers:
         return ()
-    competing_windows = _words(source_words, pattern=_WINDOW_CODE)
+    competing_windows = _words(source_words, pattern=_COMPETING_WINDOW_LABEL)
     walls = []
     caps = []
     rails = []
