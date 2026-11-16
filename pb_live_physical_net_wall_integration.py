@@ -85,6 +85,10 @@ from pb_physical_scale_calibration_bridge import build_physical_scale_calibratio
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_area_bridge import build_source_room_area_bridge
 from pb_source_room_face_authority import SourceRoomFaceSelector
+from pb_external_footprint_first_trace import (
+    ExternalFootprintTrace,
+    trace_external_footprint_first,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
     is_authoritative_derived_viewport,
@@ -128,6 +132,9 @@ class LivePhysicalNetWallClaim:
     publication: LiveExternalPhysicalNetWallPublication
     canonical_spaces: tuple[CanonicalSpace, ...] = ()
     canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...] = ()
+    # Always attempted BEFORE wall/opening/room composition on the original PDF.
+    # Its candidate is an overlay only, never a source of billable geometry.
+    footprint_first_traces: tuple[ExternalFootprintTrace, ...] = ()
     canonical_space_status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
@@ -543,6 +550,19 @@ def _collect_live_physical_net_wall_claim(
     finally:
         doc.close()
 
+    # Owner mandatory order: attempt the OUTER building trace first. Only
+    # AFTER this source-hashed preview may any inner wall/opening/room producer
+    # ingest and compose the same PDF. Unknown exterior identity stays
+    # CANDIDATE/ABSTAINED and never grants metric/quantity authority.
+    footprint_first_traces = (
+        trace_external_footprint_first(
+            payload,
+            source_sha256=source_sha,
+            page_indices=topology_selected,
+        )
+        if topology_selected else ()
+    )
+
     selected_page_ids = tuple(str(index + 1) for index in selected)
     decoded_page_ids = tuple(str(index + 1) for index in decoded_selected)
     topology_page_ids = tuple(
@@ -619,6 +639,7 @@ def _collect_live_physical_net_wall_claim(
             quantity_id=None,
             confidence=0.0,
             publication=publication,
+            footprint_first_traces=footprint_first_traces,
             correspondence_resolution_status="correspondence_not_attempted",
             surface_pipeline_diagnostics=MappingProxyType({}),
         )
@@ -1444,6 +1465,7 @@ def _collect_live_physical_net_wall_claim(
         quantity_id=None,
         confidence=0.0,
         publication=publication,
+        footprint_first_traces=footprint_first_traces,
         canonical_spaces=canonical_space_core.spaces,
         canonical_ceilings=tuple(canonical_ceiling_objects),
         canonical_space_status=canonical_space_core.status,

@@ -144,6 +144,45 @@ def test_gap_without_any_door_evidence_stays_open():
     assert result.status is EvidenceResolutionStatus.ABSTAINED and result.reason_codes == (REASON_OPEN_EXTERIOR,)
 
 
+def test_unclosed_source_collinear_gap_reports_native_owner_witness_without_publication():
+    rows = _open_gap_room()
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0,
+    )
+    evidence = [
+        w for w in result.unresolved_gap_witnesses
+        if w["horizontal"] is False
+        and w["gap_interval_pdf_pts"] == (40.0, 64.0)
+    ]
+    assert len(evidence) == 1
+    witness = evidence[0]
+    assert set(witness["adjacent_wall_native_path_indices"]) == {3, 4}
+    assert witness["left_wall_native_path_indices"] == (3,)
+    assert witness["right_wall_native_path_indices"] == (4,)
+    assert witness["source_path_side_partition_proven"] is True
+    assert witness["physical_wall_authenticated"] is False
+    assert witness["opening_authenticated"] is False
+    assert witness["can_issue_area"] is False
+    assert witness["topology_only"] is True
+    assert result.rings == () and result.closures == ()
+    assert result.unresolved_gap_witness_count >= 1
+    assert result.unresolved_gap_witnesses == build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0,
+    ).unresolved_gap_witnesses
+
+
+def test_authenticated_swing_gap_does_not_appear_as_unresolved_witness():
+    result = build_layered_wall_doorway_room_rings(
+        room(), source_sha256=SHA, page_index=0,
+    )
+    assert not any(
+        w["gap_interval_pdf_pts"] == (40.0, 64.0)
+        and w["horizontal"] is False
+        for w in result.unresolved_gap_witnesses
+    )
+    assert result.closures and result.rings
+
+
 def _open_gap_room(tf=identity):
     rows = strip(0, 0, 100, 2, tf) + strip(0, 2, 2, 98, tf) + strip(0, 98, 100, 100, tf)
     rows += strip(98, 2, 100, 40, tf) + strip(98, 64, 100, 98, tf)  # a gap and no swing, no stroke
