@@ -10,8 +10,11 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from shapely.ops import unary_union
+
 from pb_source_unbounded_building_face_walk_shadow import (
     _owner,
+    _topology_host_pairs,
     diagnose_source_outside_face_neighbors,
     walk_source_unbounded_building_face,
 )
@@ -47,15 +50,29 @@ def audit_exterior_seams(
         raise ValueError("native path IDs must be nonnegative integers")
     ids = tuple(sorted(set(native_path_ids)))
     owners: set[int] = set()
+    owned_bars = []
     for bar in wall_bars:
         owned = _owner(bar)
         if owned is not None:
             owners.update(owned[1])
+            owned_bars.append((owned[0], owned[1], bar))
     missing = tuple(i for i in ids if i not in owners)
+    # The canonical walk may be expensive on original pages. Do not rerun it
+    # for each audited native path, and do not repeatedly union every wall bar.
+    union = source_wall_union
+    if union is None and owned_bars:
+        union = unary_union([geom for geom, _ids, _bar in owned_bars])
     walk = walk_source_unbounded_building_face(
         wall_bars, source_words,
-        shared_dividers=shared_dividers, source_wall_union=source_wall_union,
+        shared_dividers=shared_dividers, source_wall_union=union,
     )
+    topology = _topology_host_pairs(drawings, source_words)
+    neutral_seams = ()
+    if drawings:
+        from pb_source_neutral_wall_seam_continuity import (
+            detect_source_neutral_wall_seams,
+        )
+        neutral_seams = detect_source_neutral_wall_seams(drawings, page_index=-1)
     receipts = []
     for path_id in ids:
         if path_id in missing:
@@ -68,7 +85,9 @@ def audit_exterior_seams(
             continue
         receipt = diagnose_source_outside_face_neighbors(
             wall_bars, path_id, drawings=drawings, source_words=source_words,
-            shared_dividers=shared_dividers, source_wall_union=source_wall_union,
+            shared_dividers=shared_dividers, source_wall_union=union,
+            canonical_walk=walk, topology_host_pairs=topology,
+            neutral_seams=neutral_seams, owned_bars=owned_bars,
         )
         receipts.append({
             "native_path_id": path_id,
