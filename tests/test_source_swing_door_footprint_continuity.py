@@ -139,3 +139,84 @@ def test_swing_arc_geometry_does_not_authorize_customer_area():
     assert emitted["measurement_authorized"] is False
     assert emitted["physical_wall_authenticated"] is False
     assert emitted["bounds_pdf_pts"] == [5.0, 20.0, 30.0, 22.5]
+
+
+def test_orthogonal_corner_host_swing_door_continuity():
+    # Corner wall meeting orthogonal wall across a swing door opening with line jamb caps
+    def line(p0, p1, layer=LAYER):
+        return {
+            "layer": layer,
+            "rect": fitz.Rect(
+                min(p0[0], p1[0]),
+                min(p0[1], p1[1]),
+                max(p0[0], p1[0]),
+                max(p0[1], p1[1]),
+            ),
+            "fill": None,
+            "items": (("l", fitz.Point(*p0), fitz.Point(*p1)),),
+        }
+
+    d = [
+        wall((0, 0, 2.5, 25)),
+        wall((28.5, 22.5, 60, 25.0)),
+        arc(((2.0, -1.0), (15.0, -1.0), (28.5, 10.0), (28.5, 23.5))),
+        line((1.5, 22.5), (1.5, 25.0)),
+        line((28.5, 22.5), (28.5, 25.0)),
+    ]
+    bridges = detect(d)
+    assert len(bridges) == 1
+    b = bridges[0]
+    assert b.axis == "h"
+    assert (b.first_host_path_id, b.second_host_path_id) == (0, 1)
+    assert b.jamb_cap_path_ids == (3, 4)
+    assert b.bounds_pdf_pts == (2.5, 22.5, 28.5, 25.0)
+    assert b.measurement_authorized is False
+    assert b.physical_wall_authenticated is False
+
+
+def test_derbyshire_construction_sample_real_pdf_exterior_swing_doors():
+    import os
+    pdf_path = r"C:\Users\bryce\OneDrive\Desktop\documents\sources\other plans\02_Derbyshire_2016_construction_sample.pdf"
+    if not os.path.exists(pdf_path):
+        return
+    from pb_new_exterior_wall_preflight import (
+        _source_wall_ink_candidate_drawings,
+        _collect_strips,
+        _collect_dark_painted_source_wall_strips,
+        _collect_monotonic_source_stroke_pairs,
+        _collect_source_heavy_stroke_strips,
+        _collect_cavity_multi_face_strips,
+        _collect_source_wide_face_pairs,
+    )
+    doc = fitz.open(pdf_path)
+    page = doc[3]
+    drawings = page.get_drawings()
+    source_words = page.get_text("words")
+    wall_ink = _source_wall_ink_candidate_drawings(drawings)[0]
+    bars = (
+        _collect_strips(wall_ink)[0]
+        + _collect_dark_painted_source_wall_strips(wall_ink)
+        + _collect_monotonic_source_stroke_pairs(wall_ink)
+        + _collect_source_heavy_stroke_strips(wall_ink)
+        + _collect_cavity_multi_face_strips(wall_ink)
+        + _collect_source_wide_face_pairs(wall_ink)
+    )
+    unique_bars = {}
+    for bar in bars:
+        if bar.polygon is None or bar.polygon.is_empty or not bar.polygon.is_valid:
+            continue
+        key = (int(bar.path_index), *(round(float(v), 4) for v in bar.polygon.bounds))
+        unique_bars[key] = bar
+    wall_bars = list(unique_bars.values())
+
+    bridges = detect(
+        drawings,
+        source_words=source_words,
+        wall_bars=wall_bars,
+        page_index=3,
+    )
+    # Front entry swing door (arc 1284), North swing door (arc 855), and Laundry/Garage (arc 435)
+    arc_ids = {b.swing_arc_path_id for b in bridges}
+    assert 1284 in arc_ids
+    assert 855 in arc_ids
+    assert 435 in arc_ids

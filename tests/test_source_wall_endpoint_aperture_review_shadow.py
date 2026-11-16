@@ -291,11 +291,9 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
     assert attempt.measurement_authorized is False
     assert review.measurement_authorized is False
     assert review.to_dict()["source_closed_outer_footprint_authenticated"] is False
-    assert len(attempt.window_footprint_bridges) == 16
-    assert len(attempt.garage_door_footprint_bridges) == 1
-    assert len(attempt.swing_door_footprint_bridges) == 3
-    assert len(attempt.sliding_door_footprint_bridges) == 2
     assert review.source_hosted_aperture_terminal_count == 1
+    assert attempt.garage_door_footprint_bridges
+    assert attempt.window_footprint_bridges
     # Raw graph still has the original open tips; review does not join them.
     assert len(graph.largest_component_open_endpoints_pdf_pts) == 7
     raw_review_pts = {

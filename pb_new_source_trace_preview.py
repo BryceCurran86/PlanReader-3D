@@ -7,6 +7,7 @@ are created by this preview.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from pathlib import Path
 
 import fitz
@@ -59,7 +60,12 @@ def _full_page_source_tiles(width: float, height: float, drawing_count: int):
     )
 
 
-def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[dict, bytes]:
+def source_native_trace_preview(
+    pdf_path: str | Path,
+    page_index: int,
+    *,
+    viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
+) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
     The function DOES NOT call legacy auto_detect_building_envelope or generate
@@ -133,6 +139,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 source_words=source_words,
                 window_source_drawings=drawings,
                 source_page_index=page_index,
+                viewport_pdf_pts=viewport_pdf_pts,
             )
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
@@ -339,6 +346,14 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             if len(ring.polygon_pdf_pts) >= 3:
                 points = [fitz.Point(float(x), float(y)) for x, y in ring.polygon_pdf_pts]
                 canvas.draw_polyline(points + [points[0]], color=(0.01, 0.70, 0.15), width=3.0)
+        if outer_wall.viewport_pdf_pts:
+            for vp_box in outer_wall.viewport_pdf_pts:
+                canvas.draw_rect(
+                    fitz.Rect(*vp_box),
+                    color=(0.10, 0.75, 0.75),
+                    dashes="[5 3] 0",
+                    width=1.5,
+                )
         zoom = min(1.2, 1800 / max(float(rect.width), float(rect.height)))
         png = canvas.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
         preview.close()
@@ -360,6 +375,12 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             ),
             "external_wall_trace_status": outer_wall.status,
             "external_wall_trace_reason": outer_wall.reason,
+            "viewport_pdf_pts": (
+                [list(vp) for vp in outer_wall.viewport_pdf_pts]
+                if outer_wall.viewport_pdf_pts is not None
+                else None
+            ),
+            "viewport_scoped_closure_enabled": outer_wall.viewport_pdf_pts is not None,
             # Diagnostic owner census only. A rejected small ring is NEVER
             # the physical building footprint or a customer quantity.
             "external_candidate_closed_wall_loop_count":
