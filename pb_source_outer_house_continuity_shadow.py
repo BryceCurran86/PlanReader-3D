@@ -22,6 +22,8 @@ from pb_source_native_exterior_endpoint_authority_shadow import (
     CONTACT_PT,
     REASON_NEAR_MISS,
     ROLE_EXCLUSION,
+    ROLE_EXTERIOR_OUTER_FACE,
+    ROLE_INTERNAL_WALL,
     authenticate_external_wall_junction,
     classify_source_native_path_role,
 )
@@ -97,20 +99,40 @@ def classify_outside_envelope_role(
 ) -> tuple[str, str]:
     """Unique source labels only. X-thresholds and largest-polygon are not roles."""
     paths = _path_ids(bar)
-    row = drawings[paths[0]] if paths and 0 <= paths[0] < len(drawings) else None
-    native_role = classify_source_native_path_role(row) if row is not None else "unknown"
+    # A composite wall strip can have several original PDF path owners.
+    # A nearby printed PORCH/ALFRESCO label is a *space* semantic, not proof
+    # that any independently painted physical wall beside it is disposable.
+    owner_roles = {
+        classify_source_native_path_role(drawings[idx])
+        for idx in paths if 0 <= idx < len(drawings)
+    }
     names = _overlapping_names(bar, _word_records(source_words))
     outdoor = tuple(name for name in names if _is_outdoor_name(name))
     house = tuple(name for name in names if _is_house_name(name))
     post = tuple(name for name in names if _is_post_name(name))
+    bounds = bar.polygon.bounds
+    width, height = bounds[2] - bounds[0], bounds[3] - bounds[1]
+    compact_post = (
+        width > 0 and height > 0
+        and max(width, height) / min(width, height) <= 1.7
+    )
     if house and outdoor:
         return ROLE_STRUCTURAL, "shared_house_outdoor_wall_kept_as_envelope"
-    if len(set(map(_padded_name, outdoor))) == 1 and not house and not post:
-        return ROLE_OUTDOOR, "unique_source_outdoor_name"
-    if len(set(map(_padded_name, post))) == 1 and not house:
-        return ROLE_POST, "unique_source_post_name"
-    if native_role == ROLE_EXCLUSION and not house:
-        return ROLE_OUTDOOR, "exclusion_site_roof_hatch_title_green"
+    # A uniquely marked compact post is a discrete element, not a long
+    # masonry wall crossing a PORCH/POST annotation.
+    if len(set(map(_padded_name, post))) == 1 and not house and compact_post:
+        return ROLE_POST, "source_named_compact_post_not_wall"
+    if (
+        ROLE_EXTERIOR_OUTER_FACE in owner_roles
+        or ROLE_INTERNAL_WALL in owner_roles
+    ):
+        return ROLE_STRUCTURAL, "original_source_wall_kept_despite_outdoor_text"
+    # Genuine green/site/roof/hatch exclusion is independently source-owned.
+    # Mixed source roles cannot use one excluded component to drop another.
+    if owner_roles == {ROLE_EXCLUSION} and not house:
+        return ROLE_OUTDOOR, "source_exclusion_site_roof_hatch_title_green"
+    if outdoor:
+        return ROLE_UNPROVEN, "outdoor_name_alone_does_not_exclude_wall"
     return ROLE_UNPROVEN, "outside_structural_ink_not_droppable"
 
 
