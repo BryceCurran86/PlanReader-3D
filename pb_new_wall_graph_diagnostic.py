@@ -1,0 +1,304 @@
+"""Source-native wall graph diagnostics; no guessed envelope or metric authority.
+
+Connectivity is computed only between source-backed physical *candidates*, with
+the 0.03 PDF-point representation tolerance already used by the original
+topology engine. No line extension, outside-site convex hull, or gap closure.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from typing import Any, Mapping, Sequence
+
+from shapely.strtree import STRtree
+from shapely.geometry import Point, LineString
+from shapely.ops import nearest_points
+@dataclass(frozen=True)
+class NativeWallEndpointNearMiss:
+    """Unconnected source-native wall candidates; NOT a gap closure or wall."""
+
+    tip_pdf_pts: tuple[float, float]
+    native_path_ids: tuple[int, ...]
+    nearby_native_path_ids: tuple[int, ...]
+    separation_pdf_pts: float
+    native_source_layers: tuple[str, ...] = ()
+    nearby_source_layers: tuple[str, ...] = ()
+    same_painted_exterior_layer_hint: bool = False
+    physical_join_authenticated: bool = False
+    measurement_authorized: bool = False
+
+
+@dataclass(frozen=True)
+class NativeWallGraphDiagnostic:
+    component_count: int = 0
+    largest_component_band_count: int = 0
+    largest_component_source_paths: tuple[int, ...] = ()
+    largest_component_bbox_pdf_pts: tuple[float, float, float, float] | None = None
+    largest_component_open_endpoints_pdf_pts: tuple[tuple[float, float], ...] = ()
+    connectivity_status: str = "unavailable"
+    second_stage_05pt_join_proposals: tuple[
+        tuple[float,float,float,float,float], ...
+    ] = ()
+    second_stage_join_source_paths: tuple[
+        tuple[tuple[int, ...],tuple[int, ...]], ...
+    ] = ()
+    second_stage_join_applied: bool = False
+    measurement_authorized: bool = False
+    outside_ink_filter_authorized: bool = False
+    endpoint_near_misses: tuple[NativeWallEndpointNearMiss, ...] = ()
+    endpoint_near_miss_total: int = 0
+
+
+def inspect_native_wall_graph(
+    bars: Sequence[object],
+    *,
+    source_drawings: Sequence[Mapping[str, Any]] | None = None,
+) -> NativeWallGraphDiagnostic:
+    """Source structural candidates only; diagnostic if an outer ring fails.
+
+    Endpoints are where the long-axis native wall-band ends do NOT meet any
+    other wall-band in the SAME connected graph. They are NOT asserted doors
+    or missing walls. A candidate band has exactly its original source IDs.
+    """
+    valid = [
+        s for s in bars if
+        getattr(s, "polygon", None) is not None
+        and s.polygon.is_valid and not s.polygon.is_empty
+        and all(math.isfinite(float(v)) for v in s.polygon.bounds)
+    ]
+    if not valid:
+        return NativeWallGraphDiagnostic()
+    # Representation-noise contact only (not the 2.5-pt production snap).
+    tol = .03
+    geoms = [s.polygon.buffer(tol, join_style=2) for s in valid]
+    tree = STRtree(geoms)
+    parents = list(range(len(valid)))
+    def find(i):
+        while parents[i] != i:
+            parents[i] = parents[parents[i]]
+            i = parents[i]
+        return i
+    for i, geom in enumerate(geoms):
+        for j in tree.query(geom, predicate="intersects"):
+            j = int(j)
+            if i == j:
+                continue
+            a, b = find(i), find(j)
+            if a != b:
+                parents[max(a,b)] = min(a,b)
+    groups = {}
+    for i in range(len(valid)):
+        groups.setdefault(find(i), []).append(i)
+    # The largest group is only a connected structural *candidate*, not an
+    # exterior wall or a proxy for the building's real external face.
+    parts = sorted(groups.values(), key=lambda indices: (
+        -len(indices),
+        -sum(valid[i].polygon.area for i in indices),
+        min(indices),
+    ))
+    main = parts[0]
+    source_ids = tuple(sorted({
+        int(path)
+        for i in main for path in valid[i].native_path_indices()
+    }))
+    bb = tuple(round(float(v), 3) for v in (
+        min(valid[i].polygon.bounds[0] for i in main),
+        min(valid[i].polygon.bounds[1] for i in main),
+        max(valid[i].polygon.bounds[2] for i in main),
+        max(valid[i].polygon.bounds[3] for i in main),
+    ))
+    # A partial open wall network can be visualized by its source-native
+    # free endpoints without pretending the bounding box is the footprint.
+    endpoints = []
+    main_members = frozenset(main)
+    for i in main:
+        strip = valid[i]
+        x0, y0, x1, y1 = (float(v) for v in strip.polygon.bounds)
+        if x1-x0 > y1-y0:
+            tips = (((x0,(y0+y1)/2),(x0,y0,x0,y1)),
+                    ((x1,(y0+y1)/2),(x1,y0,x1,y1)))
+        else:
+            tips = ((((x0+x1)/2,y0),(x0,y0,x1,y0)),
+                    (((x0+x1)/2,y1),(x0,y1,x1,y1)))
+        for point, edge in tips:
+            # A tip must touch ANOTHER source bar to count as joined.
+            x_a,y_a,x_b,y_b = edge
+            tip_edge = LineString(((x_a,y_a),(x_b,y_b)))
+            # Query the already-built source STRtree. The old code
+            # compared every tip with every bar in the largest component:
+            # O(number_of_wall_bars ** 2) expensive after dark-stroke
+            # recovery. The spatial bounding query is only a PREFILTER;
+            # the exact original 0.03-point distance and same-component
+            # rules below are unchanged. No geometry is moved or joined.
+            nearby = tree.query(tip_edge.buffer(tol))
+            connected = any(
+                (j := int(candidate)) != i
+                and j in main_members
+                and tip_edge.distance(valid[j].polygon) <= tol
+                for candidate in nearby
+            )
+            if not connected:
+                endpoints.append(tuple(round(v,3) for v in point))
+    # SECOND-STAGE source-near-join diagnostic: never actually move, extend
+    # or snap a source stroke. A 0.50-pt proximity is only proposed when the
+    # FIRST 0.03-pt connectivity stage left TWO DIFFERENT components, and the
+    # endpoint physically approaches the other source wall band. This is
+    # important for typical CAD corner mitres, but 0.5 pt is NOT a wall gate.
+    join_proposals=[]
+    joins_source=[]
+    join_keys=set()
+    for i, strip in enumerate(valid):
+        x0,y0,x1,y1=(float(q) for q in strip.polygon.bounds)
+        if x1-x0>y1-y0:
+            tip_points=[(x0,(y0+y1)/2),(x1,(y0+y1)/2)]
+        else:
+            tip_points=[((x0+x1)/2,y0),((x0+x1)/2,y1)]
+        for x,y in tip_points:
+            point=Point(x,y)
+            neighbors=tree.query(point.buffer(.5))
+            for index in neighbors:
+                j=int(index)
+                if i==j or find(i)==find(j):
+                    continue
+                distance=float(point.distance(valid[j].polygon))
+                if not .03 < distance <= .5:
+                    continue
+                nearest=nearest_points(point,valid[j].polygon)[1]
+                # Must approach another real bar, not an unrelated sheet
+                # bbox or image hull. No adjustment is performed.
+                key=(min(i,j),max(i,j),round(x,2),round(y,2))
+                if key in join_keys:
+                    continue
+                join_keys.add(key)
+                join_proposals.append((
+                    round(x,3),round(y,3),
+                    round(nearest.x,3),round(nearest.y,3),
+                    round(distance,4),
+                ))
+                joins_source.append((
+                    tuple(sorted(strip.native_path_indices())),
+                    tuple(sorted(valid[j].native_path_indices())),
+                ))
+                if len(join_proposals)>=256:
+                    break
+            if len(join_proposals)>=256:
+                break
+        if len(join_proposals)>=256:
+            break
+    # Source-native endpoint near-misses between distinct exact-contact
+    # components. This deliberately DOES NOT use commercial snapping, infer
+    # doors, invent segments or merge connectivity. We report only bounded
+    # observations, retaining the original path owners for manual review.
+    # Thick / slender source bars expose a meaningful native long-axis tip;
+    # square fill blobs and tiny decoration do not.
+    near_misses = {}
+    max_separation = 2.5  # diagnostic search radius in PDF points ONLY
+    for i, strip in enumerate(valid):
+        x0, y0, x1, y1 = (float(v) for v in strip.polygon.bounds)
+        dx, dy = x1 - x0, y1 - y0
+        if dx >= 8.0 and dx > 2.0 * dy:
+            tips = ((x0, (y0 + y1) / 2), (x1, (y0 + y1) / 2))
+        elif dy >= 8.0 and dy > 2.0 * dx:
+            tips = (((x0 + x1) / 2, y0), ((x0 + x1) / 2, y1))
+        else:
+            continue
+        src_paths = tuple(sorted({int(k) for k in strip.native_path_indices()}))
+        if not src_paths:
+            continue
+        for tip in tips:
+            point = Point(tip)
+            matches = []
+            for j in tree.query(point.buffer(max_separation + tol)):
+                j = int(j)
+                if i == j or find(i) == find(j):
+                    continue
+                distance = float(point.distance(valid[j].polygon))
+                if not (tol < distance <= max_separation):
+                    continue
+                other_paths = tuple(sorted({
+                    int(k) for k in valid[j].native_path_indices()
+                }))
+                if not other_paths or src_paths == other_paths:
+                    continue
+                matches.append((distance, other_paths))
+            if not matches:
+                continue
+            distance, other_paths = min(matches, key=lambda v: (v[0], v[1]))
+            tip_xy = tuple(round(float(q), 3) for q in tip)
+            # Deduplicate repeated drawing representations on the same source
+            # path while keeping genuinely different physical candidates.
+            key = (src_paths, other_paths, tip_xy)
+            near_misses[key] = NativeWallEndpointNearMiss(
+                tip_pdf_pts=tip_xy,
+                native_path_ids=src_paths,
+                nearby_native_path_ids=other_paths,
+                separation_pdf_pts=round(distance, 4),
+            )
+    # Native layer and paint are audit-ranking hints, never wall authority.
+    if source_drawings is not None:
+        def path_layers(paths):
+            return tuple(sorted({
+                str(source_drawings[k].get("layer", "")).strip()
+                for k in paths
+                if 0 <= k < len(source_drawings)
+                and isinstance(source_drawings[k], Mapping)
+                and str(source_drawings[k].get("layer", "")).strip()
+            }))
+
+        def painted_external(paths):
+            if not paths:
+                return False
+            for k in paths:
+                if not (0 <= k < len(source_drawings)):
+                    return False
+                drawing = source_drawings[k]
+                if not isinstance(drawing, Mapping) or drawing.get("fill") is None:
+                    return False
+                compact = "".join(
+                    c for c in str(drawing.get("layer", "")).lower() if c.isalnum()
+                )
+                if not ("wall" in compact and "external" in compact):
+                    return False
+            return True
+
+        near_misses = {
+            key: NativeWallEndpointNearMiss(
+                tip_pdf_pts=m.tip_pdf_pts,
+                native_path_ids=m.native_path_ids,
+                nearby_native_path_ids=m.nearby_native_path_ids,
+                separation_pdf_pts=m.separation_pdf_pts,
+                native_source_layers=path_layers(m.native_path_ids),
+                nearby_source_layers=path_layers(m.nearby_native_path_ids),
+                same_painted_exterior_layer_hint=(
+                    len(path_layers(m.native_path_ids)) == 1
+                    and path_layers(m.native_path_ids)
+                    == path_layers(m.nearby_native_path_ids)
+                    and painted_external(m.native_path_ids)
+                    and painted_external(m.nearby_native_path_ids)
+                ),
+            )
+            for key, m in near_misses.items()
+        }
+    ordered_near_misses = tuple(sorted(
+        near_misses.values(),
+        key=lambda m: (
+            m.separation_pdf_pts, m.native_path_ids,
+            m.nearby_native_path_ids, m.tip_pdf_pts,
+        ),
+    ))
+    return NativeWallGraphDiagnostic(
+        component_count=len(parts),
+        largest_component_band_count=len(main),
+        largest_component_source_paths=source_ids,
+        largest_component_bbox_pdf_pts=bb,
+        largest_component_open_endpoints_pdf_pts=tuple(sorted(set(endpoints))),
+        connectivity_status=(
+            "source_native_network_open"
+            if endpoints else "source_native_network_endpoints_joined_not_exterior_verified"
+        ),
+        second_stage_05pt_join_proposals=tuple(join_proposals),
+        second_stage_join_source_paths=tuple(joins_source),
+        second_stage_join_applied=False,
+        endpoint_near_misses=ordered_near_misses[:64],
+        endpoint_near_miss_total=len(ordered_near_misses),
+    )

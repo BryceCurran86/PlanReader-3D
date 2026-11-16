@@ -133,6 +133,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
             cached_src = _SOURCE_CACHE.get(cache_key) if hooks_unmodified else None
             if cached_src is not None:
                 source, published = cached_src
+                source._producer._store.cache_snapshot_membership(published.snapshot)
             else:
                 try:
                     source = SourceVisibilityProducer(
@@ -170,6 +171,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     canonical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
             else:
                 cr = authenticate_maryborough_office_rcp_ceiling_correspondence(
@@ -182,6 +184,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     canonical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
 
             if (
@@ -202,6 +205,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
             else:
                 cr_floor = authenticate_maryborough_office_cross_sheet_correspondence(
@@ -213,6 +217,7 @@ def issue_original_maryborough_ceiling_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
             if (
                 cr_floor.status is not EvidenceResolutionStatus.CORROBORATED

@@ -6329,10 +6329,415 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 break
     chosen=st.selectbox("Drawing page",labels,index=default_page_index,key=f"plan_mapper_page_select_{workspace['id']}")
     page=pages.iloc[labels.index(chosen)].to_dict()
+    # Owner mandate: the first automatic plan geometry is the newer
+    # SOURCE-NATIVE wall/room tracer. Never call the old raster envelope
+    # detector as fallback or convert a guessed outline into measurements.
+    native_trace_key=f"source_native_wall_trace_{int(page['id'])}"
+    doc_rows=lquery(
+        "SELECT path,sha256 FROM documents WHERE id=?",
+        (int(page["document_id"]),),
+    )
+    doc_path=Path(str(doc_rows[0].get("path") or "")) if doc_rows else None
+    if doc_path and doc_path.is_file() and doc_path.suffix.lower()==".pdf":
+        digest=hashlib.sha256(doc_path.read_bytes()).hexdigest()
+        stored_sha=str(doc_rows[0].get("sha256") or "").strip().lower()
+        if stored_sha and stored_sha!=digest:
+            st.session_state[native_trace_key]={
+                "digest":digest,"summary":{"status":"abstained","reason_codes":[
+                    "original_pdf_changed_since_document_registration"]},"png":None,
+            }
+        elif st.session_state.get(native_trace_key,{}).get("digest")!=digest:
+            try:
+                from pb_new_source_trace_preview import source_native_trace_preview
+                with st.spinner("Tracing original PDF wall ink and room closures (new engine only)..."):
+                    trace_summary,trace_png=source_native_trace_preview(
+                        doc_path,int(page["page_no"])-1,
+                    )
+                st.session_state[native_trace_key]={
+                    "digest":digest,"summary":trace_summary,"png":trace_png,
+                }
+            except Exception as trace_error:
+                st.session_state[native_trace_key]={
+                    "digest":digest,"summary":{
+                        "status":"abstained",
+                        "reason_codes":[
+                            "new_source_native_trace_failed:"+type(trace_error).__name__,
+                        ],
+                    },"png":None,
+                }
+    else:
+        st.session_state[native_trace_key]={
+            "digest":None,"summary":{
+                "status":"abstained",
+                "reason_codes":["original_pdf_required_no_legacy_envelope_fallback"],
+            },"png":None,
+        }
+    native_trace=st.session_state[native_trace_key]
     zones=lquery("SELECT * FROM mapped_zones WHERE page_id=? ORDER BY id",(int(page["id"]),))
     tab0,tab1,tab2,tab3=st.tabs(["Draw measurements","Scale","Map zone","Saved zones"])
     with tab0:
         pxpm=to_float(page.get("px_per_m"))
+        st.markdown("### New source-native wall trace — first stage")
+        native_report=native_trace.get("summary") or {}
+        source_mode=(native_report.get("source_modality") or {}).get("route")
+        if source_mode == "tiled_raster_underlay":
+            raster_count=len(
+                (native_report.get("raster_source_trace") or {}).get(
+                    "candidate_axis_segments_pdf_pts",[]
+                )
+            )
+            st.warning(
+                "Original PDF geometry is a TILED RASTER UNDERLAY, not native "
+                f"vector walls. New raster-source tracer found {raster_count} "
+                "unclassified source-ink line candidates (magenta). It cannot "
+                "prove physical external walls, rooms or measurements. "
+                "The legacy envelope detector is disabled."
+            )
+        native_codes=native_report.get("reason_codes") or ["new_trace_no_result"]
+        if native_trace.get("png"):
+            st.image(native_trace["png"],use_container_width=True,
+                caption="New source-native candidate wall strips (cyan/blue), temporary doorway closures (orange), candidate room rings (green). All require source review.")
+            st.caption(
+                f"Source wall strips: {native_report.get('wall_strip_count',0)}; "
+                f"temporary closures: {native_report.get('temporary_opening_closures',0)}; "
+                f"candidate enclosed regions: {native_report.get('candidate_enclosed_regions',0)}. "
+                "No exterior footprint, floor or wall quantities authorized."
+            )
+        if not native_report.get("exterior_physical_wall_authenticated"):
+            st.warning(
+                "EXTERNAL WALLS NOT YET VERIFIED: the coloured drawing lines "
+                "are unclassified source-ink candidates, not approved internal "
+                "or external walls. Nothing outside a verified building boundary "
+                "can be admitted to measurements. No legacy envelope fallback."
+            )
+            if native_report.get("external_wall_trace_reason"):
+                st.caption(
+                    "Exterior trace diagnostic: "
+                    + str(native_report["external_wall_trace_reason"])
+                )
+        if native_report.get("status")=="abstained":
+            st.warning(
+                "New tracing could not establish an enclosed room: "
+                + ", ".join(map(str, native_codes[:4]))
+                + ". The old envelope detector is NOT used as fallback."
+            )
+        else:
+            st.info(
+                "New engine found candidate enclosed regions only; "
+                "physical wall ownership and customer areas remain unverified."
+            )
+        # Numbered plan keys are recovered automatically from original
+        # native text / vector-outline OCR and bound to on-sheet markers.
+        # They name source spaces; they are NEVER proof of enclosing walls,
+        # dimensions or chargeable room areas.
+        space_key = native_report.get("numbered_space_key") or {}
+        if space_key.get("status") == "CANDIDATE":
+            entries = space_key.get("entries") or []
+            st.caption(
+                f"Source numbered space key: {len(entries)} named spaces; "
+                f"{space_key.get('matched_number_count', 0)} numbers located "
+                "on the drawing. Unmatched numbers and all measurements "
+                "remain unverified."
+            )
+            with st.expander("Numbered rooms / outside areas from the plan", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([{
+                        "No.": entry.get("number"),
+                        "Printed name": entry.get("name"),
+                        "Source role": entry.get("semantic_role"),
+                        "On-plan marker": entry.get("number_marker_status"),
+                    } for entry in entries]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        elif space_key.get("reason") not in (
+            None, "source_numbered_key_anchor_not_found",
+            "native_text_page_no_numbered_key_ocr_not_required",
+        ):
+            st.caption(
+                "Numbered space key not authenticated: "
+                + str(space_key.get("reason"))
+            )
+        # Source-native closed geometry is a read-only REVIEW lane. Keep it
+        # opt-in: running this automatically adds an expensive second source
+        # scan to every Streamlit rerun and does not authenticate rooms.
+        spatial_key=f"native_spatial_review_{int(page['id'])}"
+        with st.expander("Source-enclosed regions — unverified review", expanded=False):
+            st.caption(
+                "Inspect original PDF wall geometry, not estimated floor areas. "
+                "No region here becomes a take-off, wall, ceiling or customer quantity."
+            )
+            if st.button(
+                "Inspect original enclosed geometry",
+                key=f"native_spatial_review_run_{page['id']}",
+            ):
+                source_digest=native_trace.get("digest")
+                altered=(
+                    "original_pdf_changed_since_document_registration"
+                    in (native_report.get("reason_codes") or [])
+                )
+                if not (doc_path and doc_path.is_file() and source_digest) or altered:
+                    st.warning("A registered, unchanged original PDF is required.")
+                else:
+                    try:
+                        import fitz
+                        from pb_source_spatial_subdivision_shadow import (
+                            build_source_spatial_subdivision,
+                        )
+                        with st.spinner("Reading source-owned enclosed geometry..."):
+                            if hashlib.sha256(doc_path.read_bytes()).hexdigest() != source_digest:
+                                raise ValueError("registered_original_source_digest_mismatch")
+                            with fitz.open(doc_path) as original_document:
+                                original_page=original_document[int(page["page_no"])-1]
+                                rect=original_page.rect
+                                native_drawings=original_page.get_drawings()
+                                native_words=original_page.get_text("words")
+                                from pb_new_exterior_wall_preflight import (
+                                    attempt_source_native_outer_wall_first,
+                                )
+                                from pb_source_internal_swing_room_barrier import (
+                                    detect_source_internal_swing_room_barriers,
+                                )
+                                outer_source=attempt_source_native_outer_wall_first(
+                                    native_drawings,
+                                    source_words=native_words,
+                                    window_source_drawings=native_drawings,
+                                    source_page_index=int(page["page_no"])-1,
+                                )
+                                internal_source=detect_source_internal_swing_room_barriers(
+                                    native_drawings,native_words,
+                                    page_index=int(page["page_no"])-1,
+                                )
+                                source_review_barriers=(
+                                    *outer_source.window_footprint_bridges,
+                                    *outer_source.garage_door_footprint_bridges,
+                                    *outer_source.swing_door_footprint_bridges,
+                                    *outer_source.sliding_door_footprint_bridges,
+                                    *outer_source.neutral_wall_seams,
+                                    *internal_source,
+                                )
+                                spatial_report=build_source_spatial_subdivision(
+                                    native_drawings,
+                                    page_rect=(
+                                        float(rect.x0),float(rect.y0),
+                                        float(rect.x1),float(rect.y1),
+                                    ),
+                                    text_words=native_words,
+                                    topology_barriers=source_review_barriers,
+                                ).to_dict()
+                                spatial_report["internal_swing_room_barrier_count"]=len(
+                                    internal_source
+                                )
+                                # Reuse the SAME original opening witnesses;
+                                # only match them to independent wall-fill
+                                # boundary gaps. No source geometry or areas
+                                # are created by this diagnostic.
+                                from pb_source_room_opening_review import (
+                                    review_source_room_opening_gaps,
+                                )
+                                source_openings=(
+                                    *outer_source.window_footprint_bridges,
+                                    *outer_source.garage_door_footprint_bridges,
+                                    *outer_source.swing_door_footprint_bridges,
+                                    *outer_source.sliding_door_footprint_bridges,
+                                    *internal_source,
+                                )
+                                room_gap_review=review_source_room_opening_gaps(
+                                    native_drawings,native_words,source_openings,
+                                    page_index=int(page["page_no"])-1,
+                                    source_sha256=source_digest,
+                                ).to_dict()
+                                spatial_report["source_room_opening_review"]=room_gap_review
+                                from pb_source_spatial_candidate_overlay import (
+                                    render_unverified_enclosures,
+                                )
+                                spatial_overlay_png=render_unverified_enclosures(
+                                    original_page, spatial_report,
+                                )
+                        st.session_state[spatial_key]={
+                            "digest":source_digest,"report":spatial_report,
+                            "png":spatial_overlay_png,
+                        }
+                    except Exception as spatial_error:
+                        st.session_state[spatial_key]={
+                            "digest":source_digest,
+                            "report":{
+                                "status":"abstained",
+                                "reason":"source_spatial_review_failed:"
+                                +type(spatial_error).__name__,
+                            },
+                        }
+            spatial_cached=st.session_state.get(spatial_key) or {}
+            if spatial_cached.get("digest")==native_trace.get("digest"):
+                spatial_summary=spatial_cached.get("report") or {}
+                room_witnesses=spatial_summary.get("source_room_opening_review") or {}
+                if room_witnesses.get("ambiguous_opening_count",0):
+                    st.warning(
+                        "Source openings claimed by competing printed room "
+                        f"labels: {room_witnesses['ambiguous_opening_count']}. "
+                        "They are unassigned until the physical partition "
+                        "and doorway boundaries are independently proven."
+                    )
+                shared_outlines=room_witnesses.get(
+                    "shared_source_floor_outline_labels"
+                ) or []
+                if shared_outlines:
+                    st.warning(
+                        "Several printed room/section labels share one native "
+                        "floor-outline path. These are NOT separate measured "
+                        "rooms without independent partition evidence."
+                    )
+                    st.dataframe(pd.DataFrame([
+                        {
+                            "Native floor outline":rec.get("source_floor_path_id"),
+                            "Printed names / sections":", ".join(
+                                rec.get("printed_labels") or []
+                            ),
+                        }
+                        for rec in shared_outlines
+                    ]),use_container_width=True,hide_index=True)
+                remaining_room_gaps=room_witnesses.get("room_gap_audits") or []
+                if remaining_room_gaps:
+                    with st.expander(
+                        "Original source room boundary gaps — unverified",
+                        expanded=False,
+                    ):
+                        st.caption(
+                            "Lengths are PDF drawing POINTS, not metres or "
+                            "billable units. A zero-gap candidate is still "
+                            "not an authenticated physical room, finished "
+                            "face, ceiling or customer quantity."
+                        )
+                        st.dataframe(pd.DataFrame([
+                            {
+                                "Printed room":rec.get("room_label"),
+                                "Native floor path":rec.get(
+                                    "floor_candidate_native_path_id"
+                                ),
+                                "Unproved gap (PDF points)":round(
+                                    float(rec.get("remaining_unproved_pdf_pt",0)),2
+                                ),
+                                "Hosted aperture (PDF points)":round(
+                                    float(rec.get("hosted_opening_coverage_pdf_pt",0)),2
+                                ),
+                                "Zero-gap candidate only":bool(
+                                    rec.get("zero_gap_candidate",False)
+                                ),
+                            }
+                            for rec in remaining_room_gaps
+                        ]),use_container_width=True,hide_index=True)
+                corner_reviews=room_witnesses.get("painted_corner_reviews") or []
+                if corner_reviews:
+                    floor_names={
+                        rec.get("floor_candidate_native_path_id"):rec.get("room_label")
+                        for rec in remaining_room_gaps
+                    }
+                    with st.expander(
+                        "Original painted wall corner evidence — unverified",
+                        expanded=False,
+                    ):
+                        st.caption(
+                            "Each observed corner has TWO distinct, perpendicular "
+                            "dark native wall-fill owner paths. This does not "
+                            "authenticate a finished room, physical dimensions, "
+                            "paint, tiling, floor or ceiling takeoff."
+                        )
+                        st.dataframe(pd.DataFrame([
+                            {
+                                "Printed room":floor_names.get(
+                                    rec.get("source_floor_path_id"), "Candidate"
+                                ),
+                                "Native floor path":rec.get("source_floor_path_id"),
+                                "Observed corners":rec.get("observed_corner_count"),
+                                "Expected corners":rec.get("expected_corner_count"),
+                                "Missing source corners":len(
+                                    rec.get("missing_corner_indices") or []
+                                ),
+                                "Commercially authorized":False,
+                            }
+                            for rec in corner_reviews
+                        ]),use_container_width=True,hide_index=True)
+                if room_witnesses.get("witness_count",0):
+                    st.caption(
+                        "Existing original-source openings matched to room wall "
+                        f"gaps: {room_witnesses['witness_count']}. "
+                        "Window = closed boundary; door = threshold. "
+                        "All are candidates only; no floor, wall or ceiling "
+                        "quantity is authorised."
+                    )
+                    st.dataframe(pd.DataFrame([
+                        {
+                            "Printed room":w.get("room_label"),
+                            "Boundary side":w.get("room_side"),
+                            "Existing opening":w.get("opening_kind"),
+                            "Source host path IDs":", ".join(map(
+                                str,w.get("opening_host_path_ids") or []
+                            )),
+                            "Opening/threshold":w.get("passage_role"),
+                        }
+                        for w in room_witnesses.get("witnesses") or []
+                    ]),use_container_width=True,hide_index=True)
+                if spatial_cached.get("png"):
+                    st.image(
+                        spatial_cached["png"],use_container_width=True,
+                        caption="Coloured source-enclosed candidates only. "
+                        "Not proven rooms or billable floor/wall areas.",
+                    )
+                st.caption(
+                    "Source room candidates: "
+                    +str(spatial_summary.get("interior_room_count",0))
+                    +"; uniquely hosted internal door closures: "
+                    +str(spatial_summary.get("internal_swing_room_barrier_count",0))
+                    +"; other unverified enclosed shapes: "
+                    +str(spatial_summary.get("unverified_enclosed_count",0))
+                    +"; small wall-ink voids (not rooms): "
+                    +str(spatial_summary.get("micro_source_void_count",0))
+                    +". No physical rooms authenticated or quantities released."
+                )
+                spatial_rows=[
+                    {
+                        "Region":rec.get("region_id"),
+                        "Status":rec.get("status"),
+                        "Kind":rec.get("kind"),
+                        "Original path IDs":", ".join(
+                            map(str,(rec.get("bounding_native_path_ids") or [])[:16])
+                        ),
+                    }
+                    for rec in (spatial_summary.get("regions") or [])
+                    if rec.get("kind") in (
+                        "unverified_enclosed_candidate", "interior_enclosed_room"
+                    )
+                ]
+                if spatial_rows:
+                    st.dataframe(
+                        pd.DataFrame(spatial_rows),
+                        use_container_width=True,hide_index=True,
+                    )
+                elif spatial_summary.get("micro_source_void_count",0):
+                    st.info(
+                        "No room-sized enclosure is established by this source "
+                        "graph. Only tiny native wall-ink voids were retained "
+                        "for diagnosis, so no coloured room outline is shown."
+                    )
+                    with st.expander("Small source-ink void path receipts", expanded=False):
+                        st.dataframe(
+                            pd.DataFrame([
+                                {
+                                    "Source void":rec.get("region_id"),
+                                    "Native path IDs":", ".join(map(
+                                        str,(rec.get("bounding_native_path_ids") or [])[:16]
+                                    )),
+                                }
+                                for rec in spatial_summary.get("regions") or []
+                                if rec.get("kind")=="native_source_micro_void"
+                            ]),
+                            use_container_width=True,hide_index=True,
+                        )
+                elif spatial_summary.get("reason"):
+                    st.caption(
+                        "Source spatial diagnostic: "
+                        +str(spatial_summary["reason"])
+                    )
         st.markdown("### Draw take-off measurements on the plan")
         st.caption("Pick a take-off row, choose **Line** (walls, doors, frames, skirting — click two points) or **Outline** (building footprint, ceilings — click each corner then double-click to close), then click directly on the plan. Drawn lengths and areas are measured from the saved drawing scale.")
         detected=auto_detect_scale(page)
@@ -6400,16 +6805,11 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
             st.session_state[store_key]=new_lines
             st.session_state[rev_key]=int(st.session_state.get(rev_key,0))+1
             st.rerun()
-        if c4.button("Auto-detect building envelope",key=f"autodet_{page['id']}",use_container_width=True):
-            det_level=st.session_state.get(f"qa_level_{int(page['id'])}","Level 1")
-            auto_lines=auto_detect_envelope_shapes(int(workspace["id"]),page,pxpm,str(det_level))
-            if auto_lines:
-                st.session_state[store_key]=auto_lines
-                st.session_state[rev_key]=int(st.session_state.get(rev_key,0))+1
-                st.rerun()
-            else:
-                st.warning("No building envelope could be detected on this page — draw the external outline manually, or check the page image.")
-        st.caption("**Auto-detect** outlines the outer building envelope on this page, creating an **External walls / cladding** box (area = perimeter × 2.7 m wall height) and a **Floor plan · {level}** box (internal floor area, the flat-rate basis for internal works incl. paint). Select a box, then drag a corner to reshape or drag the box to move it — no auto-detect is perfect, so adjust before saving.")
+        if c4.button("Re-run new native wall trace",key=f"newtrace_{page['id']}",use_container_width=True):
+            st.session_state.pop(native_trace_key,None)
+            st.rerun()
+        st.caption("Automatic tracing uses the source-native wall and doorway engine only. No old-envelope fallback and no automatic commercial floor/cladding shapes. Review or manually draw source-verified measurements.")
+
         path=Path(str(page.get("image_path") or ""))
         if plan_line_editor is not None and path.exists():
             active_row_id=st.session_state.get(f"ml_active_{int(page['id'])}")

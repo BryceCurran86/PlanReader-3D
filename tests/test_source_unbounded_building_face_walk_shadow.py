@@ -1,0 +1,426 @@
+"""Use the UNBOUNDED outside face for one building containing two homes.
+
+These are topology-only safety/acceptance tests; no external wall customer
+area or finished floor area can be minted from the preview.
+"""
+
+from dataclasses import dataclass
+
+from shapely.geometry import Polygon, box
+from shapely.ops import unary_union
+
+from pb_source_shared_dwelling_envelope_shadow import CandidateSharedBuildingDivider
+from pb_source_unbounded_building_face_walk_shadow import (
+    CONTACT_PT,
+    diagnose_source_outside_face_neighbors,
+    walk_source_unbounded_building_face,
+)
+
+
+@dataclass(frozen=True)
+class SourceBar:
+    polygon: Polygon
+    original_path_id: int
+
+    def native_path_indices(self):
+        return (self.original_path_id,)
+
+
+def _building_bars():
+    return tuple(
+        SourceBar(box(*r), i)
+        for i, r in enumerate(
+            (
+                (0, 0, 240, 3),
+                (0, 117, 240, 120),
+                (0, 0, 3, 120),
+                (237, 0, 240, 120),
+                (118, 0, 122, 120),  # full-length PARTY partition, physically real
+            )
+        )
+    )
+
+
+def _source_words(*, second_x=178, alfresco=False):
+    result = (
+        (47, 55, 67, 63, "LIVING", 0, 0, 0),
+        (second_x - 10, 55, second_x + 10, 63, "MEDIA", 1, 0, 0),
+    )
+    if alfresco:
+        return (*result, (12, 25, 43, 33, "ALFRESCO", 2, 0, 0))
+    return result
+
+
+def _party():
+    return CandidateSharedBuildingDivider(
+        source_page_index=2,
+        annotation_word_ids=(733, 734),
+        annotation_text="PARTY WALL",
+        wall_native_path_ids=(4,),
+        wall_layer="Enclosure_WallExternal",
+        wall_bounds_pdf_pts=(118.0, 0.0, 122.0, 120.0),
+        orientation="vertical",
+        side_one_label="LIVING",
+        side_two_label="MEDIA",
+    )
+
+
+def test_complete_two_dwelling_envelope_walk_skips_internal_party_edge():
+    bars = _building_bars()
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+        source_wall_union=unary_union([x.polygon for x in bars]),
+    )
+    assert result.status == "CANDIDATE"
+    assert result.enclosed_region_count == 2
+    assert result.enclosed_dwelling_zone_count == 2
+    assert result.outer_wall_native_path_ids == (0, 1, 2, 3)
+    assert result.internal_party_wall_native_path_ids == (4,)
+    assert len(result.clockwise_pdf_pts) >= 5
+    assert result.clockwise_pdf_pts[0] == result.clockwise_pdf_pts[-1]
+    pts = result.clockwise_pdf_pts
+    assert sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(pts, pts[1:])) > 0
+    assert result.to_dict()["measurement_authorized"] is False
+    assert result.to_dict()["building_footprint_authenticated"] is False
+
+
+def test_second_dwelling_wall_gap_is_not_repaired_by_left_turn_or_hull():
+    bars = list(_building_bars())
+    bars[1] = SourceBar(box(0, 117, 122, 120), 1)  # right home opens outdoors
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "source_dwelling_region_still_open_to_outside"
+    assert result.enclosed_region_count == 1
+    assert result.enclosed_dwelling_zone_count == 1
+    assert result.unclosed_dwelling_sides == ("right",)
+    assert result.clockwise_pdf_pts == ()
+
+
+def test_two_printed_rooms_on_same_side_cannot_prove_second_dwelling():
+    result = walk_source_unbounded_building_face(
+        _building_bars(), _source_words(second_x=59), shared_dividers=(_party(),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.unclosed_dwelling_sides == ("right",)
+
+
+def test_single_dwelling_unchanged_when_no_party_source_exists():
+    result = walk_source_unbounded_building_face(
+        _building_bars()[:4], _source_words(), shared_dividers=()
+    )
+    assert result.status == "CANDIDATE"
+    assert result.enclosed_region_count == 1
+    assert result.internal_party_wall_native_path_ids == ()
+
+
+def test_missing_physical_party_between_occupied_units_fails():
+    result = walk_source_unbounded_building_face(
+        _building_bars()[:4], _source_words(), shared_dividers=(_party(),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "party_wall_two_sides_are_same_free_space"
+
+
+def test_alfresco_bounded_in_building_would_make_wrong_outside_trace():
+    result = walk_source_unbounded_building_face(
+        _building_bars(), _source_words(alfresco=True), shared_dividers=(_party(),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "outdoor_space_inside_proposed_building"
+
+
+def test_far_unowned_structural_wall_or_separate_building_cannot_be_dropped():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "source_other_structural_walls_outside_candidate"
+    assert result.other_source_wall_band_count == 1
+
+
+def test_original_wall_source_ids_required_and_nonfinite_or_empty_abstains():
+    bad = SourceBar(Polygon(((0, 0), (1, 1), (2, 2))), 100)
+    result = walk_source_unbounded_building_face(
+        (bad,), _source_words(), shared_dividers=(_party(),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.to_dict()["measurement_authorized"] is False
+    assert result.to_dict()["snap_join_applied"] is False
+    assert result.to_dict()["undirected_degree_is_not_outside_face_authority"] is True
+
+def test_clockwise_outside_face_walk_handles_a_source_reentrant_L_not_a_hull():
+    bars = tuple(
+        SourceBar(box(*rect), i)
+        for i, rect in enumerate(
+            (
+                (0, 0, 52, 2),
+                (50, 0, 52, 52),
+                (50, 50, 100, 52),
+                (98, 50, 100, 100),
+                (0, 98, 100, 100),
+                (0, 0, 2, 100),
+            )
+        )
+    )
+    result = walk_source_unbounded_building_face(bars, (), shared_dividers=())
+    assert result.status == "CANDIDATE"
+    assert set(result.outer_wall_native_path_ids) == set(range(6))
+    ring = Polygon(result.clockwise_pdf_pts)
+    assert ring.is_valid
+    assert not ring.covers(box(75, 20, 77, 23))
+    assert ring.covers(box(10, 80, 12, 82))
+    assert ring.area < 10000  # no page bounding hull
+    assert not result.measurement_authorized
+
+
+def test_source_T_junction_inside_outside_wall_is_not_taken_as_outer_face():
+    bars = (
+        *_building_bars()[:4],
+        SourceBar(box(0, 56, 70, 59), 9),  # genuine internal T wall
+    )
+    result = walk_source_unbounded_building_face(bars, (), shared_dividers=())
+    assert result.status == "CANDIDATE"
+    assert 9 not in result.outer_wall_native_path_ids
+    assert set(result.outer_wall_native_path_ids) == {0, 1, 2, 3}
+    assert result.clockwise_pdf_pts[0] == result.clockwise_pdf_pts[-1]
+    assert not result.measurement_authorized
+
+
+def test_unwitnessed_four_tenths_point_source_gap_is_not_snapped_closed():
+    bars = list(_building_bars())
+    bars[0] = SourceBar(box(0, 0, 50, 3), 0)
+    bars.append(SourceBar(box(50.425, 0, 240, 3), 5))
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.clockwise_pdf_pts == ()
+    assert not result.building_footprint_authenticated
+
+
+def test_source_outside_walk_is_invariant_to_translation_and_input_order():
+    from dataclasses import replace
+
+    bars = _building_bars()
+    original = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+    )
+    shifted_bars = tuple(
+        SourceBar(
+            box(
+                bar.polygon.bounds[0] + 27,
+                bar.polygon.bounds[1] + 13,
+                bar.polygon.bounds[2] + 27,
+                bar.polygon.bounds[3] + 13,
+            ),
+            bar.original_path_id,
+        )
+        for bar in reversed(bars)
+    )
+    shifted_words = tuple(
+        (w[0] + 27, w[1] + 13, w[2] + 27, w[3] + 13, *w[4:]) for w in _source_words()
+    )
+    party = replace(_party(), wall_bounds_pdf_pts=(145.0, 13.0, 149.0, 133.0))
+    shifted = walk_source_unbounded_building_face(
+        shifted_bars,
+        shifted_words,
+        shared_dividers=(party,),
+    )
+    assert original.status == shifted.status == "CANDIDATE"
+    assert original.outer_wall_native_path_ids == shifted.outer_wall_native_path_ids
+    assert (
+        original.internal_party_wall_native_path_ids
+        == shifted.internal_party_wall_native_path_ids
+    )
+    assert (
+        original.enclosed_dwelling_zone_count
+        == shifted.enclosed_dwelling_zone_count
+        == 2
+    )
+    assert original.measurement_authorized is shifted.measurement_authorized is False
+
+def test_interior_t_junction_does_not_veto_canonical_outside_face():
+    bars = (*_building_bars(), SourceBar(box(48, 60, 52, 117), 8))
+    union = unary_union([x.polygon for x in bars])
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_wall_union=union,
+    )
+    assert result.status == "CANDIDATE"
+    assert 8 not in result.outer_wall_native_path_ids
+    assert 4 in result.internal_party_wall_native_path_ids
+    receipt = diagnose_source_outside_face_neighbors(
+        bars, 1, shared_dividers=(_party(),), source_wall_union=union,
+        source_words=_source_words(),
+    )
+    assert receipt["undirected_degree_gt_2"] is True
+    assert receipt["undirected_degree_does_not_veto_outside_face"] is True
+    assert receipt["canonical_walk_status"] == "CANDIDATE"
+    kinds = {tuple(row["native_path_ids"]): row["kind"] for row in receipt["neighbors"]}
+    assert kinds.get((8,)) == "interior_t_or_partition_contact"
+    assert receipt["measurement_authorized"] is False
+    assert receipt["snap_join_applied"] is False
+
+
+def test_two_interior_t_junctions_still_follow_outside_face():
+    bars = (
+        *_building_bars(),
+        SourceBar(box(48, 60, 52, 117), 8),
+        SourceBar(box(170, 60, 174, 117), 9),
+    )
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_wall_union=unary_union([x.polygon for x in bars]),
+    )
+    assert result.status == "CANDIDATE"
+    assert result.outer_wall_native_path_ids == (0, 1, 2, 3)
+    assert {8, 9}.isdisjoint(result.outer_wall_native_path_ids)
+
+
+def test_l_shape_keeps_reentrant_faces_and_does_not_hull():
+    bars = (
+        SourceBar(box(0, 0, 3, 120), 0),
+        SourceBar(box(0, 117, 240, 120), 1),
+        SourceBar(box(237, 60, 240, 120), 2),
+        SourceBar(box(120, 60, 240, 63), 3),
+        SourceBar(box(120, 0, 123, 63), 4),
+        SourceBar(box(0, 0, 123, 3), 5),
+    )
+    result = walk_source_unbounded_building_face(bars, (), shared_dividers=())
+    assert result.status == "CANDIDATE"
+    assert {3, 4} <= set(result.outer_wall_native_path_ids)
+    assert result.to_dict()["convex_hull_applied"] is False
+    assert result.measurement_authorized is False
+
+
+def test_point425_gap_is_not_snapped_closed():
+    bars = list(_building_bars())
+    bars[0] = SourceBar(box(0, 0, 170, 3), 0)
+    bars.append(SourceBar(box(170.425, 0, 240, 3), 5))
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.clockwise_pdf_pts == ()
+    receipt = diagnose_source_outside_face_neighbors(
+        bars, 0, source_words=_source_words(), shared_dividers=(_party(),),
+    )
+    assert receipt["snap_join_applied"] is False
+    assert 0.425 > CONTACT_PT
+    assert any(row["kind"] == "near_miss_unauthenticated_no_snap" for row in receipt["neighbors"])
+
+
+def test_grey_seam_is_topology_only_not_a_wall_or_snap():
+    import fitz
+
+    bars = (
+        SourceBar(box(0, 0, 10, 2.5), 0),
+        SourceBar(box(10.5, 0, 30, 2.5), 1),
+        SourceBar(box(0, 0, 2.5, 30), 4),
+        SourceBar(box(27.5, 0, 30, 30), 5),
+        SourceBar(box(0, 27.5, 30, 30), 6),
+    )
+    grey = {
+        "rect": fitz.Rect(10, 0, 10.5, 2.5),
+        "layer": "Enclosure_WallExternal",
+        "fill": (0.415686, 0.415686, 0.415686),
+        "items": (),
+    }
+    drawings = [
+        {"rect": fitz.Rect(*b.polygon.bounds), "layer": "Enclosure_WallExternal", "fill": (0.0, 0.0, 0.0), "items": ()}
+        for b in bars[:2]
+    ]
+    drawings.append(grey)
+    union = unary_union([b.polygon for b in bars] + [box(10, 0, 10.5, 2.5)])
+    receipt = diagnose_source_outside_face_neighbors(
+        bars, 0, drawings=drawings, source_wall_union=union,
+    )
+    assert receipt["grey_seam_pairs"]
+    assert receipt["grey_seam_pairs"][0]["neutral_fill_path_ids"] == [2]
+    assert {0, 1} == {
+        receipt["grey_seam_pairs"][0]["first_host_path_id"],
+        receipt["grey_seam_pairs"][0]["second_host_path_id"],
+    }
+    kinds = [row["kind"] for row in receipt["neighbors"] if row["native_path_ids"] == [1]]
+    assert kinds == ["source_neutral_or_opening_topology_only"]
+    assert receipt["snap_join_applied"] is False
+    assert receipt["measurement_authorized"] is False
+
+
+def test_isolated_post_is_not_an_outer_wall_owner():
+    bars = (*_building_bars(), SourceBar(box(260, 20, 264, 24), 9))
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+    )
+    assert 9 not in result.outer_wall_native_path_ids
+    assert result.measurement_authorized is False
+
+
+def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
+    import hashlib
+
+    import fitz
+
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    from pb_source_native_wall_body_junction_graph_shadow import (
+        _unique_source_wall_bars,
+    )
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+
+    path = require_original_3laurel()
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=raw, filetype="pdf") as document:
+        page = document[2]
+        drawings = page.get_drawings()
+        words = page.get_text("words")
+        before = (len(drawings), len(words))
+        attempt = attempt_source_native_outer_wall_first(
+            drawings, source_words=words, window_source_drawings=drawings,
+            source_page_index=2,
+        )
+        bars = _unique_source_wall_bars(drawings)
+        receipt = diagnose_source_outside_face_neighbors(
+            bars,
+            1192,
+            drawings=drawings,
+            source_words=words,
+            shared_dividers=attempt.shared_dwelling_divider_candidates,
+        )
+        after = (len(page.get_drawings()), len(page.get_text("words")))
+    assert before == after
+    assert attempt.measurement_authorized is False
+    walk = attempt.source_outside_face_walk
+    assert walk is not None
+    assert walk.measurement_authorized is False
+    assert walk.status == "ABSTAINED"
+    assert receipt["measurement_authorized"] is False
+    assert receipt["snap_join_applied"] is False
+    assert receipt["undirected_degree_does_not_veto_outside_face"] is True
+    grey_hosts = {
+        (row["first_host_path_id"], row["second_host_path_id"])
+        for row in receipt["grey_seam_pairs"]
+    }
+    assert grey_hosts & {(1192, 1195), (1195, 1192)}
+    fills = {fid for row in receipt["grey_seam_pairs"] for fid in row["neutral_fill_path_ids"]}
+    assert {1193, 1194} <= fills or fills  # native grey seam owners when present
+    party = set(walk.internal_party_wall_native_path_ids or ())
+    outer = set(walk.outer_wall_native_path_ids or ())
+    assert not party.intersection(outer)
+    assert party.intersection({1027, 1029, 1031, 1139})
+    east = [
+        bar for bar in bars
+        if bar.polygon.bounds[0] > 756
+        and set(bar.native_path_indices()).isdisjoint(party)
+    ]
+    assert east, "right-house/garage source bars must remain available"

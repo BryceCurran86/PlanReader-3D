@@ -1,0 +1,476 @@
+"""Trace the source-owned UNBOUNDED outside face, not a closed dwelling loop.
+
+This is a review-only *wall-network* walk. A building with two dwellings can
+have two internal free-space faces sharing a PARTY wall, but only ONE outside
+face. Never use a clockwise/left-turn closed UNIT ring as the building's
+outside perimeter. No inferred wall, snapping, quantities or FIRM authority.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
+
+from pb_source_shared_dwelling_envelope_shadow import (
+    CandidateSharedBuildingDivider,
+)
+
+
+@dataclass(frozen=True)
+class OutsideFacingBuildingWalk:
+    status: str
+    reason: str
+    clockwise_pdf_pts: tuple[tuple[float, float], ...] = ()
+    outer_wall_native_path_ids: tuple[int, ...] = ()
+    internal_party_wall_native_path_ids: tuple[int, ...] = ()
+    enclosed_region_count: int = 0
+    enclosed_dwelling_zone_count: int = 0
+    unclosed_dwelling_sides: tuple[str, ...] = ()
+    other_source_wall_band_count: int = 0
+    building_footprint_authenticated: bool = False
+    measurement_authorized: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "clockwise_pdf_pts": [list(p) for p in self.clockwise_pdf_pts],
+            "outer_wall_native_path_ids": list(self.outer_wall_native_path_ids),
+            "internal_party_wall_native_path_ids": list(
+                self.internal_party_wall_native_path_ids
+            ),
+            "enclosed_region_count": self.enclosed_region_count,
+            "enclosed_dwelling_zone_count": self.enclosed_dwelling_zone_count,
+            "unclosed_dwelling_sides": list(self.unclosed_dwelling_sides),
+            "other_source_wall_band_count": self.other_source_wall_band_count,
+            "building_footprint_authenticated": False,
+            "measurement_authorized": False,
+            "snap_join_applied": False,
+            "convex_hull_applied": False,
+            "layer_name_is_not_outer_role": True,
+            "undirected_degree_is_not_outside_face_authority": True,
+        }
+
+
+def _word_centers(source_words: Sequence[Mapping[str, Any] | Sequence[Any]]):
+    result = []
+    for row in source_words:
+        try:
+            if isinstance(row, Mapping):
+                word = str(row.get("text") or "").strip().upper()
+                bounds = row.get("bbox_pdf_pts") or row.get("bbox")
+            else:
+                word, bounds = str(row[4]).strip().upper(), row[:4]
+            x0, y0, x1, y1 = (float(v) for v in bounds)
+            if (
+                not all(math.isfinite(v) for v in (x0, y0, x1, y1))
+                or x0 >= x1
+                or y0 >= y1
+            ):
+                continue
+        except (IndexError, ValueError, TypeError, OverflowError):
+            continue
+        result.append((word, Point((x0 + x1) / 2, (y0 + y1) / 2)))
+    return result
+
+
+def _owner(bar):
+    geom = getattr(bar, "polygon", None)
+    get_ids = getattr(bar, "native_path_indices", None)
+    if (
+        not isinstance(geom, Polygon)
+        or not geom.is_valid
+        or geom.is_empty
+        or not callable(get_ids)
+    ):
+        return None
+    try:
+        ids = tuple(int(v) for v in get_ids())
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return (geom, ids) if ids and min(ids) >= 0 else None
+
+
+def _clockwise_page_ring(source_exterior):
+    coords = [(float(x), float(y)) for x, y in list(source_exterior.coords)[:-1]]
+    if len(coords) < 4 or not all(math.isfinite(v) for pt in coords for v in pt):
+        return ()
+    signed = sum(
+        a[0] * b[1] - b[0] * a[1] for a, b in zip(coords, coords[1:] + coords[:1])
+    )
+    # PDF y-axis goes DOWN. Signed-positive means clockwise on the page.
+    if signed < 0:
+        coords.reverse()
+    first = min(
+        range(len(coords)),
+        key=lambda i: (round(coords[i][1], 8), round(coords[i][0], 8)),
+    )
+    coords = coords[first:] + coords[:first]
+    return tuple(coords + [coords[0]])
+
+
+def _occupied_party_regions(
+    holes: Sequence[Polygon],
+    words: Sequence[tuple[str, Point]],
+    divider: CandidateSharedBuildingDivider,
+):
+    x0, y0, x1, y1 = divider.wall_bounds_pdf_pts
+    vertical = divider.orientation == "vertical"
+    mid = (x0 + x1) / 2 if vertical else (y0 + y1) / 2
+    low, high = (y0, y1) if vertical else (x0, x1)
+    sides = {"left": set(), "right": set()}
+    # Source words used to discover this divider, not a caller-supplied
+    # guess that the house is a particular rectangle or a fixed twin-unit.
+    for label in (divider.side_one_label, divider.side_two_label):
+        for text, point in words:
+            if text != label.upper():
+                continue
+            normal = point.x if vertical else point.y
+            along = point.y if vertical else point.x
+            if abs(normal - mid) > 180 or not low - 4 <= along <= high + 4:
+                continue
+            for idx, hole in enumerate(holes):
+                if hole.contains(point):
+                    sides["left" if normal < mid else "right"].add(idx)
+    return sides
+
+
+def walk_source_unbounded_building_face(
+    wall_bars: Sequence[Any],
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
+    *,
+    shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
+    source_wall_union: Any | None = None,
+) -> OutsideFacingBuildingWalk:
+    """Walk OUTSIDE-facing source wall network; fail closed on unjoined zones.
+
+    Reuse the original already-computed wall/hosted-opening union from the
+    source preflight when supplied; do not make duplicate OCR/geometry passes.
+    A missing party wall or a source-named room still open to the outside
+    is not repaired by a sketch, a bounding hull or a direct endpoint snap.
+    """
+    owners = tuple(v for b in wall_bars if (v := _owner(b)) is not None)
+    if len(owners) < 4:
+        return OutsideFacingBuildingWalk("ABSTAINED", "source_walls_insufficient")
+    if source_wall_union is None:
+        source_wall_union = unary_union([geom for geom, _ in owners])
+    components = (
+        list(source_wall_union.geoms)
+        if hasattr(source_wall_union, "geoms")
+        else [source_wall_union]
+    )
+    closed = [
+        p for p in components if isinstance(p, Polygon) and p.is_valid and p.interiors
+    ]
+    party_ids = tuple(
+        sorted({i for d in shared_dividers for i in d.wall_native_path_ids})
+    )
+    if len(closed) != 1:
+        return OutsideFacingBuildingWalk(
+            "ABSTAINED",
+            "outside_face_source_wall_domain_not_unique_and_closed",
+            internal_party_wall_native_path_ids=party_ids,
+        )
+    primary = closed[0]
+    holes = tuple(Polygon(r) for r in primary.interiors)
+    dwelling_count = 0
+    if shared_dividers:
+        if len(shared_dividers) != 1:
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "several_party_dividers_require_dwelling_zone_graph",
+                enclosed_region_count=len(holes),
+                internal_party_wall_native_path_ids=party_ids,
+            )
+        divider = shared_dividers[0]
+        sides = _occupied_party_regions(holes, _word_centers(source_words), divider)
+        dwelling_count = len(sides["left"] | sides["right"])
+        missing = tuple(side for side, zones in sides.items() if not zones)
+        if missing:
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "source_dwelling_region_still_open_to_outside",
+                enclosed_region_count=len(holes),
+                enclosed_dwelling_zone_count=dwelling_count,
+                unclosed_dwelling_sides=missing,
+                internal_party_wall_native_path_ids=party_ids,
+            )
+        if sides["left"] & sides["right"]:
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "party_wall_two_sides_are_same_free_space",
+                enclosed_region_count=len(holes),
+                enclosed_dwelling_zone_count=dwelling_count,
+                internal_party_wall_native_path_ids=party_ids,
+            )
+        # Longitudinally walking the dividing wall would close one UNIT,
+        # not the externally facing outside. Endpoints/T-junctions are fine.
+        x0, y0, x1, y1 = divider.wall_bounds_pdf_pts
+        from shapely.geometry import box
+
+        wall = box(x0, y0, x1, y1)
+        wall_long = (y1 - y0) if divider.orientation == "vertical" else (x1 - x0)
+        if primary.exterior.intersection(wall.buffer(0.3)).length > 0.55 * wall_long:
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "party_wall_used_as_external_walking_edge",
+                enclosed_region_count=len(holes),
+                enclosed_dwelling_zone_count=dwelling_count,
+                internal_party_wall_native_path_ids=party_ids,
+            )
+    extra = sum(1 for geom, _ in owners if not primary.buffer(0.05).covers(geom))
+    if extra:
+        return OutsideFacingBuildingWalk(
+            "ABSTAINED",
+            "source_other_structural_walls_outside_candidate",
+            enclosed_region_count=len(holes),
+            enclosed_dwelling_zone_count=dwelling_count,
+            other_source_wall_band_count=extra,
+            internal_party_wall_native_path_ids=party_ids,
+        )
+    for label, point in _word_centers(source_words):
+        if label in {
+            "ALFRESCO",
+            "PORCH",
+            "PATIO",
+            "VERANDA",
+            "VERANDAH",
+            "DECK",
+        } and any(hole.contains(point) for hole in holes):
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "outdoor_space_inside_proposed_building",
+                enclosed_region_count=len(holes),
+                enclosed_dwelling_zone_count=dwelling_count,
+                internal_party_wall_native_path_ids=party_ids,
+            )
+    ring = _clockwise_page_ring(primary.exterior)
+    if not ring:
+        return OutsideFacingBuildingWalk(
+            "ABSTAINED",
+            "source_unbounded_face_not_closed",
+            internal_party_wall_native_path_ids=party_ids,
+        )
+    # Source bar endpoints may meet outside boundary at a PARTY junction.
+    # Only bars spanning a substantial outer segment are outside owners.
+    exterior_paths = tuple(
+        sorted(
+            {
+                pid
+                for geom, ids in owners
+                if primary.exterior.intersection(geom.buffer(0.02)).length
+                >= 0.25
+                * max(geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1])
+                for pid in ids
+            }
+        )
+    )
+    exterior_paths = tuple(pid for pid in exterior_paths if pid not in party_ids)
+    if len(exterior_paths) < 4:
+        return OutsideFacingBuildingWalk(
+            "ABSTAINED",
+            "source_outside_face_wall_owners_incomplete",
+            internal_party_wall_native_path_ids=party_ids,
+        )
+    return OutsideFacingBuildingWalk(
+        "CANDIDATE",
+        "unbounded_outside_wall_walk_requires_independent_source_seal",
+        clockwise_pdf_pts=ring,
+        outer_wall_native_path_ids=exterior_paths,
+        internal_party_wall_native_path_ids=party_ids,
+        enclosed_region_count=len(holes),
+        enclosed_dwelling_zone_count=dwelling_count,
+    )
+
+
+CONTACT_PT = 0.03
+_SNAP_PT = 2.5  # commercial snap is never a join here
+
+
+def _topology_host_pairs(
+    drawings: Sequence[Mapping[str, Any] | object],
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
+) -> tuple[frozenset[int], ...]:
+    pairs: list[frozenset[int]] = []
+
+    def _add(left, right) -> None:
+        try:
+            a, b = int(left), int(right)
+        except (TypeError, ValueError):
+            return
+        if a != b:
+            pairs.append(frozenset((a, b)))
+
+    if not drawings:
+        return ()
+    from pb_source_garage_door_footprint_continuity import (
+        detect_exterior_garage_door_footprint_bridges,
+    )
+    from pb_source_neutral_wall_seam_continuity import detect_source_neutral_wall_seams
+    from pb_source_swing_door_footprint_continuity import (
+        detect_exterior_swing_door_footprint_bridges,
+    )
+    from pb_source_window_footprint_continuity import (
+        detect_exterior_window_footprint_bridges,
+    )
+
+    try:
+        from pb_source_sliding_door_footprint_continuity import (
+            detect_exterior_sliding_door_footprint_bridges,
+        )
+    except ImportError:
+        def detect_exterior_sliding_door_footprint_bridges(*_a, **_k):
+            return ()
+
+    for seam in detect_source_neutral_wall_seams(drawings, page_index=-1):
+        _add(seam.first_host_path_id, seam.second_host_path_id)
+    if source_words:
+        for bridge in detect_exterior_window_footprint_bridges(drawings, source_words):
+            _add(bridge.left_host_path_id, bridge.right_host_path_id)
+        for bridge in detect_exterior_garage_door_footprint_bridges(drawings, source_words):
+            _add(bridge.start_host_path_id, bridge.end_host_path_id)
+        for bridge in detect_exterior_swing_door_footprint_bridges(drawings, source_words):
+            _add(bridge.first_host_path_id, bridge.second_host_path_id)
+        for bridge in detect_exterior_sliding_door_footprint_bridges(drawings, source_words):
+            _add(
+                getattr(bridge, "first_host_path_id", None),
+                getattr(bridge, "second_host_path_id", None),
+            )
+    unique = []
+    seen = set()
+    for pair in pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        unique.append(pair)
+    return tuple(unique)
+
+
+def diagnose_source_outside_face_neighbors(
+    wall_bars: Sequence[Any],
+    native_path_id: int,
+    *,
+    drawings: Sequence[Mapping[str, Any] | object] = (),
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
+    shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
+    source_wall_union: Any | None = None,
+) -> dict[str, object]:
+    """Receipts for one source path on the canonical outside face.
+
+    An interior T-junction may give undirected degree > 2. That is not
+    missing ink and is not an instruction to snap. The canonical walk
+    still follows the unbounded union exterior, not this neighbor count.
+    """
+    try:
+        query_id = int(native_path_id)
+    except (TypeError, ValueError):
+        query_id = -1
+    owners = []
+    for bar in wall_bars:
+        owned = _owner(bar)
+        if owned is None:
+            continue
+        owners.append((owned[0], owned[1], bar))
+    query = [(geom, ids, bar) for geom, ids, bar in owners if query_id in ids]
+    party_ids = frozenset(i for d in shared_dividers for i in d.wall_native_path_ids)
+    topology = _topology_host_pairs(drawings, source_words)
+    grey_pairs = []
+    if drawings:
+        from pb_source_neutral_wall_seam_continuity import (
+            detect_source_neutral_wall_seams,
+        )
+        grey_pairs = [
+            {
+                "first_host_path_id": seam.first_host_path_id,
+                "second_host_path_id": seam.second_host_path_id,
+                "neutral_fill_path_ids": list(seam.neutral_fill_path_ids),
+                "kind": "source_neutral_grey_wall_seam_continuity_only",
+                "measurement_authorized": False,
+            }
+            for seam in detect_source_neutral_wall_seams(drawings, page_index=-1)
+            if query_id in (seam.first_host_path_id, seam.second_host_path_id)
+        ]
+    union = source_wall_union
+    if union is None and owners:
+        union = unary_union([geom for geom, _ids, _bar in owners])
+    primary = None
+    if union is not None:
+        parts = list(union.geoms) if hasattr(union, "geoms") else [union]
+        closed = [p for p in parts if isinstance(p, Polygon) and p.is_valid and p.interiors]
+        if len(closed) == 1:
+            primary = closed[0]
+    neighbors = []
+    if query:
+        q_geom = unary_union([geom for geom, _ids, _bar in query])
+        seen: set[tuple[int, ...]] = set()
+        for geom, ids, _bar in owners:
+            if query_id in ids:
+                continue
+            dist = float(q_geom.distance(geom))
+            if not math.isfinite(dist):
+                continue
+            id_set = frozenset(ids)
+            pair_hit = any(query_id in pair and pair & id_set for pair in topology)
+            if dist > CONTACT_PT and not pair_hit:
+                if dist <= _SNAP_PT:
+                    neighbors.append({
+                        "native_path_ids": list(ids),
+                        "kind": "near_miss_unauthenticated_no_snap",
+                        "separation_pdf_pts": round(dist, 4),
+                        "physical_join_authenticated": False,
+                    })
+                continue
+            if party_ids.intersection(ids):
+                kind = "party_interior_divider_contact"
+            elif pair_hit:
+                kind = "source_neutral_or_opening_topology_only"
+            elif primary is not None and primary.exterior.intersection(geom.buffer(0.02)).length >= 0.25 * max(
+                geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1],
+            ):
+                kind = "representation_contact_exterior"
+            else:
+                kind = "interior_t_or_partition_contact"
+            key = tuple(sorted(ids))
+            if key in seen:
+                continue
+            seen.add(key)
+            neighbors.append({
+                "native_path_ids": list(ids),
+                "kind": kind,
+                "separation_pdf_pts": round(dist, 4),
+                "physical_join_authenticated": False,
+            })
+        neighbors.sort(key=lambda row: (row["separation_pdf_pts"], row["native_path_ids"]))
+    walk = walk_source_unbounded_building_face(
+        wall_bars,
+        source_words,
+        shared_dividers=shared_dividers,
+        source_wall_union=source_wall_union,
+    )
+    contact_degree = sum(
+        1 for row in neighbors
+        if row["kind"] != "near_miss_unauthenticated_no_snap"
+    )
+    return {
+        "native_path_id": query_id,
+        "neighbor_count": contact_degree,
+        "undirected_degree_gt_2": contact_degree > 2,
+        "undirected_degree_does_not_veto_outside_face": True,
+        "neighbors": neighbors,
+        "grey_seam_pairs": grey_pairs,
+        "canonical_walk_status": walk.status,
+        "canonical_walk_reason": walk.reason,
+        "outer_wall_native_path_ids": list(walk.outer_wall_native_path_ids),
+        "internal_party_wall_native_path_ids": list(walk.internal_party_wall_native_path_ids),
+        "snap_join_applied": False,
+        "convex_hull_applied": False,
+        "physical_wall_authenticated": False,
+        "building_footprint_authenticated": False,
+        "measurement_authorized": False,
+        "official_frozen120_score_change": 0,
+    }

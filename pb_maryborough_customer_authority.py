@@ -26,6 +26,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     EvidenceResolutionStatus,
     authenticate_maryborough_office_cross_sheet_correspondence,
     authenticate_maryborough_food_prep_cross_sheet_correspondence,
+    authenticate_maryborough_pwd_cross_sheet_correspondence,
     compose_authenticated_cross_sheet_physical_claim,
     compose_authenticated_cross_sheet_room_and_floor,
     enrich_cross_sheet_floor_with_documented_area,
@@ -52,6 +53,7 @@ FOOD_PREP_SOURCE_ROOM_FACE_ID = "source_room_face_record_a163b3690c0b2db83f89fcf
 
 PWD_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_5c7f261811485d3597a232c1380b277f"
 PWD_PHYSICAL_ROOM_ID = "live_physical_room_decceeeb5c395a8edee347b1454f0881"
+PWD_SOURCE_ROOM_FACE_ID = "source_room_face_record_f668f28c3762a6694ec2118010c12c96"
 
 AIRLOCK_PHYSICAL_FLOOR_ID = "physical_room_floor_surface_a4a5b86baf91c1d182dab8fad3c3ce01"
 AIRLOCK_PHYSICAL_ROOM_ID = "live_physical_room_660be6e4e831de172db0f00da88fd333"
@@ -67,7 +69,11 @@ _ORIG_FITZ_HOOKS = (
     fitz.Page.get_drawings,
     fitz.Page.get_pixmap,
 )
-_ORIG_CORR_AUTH = authenticate_maryborough_office_cross_sheet_correspondence
+_ORIG_CORR_AUTH = (
+    authenticate_maryborough_office_cross_sheet_correspondence,
+    authenticate_maryborough_food_prep_cross_sheet_correspondence,
+    authenticate_maryborough_pwd_cross_sheet_correspondence,
+)
 
 
 MARYBOROUGH_QUANTITY_AUTHORITY_UNAVAILABLE = (
@@ -154,6 +160,7 @@ def issue_all_original_maryborough_customer_quantities(
             cached_src = _SOURCE_CACHE.get(cache_key) if hooks_unmodified else None
             if cached_src is not None:
                 source, published = cached_src
+                source._producer._store.cache_snapshot_membership(published.snapshot)
             else:
                 try:
                     source = SourceVisibilityProducer(
@@ -177,11 +184,11 @@ def issue_all_original_maryborough_customer_quantities(
             target_snapshot_id = published.snapshot.snapshot_id
 
             is_food_prep = "FOOD" in room_label.upper() or "PREP" in room_label.upper()
-            target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID if is_food_prep else OFFICE_PHYSICAL_FLOOR_ID
-            target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID if is_food_prep else OFFICE_PHYSICAL_ROOM_ID
-            target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID if is_food_prep else OFFICE_SOURCE_ROOM_FACE_ID
-
+            is_pwd = "PWD" in room_label.upper()
             if is_food_prep:
+                target_floor_id = FOOD_PREP_PHYSICAL_FLOOR_ID
+                target_room_id = FOOD_PREP_PHYSICAL_ROOM_ID
+                target_face_id = FOOD_PREP_SOURCE_ROOM_FACE_ID
                 cr = authenticate_maryborough_food_prep_cross_sheet_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
                     revision_id=target_revision_id,
@@ -191,8 +198,27 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
+                )
+            elif is_pwd:
+                target_floor_id = PWD_PHYSICAL_FLOOR_ID
+                target_room_id = PWD_PHYSICAL_ROOM_ID
+                target_face_id = PWD_SOURCE_ROOM_FACE_ID
+                cr = authenticate_maryborough_pwd_cross_sheet_correspondence(
+                    document_id=MARYBOROUGH_DOCUMENT_ID,
+                    revision_id=target_revision_id,
+                    source_sha256=source_sha,
+                    snapshot_id=target_snapshot_id,
+                    canonical_floor_id=target_floor_id,
+                    physical_room_id=target_room_id,
+                    source_room_face_record_id=target_face_id,
+                    doc=document,
+                    source_bytes=payload,
                 )
             else:
+                target_floor_id = OFFICE_PHYSICAL_FLOOR_ID
+                target_room_id = OFFICE_PHYSICAL_ROOM_ID
+                target_face_id = OFFICE_SOURCE_ROOM_FACE_ID
                 cr = authenticate_maryborough_office_cross_sheet_correspondence(
                     document_id=MARYBOROUGH_DOCUMENT_ID,
                     revision_id=target_revision_id,
@@ -202,6 +228,7 @@ def issue_all_original_maryborough_customer_quantities(
                     physical_room_id=target_room_id,
                     source_room_face_record_id=target_face_id,
                     doc=document,
+                    source_bytes=payload,
                 )
 
             if (
@@ -216,7 +243,11 @@ def issue_all_original_maryborough_customer_quantities(
 
     upstream_cache_ok = (
         hooks_unmodified
-        and authenticate_maryborough_office_cross_sheet_correspondence is _ORIG_CORR_AUTH
+        and (
+            authenticate_maryborough_office_cross_sheet_correspondence,
+            authenticate_maryborough_food_prep_cross_sheet_correspondence,
+            authenticate_maryborough_pwd_cross_sheet_correspondence,
+        ) == _ORIG_CORR_AUTH
     )
     upstream_key = (MARYBOROUGH_DOCUMENT_ID, source_sha, cr.record_id, room_label)
     cached_upstream = _UPSTREAM_CACHE.get(upstream_key) if upstream_cache_ok else None
@@ -340,4 +371,17 @@ def issue_original_maryborough_food_prep_customer_quantities(
         pdf_path,
         workspace_id=workspace_id,
         room_label="FOOD PREP",
+    )
+
+
+def issue_original_maryborough_pwd_customer_quantities(
+    pdf_path: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> MaryboroughCustomerResult:
+    """Authenticate genuine source-owned Maryborough PWD FT2 floor finish."""
+    return issue_all_original_maryborough_customer_quantities(
+        pdf_path,
+        workspace_id=workspace_id,
+        room_label="PWD",
     )

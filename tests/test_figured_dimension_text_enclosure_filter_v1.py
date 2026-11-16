@@ -154,6 +154,92 @@ def test_neighbor_dimension_text_frame_is_removed_from_binding_universe() -> Non
     assert result.witness_line_ids == ("left-witness", "right-witness")
 
 
+def test_room_label_tight_frame_is_removed_allowing_perpendicular_dimension_to_bind() -> None:
+    # Simulates Maryborough PWD 2200 where an adjacent room tag [WC & SHOWER] has a 4-edge border
+    # whose left vertical edge would otherwise falsely bind to the horizontal dimension text.
+    dim_obs = DimensionObservation(
+        dimension_id="dim-2200",
+        source_page=1,
+        view_id="V",
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+        bbox=(452.5, 2012.8, 472.5, 2026.5),
+        raw_text="2200",
+        value=2200.0,
+        unit="mm",
+        orientation=DimensionOrientation.HORIZONTAL.value,
+    )
+    # The real horizontal dimension line for 2200 with witnesses at 400 and 524.8
+    real_dim_line = _seg("dim-2200-line", (400.0, 2009.6), (524.8, 2009.6), path=100)
+    left_tick = _seg("tick-left", (400.0, 1998.0), (400.0, 2021.0), path=101)
+    right_tick = _seg("tick-right", (524.8, 1998.0), (524.8, 2021.0), path=102)
+
+    # Adjacent room tag border [WC & SHOWER] at y=2035..2052, x=458.8..523.6
+    room_tag_frame = (
+        _seg("tag-top", (458.8, 2035.7), (523.6, 2035.7), path=200),
+        _seg("tag-right", (523.6, 2035.7), (523.6, 2052.8), path=200),
+        _seg("tag-bottom", (523.6, 2052.8), (458.8, 2052.8), path=200),
+        _seg("tag-left", (458.8, 2052.8), (458.8, 2035.7), path=200),
+    )
+    tag_bbox = (458.8, 2035.7, 523.6, 2052.8)
+
+    calibration = DimensionLayoutCalibration(
+        median_word_height_pt=14.0,
+        line_search_distance_pt=35.0,
+        witness_endpoint_distance_pt=12.0,
+        chain_axis_tolerance_pt=5.0,
+    )
+
+    all_segments = (*room_tag_frame, real_dim_line, left_tick, right_tick)
+    filtered = _without_dimension_text_enclosure_paths(
+        all_segments,
+        (dim_obs.bbox, tag_bbox),
+        calibration,
+    )
+
+    remaining_ids = {s.segment_id for s in filtered}
+    assert not any(s_id.startswith("tag-") for s_id in remaining_ids)
+    assert "dim-2200-line" in remaining_ids
+    assert "tick-left" in remaining_ids
+    assert "tick-right" in remaining_ids
+
+    binding = bind_observation_to_vector_geometry(
+        dim_obs,
+        filtered,
+        calibration,
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+    assert binding.status == BindingStatus.WITNESS_BOUND.value
+    assert binding.dimension_line_id == "dim-2200-line"
+    assert binding.witness_line_ids == ("tick-left", "tick-right")
+
+
+def test_wall_and_dimension_linework_never_suppressed_by_room_label() -> None:
+    # A real 92mm partition wall box (e.g. 92mm x 3570mm) and a dimension chain
+    # cannot match any room label's text bounding box within tolerance.
+    wall_segments = (
+        _seg("wall-top", (100.0, 50.0), (300.0, 50.0), path=300),
+        _seg("wall-right", (300.0, 50.0), (300.0, 55.0), path=300),
+        _seg("wall-bottom", (300.0, 55.0), (100.0, 55.0), path=300),
+        _seg("wall-left", (100.0, 55.0), (100.0, 50.0), path=300),
+    )
+    room_label_bbox = (150.0, 70.0, 220.0, 85.0)
+
+    calibration = DimensionLayoutCalibration(
+        median_word_height_pt=14.0,
+        line_search_distance_pt=35.0,
+        witness_endpoint_distance_pt=12.0,
+        chain_axis_tolerance_pt=5.0,
+    )
+
+    excluded = _tight_text_enclosure_path_indices(
+        room_label_bbox,
+        wall_segments,
+        calibration,
+    )
+    # The wall is NOT excluded
+    assert excluded == frozenset()
+
+
 def test_larger_rectangle_is_not_filtered_as_text_enclosure() -> None:
     large_box = (
         _seg("large-top", (70.0, 60.0), (150.0, 60.0), path=30),
