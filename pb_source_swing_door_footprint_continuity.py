@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Mapping, Sequence
 import math
+import re
 from typing import Any
 
 from pb_source_window_footprint_continuity import (
@@ -85,6 +86,8 @@ def detect_exterior_swing_door_footprint_bridges(
     source_words: Sequence[Any] = (),
     *,
     page_index: int = -1,
+    wall_layer_pattern: re.Pattern[str] | None = None,
+    cap_across_tolerance_pt: float = 0.5,
 ) -> tuple[ExteriorSwingDoorFootprintBridge, ...]:
     """One original cubic swing arc, two distinct wall hosts AND two jamb caps.
 
@@ -93,6 +96,9 @@ def detect_exterior_swing_door_footprint_bridges(
     interpretations compete for one arc, neither is authorized. Windows and
     garage panel-lift openings use independent detectors.
     """
+    if not (0.2 <= cap_across_tolerance_pt <= 1.0):
+        raise ValueError("cap_across_tolerance_outside_source_range")
+    wall_pattern = wall_layer_pattern or _EXTERIOR_WALL_LAYER
     walls: list[tuple[int, str, tuple[float, float, float, float]]] = []
     caps: list[tuple[int, str, tuple[float, float, float, float]]] = []
     arcs: list[tuple[int, str, tuple[float, float, float, float]]] = []
@@ -100,7 +106,7 @@ def detect_exterior_swing_door_footprint_bridges(
         if not isinstance(row, Mapping):
             continue
         layer = str(row.get("layer") or "")
-        if not _EXTERIOR_WALL_LAYER.search(layer):
+        if not wall_pattern.search(layer):
             continue
         bounds = _rect(row)
         if bounds is None:
@@ -240,7 +246,7 @@ def detect_exterior_swing_door_footprint_bridges(
                             if (
                                 on_edge
                                 and aligned
-                                and abs(across - thick) < 0.5
+                                and abs(across - thick) < cap_across_tolerance_pt
                                 and 0.25 <= along <= 1.5
                             ):
                                 ids.append(k)
