@@ -187,9 +187,45 @@ def parse_numbered_key(
     )
 
 
+def _has_readable_native_room_labels(words: Sequence[Any]) -> bool:
+    """Avoid auxiliary full-page OCR when room names already print as native text.
+
+    Evidence threshold is generic across plans: many separately printed
+    recognisable spaces in several categories, not a fixture/project hash.
+    This does NOT authenticate a room or any area.
+    """
+    if len(words) < 100:
+        return False
+    types = {
+        "LIVING": "living", "DINING": "dining", "MEALS": "dining",
+        "BED": "bed", "BEDROOM": "bed", "MEDIA": "media",
+        "KITCHEN": "kitchen", "KIT": "kitchen",
+        "BATH": "bath", "BATHROOM": "bath", "WC": "bath",
+        "ENS": "bath", "ENSUITE": "bath",
+        "GARAGE": "garage", "OFFICE": "office", "STUDY": "office",
+        "LAUNDRY": "laundry", "LDY": "laundry",
+        "ENTRY": "entry", "HALL": "hall",
+        "WIR": "closet", "WIP": "closet", "STORE": "store",
+    }
+    labels = []
+    for word in words:
+        if not isinstance(word, (tuple, list)) or len(word) < 5:
+            continue
+        name = re.sub(r"[^A-Z0-9]", "", str(word[4]).upper())
+        if name in ("KEY", "ROOMKEY", "SPACEKEY", "AREAKEY"):
+            return False  # Explicit key may still need OCR.
+        category = types.get(name)
+        if category is None and re.fullmatch(r"BED(?:ROOM)?[0-9]+", name):
+            category = "bed"
+        if category is not None:
+            labels.append(category)
+    return len(labels) >= 8 and len(set(labels)) >= 4
+
+
 def detect_numbered_space_key(page: Any, *,
                               page_index: int, source_sha256: str,
-                              max_ocr_px: int = 2700) -> NumberedSpaceKeyResult:
+                              max_ocr_px: int = 2700,
+                              force_ocr: bool = False) -> NumberedSpaceKeyResult:
     """Automatic on each original floor page, source-OCR only if necessary."""
     import fitz
     from PIL import Image
@@ -210,14 +246,26 @@ def detect_numbered_space_key(page: Any, *,
             "ABSTAINED", "numbered_key_no_source_printed_glyph_evidence",
             page_index, source_sha256,
         )
-    # The native text path is already available to the normal source reader,
-    # while the OCR path is necessary for outlined-glyph CAD sheets like Acacia.
-    # OCR is a source-evidence *candidate*, never measured area authority.
-    scan_needed=(len(native)<35 or len(drawings)>3500)
+    # Thousands of CAD vector paths do NOT by themselves justify a 2,700px
+    # full-page OCR scan. On native-text floor plans with printed room names,
+    # the optional numbered-key scan adds no room wall authority and can
+    # dominate preview time. Preserve OCR for outlined glyphs (no readable
+    # native room labels) and allow explicit forced diagnostic use.
+    readable_native_rooms = _has_readable_native_room_labels(native)
+    scan_needed = (
+        force_ocr or (
+            (len(native) < 35 or len(drawings) > 3500)
+            and not readable_native_rooms
+        )
+    )
     if not scan_needed:
+        reason = (
+            "native_room_names_visible_numbered_key_ocr_deferred"
+            if readable_native_rooms and not force_ocr
+            else "native_text_page_no_numbered_key_ocr_not_required"
+        )
         return NumberedSpaceKeyResult(
-            "ABSTAINED","native_text_page_no_numbered_key_ocr_not_required",
-            page_index,source_sha256,
+            "ABSTAINED", reason, page_index, source_sha256,
         )
     backend=RapidOCRBackend()
     if not backend.is_available():
