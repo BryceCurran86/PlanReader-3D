@@ -14,7 +14,10 @@ from typing import Any
 from shapely.geometry import box
 
 _WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*|\d{1,2})$", re.IGNORECASE)
-_DOOR_CODE = re.compile(r"^(?:d[- ]?\d+[a-z]*|door|sgd|asd[- ]?\d*|sd[- ]?\d*|stacker)$", re.IGNORECASE)
+_DOOR_CODE = re.compile(
+    r"^(?:d[- ]?\d+[a-z]*|door|sgd|assd[- ]?\d*|asd[- ]?\d*|sd[- ]?\d*|stacker)$",
+    re.IGNORECASE,
+)
 _EXTERIOR_WALL_LAYER = re.compile(r"(?:wall.*extern|extern.*wall|wall.*exterior|exterior.*wall|\ba-wall\b|\ba-wall$)", re.IGNORECASE)
 _NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 

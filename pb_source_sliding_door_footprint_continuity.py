@@ -21,7 +21,12 @@ from pb_source_window_footprint_continuity import (
     _words,
 )
 
-_SLIDING_LABEL = re.compile(r"^(?:asd[- ]?\d*|sgd[- ]?\d*|[s5]d[- ]?\d*|stacker)$", re.IGNORECASE)
+# ASSD is the schedule code used on some original sheets for an aluminium
+# sliding / stacker door; treat it like ASD for footprint continuity only.
+_SLIDING_LABEL = re.compile(
+    r"^(?:assd[- ]?\d*|asd[- ]?\d*|sgd[- ]?\d*|[s5]d[- ]?\d*|stacker)$",
+    re.IGNORECASE,
+)
 _NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 # Window competing-identity for a slider. The shared window code also
 # matches bare 1-2 digit strings; those are figured dimensions on this

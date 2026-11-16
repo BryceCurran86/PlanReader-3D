@@ -63,6 +63,16 @@ def test_vertical_source_sgd_is_not_a_window():
     assert rows[0].bounds_pdf_pts == (60.0, 5.0, 62.5, 45.0)
 
 
+def test_assd_schedule_code_is_sliding_footprint_not_window():
+    rows = detect(_vertical(), [(66, 19, 71, 28, "ASSD")])
+    assert len(rows) == 1
+    assert rows[0].label_text == "ASSD"
+    assert rows[0].axis == "v"
+    assert rows[0].bounds_pdf_pts == (60.0, 5.0, 62.5, 45.0)
+    assert rows[0].measurement_authorized is False
+    assert rows[0].physical_wall_authenticated is False
+
+
 def test_missing_source_word_jamb_track_or_wall_must_abstain():
     d = _horizontal()
     word = [(19, 6, 24, 10, "ASD")]
