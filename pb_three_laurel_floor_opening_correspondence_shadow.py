@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from pb_source_internal_swing_room_barrier import SourceInternalSwingRoomBarrier
 from pb_source_window_footprint_continuity import WindowFootprintBridge
 from pb_source_garage_door_footprint_continuity import GarageDoorFootprintBridge
 from pb_source_swing_door_footprint_continuity import ExteriorSwingDoorFootprintBridge
@@ -26,6 +27,7 @@ SourceOpening: TypeAlias = (
     | GarageDoorFootprintBridge
     | ExteriorSwingDoorFootprintBridge
     | ExteriorSlidingDoorFootprintBridge
+    | SourceInternalSwingRoomBarrier
 )
 
 
@@ -68,6 +70,13 @@ class FloorOpeningBoundaryWitness:
 def _identity(
     opening: SourceOpening,
 ) -> tuple[str, str, tuple[int, int], tuple[int, ...]] | None:
+    if isinstance(opening, SourceInternalSwingRoomBarrier):
+        return (
+            "internal_hinged_swing_door",
+            "doorway_threshold_not_solid_wall",
+            (opening.first_host_path_id, opening.second_host_path_id),
+            (opening.swing_arc_path_id, *opening.jamb_cap_path_ids),
+        )
     if isinstance(opening, WindowFootprintBridge):
         return (
             "fixed_window",
@@ -106,9 +115,9 @@ def match_source_exterior_openings_to_floor_wall_gaps(
     boundary_tolerance_pdf_pt: float = 0.75,
     min_overlap_pdf_pt: float = 0.5,
 ) -> tuple[FloorOpeningBoundaryWitness, ...]:
-    """Intersect original opening rectangles with an *uncovered* floor edge.
+    """Intersect existing native opening receipts with an *uncovered* floor edge.
 
-    Only typed, explicitly page-matched external source-aperture receipts
+    Only typed, explicitly page-matched original source-aperture receipts
     produced by the native detectors can match. No guessed opening, snap,
     addition to solid-wall support, physical-face seal or commercial output.
     """

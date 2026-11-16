@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fitz
 
+from pb_source_internal_swing_room_barrier import SourceInternalSwingRoomBarrier
 from pb_source_window_footprint_continuity import WindowFootprintBridge
 from pb_source_swing_door_footprint_continuity import ExteriorSwingDoorFootprintBridge
 from pb_source_sliding_door_footprint_continuity import (
@@ -142,6 +143,34 @@ def test_swing_and_slider_are_thresholds_not_solid_walls_or_floor_finish():
         assert m.supported_gap_length_pdf_pt == 30.0
         assert m.measurement_authorized is False
         assert m.opening_source_path_ids
+
+
+def test_existing_internal_swing_receipt_is_room_threshold_not_solid_wall():
+    internal = SourceInternalSwingRoomBarrier(
+        first_host_path_id=4,
+        second_host_path_id=5,
+        swing_arc_path_id=10,
+        jamb_cap_path_ids=(11, 12),
+        bounds_pdf_pts=(135.0, 97.0, 165.0, 100.0),
+        axis="h",
+        page_index=2,
+    )
+    matches = match_source_exterior_openings_to_floor_wall_gaps(_receipt(), (internal,))
+    assert len(matches) == 1
+    witness = matches[0]
+    assert witness.opening_kind == "internal_hinged_swing_door"
+    assert witness.passage_role == "doorway_threshold_not_solid_wall"
+    assert witness.supported_gap_length_pdf_pt == 30.0
+    assert witness.opening_source_path_ids == (10, 11, 12)
+    assert witness.measurement_authorized is False
+    assert witness.physical_wall_authenticated is False
+    assert (
+        match_source_exterior_openings_to_floor_wall_gaps(
+            _receipt(),
+            (internal, _window()),
+        )
+        == ()
+    )
 
 
 def test_wrong_page_wrong_axis_and_nonadjacent_window_do_not_bridge_room():
