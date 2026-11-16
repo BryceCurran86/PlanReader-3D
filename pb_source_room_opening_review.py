@@ -22,6 +22,10 @@ from pb_source_room_gap_audit import (
     SourceRoomGapAudit,
     audit_source_room_outline_remaining_gaps,
 )
+from pb_source_painted_wall_corner_witness import (
+    SourcePaintedWallCornerReview,
+    review_source_painted_wall_corners,
+)
 
 _SINGLE_ROOM_WORDS = frozenset({
     "LIVING", "MEDIA", "KITCHEN", "DINING", "MEALS", "GARAGE",
@@ -66,6 +70,7 @@ class SourceRoomOpeningReview:
     ambiguous_opening_count: int = 0
     shared_source_floor_outline_labels: tuple[tuple[int, tuple[str, ...]], ...] = ()
     room_gap_audits: tuple[SourceRoomGapAudit, ...] = ()
+    painted_corner_reviews: tuple[SourcePaintedWallCornerReview, ...] = ()
     physical_wall_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -84,6 +89,9 @@ class SourceRoomOpeningReview:
                 for path, names in self.shared_source_floor_outline_labels
             ],
             "room_gap_audits": [a.to_dict() for a in self.room_gap_audits],
+            "painted_corner_reviews": [
+                a.to_dict() for a in self.painted_corner_reviews
+            ],
             "physical_wall_authenticated": False,
             "measurement_authorized": False,
         }
@@ -169,6 +177,7 @@ def review_source_room_opening_gaps(
         if len(names) > 1
     )
     audits = []
+    corner_reviews = []
     for receipt in source_floor_receipts:
         path_id = receipt.floor_candidate_native_path_id
         if len(floor_label_groups[path_id]) != 1:
@@ -179,6 +188,9 @@ def review_source_room_opening_gaps(
         )
         if audit is not None:
             audits.append(audit)
+        corners = review_source_painted_wall_corners(drawings, receipt)
+        if corners is not None:
+            corner_reviews.append(corners)
 
     # Separate source receipts only; no category is ever a customer wall
     # or finish quantity, even with every opening or side accounted for.
@@ -194,5 +206,8 @@ def review_source_room_opening_gaps(
         shared_source_floor_outline_labels=shared_labels,
         room_gap_audits=tuple(sorted(
             audits, key=lambda a: (a.remaining_unproved_pdf_pt, a.room_label),
+        )),
+        painted_corner_reviews=tuple(sorted(
+            corner_reviews, key=lambda a: (a.source_floor_path_id, a.source_page_index),
         )),
     )

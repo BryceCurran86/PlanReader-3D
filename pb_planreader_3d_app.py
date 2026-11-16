@@ -6626,6 +6626,37 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                             }
                             for rec in remaining_room_gaps
                         ]),use_container_width=True,hide_index=True)
+                corner_reviews=room_witnesses.get("painted_corner_reviews") or []
+                if corner_reviews:
+                    floor_names={
+                        rec.get("floor_candidate_native_path_id"):rec.get("room_label")
+                        for rec in remaining_room_gaps
+                    }
+                    with st.expander(
+                        "Original painted wall corner evidence — unverified",
+                        expanded=False,
+                    ):
+                        st.caption(
+                            "Each observed corner has TWO distinct, perpendicular "
+                            "dark native wall-fill owner paths. This does not "
+                            "authenticate a finished room, physical dimensions, "
+                            "paint, tiling, floor or ceiling takeoff."
+                        )
+                        st.dataframe(pd.DataFrame([
+                            {
+                                "Printed room":floor_names.get(
+                                    rec.get("source_floor_path_id"), "Candidate"
+                                ),
+                                "Native floor path":rec.get("source_floor_path_id"),
+                                "Observed corners":rec.get("observed_corner_count"),
+                                "Expected corners":rec.get("expected_corner_count"),
+                                "Missing source corners":len(
+                                    rec.get("missing_corner_indices") or []
+                                ),
+                                "Commercially authorized":False,
+                            }
+                            for rec in corner_reviews
+                        ]),use_container_width=True,hide_index=True)
                 if room_witnesses.get("witness_count",0):
                     st.caption(
                         "Existing original-source openings matched to room wall "
