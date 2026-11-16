@@ -97,11 +97,39 @@ def audit_exterior_seams(
             "grey_seam_pairs": receipt["grey_seam_pairs"],
             "party_interior": path_id in walk.internal_party_wall_native_path_ids,
         })
-    scope = json.dumps([source_sha256, page_index, ids], separators=(",", ":"))
+    # Audit identity is a source-input receipt, not a commercial footprint ID.
+    # The same page/path IDs can produce different diagnostics if their native
+    # wall geometry or authenticated opening evidence changes. Hash the exact
+    # normalized geometry bytes; never publish original coordinates.
+    input_hash = hashlib.sha256()
+    for path_ids, geom_wkb in sorted(
+        (tuple(path_ids), geom.normalize().wkb)
+        for geom, path_ids, _bar in owned_bars
+    ):
+        input_hash.update(json.dumps(path_ids, separators=(",", ":")).encode("ascii"))
+        input_hash.update(geom_wkb)
+        input_hash.update(b"\\0")
+    if union is not None:
+        input_hash.update(union.normalize().wkb)
+    for pair in sorted(tuple(sorted(pair)) for pair in topology):
+        input_hash.update(json.dumps(pair, separators=(",", ":")).encode("ascii"))
+    for seam in sorted(
+        (int(row.first_host_path_id), int(row.second_host_path_id),
+         tuple(sorted(int(i) for i in row.neutral_fill_path_ids)))
+        for row in neutral_seams
+    ):
+        input_hash.update(json.dumps(seam, separators=(",", ":")).encode("ascii"))
+    scope = json.dumps(
+        [source_sha256, page_index, ids, input_hash.hexdigest(),
+         walk.status, walk.reason, walk.unclosed_dwelling_sides],
+        separators=(",", ":"),
+    )
     return {
-        "schema_version": "shadow_exterior_seam_audit_v1",
+        "schema_version": "shadow_exterior_seam_audit_v2",
         "audit_id": hashlib.sha256(scope.encode("ascii")).hexdigest(),
         "source_sha256": source_sha256,
+        "source_hash_authenticated": False,
+        "source_hash_validation": "caller_supplied_format_only",
         "page_index": page_index,
         "canonical_walk_status": walk.status,
         "canonical_walk_reason": walk.reason,
