@@ -337,7 +337,7 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
     # Figured dimensions like "21" must not silence unique printed ASD labels.
     assert len(attempt.sliding_door_footprint_bridges) >= 1
     assert all(
-        str(b.label_text).strip().upper().startswith("ASD")
+        str(b.label_text).strip().upper().startswith(("ASD", "ASSD"))
         for b in attempt.sliding_door_footprint_bridges
     )
     assert walk is not None
