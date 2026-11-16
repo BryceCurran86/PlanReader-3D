@@ -128,6 +128,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 source_ink_already_scoped=True,
                 source_words=page.get_text("words"),
                 window_source_drawings=drawings,
+                source_page_index=page_index,
             )
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override

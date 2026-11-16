@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import fitz
 
 from pb_source_window_footprint_continuity import WindowFootprintBridge
@@ -227,3 +228,34 @@ def test_unauthorized_or_untyped_receipts_fail_closed():
     assert (
         match_source_exterior_openings_to_floor_wall_gaps(_receipt(), (object(),)) == ()
     )
+
+
+
+def test_same_page_same_position_but_foreign_wall_hosts_do_not_match_room():
+    """A source-typed coincident opening from another viewport is not a room edge."""
+    receipt = _receipt()
+    for opening in (
+        replace(_window(), left_host_path_id=77, right_host_path_id=78),
+        replace(_swing(), first_host_path_id=77, second_host_path_id=78),
+        replace(_slider(), first_host_path_id=77, second_host_path_id=78),
+        replace(_garage(), start_host_path_id=77, end_host_path_id=78),
+    ):
+        assert match_source_exterior_openings_to_floor_wall_gaps(
+            receipt, (opening,)
+        ) == ()
+
+
+def test_one_host_window_is_not_enough_but_one_room_side_door_host_is():
+    """Windows need both real host faces, hosted thresholds can join one side."""
+    receipt = _receipt()
+    partial_window = replace(_window(), right_host_path_id=78)
+    assert match_source_exterior_openings_to_floor_wall_gaps(
+        receipt, (partial_window,)
+    ) == ()
+    threshold = replace(_swing(), second_host_path_id=78)
+    matches = match_source_exterior_openings_to_floor_wall_gaps(
+        receipt, (threshold,)
+    )
+    assert len(matches) == 1
+    assert matches[0].passage_role == "doorway_threshold_not_solid_wall"
+    assert matches[0].measurement_authorized is False
