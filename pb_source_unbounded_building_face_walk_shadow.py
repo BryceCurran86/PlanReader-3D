@@ -38,6 +38,9 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Shadow trace for review when other source-wall components remain.
+    # Never use this ring to issue a customer quantity or report FIRM.
+    diagnostic_unsealed_ring_pdf_pts: tuple[tuple[float, float], ...] = ()
     building_footprint_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -54,6 +57,10 @@ class OutsideFacingBuildingWalk:
             "enclosed_dwelling_zone_count": self.enclosed_dwelling_zone_count,
             "unclosed_dwelling_sides": list(self.unclosed_dwelling_sides),
             "other_source_wall_band_count": self.other_source_wall_band_count,
+            "diagnostic_unsealed_ring_pdf_pts": [
+                list(point) for point in self.diagnostic_unsealed_ring_pdf_pts
+            ],
+            "diagnostic_unsealed_not_measurement": True,
             "building_footprint_authenticated": False,
             "measurement_authorized": False,
             "snap_join_applied": False,
@@ -305,6 +312,11 @@ def walk_source_unbounded_building_face(
     candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
     extra = sum(1 for geom, _ in owners if not candidate_outer_domain.covers(geom))
     if extra:
+        # Both occupied dwelling zones are independently enclosed, but
+        # unresolved source-wall components exist beyond the outer ring.
+        # Retain a source-native preview for reviewer attribution ONLY.
+        # The authoritative clockwise_pdf_pts and wall IDs stay empty.
+        preview_ring = _clockwise_page_ring(primary.exterior)
         return OutsideFacingBuildingWalk(
             "ABSTAINED",
             "source_other_structural_walls_outside_candidate",
@@ -312,6 +324,9 @@ def walk_source_unbounded_building_face(
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
             internal_party_wall_native_path_ids=party_ids,
+            diagnostic_unsealed_ring_pdf_pts=(
+                preview_ring if 5 <= len(preview_ring) <= 20_000 else ()
+            ),
         )
     for label, point in _word_centers(source_words):
         if label in {
