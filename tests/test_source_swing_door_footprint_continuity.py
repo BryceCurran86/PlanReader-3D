@@ -220,3 +220,59 @@ def test_derbyshire_construction_sample_real_pdf_exterior_swing_doors():
     assert 1284 in arc_ids
     assert 855 in arc_ids
     assert 435 in arc_ids
+
+
+def test_rival_perpendicular_wall_cannot_displace_exact_jamb_hosts():
+    # The outside wall continues well past an entry door at either end.
+    # Its large filled body is a competing candidate, not the actual short
+    # wall that terminates at both original jamb caps.
+    d = vertical()
+    d.append(wall((60, 0, 105, 4)))
+    d.append(wall((60, 31, 105, 35)))
+    bridges = detect(d)
+    assert len(bridges) == 1
+    b = bridges[0]
+    assert b.axis == "v"
+    assert (b.first_host_path_id, b.second_host_path_id) == (0, 1)
+    assert b.jamb_cap_path_ids == (3, 4)
+    assert b.swing_arc_path_id == 2
+    assert b.measurement_authorized is False
+
+
+def test_multiple_equally_exact_jamb_host_owners_remain_unresolved():
+    # One quarter arc cannot grant an invented unique host when genuinely
+    # distinct painted source paths terminate at the same source caps.
+    d = vertical()
+    d.append(wall((60.0, 0.0, 62.5, 5.0)))
+    d.append(wall((60.0, 30.0, 62.5, 35.0)))
+    # Exact duplicate geometry is handled by the existing source owner
+    # ambiguity rules; it must not claim an authoritative physical wall.
+    rows = detect(d)
+    assert all(not row.physical_wall_authenticated for row in rows)
+    assert all(not row.measurement_authorized for row in rows)
+
+
+def test_original_3laurel_right_entry_porch_door_native_host_witness():
+    import hashlib
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    from pb_source_native_wall_body_junction_graph_shadow import _unique_source_wall_bars
+
+    original = require_original_3laurel().read_bytes()
+    assert hashlib.sha256(original).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=original, filetype="pdf") as doc:
+        page = doc[2]
+        drawings = page.get_drawings()
+        words = page.get_text("words")
+        before = (len(drawings), len(words))
+        bars = _unique_source_wall_bars(drawings)
+        bridges = detect(drawings, words, page_index=2, wall_bars=bars)
+        after = (len(page.get_drawings()), len(page.get_text("words")))
+    assert before == after
+    entrance = [bridge for bridge in bridges if bridge.swing_arc_path_id == 1912]
+    assert len(entrance) == 1
+    b = entrance[0]
+    assert b.axis == "v"
+    assert b.first_host_path_id != b.second_host_path_id
+    assert len(set(b.jamb_cap_path_ids)) == 2
+    assert not b.physical_wall_authenticated
+    assert not b.measurement_authorized
