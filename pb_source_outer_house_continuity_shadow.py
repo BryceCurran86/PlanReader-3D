@@ -8,15 +8,14 @@ is never a 2.5 pt commercial snap.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import math
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from shapely.geometry import box
 from shapely.ops import nearest_points, unary_union
 from shapely.strtree import STRtree
 
-from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_source_native_exterior_endpoint_authority_shadow import (
     CONTACT_PT,

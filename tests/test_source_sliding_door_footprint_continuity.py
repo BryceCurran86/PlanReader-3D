@@ -1,6 +1,7 @@
 """Source ASD / SGD sliding-door topology, never issued wall or frame area."""
 
 import fitz
+
 from pb_source_sliding_door_footprint_continuity import (
     detect_exterior_sliding_door_footprint_bridges as detect,
 )
@@ -113,3 +114,15 @@ def test_multiple_labels_cannot_reuse_one_host_as_two_real_doors():
     d = _horizontal()
     text = [(19, 6, 24, 10, "ASD"), (19, 6, 24, 10, "SGD")]
     assert detect(d, text) == ()
+
+
+def test_layerless_sliding_door_detected_via_rails_and_caps():
+    d = _horizontal()
+    for row in d:
+        row["layer"] = ""
+    rows = detect(d, [(19, 6, 24, 10, "SD2")])
+    assert len(rows) == 1
+    assert rows[0].label_text == "SD2"
+    assert rows[0].first_host_path_id == 0
+    assert rows[0].second_host_path_id == 1
+    assert rows[0].bounds_pdf_pts == (5.0, 0.0, 45.0, 2.5)

@@ -327,3 +327,58 @@ def test_window_continuity_unique_hosts_jambs_sill_is_topology_only():
     )
     assert missing is EvidenceResolutionStatus.ABSTAINED
     assert missing_reason == REASON_WINDOW_NO_UNIQUE_JAMB
+
+
+def test_window_continuity_with_reliable_window_designation_is_candidate():
+    """Bryce Owner Rule (16 Nov 2026): reliable external window designation suffices for footprint-only closure."""
+    drawings = tuple(_drawing() for _ in range(4))
+    status, reason = authenticate_window_continuity_topology(
+        left_host_path_ids=(0,),
+        right_host_path_ids=(1,),
+        drawings=drawings,
+        window_designation="1,800 - 910 asw",
+    )
+    assert status is EvidenceResolutionStatus.CANDIDATE
+    assert "topology_only" in reason
+
+
+def test_interior_partition_gaps_do_not_veto_external_cycle():
+    """Bryce Owner Rule (16 Nov 2026): only primary exterior cycle open endpoints veto closure."""
+    # 4 exterior walls forming a closed perimeter
+    ext_bars = [
+        _strip(0, (0, 0, 20, 1)),
+        _strip(1, (19, 0, 20, 20)),
+        _strip(2, (0, 19, 20, 20)),
+        _strip(3, (0, 0, 1, 20)),
+    ]
+    # 1 interior partition wall with a dead-end open tip inside
+    int_bar = _strip(4, (5, 5, 5, 12))
+    bars = (*ext_bars, int_bar)
+    drawings = (
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallExternal"),
+        _drawing("Enclosure_WallInternal"),
+    )
+    cycle = audit_source_native_exterior_cycle(bars, drawings, page_index=1)
+    # The interior partition open tip must NOT veto the external cycle!
+    assert cycle["candidate_outer_cycle_count"] == 1
+    assert cycle["status"] == EvidenceResolutionStatus.CANDIDATE.value
+    assert cycle["exterior_open_endpoint_count"] == 0
+    assert cycle["open_endpoint_count"] >= 1  # Interior open tip is recorded in open_endpoints
+
+
+def test_exterior_unclosed_gap_vetoes_external_cycle():
+    """Exterior cycle with true open gap must fail closed."""
+    # 3 exterior walls, open at top
+    bars = (
+        _strip(0, (0, 0, 20, 1)),
+        _strip(1, (19, 0, 20, 20)),
+        _strip(2, (0, 0, 1, 20)),
+    )
+    drawings = tuple(_drawing() for _ in range(3))
+    cycle = audit_source_native_exterior_cycle(bars, drawings, page_index=1)
+    assert cycle["candidate_outer_cycle_count"] == 0
+    assert cycle["status"] == EvidenceResolutionStatus.ABSTAINED.value
+    assert cycle["exterior_open_endpoint_count"] >= 1

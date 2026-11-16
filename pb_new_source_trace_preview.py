@@ -11,36 +11,37 @@ from pathlib import Path
 
 import fitz
 
-from pb_next_wall_ring_preview import (
-    _clip_drawing_items,
-    _collect_dark_fill_strips,
-    _collect_strips,
-    _collect_stroke_pair_strips,
-    _collect_monotonic_source_stroke_pairs,
-    _collect_source_heavy_stroke_strips,
-    _collect_cavity_multi_face_strips,
-    _collect_source_wide_face_pairs,
-    build_layered_wall_doorway_room_rings,
-)
 from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_dark_painted_source_wall_strips,
     _source_wall_ink_candidate_drawings,
 )
 from pb_new_exterior_wall_preflight import (
+    SourceNativeOuterWallAttempt,
     attempt_source_native_outer_wall_first,
 )
-from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
-from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
-from pb_new_source_modality_router import classify_source_page_modality
-from pb_new_raster_source_wall_trace import (
-    RasterSourceSegmentTrace,
-    trace_source_raster_wall_lines,
-)
-from pb_new_exterior_wall_preflight import SourceNativeOuterWallAttempt
 from pb_new_numbered_space_key import (
     NumberedSpaceKeyResult,
     detect_numbered_space_key,
 )
+from pb_new_raster_source_wall_trace import (
+    RasterSourceSegmentTrace,
+    trace_source_raster_wall_lines,
+)
+from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
+from pb_new_source_modality_router import classify_source_page_modality
+from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
+from pb_next_wall_ring_preview import (
+    _clip_drawing_items,
+    _collect_cavity_multi_face_strips,
+    _collect_dark_fill_strips,
+    _collect_monotonic_source_stroke_pairs,
+    _collect_source_heavy_stroke_strips,
+    _collect_source_wide_face_pairs,
+    _collect_strips,
+    _collect_stroke_pair_strips,
+    build_layered_wall_doorway_room_rings,
+)
+from pb_source_ocr_glyph_fastpath import get_source_words_with_glyph_fastpath
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -118,6 +119,9 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 "ABSTAINED", "source_raster_exterior_wall_not_authenticated",
             )
         else:
+            source_words = get_source_words_with_glyph_fastpath(
+                page, page_index=page_index,
+            )
             # MANDATORY FIRST GEOMETRY on native-vector source: structural
             # wall-band outer attempt before internal wall/room work.
             outer_wall = attempt_source_native_outer_wall_first(
@@ -126,7 +130,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                     strict_wall_drawings if neutral_dark_added else None
                 ),
                 source_ink_already_scoped=True,
-                source_words=page.get_text("words"),
+                source_words=source_words,
                 window_source_drawings=drawings,
                 source_page_index=page_index,
             )
@@ -137,7 +141,7 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             space_key = detect_numbered_space_key(
                 page, page_index=page_index, source_sha256=sha,
             )
-        except Exception as exc:
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError, RuntimeError, OSError) as exc:
             space_key = NumberedSpaceKeyResult(
                 "ABSTAINED",
                 "numbered_source_key_reader_failed:" + type(exc).__name__,
@@ -156,9 +160,13 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 {
                     "text": str(w[4]),
                     "bbox_pdf_pts": tuple(float(v) for v in w[:4]),
-                    "source_ref": f"native-word:p{page_index}:b{w[5]}:l{w[6]}:w{w[7]}",
+                    "source_ref": f"source-word:p{page_index}:w{i}",
                 }
-                for w in page.get_text("words")
+                for i, w in enumerate(
+                    source_words
+                    if source_modality.route != "tiled_raster_underlay"
+                    else page.get_text("words")
+                )
             ),
             stroke_pair_wall_faces=True,
             source_pair_baseline_drawings=(

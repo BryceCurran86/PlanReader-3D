@@ -8,20 +8,22 @@ opening dimension, or room-finish ownership.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections.abc import Mapping, Sequence
-from typing import Any
 import math
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from pb_source_window_footprint_continuity import (
     _EXTERIOR_WALL_LAYER,
     _WINDOW_CODE,
+    _line,
     _rect,
     _words,
 )
 
-_SLIDING_LABEL = re.compile(r"^(?:ASD|SGD)$", re.IGNORECASE)
+_SLIDING_LABEL = re.compile(r"^(?:asd[- ]?\d*|sgd[- ]?\d*|sd[- ]?\d*|stacker)$", re.IGNORECASE)
+_NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -72,38 +74,74 @@ def detect_exterior_sliding_door_footprint_bridges(
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
     *,
     page_index: int = -1,
+    wall_bars: Sequence[Any] | None = None,
 ) -> tuple[ExteriorSlidingDoorFootprintBridge, ...]:
     labels = _words(source_words, pattern=_SLIDING_LABEL)
     if not labels:
+        return ()
+    has_any_layers = any(
+        bool(str(r.get("layer") or "").strip())
+        for r in drawings
+        if isinstance(r, Mapping)
+    )
+    has_wall_layers = any(
+        _EXTERIOR_WALL_LAYER.search(str(r.get("layer") or ""))
+        for r in drawings
+        if isinstance(r, Mapping)
+    )
+    if has_any_layers and not has_wall_layers:
         return ()
     competing_windows = _words(source_words, pattern=_WINDOW_CODE)
     walls = []
     caps = []
     rails = []
+
+    if wall_bars:
+        for bar in wall_bars:
+            poly = getattr(bar, "polygon", None)
+            if poly is None or poly.is_empty or not poly.is_valid:
+                continue
+            bb = tuple(float(v) for v in poly.bounds)
+            dx, dy = bb[2] - bb[0], bb[3] - bb[1]
+            if min(dx, dy) <= 8 and max(dx, dy) >= 0.7:
+                pid = int(getattr(bar, "path_index", -1))
+                layer = str(getattr(bar, "layer", "") or "")
+                walls.append((pid, layer, bb))
+
     for idx, row in enumerate(drawings):
         if not isinstance(row, Mapping):
             continue
         layer = str(row.get("layer") or "")
-        if not _EXTERIOR_WALL_LAYER.search(layer):
+        if has_wall_layers:
+            if not _EXTERIOR_WALL_LAYER.search(layer):
+                continue
+        elif _NON_WALL_LAYER.search(layer):
             continue
         bounds = _rect(row)
         fill = row.get("fill")
-        if bounds is None or not isinstance(fill, (tuple, list)) or len(fill) < 3:
-            continue
-        tone = tuple(float(v) for v in fill[:3])
-        if not all(math.isfinite(t) for t in tone):
-            continue
-        dx, dy = bounds[2] - bounds[0], bounds[3] - bounds[1]
-        if min(dx, dy) < 0.15:
-            continue
-        if max(tone) < 0.3:
-            if min(dx, dy) <= 8 and max(dx, dy) >= 0.7:
-                walls.append((idx, layer, bounds))
-        elif min(tone) > 0.9:
-            if max(dx, dy) <= 12 and min(dx, dy) > 0.2:
-                caps.append((idx, layer, bounds))
-            elif max(dx, dy) >= 5 and min(dx, dy) <= 2.0:
-                rails.append((idx, layer, bounds))
+        if bounds and isinstance(fill, (tuple, list)) and len(fill) >= 3:
+            tone = tuple(float(v) for v in fill[:3])
+            if all(math.isfinite(t) for t in tone):
+                dx, dy = bounds[2] - bounds[0], bounds[3] - bounds[1]
+                if min(dx, dy) >= 0.15:
+                    if max(tone) < 0.3:
+                        if min(dx, dy) <= 8 and max(dx, dy) >= 0.7:
+                            walls.append((idx, layer, bounds))
+                    elif min(tone) > 0.9:
+                        if max(dx, dy) <= 12 and min(dx, dy) > 0.2:
+                            caps.append((idx, layer, bounds))
+                        elif max(dx, dy) >= 5 and min(dx, dy) <= 2.0:
+                            rails.append((idx, layer, bounds))
+        ln = _line(row)
+        if ln:
+            d = math.dist(*ln)
+            p0, p1 = ln
+            dx, dy = abs(p0[0] - p1[0]), abs(p0[1] - p1[1])
+            ln_bb = (min(p0[0], p1[0]), min(p0[1], p1[1]), max(p0[0], p1[0]), max(p0[1], p1[1]))
+            if 5.0 <= d <= 160.0 and (dx < 0.1 or dy < 0.1):
+                rails.append((idx, layer, (ln_bb[0], ln_bb[1] - 0.2, ln_bb[2], ln_bb[3] + 0.2)))
+            elif 0.2 <= d <= 12.0:
+                caps.append((idx, layer, (ln_bb[0], ln_bb[1] - 0.2, ln_bb[2], ln_bb[3] + 0.2)))
     result = []
     for label, label_rect in labels:
         lx = (label_rect[0] + label_rect[2]) / 2
@@ -111,7 +149,7 @@ def detect_exterior_sliding_door_footprint_bridges(
         matches = []
         for i, layer, a in walls:
             for j, otherlayer, b in walls:
-                if i == j or otherlayer != layer:
+                if i == j or (has_wall_layers and otherlayer != layer):
                     continue
                 for axis in ("h", "v"):
                     if axis == "h":
@@ -177,7 +215,7 @@ def detect_exterior_sliding_door_footprint_bridges(
                         )
                         owners = []
                         for k, caplayer, c in caps:
-                            if caplayer != layer:
+                            if has_wall_layers and caplayer != layer:
                                 continue
                             if axis == "h":
                                 bound_ok = (
@@ -212,7 +250,7 @@ def detect_exterior_sliding_door_footprint_bridges(
                         continue
                     tracks = []
                     for k, tracklayer, c in rails:
-                        if tracklayer != layer:
+                        if has_wall_layers and tracklayer != layer:
                             continue
                         if axis == "h":
                             length = c[2] - c[0]
@@ -245,7 +283,7 @@ def detect_exterior_sliding_door_footprint_bridges(
                         and any(center > midpoint for _, center in tracks)
                     ):
                         continue
-                    trackids = tuple(sorted(set(k for k, _ in tracks)))
+                    trackids = tuple(sorted({k for k, _ in tracks}))
                     ids = (i, j, *capids, *trackids)
                     if not _viewport_compatible(drawings, ids):
                         continue

@@ -22,13 +22,13 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_next_wall_ring_preview import (
     _collect_cavity_multi_face_strips,
     _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
     _collect_source_wide_face_pairs,
 )
-from pb_new_wall_graph_diagnostic import inspect_native_wall_graph
 from pb_source_native_exterior_endpoint_authority_shadow import (
     CONTACT_PT,
     REASON_COMPETING,
@@ -228,7 +228,7 @@ def _classify_pair(left: Any, right: Any) -> str | None:
     distance = float(left.polygon.distance(right.polygon))
     left_axis, right_axis = _axis(left), _axis(right)
     if distance > CONTACT_PT:
-        if left_axis == right_axis != "unknown" and 0.03 < distance <= 2.5:
+        if left_axis == right_axis != "unknown" and 0.03 < distance <= 4.5:
             return JUNCTION_COLLINEAR_GAP
         return None
     left_tip_hits = any(_tip_hits(tip, right) for tip in _tips(left))
@@ -412,22 +412,17 @@ def authenticate_window_continuity_topology(
     *,
     left_host_path_ids: Sequence[int],
     right_host_path_ids: Sequence[int],
-    left_jamb_path_ids: Sequence[int],
-    right_jamb_path_ids: Sequence[int],
-    sill_or_floor_path_ids: Sequence[int],
+    left_jamb_path_ids: Sequence[int] = (),
+    right_jamb_path_ids: Sequence[int] = (),
+    sill_or_floor_path_ids: Sequence[int] = (),
     drawings: Sequence[Mapping[str, Any] | object],
+    window_designation: str = "",
 ) -> tuple[EvidenceResolutionStatus, str]:
     """Topology-only window continuity. Never a wall and never a quantity."""
     hosts = (tuple(left_host_path_ids), tuple(right_host_path_ids))
     jambs = (tuple(left_jamb_path_ids), tuple(right_jamb_path_ids))
     sill = tuple(sill_or_floor_path_ids)
-    owned = (*hosts[0], *hosts[1], *jambs[0], *jambs[1], *sill)
-    if (
-        not hosts[0] or not hosts[1] or not jambs[0] or not jambs[1] or not sill
-        or len(set(owned)) != len(owned)
-        or not set(hosts[0]).isdisjoint(set(hosts[1]))
-        or not set(jambs[0]).isdisjoint(set(jambs[1]))
-    ):
+    if not hosts[0] or not hosts[1] or not set(hosts[0]).isdisjoint(set(hosts[1])):
         return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
     status, reason = authenticate_external_wall_junction(
         native_path_ids=hosts[0],
@@ -442,10 +437,25 @@ def authenticate_window_continuity_topology(
         "native_path_owners_not_disjoint",
     }:
         return status, reason
-    for path in owned:
-        if not (0 <= path < len(drawings)) or not isinstance(drawings[path], Mapping):
+
+    # Mode 1: Full jamb + sill witness
+    if jambs[0] and jambs[1] and sill:
+        owned = (*hosts[0], *hosts[1], *jambs[0], *jambs[1], *sill)
+        if len(set(owned)) != len(owned) or not set(jambs[0]).isdisjoint(set(jambs[1])):
             return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
-    return EvidenceResolutionStatus.CANDIDATE, "window_continuity_topology_only_not_wall"
+        for path in owned:
+            if not (0 <= path < len(drawings)) or not isinstance(drawings[path], Mapping):
+                return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
+        return EvidenceResolutionStatus.CANDIDATE, "window_continuity_topology_only_not_wall"
+
+    # Mode 2: Reliable external window designation / verified sill witness (Owner Rule, 16 Nov 2026)
+    if window_designation:
+        for path in (*hosts[0], *hosts[1], *sill):
+            if not (0 <= path < len(drawings)) or not isinstance(drawings[path], Mapping):
+                return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
+        return EvidenceResolutionStatus.CANDIDATE, "window_continuity_topology_only_not_wall"
+
+    return EvidenceResolutionStatus.ABSTAINED, REASON_WINDOW_NO_UNIQUE_JAMB
 
 
 def classify_window_continuity_edges(
@@ -467,6 +477,58 @@ def classify_window_continuity_edges(
         key = (tuple(left_ids), tuple(right_ids))
         mirror = (tuple(right_ids), tuple(left_ids))
         witness = by_hosts.get(key) or by_hosts.get(mirror) or {}
+        if not witness and left_ids and right_ids and sep is not None and float(sep) <= 65.0:
+            l_idx, r_idx = left_ids[0], right_ids[0]
+            if (
+                0 <= l_idx < len(drawings)
+                and 0 <= r_idx < len(drawings)
+                and isinstance(drawings[l_idx], Mapping)
+                and isinstance(drawings[r_idx], Mapping)
+            ):
+                lr, rr = drawings[l_idx].get("rect"), drawings[r_idx].get("rect")
+                if lr and rr:
+                    # Check horizontal alignment
+                    if abs(lr.y0 - rr.y0) <= 2.5 and abs(lr.y1 - rr.y1) <= 2.5:
+                        gx0, gx1 = min(lr.x1, rr.x1), max(lr.x0, rr.x0)
+                        gy0, gy1 = min(lr.y0, rr.y0) - 2.0, max(lr.y1, rr.y1) + 2.0
+                        sills = [
+                            idx for idx, d in enumerate(drawings)
+                            if isinstance(d, Mapping)
+                            and d.get("rect")
+                            and min(d["rect"].width, d["rect"].height) <= 1.0
+                            and gx0 - 2 <= d["rect"].x0 <= gx1 + 2
+                            and gy0 - 3 <= d["rect"].y0 <= gy1 + 3
+                            and idx not in left_ids
+                            and idx not in right_ids
+                        ]
+                        if sills:
+                            witness = {
+                                "left_host_path_ids": left_ids,
+                                "right_host_path_ids": right_ids,
+                                "sill_or_floor_path_ids": tuple(sills[:3]),
+                                "window_designation": "source_sill_strokes",
+                            }
+                    # Check vertical alignment
+                    elif abs(lr.x0 - rr.x0) <= 2.5 and abs(lr.x1 - rr.x1) <= 2.5:
+                        gy0, gy1 = min(lr.y1, rr.y1), max(lr.y0, rr.y0)
+                        gx0, gx1 = min(lr.x0, rr.x0) - 2.0, max(lr.x1, rr.x1) + 2.0
+                        sills = [
+                            idx for idx, d in enumerate(drawings)
+                            if isinstance(d, Mapping)
+                            and d.get("rect")
+                            and min(d["rect"].width, d["rect"].height) <= 1.0
+                            and gy0 - 2 <= d["rect"].y0 <= gy1 + 2
+                            and gx0 - 3 <= d["rect"].x0 <= gx1 + 3
+                            and idx not in left_ids
+                            and idx not in right_ids
+                        ]
+                        if sills:
+                            witness = {
+                                "left_host_path_ids": left_ids,
+                                "right_host_path_ids": right_ids,
+                                "sill_or_floor_path_ids": tuple(sills[:3]),
+                                "window_designation": "source_sill_strokes",
+                            }
         status, reason = authenticate_window_continuity_topology(
             left_host_path_ids=witness.get("left_host_path_ids") or (),
             right_host_path_ids=witness.get("right_host_path_ids") or (),
@@ -474,6 +536,7 @@ def classify_window_continuity_edges(
             right_jamb_path_ids=witness.get("right_jamb_path_ids") or (),
             sill_or_floor_path_ids=witness.get("sill_or_floor_path_ids") or (),
             drawings=drawings,
+            window_designation=witness.get("window_designation") or "",
         )
         return SourceJunctionRecord(
             junction_kind=JUNCTION_WINDOW_CONTINUITY,
@@ -530,6 +593,7 @@ def audit_source_native_exterior_cycle(
     page_index: int = -1,
     opening_chassis_witness: bool = False,
     bodies: Sequence[SourceWallBodyRecord] | None = None,
+    window_edges: Sequence[SourceJunctionRecord] = (),
 ) -> dict[str, object]:
     """Unique-or-abstain outer cycle. Layer names are not physical walls."""
     if bodies is None:
@@ -541,9 +605,33 @@ def audit_source_native_exterior_cycle(
     exterior_bodies = tuple(
         body for body in bodies if body.provenance.role == ROLE_EXTERIOR_OUTER_FACE
     )
-    first = opens[0] if opens else None
+    exterior_path_set = {
+        path for body in exterior_bodies
+        for path in body.provenance.native_path_ids
+    }
+    candidate_window_pairs = {
+        frozenset((*edge.left_path_ids, *edge.right_path_ids))
+        for edge in window_edges
+        if edge.status is EvidenceResolutionStatus.CANDIDATE
+    }
+    # Bryce Curran Owner Rule (16 Nov 2026):
+    # Only the PRIMARY exterior connected cycle's open endpoints veto footprint closure.
+    # Interior wall gaps must not veto the external cycle.
+    exterior_opens = []
+    for row in opens:
+        left_ids = tuple(row.get("native_path_ids") or ())
+        right_ids = tuple(row.get("nearby_native_path_ids") or ())
+        if not any(pid in exterior_path_set for pid in left_ids):
+            # Interior partition gap: does not veto the external cycle
+            continue
+        if frozenset((*left_ids, *right_ids)) in candidate_window_pairs:
+            # Bridged by verified window aperture continuity edge
+            continue
+        exterior_opens.append(row)
+
+    first = exterior_opens[0] if exterior_opens else (opens[0] if opens else None)
     closed = (
-        not opens
+        not exterior_opens
         and len(exterior_bodies) >= 3
         and all(body.status is not EvidenceResolutionStatus.ABSTAINED for body in exterior_bodies)
         and opening_chassis_witness is False
@@ -562,6 +650,7 @@ def audit_source_native_exterior_cycle(
         ),
         "first_unclosed_endpoint": first,
         "open_endpoint_count": len(opens),
+        "exterior_open_endpoint_count": len(exterior_opens),
         "open_endpoints": list(opens),
         "component_count": graph.component_count,
         "second_stage_join_applied": graph.second_stage_join_applied,
@@ -576,6 +665,23 @@ def audit_source_native_exterior_cycle(
         "layer_name_physical_promotion": False,
         "snap_join_applied": False,
     }
+
+
+def _is_freestanding_post(bar: Any, all_bars: Sequence[Any]) -> bool:
+    """Detect isolated freestanding timber post / column (e.g. 140x140 post path 4102)."""
+    if getattr(bar, "polygon", None) is None or bar.polygon.is_empty:
+        return False
+    bx0, by0, bx1, by1 = bar.polygon.bounds
+    w, h = bx1 - bx0, by1 - by0
+    span, girth = max(w, h), min(w, h)
+    if girth <= 0.01 or span > 8.0 or (span / girth) > 1.8:
+        return False
+    # Must be isolated: not contacting any other wall bar within 5.0 pt
+    return all(
+        bar.polygon.distance(other.polygon) > 5.0
+        for other in all_bars
+        if other is not bar and getattr(other, "polygon", None) is not None
+    )
 
 
 def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> list[Any]:
@@ -595,7 +701,8 @@ def _unique_source_wall_bars(drawings: Sequence[Mapping[str, Any] | object]) -> 
             continue
         key = (int(bar.path_index), *(round(float(v), 4) for v in bar.polygon.bounds))
         unique[key] = bar
-    return list(unique.values())
+    unique_bars = list(unique.values())
+    return [b for b in unique_bars if not _is_freestanding_post(b, unique_bars)]
 
 
 def build_source_native_wall_body_junction_graph(
@@ -609,14 +716,16 @@ def build_source_native_wall_body_junction_graph(
     bodies, junctions = classify_source_wall_body_junctions(
         bars, drawings, page_index=page_index,
     )
-    cycle = audit_source_native_exterior_cycle(
-        bars, drawings, page_index=page_index, bodies=bodies,
-    )
+    opens = _open_endpoint_receipts(bars)
     window_edges = classify_window_continuity_edges(
         junctions,
         drawings,
         page_index=page_index,
-        open_endpoints=cycle.get("open_endpoints") or (),
+        open_endpoints=opens,
+    )
+    cycle = audit_source_native_exterior_cycle(
+        bars, drawings, page_index=page_index, bodies=bodies,
+        window_edges=window_edges,
     )
     inferred = sum(1 for item in junctions if item.provenance_geometry_kind == GEOMETRY_INFERRED)
     joined = sum(

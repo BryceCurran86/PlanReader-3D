@@ -12,11 +12,11 @@ Zero customer quantities, zero FIRM, no convex hull, no artificial area issuance
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 import enum
 import math
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from statistics import median
 from typing import Any
 
@@ -27,8 +27,9 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_new_numbered_space_key import NumberedSpaceKeyResult
 from pb_source_native_wall_body_junction_graph_shadow import (
     CONTACT_PT,
-    classify_source_wall_body_junctions,
+    _is_freestanding_post,
     _unique_source_wall_bars,
+    classify_source_wall_body_junctions,
 )
 
 
@@ -49,6 +50,8 @@ REASON_DISCONNECTED_DECOY = "disconnected_decoy_component_rejected"
 REASON_OPEN_BOUNDARY_LEAK = "open_wall_boundary_leaks_to_outside"
 REASON_UNVERIFIED_ENCLOSURE = "closed_native_geometry_in_disconnected_component_not_conditioned_space"
 REASON_MICRO_SOURCE_VOID = "sub_room_scale_enclosure_in_native_wall_ink"
+REASON_OTHER_WALL_INK_OUTSIDE = "source_exterior_other_wall_ink_outside_candidate"
+REASON_PARTIAL_CYCLE_ROOM = "interior_geometry_in_unclosed_building_with_other_wall_ink_outside"
 
 
 @dataclass(frozen=True)
@@ -168,10 +171,12 @@ class SpatialSubdivisionResult:
 def _is_outdoor_name(name: str) -> bool:
     t = " " + re.sub(r"[^A-Z ]", " ", name.upper()) + " "
     return any(x in t for x in (
+        " ALFRESCO ", " AL FRESCO ", " OUTDOOR ", " OUTDOOR LIVING ",
         " CARPORT ", " COURT ", " COURTYARD ", " PORTICO ",
         " ALFRESCO ", " PATIO ", " PORCH ", " TERRACE ", " VERANDAH ",
         " BALCONY ", " DRIVEWAY ", " DECK ", " PERGOLA ",
         " WATER TANK ", " GARDEN ", " ATRIUM ", " VOID ",
+        " LANAI ", " CABANA ",
     ))
 
 
@@ -272,7 +277,9 @@ def build_source_spatial_subdivision(
     """Subdivide sheet space into outside, interior, courtyards, and outdoor."""
     if bars is None:
         bars = _unique_source_wall_bars(drawings)
-    bodies, junctions = classify_source_wall_body_junctions(bars, drawings)
+    else:
+        bars = [b for b in bars if not _is_freestanding_post(b, bars)]
+    bodies, _ = classify_source_wall_body_junctions(bars, drawings)
 
     if len(bars) < 4 or len(bodies) < 4:
         return SpatialSubdivisionResult(
@@ -339,13 +346,34 @@ def build_source_spatial_subdivision(
         if c_idx != primary_c_idx and primary_outer_poly.buffer(1.0).contains(comp):
             building_c_indices.add(c_idx)
 
-    # Collect disconnected decoy wall bodies
+    # Collect disconnected decoy or unclosed building wall bodies
     disconnected_body_ids = []
     disconnected_path_ids = []
+    outside_bars = []
     for b_idx, bar in enumerate(bars):
         if bar_to_comp.get(b_idx) not in building_c_indices:
             disconnected_body_ids.append(bodies[b_idx].body_id)
             disconnected_path_ids.extend(bodies[b_idx].provenance.native_path_ids)
+            outside_bars.append(bar)
+
+    # Evaluate whether wall ink outside primary_outer_poly represents
+    # an unclosed building envelope with genuine adjacent/substantial walls
+    # ("source_exterior_other_wall_ink_outside_candidate"), or isolated decoys.
+    has_other_wall_ink_outside = False
+    if outside_bars:
+        min_dist_to_primary = min(
+            primary_comp.distance(b.polygon) for b in outside_bars
+        ) if primary_comp is not None and not primary_comp.is_empty else 1e9
+
+        # A single partial closed ring (e.g. left wing) with other substantial walls
+        # or directly adjacent walls (doorway gap <= 50.0 pt) beyond it is NOT the outer
+        # building boundary. Count every independent source-painted wall bar.
+        if (
+            len(outside_bars) >= 12
+            or (min_dist_to_primary <= 50.0 and len(outside_bars) >= 4)
+            or len(outside_bars) > comp_bar_counts.get(primary_c_idx, 0)
+        ):
+            has_other_wall_ink_outside = True
 
     # A free-space polygon cannot become a primary-building room if its
     # enclosing wall owners belong exclusively to detached components.
@@ -586,28 +614,52 @@ def build_source_spatial_subdivision(
             regions.append(rec)
             region_geoms.append((rec, geom))
         else:
-            r_id = f"region:interior:{region_idx}"
-            rec = SpatialRegionRecord(
-                region_id=r_id,
-                kind=SpatialRegionKind.INTERIOR_ENCLOSED_ROOM,
-                bounds_pdf_pts=poly_bounds,
-                polygon_pdf_pts=coords,
-                area_pdf_pts=area,
-                label=matched_label,
-                semantic_role=matched_role,
-                bounding_wall_body_ids=touching_body_ids,
-                bounding_native_path_ids=touching_path_ids,
-                is_hole_in_building=False,
-                is_conditioned_living=True,
-                status=EvidenceResolutionStatus.CANDIDATE,
-                reason="interior_enclosed_conditioned_room_candidate",
-            )
-            regions.append(rec)
-            region_geoms.append((rec, geom))
+            if has_other_wall_ink_outside:
+                # The candidate cycle is only a partial building section, not the
+                # authenticated exterior building footprint. Bounded voids inside it
+                # are unverified candidate geometry and must not issue living room
+                # authority or customer finish FIRM.
+                r_id = f"region:unverified:{region_idx}"
+                rec = SpatialRegionRecord(
+                    region_id=r_id,
+                    kind=SpatialRegionKind.UNVERIFIED_ENCLOSED_CANDIDATE,
+                    bounds_pdf_pts=poly_bounds,
+                    polygon_pdf_pts=coords,
+                    area_pdf_pts=area,
+                    label=matched_label,
+                    semantic_role="unverified_partial_building_room_candidate_not_room_authority",
+                    bounding_wall_body_ids=touching_body_ids,
+                    bounding_native_path_ids=touching_path_ids,
+                    is_hole_in_building=False,
+                    is_conditioned_living=False,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason=REASON_OTHER_WALL_INK_OUTSIDE,
+                )
+                regions.append(rec)
+                region_geoms.append((rec, geom))
+            else:
+                r_id = f"region:interior:{region_idx}"
+                rec = SpatialRegionRecord(
+                    region_id=r_id,
+                    kind=SpatialRegionKind.INTERIOR_ENCLOSED_ROOM,
+                    bounds_pdf_pts=poly_bounds,
+                    polygon_pdf_pts=coords,
+                    area_pdf_pts=area,
+                    label=matched_label,
+                    semantic_role=matched_role,
+                    bounding_wall_body_ids=touching_body_ids,
+                    bounding_native_path_ids=touching_path_ids,
+                    is_hole_in_building=False,
+                    is_conditioned_living=True,
+                    status=EvidenceResolutionStatus.CANDIDATE,
+                    reason="interior_enclosed_conditioned_room_candidate",
+                )
+                regions.append(rec)
+                region_geoms.append((rec, geom))
         region_idx += 1
 
     # 4. Disconnected Decoy / Structure region record
-    if disconnected_body_ids:
+    if disconnected_body_ids and not has_other_wall_ink_outside:
         disc_polys = [
             bars[i].polygon for i, b in enumerate(bodies)
             if b.body_id in disconnected_body_ids
@@ -699,6 +751,14 @@ def build_source_spatial_subdivision(
                 l_kind in ext_candidates
             )
         )
+        if (
+            has_other_wall_ink_outside
+            and is_ext
+            and any(bar.polygon.distance(ob.polygon) <= 50.0 for ob in outside_bars)
+        ):
+            # If this wall face is adjacent to outside building wall ink, it faces
+            # unclosed building interior, not genuine exterior/outdoor domain.
+            is_ext = False
         is_ct = (
             (
                 l_kind == SpatialRegionKind.INTERIOR_ENCLOSED_ROOM.value and
@@ -750,11 +810,15 @@ def build_source_spatial_subdivision(
         if r.kind == SpatialRegionKind.NATIVE_SOURCE_MICRO_VOID
     ]
 
-    status = (
-        EvidenceResolutionStatus.CANDIDATE if has_outside
-        else EvidenceResolutionStatus.ABSTAINED
-    )
-    reason = REASON_SPATIAL_OK if has_outside else REASON_NO_OUTSIDE_FACE
+    if has_other_wall_ink_outside:
+        status = EvidenceResolutionStatus.ABSTAINED
+        reason = REASON_OTHER_WALL_INK_OUTSIDE
+    elif has_outside:
+        status = EvidenceResolutionStatus.CANDIDATE
+        reason = REASON_SPATIAL_OK
+    else:
+        status = EvidenceResolutionStatus.ABSTAINED
+        reason = REASON_NO_OUTSIDE_FACE
 
     return SpatialSubdivisionResult(
         status=status,

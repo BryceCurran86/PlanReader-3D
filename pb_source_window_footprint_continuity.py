@@ -13,9 +13,10 @@ from typing import Any
 
 from shapely.geometry import box
 
-_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw)$", re.IGNORECASE)
-_DOOR_CODE = re.compile(r"^(?:d[- ]?\d+[a-z]*|door|sgd|stacker)$", re.IGNORECASE)
+_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*)$", re.IGNORECASE)
+_DOOR_CODE = re.compile(r"^(?:d[- ]?\d+[a-z]*|door|sgd|asd[- ]?\d*|sd[- ]?\d*|stacker)$", re.IGNORECASE)
 _EXTERIOR_WALL_LAYER = re.compile(r"(?:wall.*extern|extern.*wall|wall.*exterior|exterior.*wall)", re.IGNORECASE)
+_NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -59,9 +60,13 @@ def _rect(row: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
     try:
         rect = row["rect"]
         nums = tuple(float(v) for v in rect)
-        if len(nums) == 4 and all(math.isfinite(v) for v in nums):
-            if nums[2] > nums[0] and nums[3] > nums[1]:
-                return nums
+        if (
+            len(nums) == 4
+            and all(math.isfinite(v) for v in nums)
+            and nums[2] > nums[0]
+            and nums[3] > nums[1]
+        ):
+            return nums
     except (KeyError, TypeError, ValueError):
         return None
     return None
@@ -103,6 +108,7 @@ def detect_exterior_window_footprint_bridges(
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
     *,
     page_index: int = -1,
+    wall_bars: Sequence[Any] | None = None,
 ) -> tuple[WindowFootprintBridge, ...]:
     """Connect *source-verified* exterior ASW/window openings as topology only.
 
@@ -114,30 +120,70 @@ def detect_exterior_window_footprint_bridges(
     door_labels = _words(source_words, pattern=_DOOR_CODE)
     if not labels:
         return ()
+    has_any_layers = any(
+        bool(str(r.get("layer") or "").strip())
+        for r in drawings
+        if isinstance(r, Mapping)
+    )
+    has_wall_layers = any(
+        _EXTERIOR_WALL_LAYER.search(str(r.get("layer") or ""))
+        for r in drawings
+        if isinstance(r, Mapping)
+    )
+    if has_any_layers and not has_wall_layers:
+        return ()
     walls: list[tuple[int, str, tuple[float, float, float, float]]] = []
     filled_rectangles: list[tuple[int, str, tuple[float, float, float, float]]] = []
     marker_lines: list[tuple[int, str, tuple[tuple[float, float], tuple[float, float]]]] = []
+    frame_lines: list[tuple[int, str, tuple[tuple[float, float], tuple[float, float]]]] = []
+
+    if wall_bars:
+        for bar in wall_bars:
+            poly = getattr(bar, "polygon", None)
+            if poly is None or poly.is_empty or not poly.is_valid:
+                continue
+            bb = tuple(float(v) for v in poly.bounds)
+            dx, dy = bb[2] - bb[0], bb[3] - bb[1]
+            if min(dx, dy) >= 0.3 and max(dx, dy) > 1.2 * min(dx, dy):
+                pid = int(getattr(bar, "path_index", -1))
+                layer = str(getattr(bar, "layer", "") or "")
+                walls.append((pid, layer, bb))
+                filled_rectangles.append((pid, layer, bb))
+
     for idx, row in enumerate(drawings):
         if not isinstance(row, Mapping):
             continue
         layer = str(row.get("layer") or "")
-        if not _EXTERIOR_WALL_LAYER.search(layer):
+        if has_wall_layers:
+            if not _EXTERIOR_WALL_LAYER.search(layer):
+                continue
+        elif _NON_WALL_LAYER.search(layer):
             continue
         bounds = _rect(row)
         fill = row.get("fill")
-        if bounds and isinstance(fill, (tuple, list)) and len(fill) >= 3:
-            if max(float(v) for v in fill[:3]) < 0.3:
-                filled_rectangles.append((idx, layer, bounds))
-                dx, dy = bounds[2]-bounds[0], bounds[3]-bounds[1]
-                # Genuine external wall ends beside windows can be short
-                # jamb-side stubs (2-4 wall thicknesses). The actual window
-                # marker + unique same-layer hosts + label remain mandatory;
-                # this aspect gate must not erase those original wall owners.
-                if max(dx, dy) > 2*min(dx, dy) and min(dx, dy) >= 0.3:
-                    walls.append((idx, layer, bounds))
+        if (
+            bounds
+            and isinstance(fill, (tuple, list))
+            and len(fill) >= 3
+            and max(float(v) for v in fill[:3]) < 0.3
+        ):
+            filled_rectangles.append((idx, layer, bounds))
+            dx, dy = bounds[2] - bounds[0], bounds[3] - bounds[1]
+            # Genuine external wall ends beside windows can be short
+            # jamb-side stubs (2-4 wall thicknesses). The actual window
+            # marker + unique same-layer hosts + label remain mandatory;
+            # this aspect gate must not erase those original wall owners.
+            if max(dx, dy) > 2 * min(dx, dy) and min(dx, dy) >= 0.3:
+                walls.append((idx, layer, bounds))
         ln = _line(row)
-        if ln and 0.5 <= math.dist(*ln) <= 16:
-            marker_lines.append((idx, layer, ln))
+        if ln:
+            d = math.dist(*ln)
+            if 0.5 <= d <= 16:
+                marker_lines.append((idx, layer, ln))
+            if 2.0 <= d <= 160:
+                p0, p1 = ln
+                if abs(p0[1] - p1[1]) < 0.1 or abs(p0[0] - p1[0]) < 0.1:
+                    frame_lines.append((idx, layer, ln))
     results: list[WindowFootprintBridge] = []
     seen_hosts: set[tuple[int, int]] = set()
     for a_idx, (a_path, a_layer, (a0, a1)) in enumerate(marker_lines):
@@ -149,7 +195,7 @@ def detect_exterior_window_footprint_bridges(
             pair = None
             for first, second in ((a0, a1), (a1, a0)):
                 for other0, other1 in ((b0, b1), (b1, b0)):
-                    if math.dist(first, other0) < .08 and .2 < math.dist(second, other1) < 3:
+                    if math.dist(first, other0) < .08 and .2 < math.dist(second, other1) <= 16:
                         pair = (first, second, other1)
             if pair is None:
                 continue
@@ -186,7 +232,7 @@ def detect_exterior_window_footprint_bridges(
                         alignment = abs((first[0]+first[2])-(second[0]+second[2]))/2
                         offset = min(abs(mx-first[0]),abs(mx-first[2]),abs(mx-second[0]),abs(mx-second[2]))
                         bounds = (max(first[0],second[0]),first[3],min(first[2],second[2]),second[1])
-                    if not 2 <= gap <= 160 or alignment > 0.3 or abs(thick1-thick2) > 0.3:
+                    if not 2 <= gap <= 160 or alignment > 0.5 or abs(thick1-thick2) > 0.6:
                         continue
                     if offset > 4*max(thick1,thick2) or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
                         continue
@@ -298,7 +344,7 @@ def detect_exterior_window_footprint_bridges(
                 str(drawings[k].get("viewport_id")
                     or drawings[k].get("source_viewport_id") or "").strip()
                 for k in (i, j, a_path, b_path)
-                if isinstance(drawings[k], Mapping)
+                if 0 <= k < len(drawings) and isinstance(drawings[k], Mapping)
             }
             scopes.discard("")
             if len(scopes) > 1:
@@ -312,4 +358,147 @@ def detect_exterior_window_footprint_bridges(
                 label_text=label, bounds_pdf_pts=bounds, axis=axis,
                 page_index=page_index,
             ))
+
+    # Parallel window frame line witness for standard residential plans
+    # where windows are drawn as parallel frame/glazing lines across the gap.
+    covered_labels = {r.label_text for r in results}
+    unmatched_labels = [lbl for lbl in labels if lbl[0] not in covered_labels]
+    for label_raw, label_bounds in unmatched_labels:
+        lx = (label_bounds[0] + label_bounds[2]) / 2
+        ly = (label_bounds[1] + label_bounds[3]) / 2
+        cand_list = []
+        for i, layer_i, first in walls:
+            for j, layer_j, second in walls:
+                if i == j or (has_wall_layers and layer_i != layer_j):
+                    continue
+                # Horizontal opening
+                if first[2] < second[0]:
+                    gap = second[0] - first[2]
+                    thick1, thick2 = first[3] - first[1], second[3] - second[1]
+                    first_is_vert = thick1 > 1.8 * (first[2] - first[0]) and thick1 >= 10.0
+                    second_is_vert = thick2 > 1.8 * (second[2] - second[0]) and thick2 >= 10.0
+
+                    if not first_is_vert and not second_is_vert:
+                        alignment = abs((first[1] + first[3]) - (second[1] + second[3])) / 2
+                        bounds = (first[2], max(first[1], second[1]), second[0], min(first[3], second[3]))
+                        valid_geom = alignment <= 0.5 and abs(thick1 - thick2) <= 0.6
+                    elif first_is_vert and not second_is_vert:
+                        bounds = (first[2], second[1], second[0], second[3])
+                        valid_geom = first[1] <= bounds[1] + 1.0 and first[3] >= bounds[3] - 1.0
+                    elif not first_is_vert and second_is_vert:
+                        bounds = (first[2], first[1], second[0], first[3])
+                        valid_geom = second[1] <= bounds[1] + 1.0 and second[3] >= bounds[3] - 1.0
+                    else:
+                        valid_geom = False
+                        bounds = (first[2], 0.0, second[0], 0.0)
+
+                    if (
+                        valid_geom
+                        and 2.0 <= gap <= 160.0
+                        and bounds[0] - 2.0 <= lx <= bounds[2] + 2.0
+                        and min(abs(ly - bounds[1]), abs(ly - bounds[3])) < 35
+                    ):
+                        label_margin = max(2.0, 0.15 * gap)
+                        door_comp = [
+                            raw for raw, w in door_labels
+                            if bounds[0] + label_margin <= (w[0] + w[2]) / 2 <= bounds[2] - label_margin
+                            and min(abs(w[1] - ly), abs(w[3] - ly)) < 35
+                        ]
+                        if not door_comp:
+                            flines = [
+                                fl for fl in frame_lines
+                                if (not has_wall_layers or fl[1] == layer_i)
+                                and bounds[0] - 2.5 <= min(fl[2][0][0], fl[2][1][0])
+                                and max(fl[2][0][0], fl[2][1][0]) <= bounds[2] + 2.5
+                                and bounds[1] - 1.5 <= (fl[2][0][1] + fl[2][1][1]) / 2 <= bounds[3] + 1.5
+                            ]
+                            if flines:
+                                min_x = min(min(fl[2][0][0], fl[2][1][0]) for fl in flines)
+                                max_x = max(max(fl[2][0][0], fl[2][1][0]) for fl in flines)
+                                total_len = sum(math.dist(*fl[2]) for fl in flines)
+                                if (
+                                    abs(min_x - bounds[0]) < 3.0
+                                    and abs(max_x - bounds[2]) < 3.0
+                                    and total_len >= 0.7 * gap
+                                ):
+                                    marker_ids = tuple(sorted(dict.fromkeys(fl[0] for fl in flines)))[:4]
+                                    cand_list.append((i, j, bounds, label_raw, marker_ids, "h"))
+                # Vertical opening
+                if first[3] < second[1]:
+                    gap = second[1] - first[3]
+                    thick1, thick2 = first[2] - first[0], second[2] - second[0]
+                    first_is_horiz = thick1 > 1.8 * (first[3] - first[1]) and thick1 >= 10.0
+                    second_is_horiz = thick2 > 1.8 * (second[2] - second[0]) and thick2 >= 10.0
+
+                    if not first_is_horiz and not second_is_horiz:
+                        alignment = abs((first[0] + first[2]) - (second[0] + second[2])) / 2
+                        bounds = (max(first[0], second[0]), first[3], min(first[2], second[2]), second[1])
+                        valid_geom = alignment <= 0.5 and abs(thick1 - thick2) <= 0.6
+                    elif first_is_horiz and not second_is_horiz:
+                        bounds = (second[0], first[3], second[2], second[1])
+                        valid_geom = first[0] <= bounds[0] + 1.0 and first[2] >= bounds[2] - 1.0
+                    elif not first_is_horiz and second_is_horiz:
+                        bounds = (first[0], first[3], first[2], second[1])
+                        valid_geom = second[0] <= bounds[0] + 1.0 and second[2] >= bounds[2] - 1.0
+                    else:
+                        valid_geom = False
+                        bounds = (0.0, first[3], 0.0, second[1])
+
+                    if (
+                        valid_geom
+                        and 2.0 <= gap <= 160.0
+                        and bounds[1] - 2.0 <= ly <= bounds[3] + 2.0
+                        and min(abs(lx - bounds[0]), abs(lx - bounds[2])) < 35
+                    ):
+                        label_margin = max(2.0, 0.15 * gap)
+                        door_comp = [
+                            raw for raw, w in door_labels
+                            if bounds[1] + label_margin <= (w[1] + w[3]) / 2 <= bounds[3] - label_margin
+                            and min(abs(w[0] - lx), abs(w[2] - lx)) < 35
+                        ]
+                        if not door_comp:
+                            flines = [
+                                fl for fl in frame_lines
+                                if (not has_wall_layers or fl[1] == layer_i)
+                                and bounds[1] - 2.5 <= min(fl[2][0][1], fl[2][1][1])
+                                and max(fl[2][0][1], fl[2][1][1]) <= bounds[3] + 2.5
+                                and bounds[0] - 1.5 <= (fl[2][0][0] + fl[2][1][0]) / 2 <= bounds[2] + 1.5
+                            ]
+                            if flines:
+                                min_y = min(min(fl[2][0][1], fl[2][1][1]) for fl in flines)
+                                max_y = max(max(fl[2][0][1], fl[2][1][1]) for fl in flines)
+                                total_len = sum(math.dist(*fl[2]) for fl in flines)
+                                if (
+                                    abs(min_y - bounds[1]) < 3.0
+                                    and abs(max_y - bounds[3]) < 3.0
+                                    and total_len >= 0.7 * gap
+                                ):
+                                    marker_ids = tuple(sorted(dict.fromkeys(fl[0] for fl in flines)))[:4]
+                                    cand_list.append((i, j, bounds, label_raw, marker_ids, "v"))
+
+        unique_cands = {(c[0], c[1], c[2], c[3], c[4], c[5]) for c in cand_list}
+        if unique_cands:
+            ranked = sorted(
+                unique_cands,
+                key=lambda c: (
+                    c[2][2] - c[2][0] if c[5] == "h" else c[2][3] - c[2][1],
+                    c[0],
+                    c[1],
+                ),
+            )
+            best_gap = ranked[0][2][2] - ranked[0][2][0] if ranked[0][5] == "h" else ranked[0][2][3] - ranked[0][2][1]
+            close = [
+                c for c in ranked
+                if (c[2][2] - c[2][0] if c[5] == "h" else c[2][3] - c[2][1]) <= best_gap + 0.5
+            ]
+            if len(close) == 1:
+                i, j, bounds, label_str, marker_ids, ax = close[0]
+                if (i, j) not in seen_hosts:
+                    seen_hosts.add((i, j))
+                    results.append(WindowFootprintBridge(
+                        left_host_path_id=i, right_host_path_id=j,
+                        marker_path_ids=marker_ids, label_text=label_str,
+                        bounds_pdf_pts=bounds, axis=ax, page_index=page_index,
+                    ))
+
     return tuple(sorted(results, key=lambda r:(r.page_index,r.left_host_path_id,r.right_host_path_id)))

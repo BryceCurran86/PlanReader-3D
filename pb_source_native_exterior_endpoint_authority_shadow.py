@@ -7,9 +7,9 @@ never an automatic junction.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import math
 from typing import Any
 
 from pb_layered_wall_doorway_room_ring_shadow import _owner_excluded_green_ink
@@ -96,6 +96,18 @@ def classify_source_native_path_role(row: Mapping[str, Any] | object) -> str:
         return ROLE_EXCLUSION
     if _is_diagonal_row(row):
         return ROLE_DIAGONAL_BRIDGE
+    # An isolated small square element (<= 6.0 pt, aspect ratio <= 1.8) on an external wall
+    # layer is a timber post / column (e.g. 140x140 post path 4102), NOT an exterior wall run.
+    r = row.get("rect")
+    if r is not None:
+        try:
+            rx0, ry0, rx1, ry1 = float(r[0]), float(r[1]), float(r[2]), float(r[3])
+            rw, rh = rx1 - rx0, ry1 - ry0
+            r_span, r_girth = max(rw, rh), min(rw, rh)
+            if 0.5 <= r_girth and r_span <= 6.0 and (r_span / max(r_girth, 0.01)) <= 1.8:
+                return ROLE_EXCLUSION
+        except (TypeError, ValueError, IndexError):
+            pass
     compact = _layer_compact(layer)
     if "wall" in compact and "external" in compact:
         return ROLE_EXTERIOR_OUTER_FACE
