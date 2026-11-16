@@ -150,3 +150,39 @@ def test_sliding_detector_is_consumed_not_reimplemented():
     attempt = attempt_source_native_outer_wall_first((), source_ink_already_scoped=True)
     assert attempt.sliding_door_footprint_bridges == ()
     assert attempt.measurement_authorized is False
+
+
+def test_grey_seam_detector_is_consumed_not_reimplemented():
+    from pb_new_exterior_wall_preflight import detect_source_neutral_wall_seams
+
+    module = getattr(detect_source_neutral_wall_seams, "__module__", "")
+    assert module in {
+        "pb_source_neutral_wall_seam_continuity",
+        "pb_new_exterior_wall_preflight",
+    }
+    attempt = attempt_source_native_outer_wall_first((), source_ink_already_scoped=True)
+    assert attempt.neutral_wall_seams == ()
+    assert attempt.measurement_authorized is False
+
+
+def test_rejected_left_loop_keeps_4373_census_and_right_house():
+    house = [
+        _filled_wall((100, 100, 400, 110)),
+        _filled_wall((100, 340, 400, 350)),
+        _filled_wall((100, 100, 110, 350)),
+        _filled_wall((390, 100, 400, 350)),
+    ]
+    right = _filled_wall((780, 190, 990, 193))
+    attempt = attempt_source_native_outer_wall_first(
+        house + [right], source_ink_already_scoped=True,
+    )
+    assert attempt.status == "ABSTAINED"
+    assert attempt.reason == "source_exterior_other_wall_ink_outside_candidate"
+    assert attempt.diagnostic_closed_wall_loop_count == 1
+    assert attempt.diagnostic_rejected_loop_bbox_pdf_pts == attempt.rejected_candidate_bbox_pdf_pts
+    assert attempt.diagnostic_wall_bands_outside_loop >= 1
+    assert 4 in attempt.diagnostic_outside_source_path_sample
+    census = census_source_outside_candidate(house + [right])
+    assert census["left_only_closed_loop_rejected"] is True
+    assert census["naive_x_filter_applied"] is False
+    assert census["measurement_authorized"] is False

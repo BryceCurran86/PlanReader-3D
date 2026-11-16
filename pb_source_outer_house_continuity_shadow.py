@@ -214,6 +214,8 @@ def census_source_outside_candidate(
         closed = box(*_bounds_of(attempt.polygon_pdf_pts))
     elif attempt.rejected_candidate_bbox_pdf_pts:
         closed = box(*attempt.rejected_candidate_bbox_pdf_pts)
+    elif attempt.diagnostic_rejected_loop_bbox_pdf_pts:
+        closed = box(*attempt.diagnostic_rejected_loop_bbox_pdf_pts)
     if closed is None:
         closed = _unique_closed_union_fragment(bars)
     outside = []
@@ -283,9 +285,20 @@ def census_source_outside_candidate(
         "can_issue_area": False,
         "official_frozen120_score_change": 0,
         "sliding_bridge_count": len(getattr(attempt, "sliding_door_footprint_bridges", ()) or ()),
+        "neutral_grey_seam_count": len(getattr(attempt, "neutral_wall_seams", ()) or ()),
         "window_bridge_count": len(attempt.window_footprint_bridges),
         "swing_bridge_count": len(attempt.swing_door_footprint_bridges),
         "garage_bridge_count": len(attempt.garage_door_footprint_bridges),
+        "diagnostic_closed_wall_loop_count": attempt.diagnostic_closed_wall_loop_count,
+        "diagnostic_wall_bands_outside_loop": attempt.diagnostic_wall_bands_outside_loop,
+        "diagnostic_outside_source_path_sample": list(
+            attempt.diagnostic_outside_source_path_sample
+        ),
+        "left_only_closed_loop_rejected": (
+            attempt.reason == "source_exterior_other_wall_ink_outside_candidate"
+            and attempt.diagnostic_closed_wall_loop_count == 1
+            and attempt.diagnostic_wall_bands_outside_loop > 0
+        ),
     }
 
 
