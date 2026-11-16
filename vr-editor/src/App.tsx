@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SceneView } from "./Scene";
+import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import type { SceneManifest } from "./types";
 
@@ -9,6 +10,7 @@ export function App() {
   const [level, setLevel] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
 
   // A production backend must authenticate this same-origin endpoint and
@@ -26,7 +28,7 @@ export function App() {
       const data: unknown = await response.json();
       if (!isSceneManifest(data)) throw new Error("Invalid or untrusted scene manifest");
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
-      if (!cancelled) { setManifest(data); setError(null); }
+      if (!cancelled) { setManifest(data); setAuthenticatedSource(true); setError(null); }
     }).catch(e => {
       if (!cancelled) setError(e instanceof Error ? e.message : "Workspace failed to load");
     }).finally(() => { if (!cancelled) setBusy(false); });
@@ -53,6 +55,7 @@ export function App() {
         })),
       };
       setManifest(localPreview);
+      setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all");
     } catch (e) {
@@ -169,6 +172,12 @@ export function App() {
                   Quantity references: {selected.quantityLinks.length
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
                 </div>
+                <CommandPreview
+                  key={selected.objectId}
+                  workspace={manifest}
+                  object={selected}
+                  authenticated={authenticatedSource}
+                />
               </>
             ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}
           </div>
