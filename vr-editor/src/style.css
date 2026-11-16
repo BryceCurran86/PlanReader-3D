@@ -7,3 +7,6 @@
 .preview-section button:disabled{background:#42535a;cursor:not-allowed}
 .preview-results{margin-top:18px;padding:13px;background:#193c38;border:1px solid #318d80;border-radius:6px;font-size:12px;line-height:1.8}
 .preview-results ul{padding-left:20px}
+
+.demo-button{background:#1b756e;color:#eafff9;border:1px solid #399b90;border-radius:8px;padding:13px 19px;cursor:pointer;font-weight:700;margin:16px 0}
+.demo-button:focus-visible{outline:3px solid #e9f2cd}
