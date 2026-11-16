@@ -18,6 +18,10 @@ from pb_three_laurel_floor_opening_correspondence_shadow import (
 from pb_three_laurel_floor_wall_face_correspondence_shadow import (
     build_floor_to_physical_wall_candidate_receipt,
 )
+from pb_source_room_gap_audit import (
+    SourceRoomGapAudit,
+    audit_source_room_outline_remaining_gaps,
+)
 
 _SINGLE_ROOM_WORDS = frozenset({
     "LIVING", "MEDIA", "KITCHEN", "DINING", "MEALS", "GARAGE",
@@ -60,6 +64,8 @@ class SourceRoomOpeningReview:
     floor_candidates: int
     witnesses: tuple[FloorOpeningBoundaryWitness, ...] = ()
     ambiguous_opening_count: int = 0
+    shared_source_floor_outline_labels: tuple[tuple[int, tuple[str, ...]], ...] = ()
+    room_gap_audits: tuple[SourceRoomGapAudit, ...] = ()
     physical_wall_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -73,6 +79,11 @@ class SourceRoomOpeningReview:
             "witness_count": len(self.witnesses),
             "witnesses": [w.to_dict() for w in self.witnesses],
             "ambiguous_opening_count": self.ambiguous_opening_count,
+            "shared_source_floor_outline_labels": [
+                {"source_floor_path_id": path, "printed_labels": list(names)}
+                for path, names in self.shared_source_floor_outline_labels
+            ],
+            "room_gap_audits": [a.to_dict() for a in self.room_gap_audits],
             "physical_wall_authenticated": False,
             "measurement_authorized": False,
         }
@@ -103,6 +114,8 @@ def review_source_room_opening_gaps(
             page_index, "ABSTAINED", "native_room_label_budget_exceeded", 0, 0,
         )
     hits: list[FloorOpeningBoundaryWitness] = []
+    source_floor_receipts = []
+    floor_label_groups: dict[int, list[str]] = {}
     candidates = 0
     for label in labels:
         receipt = build_floor_to_physical_wall_candidate_receipt(
@@ -112,6 +125,8 @@ def review_source_room_opening_gaps(
         if receipt.floor_candidate_native_path_id is None:
             continue
         candidates += 1
+        source_floor_receipts.append(receipt)
+        floor_label_groups.setdefault(receipt.floor_candidate_native_path_id, []).append(label)
         hits.extend(match_source_exterior_openings_to_floor_wall_gaps(
             receipt, openings,
         ))
@@ -145,6 +160,26 @@ def review_source_room_opening_gaps(
             continue
         accepted.append(group[0])
 
+    # Labels pointing at one original Finish_Floor path are only different
+    # names/sections of the SAME source floor outline until independent wall
+    # partitions prove otherwise. Never split them into measured rooms.
+    shared_labels = tuple(
+        (path, tuple(names))
+        for path, names in sorted(floor_label_groups.items())
+        if len(names) > 1
+    )
+    audits = []
+    for receipt in source_floor_receipts:
+        path_id = receipt.floor_candidate_native_path_id
+        if len(floor_label_groups[path_id]) != 1:
+            continue
+        audit = audit_source_room_outline_remaining_gaps(
+            receipt,
+            [w for w in accepted if w.room_label == receipt.label],
+        )
+        if audit is not None:
+            audits.append(audit)
+
     # Separate source receipts only; no category is ever a customer wall
     # or finish quantity, even with every opening or side accounted for.
     return SourceRoomOpeningReview(
@@ -156,4 +191,8 @@ def review_source_room_opening_gaps(
         floor_candidates=candidates,
         witnesses=tuple(accepted),
         ambiguous_opening_count=ambiguous,
+        shared_source_floor_outline_labels=shared_labels,
+        room_gap_audits=tuple(sorted(
+            audits, key=lambda a: (a.remaining_unproved_pdf_pt, a.room_label),
+        )),
     )

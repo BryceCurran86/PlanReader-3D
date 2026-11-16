@@ -6578,6 +6578,54 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                         "They are unassigned until the physical partition "
                         "and doorway boundaries are independently proven."
                     )
+                shared_outlines=room_witnesses.get(
+                    "shared_source_floor_outline_labels"
+                ) or []
+                if shared_outlines:
+                    st.warning(
+                        "Several printed room/section labels share one native "
+                        "floor-outline path. These are NOT separate measured "
+                        "rooms without independent partition evidence."
+                    )
+                    st.dataframe(pd.DataFrame([
+                        {
+                            "Native floor outline":rec.get("source_floor_path_id"),
+                            "Printed names / sections":", ".join(
+                                rec.get("printed_labels") or []
+                            ),
+                        }
+                        for rec in shared_outlines
+                    ]),use_container_width=True,hide_index=True)
+                remaining_room_gaps=room_witnesses.get("room_gap_audits") or []
+                if remaining_room_gaps:
+                    with st.expander(
+                        "Original source room boundary gaps — unverified",
+                        expanded=False,
+                    ):
+                        st.caption(
+                            "Lengths are PDF drawing POINTS, not metres or "
+                            "billable units. A zero-gap candidate is still "
+                            "not an authenticated physical room, finished "
+                            "face, ceiling or customer quantity."
+                        )
+                        st.dataframe(pd.DataFrame([
+                            {
+                                "Printed room":rec.get("room_label"),
+                                "Native floor path":rec.get(
+                                    "floor_candidate_native_path_id"
+                                ),
+                                "Unproved gap (PDF points)":round(
+                                    float(rec.get("remaining_unproved_pdf_pt",0)),2
+                                ),
+                                "Hosted aperture (PDF points)":round(
+                                    float(rec.get("hosted_opening_coverage_pdf_pt",0)),2
+                                ),
+                                "Zero-gap candidate only":bool(
+                                    rec.get("zero_gap_candidate",False)
+                                ),
+                            }
+                            for rec in remaining_room_gaps
+                        ]),use_container_width=True,hide_index=True)
                 if room_witnesses.get("witness_count",0):
                     st.caption(
                         "Existing original-source openings matched to room wall "
