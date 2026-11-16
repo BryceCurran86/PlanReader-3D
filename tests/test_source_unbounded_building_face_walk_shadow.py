@@ -163,6 +163,14 @@ def test_far_unowned_structural_wall_or_separate_building_cannot_be_dropped():
     assert result.status == "ABSTAINED"
     assert result.reason == "source_other_structural_walls_outside_candidate"
     assert result.other_source_wall_band_count == 1
+    assert result.clockwise_pdf_pts == ()  # no authoritative ring
+    assert result.outer_wall_native_path_ids == ()
+    assert len(result.diagnostic_unsealed_ring_pdf_pts) >= 5
+    assert not Polygon(result.diagnostic_unsealed_ring_pdf_pts).buffer(0.05).covers(
+        bars[-1].polygon
+    )
+    assert result.to_dict()["diagnostic_unsealed_not_measurement"] is True
+    assert result.measurement_authorized is False
 
 
 def test_far_paint_cavity_is_leftover_scheme_not_a_second_envelope():
@@ -512,6 +520,9 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     assert walk.reason == "source_other_structural_walls_outside_candidate"
     assert walk.unclosed_dwelling_sides == ()
     assert walk.enclosed_dwelling_zone_count == 2
+    assert walk.clockwise_pdf_pts == ()  # no firm exterior geometry
+    assert walk.outer_wall_native_path_ids == ()
+    assert len(walk.diagnostic_unsealed_ring_pdf_pts) >= 5
     assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
     assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     assert receipt["measurement_authorized"] is False
