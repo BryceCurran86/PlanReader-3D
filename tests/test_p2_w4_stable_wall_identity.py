@@ -85,6 +85,39 @@ def test_p2_resegmented_collinear_path_same_id() -> None:
     assert walls_one[0].candidate_id == walls_three[0].candidate_id
 
 
+def test_p2_collinear_retrace_is_not_erased_into_a_direct_wall() -> None:
+    # A geometrically collinear *reversal* is not a redundant split.
+    # The old perpendicular-distance-only check erased the turn at x=10,
+    # making these distinct source paths share a W4 identity.
+    direct = [(0.0, 0.0), (5.0, 0.0)]
+    retraced = [(0.0, 0.0), (10.0, 0.0), (5.0, 0.0)]
+    assert canonical_path_fingerprint(retraced) != canonical_path_fingerprint(direct)
+    assert _canonical_wall_candidate_id("vp", retraced) != _canonical_wall_candidate_id(
+        "vp", direct
+    )
+    # Direction reversal must still preserve the same *retraced* path.
+    assert canonical_path_fingerprint(retraced) == canonical_path_fingerprint(
+        list(reversed(retraced))
+    )
+    # An ordinary monotone source split stays representation-insensitive.
+    assert canonical_path_fingerprint([(0, 0), (2.5, 0), (5, 0)]) == (
+        canonical_path_fingerprint(direct)
+    )
+
+
+def test_p2_source_u_turn_same_endpoints_is_not_zero_length_identity() -> None:
+    # A -> B -> A may be a non-simple wall traversal, but cannot be
+    # converted into a single zero-length point by collinear compression.
+    turn_back = [(0.0, 0.0), (10.0, 0.0), (0.0, 0.0)]
+    fingerprint = canonical_path_fingerprint(turn_back)
+    assert len(fingerprint) == 3
+    assert fingerprint == canonical_path_fingerprint(list(reversed(turn_back)))
+    assert fingerprint != canonical_path_fingerprint([(0.0, 0.0), (0.0, 0.0)])
+    assert _canonical_wall_candidate_id("vp", turn_back) != (
+        _canonical_wall_candidate_id("vp", [(0.0, 0.0), (0.0, 0.0)])
+    )
+
+
 def test_p2_same_endpoints_different_interior_path_different_id() -> None:
     straight = _canonical_wall_candidate_id("vp", [(0.0, 0.0), (100.0, 0.0)])
     detour = _canonical_wall_candidate_id(
