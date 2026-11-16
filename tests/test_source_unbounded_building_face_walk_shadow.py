@@ -145,6 +145,52 @@ def test_far_unowned_structural_wall_or_separate_building_cannot_be_dropped():
     assert result.other_source_wall_band_count == 1
 
 
+def test_far_paint_cavity_is_leftover_scheme_not_a_second_envelope():
+    far = SourceBar(
+        Polygon(
+            ((400, 0), (440, 0), (440, 40), (400, 40), (400, 0)),
+            [((410, 10), (420, 10), (420, 20), (410, 20), (410, 10))],
+        ),
+        20,
+    )
+    bars = (*_building_bars(), far)
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+        source_wall_union=unary_union([bar.polygon for bar in bars]),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "source_other_structural_walls_outside_candidate"
+    assert result.clockwise_pdf_pts == ()
+    assert result.measurement_authorized is False
+
+
+def test_open_dwelling_plus_far_cavity_is_open_to_outside_not_unique_closed():
+    bars = list(_building_bars())
+    bars[1] = SourceBar(box(0, 117, 122, 120), 1)
+    bars.append(
+        SourceBar(
+            Polygon(
+                ((400, 0), (440, 0), (440, 40), (400, 40), (400, 0)),
+                [((410, 10), (420, 10), (420, 20), (410, 20), (410, 10))],
+            ),
+            20,
+        )
+    )
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+        source_wall_union=unary_union([bar.polygon for bar in bars]),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "source_dwelling_region_still_open_to_outside"
+    assert result.unclosed_dwelling_sides == ("right",)
+    assert result.clockwise_pdf_pts == ()
+    assert result.measurement_authorized is False
+
+
 def test_original_wall_source_ids_required_and_nonfinite_or_empty_abstains():
     bad = SourceBar(Polygon(((0, 0), (1, 1), (2, 2))), 100)
     result = walk_source_unbounded_building_face(

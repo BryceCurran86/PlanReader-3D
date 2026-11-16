@@ -376,13 +376,32 @@ def attempt_source_native_outer_wall_first(
             part for part in closed
             if any(_bbox_intersects(part.bounds, vp) for vp in viewports)
         ]
-    if len(closed) != 1:
+    walk = counts.get("source_outside_face_walk")
+    if party_dividers and walk is not None and walk.status != "CANDIDATE":
+        # Party-covering uniqueness lives in the canonical walker. Paint
+        # cavities are not rival building envelopes; do not override the
+        # walker's first failing reason with a pinhole loop count.
+        return SourceNativeOuterWallAttempt(
+            "ABSTAINED", walk.reason,
+            diagnostic_closed_wall_loop_count=len(closed),
+            **counts,
+        )
+    if party_dividers and walk is not None and walk.clockwise_pdf_pts:
+        outer = Polygon(walk.clockwise_pdf_pts)
+        if not isinstance(outer, Polygon) or not outer.is_valid or outer.is_empty:
+            return SourceNativeOuterWallAttempt(
+                "ABSTAINED", "source_unbounded_face_not_closed",
+                diagnostic_closed_wall_loop_count=len(closed),
+                **counts,
+            )
+    elif len(closed) != 1:
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_perimeter_not_unique_and_closed",
             diagnostic_closed_wall_loop_count=len(closed),
             **counts,
         )
-    outer = closed[0]
+    else:
+        outer = closed[0]
     # A building-wall union may have a fully closed VOID on either side
     # of an internal party wall. Such an interior ring is not the shared
     # outside footprint. Track this proof separately; NEVER promote the
