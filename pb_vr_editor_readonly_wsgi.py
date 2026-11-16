@@ -67,7 +67,7 @@ def make_editor_readonly_wsgi_app(
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
             ("Vary", "Cookie, Authorization"),
-            ("Access-Control-Allow-Origin", "null"),  # no cross-origin credentials
+            # Intentionally no CORS opt-in: only same-origin authenticated UI.
         ]
 
         def respond(status: str, payload: dict[str, Any]):
