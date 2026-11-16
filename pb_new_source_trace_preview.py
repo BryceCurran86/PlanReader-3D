@@ -7,6 +7,7 @@ are created by this preview.
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -78,7 +79,13 @@ def _draw_unsealed_source_ring_preview(canvas, outside_walk) -> bool:
     ring = outside_walk.diagnostic_unsealed_ring_pdf_pts
     if not 5 <= len(ring) <= 20_000 or ring[0] != ring[-1]:
         return False
-    points = [fitz.Point(float(x), float(y)) for x, y in ring]
+    try:
+        coords = [(float(x), float(y)) for x, y in ring]
+    except (ValueError, TypeError, OverflowError):
+        return False
+    if not all(math.isfinite(x) and math.isfinite(y) for x, y in coords):
+        return False
+    points = [fitz.Point(x, y) for x, y in coords]
     canvas.draw_polyline(
         points, color=(0.92, 0.58, 0.08),
         dashes="[6 4] 0", width=2.2, stroke_opacity=0.88,
