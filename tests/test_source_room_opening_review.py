@@ -157,3 +157,33 @@ def test_existing_hosted_internal_swing_is_threshold_not_floor_material():
     assert review.witnesses[0].opening_kind == "internal_hinged_swing_door"
     assert review.witnesses[0].passage_role == "doorway_threshold_not_solid_wall"
     assert review.measurement_authorized is False
+
+
+
+def test_shared_native_floor_outline_is_not_split_into_fake_room_counts():
+    drawings, words, window = _page()
+    words = [*words, (110, 140, 135, 150, "LIVING", 0, 1, 0)]
+    report = review_source_room_opening_gaps(
+        drawings,words,(window,),page_index=2,source_sha256="a"*64,
+    )
+    assert report.shared_source_floor_outline_labels == (
+        (0, ("MEDIA", "LIVING")),
+    )
+    assert report.room_gap_audits == ()
+    assert report.ambiguous_opening_count == 1
+    assert not report.measurement_authorized
+
+
+def test_unique_room_outline_reports_gap_free_candidate_without_approval():
+    drawings, words, window = _page()
+    report = review_source_room_opening_gaps(
+        drawings,words,(window,),page_index=2,source_sha256="a"*64,
+    )
+    assert len(report.room_gap_audits) == 1
+    gaps = report.room_gap_audits[0]
+    assert gaps.room_label == "MEDIA"
+    assert gaps.zero_gap_candidate
+    assert gaps.remaining_unproved_pdf_pt == 0.
+    assert not gaps.room_enclosure_authenticated
+    assert not gaps.measurement_authorized
+    assert report.to_dict()["room_gap_audits"][0]["measurement_authorized"] is False
