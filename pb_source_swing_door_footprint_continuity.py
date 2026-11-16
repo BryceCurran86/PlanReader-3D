@@ -83,6 +83,47 @@ def _viewports(
     return len(scopes) <= 1
 
 
+def _exact_native_cap_terminated_hosts(
+    bridge: ExteriorSwingDoorFootprintBridge,
+    drawings: Sequence[Mapping[str, Any] | object],
+) -> bool:
+    """Require BOTH jambs to terminate at their original source wall ends.
+
+    This is a tie breaker only when an arc already has several validated
+    host interpretations. Do not pick a long perpendicular wall running
+    past the jamb instead of the short, directly terminated wall host.
+    A text, nearest-point snap or inferred segment cannot pass this gate.
+    """
+    ids = (
+        bridge.first_host_path_id,
+        bridge.second_host_path_id,
+        *bridge.jamb_cap_path_ids,
+    )
+    if any(type(idx) is not int or idx < 0 or idx >= len(drawings) for idx in ids):
+        return False
+    if any(not isinstance(drawings[idx], Mapping) for idx in ids):
+        return False
+    rects = tuple(_rect(drawings[idx]) for idx in ids)
+    if any(r is None for r in rects):
+        return False
+    left, right, cap_left, cap_right = rects
+    if bridge.axis == "v":
+        left_end, right_start = left[3], right[1]
+        cap_a = (cap_left[1], cap_left[3])
+        cap_b = (cap_right[1], cap_right[3])
+    elif bridge.axis == "h":
+        left_end, right_start = left[2], right[0]
+        cap_a = (cap_left[0], cap_left[2])
+        cap_b = (cap_right[0], cap_right[2])
+    else:
+        return False
+    # Native near-contact allowance, not the 2.5 pt commercial snap.
+    return (
+        min(abs(left_end - v) for v in cap_a) <= 0.5
+        and min(abs(right_start - v) for v in cap_b) <= 0.5
+    )
+
+
 def detect_exterior_swing_door_footprint_bridges(
     drawings: Sequence[Mapping[str, Any] | object],
     source_words: Sequence[Any] = (),
@@ -436,6 +477,18 @@ def detect_exterior_swing_door_footprint_bridges(
         if len(unique) == 1:
             matches[arc_id] = list(unique.values())
         elif len(unique) > 1:
+            # A long intersecting wall can mimic the short native host of
+            # one exterior swing door. When exactly one of the otherwise
+            # admissible candidates has both source jambs at its actual wall
+            # terminations, retain that independently witnessed owner.
+            # Multiple exact owners remain for the existing ambiguity gate.
+            exact = [
+                candidate for candidate in unique.values()
+                if _exact_native_cap_terminated_hosts(candidate, drawings)
+            ]
+            if len(exact) == 1:
+                matches[arc_id] = exact
+                continue
             c_list = list(unique.values())
             # Group by opening locality: candidate bounds near the arc
             arc_cx = (arc[0] + arc[2]) / 2
