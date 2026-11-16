@@ -330,12 +330,20 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
     assert review.source_hosted_aperture_terminal_count == 1
     assert attempt.garage_door_footprint_bridges
     assert attempt.window_footprint_bridges
+    assert any(
+        {b.left_host_path_id, b.right_host_path_id} == {1708, 1709}
+        for b in attempt.window_footprint_bridges
+    )
     # Figured dimensions like "21" must not silence unique printed ASD labels.
     assert len(attempt.sliding_door_footprint_bridges) >= 1
     assert all(
         str(b.label_text).strip().upper().startswith("ASD")
         for b in attempt.sliding_door_footprint_bridges
     )
+    assert walk is not None
+    assert walk.reason == "source_dwelling_region_still_open_to_outside"
+    assert walk.unclosed_dwelling_sides == ("right",)
+    assert walk.enclosed_dwelling_zone_count == 1
     # Raw graph still has the original open tips; review does not join them.
     assert len(graph.largest_component_open_endpoints_pdf_pts) == 7
     raw_review_pts = {
