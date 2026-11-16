@@ -84,7 +84,11 @@ def resolve_original_3laurel(
         value = str(env.get(variable, "")).strip()
         if value:
             return _classify(Path(value), expected_sha256, explicit=True)       # a named path is the only candidate
-    root = _repo_root() if repo_root is None else Path(repo_root)
+    if repo_root is not None:
+        primary = Path(repo_root) / "documents" / "sources" / ORIGINAL_NAME
+        return _classify(primary, expected_sha256, explicit=False)
+
+    root = _repo_root()
     primary = root / "documents" / "sources" / ORIGINAL_NAME
     if primary.is_file():
         return _classify(primary, expected_sha256, explicit=False)
