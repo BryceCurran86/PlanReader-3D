@@ -13,12 +13,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
 from pb_source_shared_dwelling_envelope_shadow import (
     CandidateSharedBuildingDivider,
 )
+
+CONTACT_PT = 0.03
+_SNAP_PT = 2.5  # commercial snap is never a join here
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,52 @@ def _occupied_party_regions(
     return sides
 
 
+def _as_polygons(geom) -> tuple[Polygon, ...]:
+    if geom is None or getattr(geom, "is_empty", True):
+        return ()
+    if isinstance(geom, Polygon):
+        return (geom,) if geom.is_valid else ()
+    parts = getattr(geom, "geoms", ())
+    found: list[Polygon] = []
+    for part in parts:
+        found.extend(_as_polygons(part))
+    return tuple(found)
+
+
+def _party_covering_components(
+    components: Sequence[Any],
+    divider: CandidateSharedBuildingDivider,
+) -> tuple[Polygon, ...]:
+    wall = box(*divider.wall_bounds_pdf_pts)
+    hit = []
+    for part in components:
+        if not isinstance(part, Polygon) or not part.is_valid or part.is_empty:
+            continue
+        if part.intersects(wall):
+            hit.append(part)
+    return tuple(hit)
+
+
+def _bounded_free_space_faces(primary: Polygon) -> tuple[Polygon, ...]:
+    """Conditioned-space faces inside the wall-paint bbox, not sheet-outside.
+
+    Wall-cavity pinholes are valid polygons with interiors, but they are not
+    dwelling rooms. Rooms live in the complement of the painted bars. A face
+    that reaches the bbox edge is still open to the page / outdoors.
+    """
+    clip = box(*primary.bounds)
+    free = clip.difference(primary)
+    edge = clip.boundary
+    faces = []
+    for part in _as_polygons(free):
+        if part.area <= 0 or not math.isfinite(part.area):
+            continue
+        if part.distance(edge) <= CONTACT_PT:
+            continue
+        faces.append(part)
+    return tuple(faces)
+
+
 def walk_source_unbounded_building_face(
     wall_bars: Sequence[Any],
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
@@ -170,25 +219,43 @@ def walk_source_unbounded_building_face(
     party_ids = tuple(
         sorted({i for d in shared_dividers for i in d.wall_native_path_ids})
     )
-    if len(closed) != 1:
-        return OutsideFacingBuildingWalk(
-            "ABSTAINED",
-            "outside_face_source_wall_domain_not_unique_and_closed",
-            internal_party_wall_native_path_ids=party_ids,
-        )
-    primary = closed[0]
-    holes = tuple(Polygon(r) for r in primary.interiors)
-    dwelling_count = 0
+    occupancy_faces: tuple[Polygon, ...] = ()
     if shared_dividers:
         if len(shared_dividers) != 1:
             return OutsideFacingBuildingWalk(
                 "ABSTAINED",
                 "several_party_dividers_require_dwelling_zone_graph",
-                enclosed_region_count=len(holes),
+                enclosed_region_count=len(closed),
                 internal_party_wall_native_path_ids=party_ids,
             )
+        covering = _party_covering_components(components, shared_dividers[0])
+        if len(covering) != 1:
+            return OutsideFacingBuildingWalk(
+                "ABSTAINED",
+                "outside_face_source_wall_domain_not_unique_and_closed",
+                internal_party_wall_native_path_ids=party_ids,
+            )
+        primary = covering[0]
+    elif len(closed) != 1:
+        return OutsideFacingBuildingWalk(
+            "ABSTAINED",
+            "outside_face_source_wall_domain_not_unique_and_closed",
+            internal_party_wall_native_path_ids=party_ids,
+        )
+    else:
+        primary = closed[0]
+    holes = tuple(Polygon(r) for r in primary.interiors)
+    occupancy_faces = holes
+    dwelling_count = 0
+    if shared_dividers:
         divider = shared_dividers[0]
-        sides = _occupied_party_regions(holes, _word_centers(source_words), divider)
+        words = _word_centers(source_words)
+        sides = _occupied_party_regions(holes, words, divider)
+        if not sides["left"] or not sides["right"]:
+            free_faces = _bounded_free_space_faces(primary)
+            if free_faces:
+                occupancy_faces = free_faces
+                sides = _occupied_party_regions(free_faces, words, divider)
         dwelling_count = len(sides["left"] | sides["right"])
         missing = tuple(side for side, zones in sides.items() if not zones)
         if missing:
@@ -211,8 +278,6 @@ def walk_source_unbounded_building_face(
         # Longitudinally walking the dividing wall would close one UNIT,
         # not the externally facing outside. Endpoints/T-junctions are fine.
         x0, y0, x1, y1 = divider.wall_bounds_pdf_pts
-        from shapely.geometry import box
-
         wall = box(x0, y0, x1, y1)
         wall_long = (y1 - y0) if divider.orientation == "vertical" else (x1 - x0)
         if primary.exterior.intersection(wall.buffer(0.3)).length > 0.55 * wall_long:
@@ -241,7 +306,7 @@ def walk_source_unbounded_building_face(
             "VERANDA",
             "VERANDAH",
             "DECK",
-        } and any(hole.contains(point) for hole in holes):
+        } and any(face.contains(point) for face in occupancy_faces):
             return OutsideFacingBuildingWalk(
                 "ABSTAINED",
                 "outdoor_space_inside_proposed_building",
@@ -286,10 +351,6 @@ def walk_source_unbounded_building_face(
         enclosed_region_count=len(holes),
         enclosed_dwelling_zone_count=dwelling_count,
     )
-
-
-CONTACT_PT = 0.03
-_SNAP_PT = 2.5  # commercial snap is never a join here
 
 
 def _topology_host_pairs(
@@ -401,9 +462,14 @@ def diagnose_source_outside_face_neighbors(
     primary = None
     if union is not None:
         parts = list(union.geoms) if hasattr(union, "geoms") else [union]
-        closed = [p for p in parts if isinstance(p, Polygon) and p.is_valid and p.interiors]
-        if len(closed) == 1:
-            primary = closed[0]
+        if shared_dividers and len(shared_dividers) == 1:
+            covering = _party_covering_components(parts, shared_dividers[0])
+            if len(covering) == 1:
+                primary = covering[0]
+        else:
+            closed = [p for p in parts if isinstance(p, Polygon) and p.is_valid and p.interiors]
+            if len(closed) == 1:
+                primary = closed[0]
     neighbors = []
     if query:
         q_geom = unary_union([geom for geom, _ids, _bar in query])
