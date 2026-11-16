@@ -58,6 +58,45 @@ class EditorWorkspaceScope:
         }
 
 
+@dataclass(frozen=True)
+class VerifiedSourceWitness:
+    """Receipt minted ONLY by the server's original-source/identity resolver.
+
+    Merely recording a sheet name, object status or model_mass record is not
+    proof that its wall originated from this exact source document revision.
+    """
+
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    source_file_id: str
+    source_page: int
+    source_sheet: str
+    original_geometry_ref: str
+
+    def matches(self, scope: EditorWorkspaceScope, obj: EditableGeometryObject) -> bool:
+        return (
+            isinstance(self.document_id, str)
+            and self.document_id == scope.document_id
+            and isinstance(self.revision_id, str)
+            and self.revision_id == scope.revision_id
+            and isinstance(self.source_sha256, str)
+            and bool(_SOURCE_SHA.fullmatch(self.source_sha256))
+            and self.source_sha256.lower() == scope.source_sha256.lower()
+            and isinstance(self.source_file_id, str)
+            and bool(self.source_file_id)
+            and self.source_file_id == obj.source_file_id
+            and type(self.source_page) is int
+            and self.source_page == obj.source_page
+            and isinstance(self.source_sheet, str)
+            and bool(self.source_sheet)
+            and self.source_sheet == obj.source_sheet
+            and isinstance(self.original_geometry_ref, str)
+            and bool(self.original_geometry_ref)
+            and self.original_geometry_ref == obj.original_geometry_ref
+        )
+
+
 def _finite_positive(value: Any) -> float | None:
     if type(value) not in (float, int):
         return None
@@ -74,10 +113,15 @@ def _point(value: Any) -> tuple[float, float] | None:
     return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
 
-def _scene_object(obj: EditableGeometryObject,
-                  canonical_object_id: str | None) -> dict[str, Any]:
+def _scene_object(
+    obj: EditableGeometryObject,
+    canonical_object_id: str | None,
+    source_verified: bool,
+) -> dict[str, Any]:
     m = obj.coordinates_or_measurements
     issues: list[str] = []
+    if not source_verified:
+        issues.append("source_ownership_unverified")
     if not obj.source_sheet or obj.source_page is None:
         issues.append("source_trace_missing")
     if not canonical_object_id:
@@ -144,6 +188,7 @@ def compile_editor_scene(
     objects: Sequence[EditableGeometryObject],
     *,
     canonical_object_ids: Mapping[str, str] | None = None,
+    source_witnesses: Mapping[str, VerifiedSourceWitness] | None = None,
 ) -> dict[str, Any]:
     """Compile read-only display geometry; never turn missing source into FIRM.
 
@@ -155,6 +200,9 @@ def compile_editor_scene(
     if len(objects) > _MAX_SCENE_OBJECTS:
         raise ValueError("editor_scene_object_safety_cap_exceeded")
     canonical_object_ids = canonical_object_ids or {}
+    # No source witness means REVIEW, not a trust shortcut. The repository
+    # loader must bind a real original document SHA + native geometry ref.
+    source_witnesses = source_witnesses or {}
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
     for obj in objects:
@@ -166,7 +214,12 @@ def compile_editor_scene(
         cid = canonical_object_ids.get(obj.object_id)
         if cid is not None and (not isinstance(cid, str) or not cid.strip()):
             raise ValueError("editor_scene_invalid_canonical_identity")
-        rows.append(_scene_object(obj, cid))
+        witness = source_witnesses.get(obj.object_id)
+        source_verified = (
+            isinstance(witness, VerifiedSourceWitness)
+            and witness.matches(scope, obj)
+        )
+        rows.append(_scene_object(obj, cid, source_verified))
     rows.sort(key=lambda x: x["objectId"])
     return {
         "schemaVersion": "1.0.0",
