@@ -7,7 +7,9 @@ import math
 import pytest
 
 from pb_editable_3d_correction_model import EditableGeometryObject
-from pb_vr_editor_scene_manifest import EditorWorkspaceScope, compile_editor_scene
+from pb_vr_editor_scene_manifest import (
+    EditorWorkspaceScope, VerifiedSourceWitness, compile_editor_scene,
+)
 
 
 def _scope():
@@ -119,3 +121,62 @@ def test_input_objects_not_mutated_and_deterministic_order():
     reverse = compile_editor_scene(_scope(), [b, a])
     assert forward == reverse
     assert a.to_dict() == old[0] and b.to_dict() == old[1]
+
+
+def _source_witness():
+    return VerifiedSourceWitness(
+        document_id="doc-1", revision_id="rev-1", source_sha256="a" * 64,
+        source_file_id="source-1", source_page=2,
+        source_sheet="A100", original_geometry_ref="source-segment-17",
+    )
+
+
+def test_firm_wall_without_exact_source_native_witness_remains_review_only():
+    obj = compile_editor_scene(
+        _scope(), [_wall(authority_status="firm")],
+        canonical_object_ids={"wall-1": "canonical-wall-1"},
+    )["objects"][0]
+    assert obj["renderState"] == "review"
+    assert "source_ownership_unverified" in obj["unresolvedIssues"]
+    assert obj["canEdit"] is False
+
+
+def test_exact_original_source_revision_witness_can_verify_approved_render_state():
+    obj = compile_editor_scene(
+        _scope(), [_wall(authority_status="firm")],
+        canonical_object_ids={"wall-1": "canonical-wall-1"},
+        source_witnesses={"wall-1": _source_witness()},
+    )["objects"][0]
+    assert obj["renderState"] == "verified"
+    assert obj["unresolvedIssues"] == []
+    assert obj["canEdit"] is False
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("document_id", "other-document"),
+    ("revision_id", "old-revision"),
+    ("source_sha256", "b" * 64),
+    ("source_file_id", "other-file"),
+    ("source_page", 3),
+    ("source_sheet", "A999"),
+    ("original_geometry_ref", "unrelated-path"),
+])
+def test_source_witness_mismatches_never_verify_a_wall(field, value):
+    witness = replace(_source_witness(), **{field: value})
+    obj = compile_editor_scene(
+        _scope(), [_wall(authority_status="firm")],
+        canonical_object_ids={"wall-1": "canonical-wall-1"},
+        source_witnesses={"wall-1": witness},
+    )["objects"][0]
+    assert obj["renderState"] == "review"
+    assert "source_ownership_unverified" in obj["unresolvedIssues"]
+
+
+def test_source_receipt_cannot_override_nonfirm_geometry_authority():
+    obj = compile_editor_scene(
+        _scope(), [_wall(authority_status="review_required")],
+        canonical_object_ids={"wall-1": "canonical-wall-1"},
+        source_witnesses={"wall-1": _source_witness()},
+    )["objects"][0]
+    assert obj["renderState"] == "review"
+    assert obj["unresolvedIssues"] == []
