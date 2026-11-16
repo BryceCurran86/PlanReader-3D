@@ -20,9 +20,19 @@ local files are **always displayed as untrusted/review**, even if they claim
 
 For a deployed workspace the browser requests
 `GET /api/editor/workspaces/{workspace_id}/manifest` using same-origin
-credentials. The matching **authenticated server endpoint is not implemented
-in this viewer PR**. Do not treat a URL query parameter as authorization.
-Without the endpoint, use the local-file preview only.
+credentials. The server-side WSGI endpoint factory exists in the separate
+stacked PR #4425, but **real production session/tenant callbacks have not been
+connected**. Do not treat a URL query parameter as authorization.
+Without an authenticated backend, use the local-file preview or click the
+clearly marked **synthetic 3D / VR example** in the empty viewer.
+
+The inspector can also request a **preview only** through
+`POST /api/editor/workspaces/{workspace_id}/commands/preview` (separate
+stacked PR #4427). It requires authenticated same-origin fetch and a verified
+`<meta name="planreader-csrf-token" content="...">` inserted by the owning
+server; the standalone Vite page has no such token. Missing auth/CSRF fails
+closed. A preview NEVER persists geometry, approves corrections or publishes
+commercial quantities.
 
 ## What the first functional slice does
 
@@ -42,7 +52,9 @@ Without the endpoint, use the local-file preview only.
 ## Not implemented or not verified
 
 - Server authentication/session, source/tenant binding or authenticated API.
-- Editable command gateway, persisted draft, impact preview or approval UI.
+- A production-wired editable command gateway, persisted draft or approval UI.
+  The typed, source-checked **impact preview only** is implemented in a
+  separate stacked backend PR and is disabled without an authenticated session.
 - Wall thickness/solid generation, authenticated room/floor/ceiling meshes,
   opening volumes, materials/finishes and IFC.
 - Teleport navigation, snap-turn, accessibility/headset acceptance,
