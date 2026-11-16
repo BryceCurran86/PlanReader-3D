@@ -248,3 +248,46 @@ def test_raster_candidate_empty_native_list_cannot_be_candidate():
     assert result.wall_native_primitive_count == 0
     assert result.source_total_paths == 0
     assert result.commercial_publishable is False
+
+
+def test_large_original_sheet_raster_never_exceeds_2400px():
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+
+    # On large technical drawing sheets the old max(0.7, scale) silently
+    # rendered more than 2400 pixels on the long axis.
+    for width, height in ((6000, 4200), (4200, 6000), (10000, 2000),
+                          (1100, 780), (841, 595), (2400, 2400)):
+        scale = _bounded_raster_scale(width, height)
+        assert scale > 0
+        assert scale <= 1.8
+        assert max(width, height) * scale <= 2400.000001
+    assert _bounded_raster_scale(6000, 4200) == pytest.approx(0.4)
+    assert _bounded_raster_scale(1100, 780) == pytest.approx(1.8)
+
+
+@pytest.mark.parametrize("width,height", [
+    (0, 100), (-1, 100), (float("nan"), 100),
+    (float("inf"), 100), (100, float("-inf")),
+])
+def test_invalid_source_page_dimensions_fail_closed(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+
+    with pytest.raises(ValueError, match="invalid_page_dimensions"):
+        _bounded_raster_scale(width, height)
+
+
+def test_large_page_footprint_first_preserves_source_sha_and_abstention(tmp_path):
+    # Synthetic oversized CAD page: source provenance and non-commercial
+    # status must remain unchanged by the raster memory cap.
+    doc = fitz.open()
+    page = doc.new_page(width=6000, height=4200)
+    page.draw_rect(fitz.Rect(1500, 900, 4400, 2900), color=(0, 0, 0), width=8)
+    raw = doc.tobytes()
+    doc.close()
+    sha = hashlib.sha256(raw).hexdigest()
+    (trace,) = trace_external_footprint_first(raw, source_sha256=sha, page_indices=(0,))
+    assert trace.source_sha256 == sha
+    assert trace.page_index == 0
+    assert trace.status in ("CANDIDATE", "ABSTAINED")
+    assert trace.measurement_authorized is False
+    assert trace.commercial_publishable is False
