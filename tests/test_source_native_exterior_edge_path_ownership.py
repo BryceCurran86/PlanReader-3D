@@ -318,3 +318,39 @@ def test_source_ring_axis_not_inferred_from_opposite_faces_of_thick_wall_band():
     )
     assert wrong_receipt.missing_jamb_opening_evidence is True
     assert wrong_receipt.can_issue_area is False
+
+
+def test_nearby_parallel_source_face_is_not_the_same_opening_band():
+    """Acacia p2 source path 4000 and 4002 sit on different parallel ink lines."""
+    from types import SimpleNamespace
+    from pb_source_native_exterior_edge_path_ownership import _closure_covers_edge
+
+    other_face = SimpleNamespace(
+        horizontal=True, band=(100.0, 100.4), gap_interval=(10.0, 30.0),
+    )
+    # Only 1.5pt apart: old 2.5pt association radius incorrectly
+    # counted a closure on a different wall face.
+    assert not _closure_covers_edge((10.0, 102.0), (30.0, 102.0), (other_face,))
+    exact_face = SimpleNamespace(
+        horizontal=True, band=(101.98, 102.02), gap_interval=(10.0, 30.0),
+    )
+    assert _closure_covers_edge((10.0, 102.0), (30.0, 102.0), (exact_face,))
+    vertical_other = SimpleNamespace(
+        horizontal=False, band=(50.0, 50.4), gap_interval=(10.0, 30.0),
+    )
+    assert not _closure_covers_edge((52.0, 10.0), (52.0, 30.0), (vertical_other,))
+    vertical_exact = SimpleNamespace(
+        horizontal=False, band=(51.98, 52.02), gap_interval=(10.0, 30.0),
+    )
+    assert _closure_covers_edge((52.0, 10.0), (52.0, 30.0), (vertical_exact,))
+
+
+def test_nonfinite_closure_bounds_never_authenticate_an_exterior_gap():
+    from types import SimpleNamespace
+    from pb_source_native_exterior_edge_path_ownership import _closure_covers_edge
+
+    for bad in (float("nan"), float("inf"), -float("inf")):
+        closure = SimpleNamespace(
+            horizontal=True, band=(100.0, 102.0), gap_interval=(10.0, bad),
+        )
+        assert not _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (closure,))
