@@ -38,6 +38,17 @@ from pb_source_swing_door_footprint_continuity import (
     detect_exterior_swing_door_footprint_bridges,
 )
 
+try:
+    from pb_source_sliding_door_footprint_continuity import (
+        ExteriorSlidingDoorFootprintBridge,
+        detect_exterior_sliding_door_footprint_bridges,
+    )
+except ImportError:  # #4374 is consumed when present; never reimplemented here.
+    ExteriorSlidingDoorFootprintBridge = None
+
+    def detect_exterior_sliding_door_footprint_bridges(*_args, **_kwargs):
+        return ()
+
 
 @dataclass(frozen=True)
 class SourceNativeOuterWallAttempt:
@@ -58,6 +69,8 @@ class SourceNativeOuterWallAttempt:
     window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
     garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
     swing_door_footprint_bridges: tuple[ExteriorSwingDoorFootprintBridge, ...] = ()
+    sliding_door_footprint_bridges: tuple[Any, ...] = ()
+    rejected_candidate_bbox_pdf_pts: tuple[float, float, float, float] | None = None
 
 
 def attempt_source_native_outer_wall_first(
@@ -130,6 +143,9 @@ def attempt_source_native_outer_wall_first(
     swing_bridges = detect_exterior_swing_door_footprint_bridges(
         opening_drawings, source_words,
     )
+    sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
+        opening_drawings, source_words,
+    ) if source_words else ()
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
         bridge for bridge in window_bridges
@@ -157,6 +173,11 @@ def attempt_source_native_outer_wall_first(
             for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
         )
     )
+    sliding_bridges = tuple(
+        bridge for bridge in sliding_bridges
+        if getattr(bridge, "first_host_path_id", None) in source_bar_paths
+        and getattr(bridge, "second_host_path_id", None) in source_bar_paths
+    )
     # Only source-dark verified jamb-side bodies are included in this
     # TOPOLOGY union, never in customer wall area or published quantities.
     swing_host_ink = tuple(
@@ -172,6 +193,7 @@ def attempt_source_native_outer_wall_first(
         window_footprint_bridges=window_bridges,
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
+        sliding_door_footprint_bridges=sliding_bridges,
         graph=graph,
         source_wall_band_count=len(bars),
         source_stroke_pair_band_count=len(paired),
@@ -192,6 +214,7 @@ def attempt_source_native_outer_wall_first(
         + [box(*bridge.bounds_pdf_pts) for bridge in window_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in swing_bridges]
+        + [box(*bridge.bounds_pdf_pts) for bridge in sliding_bridges]
         + list(swing_host_ink)
     )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
@@ -216,10 +239,21 @@ def attempt_source_native_outer_wall_first(
             **counts,
         )
     # A single ROOM perimeter with other walls beyond it is not the outer
-    # building boundary. Count every independent source-painted wall bar.
-    if any(not outer.buffer(.05).covers(bar.polygon) for bar in bars):
+    # building boundary. Proven ALFRESCO/PORCH/POST labels may leave the
+    # envelope; Living/Bed/garage structure may not. Never x-crop leftovers.
+    from pb_source_outer_house_continuity_shadow import bar_proven_outside_envelope
+
+    structural_outside = [
+        bar for bar in bars
+        if not outer.buffer(.05).covers(bar.polygon)
+        and not bar_proven_outside_envelope(bar, wall_ink, source_words)
+    ]
+    if structural_outside:
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_other_wall_ink_outside_candidate",
+            rejected_candidate_bbox_pdf_pts=tuple(
+                round(float(v), 3) for v in outer.bounds
+            ),
             **counts,
         )
     points = tuple(
@@ -248,4 +282,5 @@ def attempt_source_native_outer_wall_first(
         window_footprint_bridges=window_bridges,
         garage_door_footprint_bridges=garage_bridges,
         swing_door_footprint_bridges=swing_bridges,
+        sliding_door_footprint_bridges=sliding_bridges,
     )
