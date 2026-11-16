@@ -122,3 +122,30 @@ def test_neighbor_diagnostic_reuses_supplied_walk_and_topology(monkeypatch):
     assert result["canonical_walk_reason"] == "open"
     assert result["native_path_id"] == 12
     assert result["measurement_authorized"] is False
+
+
+def test_audit_identity_changes_with_source_geometry_not_only_path_ids():
+    class Enlarged(Bar):
+        polygon = box(0, 0, 3, 2)
+
+    kwargs = {"source_sha256": "a" * 64, "page_index": 2}
+    base = audit.audit_exterior_seams([Bar()], [12], **kwargs)
+    changed = audit.audit_exterior_seams([Enlarged()], [12], **kwargs)
+    assert base["audit_id"] != changed["audit_id"]
+    assert base["schema_version"] == "shadow_exterior_seam_audit_v2"
+    assert base["source_hash_authenticated"] is False
+    assert base["source_hash_validation"] == "caller_supplied_format_only"
+    assert base["measurement_authorized"] is False
+
+
+def test_audit_identity_independent_of_native_bar_order():
+    class Other(Bar):
+        polygon = box(3, 0, 5, 2)
+
+        def native_path_indices(self):
+            return (13,)
+
+    kwargs = {"source_sha256": "a" * 64, "page_index": 2}
+    first = audit.audit_exterior_seams([Bar(), Other()], [12, 13], **kwargs)
+    permuted = audit.audit_exterior_seams([Other(), Bar()], [13, 12], **kwargs)
+    assert first["audit_id"] == permuted["audit_id"]
