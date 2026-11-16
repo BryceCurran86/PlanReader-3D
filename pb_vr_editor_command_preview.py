@@ -19,6 +19,7 @@ from pb_editable_3d_correction_model import (
 from pb_editable_3d_quantity_recalculation import recalculate_quantities_for_correction
 from pb_takeoff_output_authority import TakeoffOutputRow
 from pb_vr_editor_readonly_wsgi import AuthorizedSceneWorkspace, EditorPrincipal
+from pb_vr_editor_scene_manifest import VerifiedSourceWitness
 
 _SUPPORTED = {
     "SET_WALL_HEIGHT": ("wall", CorrectionField.HEIGHT.value),
@@ -105,6 +106,13 @@ def preview_editor_command(
     if (not isinstance(raw["targetRevisionHash"], str)
             or raw["targetRevisionHash"] != registered.revision_hash):
         return _reject("stale_object_revision")
+    # An authenticated workspace or editable model mass is not, by itself,
+    # evidence that this object comes from the pinned original PDF revision.
+    # The trusted server-side source resolver must supply a matching receipt.
+    witness = workspace.source_witnesses.get(object_id)
+    if (not isinstance(witness, VerifiedSourceWitness)
+            or not witness.matches(scope, registered)):
+        return _reject("original_source_ownership_unverified")
     server_canonical = workspace.canonical_object_ids.get(object_id)
     if (not server_canonical or not isinstance(raw["targetCanonicalId"], str)
             or raw["targetCanonicalId"] != server_canonical):
@@ -146,6 +154,7 @@ def preview_editor_command(
         reason=raw["reason"].strip(),
         actor=principal.subject_id,
         source=CorrectionSource.EDITOR_3D.value,
+        expected_revision_hash=raw["targetRevisionHash"],
     )
     if not outcome.ok or outcome.event is None:
         return _reject("correction_invalid:" + ";".join(outcome.blocking_reasons))
