@@ -316,6 +316,20 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
             ),
             "external_wall_trace_status": outer_wall.status,
             "external_wall_trace_reason": outer_wall.reason,
+            # Diagnostic owner census only. A rejected small ring is NEVER
+            # the physical building footprint or a customer quantity.
+            "external_candidate_closed_wall_loop_count":
+                outer_wall.diagnostic_closed_wall_loop_count,
+            "external_rejected_loop_bbox_pdf_pts": (
+                list(outer_wall.diagnostic_rejected_loop_bbox_pdf_pts)
+                if outer_wall.diagnostic_rejected_loop_bbox_pdf_pts is not None
+                else None
+            ),
+            "external_wall_bands_outside_rejected_loop":
+                outer_wall.diagnostic_wall_bands_outside_loop,
+            "external_source_path_ids_outside_rejected_loop_sample": list(
+                outer_wall.diagnostic_outside_source_path_sample
+            ),
             "source_window_footprint_continuity_count": len(outer_wall.window_footprint_bridges),
             "source_garage_door_footprint_continuity_count": len(outer_wall.garage_door_footprint_bridges),
             "source_swing_door_footprint_continuity_count": len(outer_wall.swing_door_footprint_bridges),
