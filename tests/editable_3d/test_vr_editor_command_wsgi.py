@@ -5,7 +5,7 @@ from io import BytesIO
 import json
 
 from pb_editable_3d_correction_model import Editable3DCorrectionLedger, EditableGeometryObject
-from pb_vr_editor_scene_manifest import EditorWorkspaceScope
+from pb_vr_editor_scene_manifest import EditorWorkspaceScope, VerifiedSourceWitness
 from pb_vr_editor_readonly_wsgi import EditorPrincipal, AuthorizedSceneWorkspace
 from pb_vr_editor_command_wsgi import make_editor_preview_wsgi_app
 
@@ -26,6 +26,11 @@ def _setup():
     workspace = AuthorizedSceneWorkspace(
         tenant_id="tenant1", scope=scope, objects=[obj],
         canonical_object_ids={"wall-1": "canonical-wall-1"},
+        source_witnesses={"wall-1": VerifiedSourceWitness(
+            document_id="d1", revision_id="rev1", source_sha256="a" * 64,
+            source_file_id="pdf-1", source_page=3, source_sheet="A101",
+            original_geometry_ref="path-18",
+        )},
     )
     principal = EditorPrincipal("user1", "tenant1", frozenset({"w1"}))
     ledger = Editable3DCorrectionLedger()
