@@ -428,6 +428,10 @@ def diagnose_source_outside_face_neighbors(
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
     shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
     source_wall_union: Any | None = None,
+    canonical_walk: OutsideFacingBuildingWalk | None = None,
+    topology_host_pairs: tuple[frozenset[int], ...] | None = None,
+    neutral_seams: Sequence[Any] | None = None,
+    owned_bars: Sequence[tuple[Polygon, tuple[int, ...], Any]] | None = None,
 ) -> dict[str, object]:
     """Receipts for one source path on the canonical outside face.
 
@@ -439,15 +443,21 @@ def diagnose_source_outside_face_neighbors(
         query_id = int(native_path_id)
     except (TypeError, ValueError):
         query_id = -1
-    owners = []
-    for bar in wall_bars:
-        owned = _owner(bar)
-        if owned is None:
-            continue
-        owners.append((owned[0], owned[1], bar))
+    if owned_bars is None:
+        owners = []
+        for bar in wall_bars:
+            owned = _owner(bar)
+            if owned is None:
+                continue
+            owners.append((owned[0], owned[1], bar))
+    else:
+        owners = owned_bars
     query = [(geom, ids, bar) for geom, ids, bar in owners if query_id in ids]
     party_ids = frozenset(i for d in shared_dividers for i in d.wall_native_path_ids)
-    topology = _topology_host_pairs(drawings, source_words)
+    topology = (
+        topology_host_pairs if topology_host_pairs is not None
+        else _topology_host_pairs(drawings, source_words)
+    )
     grey_pairs = []
     if drawings:
         from pb_source_neutral_wall_seam_continuity import (
@@ -461,7 +471,10 @@ def diagnose_source_outside_face_neighbors(
                 "kind": "source_neutral_grey_wall_seam_continuity_only",
                 "measurement_authorized": False,
             }
-            for seam in detect_source_neutral_wall_seams(drawings, page_index=-1)
+            for seam in (
+                neutral_seams if neutral_seams is not None
+                else detect_source_neutral_wall_seams(drawings, page_index=-1)
+            )
             if query_id in (seam.first_host_path_id, seam.second_host_path_id)
         ]
     union = source_wall_union
@@ -520,11 +533,14 @@ def diagnose_source_outside_face_neighbors(
                 "physical_join_authenticated": False,
             })
         neighbors.sort(key=lambda row: (row["separation_pdf_pts"], row["native_path_ids"]))
-    walk = walk_source_unbounded_building_face(
-        wall_bars,
-        source_words,
-        shared_dividers=shared_dividers,
-        source_wall_union=source_wall_union,
+    walk = (
+        canonical_walk if canonical_walk is not None
+        else walk_source_unbounded_building_face(
+            wall_bars,
+            source_words,
+            shared_dividers=shared_dividers,
+            source_wall_union=source_wall_union,
+        )
     )
     contact_degree = sum(
         1 for row in neighbors
