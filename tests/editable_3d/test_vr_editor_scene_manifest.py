@@ -119,3 +119,19 @@ def test_input_objects_not_mutated_and_deterministic_order():
     reverse = compile_editor_scene(_scope(), [b, a])
     assert forward == reverse
     assert a.to_dict() == old[0] and b.to_dict() == old[1]
+
+
+
+def test_approved_model_without_original_primitive_receipt_is_not_source_verified():
+    # The existing editable model can be manually approved, but its source
+    # pointer is not a source-hashed original primitive receipt.
+    wall = _wall(authority_status="firm", approved_by="reviewer-1")
+    result = compile_editor_scene(
+        _scope(), [wall], canonical_object_ids={"wall-1": "canonical-wall-1"}
+    )
+    row = result["objects"][0]
+    assert row["authority"] == "firm"
+    assert row["renderState"] == "review"
+    assert row["canEdit"] is False
+    assert "original_source_observation_receipt_unavailable" in row["unresolvedIssues"]
+    assert result["commercialQuantityPublicationAllowed"] is False
