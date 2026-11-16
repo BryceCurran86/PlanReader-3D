@@ -110,6 +110,7 @@ def inspect_native_wall_graph(
     # A partial open wall network can be visualized by its source-native
     # free endpoints without pretending the bounding box is the footprint.
     endpoints = []
+    main_members = frozenset(main)
     for i in main:
         strip = valid[i]
         x0, y0, x1, y1 = (float(v) for v in strip.polygon.bounds)
@@ -123,9 +124,18 @@ def inspect_native_wall_graph(
             # A tip must touch ANOTHER source bar to count as joined.
             x_a,y_a,x_b,y_b = edge
             tip_edge = LineString(((x_a,y_a),(x_b,y_b)))
+            # Query the already-built source STRtree. The old code
+            # compared every tip with every bar in the largest component:
+            # O(number_of_wall_bars ** 2) expensive after dark-stroke
+            # recovery. The spatial bounding query is only a PREFILTER;
+            # the exact original 0.03-point distance and same-component
+            # rules below are unchanged. No geometry is moved or joined.
+            nearby = tree.query(tip_edge.buffer(tol))
             connected = any(
-                j != i and tip_edge.distance(valid[j].polygon) <= tol
-                for j in main
+                (j := int(candidate)) != i
+                and j in main_members
+                and tip_edge.distance(valid[j].polygon) <= tol
+                for candidate in nearby
             )
             if not connected:
                 endpoints.append(tuple(round(v,3) for v in point))
