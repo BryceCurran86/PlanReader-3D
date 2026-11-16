@@ -341,9 +341,11 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
         for b in attempt.sliding_door_footprint_bridges
     )
     assert walk is not None
-    assert walk.reason == "source_dwelling_region_still_open_to_outside"
-    assert walk.unclosed_dwelling_sides == ("right",)
-    assert walk.enclosed_dwelling_zone_count == 1
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.unclosed_dwelling_sides == ()
+    assert walk.enclosed_dwelling_zone_count == 2
+    assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
+    assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     # Raw graph still has the original open tips; review does not join them.
     assert len(graph.largest_component_open_endpoints_pdf_pts) == 7
     raw_review_pts = {
