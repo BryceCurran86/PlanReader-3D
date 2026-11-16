@@ -51,6 +51,10 @@ from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
 )
+from pb_source_wall_endpoint_aperture_review_shadow import (
+    OriginalSourceWallEndpointAudit,
+    reconcile_original_wall_ink_endpoints_with_hosted_apertures,
+)
 from pb_source_swing_door_footprint_continuity import (
     ExteriorSwingDoorFootprintBridge,
     detect_exterior_swing_door_footprint_bridges,
@@ -92,6 +96,9 @@ class SourceNativeOuterWallAttempt:
     shared_dwelling_divider_candidates: tuple[CandidateSharedBuildingDivider, ...] = ()
     diagnostic_party_wall_bounded_unit_loops: int = 0
     source_outside_face_walk: OutsideFacingBuildingWalk | None = None
+    source_wall_endpoint_aperture_review: OriginalSourceWallEndpointAudit = field(
+        default_factory=OriginalSourceWallEndpointAudit
+    )
 
 
 def attempt_source_native_outer_wall_first(
@@ -265,7 +272,20 @@ def attempt_source_native_outer_wall_first(
             if path not in source_bar_paths
         })
     )
+    # The graph above runs BEFORE hosted openings. Its raw source-ink
+    # tips are not automatically missing walls; classify terminals covered
+    # by original SOURCE-DARK wall hosts and EXISTING native aperture
+    # receipts without modifying the graph or adding any aperture/wall.
+    endpoint_aperture_review = reconcile_original_wall_ink_endpoints_with_hosted_apertures(
+        graph,
+        source_page_index=source_page_index,
+        original_source_drawings=opening_drawings,
+        existing_native_aperture_bridges=(
+            *window_bridges, *garage_bridges, *swing_bridges, *sliding_bridges,
+        ),
+    )
     counts = {
+        "source_wall_endpoint_aperture_review": endpoint_aperture_review,
         "window_footprint_bridges": window_bridges,
         "garage_door_footprint_bridges": garage_bridges,
         "swing_door_footprint_bridges": swing_bridges,

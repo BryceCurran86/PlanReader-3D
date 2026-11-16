@@ -388,6 +388,13 @@ def source_native_trace_preview(pdf_path: str | Path, page_index: int) -> tuple[
                 outer_wall.source_outside_face_walk.to_dict()
                 if outer_wall.source_outside_face_walk is not None else None
             ),
+            # Raw wall-ink graph endpoints are not necessarily missing
+            # structural walls: windows/doors interrupt the painted ink.
+            # This read-only ledger distinguishes source-hosted EXISTING
+            # aperture terminals from residual unmatched/ambiguous tips.
+            "source_wall_endpoint_aperture_review": (
+                outer_wall.source_wall_endpoint_aperture_review.to_dict()
+            ),
             "shared_dwelling_building_footprint_authenticated": False,
             "shared_dwelling_party_wall_billing_authorized": False,
             "external_source_path_ids_outside_rejected_loop_sample": list(
