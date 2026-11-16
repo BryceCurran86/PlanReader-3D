@@ -323,10 +323,19 @@ def _closure_covers_edge(
     start: tuple[float, float],
     end: tuple[float, float],
     closures: Sequence[Any],
+    *,
+    horizontal_witness: bool | None = None,
 ) -> bool:
     if not closures:
         return False
-    horizontal = abs(start[1] - end[1]) <= _AXIS_PT
+    # A source gap's endpoint pair can span opposite faces of a thick wall.
+    # Its orientation belongs to the original ring witness, not an inferred
+    # centerline axis. Keep the old inference for standalone diagnostic calls.
+    horizontal = (
+        horizontal_witness
+        if horizontal_witness is not None
+        else abs(start[1] - end[1]) <= _AXIS_PT
+    )
     mid = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0)
     for closure in closures:
         lo, hi = closure.gap_interval
@@ -416,7 +425,9 @@ def enrich_open_to_exterior_span(
         if width is not None:
             widths.append(width)
         dashed = dashed or _dashed(row)
-    covered = _closure_covers_edge(endpoints[0], endpoints[1], closures)
+    covered = _closure_covers_edge(
+        endpoints[0], endpoints[1], closures, horizontal_witness=horizontal,
+    )
     missing = not covered
     reason = (
         "open_to_exterior_span_missing_jamb_or_opening_witness"

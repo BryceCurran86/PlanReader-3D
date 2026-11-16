@@ -280,3 +280,76 @@ def test_nonfinite_closure_bounds_never_authenticate_an_exterior_gap():
             horizontal=True, band=(100.0, 102.0), gap_interval=(10.0, bad),
         )
         assert not _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (closure,))
+
+
+def test_source_ring_axis_not_inferred_from_opposite_faces_of_thick_wall_band():
+    """Source witness orientation survives a thicker-than-2pt wall band."""
+    from types import SimpleNamespace
+
+    from pb_source_native_exterior_edge_path_ownership import (
+        _closure_covers_edge,
+        enrich_open_to_exterior_span,
+    )
+
+    # Horizontal wall-band thickness is 4.5 PDF points. The prior helper
+    # misclassified these opposite-face endpoints as a vertical edge.
+    horizontal_witness = {
+        "horizontal": True,
+        "band_pdf_pts": (100.0, 104.5),
+        "gap_interval_pdf_pts": (10.0, 30.0),
+    }
+    full_h = SimpleNamespace(
+        horizontal=True, band=(100.0, 104.5), gap_interval=(10.0, 30.0),
+    )
+    partial_h = SimpleNamespace(
+        horizontal=True, band=(100.0, 104.5), gap_interval=(19.0, 21.0),
+    )
+    wrong_axis_h = SimpleNamespace(
+        horizontal=False, band=(100.0, 104.5), gap_interval=(10.0, 30.0),
+    )
+    assert _closure_covers_edge(
+        (10.0, 100.0), (30.0, 104.5), (full_h,),
+        horizontal_witness=True,
+    )
+    full_receipt = enrich_open_to_exterior_span(
+        (), horizontal_witness, closures=(full_h,),
+    )
+    assert full_receipt.swing_or_slider_or_stroke_witness is True
+    assert full_receipt.missing_jamb_opening_evidence is False
+    assert full_receipt.status is EvidenceResolutionStatus.ABSTAINED
+    assert full_receipt.can_issue_area is False
+
+    for closure in (partial_h, wrong_axis_h):
+        receipt = enrich_open_to_exterior_span(
+            (), horizontal_witness, closures=(closure,),
+        )
+        assert receipt.missing_jamb_opening_evidence is True
+        assert receipt.swing_or_slider_or_stroke_witness is False
+        assert receipt.can_issue_area is False
+
+    # A short vertical gap may span less Y than its wall is thick in X;
+    # the source witness remains vertical even when the helper's old
+    # endpoint-only axis inference would label it horizontal.
+    vertical_witness = {
+        "horizontal": False,
+        "band_pdf_pts": (40.0, 44.5),
+        "gap_interval_pdf_pts": (10.0, 11.5),
+    }
+    full_v = SimpleNamespace(
+        horizontal=False, band=(40.0, 44.5), gap_interval=(10.0, 11.5),
+    )
+    wrong_axis_v = SimpleNamespace(
+        horizontal=True, band=(40.0, 44.5), gap_interval=(10.0, 11.5),
+    )
+    vertical_receipt = enrich_open_to_exterior_span(
+        (), vertical_witness, closures=(full_v,),
+    )
+    assert vertical_receipt.swing_or_slider_or_stroke_witness is True
+    assert vertical_receipt.missing_jamb_opening_evidence is False
+    assert vertical_receipt.status is EvidenceResolutionStatus.ABSTAINED
+    assert vertical_receipt.can_issue_area is False
+    wrong_receipt = enrich_open_to_exterior_span(
+        (), vertical_witness, closures=(wrong_axis_v,),
+    )
+    assert wrong_receipt.missing_jamb_opening_evidence is True
+    assert wrong_receipt.can_issue_area is False
