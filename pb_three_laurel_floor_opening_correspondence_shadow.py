@@ -148,6 +148,17 @@ def match_source_exterior_openings_to_floor_wall_gaps(
             kind, role, hosts, evidence_paths = identity
             if hosts[0] == hosts[1] or min(hosts) < 0 or not evidence_paths:
                 continue
+            # A coincident graphic on the same sheet is not automatically
+            # the room's opening. Require original host paths to be shared
+            # with *this exact physical wall-face segment*, not merely
+            # with a similarly labelled room or neighbouring viewport.
+            # Fixed windows need both side-wall hosts; a threshold may
+            # adjoin the room through one host and extend into an
+            # independently hosted exterior wall/door frame.
+            shared_hosts = set(hosts).intersection(face.supporting_native_wall_paths)
+            required_hosts = 2 if kind == "fixed_window" else 1
+            if len(shared_hosts) < required_hosts:
+                continue
             x0, y0, x1, y1 = opening.bounds_pdf_pts
             if not x0 < x1 or not y0 < y1:
                 continue

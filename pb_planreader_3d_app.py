@@ -6485,6 +6485,8 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                             build_source_spatial_subdivision,
                         )
                         with st.spinner("Reading source-owned enclosed geometry..."):
+                            if hashlib.sha256(doc_path.read_bytes()).hexdigest() != source_digest:
+                                raise ValueError("registered_original_source_digest_mismatch")
                             with fitz.open(doc_path) as original_document:
                                 original_page=original_document[int(page["page_no"])-1]
                                 rect=original_page.rect
@@ -6500,6 +6502,7 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                                     native_drawings,
                                     source_words=native_words,
                                     window_source_drawings=native_drawings,
+                                    source_page_index=int(page["page_no"])-1,
                                 )
                                 internal_source=detect_source_internal_swing_room_barriers(
                                     native_drawings,native_words,
@@ -6525,6 +6528,26 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                                 spatial_report["internal_swing_room_barrier_count"]=len(
                                     internal_source
                                 )
+                                # Reuse the SAME original opening witnesses;
+                                # only match them to independent wall-fill
+                                # boundary gaps. No source geometry or areas
+                                # are created by this diagnostic.
+                                from pb_source_room_opening_review import (
+                                    review_source_room_opening_gaps,
+                                )
+                                source_openings=(
+                                    *outer_source.window_footprint_bridges,
+                                    *outer_source.garage_door_footprint_bridges,
+                                    *outer_source.swing_door_footprint_bridges,
+                                    *outer_source.sliding_door_footprint_bridges,
+                                    *internal_source,
+                                )
+                                room_gap_review=review_source_room_opening_gaps(
+                                    native_drawings,native_words,source_openings,
+                                    page_index=int(page["page_no"])-1,
+                                    source_sha256=source_digest,
+                                ).to_dict()
+                                spatial_report["source_room_opening_review"]=room_gap_review
                                 from pb_source_spatial_candidate_overlay import (
                                     render_unverified_enclosures,
                                 )
@@ -6547,6 +6570,34 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
             spatial_cached=st.session_state.get(spatial_key) or {}
             if spatial_cached.get("digest")==native_trace.get("digest"):
                 spatial_summary=spatial_cached.get("report") or {}
+                room_witnesses=spatial_summary.get("source_room_opening_review") or {}
+                if room_witnesses.get("ambiguous_opening_count",0):
+                    st.warning(
+                        "Source openings claimed by competing printed room "
+                        f"labels: {room_witnesses['ambiguous_opening_count']}. "
+                        "They are unassigned until the physical partition "
+                        "and doorway boundaries are independently proven."
+                    )
+                if room_witnesses.get("witness_count",0):
+                    st.caption(
+                        "Existing original-source openings matched to room wall "
+                        f"gaps: {room_witnesses['witness_count']}. "
+                        "Window = closed boundary; door = threshold. "
+                        "All are candidates only; no floor, wall or ceiling "
+                        "quantity is authorised."
+                    )
+                    st.dataframe(pd.DataFrame([
+                        {
+                            "Printed room":w.get("room_label"),
+                            "Boundary side":w.get("room_side"),
+                            "Existing opening":w.get("opening_kind"),
+                            "Source host path IDs":", ".join(map(
+                                str,w.get("opening_host_path_ids") or []
+                            )),
+                            "Opening/threshold":w.get("passage_role"),
+                        }
+                        for w in room_witnesses.get("witnesses") or []
+                    ]),use_container_width=True,hide_index=True)
                 if spatial_cached.get("png"):
                     st.image(
                         spatial_cached["png"],use_container_width=True,
