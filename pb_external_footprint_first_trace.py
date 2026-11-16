@@ -233,12 +233,19 @@ def bound_native_drawings_to_footprint(
 
     wall_ink, _count, _green = _source_wall_ink_candidate_drawings(retained)
     primitives = sum(len(row.get("items", ())) for row in wall_ink)
-    status = "CANDIDATE" if primitives <= 20_000 else "ABSTAINED"
-    reason = (
-        "bounded_footprint_trace_only_needs_physical_wall_proof"
-        if status == "CANDIDATE"
-        else "bounded_source_viewport_exceeds_20000_primitive_cap"
-    )
+    # The raster can return a closed contour from furniture, labels or a
+    # page border. A candidate source-native viewport must actually retain
+    # at least one eligible original wall-ink primitive. Otherwise it is an
+    # empty selection, not a useful source-wall topology candidate.
+    if primitives == 0:
+        status = "ABSTAINED"
+        reason = "bounded_source_viewport_has_no_native_wall_ink"
+    elif primitives > 20_000:
+        status = "ABSTAINED"
+        reason = "bounded_source_viewport_exceeds_20000_primitive_cap"
+    else:
+        status = "CANDIDATE"
+        reason = "bounded_footprint_trace_only_needs_physical_wall_proof"
     return BoundedFootprintDrawingScope(
         status, reason, trace.page_index, tuple(retained) if status == "CANDIDATE" else (),
         tuple(indices) if status == "CANDIDATE" else (),

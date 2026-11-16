@@ -188,3 +188,63 @@ def test_read_only_original_footprint_first_cli_does_not_mint_quantities(tmp_pat
     assert json_path.exists() and json_path.stat().st_size > 200
     assert png_path.exists() and png_path.stat().st_size > 200
     assert result["exterior"]["source_sha256"] == hashlib.sha256(pdf.read_bytes()).hexdigest()
+
+
+def test_raster_candidate_with_no_original_wall_ink_abstains(tmp_path):
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace,
+        bound_native_drawings_to_footprint,
+    )
+
+    sha = "a" * 64
+    trace = ExternalFootprintTrace(
+        source_sha256=sha,
+        page_index=1,
+        status="CANDIDATE",
+        reason="visual_only",
+        polygon_pdf_pts=((10, 10), (100, 10), (100, 100), (10, 100)),
+        bbox_pdf_pts=(10, 10, 100, 100),
+    )
+    # Both native paths are genuine source rows, but neither contributes
+    # source wall paint within the raster candidate's local viewport.
+    drawings = (
+        {"rect": fitz.Rect(300, 300, 310, 310),
+         "layer": "Enclosure_WallExternal",
+         "fill": (0, 0, 0),
+         "items": (("l", fitz.Point(300, 300), fitz.Point(310, 310)),)},
+        {"rect": fitz.Rect(20, 20, 30, 30),
+         "layer": "Annotations",
+         "fill": None, "color": (0.8, 0.8, 0.8),
+         "items": (("l", fitz.Point(20, 20), fitz.Point(30, 30)),)},
+    )
+    result = bound_native_drawings_to_footprint(
+        drawings, trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.drawings == ()
+    assert result.selected_source_path_indices == ()
+    assert result.source_total_paths == len(drawings)
+    assert result.commercial_publishable is False
+
+
+def test_raster_candidate_empty_native_list_cannot_be_candidate():
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace,
+        bound_native_drawings_to_footprint,
+    )
+
+    sha = "b" * 64
+    trace = ExternalFootprintTrace(
+        sha, 1, "CANDIDATE", "visual_only",
+        bbox_pdf_pts=(0, 0, 100, 100),
+    )
+    result = bound_native_drawings_to_footprint(
+        (), trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.source_total_paths == 0
+    assert result.commercial_publishable is False
