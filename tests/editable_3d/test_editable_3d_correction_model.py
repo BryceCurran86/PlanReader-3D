@@ -461,3 +461,97 @@ class TestReplayDeterminism:
 
         # Replaying twice from the same event log must always agree.
         assert ledger.replay("WALL-1", genesis_hash="GENESIS-HASH") == replayed_hash
+
+
+class TestEditorExpectedObjectRevision:
+    """Optimistic concurrency at the existing Python correction authority gate."""
+
+    def test_stale_editor_command_cannot_append_or_mutate_corrected_wall(self):
+        ledger = Editable3DCorrectionLedger()
+        ledger.register_object(_make_wall())
+        accepted = ledger.apply_correction(
+            correction_id="EDITOR-FIRST", object_id="WALL-1",
+            field=CorrectionField.LENGTH.value, new_value=5.5,
+            reason="First revision edit", actor="Estimator A",
+            source=CorrectionSource.EDITOR_3D.value,
+            expected_revision_hash="GENESIS-HASH",
+        )
+        assert accepted.ok is True
+        live = ledger.get_object("WALL-1")
+        assert live is not None
+        revision_after_first = live.revision_hash
+        assert revision_after_first != "GENESIS-HASH"
+        before_event_count = len(ledger.events)
+        before_revision_count = len(ledger.revisions_for_object("WALL-1"))
+        before_quantity_links = tuple(live.dependent_quantity_ids)
+
+        stale = ledger.apply_correction(
+            correction_id="EDITOR-STALE", object_id="WALL-1",
+            field=CorrectionField.HEIGHT.value, new_value=3.4,
+            reason="Stale headset update", actor="Estimator B",
+            source=CorrectionSource.EDITOR_3D.value,
+            expected_revision_hash="GENESIS-HASH",
+        )
+        assert stale.ok is False
+        assert stale.event is None
+        assert any("Stale editor object revision" in r for r in stale.blocking_reasons)
+        after = ledger.get_object("WALL-1")
+        assert after is live
+        assert after.revision_hash == revision_after_first
+        assert after.coordinates_or_measurements["length"] == 5.5
+        assert after.coordinates_or_measurements["height"] == 2.7
+        assert tuple(after.dependent_quantity_ids) == before_quantity_links
+        assert len(ledger.events) == before_event_count
+        assert len(ledger.revisions_for_object("WALL-1")) == before_revision_count
+
+    def test_updated_editor_revision_can_apply_but_still_requires_approval(self):
+        ledger = Editable3DCorrectionLedger()
+        ledger.register_object(_make_wall())
+        first = ledger.apply_correction(
+            correction_id="EDITOR-FIRST", object_id="WALL-1",
+            field=CorrectionField.HEIGHT.value, new_value=3.0,
+            reason="Section-supported correction", actor="Estimator A",
+            source=CorrectionSource.EDITOR_3D.value,
+            expected_revision_hash="GENESIS-HASH",
+        )
+        assert first.ok is True
+        second = ledger.apply_correction(
+            correction_id="EDITOR-SECOND", object_id="WALL-1",
+            field=CorrectionField.HEIGHT.value, new_value=3.1,
+            reason="Revised measurement", actor="Estimator A",
+            source=CorrectionSource.EDITOR_3D.value,
+            expected_revision_hash=first.event.new_revision_hash,
+        )
+        assert second.ok is True
+        assert second.event.previous_revision_hash == first.event.new_revision_hash
+        assert ledger.get_object("WALL-1").authority_status == AuthorityStatus.REVIEW_REQUIRED.value
+        assert ledger.get_object("WALL-1").approved_by is None
+
+    @pytest.mark.parametrize("invalid", ["", "  ", False, 0])
+    def test_malformed_expected_editor_revision_is_rejected(self, invalid):
+        ledger = Editable3DCorrectionLedger()
+        ledger.register_object(_make_wall())
+        outcome = ledger.apply_correction(
+            correction_id="EDITOR-INVALID", object_id="WALL-1",
+            field=CorrectionField.HEIGHT.value, new_value=3.0,
+            reason="Malformed request", actor="Estimator A",
+            source=CorrectionSource.EDITOR_3D.value,
+            expected_revision_hash=invalid,
+        )
+        assert outcome.ok is False
+        assert outcome.event is None
+        assert "Invalid expected_revision_hash" in outcome.blocking_reasons[0]
+        assert ledger.events == ()
+        assert ledger.get_object("WALL-1").revision_hash == "GENESIS-HASH"
+
+    def test_existing_local_caller_without_expected_hash_remains_compatible(self):
+        ledger = Editable3DCorrectionLedger()
+        ledger.register_object(_make_wall())
+        accepted = ledger.apply_correction(
+            correction_id="LEGACY-LOCAL", object_id="WALL-1",
+            field=CorrectionField.HEIGHT.value, new_value=3.0,
+            reason="Existing local correction", actor="Estimator A",
+            source=CorrectionSource.EDITOR_3D.value,
+        )
+        assert accepted.ok is True
+        assert len(ledger.events) == 1

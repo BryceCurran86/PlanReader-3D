@@ -447,14 +447,37 @@ class Editable3DCorrectionLedger:
         affected_quantity_ids: Optional[List[str]] = None,
         manual_review: bool = False,
         created_at: Optional[str] = None,
+        expected_revision_hash: Optional[str] = None,
     ) -> CorrectionOutcome:
-        """Apply a correction to a registered object, updating its state only on success."""
+        """Apply a correction only to the object revision the editor observed.
+
+        The optional expected hash is additive for existing Streamlit/replay
+        callers. A browser or XR command must supply its loaded object hash;
+        it is compared before any event, geometry, approval or quantity state
+        can be mutated. This is not a replacement for workspace/source
+        identity checks at the API boundary.
+        """
         obj = self._objects.get(object_id)
         if obj is None:
             return CorrectionOutcome(
                 ok=False, event=None,
                 blocking_reasons=[f"Unknown object_id: {object_id!r} is not registered in this ledger"],
             )
+
+        if expected_revision_hash is not None:
+            if not isinstance(expected_revision_hash, str) or not expected_revision_hash.strip():
+                return CorrectionOutcome(
+                    ok=False, event=None,
+                    blocking_reasons=["Invalid expected_revision_hash for editor command"],
+                )
+            if expected_revision_hash != obj.revision_hash:
+                return CorrectionOutcome(
+                    ok=False, event=None,
+                    blocking_reasons=[
+                        "Stale editor object revision: expected "
+                        f"{expected_revision_hash!r}, current {obj.revision_hash!r}"
+                    ],
+                )
 
         old_value = obj.coordinates_or_measurements.get(field)
         if field in _OBJECT_ATTRIBUTE_FIELDS:
