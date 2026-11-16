@@ -51,6 +51,8 @@ def main() -> int:
         "near_miss": report["near_miss_seam_count"],
         "joined_seams": report["joined_seam_count"],
         "sliding": report["sliding_bridge_count"],
+        "grey_seams": report["neutral_grey_seam_count"],
+        "left_only_loop_rejected": report["left_only_closed_loop_rejected"],
         "measurement_authorized": False,
     }, indent=2))
     return 0
