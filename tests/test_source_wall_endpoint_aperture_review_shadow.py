@@ -209,7 +209,7 @@ def test_unique_internal_wall_terminal_is_not_building_outer_face():
     assert r.measurement_authorized is False
 
 
-def test_exterior_terminal_on_union_is_covered_not_snapped():
+def test_exterior_terminal_on_own_source_union_is_not_verified_closed():
     r = audit(
         _graph(),
         source_page_index=2,
@@ -219,10 +219,46 @@ def test_exterior_terminal_on_union_is_covered_not_snapped():
         wall_bars=(_Bar(box(49, 49, 51, 51), 3),),
     )
     leftover = r.endpoint_reviews[2]
-    assert leftover.status == STATUS_UNION_COVERS
+    # The union contains this exact wall bar; zero distance alone is NOT
+    # a distinct wall continuation or a source-authenticated aperture.
+    assert leftover.status == STATUS_UNMATCHED
+    assert leftover.source_owner_role == "exterior"
     assert leftover.post_aperture_union_distance_pdf_pts == 0.0
-    assert r.source_post_aperture_union_covered_terminal_count == 1
-    assert r.source_unmatched_wall_ink_terminal_count == 0
+    assert r.source_post_aperture_union_covered_terminal_count == 0
+    assert r.source_unmatched_wall_ink_terminal_count == 1
+    assert r.measurement_authorized is False
+
+
+def test_both_free_ends_of_one_source_external_wall_stay_unmatched():
+    # Without a second wall or an independent aperture, an isolated source
+    # external bar is OPEN at both ends even though its own union covers both.
+    bar = _Bar(box(0, 0, 10, 2), 0)
+    drawing = {
+        "rect": fitz.Rect(0, 0, 10, 2),
+        "layer": "Enclosure_WallExternal",
+        "fill": (0.0, 0.0, 0.0),
+    }
+    graph = NativeWallGraphDiagnostic(
+        component_count=1,
+        largest_component_band_count=1,
+        largest_component_open_endpoints_pdf_pts=((0.0, 1.0), (10.0, 1.0)),
+        connectivity_status="unclosed",
+    )
+    result = audit(
+        graph,
+        source_page_index=0,
+        original_source_drawings=(drawing,),
+        existing_native_aperture_bridges=(),
+        source_wall_union=bar.polygon,
+        wall_bars=(bar,),
+    )
+    assert result.source_unmatched_wall_ink_terminal_count == 2
+    assert result.source_post_aperture_union_covered_terminal_count == 0
+    assert all(row.status == STATUS_UNMATCHED for row in result.endpoint_reviews)
+    assert all(row.source_owner_role == "exterior" for row in result.endpoint_reviews)
+    assert all(row.post_aperture_union_distance_pdf_pts == 0.0 for row in result.endpoint_reviews)
+    assert result.source_closed_outer_footprint_authenticated is False
+    assert result.measurement_authorized is False
 
 
 def test_exterior_terminal_off_union_stays_unmatched_no_snap():
