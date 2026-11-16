@@ -46,21 +46,22 @@ from pb_source_shared_dwelling_envelope_shadow import (
     closed_loop_uses_interior_dwelling_divider,
     detect_native_shared_dwelling_dividers,
 )
-from pb_source_unbounded_building_face_walk_shadow import (
-    OutsideFacingBuildingWalk,
-    walk_source_unbounded_building_face,
-)
 from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
 )
-from pb_source_wall_endpoint_aperture_review_shadow import (
-    OriginalSourceWallEndpointAudit,
-    reconcile_original_wall_ink_endpoints_with_hosted_apertures,
-)
 from pb_source_swing_door_footprint_continuity import (
     ExteriorSwingDoorFootprintBridge,
     detect_exterior_swing_door_footprint_bridges,
+)
+from pb_source_unbounded_building_face_walk_shadow import (
+    CONTACT_PT,
+    OutsideFacingBuildingWalk,
+    walk_source_unbounded_building_face,
+)
+from pb_source_wall_endpoint_aperture_review_shadow import (
+    OriginalSourceWallEndpointAudit,
+    reconcile_original_wall_ink_endpoints_with_hosted_apertures,
 )
 from pb_source_window_footprint_continuity import (
     WindowFootprintBridge,
@@ -342,13 +343,19 @@ def attempt_source_native_outer_wall_first(
             "ABSTAINED", "source_exterior_continuous_wall_band_not_found",
             **counts,
         )
+    # Footprint bridges are axis-aligned host-to-host solids. Edge-only
+    # contact against a host fill can leave a separate GEOS component; a
+    # CONTACT_PT overlap merges topology without the 2.5 pt commercial snap.
+    def _bridge_paint(bounds: tuple[float, float, float, float]):
+        return box(*bounds).buffer(CONTACT_PT, join_style=2)
+
     union = unary_union(
         [bar.polygon for bar in bars]
-        + [box(*bridge.bounds_pdf_pts) for bridge in window_bridges]
-        + [box(*bridge.bounds_pdf_pts) for bridge in garage_bridges]
-        + [box(*bridge.bounds_pdf_pts) for bridge in swing_bridges]
-        + [box(*bridge.bounds_pdf_pts) for bridge in sliding_bridges]
-        + [box(*seam.bounds_pdf_pts) for seam in neutral_seams]
+        + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in window_bridges]
+        + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in garage_bridges]
+        + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in swing_bridges]
+        + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in sliding_bridges]
+        + [_bridge_paint(seam.bounds_pdf_pts) for seam in neutral_seams]
         + list(door_host_ink)
     )
     counts["source_wall_endpoint_aperture_review"] = _review(union)

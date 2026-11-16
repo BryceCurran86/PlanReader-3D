@@ -169,6 +169,42 @@ def test_missing_opening_identity_never_promotes_collinear_wall_gap():
     assert detect_exterior_window_footprint_bridges(drawings, words) == ()
 
 
+def test_repeated_asw_schedule_codes_keep_distinct_nonoverlapping_openings():
+    # Same printed schedule code on two separate host gaps must not collapse
+    # into one footprint merely because the centres sit inside 150 pt.
+    drawings = [
+        _wall((0, 0, 10, 2)),
+        _wall((20, 0, 30, 2)),
+        _mark((15, 4), (17, 4.5)),
+        _mark((15, 4), (17, 3.5)),
+        _wall((80, 0, 90, 2)),
+        _wall((100, 0, 110, 2)),
+        _mark((95, 4), (97, 4.5)),
+        _mark((95, 4), (97, 3.5)),
+    ]
+    words = [(13, 9, 19, 13, "asw"), (93, 9, 99, 13, "asw")]
+    bridges = detect_exterior_window_footprint_bridges(drawings, words)
+    assert len(bridges) == 2
+    spans = sorted(tuple(round(v, 1) for v in b.bounds_pdf_pts) for b in bridges)
+    assert spans == [(10.0, 0.0, 20.0, 2.0), (90.0, 0.0, 100.0, 2.0)]
+    assert all(b.measurement_authorized is False for b in bridges)
+
+
+def test_wider_collinear_asw_rival_loses_to_tighter_adjacent_hosts():
+    drawings = [
+        _wall((0, 0, 10, 2)),
+        _wall((20, 0, 30, 2)),
+        _wall((40, 0, 50, 2)),
+        _mark((15, 4), (17, 4.5)),
+        _mark((15, 4), (17, 3.5)),
+    ]
+    words = [(13, 9, 19, 13, "asw")]
+    bridges = detect_exterior_window_footprint_bridges(drawings, words)
+    assert len(bridges) == 1
+    assert bridges[0].bounds_pdf_pts == (10.0, 0.0, 20.0, 2.0)
+    assert bridges[0].measurement_authorized is False
+
+
 def test_duplicate_host_span_is_ambiguous_not_a_footprint_bridge():
     drawings, words = _window_setup()
     drawings.insert(1, _wall((0, 0, 10, 2)))

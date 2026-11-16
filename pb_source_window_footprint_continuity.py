@@ -569,8 +569,10 @@ def detect_exterior_window_footprint_bridges(
                         bounds_pdf_pts=bounds, axis=ax, page_index=page_index,
                     ))
 
-    # If multiple candidates claim the same source label within 150pt,
-    # keep the tighter opening (the immediately adjacent hosts, not a wider rival).
+    # Repeated schedule codes (ASW/ASW/…) are distinct openings. Only collapse
+    # candidates that claim the same aperture span: overlapping host gap on the
+    # same axis. A wider collinear rival behind the same mark still loses to the
+    # tighter immediately-adjacent hosts.
     deduped: list[WindowFootprintBridge] = []
     for bridge in sorted(
         results,
@@ -581,16 +583,21 @@ def detect_exterior_window_footprint_bridges(
         ),
     ):
         b = bridge.bounds_pdf_pts
-        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
         lbl = bridge.label_text.upper()
         rival = False
         for kept in deduped:
-            if kept.label_text.upper() == lbl:
-                kb = kept.bounds_pdf_pts
-                kcx, kcy = (kb[0] + kb[2]) / 2, (kb[1] + kb[3]) / 2
-                if math.dist((cx, cy), (kcx, kcy)) < 150.0:
-                    rival = True
-                    break
+            if kept.label_text.upper() != lbl or kept.axis != bridge.axis:
+                continue
+            kb = kept.bounds_pdf_pts
+            if bridge.axis == "h":
+                overlap = min(b[2], kb[2]) - max(b[0], kb[0])
+                band = abs((b[1] + b[3]) - (kb[1] + kb[3])) / 2
+            else:
+                overlap = min(b[3], kb[3]) - max(b[1], kb[1])
+                band = abs((b[0] + b[2]) - (kb[0] + kb[2])) / 2
+            if overlap > 0.5 and band <= 2.0:
+                rival = True
+                break
         if not rival:
             deduped.append(bridge)
     return tuple(sorted(deduped, key=lambda r: (r.page_index, r.left_host_path_id, r.right_host_path_id)))

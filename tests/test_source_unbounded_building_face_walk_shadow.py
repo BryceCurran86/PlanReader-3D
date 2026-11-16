@@ -475,11 +475,18 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     assert before == after
     assert attempt.measurement_authorized is False
     assert len(attempt.sliding_door_footprint_bridges) >= 1
+    # Repeated ASW schedule codes must keep the living-north hosts 1709/1708.
+    assert any(
+        {b.left_host_path_id, b.right_host_path_id} == {1708, 1709}
+        for b in attempt.window_footprint_bridges
+    )
     walk = attempt.source_outside_face_walk
     assert walk is not None
     assert walk.measurement_authorized is False
     assert walk.status == "ABSTAINED"
     assert walk.reason == "source_dwelling_region_still_open_to_outside"
+    assert walk.unclosed_dwelling_sides == ("right",)
+    assert walk.enclosed_dwelling_zone_count == 1
     assert receipt["measurement_authorized"] is False
     assert receipt["snap_join_applied"] is False
     assert receipt["undirected_degree_does_not_veto_outside_face"] is True
