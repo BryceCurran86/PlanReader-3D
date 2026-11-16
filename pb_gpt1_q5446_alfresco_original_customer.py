@@ -52,9 +52,11 @@ def _blocked(code: str) -> OriginalQ5446AlfrescoCustomerResult:
 
 
 def issue_original_q5446_alfresco_customer_area(
-    original_pdf_path: str, *, workspace_id: int,
+    original_pdf_path: str | Path, *, workspace_id: int,
 ) -> OriginalQ5446AlfrescoCustomerResult:
     """Source-check architect's ALFRESCO footprint, then use existing adapters."""
+    if isinstance(original_pdf_path, Path):
+        original_pdf_path = str(original_pdf_path)
     if type(original_pdf_path) is not str or not original_pdf_path.strip():
         return _blocked("source_path_unavailable")
     if type(workspace_id) is not int or workspace_id <= 0:
