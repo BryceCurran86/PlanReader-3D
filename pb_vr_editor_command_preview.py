@@ -91,8 +91,17 @@ def preview_editor_command(
         return _reject("target_object_id_missing")
     object_id = raw["targetObjectId"]
     registered = ledger.get_object(object_id)
-    if registered is None or not any(o.object_id == object_id for o in workspace.objects):
+    owner = next((o for o in workspace.objects if o.object_id == object_id), None)
+    if registered is None or owner is None:
         return _reject("target_object_not_in_workspace")
+    if (owner.revision_hash != registered.revision_hash
+        or owner.source_file_id != registered.source_file_id
+        or owner.source_page != registered.source_page
+        or owner.source_sheet != registered.source_sheet
+        or owner.original_geometry_ref != registered.original_geometry_ref):
+        # The workspace provider and the mutable ledger must refer to the
+        # SAME source observation. Same object ID alone is not sufficient.
+        return _reject("workspace_ledger_source_conflict")
     if (not isinstance(raw["targetRevisionHash"], str)
             or raw["targetRevisionHash"] != registered.revision_hash):
         return _reject("stale_object_revision")
@@ -143,9 +152,14 @@ def preview_editor_command(
     after = shadow.get_object(object_id)
     if after is None:
         return _reject("correction_target_lost")
-    changes = recalculate_quantities_for_correction(
-        outcome.event, after, existing_rows=existing_rows,
-    )
+    try:
+        changes = recalculate_quantities_for_correction(
+            outcome.event, after, existing_rows=existing_rows,
+        )
+    except Exception:
+        # A malformed or oversized preview is never allowed to reach a
+        # commercial writer; do not expose internal source/database errors.
+        return _reject("quantity_preview_calculation_unavailable")
     return {
         "accepted": True,
         "validationState": "valid_preview_only",
