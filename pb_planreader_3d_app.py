@@ -6488,14 +6488,43 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                             with fitz.open(doc_path) as original_document:
                                 original_page=original_document[int(page["page_no"])-1]
                                 rect=original_page.rect
+                                native_drawings=original_page.get_drawings()
+                                native_words=original_page.get_text("words")
+                                from pb_new_exterior_wall_preflight import (
+                                    attempt_source_native_outer_wall_first,
+                                )
+                                from pb_source_internal_swing_room_barrier import (
+                                    detect_source_internal_swing_room_barriers,
+                                )
+                                outer_source=attempt_source_native_outer_wall_first(
+                                    native_drawings,
+                                    source_words=native_words,
+                                    window_source_drawings=native_drawings,
+                                )
+                                internal_source=detect_source_internal_swing_room_barriers(
+                                    native_drawings,native_words,
+                                    page_index=int(page["page_no"])-1,
+                                )
+                                source_review_barriers=(
+                                    *outer_source.window_footprint_bridges,
+                                    *outer_source.garage_door_footprint_bridges,
+                                    *outer_source.swing_door_footprint_bridges,
+                                    *outer_source.sliding_door_footprint_bridges,
+                                    *outer_source.neutral_wall_seams,
+                                    *internal_source,
+                                )
                                 spatial_report=build_source_spatial_subdivision(
-                                    original_page.get_drawings(),
+                                    native_drawings,
                                     page_rect=(
                                         float(rect.x0),float(rect.y0),
                                         float(rect.x1),float(rect.y1),
                                     ),
-                                    text_words=original_page.get_text("words"),
+                                    text_words=native_words,
+                                    topology_barriers=source_review_barriers,
                                 ).to_dict()
+                                spatial_report["internal_swing_room_barrier_count"]=len(
+                                    internal_source
+                                )
                                 from pb_source_spatial_candidate_overlay import (
                                     render_unverified_enclosures,
                                 )
@@ -6525,7 +6554,11 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                         "Not proven rooms or billable floor/wall areas.",
                     )
                 st.caption(
-                    "Unverified room-sized shapes: "
+                    "Source room candidates: "
+                    +str(spatial_summary.get("interior_room_count",0))
+                    +"; uniquely hosted internal door closures: "
+                    +str(spatial_summary.get("internal_swing_room_barrier_count",0))
+                    +"; other unverified enclosed shapes: "
                     +str(spatial_summary.get("unverified_enclosed_count",0))
                     +"; small wall-ink voids (not rooms): "
                     +str(spatial_summary.get("micro_source_void_count",0))
@@ -6541,7 +6574,9 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                         ),
                     }
                     for rec in (spatial_summary.get("regions") or [])
-                    if rec.get("kind")=="unverified_enclosed_candidate"
+                    if rec.get("kind") in (
+                        "unverified_enclosed_candidate", "interior_enclosed_room"
+                    )
                 ]
                 if spatial_rows:
                     st.dataframe(
