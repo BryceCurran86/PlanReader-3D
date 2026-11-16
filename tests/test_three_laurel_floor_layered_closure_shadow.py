@@ -1,6 +1,7 @@
 """Existing room-ring CS / VSD candidates never become billable walls."""
 
 from dataclasses import replace
+import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_next_wall_ring_preview import (
@@ -81,6 +82,64 @@ def result(*closures, status=EvidenceResolutionStatus.CANDIDATE):
         unplaced_swing_count=0,
         ambiguous_swing_count=0,
     )
+
+
+def test_existing_cs_native_wall_end_ids_added_without_billing():
+    # The floor edge is at x=100.0; the actual dark wall faces lie
+    # immediately to either side of the pink cavity-slider aperture.
+    dark = (
+        {
+            "layer": "Enclosure_WallInternal",
+            "type": "f",
+            "fill": (0.0, 0.0, 0.0),
+            "rect": fitz.Rect(98.0, 0.0, 100.3, 30.0),
+        },
+        {
+            "layer": "Enclosure_WallInternal",
+            "type": "f",
+            "fill": (0.0, 0.0, 0.0),
+            "rect": fitz.Rect(98.0, 65.0, 100.3, 80.0),
+        },
+    )
+    m = match(
+        receipt(),
+        result(closure()),
+        source_sha256=SHA,
+        page_index=2,
+        original_source_drawings=dark,
+    )
+    assert len(m) == 1
+    assert m[0].independently_painted_wall_end_path_ids == (0, 1)
+    assert m[0].evidence_completeness == "word_only_unhosted"
+    assert m[0].to_dict()["measurement_authorized"] is False
+    assert m[0].to_dict()["room_enclosure_authenticated"] is False
+
+
+def test_annotated_yellow_wall_pink_slider_without_native_wall_stays_unsupported():
+    fake = (
+        {
+            "layer": "Annotation_UserMarkup",
+            "type": "f",
+            "fill": (1.0, 0.8, 0.0),
+            "rect": fitz.Rect(98.0, 0.0, 100.3, 30.0),
+        },
+        {
+            "layer": "Annotation_UserMarkup",
+            "type": "f",
+            "fill": (1.0, 0.1, 0.7),
+            "rect": fitz.Rect(98.0, 65.0, 100.3, 80.0),
+        },
+    )
+    m = match(
+        receipt(),
+        result(closure()),
+        source_sha256=SHA,
+        page_index=2,
+        original_source_drawings=fake,
+    )
+    assert len(m) == 1  # source word candidate remains visible
+    assert m[0].independently_painted_wall_end_path_ids == ()
+    assert not m[0].measurement_authorized
 
 
 def test_existing_cs_word_only_producer_corresponds_but_never_authenticates():

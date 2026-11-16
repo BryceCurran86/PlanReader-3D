@@ -7,7 +7,13 @@ physical wall, scale, customer floor finish or sealed room ownership.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
+
+from pb_three_laurel_native_slider_wall_end_correspondence_shadow import (
+    corroborate_native_wall_ends_at_existing_slider,
+)
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_next_wall_ring_preview import (
@@ -35,6 +41,7 @@ class FloorCandidateLayeredClosureMatch:
     evidence_completeness: str
     room_gap_interval_pdf_pt: tuple[float, float]
     matched_span_pdf_pt: float
+    independently_painted_wall_end_path_ids: tuple[int, int] | tuple[()] = ()
     measurement_authorized: bool = False
     physical_wall_authenticated: bool = False
     room_enclosure_authenticated: bool = False
@@ -54,6 +61,9 @@ class FloorCandidateLayeredClosureMatch:
             "evidence_completeness": self.evidence_completeness,
             "room_gap_interval_pdf_pt": list(self.room_gap_interval_pdf_pt),
             "matched_span_pdf_pt": round(self.matched_span_pdf_pt, 3),
+            "independently_painted_wall_end_path_ids": list(
+                self.independently_painted_wall_end_path_ids
+            ),
             "measurement_authorized": False,
             "physical_wall_authenticated": False,
             "room_enclosure_authenticated": False,
@@ -67,6 +77,7 @@ def match_existing_room_ring_closure_candidates(
     source_sha256: str,
     page_index: int,
     max_face_offset_pt: float = 0.75,
+    original_source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
 ) -> tuple[FloorCandidateLayeredClosureMatch, ...]:
     """Correlate CS/VSD candidate closure with still-uncovered native floor edge.
 
@@ -127,6 +138,16 @@ def match_existing_room_ring_closure_candidates(
             )
             if normal_distance > max_face_offset_pt:
                 continue
+            wall_ends = (
+                corroborate_native_wall_ends_at_existing_slider(
+                    closure,
+                    original_source_drawings,
+                    source_sha256=source_sha256,
+                    page_index=page_index,
+                )
+                if original_source_drawings is not None
+                else None
+            )
             for start, end in face.uncovered_intervals_pdf_pt:
                 lo = max(start, closure.gap_interval[0])
                 hi = min(end, closure.gap_interval[1])
@@ -153,6 +174,11 @@ def match_existing_room_ring_closure_candidates(
                         evidence_completeness=completeness,
                         room_gap_interval_pdf_pt=(lo, hi),
                         matched_span_pdf_pt=hi - lo,
+                        independently_painted_wall_end_path_ids=(
+                            wall_ends.wall_host_path_ids
+                            if wall_ends is not None
+                            else ()
+                        ),
                     )
                 )
     # Two different source closure ids claiming the same segment are

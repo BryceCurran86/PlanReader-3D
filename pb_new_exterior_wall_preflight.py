@@ -87,6 +87,7 @@ def attempt_source_native_outer_wall_first(
     source_ink_already_scoped: bool = False,
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
     window_source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
+    source_page_index: int = -1,
 ) -> SourceNativeOuterWallAttempt:
     """Find one joined perimeter in *source wall fills*, NOT the sheet bbox.
 
@@ -97,6 +98,8 @@ def attempt_source_native_outer_wall_first(
     """
     if type(source_ink_already_scoped) is not bool:
         raise ValueError("source_ink_already_scoped_must_be_bool")
+    if type(source_page_index) is not int or source_page_index < -1:
+        raise ValueError("source_page_index_invalid")
     # The preview already applies original source-negative paint hygiene.
     # Reapplying its original black-only mask here would silently discard
     # the newly recovered neutral-grey paths.
@@ -142,19 +145,19 @@ def attempt_source_native_outer_wall_first(
     # they are never emitted as wall, frame, length or customer quantities.
     opening_drawings = window_source_drawings if window_source_drawings is not None else wall_ink
     window_bridges = detect_exterior_window_footprint_bridges(
-        opening_drawings, source_words, wall_bars=bars,
+        opening_drawings, source_words, page_index=source_page_index, wall_bars=bars,
     ) if source_words else ()
     garage_bridges = detect_exterior_garage_door_footprint_bridges(
-        opening_drawings, source_words,
+        opening_drawings, source_words, page_index=source_page_index,
     ) if source_words else ()
     swing_bridges = detect_exterior_swing_door_footprint_bridges(
-        opening_drawings, source_words,
+        opening_drawings, source_words, page_index=source_page_index,
     )
     sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
-        opening_drawings, source_words, wall_bars=bars,
+        opening_drawings, source_words, page_index=source_page_index, wall_bars=bars,
     ) if source_words else ()
     seam_candidates = detect_source_neutral_wall_seams(
-        opening_drawings, page_index=-1,
+        opening_drawings, page_index=source_page_index,
     )
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
