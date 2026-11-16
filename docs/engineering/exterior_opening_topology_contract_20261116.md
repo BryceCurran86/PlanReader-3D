@@ -66,6 +66,24 @@ jambs, one-sided tracks, cross-viewport hosts and an intervening full-thickness
 wall must all abstain. This bridge may not become solid wall, frame material,
 floor finish ownership or any commercial quantity.
 
+### Neutral-grey exact source wall seam (NOT an inferred snap)
+
+Two real source-painted dark external wall bars can already be bridged by
+one or more source-painted *neutral-grey* wall fill rectangles. The
+independently native-owned grey path(s) must fully cover the tiny aligned
+gap at the actual wall thickness and share the same original wall layer and
+viewport. Keep their path IDs with the candidate-only footprint graph.
+Bright-coloured annotation, white jamb/track art, uncovered or large
+gaps, duplicate competing full-gap owners, and mixed views do NOT count.
+The source-owned grey continuation is NOT itself a new billable wall,
+quantity, frame, opening or a reason to trust a whole-building polygon.
+
+In original 3Laurel p3, upper seam 1708→1704 is physically drawn as
+neutral native path 1705; lower seam 1192→1195 is drawn as native paths
+1193+1194. The visually nearby middle 1029→1031 discontinuity is covered
+by black *internal* original wall path 1030, and is not an external
+boundary gap; do NOT classify this internal wall as the outside footprint.
+
 ### Outside boundary vs. envelope of the sheet
 
 For the 3Laurel original p3, the ALFRESCO and PORCH are not in the enclosed
