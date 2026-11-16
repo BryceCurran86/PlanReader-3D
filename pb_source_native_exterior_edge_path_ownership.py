@@ -340,13 +340,19 @@ def _closure_covers_edge(
     for closure in closures:
         lo, hi = closure.gap_interval
         band0, band1 = closure.band
+        if not all(math.isfinite(float(v)) for v in (lo, hi, band0, band1)):
+            continue
         if bool(closure.horizontal) != horizontal:
             continue
+        # The 2.5-pt path SEARCH radius is not source closure authority:
+        # parallel physical wall faces can be inside that radius.
+        # Require the SAME band to touch within 0.05-pt representation noise.
+        low_band, high_band = sorted((band0, band1))
         if horizontal:
-            on_band = band0 - _EDGE_SEARCH_PT <= mid[1] <= band1 + _EDGE_SEARCH_PT
+            on_band = low_band - NOISE_PT <= mid[1] <= high_band + NOISE_PT
             span0, span1 = sorted((start[0], end[0]))
         else:
-            on_band = band0 - _EDGE_SEARCH_PT <= mid[0] <= band1 + _EDGE_SEARCH_PT
+            on_band = low_band - NOISE_PT <= mid[0] <= high_band + NOISE_PT
             span0, span1 = sorted((start[1], end[1]))
         # A closure touching only the middle of a longer missing span
         # cannot authenticate the entire opening. Preserve the source
