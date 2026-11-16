@@ -44,6 +44,18 @@ def _abstain(sha: str, index: int, reason: str, drawings: int = 0) -> ExternalFo
     return ExternalFootprintTrace(sha, index, "ABSTAINED", reason, page_drawings_examined=drawings)
 
 
+def _bounded_raster_scale(width: float, height: float) -> float:
+    """Cap the longest raster dimension even for oversized source PDF pages.
+
+    The previous 0.7 minimum defeated the 2400-pixel cap for sheets larger
+    than 3428 PDF points, risking unexpectedly large raster allocations.
+    """
+    longest = max(width, height)
+    if not math.isfinite(longest) or longest <= 0:
+        raise ValueError("external_footprint_invalid_page_dimensions")
+    return min(1.8, 2400.0 / longest)
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -77,8 +89,7 @@ def trace_external_footprint_first(
                 raise ValueError("external_footprint_page_outside_original")
             page = doc[index]
             # Bound raster memory on high-resolution A0/A1 plans.
-            scale = min(1.8, 2400.0 / max(float(page.rect.width), float(page.rect.height)))
-            scale = max(0.7, scale)
+            scale = _bounded_raster_scale(float(page.rect.width), float(page.rect.height))
             raster = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False, colorspace=fitz.csRGB)
             width, height = raster.width, raster.height
             pixels = np.frombuffer(raster.samples, dtype=np.uint8).reshape(height, width, 3)
