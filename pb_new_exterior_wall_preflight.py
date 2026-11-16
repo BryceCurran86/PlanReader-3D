@@ -43,6 +43,10 @@ from pb_source_shared_dwelling_envelope_shadow import (
     closed_loop_uses_interior_dwelling_divider,
     detect_native_shared_dwelling_dividers,
 )
+from pb_source_unbounded_building_face_walk_shadow import (
+    OutsideFacingBuildingWalk,
+    walk_source_unbounded_building_face,
+)
 from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
@@ -87,6 +91,7 @@ class SourceNativeOuterWallAttempt:
     # misclassify an annotated internal PARTY wall as outside envelope.
     shared_dwelling_divider_candidates: tuple[CandidateSharedBuildingDivider, ...] = ()
     diagnostic_party_wall_bounded_unit_loops: int = 0
+    source_outside_face_walk: OutsideFacingBuildingWalk | None = None
 
 
 def attempt_source_native_outer_wall_first(
@@ -291,6 +296,15 @@ def attempt_source_native_outer_wall_first(
         + [box(*seam.bounds_pdf_pts) for seam in neutral_seams]
         + list(door_host_ink)
     )
+    # No duplicate original-page decode/union. This outside-face walker
+    # reuses the source-native wall-and-hosted-opening network computed above.
+    # The outside is one building face, never a party-wall-bounded unit face.
+    if party_dividers:
+        counts["source_outside_face_walk"] = walk_source_unbounded_building_face(
+            bars, source_words,
+            shared_dividers=party_dividers,
+            source_wall_union=union,
+        )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
     # dimension ticks and boxed landscape art cannot be promoted by hull.
@@ -369,6 +383,19 @@ def attempt_source_native_outer_wall_first(
         return SourceNativeOuterWallAttempt(
             "ABSTAINED",
             "source_party_wall_is_internal_not_building_outer_boundary",
+            diagnostic_closed_wall_loop_count=len(closed),
+            diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
+            **counts,
+        )
+    # Party-wall adjacency must prove TWO enclosed dwelling domains before
+    # the common building perimeter can be even a geometry CANDIDATE.
+    # A left-hand unit loop returning home is NOT this outside face.
+    if party_dividers and (
+        counts["source_outside_face_walk"].status != "CANDIDATE"
+    ):
+        return SourceNativeOuterWallAttempt(
+            "ABSTAINED",
+            counts["source_outside_face_walk"].reason,
             diagnostic_closed_wall_loop_count=len(closed),
             diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
             **counts,
