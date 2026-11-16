@@ -150,3 +150,99 @@ def test_original_wall_source_ids_required_and_nonfinite_or_empty_abstains():
     )
     assert result.status == "ABSTAINED"
     assert result.to_dict()["measurement_authorized"] is False
+
+
+def test_clockwise_outside_face_walk_handles_a_source_reentrant_L_not_a_hull():
+    bars = tuple(
+        SourceBar(box(*rect), i)
+        for i, rect in enumerate(
+            (
+                (0, 0, 52, 2),
+                (50, 0, 52, 52),
+                (50, 50, 100, 52),
+                (98, 50, 100, 100),
+                (0, 98, 100, 100),
+                (0, 0, 2, 100),
+            )
+        )
+    )
+    result = walk_source_unbounded_building_face(bars, (), shared_dividers=())
+    assert result.status == "CANDIDATE"
+    assert set(result.outer_wall_native_path_ids) == set(range(6))
+    ring = Polygon(result.clockwise_pdf_pts)
+    assert ring.is_valid
+    assert not ring.covers(box(75, 20, 77, 23))
+    assert ring.covers(box(10, 80, 12, 82))
+    assert ring.area < 10000  # no page bounding hull
+    assert not result.measurement_authorized
+
+
+def test_source_T_junction_inside_outside_wall_is_not_taken_as_outer_face():
+    bars = (
+        *_building_bars()[:4],
+        SourceBar(box(0, 56, 70, 59), 9),  # genuine internal T wall
+    )
+    result = walk_source_unbounded_building_face(bars, (), shared_dividers=())
+    assert result.status == "CANDIDATE"
+    assert 9 not in result.outer_wall_native_path_ids
+    assert set(result.outer_wall_native_path_ids) == {0, 1, 2, 3}
+    assert result.clockwise_pdf_pts[0] == result.clockwise_pdf_pts[-1]
+    assert not result.measurement_authorized
+
+
+def test_unwitnessed_four_tenths_point_source_gap_is_not_snapped_closed():
+    bars = list(_building_bars())
+    bars[0] = SourceBar(box(0, 0, 50, 3), 0)
+    bars.append(SourceBar(box(50.425, 0, 240, 3), 5))
+    result = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.clockwise_pdf_pts == ()
+    assert not result.building_footprint_authenticated
+
+
+def test_source_outside_walk_is_invariant_to_translation_and_input_order():
+    from dataclasses import replace
+
+    bars = _building_bars()
+    original = walk_source_unbounded_building_face(
+        bars,
+        _source_words(),
+        shared_dividers=(_party(),),
+    )
+    shifted_bars = tuple(
+        SourceBar(
+            box(
+                bar.polygon.bounds[0] + 27,
+                bar.polygon.bounds[1] + 13,
+                bar.polygon.bounds[2] + 27,
+                bar.polygon.bounds[3] + 13,
+            ),
+            bar.original_path_id,
+        )
+        for bar in reversed(bars)
+    )
+    shifted_words = tuple(
+        (w[0] + 27, w[1] + 13, w[2] + 27, w[3] + 13, *w[4:]) for w in _source_words()
+    )
+    party = replace(_party(), wall_bounds_pdf_pts=(145.0, 13.0, 149.0, 133.0))
+    shifted = walk_source_unbounded_building_face(
+        shifted_bars,
+        shifted_words,
+        shared_dividers=(party,),
+    )
+    assert original.status == shifted.status == "CANDIDATE"
+    assert original.outer_wall_native_path_ids == shifted.outer_wall_native_path_ids
+    assert (
+        original.internal_party_wall_native_path_ids
+        == shifted.internal_party_wall_native_path_ids
+    )
+    assert (
+        original.enclosed_dwelling_zone_count
+        == shifted.enclosed_dwelling_zone_count
+        == 2
+    )
+    assert original.measurement_authorized is shifted.measurement_authorized is False
