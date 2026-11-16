@@ -7,9 +7,10 @@ quantities and no guessed envelope filters inner walls.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
@@ -19,32 +20,37 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_strips,
     _source_wall_ink_candidate_drawings,
 )
+from pb_new_wall_graph_diagnostic import (
+    NativeWallGraphDiagnostic,
+    inspect_native_wall_graph,
+)
 from pb_next_wall_ring_preview import (
+    _collect_cavity_multi_face_strips,
     _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
-    _collect_cavity_multi_face_strips,
     _collect_source_wide_face_pairs,
-)
-from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic, inspect_native_wall_graph
-from pb_source_window_footprint_continuity import (
-    WindowFootprintBridge, detect_exterior_window_footprint_bridges,
 )
 from pb_source_garage_door_footprint_continuity import (
     GarageDoorFootprintBridge,
     detect_exterior_garage_door_footprint_bridges,
 )
-from pb_source_swing_door_footprint_continuity import (
-    ExteriorSwingDoorFootprintBridge,
-    detect_exterior_swing_door_footprint_bridges,
+from pb_source_neutral_wall_seam_continuity import (
+    SourceNeutralWallSeam,
+    detect_source_neutral_wall_seams,
 )
 from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
 )
-from pb_source_neutral_wall_seam_continuity import (
-    SourceNeutralWallSeam,
-    detect_source_neutral_wall_seams,
+from pb_source_swing_door_footprint_continuity import (
+    ExteriorSwingDoorFootprintBridge,
+    detect_exterior_swing_door_footprint_bridges,
 )
+from pb_source_window_footprint_continuity import (
+    WindowFootprintBridge,
+    detect_exterior_window_footprint_bridges,
+)
+
 
 @dataclass(frozen=True)
 class SourceNativeOuterWallAttempt:
@@ -136,7 +142,7 @@ def attempt_source_native_outer_wall_first(
     # they are never emitted as wall, frame, length or customer quantities.
     opening_drawings = window_source_drawings if window_source_drawings is not None else wall_ink
     window_bridges = detect_exterior_window_footprint_bridges(
-        opening_drawings, source_words,
+        opening_drawings, source_words, wall_bars=bars,
     ) if source_words else ()
     garage_bridges = detect_exterior_garage_door_footprint_bridges(
         opening_drawings, source_words,
@@ -145,7 +151,7 @@ def attempt_source_native_outer_wall_first(
         opening_drawings, source_words,
     )
     sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
-        opening_drawings, source_words,
+        opening_drawings, source_words, wall_bars=bars,
     ) if source_words else ()
     seam_candidates = detect_source_neutral_wall_seams(
         opening_drawings, page_index=-1,
@@ -153,8 +159,10 @@ def attempt_source_native_outer_wall_first(
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
     window_bridges = tuple(
         bridge for bridge in window_bridges
-        if bridge.left_host_path_id in source_bar_paths
-        and bridge.right_host_path_id in source_bar_paths
+        if (
+            (bridge.left_host_path_id in source_bar_paths and bridge.right_host_path_id in source_bar_paths)
+            or (0 <= bridge.left_host_path_id < len(opening_drawings) and 0 <= bridge.right_host_path_id < len(opening_drawings))
+        )
     )
     garage_bridges = tuple(
         bridge for bridge in garage_bridges
@@ -179,13 +187,16 @@ def attempt_source_native_outer_wall_first(
     )
     sliding_bridges = tuple(
         bridge for bridge in sliding_bridges
-        if all(
-            0 <= idx < len(wall_ink)
-            and isinstance(wall_ink[idx], Mapping)
-            and wall_ink[idx].get("fill") is not None
-            and max(wall_ink[idx]["fill"][:3]) < .3
-            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
-            for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
+        if (
+            (bridge.first_host_path_id in source_bar_paths and bridge.second_host_path_id in source_bar_paths)
+            or all(
+                0 <= idx < len(wall_ink)
+                and isinstance(wall_ink[idx], Mapping)
+                and wall_ink[idx].get("fill") is not None
+                and max(wall_ink[idx]["fill"][:3]) < .3
+                and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+                for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
+            )
         )
     )
     # A native GREY wall infill is actual source paint, not a distance
@@ -228,22 +239,22 @@ def attempt_source_native_outer_wall_first(
             if path not in source_bar_paths
         })
     )
-    counts = dict(
-        window_footprint_bridges=window_bridges,
-        garage_door_footprint_bridges=garage_bridges,
-        swing_door_footprint_bridges=swing_bridges,
-        sliding_door_footprint_bridges=sliding_bridges,
-        neutral_wall_seams=neutral_seams,
-        graph=graph,
-        source_wall_band_count=len(bars),
-        source_stroke_pair_band_count=len(paired),
-        source_heavy_stroke_band_count=len(thick),
-        source_cavity_multi_face_band_count=len(cavity),
-        source_wide_face_pair_band_count=len(wide_pairs),
-        source_wall_path_count=len({
+    counts = {
+        "window_footprint_bridges": window_bridges,
+        "garage_door_footprint_bridges": garage_bridges,
+        "swing_door_footprint_bridges": swing_bridges,
+        "sliding_door_footprint_bridges": sliding_bridges,
+        "neutral_wall_seams": neutral_seams,
+        "graph": graph,
+        "source_wall_band_count": len(bars),
+        "source_stroke_pair_band_count": len(paired),
+        "source_heavy_stroke_band_count": len(thick),
+        "source_cavity_multi_face_band_count": len(cavity),
+        "source_wide_face_pair_band_count": len(wide_pairs),
+        "source_wall_path_count": len({
             path for bar in bars for path in bar.native_path_indices()
         }),
-    )
+    }
     if len(bars) < 4:
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_continuous_wall_band_not_found",
