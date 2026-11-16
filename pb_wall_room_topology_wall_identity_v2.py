@@ -70,9 +70,19 @@ def _is_collinear(a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float
     cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     length_ac = math.hypot(c[0] - a[0], c[1] - a[1])
     if length_ac <= 1e-9:
-        return True
+        # A -> B -> A is a real reversal, not a redundant collinear
+        # vertex. Only three coincident points can be collapsed here.
+        return b == a
     perpendicular_distance = abs(cross) / length_ac
-    return perpendicular_distance <= _COLLINEAR_TOLERANCE_PT
+    if perpendicular_distance > _COLLINEAR_TOLERANCE_PT:
+        return False
+    # Perpendicular collinearity alone is insufficient: a midpoint beyond
+    # either endpoint is an overshoot/backtrack. Removing it would make a
+    # physical return path share the same wall identity as a direct span.
+    ab_x, ab_y = b[0] - a[0], b[1] - a[1]
+    ac_x, ac_y = c[0] - a[0], c[1] - a[1]
+    projection = ab_x * ac_x + ab_y * ac_y
+    return 0.0 <= projection <= length_ac * length_ac
 
 
 def _collapse_collinear(points: Sequence[Tuple[float, float]]) -> Tuple[Tuple[float, float], ...]:
