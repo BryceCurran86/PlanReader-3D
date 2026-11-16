@@ -67,3 +67,40 @@ Neither external nor internal thresholds are opaque material or floor finish
 on the far side of the entrance. Garage remains without a floor candidate in
 this diagnostic and requires independent source region correspondence. Do
 not reimplement any of the already detected doors.
+
+## Existing CS / robe-sliding candidate source (not hosted/physical approval)
+
+The production `pb_next_wall_ring_preview.build_layered_wall_doorway_room_rings`
+already recovers CS cavity-slider and paired sliding-leaf/frame *candidate*
+closures. The new `pb_three_laurel_floor_layered_closure_shadow.py`
+cross-references those existing typed producer closures with the remaining
+**uncovered floor candidate boundary segments**, using exact source SHA,
+page, source reference, edge direction and proximity. It creates no new
+door or window detector and never fills an unproved solid wall or promotes
+a room quantity.
+
+Against the original 3Laurel p3, it identifies three **candidate only** matches:
+
+- MEDIA east: existing `cavity_slider_cs_closure`, ~36.28 PDF pt,
+  with source native CS word ref `p3:w342` **but no native wall-host path
+  IDs** in the existing closure receipt. Must remain
+  `word_only_unhosted`.
+- BED 2 robe north: existing `sliding_leaf_frame_closure`, ~51.02 PDF pt,
+  with native leaf/frame path IDs `2292,2293,2302,2303` but **no confirmed
+  wall host IDs**. Remains `native_leaf_without_host_wall_ids`.
+- BED 3 robe north: existing `sliding_leaf_frame_closure`, ~51.02 PDF pt,
+  with original path IDs `2270,2271,2280,2281`, similarly no host IDs.
+
+The source original plan prints **ROBE / 1,800 / VSD** at the bedrooms and
+**CS** at Media; these text labels are background corroboration only.
+Without independently authenticated native physical host and threshold
+ownership, none of these candidates proves a closed room ring or correct
+floor-finish limit. The remaining LIVING west CS and GARAGE source assignment
+continue to abstain in this lane. Private diagnostic JSON stays only on
+Bryce's PC:
+`C:\Users\bryce\private_packets\gpt6_max_3laurel_existing_CS_VSD_closure_candidate_matches_20261116.json`.
+
+Do not count these three candidate links or nine existing hosted links as
+frozen120 measured items. In all branches, `measurement_authorized=False`,
+`physical_wall_authenticated=False`, and
+`room_enclosure_authenticated=False`.
