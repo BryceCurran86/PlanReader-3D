@@ -21,7 +21,11 @@ from pb_source_window_footprint_continuity import (
     _words,
 )
 
-_SLIDING_LABEL = re.compile(r"^(?:asd[- ]?\d*|sgd[- ]?\d*|[s5]d[- ]?\d*|stacker)$", re.IGNORECASE)
+# ASSD (aluminium stacking/sliding door) is an independently printed
+# external aperture designation on original vector plans. A label alone
+# remains insufficient: the detector still requires two wall hosts, two
+# separate jamb caps, paired tracks and no competing window identity.
+_SLIDING_LABEL = re.compile(r"^(?:(?:assd|asd)[- ]?\d*|sgd[- ]?\d*|[s5]d[- ]?\d*|stacker)$", re.IGNORECASE)
 _NON_WALL_LAYER = re.compile(r"(?:dim|anno|text|grid|title|border|note)", re.IGNORECASE)
 # Window competing-identity for a slider. The shared window code also
 # matches bare 1-2 digit strings; those are figured dimensions on this
