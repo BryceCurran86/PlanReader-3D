@@ -204,8 +204,18 @@ def attempt_source_native_outer_wall_first(
             and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
             for idx in seam.neutral_fill_path_ids
         )
-        and seam.first_host_path_id in source_bar_paths
-        and seam.second_host_path_id in source_bar_paths
+        # Short, source-painted black wall faces can be omitted by the
+        # commercial wall-strip collector. The native seam detector has
+        # already proved unique wall-layer/dark-host/full-grey-fill geometry;
+        # require original source identity here, not a separate billable strip.
+        and all(
+            0 <= idx < len(wall_ink)
+            and isinstance(wall_ink[idx], Mapping)
+            and wall_ink[idx].get("fill") is not None
+            and max(wall_ink[idx]["fill"][:3]) < .3
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in (seam.first_host_path_id, seam.second_host_path_id)
+        )
     )
     # Only source-dark verified jamb-side bodies are included in this
     # TOPOLOGY union, never in customer wall area or published quantities.
