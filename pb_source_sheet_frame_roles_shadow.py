@@ -143,6 +143,11 @@ def source_sheet_frame_nonwall_path_ids(
                 continue
             key = tuple(round(k, 4) for k in (lx, top, rx, bottom))
             ids = {left[0], right[0], upper[0][0], lower[0][0]}
+            # Two distinct source-native frame candidates at identical
+            # geometry are still competing original owners; do not let
+            # a dict overwrite silently elect either one.
+            if key in discovered:
+                return frozenset()
             discovered[key] = (ids, (lx, top, rx, bottom, footer_limit))
     if len(discovered) != 1:
         return frozenset()

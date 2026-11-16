@@ -45,6 +45,9 @@ def test_sheet_frame_refuses_missing_corner_title_foreign_wall_or_ambiguous_fram
     duplicate=deepcopy(rows)
     duplicate.append(deepcopy(duplicate[0]))
     assert not detect(duplicate,words)
+    duplicate_vertical=deepcopy(rows)
+    duplicate_vertical.append(deepcopy(duplicate_vertical[1]))
+    assert not detect(duplicate_vertical,words)
 
 
 def test_nonwall_requires_footer_text_and_relative_page_coverage():
