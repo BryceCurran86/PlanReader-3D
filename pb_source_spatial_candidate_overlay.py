@@ -13,7 +13,7 @@ from typing import Any
 import fitz
 from PIL import Image, ImageDraw
 
-_CANDIDATE = "unverified_enclosed_candidate"
+_CANDIDATES = {"unverified_enclosed_candidate", "interior_enclosed_room"}
 _PALETTE = (
     (211, 56, 67), (18, 126, 157), (168, 99, 29),
     (113, 78, 177), (25, 139, 78), (220, 104, 30),
@@ -29,7 +29,9 @@ def render_unverified_enclosures(
     rows = tuple(
         rec for rec in (report.get("regions") or ())
         if isinstance(rec, Mapping)
-        and rec.get("kind") == _CANDIDATE
+        and rec.get("kind") in _CANDIDATES
+        and rec.get("status") in ("candidate", "abstained")
+        and not rec.get("measurement_authorized", False)
         and rec.get("bounding_native_path_ids")
     )
     if not rows:
