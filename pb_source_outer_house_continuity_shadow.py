@@ -279,6 +279,13 @@ def census_source_outside_candidate(
     structural_outside = [
         row for row in outside if row["envelope_role"] in {ROLE_STRUCTURAL, ROLE_UNPROVEN}
     ]
+    from pb_source_unbounded_exterior_face_walk_shadow import (
+        walk_unbounded_exterior_face,
+    )
+
+    exterior_walk = walk_unbounded_exterior_face(
+        drawings, source_words=source_words, page_index=page_index, bars=bars,
+    )
     return {
         "page_index": page_index,
         "preflight_status": attempt.status,
@@ -320,6 +327,10 @@ def census_source_outside_candidate(
             and attempt.diagnostic_closed_wall_loop_count == 1
             and attempt.diagnostic_wall_bands_outside_loop > 0
         ),
+        "unbounded_exterior_walk": exterior_walk,
+        "unbounded_exterior_walk_reason": exterior_walk["reason"],
+        "unbounded_exterior_closed_candidate": exterior_walk["closed_shared_envelope_candidate"],
+        "unbounded_interior_divider_path_ids": list(exterior_walk["interior_divider_path_ids"]),
     }
 
 

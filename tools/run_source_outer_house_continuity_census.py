@@ -53,6 +53,10 @@ def main() -> int:
         "sliding": report["sliding_bridge_count"],
         "grey_seams": report["neutral_grey_seam_count"],
         "left_only_loop_rejected": report["left_only_closed_loop_rejected"],
+        "unbounded_walk": report.get("unbounded_exterior_walk_reason"),
+        "unbounded_closed_candidate": report.get("unbounded_exterior_closed_candidate"),
+        "interior_divider_count": len(report.get("unbounded_interior_divider_path_ids") or ()),
+        "interior_divider_path_sample": list(report.get("unbounded_interior_divider_path_ids") or ())[:16],
         "measurement_authorized": False,
     }, indent=2))
     return 0

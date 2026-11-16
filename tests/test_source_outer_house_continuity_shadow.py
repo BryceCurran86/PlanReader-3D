@@ -189,6 +189,8 @@ def test_rejected_left_loop_keeps_4373_census_and_right_house():
     assert census["left_only_closed_loop_rejected"] is True
     assert census["naive_x_filter_applied"] is False
     assert census["measurement_authorized"] is False
+    assert census["unbounded_exterior_walk"]["measurement_authorized"] is False
+    assert census["unbounded_exterior_closed_candidate"] is False
 
 
 def test_true_master_bed_exterior_wall_beside_porch_text_is_not_discarded():
