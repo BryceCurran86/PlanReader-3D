@@ -45,7 +45,7 @@ class OutsideFacingBuildingWalk:
     measurement_authorized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "status": self.status,
             "reason": self.reason,
             "clockwise_pdf_pts": [list(p) for p in self.clockwise_pdf_pts],
@@ -57,10 +57,6 @@ class OutsideFacingBuildingWalk:
             "enclosed_dwelling_zone_count": self.enclosed_dwelling_zone_count,
             "unclosed_dwelling_sides": list(self.unclosed_dwelling_sides),
             "other_source_wall_band_count": self.other_source_wall_band_count,
-            "diagnostic_unsealed_ring_pdf_pts": [
-                list(point) for point in self.diagnostic_unsealed_ring_pdf_pts
-            ],
-            "diagnostic_unsealed_not_measurement": True,
             "building_footprint_authenticated": False,
             "measurement_authorized": False,
             "snap_join_applied": False,
@@ -68,6 +64,14 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        # Preserve byte-compatible old receipts when no unsealed preview
+        # exists. Only outside-component ABSTAIN adds a diagnostic field.
+        if self.diagnostic_unsealed_ring_pdf_pts:
+            payload["diagnostic_unsealed_ring_pdf_pts"] = [
+                list(point) for point in self.diagnostic_unsealed_ring_pdf_pts
+            ]
+            payload["diagnostic_unsealed_not_measurement"] = True
+        return payload
 
 
 def _word_centers(source_words: Sequence[Mapping[str, Any] | Sequence[Any]]):
