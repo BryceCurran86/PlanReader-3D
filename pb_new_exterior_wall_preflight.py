@@ -272,20 +272,7 @@ def attempt_source_native_outer_wall_first(
             if path not in source_bar_paths
         })
     )
-    # The graph above runs BEFORE hosted openings. Its raw source-ink
-    # tips are not automatically missing walls; classify terminals covered
-    # by original SOURCE-DARK wall hosts and EXISTING native aperture
-    # receipts without modifying the graph or adding any aperture/wall.
-    endpoint_aperture_review = reconcile_original_wall_ink_endpoints_with_hosted_apertures(
-        graph,
-        source_page_index=source_page_index,
-        original_source_drawings=opening_drawings,
-        existing_native_aperture_bridges=(
-            *window_bridges, *garage_bridges, *swing_bridges, *sliding_bridges,
-        ),
-    )
     counts = {
-        "source_wall_endpoint_aperture_review": endpoint_aperture_review,
         "window_footprint_bridges": window_bridges,
         "garage_door_footprint_bridges": garage_bridges,
         "swing_door_footprint_bridges": swing_bridges,
@@ -302,7 +289,26 @@ def attempt_source_native_outer_wall_first(
             path for bar in bars for path in bar.native_path_indices()
         }),
     }
+
+    def _review(source_wall_union=None):
+        # The graph above runs BEFORE hosted openings. Its raw source-ink
+        # tips are not automatically missing walls; classify terminals
+        # covered by original SOURCE-DARK wall hosts, EXISTING native
+        # aperture receipts, then the post-aperture union / unique owner
+        # layer. Never modify the graph or add an aperture/wall.
+        return reconcile_original_wall_ink_endpoints_with_hosted_apertures(
+            graph,
+            source_page_index=source_page_index,
+            original_source_drawings=opening_drawings,
+            existing_native_aperture_bridges=(
+                *window_bridges, *garage_bridges, *swing_bridges, *sliding_bridges,
+            ),
+            source_wall_union=source_wall_union,
+            wall_bars=bars,
+        )
+
     if len(bars) < 4:
+        counts["source_wall_endpoint_aperture_review"] = _review()
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_continuous_wall_band_not_found",
             **counts,
@@ -316,6 +322,7 @@ def attempt_source_native_outer_wall_first(
         + [box(*seam.bounds_pdf_pts) for seam in neutral_seams]
         + list(door_host_ink)
     )
+    counts["source_wall_endpoint_aperture_review"] = _review(union)
     # No duplicate original-page decode/union. This outside-face walker
     # reuses the source-native wall-and-hosted-opening network computed above.
     # The outside is one building face, never a party-wall-bounded unit face.

@@ -6,23 +6,40 @@ are applied and must not be mistaken for the final exterior trace. This
 module tags original unconnected wall endpoints already covered by the
 EXISTING verified window, garage, swing and sliding source receipts.
 It NEVER draws a new wall, changes connectivity or approves quantities.
+Unmatched tips are compared to the post-aperture wall/opening union and the
+unique owner-bar source layer; joinery, annotation and internal walls are
+not outer-face gaps. 2.5 pt snap is never a join.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import math
 from typing import Any
 
 from shapely.geometry import Point, box
 
 from pb_new_wall_graph_diagnostic import NativeWallGraphDiagnostic
-from pb_source_window_footprint_continuity import WindowFootprintBridge
 from pb_source_garage_door_footprint_continuity import GarageDoorFootprintBridge
-from pb_source_swing_door_footprint_continuity import ExteriorSwingDoorFootprintBridge
 from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
+)
+from pb_source_swing_door_footprint_continuity import ExteriorSwingDoorFootprintBridge
+from pb_source_window_footprint_continuity import WindowFootprintBridge
+
+CONTACT_PT = 0.03  # representation contact; 2.5 pt commercial snap is never a join
+
+STATUS_HOSTED = "source_hosted_aperture_terminal_candidate"
+STATUS_AMBIGUOUS_APERTURE = "ambiguous_competing_hosted_apertures"
+STATUS_UNMATCHED = "unmatched_raw_wall_ink_terminal_needs_post_opening_review"
+STATUS_EXCLUSION = "source_exclusion_or_joinery_terminal_not_outer_face"
+STATUS_INTERNAL = "source_internal_wall_terminal_not_outer_face"
+STATUS_UNION_COVERS = "source_post_aperture_union_covers_terminal_not_missing_wall"
+STATUS_AMBIGUOUS_ROLE = "ambiguous_competing_source_roles"
+_EXCLUSION_LAYER_TOKENS = (
+    "joinery", "anno", "annotation", "furniture", "furn", "hatch", "dim",
+    "title", "site", "text", "grid", "border", "viewport",
 )
 
 
@@ -33,6 +50,9 @@ class OriginalSourceWallEndpointReview:
     original_aperture_kind: str | None = None
     original_host_path_ids: tuple[int, int] = ()
     original_aperture_bounds_pdf_pts: tuple[float, float, float, float] | None = None
+    native_path_ids: tuple[int, ...] = ()
+    source_owner_role: str | None = None
+    post_aperture_union_distance_pdf_pts: float | None = None
     physical_wall_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -47,6 +67,11 @@ class OriginalSourceWallEndpointReview:
                 if self.original_aperture_bounds_pdf_pts
                 else None
             ),
+            "native_path_ids": list(self.native_path_ids),
+            "source_owner_role": self.source_owner_role,
+            "post_aperture_union_distance_pdf_pts": (
+                self.post_aperture_union_distance_pdf_pts
+            ),
             "physical_wall_authenticated": False,
             "measurement_authorized": False,
         }
@@ -58,15 +83,37 @@ class OriginalSourceWallEndpointAudit:
     source_hosted_aperture_terminal_count: int = 0
     source_unmatched_wall_ink_terminal_count: int = 0
     source_ambiguous_aperture_terminal_count: int = 0
+    source_exclusion_or_joinery_terminal_count: int = 0
+    source_internal_wall_terminal_count: int = 0
+    source_post_aperture_union_covered_terminal_count: int = 0
+    source_ambiguous_owner_role_terminal_count: int = 0
     source_closed_outer_footprint_authenticated: bool = False
     measurement_authorized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "endpoint_reviews": [x.to_dict() for x in self.endpoint_reviews],
-            "source_hosted_aperture_terminal_count": self.source_hosted_aperture_terminal_count,
-            "source_unmatched_wall_ink_terminal_count": self.source_unmatched_wall_ink_terminal_count,
-            "source_ambiguous_aperture_terminal_count": self.source_ambiguous_aperture_terminal_count,
+            "source_hosted_aperture_terminal_count": (
+                self.source_hosted_aperture_terminal_count
+            ),
+            "source_unmatched_wall_ink_terminal_count": (
+                self.source_unmatched_wall_ink_terminal_count
+            ),
+            "source_ambiguous_aperture_terminal_count": (
+                self.source_ambiguous_aperture_terminal_count
+            ),
+            "source_exclusion_or_joinery_terminal_count": (
+                self.source_exclusion_or_joinery_terminal_count
+            ),
+            "source_internal_wall_terminal_count": (
+                self.source_internal_wall_terminal_count
+            ),
+            "source_post_aperture_union_covered_terminal_count": (
+                self.source_post_aperture_union_covered_terminal_count
+            ),
+            "source_ambiguous_owner_role_terminal_count": (
+                self.source_ambiguous_owner_role_terminal_count
+            ),
             "source_closed_outer_footprint_authenticated": False,
             "measurement_authorized": False,
         }
@@ -165,6 +212,105 @@ def _source_hosted_aperture(
     return kind, ids, bounds, hosts
 
 
+def _layer_role(layer: str) -> str:
+    compact = "".join(c for c in str(layer).lower() if c.isalnum())
+    if any(token in compact for token in _EXCLUSION_LAYER_TOKENS):
+        return "exclusion"
+    if "wall" in compact and "external" in compact:
+        return "exterior"
+    if "wall" in compact:
+        return "internal"
+    return "unknown"
+
+
+def _union_distance(point: Point, source_wall_union: Any) -> float | None:
+    if source_wall_union is None:
+        return None
+    try:
+        dist = float(point.distance(source_wall_union))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return dist if math.isfinite(dist) else None
+
+
+def _owner_bar_path_ids(point: Point, wall_bars: Sequence[object]) -> tuple[int, ...]:
+    owned: list[tuple[int, ...]] = []
+    for bar in wall_bars:
+        geom = getattr(bar, "polygon", None)
+        get_ids = getattr(bar, "native_path_indices", None)
+        if geom is None or not callable(get_ids):
+            continue
+        try:
+            dist = float(point.distance(geom))
+            ids = tuple(sorted({int(v) for v in get_ids()}))
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            continue
+        if math.isfinite(dist) and dist <= CONTACT_PT and ids and min(ids) >= 0:
+            owned.append(ids)
+    unique = []
+    seen: set[tuple[int, ...]] = set()
+    for ids in owned:
+        if ids in seen:
+            continue
+        seen.add(ids)
+        unique.append(ids)
+    if len(unique) == 1:
+        return unique[0]
+    if not unique:
+        return ()
+    # Several bars at the same tip: keep the combined ids only when we can
+    # still prove a unique role later; competing ids stay visible.
+    return tuple(sorted({idx for ids in unique for idx in ids}))
+
+
+def _refine_unmatched_terminal(
+    point: Point,
+    *,
+    drawings: Sequence[Mapping[str, Any] | object],
+    wall_bars: Sequence[object],
+    source_wall_union: Any,
+    proximity_pdf_pt: float,
+) -> OriginalSourceWallEndpointReview | None:
+    """Typed post-union review. Never snaps, never invents a wall or door."""
+    dist = _union_distance(point, source_wall_union)
+    ids = _owner_bar_path_ids(point, wall_bars)
+    roles = {
+        _layer_role(str(drawings[idx].get("layer") or ""))
+        for idx in ids
+        if 0 <= idx < len(drawings) and isinstance(drawings[idx], Mapping)
+    }
+    xy = (float(point.x), float(point.y))
+    covered = dist is not None and dist <= proximity_pdf_pt
+    if len(roles) > 1:
+        return OriginalSourceWallEndpointReview(
+            xy, STATUS_AMBIGUOUS_ROLE, native_path_ids=ids,
+            post_aperture_union_distance_pdf_pts=(
+                None if dist is None else round(dist, 4)
+            ),
+        )
+    role = next(iter(roles)) if len(roles) == 1 else None
+    if role == "exclusion":
+        return OriginalSourceWallEndpointReview(
+            xy, STATUS_EXCLUSION, native_path_ids=ids, source_owner_role=role,
+            post_aperture_union_distance_pdf_pts=(
+                None if dist is None else round(dist, 4)
+            ),
+        )
+    if role == "internal":
+        return OriginalSourceWallEndpointReview(
+            xy, STATUS_INTERNAL, native_path_ids=ids, source_owner_role=role,
+            post_aperture_union_distance_pdf_pts=(
+                None if dist is None else round(dist, 4)
+            ),
+        )
+    if covered:
+        return OriginalSourceWallEndpointReview(
+            xy, STATUS_UNION_COVERS, native_path_ids=ids, source_owner_role=role,
+            post_aperture_union_distance_pdf_pts=round(dist, 4),
+        )
+    return None
+
+
 def reconcile_original_wall_ink_endpoints_with_hosted_apertures(
     graph: NativeWallGraphDiagnostic,
     *,
@@ -172,12 +318,16 @@ def reconcile_original_wall_ink_endpoints_with_hosted_apertures(
     original_source_drawings: Sequence[Mapping[str, Any] | object],
     existing_native_aperture_bridges: Sequence[object],
     proximity_pdf_pt: float = 0.16,
+    source_wall_union: Any | None = None,
+    wall_bars: Sequence[object] = (),
 ) -> OriginalSourceWallEndpointAudit:
     """Post-opening endpoint triage; output cannot change raw graph status.
 
     Original dark host pair AND unique source hosted aperture receipt
     required to classify one gap as an existing aperture; source-only
     near-misses/annotations are NEVER new filled physical walls.
+    Unmatched tips are then compared to the already-computed post-aperture
+    union and unique owner-bar layer role. 2.5 pt snap is never a join.
     """
     if not isinstance(graph, NativeWallGraphDiagnostic):
         return OriginalSourceWallEndpointAudit()
@@ -219,7 +369,7 @@ def reconcile_original_wall_ink_endpoints_with_hosted_apertures(
             reviews.append(
                 OriginalSourceWallEndpointReview(
                     (x, y),
-                    "source_hosted_aperture_terminal_candidate",
+                    STATUS_HOSTED,
                     kind,
                     ids,
                     bounds,
@@ -229,27 +379,46 @@ def reconcile_original_wall_ink_endpoints_with_hosted_apertures(
             reviews.append(
                 OriginalSourceWallEndpointReview(
                     (x, y),
-                    "ambiguous_competing_hosted_apertures",
+                    STATUS_AMBIGUOUS_APERTURE,
                 )
             )
         else:
-            reviews.append(
-                OriginalSourceWallEndpointReview(
-                    (x, y),
-                    "unmatched_raw_wall_ink_terminal_needs_post_opening_review",
+            refined = None
+            if source_wall_union is not None or wall_bars:
+                refined = _refine_unmatched_terminal(
+                    pt,
+                    drawings=original_source_drawings,
+                    wall_bars=wall_bars,
+                    source_wall_union=source_wall_union,
+                    proximity_pdf_pt=proximity_pdf_pt,
                 )
+            reviews.append(
+                refined
+                if refined is not None
+                else OriginalSourceWallEndpointReview((x, y), STATUS_UNMATCHED)
             )
     rows = tuple(reviews)
     return OriginalSourceWallEndpointAudit(
         endpoint_reviews=rows,
         source_hosted_aperture_terminal_count=sum(
-            x.status == "source_hosted_aperture_terminal_candidate" for x in rows
+            x.status == STATUS_HOSTED for x in rows
         ),
         source_unmatched_wall_ink_terminal_count=sum(
-            x.status == "unmatched_raw_wall_ink_terminal_needs_post_opening_review"
-            for x in rows
+            x.status == STATUS_UNMATCHED for x in rows
         ),
         source_ambiguous_aperture_terminal_count=sum(
-            x.status == "ambiguous_competing_hosted_apertures" for x in rows
+            x.status == STATUS_AMBIGUOUS_APERTURE for x in rows
+        ),
+        source_exclusion_or_joinery_terminal_count=sum(
+            x.status == STATUS_EXCLUSION for x in rows
+        ),
+        source_internal_wall_terminal_count=sum(
+            x.status == STATUS_INTERNAL for x in rows
+        ),
+        source_post_aperture_union_covered_terminal_count=sum(
+            x.status == STATUS_UNION_COVERS for x in rows
+        ),
+        source_ambiguous_owner_role_terminal_count=sum(
+            x.status == STATUS_AMBIGUOUS_ROLE for x in rows
         ),
     )
