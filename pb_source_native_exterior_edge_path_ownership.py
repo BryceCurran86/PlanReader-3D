@@ -335,10 +335,15 @@ def _closure_covers_edge(
             continue
         if horizontal:
             on_band = band0 - _EDGE_SEARCH_PT <= mid[1] <= band1 + _EDGE_SEARCH_PT
-            on_span = lo - NOISE_PT <= mid[0] <= hi + NOISE_PT
+            span0, span1 = sorted((start[0], end[0]))
         else:
             on_band = band0 - _EDGE_SEARCH_PT <= mid[0] <= band1 + _EDGE_SEARCH_PT
-            on_span = lo - NOISE_PT <= mid[1] <= hi + NOISE_PT
+            span0, span1 = sorted((start[1], end[1]))
+        # A closure touching only the middle of a longer missing span
+        # cannot authenticate the entire opening. Preserve the source
+        # tolerance, but require BOTH native gap ends to be witnessed by
+        # this same closure. Never union unrelated partial closures.
+        on_span = lo - NOISE_PT <= span0 and span1 <= hi + NOISE_PT
         if on_band and on_span:
             return True
     return False
