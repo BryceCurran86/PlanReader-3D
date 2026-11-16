@@ -303,10 +303,17 @@ def _refine_unmatched_terminal(
                 None if dist is None else round(dist, 4)
             ),
         )
-    if covered:
+    # The endpoint's OWN painted wall is part of source_wall_union. Thus
+    # distance 0 to that union does not prove a continuation or close an
+    # exterior perimeter. Only the independently hosted aperture branch
+    # above may clear an opening tip. Retain real original owner/distance
+    # evidence while leaving exterior and unknown roles unresolved.
+    if role == "exterior" or covered:
         return OriginalSourceWallEndpointReview(
-            xy, STATUS_UNION_COVERS, native_path_ids=ids, source_owner_role=role,
-            post_aperture_union_distance_pdf_pts=round(dist, 4),
+            xy, STATUS_UNMATCHED, native_path_ids=ids, source_owner_role=role,
+            post_aperture_union_distance_pdf_pts=(
+                None if dist is None else round(dist, 4)
+            ),
         )
     return None
 
