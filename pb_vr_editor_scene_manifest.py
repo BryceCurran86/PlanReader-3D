@@ -19,7 +19,6 @@ _AUTHENTICATED_HEIGHT_ROLES = frozenset({
     "documented_ceiling_height", "figured_dimension", "section_derived",
     "schedule_derived", "user_entered", "user_approved",
 })
-_APPROVED_STATES = frozenset({"firm", "user_approved"})
 _MAX_SCENE_OBJECTS = 20_000
 
 
@@ -114,7 +113,11 @@ def _scene_object(obj: EditableGeometryObject,
         issues.append("render_geometry_not_authenticated")
 
     status = str(obj.authority_status or "provisional").lower()
-    verified = bool(geometry and not issues and status in _APPROVED_STATES)
+    # EditableGeometryObject holds sheet/page and a geometry pointer, but NOT
+    # an authenticated original source-primitive receipt tied to this SHA and
+    # canonical ID. A previously approved *model correction* is insufficient
+    # to mark an XR wall as independently source verified.
+    issues.append("original_source_observation_receipt_unavailable")
     return {
         "objectId": obj.object_id,
         "canonicalObjectId": canonical_object_id,
@@ -122,7 +125,7 @@ def _scene_object(obj: EditableGeometryObject,
         "levelId": obj.level_id,
         "objectRevision": obj.revision_hash,
         "authority": status,
-        "renderState": "verified" if verified else "review",
+        "renderState": "review",
         "geometry": geometry,
         "dimensions": dimensions,
         "source": {
