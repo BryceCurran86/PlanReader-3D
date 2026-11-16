@@ -37,26 +37,14 @@ from pb_source_swing_door_footprint_continuity import (
     ExteriorSwingDoorFootprintBridge,
     detect_exterior_swing_door_footprint_bridges,
 )
-
-try:
-    from pb_source_sliding_door_footprint_continuity import (
-        ExteriorSlidingDoorFootprintBridge,
-        detect_exterior_sliding_door_footprint_bridges,
-    )
-except ImportError:  # #4374 is consumed when present; never reimplemented here.
-    ExteriorSlidingDoorFootprintBridge = None
-
-    def detect_exterior_sliding_door_footprint_bridges(*_args, **_kwargs):
-        return ()
-
-try:
-    from pb_source_neutral_wall_seam_continuity import (
-        detect_source_neutral_wall_seams,
-    )
-except ImportError:  # #4375 grey source fills; never nearest-snap a missing seam.
-    def detect_source_neutral_wall_seams(*_args, **_kwargs):
-        return ()
-
+from pb_source_sliding_door_footprint_continuity import (
+    ExteriorSlidingDoorFootprintBridge,
+    detect_exterior_sliding_door_footprint_bridges,
+)
+from pb_source_neutral_wall_seam_continuity import (
+    SourceNeutralWallSeam,
+    detect_source_neutral_wall_seams,
+)
 
 @dataclass(frozen=True)
 class SourceNativeOuterWallAttempt:
@@ -77,13 +65,13 @@ class SourceNativeOuterWallAttempt:
     window_footprint_bridges: tuple[WindowFootprintBridge, ...] = ()
     garage_door_footprint_bridges: tuple[GarageDoorFootprintBridge, ...] = ()
     swing_door_footprint_bridges: tuple[ExteriorSwingDoorFootprintBridge, ...] = ()
-    sliding_door_footprint_bridges: tuple[Any, ...] = ()
+    sliding_door_footprint_bridges: tuple[ExteriorSlidingDoorFootprintBridge, ...] = ()
     rejected_candidate_bbox_pdf_pts: tuple[float, float, float, float] | None = None
     diagnostic_closed_wall_loop_count: int = 0
     diagnostic_rejected_loop_bbox_pdf_pts: tuple[float, float, float, float] | None = None
     diagnostic_wall_bands_outside_loop: int = 0
     diagnostic_outside_source_path_sample: tuple[int, ...] = ()
-    neutral_wall_seams: tuple[Any, ...] = ()
+    neutral_wall_seams: tuple[SourceNeutralWallSeam, ...] = ()
 
 
 def attempt_source_native_outer_wall_first(
@@ -191,18 +179,21 @@ def attempt_source_native_outer_wall_first(
     )
     sliding_bridges = tuple(
         bridge for bridge in sliding_bridges
-        if getattr(bridge, "first_host_path_id", None) in source_bar_paths
-        and getattr(bridge, "second_host_path_id", None) in source_bar_paths
+        if all(
+            0 <= idx < len(wall_ink)
+            and isinstance(wall_ink[idx], Mapping)
+            and wall_ink[idx].get("fill") is not None
+            and max(wall_ink[idx]["fill"][:3]) < .3
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
+        )
     )
     # A native GREY wall infill is actual source paint, not a distance
     # snap. Preserve only when all its path owners survive the original
     # page source filter and remain on the same source wall layer.
-    # Grey fills are not black wall bars; do not require them in source_bar_paths.
-    opening_layer = {
-        idx: drawing.get("layer")
-        for idx, drawing in enumerate(opening_drawings)
-        if isinstance(drawing, Mapping)
-    }
+    # Grey fills are not black wall bars; the source detector must prove
+    # the independently hosted original black faces and same-layer grey seam.
+
     neutral_seams = tuple(
         seam for seam in seam_candidates
         if all(
@@ -210,19 +201,29 @@ def attempt_source_native_outer_wall_first(
             and isinstance(wall_ink[idx], Mapping)
             and wall_ink[idx].get("fill") is not None
             and .3 < min(wall_ink[idx]["fill"][:3]) < .75
-            and wall_ink[idx].get("layer") == opening_layer.get(idx)
-            for idx in getattr(seam, "neutral_fill_path_ids", ())
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in seam.neutral_fill_path_ids
         )
-        and getattr(seam, "first_host_path_id", None) in source_bar_paths
-        and getattr(seam, "second_host_path_id", None) in source_bar_paths
+        # Short, source-painted black wall faces can be omitted by the
+        # commercial wall-strip collector. The native seam detector has
+        # already proved unique wall-layer/dark-host/full-grey-fill geometry;
+        # require original source identity here, not a separate billable strip.
+        and all(
+            0 <= idx < len(wall_ink)
+            and isinstance(wall_ink[idx], Mapping)
+            and wall_ink[idx].get("fill") is not None
+            and max(wall_ink[idx]["fill"][:3]) < .3
+            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
+            for idx in (seam.first_host_path_id, seam.second_host_path_id)
+        )
     )
     # Only source-dark verified jamb-side bodies are included in this
     # TOPOLOGY union, never in customer wall area or published quantities.
-    swing_host_ink = tuple(
+    door_host_ink = tuple(
         box(*wall_ink[idx]["rect"])
         for idx in sorted({
             path
-            for bridge in swing_bridges
+            for bridge in (*swing_bridges, *sliding_bridges)
             for path in (bridge.first_host_path_id, bridge.second_host_path_id)
             if path not in source_bar_paths
         })
@@ -255,7 +256,7 @@ def attempt_source_native_outer_wall_first(
         + [box(*bridge.bounds_pdf_pts) for bridge in swing_bridges]
         + [box(*bridge.bounds_pdf_pts) for bridge in sliding_bridges]
         + [box(*seam.bounds_pdf_pts) for seam in neutral_seams]
-        + list(swing_host_ink)
+        + list(door_host_ink)
     )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
