@@ -752,6 +752,59 @@ def _merged_along_spans(
             merged.append((lo, hi))
     return merged
 
+def _collect_source_heavy_stroke_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Opaque black heavy native line paint as topology-only wall-band candidates.
+
+    Some CAD sheets paint a wall as one 1.2–6 pt source stroke instead of a
+    fill or a paired face. Axis-aligned, long, source-black, opaque strokes
+    become candidate bands with their original path index. Hairline drafting
+    ink, green, faint, short, and diagonal strokes are not walls. This does
+    not mint a physical wall, close a gap, or issue area.
+    """
+    found: list[_Strip] = []
+    seen: set[tuple[int, float, float, float, float]] = set()
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _is_black(row.get("color")):
+            continue
+        opacity = row.get("stroke_opacity", 1.0)
+        if type(opacity) is bool or type(opacity) not in (int, float):
+            continue
+        if not math.isfinite(opacity) or opacity < 0.95:
+            continue
+        width = row.get("width", 0)
+        if type(width) is bool or type(width) not in (int, float):
+            continue
+        if not math.isfinite(width) or not (1.2 <= float(width) <= 6.0):
+            continue
+        half = float(width) / 2.0
+        for item in row.get("items") or ():
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if not all(math.isfinite(v) for v in (ax, ay, bx, by)):
+                continue
+            if abs(ay - by) < 0.08 and abs(ax - bx) >= 12.0:
+                x0, x1 = sorted((ax, bx))
+                mid_y = (ay + by) / 2.0
+                y0, y1 = mid_y - half, mid_y + half
+            elif abs(ax - bx) < 0.08 and abs(ay - by) >= 12.0:
+                y0, y1 = sorted((ay, by))
+                mid_x = (ax + bx) / 2.0
+                x0, x1 = mid_x - half, mid_x + half
+            else:
+                continue
+            key = (index, round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4))
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(_Strip(index, x0, y0, x1, y1, box(x0, y0, x1, y1)))
+    return found
+
+
 def _collect_stroke_pair_strips(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
@@ -892,6 +945,30 @@ def _runs(strips: Sequence[_Strip], horizontal: bool) -> list[tuple[tuple[float,
     return out
 
 
+def _unique_collinear_run_end_paths(
+    same_band_runs: Sequence[tuple],
+    lo: float,
+    hi: float,
+) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
+    """Unique-or-abstain collinear owners of a gap's two run ends.
+
+    A collinear interruption is the free interval between two runs of one
+    band. Left is the unique run that ends at ``lo``; right is the unique run
+    that starts at ``hi``. Two 0.02-close rival bands, or a missing end,
+    leave both sides empty so callers keep the unsided touching inventory
+    and do not invent a host. This does not close the gap.
+    """
+    left_runs = [run for run in same_band_runs if _close(run[2], lo)]
+    right_runs = [run for run in same_band_runs if _close(run[1], hi)]
+    if len(left_runs) != 1 or len(right_runs) != 1:
+        return (), (), False
+    return (
+        tuple(sorted(left_runs[0][3])),
+        tuple(sorted(right_runs[0][3])),
+        True,
+    )
+
+
 def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
     """Maximal bounded interruptions of every wall band.
 
@@ -950,7 +1027,14 @@ def _gaps(strips: Sequence[_Strip], union: Any, domain: Any) -> list[_Gap]:
                     for run in runs
                 ]
                 collinear = any(_close(r[2], a) for r in same_band) and any(_close(r[1], b) for r in same_band)
-                found[key] = _Gap(horizontal, band, a, b, touching, (), collinear)
+                left_paths, right_paths, _unique_ends = _unique_collinear_run_end_paths(
+                    same_band, a, b,
+                )
+                if not _unique_ends:
+                    # Unsided touching inventory is adjacent-path evidence only.
+                    # It is not left/right host ownership.
+                    left_paths, right_paths = touching, ()
+                found[key] = _Gap(horizontal, band, a, b, left_paths, right_paths, collinear)
     return list(found.values())
 
 
@@ -1771,8 +1855,8 @@ def _source_unresolved_gap_witnesses(
 
     Source native path indices are original page indices, including when the
     drawing list was bounded by the footprint diagnostic with inert placeholders.
-    The legacy _gaps producer puts touching wall paths in one unsided set.
-    Do not fabricate separate left/right host ownership from that inventory.
+    Left/right owners are recorded only when each collinear run end is unique.
+    An unsided touching inventory is adjacent-path evidence, not a host.
     Sampling is presentation-only: all such gaps stay unclosed, regardless of
     whether their receipt makes the bounded diagnostic list.
     """
@@ -1791,6 +1875,7 @@ def _source_unresolved_gap_witnesses(
         )
         left = tuple(sorted(set(int(i) for i in gap.left_path_indices)))
         right = tuple(sorted(set(int(i) for i in gap.right_path_indices)))
+        partitioned = bool(left) and bool(right)
         adjacent_paths = tuple(sorted(set(left) | set(right)))
         key = (*geometry, adjacent_paths)
         if key in unique:
@@ -1800,7 +1885,9 @@ def _source_unresolved_gap_witnesses(
             "band_pdf_pts": (geometry[1], geometry[2]),
             "gap_interval_pdf_pts": (geometry[3], geometry[4]),
             "adjacent_wall_native_path_indices": adjacent_paths,
-            "source_path_side_partition_proven": False,
+            "left_wall_native_path_indices": left if partitioned else (),
+            "right_wall_native_path_indices": right if partitioned else (),
+            "source_path_side_partition_proven": partitioned,
             "topology_only": True,
             "physical_wall_authenticated": False,
             "opening_authenticated": False,
@@ -1819,6 +1906,7 @@ def build_layered_wall_doorway_room_rings(
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
+    source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -1827,6 +1915,9 @@ def build_layered_wall_doorway_room_rings(
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
+    ``source_heavy_stroke_wall_bands`` (default False) admits one opaque 1.2–6 pt
+    black axis-aligned stroke as a topology-only wall band. It is not a pair,
+    not a raster hull, and not a billed wall.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
@@ -1834,6 +1925,8 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("dark_painted_wall_source must be an explicit boolean")
     if type(wall_end_stroke_closures) is not bool:
         raise ValueError("wall_end_stroke_closures must be an explicit boolean")
+    if type(source_heavy_stroke_wall_bands) is not bool:
+        raise ValueError("source_heavy_stroke_wall_bands must be an explicit boolean")
     if wall_end_stroke_closures and not dark_painted_wall_source:
         raise ValueError("wall_end_stroke_closures requires dark_painted_wall_source")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
@@ -1872,6 +1965,8 @@ def build_layered_wall_doorway_room_rings(
         )
         if wall_end_stroke_closures:
             strips = strips + _collect_wall_end_closing_strips(drawings, strips)
+    if source_heavy_stroke_wall_bands:
+        strips = strips + _collect_source_heavy_stroke_strips(drawings)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -2115,9 +2210,10 @@ def build_layered_wall_doorway_room_rings(
 
 
 def build_from_pdf_bytes(
-    source_bytes: bytes, *, source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
+    source_bytes: bytes, *,     source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
+    source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -2134,6 +2230,7 @@ def build_from_pdf_bytes(
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
         wall_end_stroke_closures=wall_end_stroke_closures,
+        source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
     )
 
 
