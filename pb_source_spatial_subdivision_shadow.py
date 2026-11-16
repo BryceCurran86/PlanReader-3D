@@ -13,6 +13,7 @@ Zero customer quantities, zero FIRM, no convex hull, no artificial area issuance
 from __future__ import annotations
 
 import enum
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -132,6 +133,7 @@ class SpatialSubdivisionResult:
     disconnected_decoy_count: int
     unverified_enclosed_count: int = 0
     micro_source_void_count: int = 0
+    source_topology_barrier_count: int = 0
     regions: tuple[SpatialRegionRecord, ...] = ()
     boundary_faces: tuple[SpatialBoundaryFaceRecord, ...] = ()
     outside_region_id: str = ""
@@ -153,6 +155,7 @@ class SpatialSubdivisionResult:
             "disconnected_decoy_count": self.disconnected_decoy_count,
             "unverified_enclosed_count": self.unverified_enclosed_count,
             "micro_source_void_count": self.micro_source_void_count,
+            "source_topology_barrier_count": self.source_topology_barrier_count,
             "outside_region_id": self.outside_region_id,
             "has_explicit_outside_face": self.has_explicit_outside_face,
             "primary_building_body_count": self.primary_building_body_count,
@@ -193,6 +196,75 @@ def _clean_coords(poly: Polygon) -> tuple[tuple[float, float], ...]:
     )
 
 
+
+def _verified_original_topology_barriers(
+    receipts: Sequence[Any], drawings: Sequence[Mapping[str, Any] | object]
+) -> tuple[Any, ...]:
+    """Only typed, original-source-owned witnesses close review free space.
+
+    No virtual rectangle is wall material, finished-face area or a customer
+    quantity. Foreign viewports and missing source paths abstain.
+    """
+    from pb_source_internal_swing_room_barrier import SourceInternalSwingRoomBarrier
+    from pb_source_swing_door_footprint_continuity import ExteriorSwingDoorFootprintBridge
+    from pb_source_window_footprint_continuity import WindowFootprintBridge
+    from pb_source_garage_door_footprint_continuity import GarageDoorFootprintBridge
+    from pb_source_sliding_door_footprint_continuity import ExteriorSlidingDoorFootprintBridge
+    from pb_source_neutral_wall_seam_continuity import SourceNeutralWallSeam
+
+    allowed = (
+        SourceInternalSwingRoomBarrier, ExteriorSwingDoorFootprintBridge,
+        WindowFootprintBridge, GarageDoorFootprintBridge,
+        ExteriorSlidingDoorFootprintBridge, SourceNeutralWallSeam,
+    )
+    seen: set[tuple[Any, ...]] = set()
+    valid = []
+    for record in receipts:
+        if type(record) not in allowed:
+            continue
+        if record.measurement_authorized or record.physical_wall_authenticated:
+            continue
+        bounds = tuple(getattr(record, "bounds_pdf_pts", ()))
+        if len(bounds) != 4 or not all(math.isfinite(float(v)) for v in bounds):
+            continue
+        if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+            continue
+        owners = []
+        for member in (
+            "first_host_path_id", "second_host_path_id",
+            "left_host_path_id", "right_host_path_id",
+            "start_host_path_id", "end_host_path_id", "swing_arc_path_id",
+        ):
+            if hasattr(record, member):
+                owners.append(getattr(record, member))
+        for member in (
+            "jamb_cap_path_ids", "marker_path_ids", "sliding_track_path_ids",
+            "track_path_ids", "neutral_fill_path_ids",
+        ):
+            owners.extend(getattr(record, member, ()))
+        if not owners or any(
+            not isinstance(idx, int) or idx < 0 or idx >= len(drawings)
+            for idx in owners
+        ):
+            continue
+        if len(set(owners)) != len(owners):
+            continue
+        scopes = {
+            str(drawings[idx].get("viewport_id")
+                or drawings[idx].get("source_viewport_id") or "").strip()
+            for idx in owners if isinstance(drawings[idx], Mapping)
+        }
+        scopes.discard("")
+        if len(scopes) > 1:
+            continue
+        key = (type(record), tuple(sorted(owners)), bounds)
+        if key in seen:
+            continue
+        seen.add(key)
+        valid.append(record)
+    return tuple(valid)
+
+
 def build_source_spatial_subdivision(
     drawings: Sequence[Mapping[str, Any] | object] = (),
     *,
@@ -200,6 +272,7 @@ def build_source_spatial_subdivision(
     page_rect: tuple[float, float, float, float] | None = None,
     space_key: NumberedSpaceKeyResult | None = None,
     text_words: Sequence[Sequence[Any]] | None = None,
+    topology_barriers: Sequence[Any] = (),
 ) -> SpatialSubdivisionResult:
     """Subdivide sheet space into outside, interior, courtyards, and outdoor."""
     if bars is None:
@@ -235,7 +308,13 @@ def build_source_spatial_subdivision(
         bar.polygon for bar in bars
         if bar.polygon is not None and not bar.polygon.is_empty
     ]
-    wall_union = unary_union(wall_polygons)
+    # Topology-only source witnesses; never physical wall or finished-face area.
+    source_barriers = _verified_original_topology_barriers(
+        topology_barriers, drawings
+    )
+    wall_union = unary_union(
+        wall_polygons + [box(*r.bounds_pdf_pts) for r in source_barriers]
+    )
     components = (
         list(wall_union.geoms) if hasattr(wall_union, "geoms") else [wall_union]
     )
@@ -399,6 +478,35 @@ def build_source_spatial_subdivision(
 
         touching_body_ids = tuple(sorted(set(touching_body_ids)))
         touching_path_ids = tuple(sorted(set(touching_path_ids)))
+
+        # Source wall ink may contain pinhole/rail-gap interiors inside the
+        # primary component as well as detached fragments. Never label an
+        # enclosure narrower than six native wall-band girths as a room.
+        span = min(
+            float(poly_bounds[2] - poly_bounds[0]),
+            float(poly_bounds[3] - poly_bounds[1]),
+        )
+        if (
+            touching_body_ids and minimum_room_candidate_span > 0
+            and span < minimum_room_candidate_span
+        ):
+            regions.append(SpatialRegionRecord(
+                region_id=f"region:micro-ink:{region_idx}",
+                kind=SpatialRegionKind.NATIVE_SOURCE_MICRO_VOID,
+                bounds_pdf_pts=poly_bounds,
+                polygon_pdf_pts=coords,
+                area_pdf_pts=area,
+                label=None,
+                semantic_role="small_source_wall_ink_void_not_room",
+                bounding_wall_body_ids=touching_body_ids,
+                bounding_native_path_ids=touching_path_ids,
+                is_hole_in_building=False,
+                is_conditioned_living=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=REASON_MICRO_SOURCE_VOID,
+            ))
+            region_idx += 1
+            continue
 
         # Detached closed wall loops also bound free-space polygons. They
         # are not conditioned/interior rooms of the primary structure. Keep
@@ -722,6 +830,7 @@ def build_source_spatial_subdivision(
         disconnected_decoy_count=len(decoys),
         unverified_enclosed_count=len(unverified_enclosed),
         micro_source_void_count=len(micro_source_voids),
+        source_topology_barrier_count=len(source_barriers),
         regions=tuple(regions),
         boundary_faces=tuple(boundary_faces),
         outside_region_id=outside_region_id,
