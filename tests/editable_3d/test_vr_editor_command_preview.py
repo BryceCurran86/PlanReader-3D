@@ -7,7 +7,7 @@ import math
 import pytest
 
 from pb_editable_3d_correction_model import Editable3DCorrectionLedger, EditableGeometryObject
-from pb_vr_editor_scene_manifest import EditorWorkspaceScope
+from pb_vr_editor_scene_manifest import EditorWorkspaceScope, VerifiedSourceWitness
 from pb_vr_editor_readonly_wsgi import EditorPrincipal, AuthorizedSceneWorkspace
 from pb_vr_editor_command_preview import preview_editor_command
 
@@ -36,6 +36,11 @@ def _fixture():
     workspace = AuthorizedSceneWorkspace(
         tenant_id="tenant1", scope=scope, objects=[obj],
         canonical_object_ids={"wall-1": "canonical-wall-1"},
+        source_witnesses={"wall-1": VerifiedSourceWitness(
+            document_id="d1", revision_id="rev1", source_sha256="a" * 64,
+            source_file_id="pdf-1", source_page=3, source_sheet="A101",
+            original_geometry_ref="path-18",
+        )},
     )
     user = EditorPrincipal("estimator-1", "tenant1", frozenset({"w1"}))
     ledger = Editable3DCorrectionLedger()
@@ -139,3 +144,21 @@ def test_invalid_command_does_not_emit_correction_event():
     result = preview_editor_command(cmd, principal=user, workspace=ws, ledger=ledger)
     assert result["blockingReasons"] == ["correction_object_type_conflict"]
     assert ledger.events == ()
+
+
+def test_preview_rejects_missing_or_wrong_original_source_receipt():
+    user, ws, ledger, cmd = _fixture()
+    missing = replace(ws, source_witnesses={})
+    result = preview_editor_command(cmd, principal=user, workspace=missing, ledger=ledger)
+    assert result["blockingReasons"] == ["original_source_ownership_unverified"]
+    assert ledger.events == ()
+    receipt = ws.source_witnesses["wall-1"]
+    for changed in (
+        replace(receipt, source_sha256="b" * 64),
+        replace(receipt, revision_id="stale-drawing"),
+        replace(receipt, original_geometry_ref="other-native-path"),
+    ):
+        mismatched = replace(ws, source_witnesses={"wall-1": changed})
+        result = preview_editor_command(cmd, principal=user, workspace=mismatched, ledger=ledger)
+        assert result["blockingReasons"] == ["original_source_ownership_unverified"]
+        assert ledger.events == ()
