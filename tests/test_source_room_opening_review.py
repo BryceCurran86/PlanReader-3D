@@ -138,3 +138,22 @@ def test_duplicate_same_source_window_receipt_is_not_double_counted():
     )
     assert len(review.witnesses) == 1
     assert review.ambiguous_opening_count == 0
+
+
+
+def test_existing_hosted_internal_swing_is_threshold_not_floor_material():
+    from pb_source_internal_swing_room_barrier import SourceInternalSwingRoomBarrier
+    drawings, words, _ = _page()
+    internal = SourceInternalSwingRoomBarrier(
+        first_host_path_id=4, second_host_path_id=5,
+        swing_arc_path_id=10, jamb_cap_path_ids=(11, 12),
+        bounds_pdf_pts=(135.0, 97.0, 165.0, 100.0),
+        axis="h", page_index=2,
+    )
+    review = review_source_room_opening_gaps(
+        drawings, words, (internal,), page_index=2, source_sha256="a"*64,
+    )
+    assert len(review.witnesses) == 1
+    assert review.witnesses[0].opening_kind == "internal_hinged_swing_door"
+    assert review.witnesses[0].passage_role == "doorway_threshold_not_solid_wall"
+    assert review.measurement_authorized is False

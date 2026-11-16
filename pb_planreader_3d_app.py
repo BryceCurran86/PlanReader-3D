@@ -6540,6 +6540,7 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                                     *outer_source.garage_door_footprint_bridges,
                                     *outer_source.swing_door_footprint_bridges,
                                     *outer_source.sliding_door_footprint_bridges,
+                                    *internal_source,
                                 )
                                 room_gap_review=review_source_room_opening_gaps(
                                     native_drawings,native_words,source_openings,
