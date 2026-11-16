@@ -70,6 +70,7 @@ class SourceNativeOuterWallAttempt:
     neutral_wall_seams: tuple[SourceNeutralWallSeam, ...] = ()
     diagnostic_closed_wall_loop_count: int = 0
     diagnostic_rejected_loop_bbox_pdf_pts: tuple[float, float, float, float] | None = None
+    rejected_candidate_bbox_pdf_pts: tuple[float, float, float, float] | None = None
     diagnostic_wall_bands_outside_loop: int = 0
     diagnostic_outside_source_path_sample: tuple[int, ...] = ()
 
@@ -144,8 +145,10 @@ def attempt_source_native_outer_wall_first(
     swing_bridges = detect_exterior_swing_door_footprint_bridges(
         opening_drawings, source_words,
     )
-    sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
-        opening_drawings, source_words,
+    sliding_bridges = (
+        detect_exterior_sliding_door_footprint_bridges(opening_drawings, source_words)
+        if source_words
+        else ()
     )
     seam_candidates = detect_source_neutral_wall_seams(opening_drawings)
     source_bar_paths = {path for bar in bars for path in bar.native_path_indices()}
@@ -264,26 +267,34 @@ def attempt_source_native_outer_wall_first(
             **counts,
         )
     # A single ROOM perimeter with other walls beyond it is not the outer
-    # building boundary. Count every independent source-painted wall bar.
+    # A single ROOM perimeter with other walls beyond it is not the outer
+    # building boundary. Proven ALFRESCO/PORCH/POST labels may leave the
+    # envelope; Living/Bed/garage structure may not. Never x-crop leftovers.
+    from pb_source_outer_house_continuity_shadow import bar_proven_outside_envelope
+
     expanded_outer = outer.buffer(.05)
     outside_bars = [
         bar for bar in bars if not expanded_outer.covers(bar.polygon)
     ]
-    if outside_bars:
+    structural_outside = [
+        bar for bar in outside_bars
+        if not bar_proven_outside_envelope(bar, wall_ink, source_words)
+    ]
+    if structural_outside:
         # The short receipt contains actual original path_index owners for
         # rejected source wall BANDS; composite bars may reference many more
         # primitive paths. A bounded first-seen owner sample is readable on
         # the original drawing, and never authorizes any physical wall area.
         outside_source_paths = tuple(dict.fromkeys(
-            int(bar.path_index) for bar in outside_bars
+            int(bar.path_index) for bar in structural_outside
         ))
+        bbox_pts = tuple(round(float(v), 3) for v in outer.bounds)
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_other_wall_ink_outside_candidate",
             diagnostic_closed_wall_loop_count=len(closed),
-            diagnostic_rejected_loop_bbox_pdf_pts=tuple(
-                round(float(v), 3) for v in outer.bounds
-            ),
-            diagnostic_wall_bands_outside_loop=len(outside_bars),
+            diagnostic_rejected_loop_bbox_pdf_pts=bbox_pts,
+            rejected_candidate_bbox_pdf_pts=bbox_pts,
+            diagnostic_wall_bands_outside_loop=len(structural_outside),
             diagnostic_outside_source_path_sample=outside_source_paths[:32],
             **counts,
         )
