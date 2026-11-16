@@ -149,3 +149,60 @@ def test_audit_identity_independent_of_native_bar_order():
     first = audit.audit_exterior_seams([Bar(), Other()], [12, 13], **kwargs)
     permuted = audit.audit_exterior_seams([Other(), Bar()], [13, 12], **kwargs)
     assert first["audit_id"] == permuted["audit_id"]
+
+
+def test_original_3laurel_p3_source_owned_seams_keep_real_dwelling_leaks_open():
+    """Authenticated original p3 regression; no frozen truth or invented join."""
+    import hashlib
+    import fitz
+
+    from pb_source_native_wall_body_junction_graph_shadow import (
+        _unique_source_wall_bars,
+    )
+    from pb_source_shared_dwelling_envelope_shadow import (
+        detect_native_shared_dwelling_dividers,
+    )
+    from tests.original_source_3laurel import (
+        ORIGINAL_SHA256, require_original_3laurel,
+    )
+
+    source_bytes = require_original_3laurel().read_bytes()
+    assert hashlib.sha256(source_bytes).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        page = document[2]
+        drawings = page.get_drawings()
+        words = page.get_text("words")
+        bars = _unique_source_wall_bars(drawings)
+        dividers = detect_native_shared_dwelling_dividers(
+            drawings, words, source_page_index=2,
+        )
+        assert len(dividers) == 1
+        result = audit.audit_exterior_seams(
+            bars, [1192, 1195, 1027, 1029],
+            source_words=words, drawings=drawings,
+            shared_dividers=dividers,
+            source_sha256=ORIGINAL_SHA256, page_index=2,
+        )
+    assert result["source_missing_path_ids"] == []
+    assert result["canonical_walk_status"] == "ABSTAINED"
+    assert result["canonical_walk_reason"] == (
+        "source_dwelling_region_still_open_to_outside"
+    )
+    assert [row["native_path_id"] for row in result["receipts"]] == [
+        1027, 1029, 1192, 1195,
+    ]
+    grey = [
+        item for row in result["receipts"]
+        for item in row.get("grey_seam_pairs", [])
+    ]
+    assert any(
+        {item["first_host_path_id"], item["second_host_path_id"]} == {
+            1192, 1195,
+        }
+        for item in grey
+    )
+    assert result["source_hash_authenticated"] is False
+    assert result["building_footprint_authenticated"] is False
+    assert result["measurement_authorized"] is False
+    assert result["snap_join_applied"] is False
+    assert result["official_frozen120_score_change"] == 0
