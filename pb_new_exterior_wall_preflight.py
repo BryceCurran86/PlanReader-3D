@@ -25,6 +25,9 @@ from pb_new_wall_graph_diagnostic import (
     inspect_native_wall_graph,
 )
 from pb_next_wall_ring_preview import (
+    _as_viewports,
+    _bbox_intersects,
+    _clip_drawings,
     _collect_cavity_multi_face_strips,
     _collect_monotonic_source_stroke_pairs,
     _collect_source_heavy_stroke_strips,
@@ -91,6 +94,7 @@ class SourceNativeOuterWallAttempt:
     diagnostic_wall_bands_outside_loop: int = 0
     diagnostic_outside_source_path_sample: tuple[int, ...] = ()
     neutral_wall_seams: tuple[SourceNeutralWallSeam, ...] = ()
+    viewport_pdf_pts: tuple[tuple[float, float, float, float], ...] | None = None
     # One connected BUILDING may contain two (or more) DWELLINGS. Never
     # misclassify an annotated internal PARTY wall as outside envelope.
     shared_dwelling_divider_candidates: tuple[CandidateSharedBuildingDivider, ...] = ()
@@ -109,6 +113,7 @@ def attempt_source_native_outer_wall_first(
     source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
     window_source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
     source_page_index: int = -1,
+    viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
 ) -> SourceNativeOuterWallAttempt:
     """Find one joined perimeter in *source wall fills*, NOT the sheet bbox.
 
@@ -121,6 +126,13 @@ def attempt_source_native_outer_wall_first(
         raise ValueError("source_ink_already_scoped_must_be_bool")
     if type(source_page_index) is not int or source_page_index < -1:
         raise ValueError("source_page_index_invalid")
+    viewports = _as_viewports(viewport_pdf_pts)
+    if viewports is not None:
+        drawings = _clip_drawings(drawings, viewports)
+        if baseline_source_drawings is not None:
+            baseline_source_drawings = _clip_drawings(baseline_source_drawings, viewports)
+        if window_source_drawings is not None:
+            window_source_drawings = _clip_drawings(window_source_drawings, viewports)
     # The preview already applies original source-negative paint hygiene.
     # Reapplying its original black-only mask here would silently discard
     # the newly recovered neutral-grey paths.
@@ -160,6 +172,12 @@ def attempt_source_native_outer_wall_first(
         )
         unique_bars[key] = bar
     bars = list(unique_bars.values())
+    if viewports is not None:
+        bars = [
+            bar for bar in bars
+            if bar.polygon and not bar.polygon.is_empty
+            and any(_bbox_intersects(bar.polygon.bounds, vp) for vp in viewports)
+        ]
     graph = inspect_native_wall_graph(bars, source_drawings=wall_ink)
     # Windows are holes in wall paint but NOT holes in the exterior footprint.
     # The synthetic bridging solids below exist only in this topology union;
@@ -172,7 +190,7 @@ def attempt_source_native_outer_wall_first(
         opening_drawings, source_words, page_index=source_page_index,
     ) if source_words else ()
     swing_bridges = detect_exterior_swing_door_footprint_bridges(
-        opening_drawings, source_words, page_index=source_page_index,
+        opening_drawings, source_words, page_index=source_page_index, wall_bars=bars,
     )
     sliding_bridges = detect_exterior_sliding_door_footprint_bridges(
         opening_drawings, source_words, page_index=source_page_index, wall_bars=bars,
@@ -209,27 +227,16 @@ def attempt_source_native_outer_wall_first(
     # commercial/measurement wall-strip issuer to have accepted them.
     swing_bridges = tuple(
         bridge for bridge in swing_bridges
-        if all(
-            0 <= idx < len(wall_ink)
-            and isinstance(wall_ink[idx], Mapping)
-            and wall_ink[idx].get("fill") is not None
-            and max(wall_ink[idx]["fill"][:3]) < .3
-            and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
-            for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
+        if (
+            (bridge.first_host_path_id in source_bar_paths and bridge.second_host_path_id in source_bar_paths)
+            or (0 <= bridge.first_host_path_id < len(opening_drawings) and 0 <= bridge.second_host_path_id < len(opening_drawings))
         )
     )
     sliding_bridges = tuple(
         bridge for bridge in sliding_bridges
         if (
             (bridge.first_host_path_id in source_bar_paths and bridge.second_host_path_id in source_bar_paths)
-            or all(
-                0 <= idx < len(wall_ink)
-                and isinstance(wall_ink[idx], Mapping)
-                and wall_ink[idx].get("fill") is not None
-                and max(wall_ink[idx]["fill"][:3]) < .3
-                and wall_ink[idx].get("layer") == opening_drawings[idx].get("layer")
-                for idx in (bridge.first_host_path_id, bridge.second_host_path_id)
-            )
+            or (0 <= bridge.first_host_path_id < len(opening_drawings) and 0 <= bridge.second_host_path_id < len(opening_drawings))
         )
     )
     # A native GREY wall infill is actual source paint, not a distance
@@ -272,6 +279,27 @@ def attempt_source_native_outer_wall_first(
             if path not in source_bar_paths
         })
     )
+    if viewports is not None:
+        window_bridges = tuple(
+            b for b in window_bridges
+            if any(_bbox_intersects(b.bounds_pdf_pts, vp) for vp in viewports)
+        )
+        garage_bridges = tuple(
+            b for b in garage_bridges
+            if any(_bbox_intersects(b.bounds_pdf_pts, vp) for vp in viewports)
+        )
+        swing_bridges = tuple(
+            b for b in swing_bridges
+            if any(_bbox_intersects(b.bounds_pdf_pts, vp) for vp in viewports)
+        )
+        sliding_bridges = tuple(
+            b for b in sliding_bridges
+            if any(_bbox_intersects(b.bounds_pdf_pts, vp) for vp in viewports)
+        )
+        neutral_seams = tuple(
+            s for s in neutral_seams
+            if any(_bbox_intersects(s.bounds_pdf_pts, vp) for vp in viewports)
+        )
     # The graph above runs BEFORE hosted openings. Its raw source-ink
     # tips are not automatically missing walls; classify terminals covered
     # by original SOURCE-DARK wall hosts and EXISTING native aperture
@@ -292,6 +320,7 @@ def attempt_source_native_outer_wall_first(
         "sliding_door_footprint_bridges": sliding_bridges,
         "neutral_wall_seams": neutral_seams,
         "shared_dwelling_divider_candidates": party_dividers,
+        "viewport_pdf_pts": tuple(viewports) if viewports is not None else None,
         "graph": graph,
         "source_wall_band_count": len(bars),
         "source_stroke_pair_band_count": len(paired),
@@ -335,6 +364,11 @@ def attempt_source_native_outer_wall_first(
         and len(part.interiors) >= 1
         and len(part.exterior.coords) >= 5
     ]
+    if viewports is not None:
+        closed = [
+            part for part in closed
+            if any(_bbox_intersects(part.bounds, vp) for vp in viewports)
+        ]
     if len(closed) != 1:
         return SourceNativeOuterWallAttempt(
             "ABSTAINED", "source_exterior_perimeter_not_unique_and_closed",
@@ -368,8 +402,10 @@ def attempt_source_native_outer_wall_first(
     from pb_source_outer_house_continuity_shadow import bar_proven_outside_envelope
 
     expanded_outer = outer.buffer(.05)
+    envelope = Polygon(outer.exterior).buffer(.05)
     outside_bars = [
-        bar for bar in bars if not expanded_outer.covers(bar.polygon)
+        bar for bar in bars
+        if not (expanded_outer.covers(bar.polygon) or envelope.covers(bar.polygon))
     ]
     structural_outside = [
         bar for bar in outside_bars
@@ -448,6 +484,7 @@ def attempt_source_native_outer_wall_first(
         swing_door_footprint_bridges=swing_bridges,
         sliding_door_footprint_bridges=sliding_bridges,
         neutral_wall_seams=neutral_seams,
+        viewport_pdf_pts=tuple(viewports) if viewports is not None else None,
         diagnostic_closed_wall_loop_count=len(closed),
         diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
         diagnostic_wall_bands_outside_loop=0,

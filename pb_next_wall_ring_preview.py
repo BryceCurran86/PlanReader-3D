@@ -699,34 +699,42 @@ def _collect_source_wide_face_pairs(
                 length=min(source[4]-source[3],other[4]-other[3])
                 if length>0 and overlap>=.8*length:
                     near.append(other)
-            groups=_cluster_strokes_by_perp([source]+near)
-            if len(groups)!=2:
-                continue
-            a,b=groups[0],groups[-1]
-            spacing=b[0]-a[0]
-            if not 8.0<spacing<=16.0:
-                continue
-            face0=max(a[1],key=lambda item:item[4]-item[3])
-            face1=max(b[1],key=lambda item:item[4]-item[3])
-            lo=max(face0[3],face1[3]);hi=min(face0[4],face1[4])
-            if hi-lo<30.:
-                continue
-            if hi-lo<.8*min(face0[4]-face0[3],face1[4]-face1[3]):
-                continue
-            if horiz:
-                x0,x1,y0,y1=lo,hi,a[0],b[0]
-            else:
-                x0,x1,y0,y1=a[0],b[0],lo,hi
-            key=tuple(round(z,2) for z in (x0,y0,x1,y1))
-            if key in seen:
-                continue
-            seen.add(key)
-            paths=tuple(sorted({item[0] for group in groups
-                                for item in group[1]}))
-            if len(paths)<2:
-                continue
-            found.append(_Strip(paths[0],x0,y0,x1,y1,
-                                box(x0,y0,x1,y1),path_indices=paths))
+            sides = (
+                ([o for o in near if o[2] < source[2] - 0.5], [o for o in near if o[2] > source[2] + 0.5])
+                if len(_cluster_strokes_by_perp([source] + near)) > 2
+                else (near,)
+            )
+            for candidate_near in sides:
+                if not candidate_near:
+                    continue
+                groups = _cluster_strokes_by_perp([source] + candidate_near)
+                if len(groups) != 2:
+                    continue
+                a,b=groups[0],groups[-1]
+                spacing=b[0]-a[0]
+                if not 8.0<spacing<=16.0:
+                    continue
+                face0=max(a[1],key=lambda item:item[4]-item[3])
+                face1=max(b[1],key=lambda item:item[4]-item[3])
+                lo=max(face0[3],face1[3]);hi=min(face0[4],face1[4])
+                if hi-lo<30.:
+                    continue
+                if hi-lo<.8*min(face0[4]-face0[3],face1[4]-face1[3]):
+                    continue
+                if horiz:
+                    x0,x1,y0,y1=lo,hi,a[0],b[0]
+                else:
+                    x0,x1,y0,y1=a[0],b[0],lo,hi
+                key=tuple(round(z,2) for z in (x0,y0,x1,y1))
+                if key in seen:
+                    continue
+                seen.add(key)
+                paths=tuple(sorted({item[0] for group in groups
+                                    for item in group[1]}))
+                if len(paths)<2:
+                    continue
+                found.append(_Strip(paths[0],x0,y0,x1,y1,
+                                    box(x0,y0,x1,y1),path_indices=paths))
     return found
 
 
@@ -762,45 +770,54 @@ def _collect_cavity_multi_face_strips(
                 close_strokes.append(other)
             grouped=_cluster_strokes_by_perp(close_strokes)
             if not (3<=len(grouped)<=4):
-                continue
-            first,last=grouped[0],grouped[-1]
-            low_perp,high_perp=first[0],last[0]
-            if not 1.2<=high_perp-low_perp<=16.0:
-                continue
-            # Do not choose from the interior: the two outside faces are
-            # actual represented source strokes, never extrapolated edges.
-            if abs(source[2]-low_perp)>.8 and abs(source[2]-high_perp)>.8:
-                continue
-            # Require all 3/4 face levels to have a real source stroke
-            # covering a substantial common span. Extra strokes beyond
-            # these clusters make this family ambiguous, so abstain.
-            representatives=[
-                max(members,key=lambda item:(item[4]-item[3],-item[0]))
-                for _perp,members in grouped
-            ]
-            lo=max(item[3] for item in representatives)
-            hi=min(item[4] for item in representatives)
-            if hi-lo<15.:
-                continue
-            if hi-lo < .70*min(item[4]-item[3] for item in representatives):
-                continue
-            if horiz:
-                x0,x1,y0,y1=lo,hi,low_perp,high_perp
+                if len(grouped) > 4:
+                    gaps = [grouped[i+1][0] - grouped[i][0] for i in range(len(grouped)-1)]
+                    if all(abs(gaps[i] - gaps[0]) < 0.5 for i in range(len(gaps))):
+                        continue
+                    if abs(source[2] - grouped[0][0]) <= 0.8:
+                        candidate_groups = [grouped[:3], grouped[:4]]
+                    elif abs(source[2] - grouped[-1][0]) <= 0.8:
+                        candidate_groups = [grouped[-3:], grouped[-4:]]
+                    else:
+                        continue
+                else:
+                    continue
             else:
-                x0,x1,y0,y1=low_perp,high_perp,lo,hi
-            key=tuple(round(v,2) for v in (x0,y0,x1,y1))
-            if key in seen:
-                continue
-            seen.add(key)
-            paths=tuple(sorted({
-                item[0] for _perp,members in grouped
-                for item in members
-                if min(item[4],hi)-max(item[3],lo)>5.
-            }))
-            if len(paths)<3:
-                continue
-            out.append(_Strip(paths[0],x0,y0,x1,y1,box(x0,y0,x1,y1),
-                              path_indices=paths))
+                candidate_groups = [grouped]
+            for g in candidate_groups:
+                first,last=g[0],g[-1]
+                low_perp,high_perp=first[0],last[0]
+                if not 1.2<=high_perp-low_perp<=16.0:
+                    continue
+                if abs(source[2]-low_perp)>.8 and abs(source[2]-high_perp)>.8:
+                    continue
+                representatives=[
+                    max(members,key=lambda item:(item[4]-item[3],-item[0]))
+                    for _perp,members in g
+                ]
+                lo=max(item[3] for item in representatives)
+                hi=min(item[4] for item in representatives)
+                if hi-lo<15.:
+                    continue
+                if hi-lo < .70*min(item[4]-item[3] for item in representatives):
+                    continue
+                if horiz:
+                    x0,x1,y0,y1=lo,hi,low_perp,high_perp
+                else:
+                    x0,x1,y0,y1=low_perp,high_perp,lo,hi
+                key=tuple(round(v,2) for v in (x0,y0,x1,y1))
+                if key in seen:
+                    continue
+                seen.add(key)
+                paths=tuple(sorted({
+                    item[0] for _perp,members in g
+                    for item in members
+                    if min(item[4],hi)-max(item[3],lo)>5.
+                }))
+                if len(paths)<3:
+                    continue
+                out.append(_Strip(paths[0],x0,y0,x1,y1,box(x0,y0,x1,y1),
+                                  path_indices=paths))
     return out
 
 
