@@ -8,9 +8,9 @@ outside perimeter. No inferred wall, snapping, quantities or FIRM authority.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import math
 from typing import Any
 
 from shapely.geometry import Point, Polygon
@@ -50,6 +50,10 @@ class OutsideFacingBuildingWalk:
             "other_source_wall_band_count": self.other_source_wall_band_count,
             "building_footprint_authenticated": False,
             "measurement_authorized": False,
+            "snap_join_applied": False,
+            "convex_hull_applied": False,
+            "layer_name_is_not_outer_role": True,
+            "undirected_degree_is_not_outside_face_authority": True,
         }
 
 
@@ -282,3 +286,191 @@ def walk_source_unbounded_building_face(
         enclosed_region_count=len(holes),
         enclosed_dwelling_zone_count=dwelling_count,
     )
+
+
+CONTACT_PT = 0.03
+_SNAP_PT = 2.5  # commercial snap is never a join here
+
+
+def _topology_host_pairs(
+    drawings: Sequence[Mapping[str, Any] | object],
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]],
+) -> tuple[frozenset[int], ...]:
+    pairs: list[frozenset[int]] = []
+
+    def _add(left, right) -> None:
+        try:
+            a, b = int(left), int(right)
+        except (TypeError, ValueError):
+            return
+        if a != b:
+            pairs.append(frozenset((a, b)))
+
+    if not drawings:
+        return ()
+    from pb_source_garage_door_footprint_continuity import (
+        detect_exterior_garage_door_footprint_bridges,
+    )
+    from pb_source_neutral_wall_seam_continuity import detect_source_neutral_wall_seams
+    from pb_source_swing_door_footprint_continuity import (
+        detect_exterior_swing_door_footprint_bridges,
+    )
+    from pb_source_window_footprint_continuity import (
+        detect_exterior_window_footprint_bridges,
+    )
+
+    try:
+        from pb_source_sliding_door_footprint_continuity import (
+            detect_exterior_sliding_door_footprint_bridges,
+        )
+    except ImportError:
+        def detect_exterior_sliding_door_footprint_bridges(*_a, **_k):
+            return ()
+
+    for seam in detect_source_neutral_wall_seams(drawings, page_index=-1):
+        _add(seam.first_host_path_id, seam.second_host_path_id)
+    if source_words:
+        for bridge in detect_exterior_window_footprint_bridges(drawings, source_words):
+            _add(bridge.left_host_path_id, bridge.right_host_path_id)
+        for bridge in detect_exterior_garage_door_footprint_bridges(drawings, source_words):
+            _add(bridge.start_host_path_id, bridge.end_host_path_id)
+        for bridge in detect_exterior_swing_door_footprint_bridges(drawings, source_words):
+            _add(bridge.first_host_path_id, bridge.second_host_path_id)
+        for bridge in detect_exterior_sliding_door_footprint_bridges(drawings, source_words):
+            _add(
+                getattr(bridge, "first_host_path_id", None),
+                getattr(bridge, "second_host_path_id", None),
+            )
+    unique = []
+    seen = set()
+    for pair in pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        unique.append(pair)
+    return tuple(unique)
+
+
+def diagnose_source_outside_face_neighbors(
+    wall_bars: Sequence[Any],
+    native_path_id: int,
+    *,
+    drawings: Sequence[Mapping[str, Any] | object] = (),
+    source_words: Sequence[Mapping[str, Any] | Sequence[Any]] = (),
+    shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
+    source_wall_union: Any | None = None,
+) -> dict[str, object]:
+    """Receipts for one source path on the canonical outside face.
+
+    An interior T-junction may give undirected degree > 2. That is not
+    missing ink and is not an instruction to snap. The canonical walk
+    still follows the unbounded union exterior, not this neighbor count.
+    """
+    try:
+        query_id = int(native_path_id)
+    except (TypeError, ValueError):
+        query_id = -1
+    owners = []
+    for bar in wall_bars:
+        owned = _owner(bar)
+        if owned is None:
+            continue
+        owners.append((owned[0], owned[1], bar))
+    query = [(geom, ids, bar) for geom, ids, bar in owners if query_id in ids]
+    party_ids = frozenset(i for d in shared_dividers for i in d.wall_native_path_ids)
+    topology = _topology_host_pairs(drawings, source_words)
+    grey_pairs = []
+    if drawings:
+        from pb_source_neutral_wall_seam_continuity import (
+            detect_source_neutral_wall_seams,
+        )
+        grey_pairs = [
+            {
+                "first_host_path_id": seam.first_host_path_id,
+                "second_host_path_id": seam.second_host_path_id,
+                "neutral_fill_path_ids": list(seam.neutral_fill_path_ids),
+                "kind": "source_neutral_grey_wall_seam_continuity_only",
+                "measurement_authorized": False,
+            }
+            for seam in detect_source_neutral_wall_seams(drawings, page_index=-1)
+            if query_id in (seam.first_host_path_id, seam.second_host_path_id)
+        ]
+    union = source_wall_union
+    if union is None and owners:
+        union = unary_union([geom for geom, _ids, _bar in owners])
+    primary = None
+    if union is not None:
+        parts = list(union.geoms) if hasattr(union, "geoms") else [union]
+        closed = [p for p in parts if isinstance(p, Polygon) and p.is_valid and p.interiors]
+        if len(closed) == 1:
+            primary = closed[0]
+    neighbors = []
+    if query:
+        q_geom = unary_union([geom for geom, _ids, _bar in query])
+        seen: set[tuple[int, ...]] = set()
+        for geom, ids, _bar in owners:
+            if query_id in ids:
+                continue
+            dist = float(q_geom.distance(geom))
+            if not math.isfinite(dist):
+                continue
+            id_set = frozenset(ids)
+            pair_hit = any(query_id in pair and pair & id_set for pair in topology)
+            if dist > CONTACT_PT and not pair_hit:
+                if dist <= _SNAP_PT:
+                    neighbors.append({
+                        "native_path_ids": list(ids),
+                        "kind": "near_miss_unauthenticated_no_snap",
+                        "separation_pdf_pts": round(dist, 4),
+                        "physical_join_authenticated": False,
+                    })
+                continue
+            if party_ids.intersection(ids):
+                kind = "party_interior_divider_contact"
+            elif pair_hit:
+                kind = "source_neutral_or_opening_topology_only"
+            elif primary is not None and primary.exterior.intersection(geom.buffer(0.02)).length >= 0.25 * max(
+                geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1],
+            ):
+                kind = "representation_contact_exterior"
+            else:
+                kind = "interior_t_or_partition_contact"
+            key = tuple(sorted(ids))
+            if key in seen:
+                continue
+            seen.add(key)
+            neighbors.append({
+                "native_path_ids": list(ids),
+                "kind": kind,
+                "separation_pdf_pts": round(dist, 4),
+                "physical_join_authenticated": False,
+            })
+        neighbors.sort(key=lambda row: (row["separation_pdf_pts"], row["native_path_ids"]))
+    walk = walk_source_unbounded_building_face(
+        wall_bars,
+        source_words,
+        shared_dividers=shared_dividers,
+        source_wall_union=source_wall_union,
+    )
+    contact_degree = sum(
+        1 for row in neighbors
+        if row["kind"] != "near_miss_unauthenticated_no_snap"
+    )
+    return {
+        "native_path_id": query_id,
+        "neighbor_count": contact_degree,
+        "undirected_degree_gt_2": contact_degree > 2,
+        "undirected_degree_does_not_veto_outside_face": True,
+        "neighbors": neighbors,
+        "grey_seam_pairs": grey_pairs,
+        "canonical_walk_status": walk.status,
+        "canonical_walk_reason": walk.reason,
+        "outer_wall_native_path_ids": list(walk.outer_wall_native_path_ids),
+        "internal_party_wall_native_path_ids": list(walk.internal_party_wall_native_path_ids),
+        "snap_join_applied": False,
+        "convex_hull_applied": False,
+        "physical_wall_authenticated": False,
+        "building_footprint_authenticated": False,
+        "measurement_authorized": False,
+        "official_frozen120_score_change": 0,
+    }
