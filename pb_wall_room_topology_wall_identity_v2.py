@@ -70,9 +70,20 @@ def _is_collinear(a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float
     cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     length_ac = math.hypot(c[0] - a[0], c[1] - a[1])
     if length_ac <= 1e-9:
-        return True
+        # A -> B -> A is a real retrace, not a redundant point.
+        # Only three genuinely coincident vertices may collapse here.
+        return math.hypot(b[0] - a[0], b[1] - a[1]) <= 1e-9
     perpendicular_distance = abs(cross) / length_ac
-    return perpendicular_distance <= _COLLINEAR_TOLERANCE_PT
+    if perpendicular_distance > _COLLINEAR_TOLERANCE_PT:
+        return False
+    # Collinearity alone is insufficient. B must be BETWEEN A and C:
+    # A -> B -> C could double back along exactly the same source line.
+    # Collapsing a turn-back would make a traced reentrant/retraced wall
+    # collide with a physically different direct wall in W4 identity.
+    projection = (b[0] - a[0]) * (c[0] - a[0]) + (b[1] - a[1]) * (c[1] - a[1])
+    limit = length_ac * length_ac
+    slack = length_ac * _COLLINEAR_TOLERANCE_PT
+    return -slack <= projection <= limit + slack
 
 
 def _collapse_collinear(points: Sequence[Tuple[float, float]]) -> Tuple[Tuple[float, float], ...]:
