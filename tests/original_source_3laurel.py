@@ -85,7 +85,21 @@ def resolve_original_3laurel(
         if value:
             return _classify(Path(value), expected_sha256, explicit=True)       # a named path is the only candidate
     root = _repo_root() if repo_root is None else Path(repo_root)
-    return _classify(root / "documents" / "sources" / ORIGINAL_NAME, expected_sha256, explicit=False)
+    primary = root / "documents" / "sources" / ORIGINAL_NAME
+    if primary.is_file():
+        return _classify(primary, expected_sha256, explicit=False)
+
+    candidate_paths = (
+        Path.home() / "OneDrive" / "Desktop" / "documents" / "sources" / ORIGINAL_NAME,
+        Path.home() / "Downloads" / "PlanReader_verified_private_sources" / "documents" / "sources" / ORIGINAL_NAME,
+        Path.home() / "Downloads" / "PlanReader_All_Four_10GB_PRIVATE_READY_TO_RUN" / "sources" / "au_qld_3laurel" / ORIGINAL_NAME,
+        Path.home() / "PlanReader-3D-review-anti-4317-20261114" / "documents" / "sources" / ORIGINAL_NAME,
+    )
+    for candidate in candidate_paths:
+        if candidate.is_file():
+            return _classify(candidate, expected_sha256, explicit=False)
+
+    return _classify(primary, expected_sha256, explicit=False)
 
 
 def require_original_3laurel(
