@@ -181,8 +181,9 @@ def _gap_covered_by_physical_wall(
     ux, uy = vx / length, vy / length
     intervals: List[Tuple[float, float]] = []
     for sid, (x1, y1, x2, y2) in members.items():
-        if sid in (gap.source_primitive_id_a, gap.source_primitive_id_b):
-            continue
+        # The gap producer's nominated host may itself be a continuous wall
+        # incorrectly classified as interrupted. Source geometry, not the
+        # inferred role, decides whether the full face is still painted.
         # Both ends of the supporting member must lie on this face's line.
         offsets = (abs((x1 - ax) * uy - (y1 - ay) * ux),
                    abs((x2 - ax) * uy - (y2 - ay) * ux))
