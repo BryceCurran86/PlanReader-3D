@@ -293,3 +293,51 @@ def test_nested_raster_outlines_from_one_thick_wall_are_not_competing():
     ranked = ((10000., (100, 100, 220, 190), object()),
               (9500., (104, 103, 212, 184), object()))
     assert _competing_disjoint_envelopes(ranked) is False
+
+
+def test_refined_footprint_recalculates_bbox_after_false_top_box_removal(monkeypatch):
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+    from pb_source_unsupported_rectangular_detour_shadow import RectangularDetourCollapseReceipt
+    import pb_source_unsupported_rectangular_detour_shadow as detours
+
+    candidate = ExternalFootprintTrace(
+        "a" * 64, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((0., 100.), (40., 100.), (40., 40.),
+                         (70., 40.), (70., 100.), (200., 100.),
+                         (200., 300.), (0., 300.)),
+        bbox_pdf_pts=(0., 40., 200., 300.),
+    )
+    expected = ((0., 100.), (40., 100.), (70., 100.),
+                (200., 100.), (200., 300.), (0., 300.))
+    monkeypatch.setattr(
+        detours, "collapse_unsupported_rectangular_detours",
+        lambda polygon, members: RectangularDetourCollapseReceipt(
+            original_vertex_count=8, repaired_vertex_count=6,
+            collapsed_detour_count=1, polygon_pdf_pts=expected,
+            reason_codes=("collapsed_unsupported_rectangular_detour",),
+        ),
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, ())
+    assert receipt["collapsed_detour_count"] == 1
+    assert refined.polygon_pdf_pts == expected
+    assert refined.bbox_pdf_pts == (0., 100., 200., 300.)
+    assert refined.source_sha256 == candidate.source_sha256
+    assert refined.page_index == candidate.page_index
+    assert refined.commercial_publishable is False
+    assert refined.measurement_authorized is False
+
+
+def test_unrepaired_footprint_keeps_its_original_raster_bbox():
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+    candidate = ExternalFootprintTrace(
+        "a" * 64, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((0., 100.), (200., 100.), (200., 300.), (0., 300.)),
+        bbox_pdf_pts=(-2., 98., 202., 302.),
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, ())
+    assert receipt["collapsed_detour_count"] == 0
+    assert refined.bbox_pdf_pts == candidate.bbox_pdf_pts
