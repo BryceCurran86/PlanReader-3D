@@ -320,9 +320,20 @@ def refine_external_footprint_against_wall_ink(
     )
     if receipt.collapsed_detour_count <= 0:
         return trace, receipt.to_dict()
+    # The old raster bbox still contains the rejected fake excursions.
+    # Crop native-source review using the corrected, source-backed outline;
+    # keep the regular scoping pad and all original source path indices.
+    coords = receipt.polygon_pdf_pts
+    corrected_bbox = (
+        round(min(x for x, _ in coords), 3),
+        round(min(y for _, y in coords), 3),
+        round(max(x for x, _ in coords), 3),
+        round(max(y for _, y in coords), 3),
+    )
     refined = replace(
         trace,
-        polygon_pdf_pts=receipt.polygon_pdf_pts,
+        polygon_pdf_pts=coords,
+        bbox_pdf_pts=corrected_bbox,
         reason=(
             "external_footprint_ink_trace_collapsed_unsupported_detours_"
             "needs_physical_wall_owner_and_scale"
