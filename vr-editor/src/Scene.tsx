@@ -11,6 +11,8 @@ import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
+import type { WallAdditionSketch } from "./wallAdditionProtocol";
+import { scopeKey } from "./reviewDraft";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
@@ -24,6 +26,7 @@ type Props = {
   mood: LightingMood;
   quality: RenderQuality;
   detail: SurfaceDetail;
+  addedWallSketch: WallAdditionSketch | null;
   captureSerial: number;
   onCapture: (message:string)=>void;
   inspection: InspectionSettings;
@@ -132,13 +135,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, addedWallSketch }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const addedWallCurrent = useRef(addedWallSketch);
+  addedWallCurrent.current = addedWallSketch;
   const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
   visualSettings.current = { mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
@@ -239,6 +244,48 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       mesh.userData.originalReviewColor =
         (mesh.material as THREE.MeshStandardMaterial).color.getHex();
       mesh.userData.originalOpacity = 1;
+    }
+    // Newly drawn walls are separate purple REVIEW meshes. They have no
+    // original-source witness or correction authorization, are not pickable,
+    // never issue quantities here and cannot alter the original scene.
+    const wallAdditionLayer = new THREE.Group();
+    wallAdditionLayer.name = "UnapprovedNewWallStudy";
+    scene.add(wallAdditionLayer);
+    let lastNewWallKey = "";
+    function refreshWallAddition(){
+      const request = addedWallCurrent.current;
+      const valid = request && request.scopeKey === scopeKey(manifest) &&
+        Number.isFinite(request.heightM) && request.heightM > 0 &&
+        request.start.every(Number.isFinite) && request.end.every(Number.isFinite) &&
+        request.heightM <= 20;
+      const state = valid ? JSON.stringify(request) : "";
+      if (state === lastNewWallKey) return;
+      lastNewWallKey = state;
+      for (const child of [...wallAdditionLayer.children]) {
+        wallAdditionLayer.remove(child);
+        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+          child.geometry.dispose();
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(m=>m.dispose());
+        }
+      }
+      if (!valid || !request) return;
+      const a=request.start,b=request.end,h=request.heightM;
+      const distance=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      if (distance < .05 || distance > 200) return;
+      const vertices=new Float32Array([
+        a[0],0,a[1], b[0],0,b[1], b[0],h,b[1],
+        a[0],0,a[1], b[0],h,b[1], a[0],h,a[1],
+      ]);
+      const geom=new THREE.BufferGeometry();
+      geom.setAttribute("position",new THREE.BufferAttribute(vertices,3));
+      geom.computeVertexNormals();
+      const mesh=new THREE.Mesh(geom,new THREE.MeshStandardMaterial({
+        color:0x9672dd,side:THREE.DoubleSide,transparent:true,opacity:.36,
+        depthWrite:false,metalness:0,roughness:.85,
+      }));
+      mesh.userData.reviewOnlyWallProposal = true;
+      wallAdditionLayer.add(mesh);
     }
     // Presentation-only shadow-catching floor; never a sourced slab, floor finish or quantity.
     // It exists solely below existing linework and cannot be selected.
@@ -379,6 +426,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     renderer.setAnimationLoop(() => {
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
+      refreshWallAddition();
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
       presentationFloor.visible = activeInspection.showShadows;
@@ -569,6 +617,14 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           materials.forEach(m => m.dispose());
         }
       });
+      for (const child of [...wallAdditionLayer.children]) {
+        wallAdditionLayer.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          const material = Array.isArray(child.material) ? child.material : [child.material];
+          material.forEach(m=>m.dispose());
+        }
+      }
       roughTile.dispose();
       presentationFloor.geometry.dispose();
       presentationFloor.material.dispose();
