@@ -429,6 +429,24 @@ def walk_source_unbounded_building_face(
                 ):
                     excluded_nonwall += 1
                     continue
+            # Original CAD can have no viewport metadata at all. A single
+            # native straight line with an EXPLICIT nonwall source layer and
+            # the same original geometry as its outside-bar candidate is
+            # negative structural-role evidence independent of viewport.
+            # This is deliberately narrower than generic ROLE_EXCLUSION:
+            # dashed/green/compact unlabeled exterior posts stay unresolved.
+            if all(
+                classify_source_native_path_role(source_drawings[idx])
+                == ROLE_EXCLUSION
+                and str(source_drawings[idx].get("layer") or "").lower()
+                .startswith(("annotation_", "structure_slab", "service_"))
+                and _source_frame_rule_overlaps_bar(
+                    geom, source_drawings[idx]
+                )
+                for idx in ids
+            ):
+                excluded_nonwall += 1
+                continue
             viewports = {_viewport(source_drawings[idx]) for idx in ids}
             if (len(viewports) != 1 or "" in viewports
                     or len(interior_wall_views) != 1
