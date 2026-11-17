@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { EditorObject, SceneManifest } from "./types";
 import { verifyPreviewResponse } from "./previewProtocol";
 import type { VerifiedPreview } from "./previewProtocol";
+import { verifyLiveCostingResponse } from "./liveCostingProtocol";
+import type { VerifiedCostPreview } from "./liveCostingProtocol";
 
 type Props = {
   workspace: SceneManifest;
@@ -29,11 +31,21 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<VerifiedPreview | null>(null);
+  const [costPreview, setCostPreview] = useState<VerifiedCostPreview | null>(null);
+  const [autoLive, setAutoLive] = useState(false);
   const previewRequestId = useRef(0);
   const pendingPreview = useRef<AbortController | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
+
+  function invalidatePreview() {
+    previewRequestId.current += 1;
+    pendingPreview.current?.abort();
+    setWorking(false);
+    setPreview(null);
+    setCostPreview(null);
+  }
 
   useEffect(() => {
     previewRequestId.current += 1;
@@ -50,12 +62,26 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       setValue("");
     }
     setPreview(null);
+    setCostPreview(null);
     return () => { previewRequestId.current += 1; pendingPreview.current?.abort(); };
   }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
 
-  async function sendPreview() {
+  // Opt-in, debounced LIVE repricing: never dispatch incomplete corrections,
+  // and every typed change aborts the prior source/rate request.
+  useEffect(() => {
+    if (!autoLive || !enabled || reason.trim().length < 8 || !control) return;
+    const trimmed = value.trim();
+    if (!trimmed || (control.numeric &&
+      (!Number.isFinite(Number(trimmed)) || Number(trimmed) <= 0))) return;
+    const timer = window.setTimeout(() => { void sendPreview(true); }, 650);
+    return () => window.clearTimeout(timer);
+  }, [autoLive, enabled, kind, value, reason,
+      object.objectRevision, workspace.scope.snapshotId, control?.numeric]);
+
+  async function sendPreview(withCost: boolean) {
     setError(null);
     setPreview(null);
+    setCostPreview(null);
     if (!enabled || !control) return;
     const csrf = document.querySelector<HTMLMetaElement>('meta[name="planreader-csrf-token"]')?.content;
     if (!csrf) {
@@ -96,7 +122,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     setWorking(true);
     try {
       const response = await fetch(
-        `/api/editor/workspaces/${encodeURIComponent(workspace.scope.workspaceId)}/commands/preview`,
+        `/api/editor/workspaces/${encodeURIComponent(workspace.scope.workspaceId)}/${withCost ? "costing/preview" : "commands/preview"}`,
         {
           method: "POST",
           credentials: "include",
@@ -114,9 +140,18 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
           : `Preview rejected (${response.status})`;
         throw new Error(issues || "Source authority rejected preview");
       }
-      const validated = verifyPreviewResponse(result, command);
-      if (requestId === previewRequestId.current && !controller.signal.aborted)
+      const live = withCost ? verifyLiveCostingResponse(
+        result, {
+          ...command, targetRevisionHash: object.objectRevision,
+          workspaceId: workspace.scope.workspaceId,
+          snapshotId: workspace.scope.snapshotId,
+        }
+      ) : null;
+      const validated = live?.quantityPreview ?? verifyPreviewResponse(result, command);
+      if (requestId === previewRequestId.current && !controller.signal.aborted) {
         setPreview(validated);
+        setCostPreview(live?.costingPreview ?? null);
+      }
     } catch (e) {
       if (requestId === previewRequestId.current && !controller.signal.aborted)
         setError(e instanceof Error ? e.message : "Preview unavailable");
@@ -137,7 +172,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       {!enabled && <p className="error">Requires an authenticated workspace with a proven canonical object identity. Local JSON imports cannot submit commands.</p>}
       <label htmlFor="correction-kind">Proposed correction</label>
       <select id="correction-kind" value={kind} disabled={!enabled}
-        onChange={e => { setKind(e.target.value); setValue(""); setPreview(null); }}>
+        onChange={e => { invalidatePreview(); setKind(e.target.value); setValue(""); }}>
         {available.map(c =>
           <option key={c.command} value={c.command}>{c.label}</option>)}
       </select>
@@ -145,19 +180,74 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       <input id="correction-value" disabled={!enabled}
         type={control?.numeric ? "number" : "text"} step={control?.numeric ? "any" : undefined}
         min={control?.numeric ? "0.000001" : undefined}
-        value={value} onChange={e => setValue(e.target.value)}
+        value={value} onChange={e => { invalidatePreview(); setValue(e.target.value); }}
         placeholder={control?.numeric ? "Measured value in metres" : "Finish schedule code"}
       />
       <label htmlFor="correction-reason">Evidence / correction reason</label>
       <textarea id="correction-reason" disabled={!enabled}
         maxLength={1024} value={reason} rows={3}
-        onChange={e => setReason(e.target.value)}
+        onChange={e => { invalidatePreview(); setReason(e.target.value); }}
         placeholder="Identify the drawing, dimension or reviewed observation…"
       />
-      <button type="button" disabled={!enabled || working} onClick={() => void sendPreview()}>
-        {working ? "Checking source authority…" : "Preview quantity impact"}
-      </button>
+      <label className="live-cost-auto">
+        <input type="checkbox" disabled={!enabled} checked={autoLive}
+          onChange={e => {
+            invalidatePreview();
+            setAutoLive(e.target.checked);
+          }}/>
+        Live update after changes (650 ms pause, verified source and company rates required)
+      </label>
+      <div className="live-cost-actions">
+        <button type="button" disabled={!enabled || working}
+          onClick={() => void sendPreview(false)}>
+          {working ? "Checking source authority…" : "Preview quantity only"}
+        </button>
+        <button type="button" disabled={!enabled || working}
+          onClick={() => void sendPreview(true)}>
+          {working ? "Calculating source-checked costs…" : "Recalculate live costs"}
+        </button>
+      </div>
+      <p className="muted">Live costs use the logged-in company's current server-owned rate book. Prices cannot be supplied by the browser; missing rates remain unpriced.</p>
       {error && <p role="alert" className="error">{error}</p>}
+      {costPreview && (
+        <div role="status" className="preview-results live-cost-results" aria-label="Unapproved live cost preview">
+          <strong>WHAT-IF COSTING — NOT AN APPROVED QUOTE</strong>
+          <p className="muted">
+            Company rate revision: {costPreview.rateBookRevision} · {costPreview.currency}
+            · Tax: {costPreview.taxPct}% · Contingency: {costPreview.contingencyPct}%.
+          </p>
+          <p className="muted">
+            {costPreview.pricedComplete
+              ? "All recalculated impacts have explicit rates. The correction is still unapproved."
+              : "PARTIAL COST TOTALS — unresolved targets or missing rates prevent a complete estimate."}
+          </p>
+          <div className="live-cost-summary">
+            <div><span>Before (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.before.sellIncTax}` : "UNPRICED"}</strong></div>
+            <div><span>After (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.after.sellIncTax}` : "UNPRICED"}</strong></div>
+            <div><span>Change (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.delta.sellIncTax}` : "UNPRICED"}</strong></div>
+            <div><span>Direct cost change</span><strong>{costPreview.currency} {costPreview.totals.delta.direct}</strong></div>
+            <div><span>Margin change</span><strong>{costPreview.currency} {costPreview.totals.delta.margin}</strong></div>
+            <div><span>Tax change</span><strong>{costPreview.currency} {costPreview.totals.delta.tax}</strong></div>
+          </div>
+          {costPreview.lines.length > 0 && <div>
+            <strong>Source-priced quantity impacts</strong>
+            <ul>{costPreview.lines.map(line => <li key={line.target}>
+              <strong>{line.target}</strong> · {line.previousQuantity} → {line.proposedQuantity} {line.unit}
+              · Rate: {line.rateKey}
+              <p>Before {costPreview.currency} {line.before.sellIncTax}
+                · After {costPreview.currency} {line.after.sellIncTax}
+                · Delta {costPreview.currency} {line.deltaIncTax}</p>
+            </li>)}</ul>
+          </div>}
+          {costPreview.unpriced.length > 0 && <div>
+            <strong>Not priced — manual review or rate binding required</strong>
+            <ul>{costPreview.unpriced.map(item =>
+              <li key={item.target}>{item.target}: {item.reason.replace(/_/g, " ")}</li>)}</ul>
+          </div>}
+          <p className="muted">Rate snapshot {costPreview.rateBookRevision} · Receipt {costPreview.costPreviewReceiptSha256.slice(0,16)}…</p>
+          <p className="muted">No original drawing, canonical measurement, approved quote, invoice or JobHub price has been changed.</p>
+        </div>
+      )}
       {preview && (
         <div role="status" className="preview-results">
           <strong>Proposal only — not persisted or commercially approved</strong>
