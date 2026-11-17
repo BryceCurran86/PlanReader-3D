@@ -13,3 +13,8 @@
 
 .scene-loading{position:absolute;inset:0;z-index:4;display:grid;place-items:center;text-align:center;padding:24px;background:#121f27;color:#dbecef;font-size:13px;line-height:1.6}
 .scene-canvas:focus-within{outline:2px solid #55ccbf;outline-offset:-2px}
+
+.review-note-list{margin-top:14px;max-height:390px;overflow:auto}
+.review-note{padding:12px;border:1px solid #455761;background:#1b2b34;border-radius:6px;margin-bottom:9px;font-size:12px;overflow-wrap:anywhere}
+.review-note p{line-height:1.5;color:#bbcad0;white-space:pre-wrap}
+.review-note button{min-width:0;word-wrap:break-word}
