@@ -78,6 +78,9 @@ def make_editor_readonly_wsgi_app(
             ("Pragma", "no-cache"),
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
+            ("X-Frame-Options", "DENY"),
+            ("Cross-Origin-Resource-Policy", "same-origin"),
+            ("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"),
             ("Vary", "Cookie, Authorization"),
             # Intentionally no CORS opt-in: only same-origin authenticated UI.
         ]
