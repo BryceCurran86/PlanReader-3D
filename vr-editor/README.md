@@ -241,3 +241,23 @@ This is a server-owned **what-if estimate** only, not a persisted correction,
 approved client quote, JobHub publication, invoice or sale. It needs a genuine
 production company rate-book callback; the frontend never supplies a fallback.
 See [the live costing formula and deployment contract](../docs/engineering/VR_LIVE_COSTING_IMPLEMENTATION.md).
+
+## Source-preserving VR wall position studies
+
+The reviewer can explicitly switch from **Inspect** to **Move** mode. In
+Move mode, select an existing wall with the VR trigger, squeeze and move a
+controller, then release to propose a source-relative displacement. The
+same gesture is available from desktop arrow-key / nudge controls; Shift
+changes desktop step from 50mm to 500mm. Proposed offsets snap to a 50mm
+metre grid and reject nonfinite, excessive and crossing same-level wall
+segments. Undo/redo uses Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z in move mode.
+
+Every proposed movement is *local, reversible and review-only*. Existing
+source model endpoints and geometry buffers are untouched; only Three.js
+Object3D.position is translated. Collision checks do not prove all wall
+junctions or hosted opening integrity. A backend MOVE_WALL approval/
+quantity/revision command is **not yet available**, so position drafts are
+never offered as persisted changes or priced commercial quantities.
+User-confirmed source projection, wall-host continuity and true room closure
+are separate prerequisites. Headset grip must be smoke-tested on real
+devices before shipping the interaction as production editing.
