@@ -551,6 +551,32 @@ def test_missing_or_malformed_labelled_box_overlap_abstains(overlap):
     assert result["authenticated_physical_wall_face_equivalence"] is False
 
 
+@pytest.mark.parametrize("overlap", [False, None, "0", -1])
+def test_source_producer_preserves_malformed_overlap_as_abstain(overlap):
+    # The producer used to bool()-coerce these hints, losing malformed
+    # source identity before classify_floor could reject it.
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+            "other_labelled_boxes_overlapping": overlap,
+        }],
+        marks=[{
+            "x": 327.8, "y": 1437.5,
+            "code": "FT3", "registered_region": True,
+        }],
+    )
+    assert result.records
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert OVERLAPPING_MEASURED_BOXES in result.records[0].reason_codes
+    assert all(not record.takeoff_eligible for record in result.records)
+
+
 def test_duplicated_ft3_marks_abstain_through_real_source_shadow_producer():
     selector = sample_selector()
     prod = SourceCrossViewFloorCorrespondenceProducer()
