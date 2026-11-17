@@ -52,6 +52,25 @@ def _bounded_raster_scale(page_width_pts: float, page_height_pts: float) -> floa
     return min(1.8, 2400.0 / max(axes))
 
 
+def _competing_disjoint_envelopes(
+    ranked: Sequence[tuple[float, tuple[int, int, int, int], object]],
+) -> bool:
+    """Two separate large shapes cannot be called one unique building footprint.
+
+    Nested contours from a thick wall are normal; only comparably sized,
+    NON-overlapping enclosing contours compete. Never join them with raster ink.
+    """
+    if len(ranked) < 2:
+        return False
+    leading_area, (x, y, w, h), _ = ranked[0]
+    for area, (rx, ry, rw, rh), _ in ranked[1:]:
+        if area < leading_area * 0.8:
+            continue
+        if x + w < rx or rx + rw < x or y + h < ry or ry + rh < y:
+            return True
+    return False
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -100,6 +119,7 @@ def trace_external_footprint_first(
             # permanently from the original source PDF.
             ink[int(height * .82):, :] = 0
             outer = []
+            competing_envelopes = 0
             for radius in (3, 5, 8):
                 # The graduated close is for SHADOW connectivity only. It does
                 # not instantiate a physical door, wall, or commercial area.
@@ -133,8 +153,18 @@ def trace_external_footprint_first(
                     # The largest bounded enclosing trace is a *candidate*
                     # only. A competing building/site envelope cannot be
                     # independently authenticated by visual ink alone.
-                    outer = sorted(candidates, key=lambda item: item[0], reverse=True)
+                    ranked = sorted(candidates, key=lambda item: item[0], reverse=True)
+                    if _competing_disjoint_envelopes(ranked):
+                        competing_envelopes = len(ranked)
+                        break
+                    outer = ranked
                     break
+            if competing_envelopes:
+                results.append(replace(
+                    _abstain(source_sha256, index, "external_footprint_competing_disjoint_envelopes"),
+                    candidate_count=competing_envelopes,
+                ))
+                continue
             if not outer:
                 results.append(_abstain(
                     source_sha256, index, "external_footprint_no_closed_wall_ink_candidate",
