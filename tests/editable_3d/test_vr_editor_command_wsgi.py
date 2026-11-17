@@ -167,3 +167,24 @@ def test_readonly_member_denied_preview_before_ledger_or_csrf_invocation():
     assert result["error"] == "correction_preview_permission_denied"
     assert called == []
     assert ledger.events == ()
+
+
+def test_nonstandard_json_nonfinite_constants_are_rejected_before_workspace_access():
+    factory, command, ledger = _setup()
+    for literal in (b'NaN', b'Infinity', b'-Infinity'):
+        body = b'{"invalidValue":' + literal + b'}'
+        status, _, result = _request(factory(), command, raw=body)
+        assert status.startswith("400")
+        assert result["error"] == "invalid_json"
+    assert ledger.events == ()
+
+
+def test_preview_api_response_is_private_nonframeable_and_same_origin():
+    factory, command, _ = _setup()
+    status, headers, result = _request(factory(), command)
+    assert status.startswith("200")
+    assert result["persisted"] is False
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert "Access-Control-Allow-Origin" not in headers
