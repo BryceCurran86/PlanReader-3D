@@ -388,3 +388,75 @@ def get_created_wall_pdf(db: sqlite3.Connection, principal: EditorPrincipal,
     if row is None or sha256(row[0]).hexdigest() != row[1]:
         raise WallCreateConflict("wall_revision_not_found_or_corrupt")
     return bytes(row[0])
+
+
+def attach_created_walls_to_scene(scene: dict, records: list[dict]) -> dict:
+    """Render persisted working walls as REVIEW geometry, never source objects.
+
+    The optional authenticated manifest loader must fetch records using
+    list_created_walls() for the exact same principal/workspace. The model
+    revision in the workspace scope must already include all wall events.
+    """
+    if type(scene) is not dict or type(records) is not list or len(records) > 10000:
+        raise ValueError("created_wall_manifest_invalid")
+    if scene.get("schemaVersion") != "1.0.0" or scene.get("readOnly") is not True or (
+        scene.get("commercialQuantityPublicationAllowed") is not False
+    ):
+        raise ValueError("created_wall_manifest_authority_invalid")
+    scope = scene.get("scope")
+    objects = scene.get("objects")
+    if not isinstance(scope, dict) or not isinstance(objects, list):
+        raise ValueError("created_wall_manifest_scope_invalid")
+    existing = {obj["objectId"] for obj in objects}
+    additions = []
+    for entry in records:
+        if type(entry) is not dict or entry.get("workingDesignOnly") is not True:
+            raise ValueError("created_wall_record_untrusted")
+        cid = entry.get("canonicalWallId")
+        wall = entry.get("wall")
+        model_rev = entry.get("modelRevision")
+        revision_id = entry.get("revisionId")
+        if (type(cid) is not str or re.fullmatch(r"vr-wall:[0-9a-f]{32}", cid) is None or
+            type(revision_id) is not str or re.fullmatch("[0-9a-f]{40}", revision_id) is None or
+            type(model_rev) is not int or model_rev > scope.get("modelRevision", -1) or
+            type(wall) is not dict):
+            raise ValueError("created_wall_record_revision_invalid")
+        if (wall.get("workspace_id") != scope.get("workspaceId") or
+            wall.get("snapshot_id") != scope.get("snapshotId") or
+            wall.get("source_sha256", "").lower() != scope.get("sourceSha256", "").lower()):
+            raise ValueError("created_wall_record_source_scope_invalid")
+        start, end, h = wall.get("start_pt"), wall.get("end_pt"), wall.get("height_m")
+        level = wall.get("level_id")
+        if (not isinstance(start, list) or not isinstance(end, list) or
+            len(start) != 2 or len(end) != 2 or
+            any(type(v) not in (float, int) or not math.isfinite(v) for v in start+end) or
+            type(h) not in (float, int) or not math.isfinite(h) or h <= 0 or
+            type(level) is not str or not level):
+            raise ValueError("created_wall_geometry_invalid")
+        length = math.dist(start, end)
+        if not 0.05 <= length <= 200:
+            raise ValueError("created_wall_geometry_length_invalid")
+        if cid in existing:
+            raise ValueError("created_wall_duplicate_canonical_id")
+        existing.add(cid)
+        additions.append({
+            "objectId": cid, "canonicalObjectId": cid,
+            "objectType": "wall", "levelId": level,
+            "objectRevision": revision_id,
+            "authority": "provisional", "renderState": "review",
+            "geometry": {"kind": "wallFace", "start": start,
+                         "end": end, "heightM": h},
+            "dimensions": {"lengthM": length, "heightM": h},
+            "source": {"sourceFileId": None, "page": None, "sheet": None,
+                       "sourceRegion": None, "originalGeometryRef": None,
+                       "currentGeometryRef": "working-design:" + revision_id},
+            "quantityLinks": [], "unresolvedIssues": [
+                "user_authored_working_design_not_original_source",
+                "structural_and_services_approval_required",
+            ], "canEdit": False,
+        })
+    result = dict(scene)
+    result["objects"] = sorted([*objects, *additions], key=lambda r: r["objectId"])
+    if len(result["objects"]) > 20000:
+        raise ValueError("created_wall_manifest_render_cap")
+    return result
