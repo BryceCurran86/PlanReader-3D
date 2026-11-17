@@ -106,15 +106,22 @@ def original_pdf_line_count(page: fitz.Page,
             path.get("stroke_opacity", 1.0) < 0.98
         ):
             continue
+        # PyMuPDF Shape.finish can emit a source line as forward and
+        # backward `l` elements in ONE native drawing path. Those are one
+        # primitive witness, not two competing source objects. Count unique
+        # PDF drawing paths, while still rejecting two separately authored paths.
+        path_matches = False
         for item in path.get("items", ()):
             if len(item) != 3 or item[0] != "l":
                 continue
             a, b = item[1], item[2]
             found = ((float(a.x), float(a.y)), (float(b.x), float(b.y)))
             if _same_line(original, found):
-                matches += 1
-                if matches > 1:
-                    return matches
+                path_matches = True
+        if path_matches:
+            matches += 1
+            if matches > 1:
+                return matches
     return matches
 
 
