@@ -13,6 +13,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from pb_editable_3d_correction_model import EditableGeometryObject
+from pb_vr_verified_surface_patches import SourceVerified3DSurface
 
 _SOURCE_SHA = re.compile(r"[0-9a-fA-F]{64}\Z")
 _AUTHENTICATED_HEIGHT_ROLES = frozenset({
@@ -189,6 +190,7 @@ def compile_editor_scene(
     *,
     canonical_object_ids: Mapping[str, str] | None = None,
     source_witnesses: Mapping[str, VerifiedSourceWitness] | None = None,
+    source_surfaces: Sequence[SourceVerified3DSurface] = (),
 ) -> dict[str, Any]:
     """Compile read-only display geometry; never turn missing source into FIRM.
 
@@ -221,7 +223,42 @@ def compile_editor_scene(
         )
         rows.append(_scene_object(obj, cid, source_verified))
     rows.sort(key=lambda x: x["objectId"])
-    return {
+    # An independent registered physical-surface producer may provide real
+    # triangulated floors/ceilings/roofs. Never extrude rooms from approximate
+    # polylines or inherit source authority from a merely approved model.
+    source_surfaces_out: list[dict[str, Any]] = []
+    if len(source_surfaces) > _MAX_SCENE_OBJECTS:
+        raise ValueError("source_surface_count_cap_exceeded")
+    by_object = {o.object_id: o for o in objects}
+    used_surface_ids: set[str] = set()
+    triangle_count = 0
+    for surface in source_surfaces:
+        if type(surface) is not SourceVerified3DSurface:
+            raise ValueError("untrusted_surface_producer_record")
+        obj = by_object.get(surface.object_id)
+        witness = source_witnesses.get(surface.object_id)
+        cid = canonical_object_ids.get(surface.object_id)
+        role_allowed = (
+            surface.surface_kind in ("floor", "ceiling")
+            and obj is not None and obj.object_type in ("room", "surface")
+        ) or (
+            surface.surface_kind == "roof" and obj is not None
+            and obj.object_type in ("roof", "surface")
+        )
+        if (not role_allowed or obj is None or
+            not isinstance(witness, VerifiedSourceWitness) or
+            not surface.matches_original(scope, obj, witness, cid) or
+            obj.authority_status not in _APPROVED_STATES):
+            raise ValueError("source_surface_object_or_native_witness_mismatch")
+        if surface.surface_id in used_surface_ids:
+            raise ValueError("duplicate_source_surface_id")
+        used_surface_ids.add(surface.surface_id)
+        triangle_count += len(surface.vertices) // 3
+        if triangle_count > _MAX_SCENE_OBJECTS:
+            raise ValueError("source_surface_primitive_cap_exceeded")
+        source_surfaces_out.append(surface.to_scene_dict())
+    source_surfaces_out.sort(key=lambda s: s["surfaceId"])
+    result = {
         "schemaVersion": "1.0.0",
         "scope": scope.to_dict(),
         "coordinateSystem": {
@@ -233,3 +270,6 @@ def compile_editor_scene(
         "objects": rows,
         "commercialQuantityPublicationAllowed": False,
     }
+    if source_surfaces_out:
+        result["sourceSurfaces"] = source_surfaces_out
+    return result
