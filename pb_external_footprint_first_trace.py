@@ -253,7 +253,10 @@ def bound_native_drawings_to_footprint(
         except (TypeError, ValueError, AttributeError):
             retained.append(inert)
             continue
-        if not all(math.isfinite(v) for v in (a, b, c, d)):
+        # A malformed/reversed source path rect cannot prove that its ink
+        # falls inside this viewport. Treat as inert, never sort the reversed
+        # coordinates into fabricated native wall ownership.
+        if not all(math.isfinite(v) for v in (a, b, c, d)) or c < a or d < b:
             retained.append(inert)
             continue
         if c < x0 - padx or a > x1 + padx or d < y0 - pady or b > y1 + pady:
