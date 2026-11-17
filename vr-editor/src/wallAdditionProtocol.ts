@@ -221,7 +221,7 @@ export function verifyWallConstructionImpact(
   const pages=new Set<number>();
   for(const item of impact.affectedPages){
     const p=obj(item);
-    if(!Number.isSafeInteger(p.pageIndex)||Number(p.pageIndex)<0||
+    if(typeof p.pageIndex!=="number"||!Number.isSafeInteger(p.pageIndex)||p.pageIndex<0||
        typeof p.sheetId!=="string"||!ID.test(p.sheetId)||
        typeof p.registrationEvidenceId!=="string"||!ID.test(p.registrationEvidenceId)||
        pages.has(Number(p.pageIndex)))
