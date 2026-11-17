@@ -17,7 +17,7 @@ Saved copies are **review/coordination drawings**; the PDF vector lines and dime
 
 ## Wiring to the production PlanReader application
 
-This is an **opt-in WSGI endpoint factory**. The eight callbacks below are integration interfaces, not already deployed functions:
+This is an **opt-in WSGI endpoint factory**. The nine callbacks below are integration interfaces, not already deployed functions:
 
 ```python
 from pb_plan_edit_revision_wsgi import make_plan_edit_revision_wsgi_app
@@ -35,10 +35,11 @@ app = make_plan_edit_revision_wsgi_app(
     load_original_pdf_bytes=protected_original_document_blob_loader,
     resolve_verified_related_pages=complete_cross_sheet_source_page_resolver,
     resolve_workspace_database_id=trusted_integer_workspace_db_id_loader,
+    verify_unified_document_head=serialized_document_head_verifier,
 )
 ```
 
-**None** of the above illustrative callback names is an implemented app provider. The user-provided browser command must not provide file paths, page lists, physical receipts, rate fields, geometry authority, target page indices, or a `complete` flag.
+**None** of the above illustrative callback names is an implemented app provider. `verify_unified_document_head(principal, workspace, connection)` must run after SQLite `BEGIN IMMEDIATE` and return the literal `True` only if the source snapshot, current model head and ALL other document revision tracks (including VR wall creation and standalone Streamlit corrections) agree. Every competing writer must participate in the same held document lock, either the same SQLite database or a host-owned external lock covering the full transaction; checking another database without locking it is insufficient. A failed or unavailable verifier rolls back the save. Until the host supplies and tests this shared authority, do not expose either write route. The user-provided browser command must not provide file paths, page lists, physical receipts, rate fields, geometry authority, target page indices, or a `complete` flag.
 
 The server resolver should construct `RelatedPageCoverage`, optionally through `corroborated_related_page_coverage()` with a complete producer-owned candidate-page census and `CrossSheetRegistrationAuthority`. If a related page is missing, ambiguous, cross-project, stale, or uncorroborated, the revision refuses to save; it does NOT silently issue a partially updated drawing set. The original page source witness must be exact. This implementation supports every related page **within a single original PDF**. Cross-document links in separate PDFs require a multi-document transaction and an independently verified source-SHA mapping for each PDF before claiming the entire uploaded plan set was revised.
 
