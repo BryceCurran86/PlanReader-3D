@@ -319,6 +319,18 @@ def test_wide_window_gap_disposition_is_not_sub_snap():
     assert all(item.physical_join_authenticated is False for item in edges)
 
 
+def test_collinear_gap_junction_gets_explicit_no_join_disposition():
+    bars = (_strip(0, (0, 0, 10, 1)), _strip(1, (10.4252, 0, 20.4252, 1)))
+    drawings = (_drawing(), _drawing())
+    _bodies, junctions = classify_source_wall_body_junctions(bars, drawings)
+    gaps = [item for item in junctions if item.junction_kind == JUNCTION_COLLINEAR_GAP]
+    assert gaps
+    assert all(
+        item.disposition == "abstain_collinear_gap_no_source_ink_join" for item in gaps
+    )
+    assert all(item.physical_join_authenticated is False for item in gaps)
+
+
 def test_wide_unhosted_window_span_is_aperture_continuity_not_a_wall():
     bars = (_strip(0, (0, 0, 10, 1)), _strip(1, (35.8, 0, 50, 1)))
     drawings = (_drawing(), _drawing())
