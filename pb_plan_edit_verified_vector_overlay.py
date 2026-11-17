@@ -159,12 +159,10 @@ def draw_page_vector_overlay(page: fitz.Page,
                              revision_label: str) -> None:
     """Reversible coloured layer; no removal of source strokes or quantities."""
     a, b = patch.proposed_pdf_segment
-    old_a, old_b = patch.original_pdf_segment
-    # A ghosted original segment clarifies the change without falsely erasing
-    # the original line. The new vector is a real PDF drawing stroke.
+    # Keep original drafting visible beneath the proposal. Draw the revised
+    # line exactly ONCE: repeated Shape.finish() in one shape can duplicate
+    # vector path records in PyMuPDF and would break native-line lineage.
     shape = page.new_shape()
-    shape.draw_line(fitz.Point(*old_a), fitz.Point(*old_b))
-    shape.finish(color=(0.8, 0.45, 0.18), width=0.75, dashes="[2 3] 0")
     shape.draw_line(fitz.Point(*a), fitz.Point(*b))
     shape.finish(color=(0.02, 0.39, 0.78), width=2.4)
     shape.commit(overlay=True)
