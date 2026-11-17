@@ -651,6 +651,7 @@ def test_outside_composite_conflicting_wall_or_viewport_remains_unresolved():
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
     assert mixed.status == "ABSTAINED"
+    assert mixed.unresolved_outside_native_path_id_sample == (12, 13)
     rows[13] = _residual_row(
         "Annotation_General", (281, 20, 283, 90), viewport_id="elevation",
     )
@@ -982,3 +983,33 @@ def test_original_native_slab_and_service_lines_need_same_strict_geometry():
     )
     assert result.status == "ABSTAINED"
     assert result.other_source_wall_band_count == 1
+
+
+def test_unresolved_source_owner_sample_excludes_foreign_composite_path_ids():
+    # One huge composite bar may carry nonlocal path IDs: only the source
+    # strokes that geometrically intersect the unresolved outside band are
+    # meaningful next investigative targets. Never authenticate from this.
+    class CompositeBar:
+        polygon = box(280, 20, 283, 40)
+
+        def native_path_indices(self):
+            return (12, 13)
+
+    bars = (*_building_bars(), CompositeBar())
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(14)
+    ]
+    rows[12] = _residual_row("", (280, 20, 283, 40))
+    # An unrelated foreign physical wall cannot become the local residual.
+    rows[13] = _residual_row("Enclosure_WallExternal", (10, 10, 14, 50))
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.unresolved_outside_native_path_id_sample == (12,)
+    assert walk.to_dict()["unresolved_outside_native_path_id_sample"] == [12]
+    assert walk.outer_wall_native_path_ids == ()
+    assert walk.clockwise_pdf_pts == ()
+    assert not walk.measurement_authorized
