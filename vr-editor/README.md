@@ -190,6 +190,31 @@ stay source lines. Camera modes are perspective review aids, **not** surveyed
 elevations, orthophotos or accuracy proofs. Hidden objects continue to exist
 in the source manifest and must not be omitted from commercial takeoffs.
 
+## Source-locked reviewer findings
+
+The VR review notes panel lets a reviewer pin up to 250 bounded questions to
+specific source object IDs and their exact object revisions. It supports
+low/normal/high priority, open/reviewed local state, find-in-model navigation,
+and handoff import/export. Imports fail closed on stale workspace, drawing SHA,
+snapshot, model revision or object revision. Data stays in memory unless the
+reviewer explicitly downloads a local JSON handoff (max 256 KB).
+
+No notes go into the construction source, correction ledger, commercial
+takeoff, quote, pricing or original PDF. "Reviewed" means a reviewer has
+looked at a note; it does **not** mean source-verified, approved or FIRM.
+Uploaded handoff files remain untrusted and cannot carry authority fields.
+
+## Explicit visual review image export
+
+Use **Export watermarked review PNG** to capture the current desktop WebGL
+view, including local visual proposals and source filters. The resulting
+image is stamped with project/document/revision/snapshot and an unavoidable
+**not a source measurement or approved quote** watermark. Browser export is
+bounded to 4096 pixels per axis; no screenshot is automatically uploaded,
+saved or shared. WebXR headset screenshot export is intentionally disabled
+until hardware/browser consent and privacy support are validated. This is
+not a certified drawing sheet or a source-authenticated quantity record.
+
 ## Evidence-bound dimensions in desktop/VR
 
 An optional **Source dimensions** toggle shows length and height on the selected

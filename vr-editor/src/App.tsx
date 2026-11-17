@@ -3,6 +3,9 @@ import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
+import { ReviewNotesPanel } from "./ReviewNotesPanel";
+import { freshReviewNotes } from "./reviewNotes";
+import type { ReviewNotesState } from "./reviewNotes";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
@@ -21,6 +24,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
+  const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
@@ -29,6 +33,8 @@ export function App() {
   const [sourceSheet, setSourceSheet] = useState("");
   const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+  const [captureSerial,setCaptureSerial]=useState(0);
+  const [captureStatus,setCaptureStatus]=useState<string|null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -83,7 +89,7 @@ export function App() {
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
       if (!cancelled && !controller.signal.aborted) {
         setManifest(data); setAuthenticatedSource(true); setError(null);
-        setDraftState(freshDrafts(data)); setSelectedId(null);
+        setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data)); setSelectedId(null);
         setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet("");
       }
     }).catch(e => {
@@ -120,6 +126,7 @@ export function App() {
       };
       setManifest(localPreview);
       setDraftState(freshDrafts(localPreview));
+      setReviewNotes(freshReviewNotes(localPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
@@ -146,6 +153,7 @@ export function App() {
       };
       setManifest(syntheticPreview);
       setDraftState(freshDrafts(syntheticPreview));
+      setReviewNotes(freshReviewNotes(syntheticPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
@@ -177,6 +185,8 @@ export function App() {
   const summaries = summarizeEvidence(visible?.objects ?? []);
   const sheets = sourceSheets(manifest?.objects ?? []);
   const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
+  const activeNotes = manifest && reviewNotes?.scopeKey === scopeKey(manifest)
+    ? reviewNotes : manifest ? freshReviewNotes(manifest) : null;
   const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
     ? draftState : manifest ? freshDrafts(manifest) : null;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
@@ -216,7 +226,8 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
+                captureSerial={captureSerial} onCapture={setCaptureStatus} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -228,6 +239,14 @@ export function App() {
                 Open synthetic 3D / VR example
               </button>
               <p>This demonstration contains no real construction source or measured quantities.</p>
+            </div>
+          )}
+          {visible && (
+            <div className="review-image-toolbar">
+              <button type="button" onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}>
+                Export watermarked review PNG
+              </button>
+              {captureStatus && <span role="status">{captureStatus}</span>}
             </div>
           )}
           <div className="viewer-footer">
@@ -412,6 +431,19 @@ export function App() {
             ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}
           </div>
 
+          {manifest && activeNotes && (
+            <div className="section-block" aria-label="Review findings">
+              <ReviewNotesPanel scene={manifest} selectedId={selectedId}
+                state={activeNotes} onChange={setReviewNotes}
+                onSelect={id => {
+                  setInspection({...DEFAULT_INSPECTION});
+                  setLevel("all"); setSourceSheet(""); setSelectedId(id);
+                  setCameraRequest(current=>({
+                    mode:current.mode, focus:"selected", serial:current.serial+1,
+                  }));
+                }} />
+            </div>
+          )}
           <div className="section-block caution">
             <strong>Commercial safety</strong>
             <p>This scene is for inspection only. Meshes do not establish wall thickness, scale, area or billable quantities. Corrections, approval and pricing remain in the existing authenticated PlanReader workflow.</p>

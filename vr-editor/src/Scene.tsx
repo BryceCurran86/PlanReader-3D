@@ -10,6 +10,7 @@ import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS }
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
+import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
 
@@ -22,6 +23,8 @@ type Props = {
   mood: LightingMood;
   quality: RenderQuality;
   detail: SurfaceDetail;
+  captureSerial: number;
+  onCapture: (message:string)=>void;
   inspection: InspectionSettings;
   cameraRequest: {mode: CameraView; focus: FocusTarget; serial: number};
 };
@@ -105,15 +108,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
-  const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest });
-  visualSettings.current = { mood, quality, detail, inspection, cameraRequest };
+  const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const draftMap = useRef<Map<string, WallDraft>>(new Map());
@@ -337,6 +340,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     let lastQuality: RenderQuality | null = null;
     let lastDetail: SurfaceDetail | null = null;
     let lastCameraSerial: number | null = null;
+    let lastCaptureSerial = visualSettings.current.captureSerial;
+    let disposed = false;
     renderer.setAnimationLoop(() => {
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
@@ -470,9 +475,44 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       }
       controls.update();
       renderer.render(scene, camera);
+      const request = visualSettings.current;
+      if (request.captureSerial !== lastCaptureSerial) {
+        lastCaptureSerial = request.captureSerial;
+        if (renderer.xr.isPresenting) {
+          request.onCapture("Exit headset mode before exporting a desktop review image.");
+        } else {
+          try {
+            const size = safeCaptureSize(renderer.domElement.width, renderer.domElement.height);
+            if (!size) throw Error("Invalid capture canvas dimensions.");
+            const copy = document.createElement("canvas");
+            copy.width = size[0]; copy.height = size[1];
+            const context = copy.getContext("2d");
+            if (!context) throw Error("Canvas image export is unsupported.");
+            // Copy within the same rendered frame: WebGL draw buffer is not
+            // required to be preserved after this callback.
+            context.drawImage(renderer.domElement, 0, 0, copy.width, copy.height);
+            const stamp = reviewStamp(manifest, manifest.objects.length);
+            drawReviewStamp(context, copy.width, copy.height, stamp);
+            copy.toBlob(blob => {
+              if (disposed) return;
+              if (!blob) {
+                request.onCapture("Browser could not encode the review image."); return;
+              }
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url; link.download = stamp.filename; link.click();
+              URL.revokeObjectURL(url);
+              request.onCapture("Exported a visual review image. This is not a measurement.");
+            }, "image/png");
+          } catch {
+            request.onCapture("Review image export failed in this browser.");
+          }
+        }
+      }
     });
 
     return () => {
+      disposed = true;
       renderer.setAnimationLoop(null);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
