@@ -22,10 +22,10 @@ CONTACT_PT = 0.03
 _COMPETING_TOKENS = (
     "joinery", "slab", "anno", "annotation", "furniture", "furn",
     "hatch", "dim", "title", "site", "text", "grid", "border", "viewport",
-    # Service / roof / gas paint is never an exterior wall owner. Kept
-    # out of wall-role promotion; residual outside-band audit may drop
+    # Service / roof / gas / finish paint is never an exterior wall owner.
+    # Kept out of wall-role promotion; residual outside-band audit may drop
     # pure service composites without discarding WallExternal mixes.
-    "service", "storm", "gas", "roof",
+    "service", "storm", "gas", "roof", "finish",
 )
 
 REASON_NEAR_MISS = "near_miss_unauthenticated_no_elbow_jamb_or_opening"
