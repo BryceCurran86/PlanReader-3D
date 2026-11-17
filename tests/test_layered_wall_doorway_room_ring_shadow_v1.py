@@ -731,3 +731,68 @@ def test_swing_through_a_thick_open_pier_closes_the_opening():
     assert KIND_SWING in {c.kind for c in result.closures}
     boxes = sorted(r.bbox_pdf_pts for r in candidates(result))
     assert len(boxes) == 2
+
+
+def _colored_line(a, b, *, color, layer=WALL):
+    row = line(a, b, layer=layer)
+    row["color"] = color
+    return row
+
+
+def test_mid_gray_non_wall_glazing_stroke_closes_a_host_window_gap():
+    """Acacia Living/Court: mid-gray glazing on a non-wall layer still closes the host."""
+    rows = strip(0, 0, 100, 2) + strip(0, 2, 2, 98) + strip(98, 2, 100, 98)
+    rows += strip(0, 98, 30, 100) + strip(60, 98, 100, 100)
+    rows.append(_colored_line((30, 98), (60, 98), color=(0.48, 0.48, 0.48), layer="Window_Glazing"))
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.unresolved_gap_count == 0
+    assert KIND_STROKE in {c.kind for c in result.closures}
+    assert len(candidates(result)) == 1
+
+
+def test_inset_and_split_jamb_caps_close_a_powder_door_opening():
+    """Acacia powder door: inset through-jamb + colinear split jamb with a track notch."""
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(98, 2, 100, 40) + strip(98, 70, 100, 98)
+    rows.append(line((98, 41), (100, 41)))  # inset through-jamb at the low end
+    rows.append(line((98, 68.5), (98.9, 68.5)))  # split high jamb
+    rows.append(line((99.3, 68.5), (100, 68.5)))
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.unresolved_gap_count == 0
+    assert KIND_STROKE in {c.kind for c in result.closures}
+    assert len(candidates(result)) == 2
+
+
+def test_parallel_face_gap_is_consumed_when_sibling_face_is_jamb_closed():
+    """Acacia window: closing one overlapping face also resolves the parallel face."""
+    rows = strip(0, 0, 2, 100) + strip(198, 0, 200, 100) + strip(2, 0, 198, 2) + strip(2, 98, 198, 100)
+    rows += strip(2, 40, 80, 44) + strip(120, 40, 198, 44)
+    rows += strip(2, 40.8, 80, 44) + strip(120, 40.8, 198, 44)
+    rows.append(line((80, 40.8), (80, 44)))
+    rows.append(line((120, 40.8), (120, 44)))
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.unresolved_gap_count == 0
+    assert len(result.closures) >= 2
+    assert all(c.kind == KIND_STROKE for c in result.closures)
+
+
+def test_equally_near_competing_through_jambs_abstain():
+    """Two full through-jambs at equal distance from a gap end must not pick a winner."""
+    rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)
+    rows += strip(98, 2, 100, 40) + strip(98, 70, 100, 98)
+    # Separate station clusters (1.0 pt apart > cluster tol) but equal distance to the end.
+    rows.append(line((98, 40.5), (100, 40.5)))
+    rows.append(line((98, 39.5), (100, 39.5)))
+    rows.append(line((98, 70), (100, 70)))
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    # Low end abstains → opening stays unresolved (no jamb stroke closure).
+    assert result.unresolved_gap_count >= 1
+    assert all(c.kind != KIND_STROKE for c in result.closures)

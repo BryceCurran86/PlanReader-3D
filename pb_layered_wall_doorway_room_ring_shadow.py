@@ -182,6 +182,10 @@ def _source_wall_ink_candidate_drawings(
     never enters room planarization. This is NOT a source deletion: the
     output contains empty inert rows in exactly the same indices so
     source-owned native path numbers cannot be silently reindexed.
+
+    Unfilled non-green strokes are retained as doorway/glazing *evidence*
+    only (``_stroke_closed``, jamb caps). Strip collectors still require
+    black/dark/named wall paint and do not promote mid-gray lining to a wall.
     """
     blank: Mapping[str, Any] = {
         "layer": "", "fill": None, "color": None, "items": (),
@@ -217,6 +221,13 @@ def _source_wall_ink_candidate_drawings(
             kept.append(row)
         elif row.get("fill") is not None and _opaque(row):
             # Keep later opaque fills so they can hide a stroke. Not a wall.
+            kept.append(row)
+        elif (
+            fill is None
+            and row.get("items")
+            and _visible_source_stroke_paint(row)
+        ):
+            # Glazing/lining CAD strokes (often mid-gray) close host wall gaps.
             kept.append(row)
         else:
             kept.append(blank)
@@ -1249,14 +1260,22 @@ def _jamb_cap_closed(
 
     Competing caps abstain. Hall-length interruptions are not closed this way.
     Representation noise / face identity only; never the 2.5 pt production snap.
+
+    Inset CAD jambs (door returns within one wall thickness of the run end) are
+    accepted when they still cover the host band. Continuous jamb walls that
+    continue past the host are allowed up to ``_WALL_END_SUPPORT_SPAN``.
+    Colinear split jamb strokes at one station may union to cover the band.
     """
     thickness = gap.band[1] - gap.band[0]
     span = gap.hi - gap.lo
     if thickness <= NOISE_PT or not (10.0 <= span <= 140.0):
         return None
+    station_tol = max(_STROKE_PAIR_FACE_PT, thickness)
+    max_cap_extent = max(_WALL_END_SUPPORT_SPAN, thickness + 2.0 * _STROKE_PAIR_FACE_PT)
 
     def caps(station: float) -> list[int]:
-        hits: list[int] = []
+        # (index, along_lo, along_hi, perp_station)
+        pieces: list[tuple[int, float, float, float]] = []
         for index, row in _source_rows(drawings, all_ink=all_ink):
             if row.get("fill") is not None or not _visible_source_stroke_paint(row):
                 continue
@@ -1267,21 +1286,71 @@ def _jamb_cap_closed(
                 if gap.horizontal:
                     if not _close(ax, bx, _STROKE_PAIR_FACE_PT):
                         continue
-                    if abs(((ax + bx) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                    perp = (ax + bx) / 2.0
+                    if abs(perp - station) > station_tol:
                         continue
                     lo, hi = sorted((ay, by))
                 else:
                     if not _close(ay, by, _STROKE_PAIR_FACE_PT):
                         continue
-                    if abs(((ay + by) / 2.0) - station) > _STROKE_PAIR_FACE_PT:
+                    perp = (ay + by) / 2.0
+                    if abs(perp - station) > station_tol:
                         continue
                     lo, hi = sorted((ax, bx))
-                if lo - _STROKE_PAIR_FACE_PT > gap.band[0] or hi + _STROKE_PAIR_FACE_PT < gap.band[1]:
+                if (hi - lo) > max_cap_extent:
                     continue
-                if (hi - lo) > thickness + 2.0 * _STROKE_PAIR_FACE_PT:
+                # Keep pieces that overlap the host band; union may finish coverage.
+                if hi < gap.band[0] - _STROKE_PAIR_FACE_PT or lo > gap.band[1] + _STROKE_PAIR_FACE_PT:
                     continue
-                hits.append(index)
-        return list(dict.fromkeys(hits))
+                pieces.append((index, lo, hi, perp))
+        if not pieces:
+            return []
+        # Inset jambs and face-end returns can both sit inside station_tol.
+        # Cluster by perpendicular station first so a through-jamb is not
+        # merged with unrelated face returns at the run end.
+        pieces.sort(key=lambda item: (item[3], item[1], item[2], item[0]))
+        station_groups: list[list[tuple[int, float, float]]] = []
+        group_perp: list[float] = []
+        for index, lo, hi, perp in pieces:
+            if group_perp and abs(perp - group_perp[-1]) <= _STROKE_PAIR_CLUSTER_PT:
+                station_groups[-1].append((index, lo, hi))
+            else:
+                group_perp.append(perp)
+                station_groups.append([(index, lo, hi)])
+
+        # CAD often splits one jamb into two colinear strokes with a small
+        # track/hardware notch inside the host band. Merge within one station
+        # cluster so the union can still cover the wall thickness.
+        merge_tol = _STROKE_PAIR_CLUSTER_PT * 2.0
+        covering: list[tuple[float, set[int]]] = []
+        for group_index, group in enumerate(station_groups):
+            group = sorted(group, key=lambda item: (item[1], item[2], item[0]))
+            components: list[tuple[float, float, set[int]]] = []
+            for index, lo, hi in group:
+                if components and lo <= components[-1][1] + merge_tol:
+                    prev_lo, prev_hi, prev_used = components[-1]
+                    components[-1] = (prev_lo, max(prev_hi, hi), prev_used | {index})
+                else:
+                    components.append((lo, hi, {index}))
+            for lo, hi, used in components:
+                if (
+                    lo - _STROKE_PAIR_FACE_PT <= gap.band[0]
+                    and hi + _STROKE_PAIR_FACE_PT >= gap.band[1]
+                    and 1 <= len(used) <= 2
+                ):
+                    covering.append((group_perp[group_index], used))
+        if not covering:
+            return []
+        # Prefer the covering cluster nearest the geometric gap end. A second
+        # through-jamb only a face away (common CAD double-line) abstains when
+        # equally near; an inset return farther away loses to the end station.
+        covering.sort(key=lambda item: (abs(item[0] - station), sorted(item[1])))
+        best_perp, best_used = covering[0]
+        if len(covering) > 1:
+            second_perp, _second_used = covering[1]
+            if abs(abs(second_perp - station) - abs(best_perp - station)) <= _STROKE_PAIR_FACE_PT:
+                return []
+        return sorted(best_used)
 
     low, high = caps(gap.lo), caps(gap.hi)
     if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
@@ -2047,6 +2116,7 @@ def build_layered_wall_doorway_room_rings(
             gaps.append(gap)
 
     closures: list[LayeredDoorwayClosure] = []
+    closed_gaps: list[_Gap] = []
     unresolved: list[_Gap] = []
     closure_rects: list[tuple[str, Polygon]] = []
     sliding_by_gap: dict[int, tuple[int, ...]] = {}
@@ -2058,6 +2128,36 @@ def build_layered_wall_doorway_room_rings(
         # one native stroke or box may evidence only ONE interruption; a shared one is a one-to-many span
         uses = Counter(index for evidence in sliding_by_gap.values() for index in evidence)
         sliding_by_gap = {g: e for g, e in sliding_by_gap.items() if all(uses[i] == 1 for i in e)}
+
+    def _append_closure(gap: _Gap, kind: str, native: tuple[int, ...]) -> None:
+        closure_id = stable_contract_id(
+            "layered_doorway_closure",
+            {
+                "source_sha256": source_sha256,
+                "page_index": page_index,
+                "kind": kind,
+                "horizontal": gap.horizontal,
+                "band": [round(v, 3) for v in gap.band],
+                "gap": [round(gap.lo, 3), round(gap.hi, 3)],
+                "native": list(native),
+            },
+            digest_chars=24,
+        )
+        closures.append(LayeredDoorwayClosure(
+            closure_id=closure_id, kind=kind, horizontal=gap.horizontal,
+            band=gap.band, gap_interval=(gap.lo, gap.hi), native_path_indices=tuple(native),
+            wall_path_indices=tuple(sorted(set(gap.left_path_indices) | set(gap.right_path_indices))),
+        ))
+        closed_gaps.append(gap)
+        # Frame cracks beside a sourced opening are thinner than a wall and are
+        # not rooms. Pad only the planarization barrier, never the evidenced interval.
+        pad = _STROKE_PAIR_THICK_MIN
+        if gap.horizontal:
+            barrier_rect = box(gap.lo - pad, gap.band[0], gap.hi + pad, gap.band[1])
+        else:
+            barrier_rect = box(gap.band[0], gap.lo - pad, gap.band[1], gap.hi + pad)
+        closure_rects.append((closure_id, barrier_rect))
+
     for gap_index, gap in enumerate(gaps):
         swing = swing_by_gap.get(gap_index)
         host_wall = (gap.band[1] - gap.band[0]) >= _STROKE_PAIR_THICK_MIN
@@ -2091,32 +2191,37 @@ def build_layered_wall_doorway_room_rings(
             kind, native = KIND_STROKE, tuple(stroke)
         else:
             kind, native = KIND_SLIDING_LEAF, tuple(sliding)
-        closure_id = stable_contract_id(
-            "layered_doorway_closure",
-            {
-                "source_sha256": source_sha256,
-                "page_index": page_index,
-                "kind": kind,
-                "horizontal": gap.horizontal,
-                "band": [round(v, 3) for v in gap.band],
-                "gap": [round(gap.lo, 3), round(gap.hi, 3)],
-                "native": list(native),
-            },
-            digest_chars=24,
-        )
-        closures.append(LayeredDoorwayClosure(
-            closure_id=closure_id, kind=kind, horizontal=gap.horizontal,
-            band=gap.band, gap_interval=(gap.lo, gap.hi), native_path_indices=tuple(native),
-            wall_path_indices=tuple(sorted(set(gap.left_path_indices) | set(gap.right_path_indices))),
-        ))
-        # Frame cracks beside a sourced opening are thinner than a wall and are
-        # not rooms. Pad only the planarization barrier, never the evidenced interval.
-        pad = _STROKE_PAIR_THICK_MIN
-        if gap.horizontal:
-            barrier_rect = box(gap.lo - pad, gap.band[0], gap.hi + pad, gap.band[1])
-        else:
-            barrier_rect = box(gap.band[0], gap.lo - pad, gap.band[1], gap.hi + pad)
-        closure_rects.append((closure_id, barrier_rect))
+        _append_closure(gap, kind, native)
+
+    # A thick wall has two collinear faces. Closing one face of an opening
+    # (jamb/stroke) also resolves the parallel unfinished face of the same
+    # span; leave competing / differently spanned gaps unresolved.
+    seed_faces = tuple(zip(tuple(closed_gaps), tuple(closures)))
+    still_unresolved: list[_Gap] = []
+    for gap in unresolved:
+        sibling_native: tuple[int, ...] | None = None
+        sibling_kind = KIND_STROKE
+        for closed, closure in seed_faces:
+            if not gap.collinear or closed.horizontal != gap.horizontal:
+                continue
+            if not (
+                _close(closed.lo, gap.lo, _STROKE_PAIR_FACE_PT)
+                and _close(closed.hi, gap.hi, _STROKE_PAIR_FACE_PT)
+            ):
+                continue
+            overlap = (
+                min(closed.band[1], gap.band[1]) - max(closed.band[0], gap.band[0])
+            )
+            if overlap < _STROKE_PAIR_THICK_MIN - _STROKE_PAIR_FACE_PT:
+                continue
+            sibling_native = tuple(closure.native_path_indices)
+            sibling_kind = closure.kind
+            break
+        if sibling_native is None:
+            still_unresolved.append(gap)
+            continue
+        _append_closure(gap, sibling_kind, sibling_native)
+    unresolved = still_unresolved
 
     barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects)])
     free = domain.difference(barrier)
