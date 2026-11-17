@@ -24,12 +24,19 @@ class EditorPrincipal:
     subject_id: str
     tenant_id: str
     allowed_workspace_ids: frozenset[str]
+    # Reading a workspace does NOT grant access to geometry/quantity impact
+    # previews. A production permission resolver must populate this explicitly.
+    allowed_preview_workspace_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.subject_id or not self.tenant_id:
             raise ValueError("principal identity and tenant required")
         if not isinstance(self.allowed_workspace_ids, frozenset):
             raise ValueError("allowed_workspace_ids must be an immutable server-side grant set")
+        if not isinstance(self.allowed_preview_workspace_ids, frozenset):
+            raise ValueError("allowed_preview_workspace_ids must be an immutable server-side grant set")
+        if not self.allowed_preview_workspace_ids.issubset(self.allowed_workspace_ids):
+            raise ValueError("preview grants must be included in allowed readable workspaces")
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,9 @@ def make_editor_readonly_wsgi_app(
             ("Pragma", "no-cache"),
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
+            ("X-Frame-Options", "DENY"),
+            ("Cross-Origin-Resource-Policy", "same-origin"),
+            ("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"),
             ("Vary", "Cookie, Authorization"),
             # Intentionally no CORS opt-in: only same-origin authenticated UI.
         ]
