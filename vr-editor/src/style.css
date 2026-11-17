@@ -63,3 +63,19 @@
 .plan-edit-saved a,.plan-revision-history a{color:#9be5c4;text-decoration:underline;font-weight:600;font-size:12px}
 .plan-revision-history-row{padding:11px 0;border-top:1px solid #49645d;margin-top:12px}
 .plan-revision-history-row p{overflow-wrap:anywhere;font-size:12px}
+
+.wall-addition-panel{display:flex;flex-direction:column;gap:9px}
+.wall-addition-panel>label{font-size:12px;color:#bbd3d8;margin-top:8px}
+.wall-addition-panel input[type=text],.wall-addition-panel input[type=number]{width:100%;background:#21313b;border:1px solid #42606d;color:#f1f7f9;border-radius:6px;font-size:12px;padding:10px}
+.wall-addition-panel input:focus-visible,.wall-addition-panel button:focus-visible{outline:2px solid #9d8ddd;outline-offset:2px}
+.added-wall-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.added-wall-field{font-size:11px;color:#b4c9d1;display:flex;flex-direction:column;gap:4px}
+.added-wall-checkbox{display:flex;gap:8px;align-items:center}
+.added-wall-checkbox input{accent-color:#8b73c6}
+.wall-addition-panel>button{padding:12px;background:#4d4185;border:1px solid #9279cf;border-radius:8px;color:#fff;font-weight:650;cursor:pointer}
+.wall-addition-panel>button:disabled{opacity:.45;cursor:not-allowed}
+.wall-assembly-result{border:1px solid #645780;background:#221c31;padding:11px;border-radius:8px;margin-top:12px;overflow-wrap:anywhere}
+.wall-assembly-result table{width:100%;border-collapse:collapse;font-size:11px;text-align:left;margin:9px 0;table-layout:fixed}
+.wall-assembly-result th,.wall-assembly-result td{padding:7px 4px;border-bottom:1px solid #514760;vertical-align:top;overflow-wrap:anywhere}
+.wall-assembly-result td small{display:block;color:#af9cc5;margin-top:3px}
+.wall-assembly-result li{font-size:11px;color:#dfcce2;padding:3px 0}
