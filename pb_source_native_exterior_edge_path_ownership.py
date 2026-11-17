@@ -271,6 +271,78 @@ def own_exterior_contour_native_paths(
     return tuple(owned)
 
 
+def _source_exact_collinear_chain(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    horizontal: bool,
+    segments: Sequence[
+        tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]]
+    ],
+) -> tuple[str, tuple[int, ...], bool] | None:
+    """Retain original touching CAD strokes, never use a 2.5pt wall join.
+
+    This can only bind source ink to a review contour. Even an exact full
+    stroke chain does not authenticate a physical wall or customer area.
+    """
+    axis = 1 if horizontal else 0
+    along = 0 if horizontal else 1
+    low, high = sorted((start[along], end[along]))
+    length = high - low
+    if length <= _SHORT_CONTOUR_PT:
+        return None
+    nearby = []
+    for index, a, b, _row in segments:
+        if abs(a[axis] - b[axis]) > NOISE_PT:
+            continue
+        coordinate = (a[axis] + b[axis]) / 2.0
+        if max(abs(coordinate - start[axis]),
+               abs(coordinate - end[axis])) > _EDGE_SEARCH_PT:
+            continue
+        sa, sb = sorted((a[along], b[along]))
+        lo, hi = max(low, sa), min(high, sb)
+        if hi - lo >= 1.0:
+            nearby.append((coordinate, lo, hi, index))
+    if len(nearby) < 2:
+        return None
+    # Nearby parallel wall faces are separate groups, not one inferred strip.
+    buckets: list[tuple[float, list[tuple[float, float, int]]]] = []
+    for coord, lo, hi, index in sorted(nearby):
+        if buckets and abs(coord - buckets[-1][0]) <= NOISE_PT:
+            buckets[-1][1].append((lo, hi, index))
+        else:
+            buckets.append((coord, [(lo, hi, index)]))
+    runs = []
+    for _coord, spans in buckets:
+        current_lo = current_hi = None
+        current_ids: set[int] = set()
+        for lo, hi, index in sorted(spans):
+            if current_lo is None:
+                current_lo, current_hi, current_ids = lo, hi, {index}
+            elif lo <= current_hi + NOISE_PT:
+                current_hi = max(current_hi, hi)
+                current_ids.add(index)
+            else:
+                runs.append((current_hi - current_lo, current_lo,
+                             current_hi, tuple(sorted(current_ids))))
+                current_lo, current_hi, current_ids = lo, hi, {index}
+        if current_lo is not None:
+            runs.append((current_hi - current_lo, current_lo,
+                         current_hi, tuple(sorted(current_ids))))
+    plausible = [
+        run for run in runs
+        if run[0] >= 0.5 * length and len(run[3]) >= 2
+    ]
+    if not plausible:
+        return None
+    plausible.sort(key=lambda run: (-run[0], run[1], run[2], run[3]))
+    if len(plausible) != 1:
+        ids = tuple(sorted({i for run in plausible for i in run[3]}))
+        return "ambiguous", ids, False
+    _covered, first, last, ids = plausible[0]
+    complete = first <= low + NOISE_PT and last >= high - NOISE_PT
+    return ("complete" if complete else "incomplete"), ids, complete
+
+
 def _own_one_edge(
     edge_index: int,
     start: tuple[float, float],
@@ -329,6 +401,25 @@ def _own_one_edge(
         outward = -signed if winding > 0 else signed
         hits.append((round(outward, 3), index))
     if not hits:
+        chain = _source_exact_collinear_chain(start, end, horizontal, segments)
+        if chain is not None:
+            kind, ids, complete = chain
+            if kind == "ambiguous":
+                return ExteriorEdgeNativeOwnership(
+                    edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
+                    "ambiguous_competing_native_path_owners",
+                    "competing_source_ink_chains", ids, diagonal,
+                )
+            return ExteriorEdgeNativeOwnership(
+                edge_index, start, end,
+                EvidenceResolutionStatus.CANDIDATE if complete
+                else EvidenceResolutionStatus.ABSTAINED,
+                ("native_exact_source_chain_needs_physical_wall_proof"
+                 if complete else "native_source_chain_has_unwitnessed_contour_endpoint"),
+                ("source_native_wall_ink_chain_candidate"
+                 if complete else "incomplete_source_native_wall_ink_chain"),
+                ids, diagonal,
+            )
         return ExteriorEdgeNativeOwnership(
             edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
             "no_native_path_owner_for_morphological_edge",
