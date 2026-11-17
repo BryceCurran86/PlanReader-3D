@@ -156,11 +156,19 @@ export function App() {
   const levels = useMemo(() => [...new Set(
     (manifest?.objects ?? []).map(o => o.levelId).filter((id): id is string => !!id)
   )].sort(), [manifest]);
+  // Preserve Three.js / WebXR renderer identity across selection and cosmetic
+  // toggles. Only actual object-filter changes reconstruct the scene.
+  const isolateId = inspection.isolateSelected ? selectedId : null;
   const visible = useMemo<SceneManifest | null>(() => manifest ? {
     ...manifest,
-    objects: filterEvidence(manifest, level, selectedId, inspection)
-      .filter(row => !sourceSheet || row.source.sheet === sourceSheet),
-  } : null, [manifest, level, selectedId, inspection, sourceSheet]);
+    objects: filterEvidence(manifest, level, isolateId, {
+      ...DEFAULT_INSPECTION,
+      reviewFilter: inspection.reviewFilter,
+      search: inspection.search,
+      isolateSelected: inspection.isolateSelected,
+    }).filter(row => !sourceSheet || row.source.sheet === sourceSheet),
+  } : null, [manifest, level, isolateId, inspection.isolateSelected,
+    inspection.reviewFilter, inspection.search, sourceSheet]);
   const allForLevel = useMemo(() => manifest ? filterEvidence(manifest, level, null,
     {...inspection, isolateSelected:false})
     .filter(o=>!sourceSheet || o.source.sheet===sourceSheet) : [],
