@@ -69,6 +69,8 @@ def preview_editor_command(
     if (workspace.tenant_id != principal.tenant_id
         or scope.workspace_id not in principal.allowed_workspace_ids):
         return _reject("tenant_or_workspace_access_denied")
+    if scope.workspace_id not in principal.allowed_preview_workspace_ids:
+        return _reject("correction_preview_permission_denied")
     identities = (
         ("workspaceId", scope.workspace_id),
         ("projectId", scope.project_id),
