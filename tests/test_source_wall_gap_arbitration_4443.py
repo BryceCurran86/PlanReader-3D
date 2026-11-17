@@ -98,3 +98,19 @@ def test_two_end_stubs_with_genuine_gap_do_not_count_as_continuous_wall():
         "stub1": (165, 100, 190, 100),
         "stub2": (200, 100, 225, 100),
     })
+
+
+def test_ninety_five_percent_wall_coverage_is_not_permission_to_erase_a_gap():
+    gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "a", "b")
+    # A former 90% overlap rule wrongly suppressed this genuine 2.5 pt break.
+    assert not _gap_covered_by_physical_wall(gap, {
+        "almost_continuous": (170, 100, 217.5, 100),
+    })
+
+
+def test_reverse_direction_fragmented_wall_is_still_continuous():
+    gap = OpeningGapCandidate((220, 100), (170, 100), 50, 2.6, "a", "b")
+    assert _gap_covered_by_physical_wall(gap, {
+        "first": (195, 100, 170, 100),
+        "second": (220, 100, 195, 100),
+    })
