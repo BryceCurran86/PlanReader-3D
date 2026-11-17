@@ -48,11 +48,16 @@ Push-Location $repo
 try {
   # Run focused source-neutral regressions before private replay.
   $testArgs = @('-3.13','-m','pytest','-q',
-    'tests/test_source_wall_gap_arbitration_4443.py',
     'tests/test_structural_room_region_shadow.py',
     'tests/test_source_room_boundary_repair_shadow.py',
     'tests/test_external_footprint_first_trace.py',
     'tests/test_source_native_exterior_edge_path_ownership.py')
+  # #4445 may still be in review and therefore absent from a main checkout.
+  # Run the regression whenever it is present; report this explicitly.
+  $newRegression = 'tests/test_source_wall_gap_arbitration_4443.py'
+  $hasNewRegression = Test-Path -LiteralPath $newRegression
+  if ($hasNewRegression) { $testArgs += $newRegression }
+  else { Write-Warning 'PR #4445 regression file not present: checkout its branch or merge it before final acceptance.' }
   Invoke-Step 'Focused regression tests' $testArgs
   $footDir = Join-Path $runDir 'footprint'
   $ownerDir = Join-Path $runDir 'native_ownership'
@@ -74,6 +79,7 @@ try {
     page_index_0based=$PageIndex
     run_folder=$runDir
     focused_tests='passed'
+    pr_4445_regressions_executed=$hasNewRegression
     diagnostics='completed; candidates only, no commercial authority'
     original_pdf_copied=$false
     public_repo_modified=$false
