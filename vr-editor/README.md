@@ -241,3 +241,25 @@ This is a server-owned **what-if estimate** only, not a persisted correction,
 approved client quote, JobHub publication, invoice or sale. It needs a genuine
 production company rate-book callback; the frontend never supplies a fallback.
 See [the live costing formula and deployment contract](../docs/engineering/VR_LIVE_COSTING_IMPLEMENTATION.md).
+
+## Authenticated building surface meshes
+
+An existing PlanReader original-source producer may optionally supply
+`SourceVerified3DSurface` records for **floor**, **ceiling** and **roof**
+surfaces in the current scene. These are independently triangulated, tied to
+the immutable original PDF SHA, exact source native geometry, canonical
+object revision, validated area, and separate geometry/triangulation receipts.
+The renderer draws exactly those triangles, not a guessed room slab or roof.
+
+This is deliberately a positive-evidence-only feature: absent a trusted
+producer, nonwall objects remain inspector-only with no invented surface.
+The feature does not synthesize wall thickness, subtract openings, invent
+ceiling heights, add materials, approve measurements or publish a quantity.
+
+Production deployment needs the existing server workspace loader to pass
+`source_surfaces` from the independently authenticated original-source
+triangulation producer into `compile_editor_scene(...)`. Passing
+`coordinates_or_measurements` from a client or declaring a room "firm"
+cannot mint a `SourceVerified3DSurface`. Source-surface area is a display
+consistency cross-check, not a billable takeoff. The full room/wall/opening
+BIM-authority workflow remains a separate gate.
