@@ -33,6 +33,7 @@ class BoundaryDefectKind(str, Enum):
     COLLAPSED_ANTENNA_SPIKE = "COLLAPSED_ANTENNA_SPIKE"
     DUPLICATE_OR_MICRO_VERTEX = "DUPLICATE_OR_MICRO_VERTEX"
     COLLINEAR_REDUNDANT_VERTEX = "COLLINEAR_REDUNDANT_VERTEX"
+    UNSUPPORTED_RECTANGULAR_DETOUR = "UNSUPPORTED_RECTANGULAR_DETOUR"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ class SourceRoomBoundaryRepairShadowAuthority:
         *,
         room_id: str,
         vertices: Sequence[Tuple[float, float]],
+        wall_segments: Sequence[Tuple[float, float, float, float]] = (),
     ) -> RepairedBoundaryRecord:
         pts = list(vertices)
         if len(pts) > 1 and _pt_dist(pts[0], pts[-1]) <= self.snap_tolerance_pt:
@@ -197,6 +199,32 @@ class SourceRoomBoundaryRepairShadowAuthority:
                     cleaned.pop(i)
                     changed = True
                     break
+
+        # Stage 2b (#4443): unsupported rectangular U-detours lacking wall ink.
+        # Requires caller-supplied wall segments so genuine alcoves with paired
+        # faces are retained; empty wall evidence leaves prior stages unchanged.
+        if wall_segments and len(cleaned) >= 4:
+            from pb_source_unsupported_rectangular_detour_shadow import (
+                collapse_unsupported_rectangular_detours,
+            )
+
+            detour = collapse_unsupported_rectangular_detours(
+                cleaned,
+                wall_segments,
+                snap_tolerance_pt=self.snap_tolerance_pt,
+            )
+            if detour.collapsed_detour_count > 0:
+                cleaned = list(detour.polygon_pdf_pts)
+                if any(
+                    code.startswith("collapsed_unsupported_rectangular")
+                    for code in detour.reason_codes
+                ):
+                    if BoundaryDefectKind.UNSUPPORTED_RECTANGULAR_DETOUR not in defects:
+                        defects.append(BoundaryDefectKind.UNSUPPORTED_RECTANGULAR_DETOUR)
+                if any(
+                    "antenna" in code for code in detour.reason_codes
+                ) and BoundaryDefectKind.COLLAPSED_ANTENNA_SPIKE not in defects:
+                    defects.append(BoundaryDefectKind.COLLAPSED_ANTENNA_SPIKE)
 
         # Stage 3: Detect bowtie self-intersection
         n = len(cleaned)

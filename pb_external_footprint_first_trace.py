@@ -6,10 +6,10 @@ authorize customer quantities. The candidate is a review overlay only.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -251,3 +251,44 @@ def bound_native_drawings_to_footprint(
         tuple(indices) if status == "CANDIDATE" else (),
         primitives, len(drawings),
     )
+
+
+def refine_external_footprint_against_wall_ink(
+    trace: ExternalFootprintTrace,
+    drawings: Sequence[Mapping[str, object] | object],
+) -> tuple[ExternalFootprintTrace, Mapping[str, object]]:
+    """Collapse unsupported rectangular contour boxes using source wall ink.
+
+    Shadow/candidate only. Does not mint walls, scale, or customer quantities.
+    Genuine alcoves whose paired faces are painted stay in the polygon.
+    """
+    if trace.status != "CANDIDATE" or len(trace.polygon_pdf_pts) < 4:
+        return trace, {
+            "collapsed_detour_count": 0,
+            "reason_codes": ["footprint_not_eligible_for_detour_refine"],
+            "commercial_publishable": False,
+            "measurement_authorized": False,
+        }
+    from pb_source_unsupported_rectangular_detour_shadow import (
+        collapse_unsupported_rectangular_detours,
+        wall_ink_segments_from_drawings,
+    )
+
+    mapping_rows = tuple(
+        row for row in drawings if isinstance(row, Mapping)
+    )
+    receipt = collapse_unsupported_rectangular_detours(
+        trace.polygon_pdf_pts,
+        wall_ink_segments_from_drawings(mapping_rows),
+    )
+    if receipt.collapsed_detour_count <= 0:
+        return trace, receipt.to_dict()
+    refined = replace(
+        trace,
+        polygon_pdf_pts=receipt.polygon_pdf_pts,
+        reason=(
+            "external_footprint_ink_trace_collapsed_unsupported_detours_"
+            "needs_physical_wall_owner_and_scale"
+        ),
+    )
+    return refined, receipt.to_dict()
