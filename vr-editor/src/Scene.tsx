@@ -32,7 +32,7 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
   if (a.distanceTo(b) <= 1e-8) return null;
   const trustworthy = row.renderState === "verified" &&
     row.unresolvedIssues.length === 0;
-  const color = trustworthy ? 0x48b8a6 : 0xe3ad58;
+  const color = trustworthy ? 0xe8e4dc : 0xd5a56d;
   const name = row.objectId;
   if (shape.kind === "wallFace" && mayRenderWallFace(shape.kind, shape.heightM)) {
     const h = shape.heightM;
@@ -122,6 +122,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     scene.add(ambient);
     const sunlight = new THREE.DirectionalLight(initialPreset.sunColor, initialPreset.sunIntensity);
     sunlight.position.set(...initialPreset.sunPosition);
+    const lightCenter = new THREE.Vector3();
     sunlight.castShadow = true;
     sunlight.shadow.mapSize.set(shadowMapSize(visualSettings.current.quality),
       shadowMapSize(visualSettings.current.quality));
@@ -207,6 +208,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         Math.min(300, Math.max(20, size.z * 1.5)), 1);
       presentationFloor.position.x = center.x;
       presentationFloor.position.z = center.z;
+      lightCenter.copy(center);
       sunlight.target.position.copy(center);
       sunlight.position.add(center);
       scene.add(sunlight.target);
@@ -320,7 +322,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         ambient.intensity = preset.ambientIntensity;
         sunlight.color.setHex(preset.sunColor);
         sunlight.intensity = preset.sunIntensity;
-        sunlight.position.set(...preset.sunPosition);
+        sunlight.position.set(...preset.sunPosition).add(lightCenter);
         renderer.toneMappingExposure = preset.exposure;
         for (const item of pickables) {
           if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial) {
@@ -332,8 +334,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       if (lastQuality !== activeQuality) {
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
-        sunlight.shadow.map?.dispose();
-        sunlight.shadow.map = null;
+        if (sunlight.shadow.map) {
+          sunlight.shadow.map.dispose();
+          sunlight.shadow.map = null;
+        }
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
           maxRenderPixelRatio(activeQuality, renderer.xr.isPresenting)));
         onResize();
