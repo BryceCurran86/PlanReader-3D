@@ -5,6 +5,7 @@ import type { VerifiedPreview } from "./previewProtocol";
 import { verifyLiveCostingResponse } from "./liveCostingProtocol";
 import type { VerifiedCostPreview } from "./liveCostingProtocol";
 import { verifySavedPlanRevision } from "./planRevisionProtocol";
+import { editorSourceSelectionKey } from "./editorSourceSelection";
 import type { SavedPlanRevision } from "./planRevisionProtocol";
 
 type Props = {
@@ -45,13 +46,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   // Scope every in-flight edit to the exact source AND selected object.
   // Object revision hashes may coincide across different objects, so an
   // objectRevision-only effect dependency is insufficient.
-  const editSourceIdentity = JSON.stringify([
-    workspace.scope.workspaceId, workspace.scope.projectId,
-    workspace.scope.documentId, workspace.scope.revisionId,
-    workspace.scope.snapshotId, workspace.scope.sourceSha256,
-    workspace.scope.modelRevision, object.objectId, object.objectRevision,
-    object.canonicalObjectId,
-  ]);
+  const editSourceIdentity = editorSourceSelectionKey(workspace, object);
   const latestSourceIdentity = useRef(editSourceIdentity);
   latestSourceIdentity.current = editSourceIdentity;
   const control = available.find(c => c.command === kind) ?? available[0];
