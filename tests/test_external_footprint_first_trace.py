@@ -266,3 +266,30 @@ def test_acacia_raster_cap_never_exceeds_2400px(width, height):
     scale = _bounded_raster_scale(width, height)
     assert 0. < scale <= 1.8
     assert max(width, height) * scale <= 2400. + 1e-9
+
+
+def test_two_disconnected_buildings_do_not_get_selected_as_one_external_footprint(tmp_path):
+    path = tmp_path / "two_buildings.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1100, height=780)
+    page.draw_rect(fitz.Rect(125, 130, 480, 470), color=(0, 0, 0), width=4)
+    page.draw_rect(fitz.Rect(615, 130, 970, 470), color=(0, 0, 0), width=4)
+    doc.save(path)
+    doc.close()
+    raw = path.read_bytes()
+    (result,) = trace_external_footprint_first(
+        raw, source_sha256=hashlib.sha256(raw).hexdigest(), page_indices=(0,),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "external_footprint_competing_disjoint_envelopes"
+    assert result.candidate_count >= 2
+    assert result.polygon_pdf_pts == ()
+    assert result.commercial_publishable is False
+    assert result.measurement_authorized is False
+
+
+def test_nested_raster_outlines_from_one_thick_wall_are_not_competing():
+    from pb_external_footprint_first_trace import _competing_disjoint_envelopes
+    ranked = ((10000., (100, 100, 220, 190), object()),
+              (9500., (104, 103, 212, 184), object()))
+    assert _competing_disjoint_envelopes(ranked) is False
