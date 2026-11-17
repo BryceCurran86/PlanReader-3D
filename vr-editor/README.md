@@ -224,3 +224,20 @@ Local JSON files are downgraded to REVIEW, and unknown-height source lines
 never receive numerical overlays. This is a visual inspection of supplied
 source geometry, not a new independent measured takeoff, pricing authority or
 approval. The original 120 benchmark items remain unchanged.
+
+## Source-authenticated live costing preview
+
+The selected-wall correction inspector now has two explicit options:
+**Preview quantity only** (the existing authenticated endpoint) and
+**Recalculate live costs** (the new source-checked, rate-book-bound endpoint).
+The second option displays prior/proposed material, waste, labour, plant,
+subcontract, overhead, contingency, gross margin, tax, selling price and signed
+price impact. The UI never accepts browser-supplied rates, tax or publishing
+claims, and will invalidate a previous result when the proposal changes.
+Every incomplete price total is marked PARTIAL; missing rates are unpriced
+rather than free work.
+
+This is a server-owned **what-if estimate** only, not a persisted correction,
+approved client quote, JobHub publication, invoice or sale. It needs a genuine
+production company rate-book callback; the frontend never supplies a fallback.
+See [the live costing formula and deployment contract](../docs/engineering/VR_LIVE_COSTING_IMPLEMENTATION.md).
