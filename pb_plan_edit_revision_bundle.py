@@ -20,6 +20,9 @@ import fitz
 
 from pb_editable_3d_correction_model import EditableGeometryObject
 from pb_vr_editor_scene_manifest import EditorWorkspaceScope, VerifiedSourceWitness
+from pb_plan_edit_verified_vector_overlay import (
+    VerifiedPageLineOverlay, validate_verified_overlays, draw_page_vector_overlay,
+)
 
 _SHA = re.compile(r"[0-9a-fA-F]{64}\Z")
 _MAX_PDF = 80 * 1024 * 1024
@@ -97,6 +100,10 @@ class RelatedPageCoverage:
     known_related_page_indices: tuple[int, ...]
     complete: bool
     unresolved_page_indices: tuple[int, ...] = ()
+    # This never arrives from a browser. All sheets need independently
+    # corroborated source primitives and their OWN 2D projection.
+    vector_overlays: tuple[VerifiedPageLineOverlay, ...] = ()
+    vector_projection_complete: bool = False
 
 
 @dataclass(frozen=True)
@@ -165,6 +172,7 @@ def render_related_page_revision(
     base_pdf_sha256: str | None = None,
     prior_value: object,
     new_value: object,
+    correction_id: str | None = None,
 ) -> RevisedPlanPdf:
     """Render visible revision notes on all registered related source pages.
 
@@ -200,6 +208,18 @@ def render_related_page_revision(
             scope, edited, witness, canonical_object_id, coverage,
             document.page_count,
         )
+        overlays = ()
+        if coverage.vector_projection_complete is True:
+            if not isinstance(correction_id, str) or not correction_id:
+                raise ValueError("vector_overlay_requires_source_correction_id")
+            overlays = validate_verified_overlays(
+                document, links, coverage.vector_overlays,
+                canonical_object_id=canonical_object_id,
+                revision_command_id=correction_id,
+            )
+        elif coverage.vector_overlays:
+            raise ValueError("partial_or_unproven_vector_projection_denied")
+        by_page = {p.page_index: p for p in overlays}
         pages = []
         for link in links:
             page = document[link.page_index]
@@ -241,7 +261,14 @@ def render_related_page_revision(
                     content="Verified source location; revised geometry not redrawn",
                 )
                 cloud.update()
+            verified_patch = by_page.get(link.page_index)
+            if verified_patch is not None:
+                draw_page_vector_overlay(page, verified_patch, revision_label)
             pages.append({
+                "vectorGeometryOverlayDrawn": verified_patch is not None,
+                "vectorOverlayKind": (
+                    verified_patch.projection_kind if verified_patch else None
+                ),
                 "pageIndex": link.page_index,
                 "pageLabel": link.page_label,
                 "sheet": link.sheet,
