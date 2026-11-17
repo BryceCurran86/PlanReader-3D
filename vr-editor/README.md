@@ -142,3 +142,16 @@ photorealistic source materials, missing 3D BIM geometry or headset compatibilit
 Use original-source floor/ceiling and opening witnesses before extending to
 measured interiors. Profile on real desktop GPUs and supported headsets before
 shipping as an immersive production feature.
+
+## Evidence-safe wall surface microdetail
+
+The renderer can optionally show subtle deterministic micro-roughness on existing,
+source-verified wall faces, scaled to the real source wall-face length and
+height in texture coordinates. No material schedule is inferred: the pattern
+is **a generic presentation aid**, not an actual plaster or paint system.
+Unresolved/review-only wall faces keep their translucent appearance and do not
+cast false complete-enclosure shadows. Selected faces receive a restrained
+presentation highlight rather than replacing the colour of a finish study.
+The wall geometry, original-source witness, ledger, frozen quantities and
+commercial controls do not change. The effect is off by default and uses one
+small disposable texture for the whole scene, with no asset downloads.

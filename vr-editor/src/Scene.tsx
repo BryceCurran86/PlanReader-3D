@@ -8,6 +8,8 @@ import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
 import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS } from "./visualRealism";
 import type { LightingMood, RenderQuality } from "./visualRealism";
+import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
+import type { SurfaceDetail } from "./surfaceDetail";
 
 type Props = {
   manifest: SceneManifest;
@@ -17,6 +19,7 @@ type Props = {
   onCycleStudy: (objectId: string) => void;
   mood: LightingMood;
   quality: RenderQuality;
+  detail: SurfaceDetail;
 };
 
 function point2(value: unknown): value is [number, number] {
@@ -42,6 +45,8 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     ]);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(data, 3));
+    const surfaceUV = sourceWallUV(a.distanceTo(b), h);
+    if (surfaceUV) geometry.setAttribute("uv", new THREE.BufferAttribute(surfaceUV, 2));
     geometry.computeVertexNormals();
     const material = new THREE.MeshStandardMaterial({
       color,
@@ -54,8 +59,10 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.objectId = name;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    // REVIEW surfaces may be incomplete; do not imply solid enclosure via shadows.
+    mesh.castShadow = trustworthy;
+    mesh.receiveShadow = trustworthy;
+    mesh.userData.sourceWitnessedFace = trustworthy;
     return mesh;
   }
   // Unverified height is shown ONLY as source XY linework, never an extruded
@@ -94,15 +101,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
-  const visualSettings = useRef({ mood, quality });
-  visualSettings.current = { mood, quality };
+  const visualSettings = useRef({ mood, quality, detail });
+  visualSettings.current = { mood, quality, detail };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const draftMap = useRef<Map<string, WallDraft>>(new Map());
@@ -163,6 +170,16 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     controls.minDistance = 0.15;
     controls.maxDistance = 2000;
 
+    // Shared, deterministic micro-roughness texture: strictly illustrative,
+    // unrelated to source finish schedules, plaster specification or rates.
+    const roughTile = new THREE.DataTexture(
+      createPresentationRoughnessTile(), 64, 64, THREE.RGBAFormat,
+    );
+    roughTile.wrapS = THREE.RepeatWrapping;
+    roughTile.wrapT = THREE.RepeatWrapping;
+    roughTile.colorSpace = THREE.NoColorSpace;
+    roughTile.needsUpdate = true;
+
     const physical = new THREE.Group();
     scene.add(physical);
     const pickables: THREE.Object3D[] = [];
@@ -175,6 +192,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       // Keep the original review material as the fallback after any study clears.
       if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial) {
         item.userData.originalReviewColor = item.material.color.getHex();
+        item.material.roughnessMap = item.userData.sourceWitnessedFace &&
+          visualSettings.current.detail === "subtle" ? roughTile : null;
         item.userData.originalOpacity = item.material.opacity;
         const geometry = row.geometry;
         if (geometry?.kind === "wallFace") item.userData.originalHeight = geometry.heightM;
@@ -312,8 +331,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     let lastLabelId: string | null = null;
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
+    let lastDetail: SurfaceDetail | null = null;
     renderer.setAnimationLoop(() => {
-      const { mood: activeMood, quality: activeQuality } = visualSettings.current;
+      const { mood: activeMood, quality: activeQuality, detail: activeDetail } = visualSettings.current;
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -330,6 +350,19 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           }
         }
         lastMood = activeMood;
+      }
+      if (lastDetail !== activeDetail) {
+        for (const item of pickables) {
+          if (!(item instanceof THREE.Mesh) ||
+              !(item.material instanceof THREE.MeshStandardMaterial)) continue;
+          const nextMap = activeDetail === "subtle" && item.userData.sourceWitnessedFace
+            ? roughTile : null;
+          if (item.material.roughnessMap !== nextMap) {
+            item.material.roughnessMap = nextMap;
+            item.material.needsUpdate = true;
+          }
+        }
+        lastDetail = activeDetail;
       }
       if (lastQuality !== activeQuality) {
         const size = shadowMapSize(activeQuality);
@@ -362,6 +395,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         item.material.opacity = ghost ? 0.30 : originalOpacity;
         item.material.transparent = ghost || originalOpacity < 1;
         item.material.depthWrite = !ghost && originalOpacity >= 0.9;
+        // Highlight selection without repainting the verified/source-study colour.
+        const selected = picked.current === id;
+        item.material.emissive.setHex(selected ? 0x173b36 : 0x000000);
+        item.material.emissiveIntensity = selected ? 0.32 : 0;
         if (originalHeight !== undefined) {
           const height = ghost ? ghostHeight : originalHeight;
           const position = item.geometry.getAttribute("position");
@@ -419,6 +456,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           materials.forEach(m => m.dispose());
         }
       });
+      roughTile.dispose();
       presentationFloor.geometry.dispose();
       presentationFloor.material.dispose();
       sunlight.shadow.dispose();
