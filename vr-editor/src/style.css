@@ -52,3 +52,14 @@
 
 .live-cost-auto{display:flex!important;gap:8px;align-items:flex-start;margin:10px 0!important;color:#ccece0;font-size:12px;line-height:1.5}
 .live-cost-auto input{accent-color:#48bda1;margin-top:3px;flex-shrink:0}
+
+.plan-edit-save-panel,.plan-edit-saved,.plan-revision-history{margin:16px 0;border:1px solid #577e72;border-radius:9px;padding:14px;background:#1b302d}
+.plan-edit-save-panel strong,.plan-edit-saved strong,.plan-revision-history strong{color:#e2fff4}
+.plan-edit-save-panel button,.plan-revision-history button{display:block;width:100%;border-radius:6px;border:1px solid #6cbe9d;background:#185449;color:#f0fff9;padding:10px 11px;font-weight:600;cursor:pointer}
+.plan-edit-save-panel button:disabled,.plan-revision-history button:disabled{opacity:.5;cursor:not-allowed}
+.plan-edit-save-panel button:focus-visible,.plan-revision-history button:focus-visible,.plan-edit-saved a:focus-visible,.plan-revision-history a:focus-visible{outline:2px solid #f6e1bb;outline-offset:2px}
+.plan-edit-saved ul{margin:8px 0 12px;padding-left:19px}
+.plan-edit-saved li{font-size:12px;margin-bottom:5px;color:#bfddd1}
+.plan-edit-saved a,.plan-revision-history a{color:#9be5c4;text-decoration:underline;font-weight:600;font-size:12px}
+.plan-revision-history-row{padding:11px 0;border-top:1px solid #49645d;margin-top:12px}
+.plan-revision-history-row p{overflow-wrap:anywhere;font-size:12px}
