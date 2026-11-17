@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
+import { downgradeLocalManifest } from "./localManifestSafety";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
@@ -118,13 +119,7 @@ export function App() {
       if (!isSceneManifest(data)) throw new Error("Manifest failed source/scope validation");
       // Local files are user-supplied previews, NOT server-attested evidence.
       // Never render their claimed "verified" status as trusted green/FIRM.
-      const localPreview: SceneManifest = {
-        ...data,
-        objects: data.objects.map(o => ({
-          ...o, renderState: "review" as const,
-          unresolvedIssues: [...new Set([...o.unresolvedIssues, "local_manifest_not_authenticated"])],
-        })),
-      };
+      const localPreview: SceneManifest = downgradeLocalManifest(data);
       setManifest(localPreview);
       setDraftState(freshDrafts(localPreview));
       setReviewNotes(freshReviewNotes(localPreview));
