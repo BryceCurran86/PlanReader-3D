@@ -13,6 +13,7 @@ import { VISUAL_PRESETS } from "./visualRealism";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import type { SurfaceDetail } from "./surfaceDetail";
 import { DEFAULT_INSPECTION, filterEvidence, nextReview, sourceSheets, summarizeEvidence } from "./reviewInspection";
+import { sourceDimensionCount } from "./sourceDimensions";
 import type { CameraView, FocusTarget, InspectionSettings, ReviewFilter } from "./reviewInspection";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
@@ -340,11 +341,14 @@ export function App() {
                   onChange={e=>inspect({showLabels:e.target.checked})}/> Selected label</label>
                 <label><input type="checkbox" checked={inspection.showGhosts}
                   onChange={e=>inspect({showGhosts:e.target.checked})}/> Ghost heights</label>
+                <label><input type="checkbox" checked={inspection.showDimensions}
+                  onChange={e=>inspect({showDimensions:e.target.checked})}/> Source dimensions</label>
               </div>
               <p className="muted">
                 Visible {summaries.total} · verified {summaries.verified} · review {summaries.review}
                 · wall faces {summaries.faces} · source lines {summaries.lines}
-                · without display geometry {summaries.withoutDisplayGeometry}.
+                · without display geometry {summaries.withoutDisplayGeometry}
+                · source-backed dimension labels {sourceDimensionCount(visible?.objects??[])}.
               </p>
             </div>
           )}

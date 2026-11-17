@@ -12,6 +12,7 @@ import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
+import { sourceWallDimensions } from "./sourceDimensions";
 
 type Props = {
   manifest: SceneManifest;
@@ -447,25 +448,24 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           }
         }
       }
-      if (!activeInspection.showLabels && selectedLabel) {
-        scene.remove(selectedLabel);
-        selectedLabel.material.map?.dispose();
-        selectedLabel.material.dispose();
-        selectedLabel = null;
-        lastLabelId = null;
-      }
-      if (activeInspection.showLabels && (picked.current !== lastLabelId || !selectedLabel && !!picked.current)) {
+      const labelKey = picked.current && activeInspection.showLabels
+        ? `${picked.current}|${activeInspection.showDimensions}` : null;
+      if (labelKey !== lastLabelId) {
         if (selectedLabel) {
           scene.remove(selectedLabel);
           selectedLabel.material.map?.dispose();
           selectedLabel.material.dispose();
           selectedLabel = null;
         }
-        lastLabelId = picked.current;
-        if (lastLabelId) {
-          const sourceObject = pickables.find(x => x.userData.objectId === lastLabelId);
-          if (sourceObject) {
-            selectedLabel = labelSprite(lastLabelId);
+        lastLabelId = labelKey;
+        if (picked.current && labelKey) {
+          const id = picked.current;
+          const sourceObject = pickables.find(x => x.userData.objectId === id);
+          const row = sourceById.get(id);
+          if (sourceObject && row) {
+            const dims = activeInspection.showDimensions
+              ? sourceWallDimensions(row) : null;
+            selectedLabel = labelSprite(dims ? dims.label : id);
             const bounds = new THREE.Box3().setFromObject(sourceObject);
             selectedLabel.position.copy(bounds.getCenter(new THREE.Vector3()));
             selectedLabel.position.y += 1.2;

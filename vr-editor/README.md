@@ -214,3 +214,13 @@ bounded to 4096 pixels per axis; no screenshot is automatically uploaded,
 saved or shared. WebXR headset screenshot export is intentionally disabled
 until hardware/browser consent and privacy support are validated. This is
 not a certified drawing sheet or a source-authenticated quantity record.
+
+## Evidence-bound dimensions in desktop/VR
+
+An optional **Source dimensions** toggle shows length and height on the selected
+wall face, but only when the server-provided scene has a verified, issue-free
+wall object with a canonical ID, original source path and documented height.
+Local JSON files are downgraded to REVIEW, and unknown-height source lines
+never receive numerical overlays. This is a visual inspection of supplied
+source geometry, not a new independent measured takeoff, pricing authority or
+approval. The original 120 benchmark items remain unchanged.
