@@ -118,7 +118,12 @@ def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
     with fitz.open(stream=source_bytes, filetype="pdf") as document:
         if type(page_index) is not int or not 0 <= page_index < len(document):
             raise ValueError("original_footprint_original_page_index_invalid")
-        if expected_title not in document[page_index].get_text():
+        # Source title blocks may wrap a single drawing title across PDF
+        # lines (Acacia p10: "Window" / "and Door Schedule"). Whitespace
+        # layout is not part of the drawing's semantic title identity.
+        source_title_text = " ".join(document[page_index].get_text().split())
+        normalized_expected_title = " ".join(expected_title.split())
+        if normalized_expected_title not in source_title_text:
             raise ValueError("original_footprint_original_page_title_mismatch")
     return True
 
