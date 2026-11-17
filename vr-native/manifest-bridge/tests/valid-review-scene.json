@@ -1,0 +1,15 @@
+{
+  "schemaVersion":"1.0.0",
+  "scope":{"workspaceId":"demo-workspace","projectId":"demo-project","documentId":"demo-document","revisionId":"revision-A","snapshotId":"snapshot-A","sourceSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modelRevision":1},
+  "coordinateSystem":{"unit":"metres","sourceToModelTransform":null,"renderOrigin":[0,0,0]},
+  "readOnly":true,
+  "commercialQuantityPublicationAllowed":false,
+  "objects":[{
+    "objectId":"wall-A","canonicalObjectId":null,"objectType":"wall","levelId":"level-1",
+    "objectRevision":"sha-demo-01","authority":"firm","renderState":"verified",
+    "geometry":{"kind":"wallFace","start":[0,0],"end":[3.5,0],"heightM":2.7},
+    "dimensions":{"lengthM":3.5,"heightM":2.7},
+    "source":{"sourceFileId":null,"page":null,"sheet":null,"sourceRegion":null,"originalGeometryRef":null,"currentGeometryRef":null},
+    "quantityLinks":[],"unresolvedIssues":[],"canEdit":false
+  }]
+}
