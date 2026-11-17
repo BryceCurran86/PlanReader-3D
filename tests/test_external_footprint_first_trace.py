@@ -611,7 +611,7 @@ def test_original_cover_contents_floor_plan_is_not_drawing_title(tmp_path):
         page = doc.new_page()
         page.insert_text(
             (30, 45),
-            "Drawing title: Cover Sheet\\nA0.3 Floor Plan\\nScale: 1:100",
+            "Drawing title: Cover Sheet\nA0.3 Floor Plan\nScale: 1:100",
         )
         doc.save(path)
     raw = path.read_bytes()
