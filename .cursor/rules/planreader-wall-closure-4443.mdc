@@ -1,0 +1,23 @@
+---
+description: "Cursor: owner-confirmed PlanReader wall/opening classification, straight exterior trace, and source-backed room closure for issue #4443"
+globs: ["pb_*wall*.py", "pb_*room*.py", "pb_*opening*.py", "tools/run_cursor_wall_closure.ps1", "tools/run_antigravity_wall_closure.ps1"]
+alwaysApply: false
+---
+
+# Cursor — complete source-backed footprint and room closure
+
+**Read before touching code:** `AGENTS.md`, `docs/AI_ENGINEERING_PLAYBOOK.md`, `docs/engineering/ANTIGRAVITY_RUN_WALL_CLOSURE_4443.md` (legacy filename; handoff now belongs to Cursor), issue #4443, PR #4445, and stacked Acacia #4423/#4436/#4437. Check latest branches, resolve coordination claims on #4135. Avoid overwriting another active lane.
+
+## Owner acceptance
+The two protruding rectangles on the marked external wall are fabricated; the correct exterior wall must be one straight **source-painted** wall. The highlighted BED 5 / WIR / BATH / LIVING area misclassifies actual walls as openings and misses genuine door/slider gaps. Correct source classification before deriving room polygons. Real hosted door/slider openings receive *virtual topology-only* threshold closures, not fabricated physical walls or quantities. Preserve real alcoves and connected LIVING/KITCHEN open-plan; distinguish ALFRESCO from rooms.
+
+## Run locally (original private source, no GitHub upload)
+Run the `tools/run_cursor_wall_closure.ps1` wrapper on the authorized Windows workspace with the original PDF:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\run_cursor_wall_closure.ps1 -Pdf "C:\PRIVATE\original_acacia.pdf" -PageIndex 1 -OutDir "C:\PRIVATE\cursor_wall_closure" -ExpectedSha256 "435a6b610fea904f2b27dc330667d92a25919ada3368e5905e58ff92e047f37a"
+```
+Replace the placeholder path with the actual privately held original; hash must match. The wrapper uses existing focused pytest, original footprint trace, native contour source ownership, room overlay and saves results **outside** the public checkout. PageIndex is zero-based; this Acacia floor plan is index 1 according to existing private source notes. If the original is missing or mismatched, ABSTAIN rather than guessing from the screenshot.
+
+Compare before/after overlays with owner markup. No source wall may be erased because an opening was inferred; no source door gap may be filled merely to force closure. Record original native path IDs, typed gap IDs, area/room ring identities and precise unresolved endpoints. Add positive and negative tests, re-run exact-source replay, obtain exact-head full Python 3.13/3.14 CI and existing source/customer retention checks. Push a bounded PR; merge only validated changes. Do not claim source-grounded customer quantity from diagnostic shadow layers.
+
+**Non-negotiables:** frozen 120 (27/24/63/6), 2.5pt snap, 20k primitive cap, eight Lot16 signed openings, signed Maryborough floors, private original security, no new commercial issuer and no invented source.
