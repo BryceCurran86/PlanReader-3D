@@ -82,7 +82,9 @@ export function validateAdditionSketch(
   manifest:SceneManifest,
   input:Omit<WallAdditionSketch,"scopeKey">,
 ):WallAdditionSketch {
-  if(!ID.test(input.proposalId)||!ID.test(input.levelId)||
+  if(!ID.test(input.proposalId)||
+     typeof input.levelId!=="string"||!input.levelId.trim()||
+     input.levelId.length>128||
      !point(input.start)||!point(input.end)||!Number.isFinite(input.heightM)||
      input.heightM<=0||input.heightM>20){
     throw new Error("A valid named wall, level, endpoints and height are required");
