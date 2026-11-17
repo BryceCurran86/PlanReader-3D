@@ -5,6 +5,7 @@ area or finished floor area can be minted from the preview.
 """
 
 from dataclasses import dataclass
+import math
 
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
@@ -548,6 +549,14 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
         )
         assert walk.unresolved_outside_native_path_id_sample
         assert len(walk.unresolved_outside_native_path_id_sample) <= 64
+        assert len(walk.unresolved_outside_band_review_sample) == min(
+            walk.other_source_wall_band_count, 32
+        )
+        for bounds, native_ids in walk.unresolved_outside_band_review_sample:
+            assert len(bounds) == 4
+            assert all(map(math.isfinite, bounds))
+            assert native_ids
+            assert all(0 <= idx < len(drawings) for idx in native_ids)
         assert all(
             0 <= idx < len(drawings)
             for idx in walk.unresolved_outside_native_path_id_sample
