@@ -60,6 +60,9 @@ export function PlanRevisionHistory({workspace,authenticated}:{
       <p className="muted">Model {item.previousModelRevision} → {item.updatedModelRevision}.
         Unapproved review version; drawing coordination still required.</p>
       <p className="muted">Sheets: {item.pagesRevised.map(p=>p.sheet).join(", ")}</p>
+      <p className="muted">{item.sourceVerifiedVectorOverlayComplete ?
+        "Proposed vectors source-checked and drawn on every linked page; underlying architectural geometry remains unchanged." :
+        "Coordination annotations only; verified page-vector redraw unavailable."}</p>
       <a href={item.downloadPath} download>Download this revision PDF</a>
     </div>)}
   </div>;
