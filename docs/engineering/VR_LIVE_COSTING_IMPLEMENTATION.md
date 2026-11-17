@@ -149,3 +149,14 @@ To run focused tests:
 python -m pytest -q tests/editable_3d/test_vr_live_costing.py tests/editable_3d/test_vr_live_costing_wsgi.py tests/editable_3d/test_vr_live_ratebook_store.py
 cd vr-editor && npm ci && npm test && npm run build
 ```
+
+### Interactive live refresh
+
+The pricing panel also offers opt-in **Live update after changes**, off by
+default. Once an authenticated canonical object, complete positive correction
+value and an evidence reason of at least eight characters are supplied, it
+waits 650 ms after the latest change and POSTs a fresh source-checked preview.
+Changing a field aborts prior in-flight requests, invalidates old figures and
+rejects stale receipts. The client never calculates sell prices from its own
+inputs. When **zero lines** can be priced, the display says UNPRICED rather
+than showing a misleading 0.00 job cost.
