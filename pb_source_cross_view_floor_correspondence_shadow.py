@@ -451,7 +451,7 @@ def classify_floor(
         reasons.append(BOX_NOT_WALL_BOUNDED)
     elif correspondence.get("wall_evidence_identical_on_both_sheets") is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
-    # Missing or malformed overlap counts are not evidence of zero rivals.
+    # A malformed explicit overlap count is not proof of zero rivals.
     # bool is deliberately excluded despite being a subclass of int.
     if (
         type(other_labelled_boxes_overlapping) is not int
@@ -898,8 +898,9 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     })
 
             # Keep the independently measured overlap flag and the caller's
-            # count typed. A boolean, missing/malformed non-integer or
-            # negative count is NOT a zero-overlap source receipt.
+            # explicit count typed. An omitted optional count defaults to 0,
+            # but every measured box is still checked by the geometric sweep.
+            # A supplied bool, non-integer or negative count must abstain.
             raw_overlap_count = item.get("other_labelled_boxes_overlapping", 0)
             if type(raw_overlap_count) is int and raw_overlap_count >= 0:
                 overlap_count = raw_overlap_count + int(overlap_flags[box_index])
