@@ -3,7 +3,7 @@
  * Never write the model/ledger from this module.
  */
 import type { EditorObject, SceneManifest } from "./types";
-import { FINISH_SWATCHES, visualStudyAllowed } from "./finishStudy";
+import { FINISH_SWATCHES, visualStudyAllowed } from "./finishStudy.ts";
 import type { FinishSwatch } from "./finishStudy";
 
 export interface WallDraft {
