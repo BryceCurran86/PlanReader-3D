@@ -378,3 +378,20 @@ def test_unattempted_original_gap_review_does_not_report_false_zero(tmp_path):
     assert result["topology"]["room_quantity_authorized"] is False
     assert result["commercial_quantity_rows"] == 0
     assert report.exists() and overlay.exists()
+
+
+def test_acacia_wrapped_window_and_door_schedule_page_title(tmp_path):
+    """Original Acacia p10 has Window / and Door Schedule on separate PDF lines."""
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    pdf = tmp_path / "original_schedule.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((30, 45), "Window\\nand Door Schedule")
+        document.save(pdf)
+    raw = pdf.read_bytes()
+    assert _verify_original_drawing_title(
+        raw, 0, "Window and Door Schedule",
+    ) is True
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(raw, 0, "Setout Plan")
