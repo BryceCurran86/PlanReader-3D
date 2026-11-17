@@ -897,14 +897,20 @@ class SourceCrossViewFloorCorrespondenceProducer:
                         "registered_region": mark.get("registered_region"),
                     })
 
+            # Keep the independently measured overlap flag and the caller's
+            # count typed. A boolean, missing/malformed non-integer or
+            # negative count is NOT a zero-overlap source receipt.
+            raw_overlap_count = item.get("other_labelled_boxes_overlapping", 0)
+            if type(raw_overlap_count) is int and raw_overlap_count >= 0:
+                overlap_count = raw_overlap_count + int(overlap_flags[box_index])
+            else:
+                overlap_count = raw_overlap_count
+
             classified = classify_floor(
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=(
-                    bool(item.get("other_labelled_boxes_overlapping", 0))
-                    or overlap_flags[box_index]
-                ),
+                other_labelled_boxes_overlapping=overlap_count,
                 material_code=selector.material_code,
                 identity_missing=identity_missing,
                 identity_ambiguous=identity_ambiguous,
