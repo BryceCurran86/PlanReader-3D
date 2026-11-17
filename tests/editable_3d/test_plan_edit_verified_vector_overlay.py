@@ -134,18 +134,15 @@ def test_missing_page_transform_or_nonunique_original_stroke_abstains():
 
 def test_nonfinite_out_of_bounds_forged_or_noop_patches_rejected():
     patch=_fixture_with_verified_vector_overlays()[4].vector_overlays[0]
-    for revised in (
-        replace(patch,proposed_pdf_segment=((40.,100.),(240.,100.))),
-        replace(patch,proposed_pdf_segment=((float("nan"),100.),(240.,100.))),
-        replace(patch,original_source_receipt_id=patch.transform_receipt_id),
-        replace(patch,producer_accepted=False),
-        replace(patch,projection_kind="freehand"),
+    for changed in (
+        {"proposed_pdf_segment":((40.,100.),(240.,100.))},
+        {"proposed_pdf_segment":((float("nan"),100.),(240.,100.))},
+        {"original_source_receipt_id":patch.transform_receipt_id},
+        {"producer_accepted":False},
+        {"projection_kind":"freehand"},
     ):
         with pytest.raises(ValueError):
-            # The constructor itself normally catches invalid patches.
-            VerifiedPageLineOverlay(**{
-                k:getattr(revised,k) for k in revised.__dataclass_fields__
-            })
+            replace(patch,**changed)
 
 
 def test_atomic_saved_revision_records_source_verified_vector_coverage():
