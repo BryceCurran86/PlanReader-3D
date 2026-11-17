@@ -133,10 +133,10 @@ def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
         # Require one explicit title-block field, not arbitrary page text.
         # Title/metadata may wrap across multiple PDF text lines.
         titles = re.findall(
-            r"\\bDrawing\\s+(?:title|name)\\s*:\\s*(.*?)\\s*"
-            r"(?=\\bScale\\s*:|\\bPaper\\s+size\\s*:|"
-            r"\\bDrawing\\s+number\\s*:|\\bDate\\s+issued\\s*:|"
-            r"\\bProject\\s+stage\\s*:|$)",
+            r"\bDrawing\s+(?:title|name)\s*:\s*(.*?)\s*"
+            r"(?=\bScale\s*:|\bPaper\s+size\s*:|"
+            r"\bDrawing\s+number\s*:|\bDate\s+issued\s*:|"
+            r"\bProject\s+stage\s*:|$)",
             source_title_text,
             flags=re.IGNORECASE,
         )
