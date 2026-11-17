@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EditorObject, SceneManifest } from "./types";
 import { verifyPreviewResponse } from "./previewProtocol";
 import type { VerifiedPreview } from "./previewProtocol";
@@ -7,6 +7,7 @@ type Props = {
   workspace: SceneManifest;
   object: EditorObject;
   authenticated: boolean;
+  suggestion?: { command: "SET_WALL_HEIGHT"; value: string; objectRevision: string } | null;
 };
 
 const CONTROLS: Record<string, { command: string; label: string; numeric: boolean }[]> = {
@@ -20,7 +21,7 @@ const CONTROLS: Record<string, { command: string; label: string; numeric: boolea
   ],
 };
 
-export function CommandPreview({ workspace, object, authenticated }: Props) {
+export function CommandPreview({ workspace, object, authenticated, suggestion }: Props) {
   const available = CONTROLS[object.objectType] || [];
   const [kind, setKind] = useState(available[0]?.command ?? "");
   const [value, setValue] = useState("");
@@ -31,6 +32,20 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
+
+  useEffect(() => {
+    // A local visual study can only prefill this unsubmitted form, never
+    // supply server authority, a reason, pricing or an approval.
+    if (suggestion?.objectRevision === object.objectRevision &&
+        available.some(c => c.command === suggestion.command)) {
+      setKind(suggestion.command);
+      setValue(suggestion.value);
+    } else {
+      setKind(available[0]?.command ?? "");
+      setValue("");
+    }
+    setPreview(null);
+  }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
 
   async function sendPreview() {
     setError(null);
@@ -102,6 +117,7 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
     <div className="preview-section">
       <span className="eyebrow">CONTROLLED CORRECTION PREVIEW</span>
       <p className="muted">Preview uses current PlanReader correction formulas. No change is saved or approved.</p>
+      {suggestion && <p className="muted">Illustrative VR height prefilled for review; explicitly submit with a source-based reason to request a server-side impact preview.</p>}
       {!enabled && <p className="error">Requires an authenticated workspace with a proven canonical object identity. Local JSON imports cannot submit commands.</p>}
       <label htmlFor="correction-kind">Proposed correction</label>
       <select id="correction-kind" value={kind} disabled={!enabled}
