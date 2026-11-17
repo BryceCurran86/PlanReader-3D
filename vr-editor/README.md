@@ -86,3 +86,4 @@ For a genuine finish-code quantity-impact proposal, use the existing separate
 authenticated + CSRF-bound **Controlled Correction Preview**. That preview is
 also non-persistent and is never automatically applied from a colour choice.
 
+With a supported WebXR controller, **trigger** selects an existing source object and **grip/squeeze** cycles the temporary wall colour palette (last squeeze clears it). Non-wall items and source lines with unknown height cannot be given a visual wall face. VR squeeze never sends a server command.\n
