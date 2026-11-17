@@ -8,6 +8,7 @@ import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
 import { VISUAL_PRESETS } from "./visualRealism";
 import type { LightingMood, RenderQuality } from "./visualRealism";
+import type { SurfaceDetail } from "./surfaceDetail";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
 const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView })));
@@ -20,6 +21,7 @@ export function App() {
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
+  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -172,7 +174,7 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -240,7 +242,14 @@ export function App() {
               <option value="balanced">Balanced — responsive desktop / VR</option>
               <option value="high">High fidelity — sharper desktop shadows</option>
             </select>
-            <p className="muted">Photographic lighting is illustrative. Unknown-height walls remain lines; no unsourced doors, windows, floors, ceilings or textures are manufactured.</p>
+            <label htmlFor="surface-detail" className="eyebrow">WALL SURFACE DETAIL</label>
+            <select id="surface-detail" value={surfaceDetail}
+              onChange={e => setSurfaceDetail(e.target.value as SurfaceDetail)}>
+              <option value="smooth">Smooth — evidence-neutral wall appearance</option>
+              <option value="subtle">Subtle micro-roughness — illustrative only</option>
+            </select>
+            <p className="muted">Micro-surface texture is a rendering effect, not a specified product, plaster finish, paint system, or billable material. Only source-verified existing faces receive detail.</p>
+            <p className="muted">Lighting is illustrative. Unknown-height walls remain lines; no unsourced doors, windows, floors or ceilings are manufactured.</p>
           </div>
 
           <div className="section-block detail">
