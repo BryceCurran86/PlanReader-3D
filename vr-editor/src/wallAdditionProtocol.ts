@@ -70,7 +70,7 @@ export interface WallAssemblyPreview {
     original_source_modified:false;
   };
 }
-const SHA=/^[0-9a-f]{64}$/i;
+const LINE=/^[0-9a-f]{32}$/i;
 const HASH=/^[0-9a-f]{64}$/i;
 const ID=/^[A-Za-z0-9_.:-]{1,128}$/;
 const MAX=10000;
@@ -153,7 +153,7 @@ export function verifyWallAssemblyPreview(
   const ids=new Set<string>();
   for(const item of p.quantities){
     const q=obj(item);
-    if(typeof q.line_id!=="string"||!SHA.test(q.line_id+"0".repeat(32))||
+    if(typeof q.line_id!=="string"||!LINE.test(q.line_id)||
        ids.has(q.line_id)||typeof q.trade!=="string"||
        !["carpentry","plastering","electrical","plumbing"].includes(q.trade)||
        typeof q.element!=="string"||!q.element||
