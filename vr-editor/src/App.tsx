@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { SceneView } from "./Scene";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import type { SceneManifest } from "./types";
+
+// Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
+const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView })));
 
 export function App() {
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
@@ -112,7 +114,9 @@ export function App() {
       <main className="workspace-layout">
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
-            <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} />
+            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} />
+            </Suspense>
           ) : (
             <div className="viewer-empty">
               <div className="outline-icon">⌁</div>
