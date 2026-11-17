@@ -8,8 +8,8 @@ import pytest
 from pb_vr_live_ratebook_store import (
     install_rate_book_schema, activate_rate_book, load_authorized_cost_book,
 )
-from tests.editable_3d.test_vr_editor_command_preview import _fixture
-from tests.editable_3d.test_vr_live_costing import _book, _rate
+from test_vr_editor_command_preview import _fixture
+from test_vr_live_costing import _book, _rate
 from pb_vr_live_costing import LiveRateBinding
 from pb_vr_editor_readonly_wsgi import EditorPrincipal
 
