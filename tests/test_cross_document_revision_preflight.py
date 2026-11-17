@@ -16,7 +16,7 @@ REQUIRED = frozenset({"floor", "elevation"})
 def original():
     floor = RegisteredRevisionDocument(
         "tenant", "workspace", "floor", "rev-a", "snap-a",
-        SHA1, SHA1, 0, 3, (1, 2))
+        SHA1, SHA1, 0, 3, (1,))
     elevation = RegisteredRevisionDocument(
         "tenant", "workspace", "elevation", "rev-b", "snap-b",
         SHA2, SHA2, 4, 2, (0,))
@@ -113,3 +113,22 @@ def test_untrusted_document_census_rejected():
         docs, links, ids=frozenset({"floor"})).blockers
     with pytest.raises(TypeError):
         run(docs, links, ids={"floor", "elevation"})
+
+
+def test_connected_documents_with_unwitnessed_affected_page_abstain():
+    docs, links = original()
+    docs[0] = replace(docs[0], affected_page_indices=(1, 2))
+    preflight = run(docs, links)
+    assert not preflight.source_preflight_passed
+    assert "cross_document_affected_page_unwitnessed:floor" in preflight.blockers
+    assert not preflight.atomic_write_authorized
+
+
+def test_only_verified_producer_links_qualify_for_page_coverage():
+    docs, links = original()
+    docs[0] = replace(docs[0], affected_page_indices=(1, 2))
+    second = replace(links[0], from_page_index=2, producer_witness_id="producer-callout-10")
+    passed = run(docs, links + [second])
+    assert passed.source_preflight_passed
+    failed = run(docs, links + [second], verify_edge=lambda link: link.from_page_index != 2)
+    assert "cross_document_affected_page_unwitnessed:floor" in failed.blockers
