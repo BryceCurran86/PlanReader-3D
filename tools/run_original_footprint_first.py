@@ -89,11 +89,29 @@ def _draw_source_overlay(page, original, trace, scope, ring):
     return candidate_count
 
 
-def run(pdf: Path, page_index: int, out_dir: Path):
+def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | None) -> bool:
+    """Fail before any geometry or output if the regional original is wrong.
+
+    A Brisbane acceptance run must not silently use the similar Sydney or
+    Melbourne Acacia PDF. No PDF bytes, source paths, or quantities are changed.
+    """
+    if expected_sha256 is None:
+        return False
+    if (type(expected_sha256) is not str or len(expected_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in expected_sha256)):
+        raise ValueError("original_footprint_expected_sha256_invalid")
+    if actual_sha != expected_sha256:
+        raise ValueError("original_footprint_source_sha256_mismatch")
+    return True
+
+
+def run(pdf: Path, page_index: int, out_dir: Path, *,
+        expected_sha256: str | None = None):
     import fitz
 
     original_bytes = pdf.read_bytes()
     sha = hashlib.sha256(original_bytes).hexdigest()
+    sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
     (outer,) = trace_external_footprint_first(
         original_bytes, source_sha256=sha, page_indices=(page_index,),
     )
@@ -117,6 +135,7 @@ def run(pdf: Path, page_index: int, out_dir: Path):
             )
         result = {
             "source_sha256": sha,
+            "source_sha_pin_verified": sha_pin_verified,
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
@@ -187,9 +206,15 @@ if __name__ == "__main__":
     parser.add_argument("--page", type=int, required=True,
                         help="0-based page index")
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--expected-sha256",
+                        help="Exact lowercase SHA-256 of the intended original PDF; reject wrong regional copies")
     arguments = parser.parse_args()
-    result, js, png = run(arguments.pdf, arguments.page, arguments.out_dir)
+    result, js, png = run(
+        arguments.pdf, arguments.page, arguments.out_dir,
+        expected_sha256=arguments.expected_sha256,
+    )
     print(json.dumps({
+        "source_sha_pin_verified": result["source_sha_pin_verified"],
         "exterior_status": result["exterior"]["status"],
         "source_native_ink_primitives": result["bounded_source"]["candidate_wall_native_primitives"],
         "room_topology_status": result["topology"]["status"],
