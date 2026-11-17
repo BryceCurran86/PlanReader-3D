@@ -52,6 +52,8 @@ def _bounded_raster_scale(page_width_pts: float, page_height_pts: float) -> floa
     A lower sampling scale is diagnostic only: no measured quantities or
     source geometry are inferred from these raster pixels.
     """
+    if not all(math.isfinite(d) and d > 0 for d in (page_width_pts, page_height_pts)):
+        raise ValueError("external_footprint_invalid_page_dimensions")
     longest = max(page_width_pts, page_height_pts)
     if not math.isfinite(longest) or longest <= 0:
         raise ValueError("external_footprint_invalid_page_dimensions")
