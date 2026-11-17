@@ -42,7 +42,7 @@ def _fixture():
             original_geometry_ref="path-18",
         )},
     )
-    user = EditorPrincipal("estimator-1", "tenant1", frozenset({"w1"}))
+    user = EditorPrincipal("estimator-1", "tenant1", frozenset({"w1"}), frozenset({"w1"}))
     ledger = Editable3DCorrectionLedger()
     ledger.register_object(obj)
     request = {
@@ -162,3 +162,14 @@ def test_preview_rejects_missing_or_wrong_original_source_receipt():
         result = preview_editor_command(cmd, principal=user, workspace=mismatched, ledger=ledger)
         assert result["blockingReasons"] == ["original_source_ownership_unverified"]
         assert ledger.events == ()
+
+
+def test_readonly_workspace_member_cannot_preview_correction_impacts():
+    user, ws, ledger, cmd = _fixture()
+    viewer = EditorPrincipal(user.subject_id, user.tenant_id, frozenset({"w1"}))
+    result = preview_editor_command(cmd, principal=viewer, workspace=ws, ledger=ledger)
+    assert result["accepted"] is False
+    assert result["blockingReasons"] == ["correction_preview_permission_denied"]
+    assert ledger.events == ()
+    with pytest.raises(ValueError, match="preview grants must be included"):
+        EditorPrincipal("user", "tenant1", frozenset({"w1"}), frozenset({"w2"}))
