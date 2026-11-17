@@ -657,3 +657,65 @@ def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
     assert failed.status == "ABSTAINED"
     assert failed.other_source_wall_band_count == 1
     assert failed.clockwise_pdf_pts == ()
+
+
+def test_unique_title_bearing_source_frame_can_be_excluded_without_viewport():
+    from tests.test_source_sheet_frame_roles_shadow import source
+
+    source_lines, source_titles = source()
+    dx, dy = 300, 200
+    shifted = []
+    for row in source_lines:
+        cloned = dict(row)
+        _kind, a, b = row["items"][0]
+        cloned["items"] = [(
+            "l", (a[0] + dx, a[1] + dy), (b[0] + dx, b[1] + dy)
+        )]
+        shifted.append(cloned)
+    shifted_titles = tuple(
+        (x0 + dx, y0 + dy, x1 + dx, y1 + dy, label, 0, 0, 0)
+        for x0, y0, x1, y1, label, *_rest in source_titles
+    )
+    # Original sheet frame line 13 is the left-side rule; the alleged
+    # outside wall-like bar must itself physically overlay that exact rule.
+    rows = [
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+        for _ in range(12)
+    ] + shifted
+    rect = box(309.7, 210, 310.3, 360)
+    bars = (*_building_bars(), SourceBar(rect, 13))
+    result = walk_source_unbounded_building_face(
+        bars, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert result.status == "CANDIDATE"
+    assert result.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+    assert result.outer_wall_native_path_ids == (0, 1, 2, 3)
+    assert not result.building_footprint_authenticated
+    assert not result.measurement_authorized
+
+    # Path ID by itself is not enough. Geometry anywhere else is an
+    # unresolved structural candidate regardless of the genuine frame.
+    mismatched = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 13))
+    foreign = walk_source_unbounded_building_face(
+        mismatched, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert foreign.status == "ABSTAINED"
+    assert foreign.other_source_wall_band_count == 1
+    assert foreign.source_proven_nonwall_band_count == 0
+
+    # Missing native title evidence or wall-layer reclassification cannot
+    # turn an unknown physical bar into a source-confirmed nonwall.
+    without_titles = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert without_titles.status == "ABSTAINED"
+    rows[13] = {**rows[13], "layer": "Enclosure_WallExternal"}
+    changed = walk_source_unbounded_building_face(
+        bars, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert changed.status == "ABSTAINED"
+    assert changed.clockwise_pdf_pts == ()
