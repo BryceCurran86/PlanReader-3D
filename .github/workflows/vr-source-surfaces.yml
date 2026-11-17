@@ -1,0 +1,31 @@
+name: VR authenticated building surface evidence
+on:
+  pull_request:
+    paths:
+      - 'pb_vr_verified_surface_patches.py'
+      - 'pb_vr_editor_scene_manifest.py'
+      - 'tests/editable_3d/test_vr_verified_surface_patches.py'
+      - '.github/workflows/vr-source-surfaces.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pb_vr_verified_surface_patches.py'
+      - 'pb_vr_editor_scene_manifest.py'
+      - 'tests/editable_3d/test_vr_verified_surface_patches.py'
+      - '.github/workflows/vr-source-surfaces.yml'
+jobs:
+  source-surfaces:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13','3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install tests
+        run: python -m pip install pytest PyMuPDF numpy pandas plotly
+      - name: Test source-bound floors ceilings and roofs
+        run: python -m pytest -q tests/editable_3d/test_vr_verified_surface_patches.py tests/editable_3d/test_vr_editor_scene_manifest.py
