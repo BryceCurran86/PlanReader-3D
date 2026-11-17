@@ -12,12 +12,13 @@ export interface InspectionSettings {
   showShadows: boolean;
   showLabels: boolean;
   showGhosts: boolean;
+  showDimensions: boolean;
   showStatusColours: boolean;
 }
 export const DEFAULT_INSPECTION: Readonly<InspectionSettings> = {
   reviewFilter: "all", search: "", isolateSelected: false,
   showGrid: true, showShadows: true, showLabels: true,
-  showGhosts: true, showStatusColours: true,
+  showGhosts: true, showDimensions: false, showStatusColours: true,
 };
 export function safeQuery(input: string): string {
   return input.trim().toLocaleLowerCase().slice(0, 128);
