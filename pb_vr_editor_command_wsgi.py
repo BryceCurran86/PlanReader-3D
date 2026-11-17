@@ -90,6 +90,8 @@ def make_editor_preview_wsgi_app(
             return respond("401 Unauthorized", {"error": "authentication_required"})
         if workspace_id not in principal.allowed_workspace_ids:
             return respond("403 Forbidden", {"error": "workspace_access_denied"})
+        if workspace_id not in principal.allowed_preview_workspace_ids:
+            return respond("403 Forbidden", {"error": "correction_preview_permission_denied"})
         try:
             csrf_ok = verify_csrf(environ, principal)
         except Exception:
