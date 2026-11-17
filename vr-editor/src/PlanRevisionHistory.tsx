@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SceneManifest } from "./types";
 import { verifyPlanRevisionHistory } from "./planRevisionProtocol";
 import type { SavedPlanRevision } from "./planRevisionProtocol";
+import { PlanRevisionComparePanel } from "./PlanRevisionComparePanel";
 
 export function PlanRevisionHistory({workspace,authenticated}:{
   workspace:SceneManifest;authenticated:boolean;
@@ -55,6 +56,7 @@ export function PlanRevisionHistory({workspace,authenticated}:{
     </button>
     {error&&<p role="alert" className="error">{error}</p>}
     {items?.length===0&&<p className="muted">No saved revisions for this source snapshot.</p>}
+    {authenticated&&items&&items.length>1&&<PlanRevisionComparePanel workspace={workspace} revisions={items}/>}
     {items?.map(item=><div className="plan-revision-history-row" key={item.revisionId}>
       <strong>{item.revisionLabel} · {item.pagesRevised.length} linked page(s)</strong>
       <p className="muted">Model {item.previousModelRevision} → {item.updatedModelRevision}.
