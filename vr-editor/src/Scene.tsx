@@ -12,6 +12,7 @@ import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
 import type { WallAdditionSketch } from "./wallAdditionProtocol";
+import { evaluateSourceFloorTeleport,describeTeleportReason } from "./verifiedTeleport";
 import { scopeKey } from "./reviewDraft";
 import { safeWallMoves } from "./wallMoveStudy";
 import type { MoveMode, WallMoveHistory } from "./wallMoveStudy";
@@ -33,6 +34,8 @@ type Props = {
   detail: SurfaceDetail;
   moveMode: MoveMode;
   addedWallSketch: WallAdditionSketch | null;
+  teleportMode: boolean;
+  onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
   captureSerial: number;
@@ -115,6 +118,7 @@ function displaySourceSurface(surface: SourceSurface): THREE.Mesh {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.userData.objectId = surface.objectId;
   mesh.userData.surfaceId = surface.surfaceId;
+  mesh.userData.surfaceKind = surface.kind;
   mesh.userData.sourceWitnessedSurface = true;
   mesh.castShadow = surface.kind === "roof";
   mesh.receiveShadow = true;
@@ -144,13 +148,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, teleportMode, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const teleportSettings = useRef({teleportMode,onTeleportMessage});
+  teleportSettings.current = {teleportMode,onTeleportMessage};
   const addedWallRef = useRef(addedWallSketch);
   addedWallRef.current = addedWallSketch;
   const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
@@ -232,6 +238,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const physical = new THREE.Group();
     scene.add(physical);
     const pickables: THREE.Object3D[] = [];
+    const verifiedFloorMeshes: THREE.Object3D[] = [];
     const sourceById = new Map(manifest.objects.map(row => [row.objectId, row]));
     for (const row of manifest.objects) {
       const item = displayObject(row, initialPreset.materialRoughness);
@@ -252,6 +259,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     // source-derived surface evidence, not the synthetic shadow ground plane.
     for (const surface of manifest.sourceSurfaces ?? []) {
       const mesh = displaySourceSurface(surface);
+      if(surface.kind==="floor")verifiedFloorMeshes.push(mesh);
       physical.add(mesh);
       pickables.push(mesh);
       mesh.userData.originalReviewColor =
@@ -390,8 +398,71 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
       pick();
     }
-    const select0 = () => xrPick(controllers[0]);
-    const select1 = () => xrPick(controllers[1]);
+    // This marker is never a source object: only a validated raycast hit
+    // from the authenticated existing floor may authorise teleportation.
+    const teleportMarker = new THREE.Mesh(
+      new THREE.RingGeometry(.18,.24,32),
+      new THREE.MeshBasicMaterial({color:0x4ee0b8,side:THREE.DoubleSide,
+        depthWrite:false,transparent:true,opacity:.9}),
+    );
+    teleportMarker.rotation.x=-Math.PI/2;
+    teleportMarker.visible=false;
+    scene.add(teleportMarker);
+
+    function candidateTeleport(index:number) {
+      const controller=controllers[index];
+      tempMatrix.identity().extractRotation(controller.matrixWorld);
+      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+      raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMatrix);
+      const hit=raycaster.intersectObjects(verifiedFloorMeshes,false)[0];
+      if (!hit) return {accepted:false as const,reason:"no_verified_source_floor" as const};
+      const id=hit.object.userData.surfaceId as string|undefined;
+      if (!id) return {accepted:false as const,reason:"no_verified_source_floor" as const};
+      const head=renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+      return evaluateSourceFloorTeleport(
+        manifest,id,[hit.point.x,hit.point.y,hit.point.z],
+        [head.x,head.y,head.z],
+      );
+    }
+    const trigger=(index:number)=>{ // Headset trigger still selects unless explicitly in teleport mode.
+      if(!teleportSettings.current.teleportMode){
+        xrPick(controllers[index]);return;
+      }
+      if(!renderer.xr.isPresenting){
+        teleportSettings.current.onTeleportMessage("Start a VR session before teleporting.");
+        return;
+      }
+      const target=candidateTeleport(index);
+      if(!target.accepted || !target.destination){
+        teleportSettings.current.onTeleportMessage(describeTeleportReason(target.reason));
+        return;
+      }
+      const space=renderer.xr.getReferenceSpace();
+      if(!space || typeof XRRigidTransform==="undefined"){
+        teleportSettings.current.onTeleportMessage("SteamVR has no movable WebXR reference space.");
+        return;
+      }
+      const head=renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+      const x=head.x-target.destination[0];
+      const z=head.z-target.destination[2];
+      try {
+        // An incremental XR reference-space offset moves the virtual
+        // observer without modifying any PlanReader source geometry.
+        const offset=new XRRigidTransform(
+          {x,y:0,z},{x:0,y:0,z:0,w:1},
+        );
+        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(offset));
+        teleportSettings.current.onTeleportMessage(
+          `Moved ${(target.distanceM??0).toFixed(1)}m on verified floor (review navigation only)`,
+        );
+      } catch {
+        teleportSettings.current.onTeleportMessage(
+          "SteamVR declined the teleport reference-space change.",
+        );
+      }
+    };
+    const select0 = () => trigger(0);
+    const select1 = () => trigger(1);
     // SteamVR presents Sony Sense controllers as standard XR input sources.
     // Do not rely on a proprietary profile name or guessed Sony button IDs:
     // WebXR 'select' aims with the trigger, 'squeeze' invokes the grip action.
@@ -405,6 +476,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       sessionReportCallback.current({presenting, controllers: controllerInfos});
     };
     function applyFinishSqueeze() {
+      if (teleportSettings.current.teleportMode) return;
       const id = picked.current;
       if (id && sourceById.has(id)) cycleCallback.current(id);
     }
@@ -573,6 +645,22 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           obj.position.set(dx,0,dz);
       }
       refreshWallAddition();
+      // Aiming at source-backed floor is visible only in immersive VR.
+      // Never display this marker over an invented presentation floor.
+      teleportMarker.visible=false;
+      if(renderer.xr.isPresenting && teleportSettings.current.teleportMode) {
+        for(let index=0;index<controllers.length;index++) {
+          const source=inputSources[index];
+          if(!source || source.targetRayMode!=="tracked-pointer")continue;
+          const target=candidateTeleport(index);
+          if(target.accepted && target.destination){
+            const [x,y,z]=target.destination;
+            teleportMarker.position.set(x,y+.02,z);
+            teleportMarker.visible=true;
+            break;
+          }
+        }
+      }
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
       presentationFloor.visible = activeInspection.showShadows;
