@@ -115,13 +115,16 @@ def _encode(value: object) -> str:
 
 
 def _read_head(connection: sqlite3.Connection, key: tuple[str, ...]):
-    return connection.execute(
+    row = connection.execute(
         """SELECT revision_id, model_revision, revision_number, updated_pdf_sha256
         FROM plan_edit_revision_heads
         WHERE tenant_id=? AND workspace_id=? AND document_id=?
           AND source_pdf_sha256=? AND source_snapshot_id=?""",
         key,
     ).fetchone()
+    # The production PlanReader SQLite connection uses sqlite3.Row. Normalise
+    # to tuples for deterministic compare-and-swap against a fresh HEAD read.
+    return tuple(row) if row is not None else None
 
 
 def _idempotent_result(connection: sqlite3.Connection, key: tuple[str, ...],
