@@ -24,3 +24,8 @@
 .section-block>label:not(.file-upload){font-size:11px;color:#a9c5c7;display:block;margin-top:13px}
 .section-block input[type=search]{width:100%;border:1px solid #45616c;background:#202f38;color:#e3edf0;border-radius:6px;padding:10px;margin-top:8px}
 .review-source-copy{width:100%;margin:10px 0}
+
+.review-note-list{margin-top:14px;max-height:390px;overflow:auto}
+.review-note{padding:12px;border:1px solid #455761;background:#1b2b34;border-radius:6px;margin-bottom:9px;font-size:12px;overflow-wrap:anywhere}
+.review-note p{line-height:1.5;color:#bbcad0;white-space:pre-wrap}
+.review-note button{min-width:0;overflow-wrap:anywhere}
