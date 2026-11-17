@@ -782,6 +782,50 @@ def test_parallel_face_gap_is_consumed_when_sibling_face_is_jamb_closed():
     assert all(c.kind == KIND_STROKE for c in result.closures)
 
 
+def test_parallel_face_consume_survives_translation_and_segment_split():
+    """Sibling-face consume must be invariant to rigid shift and collinear splits."""
+    def build(dx: float, dy: float, *, split_jamb: bool):
+        rows = (
+            strip(0 + dx, 0 + dy, 2 + dx, 100 + dy)
+            + strip(198 + dx, 0 + dy, 200 + dx, 100 + dy)
+            + strip(2 + dx, 0 + dy, 198 + dx, 2 + dy)
+            + strip(2 + dx, 98 + dy, 198 + dx, 100 + dy)
+        )
+        rows += strip(2 + dx, 40 + dy, 80 + dx, 44 + dy) + strip(120 + dx, 40 + dy, 198 + dx, 44 + dy)
+        rows += strip(2 + dx, 40.8 + dy, 80 + dx, 44 + dy) + strip(120 + dx, 40.8 + dy, 198 + dx, 44 + dy)
+        if split_jamb:
+            rows.append(line((80 + dx, 40.8 + dy), (80 + dx, 42 + dy)))
+            rows.append(line((80 + dx, 42 + dy), (80 + dx, 44 + dy)))
+            rows.append(line((120 + dx, 40.8 + dy), (120 + dx, 42 + dy)))
+            rows.append(line((120 + dx, 42 + dy), (120 + dx, 44 + dy)))
+        else:
+            rows.append(line((80 + dx, 40.8 + dy), (80 + dx, 44 + dy)))
+            rows.append(line((120 + dx, 40.8 + dy), (120 + dx, 44 + dy)))
+        return build_layered_wall_doorway_room_rings(
+            rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+        )
+
+    baseline = build(0.0, 0.0, split_jamb=False)
+    shifted = build(17.5, -9.0, split_jamb=False)
+    split = build(0.0, 0.0, split_jamb=True)
+    for result in (baseline, shifted, split):
+        assert result.unresolved_gap_count == 0
+        assert len(result.closures) >= 2
+        assert all(c.kind == KIND_STROKE for c in result.closures)
+
+
+def test_parallel_face_without_sibling_jamb_closure_stays_unresolved():
+    """Parallel faces alone must not invent a doorway when no jamb closes either gap."""
+    rows = strip(0, 0, 2, 100) + strip(198, 0, 200, 100) + strip(2, 0, 198, 2) + strip(2, 98, 198, 100)
+    rows += strip(2, 40, 80, 44) + strip(120, 40, 198, 44)
+    rows += strip(2, 40.8, 80, 44) + strip(120, 40.8, 198, 44)
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.unresolved_gap_count >= 1
+    assert all(c.kind != KIND_STROKE for c in result.closures)
+
+
 def test_equally_near_competing_through_jambs_abstain():
     """Two full through-jambs at equal distance from a gap end must not pick a winner."""
     rows = strip(0, 0, 200, 2) + strip(0, 98, 200, 100) + strip(0, 2, 2, 98) + strip(198, 2, 200, 98)

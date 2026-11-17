@@ -172,24 +172,38 @@ def _owner_excluded_green_ink(color: Any) -> bool:
     )
 
 
+def _is_dark_neutral_paint(color: Any) -> bool:
+    """Near-black / dark gray CAD paint (≤0.25), not mid-gray glazing evidence."""
+    return (
+        isinstance(color, (tuple, list))
+        and len(color) == 3
+        and all(
+            type(v) in (int, float) and math.isfinite(v) and 0.0 <= v <= 0.25
+            for v in color
+        )
+        and max(color) - min(color) <= 0.03
+    )
+
+
 def _is_source_wall_support_row(row: Mapping[str, Any]) -> bool:
-    """Named wall layer, black unfilled stroke, or near-black fill — not mid-gray evidence."""
+    """Named wall layer with dark paint, black stroke, or near-black fill — not mid-gray."""
     fill, stroke = row.get("fill"), row.get("color")
     if _owner_excluded_green_ink(fill) or _owner_excluded_green_ink(stroke):
+        return False
+    # Unfilled mid-gray / pale strokes stay doorway/glazing evidence only even
+    # when the CAD layer name says Wall*; they must not mint wall strips or
+    # alone authorize a bounded footprint primitive count.
+    if (
+        fill is None
+        and stroke is not None
+        and not _is_black(stroke)
+        and not _is_dark_neutral_paint(stroke)
+    ):
         return False
     return bool(
         is_explicit_wall_layer_name(str(row.get("layer") or ""))
         or (fill is None and _is_black(stroke) and _visible_source_stroke_paint(row))
-        or (
-            isinstance(fill, (tuple, list))
-            and len(fill) == 3
-            and all(
-                type(v) in (int, float)
-                and math.isfinite(v) and 0 <= v <= 0.25
-                for v in fill
-            )
-            and max(fill) - min(fill) <= 0.03
-        )
+        or _is_dark_neutral_paint(fill)
     )
 
 
