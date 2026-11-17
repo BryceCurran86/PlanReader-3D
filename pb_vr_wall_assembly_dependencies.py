@@ -41,9 +41,11 @@ def _num(value: object, field: str, *, zero: bool = False, cap: float = 1e6) -> 
 
 
 def _point(value: object) -> tuple[float, float]:
-    if type(value) is not tuple or len(value) != 2:
+    if (type(value) is not tuple or len(value) != 2 or
+        any(type(v) not in (int, float) or not math.isfinite(v) or
+            abs(v) > 10_000 for v in value)):
         raise ValueError("new_wall_position_invalid")
-    return tuple(_num(x, "coordinate", zero=True, cap=10000) for x in value)
+    return (float(value[0]), float(value[1]))
 
 
 @dataclass(frozen=True)
