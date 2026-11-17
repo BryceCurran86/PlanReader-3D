@@ -180,6 +180,7 @@ def _gap_covered_by_physical_wall(
     if not math.isfinite(length) or length <= 0.0:
         return False
     ux, uy = vx / length, vy / length
+    intervals: List[Tuple[float, float]] = []
     for sid, (x1, y1, x2, y2) in members.items():
         if sid in (gap.source_primitive_id_a, gap.source_primitive_id_b):
             continue
@@ -190,9 +191,24 @@ def _gap_covered_by_physical_wall(
             continue
         p, q = sorted(((x1 - ax) * ux + (y1 - ay) * uy,
                        (x2 - ax) * ux + (y2 - ay) * uy))
-        if max(0.0, min(length, q) - max(0.0, p)) >= min_covered_fraction * length:
-            return True
-    return False
+        lo, hi = max(0.0, p), min(length, q)
+        if hi > lo:
+            intervals.append((lo, hi))
+    if not intervals:
+        return False
+    # Source-native walls are frequently split into several vector strokes.
+    # Union strictly contiguous collinear strokes, but DO NOT close a door-sized
+    # missing interval by treating disconnected end pieces as one wall.
+    intervals.sort()
+    start, stop = intervals[0]
+    for lo, hi in intervals[1:]:
+        if lo > stop + alignment_tolerance_pt:
+            if stop - start >= min_covered_fraction * length:
+                return True
+            start, stop = lo, hi
+        else:
+            stop = max(stop, hi)
+    return stop - start >= min_covered_fraction * length
 
 
 def derive_structural_room_regions(
