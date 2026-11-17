@@ -526,36 +526,44 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     walk = attempt.source_outside_face_walk
     assert walk is not None
     assert walk.measurement_authorized is False
-    # Original two-dwelling building wall graph now yields one source-backed
-    # exterior review candidate. PARTY remains internal and no physical
-    # measurement or commercial wall quantity is authorized.
-    assert walk.status == "CANDIDATE"
-    assert walk.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+    # CANDIDATE and unresolved outside structural wall bands are mutually
+    # exclusive. A negative source-role audit must never mint an exterior
+    # physical envelope from a diagnostic preview alone.
     assert walk.unclosed_dwelling_sides == ()
     assert walk.enclosed_dwelling_zone_count == 2
-    assert len(walk.clockwise_pdf_pts) >= 5
-    assert walk.clockwise_pdf_pts[0] == walk.clockwise_pdf_pts[-1]
-    assert len(walk.outer_wall_native_path_ids) >= 4
     assert not walk.building_footprint_authenticated
     assert not walk.measurement_authorized
-    assert attempt.status == "CANDIDATE"
     assert attempt.source_outside_face_walk is not None
     assert attempt.shared_dwelling_divider_candidates
-    # Preflight displays 0.001pt-rounded points while the source walker
-    # preserves full original PDF precision and a terminal close vertex.
-    assert Polygon(attempt.polygon_pdf_pts).hausdorff_distance(
-        Polygon(walk.clockwise_pdf_pts)
-    ) < 0.005
-    # Source-negative role audit must run through preflight drawings and
-    # only drop independently proven non-walls. Genuine residual outside
-    # structural/unlabelled bands keep the hard ABSTAIN.
-    assert walk.source_outside_role_audit_applied is True
-    assert walk.source_proven_nonwall_band_count >= 1
-    assert walk.source_outside_band_count_before_role_audit > (
-        walk.other_source_wall_band_count
-    )
-    assert walk.other_source_wall_band_count >= 1
-    assert walk.to_dict()["source_outside_role_audit_noncommercial"] is True
+    if walk.other_source_wall_band_count:
+        assert walk.status == "ABSTAINED"
+        assert walk.reason == "source_other_structural_walls_outside_candidate"
+        assert walk.clockwise_pdf_pts == ()
+        assert walk.outer_wall_native_path_ids == ()
+        assert len(walk.diagnostic_unsealed_ring_pdf_pts) >= 5
+        assert walk.source_outside_role_audit_applied is True
+        assert walk.source_proven_nonwall_band_count >= 1
+        assert walk.source_outside_band_count_before_role_audit > (
+            walk.other_source_wall_band_count
+        )
+        assert walk.unresolved_outside_native_path_id_sample
+        assert len(walk.unresolved_outside_native_path_id_sample) <= 64
+        assert all(
+            0 <= idx < len(drawings)
+            for idx in walk.unresolved_outside_native_path_id_sample
+        )
+        assert walk.to_dict()["source_outside_role_audit_noncommercial"] is True
+        assert walk.to_dict()["unresolved_owner_ids_are_review_only"] is True
+        assert attempt.status == "ABSTAINED"
+    else:
+        assert walk.status == "CANDIDATE"
+        assert walk.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+        assert len(walk.clockwise_pdf_pts) >= 5
+        assert walk.clockwise_pdf_pts[0] == walk.clockwise_pdf_pts[-1]
+        assert len(walk.outer_wall_native_path_ids) >= 4
+        assert walk.unresolved_outside_native_path_id_sample == ()
+        # Candidate topology is still unsealed, never commercial.
+        assert attempt.measurement_authorized is False
     assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
     assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     assert receipt["measurement_authorized"] is False
@@ -615,6 +623,8 @@ def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
         assert result.reason == "source_other_structural_walls_outside_candidate"
         assert result.other_source_wall_band_count == 1
         assert result.source_proven_nonwall_band_count == 0
+        assert result.unresolved_outside_native_path_id_sample == (12,)
+        assert result.to_dict()["unresolved_outside_native_path_id_sample"] == [12]
         assert result.source_outside_band_count_before_role_audit == 1
         assert result.to_dict()["source_outside_role_audit_noncommercial"] is True
         assert result.clockwise_pdf_pts == ()
