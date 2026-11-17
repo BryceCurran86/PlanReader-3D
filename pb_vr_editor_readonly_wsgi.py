@@ -27,6 +27,9 @@ class EditorPrincipal:
     # Reading a workspace does NOT grant access to geometry/quantity impact
     # previews. A production permission resolver must populate this explicitly.
     allowed_preview_workspace_ids: frozenset[str] = frozenset()
+    # Revision writes are strictly stronger than preview access and default off.
+    # The production permission resolver must opt in explicitly per workspace.
+    allowed_revision_workspace_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.subject_id or not self.tenant_id:
@@ -37,6 +40,10 @@ class EditorPrincipal:
             raise ValueError("allowed_preview_workspace_ids must be an immutable server-side grant set")
         if not self.allowed_preview_workspace_ids.issubset(self.allowed_workspace_ids):
             raise ValueError("preview grants must be included in allowed readable workspaces")
+        if not isinstance(self.allowed_revision_workspace_ids, frozenset):
+            raise ValueError("revision grants must be an immutable server-side grant set")
+        if not self.allowed_revision_workspace_ids.issubset(self.allowed_preview_workspace_ids):
+            raise ValueError("revision grants must be included in previewable workspaces")
 
 
 @dataclass(frozen=True)
