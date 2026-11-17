@@ -344,6 +344,8 @@ def walk_source_unbounded_building_face(
     if source_drawings is not None:
         from pb_source_native_exterior_endpoint_authority_shadow import (
             ROLE_EXCLUSION,
+            ROLE_EXTERIOR_OUTER_FACE,
+            ROLE_INTERNAL_WALL,
             classify_source_native_path_role,
         )
         from pb_source_outer_house_continuity_shadow import (
@@ -358,6 +360,41 @@ def walk_source_unbounded_building_face(
         sheet_nonwall = source_sheet_frame_nonwall_path_ids(
             source_drawings, source_words,
         )
+
+        def _unfilled_empty_thin_stroke(row: Mapping[str, Any]) -> bool:
+            if str(row.get("layer") or "").strip() or row.get("fill") is not None:
+                return False
+            if row.get("type") not in ("s", None):
+                return False
+            try:
+                width = float(row.get("width"))
+            except (TypeError, ValueError):
+                return False
+            return 0 < width <= 1.0
+
+        def _service_or_roof_layer(row: Mapping[str, Any]) -> bool:
+            compact = "".join(
+                c for c in str(row.get("layer") or "").lower() if c.isalnum()
+            )
+            return any(
+                token in compact for token in ("service", "storm", "gas", "roof")
+            )
+
+        def _nonwall_residual_path(idx: int) -> bool:
+            # Annotation exclusions still go through classify_outside_envelope_role
+            # so house-named garage/porch context can refuse the drop. This
+            # branch only covers empty thin strokes, sheet-frame rules, and
+            # pure service/roof paint.
+            if idx in sheet_nonwall:
+                return True
+            row = source_drawings[idx]
+            if _unfilled_empty_thin_stroke(row):
+                return True
+            return (
+                classify_source_native_path_role(row) == ROLE_EXCLUSION
+                and _service_or_roof_layer(row)
+            )
+
         for bar, (_geom, ids) in outside:
             # A stale/partial native-path index or conflicting viewport
             # makes the candidate unresolved. Never trust one excluded
@@ -381,6 +418,10 @@ def walk_source_unbounded_building_face(
             if len(viewports) != 1:
                 unresolved.append((bar, ids))
                 continue
+            path_roles = {
+                classify_source_native_path_role(source_drawings[idx])
+                for idx in ids
+            }
             role, _reason = classify_outside_envelope_role(
                 bar, source_drawings, source_words,
             )
@@ -394,6 +435,12 @@ def walk_source_unbounded_building_face(
             ):
                 # A layerless sheet frame + annotation composite is neither
                 # a house wall nor an excuse to drop a mixed physical owner.
+                excluded_nonwall += 1
+            elif (
+                ROLE_EXTERIOR_OUTER_FACE not in path_roles
+                and ROLE_INTERNAL_WALL not in path_roles
+                and all(_nonwall_residual_path(idx) for idx in ids)
+            ):
                 excluded_nonwall += 1
             else:
                 unresolved.append((bar, ids))
