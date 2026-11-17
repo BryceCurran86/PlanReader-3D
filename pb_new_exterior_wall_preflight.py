@@ -106,6 +106,41 @@ class SourceNativeOuterWallAttempt:
     )
 
 
+def _independent_outside_nonwall_audit_complete(
+    walk: Any, outer: Polygon, *, outside_band_count: int,
+    party_divider_count: int,
+) -> bool:
+    """Only complete ORIGINAL source-negative receipts bypass legacy veto.
+
+    Comparing a candidate polygon to its own tracing walker is insufficient.
+    The walker must have audited every actual outside band with native ink,
+    source-local role evidence and no unresolved structural wall candidate.
+    Never authenticates the physical wall or authorizes a quantity.
+    """
+    if not party_divider_count or walk is None:
+        return False
+    if (
+        getattr(walk, "status", None) != "CANDIDATE"
+        or not getattr(walk, "source_outside_role_audit_applied", False)
+        or getattr(walk, "other_source_wall_band_count", None) != 0
+        or getattr(walk, "source_outside_band_count_before_role_audit", None)
+           != outside_band_count
+        or getattr(walk, "source_proven_nonwall_band_count", None)
+           != outside_band_count
+        or len(getattr(walk, "outer_wall_native_path_ids", ()) or ()) < 4
+    ):
+        return False
+    try:
+        other = Polygon(walk.clockwise_pdf_pts)
+        return bool(
+            outer.is_valid and other.is_valid
+            and not outer.is_empty and not other.is_empty
+            and outer.equals_exact(other, tolerance=CONTACT_PT)
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def attempt_source_native_outer_wall_first(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -451,15 +486,9 @@ def attempt_source_native_outer_wall_first(
     # A CANDIDATE/self-matching polygon is never enough on its own: all bars
     # must be original source-authenticated nonwalls, with matching count and
     # independently source-owned external wall path indices. Still no FIRM.
-    fully_proven_nonwall_outside = bool(
-        party_dividers and walk is not None
-        and walk.status == "CANDIDATE"
-        and walk.source_outside_role_audit_applied
-        and walk.other_source_wall_band_count == 0
-        and walk.source_outside_band_count_before_role_audit == len(outside_bars)
-        and walk.source_proven_nonwall_band_count == len(outside_bars)
-        and len(walk.outer_wall_native_path_ids) >= 4
-        and outer.equals_exact(Polygon(walk.clockwise_pdf_pts), tolerance=CONTACT_PT)
+    fully_proven_nonwall_outside = _independent_outside_nonwall_audit_complete(
+        walk, outer, outside_band_count=len(outside_bars),
+        party_divider_count=len(party_dividers),
     )
     structural_outside = [] if fully_proven_nonwall_outside else [
         bar for bar in outside_bars
