@@ -63,3 +63,18 @@
 .plan-edit-saved a,.plan-revision-history a{color:#9be5c4;text-decoration:underline;font-weight:600;font-size:12px}
 .plan-revision-history-row{padding:11px 0;border-top:1px solid #49645d;margin-top:12px}
 .plan-revision-history-row p{overflow-wrap:anywhere;font-size:12px}
+
+.pcvr2-panel{display:flex;flex-direction:column;gap:9px}
+.pcvr2-panel p{margin:5px 0}
+.pcvr2-status{display:flex;flex-direction:column;gap:5px;background:#18303b;border:1px solid #48616d;border-radius:8px;padding:12px;font-size:12px;line-height:1.55}
+.pcvr2-status strong{color:#bce8e4}
+.pcvr2-status span{color:#a9c7d5}
+.pcvr2-panel button{border:1px solid #488c91;background:#1f4e56;color:#e7fff8;border-radius:8px;padding:10px 12px;cursor:pointer;font-weight:600;font-size:12px}
+.pcvr2-panel button:disabled{opacity:.5;cursor:not-allowed}
+.pcvr2-panel button:focus-visible,.pcvr2-links a:focus-visible{outline:2px solid #b2ffdf;outline-offset:3px}
+.pcvr2-controllers{background:#17272f;border:1px solid #36535c;padding:12px;border-radius:8px}
+.pcvr2-controllers ul{list-style:none;margin:9px 0 0;padding:0}
+.pcvr2-controllers li{padding:8px 0;border-top:1px solid #354d54;display:flex;flex-direction:column;gap:3px;font-size:11px;overflow-wrap:anywhere}
+.pcvr2-controllers li span{color:#a5bfc6}
+.pcvr2-links{display:flex;flex-wrap:wrap;gap:9px}
+.pcvr2-links a{color:#95d5e6;font-size:11px;text-decoration:underline}
