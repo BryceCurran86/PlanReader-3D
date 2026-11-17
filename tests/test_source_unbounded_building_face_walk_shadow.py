@@ -1026,6 +1026,15 @@ def test_unresolved_source_owner_sample_excludes_foreign_composite_path_ids():
     assert walk.other_source_wall_band_count == 1
     assert walk.unresolved_outside_native_path_id_sample == (12,)
     assert walk.to_dict()["unresolved_outside_native_path_id_sample"] == [12]
+    assert len(walk.unresolved_outside_band_review_sample) == 1
+    bbox, owners = walk.unresolved_outside_band_review_sample[0]
+    assert bbox == (280.0, 20.0, 283.0, 40.0)
+    assert owners == (12,)
+    review = walk.to_dict()["unresolved_outside_band_review_sample"][0]
+    assert review["source_local_native_path_ids"] == [12]
+    assert review["bounds_pdf_pts"] == [280.0, 20.0, 283.0, 40.0]
+    assert review["measurement_authorized"] is False
+    assert review["physical_wall_authenticated"] is False
     assert walk.outer_wall_native_path_ids == ()
     assert walk.clockwise_pdf_pts == ()
     assert not walk.measurement_authorized
