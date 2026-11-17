@@ -37,3 +37,5 @@ $duplicate = Get-Content -LiteralPath $fixture -Raw | ConvertFrom-Json
 $duplicate.objects = @($duplicate.objects[0], $duplicate.objects[0])
 Invoke-Case $duplicate $false
 Write-Host "Six bounded source-neutral native scene tests passed."
+# The final negative fixture intentionally returns exit 2; reset process result.
+exit 0
