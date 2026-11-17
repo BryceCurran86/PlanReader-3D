@@ -611,7 +611,10 @@ def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
     assert result.status == "CANDIDATE"
     assert result.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
     assert result.other_source_wall_band_count == 0
-    assert result.source_proven_nonwall_band_count == 0  # CANDIDATE keeps no veto metrics
+    assert result.source_proven_nonwall_band_count == 1
+    assert result.source_outside_band_count_before_role_audit == 1
+    assert result.source_outside_role_audit_applied is True
+    assert result.to_dict()["source_outside_role_audit_noncommercial"] is True
     assert result.measurement_authorized is False
 
 def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
