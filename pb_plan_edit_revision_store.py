@@ -17,7 +17,7 @@ from dataclasses import asdict
 from hashlib import sha256
 import json
 import sqlite3
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from pb_editable_3d_correction_model import (
     CorrectionSource, Editable3DCorrectionLedger,
@@ -201,6 +201,7 @@ def save_plan_edit_revision(
     command: Mapping[str, Any],
     original_pdf_bytes: bytes,
     page_coverage: RelatedPageCoverage,
+    unified_head_verifier: Callable[[EditorPrincipal, AuthorizedSceneWorkspace, sqlite3.Connection], bool] | None = None,
     existing_rows: Sequence[TakeoffOutputRow] = (),
 ) -> dict[str, Any]:
     """Atomically save an edited model revision + all verified related PDF pages.
@@ -212,6 +213,8 @@ def save_plan_edit_revision(
     _require_save_permission(principal, workspace)
     if not isinstance(connection, sqlite3.Connection) or connection.in_transaction:
         raise ValueError("revision_store_requires_idle_sqlite_transaction")
+    if not callable(unified_head_verifier):
+        raise ValueError("plan_revision_requires_transactional_unified_head_verifier")
     if type(workspace_db_id) is not int or workspace_db_id <= 0:
         raise ValueError("trusted_workspace_db_id_required")
     if type(ledger) is not Editable3DCorrectionLedger or not isinstance(command, Mapping):
@@ -307,6 +310,10 @@ def save_plan_edit_revision(
     # fails; no app edit without a persisted revision and related-page bundle.
     connection.execute("BEGIN IMMEDIATE")
     try:
+        # All competing editors must participate in the host-owned document
+        # lock, held across this entire write transaction.
+        if unified_head_verifier(principal, workspace, connection) is not True:
+            raise PlanRevisionConflict("another_editor_or_document_revision_unresolved")
         current = _read_head(connection, key)
         if current != head:
             raise PlanRevisionConflict("concurrent_document_revision_conflict")
