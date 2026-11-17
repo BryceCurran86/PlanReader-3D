@@ -632,8 +632,16 @@ def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
         assert result.reason == "source_other_structural_walls_outside_candidate"
         assert result.other_source_wall_band_count == 1
         assert result.source_proven_nonwall_band_count == 0
-        assert result.unresolved_outside_native_path_id_sample == (12,)
-        assert result.to_dict()["unresolved_outside_native_path_id_sample"] == [12]
+        # A missing source path ID may be suspected, but cannot be
+        # represented as a *locally authenticated* original owner.
+        if len(sources) <= 12:
+            assert result.unresolved_outside_native_path_id_sample == ()
+            review = result.to_dict()["unresolved_outside_band_review_sample"][0]
+            assert review["source_local_native_path_ids"] == []
+            assert review["owner_locality_authenticated"] is False
+        else:
+            assert result.unresolved_outside_native_path_id_sample == (12,)
+            assert result.to_dict()["unresolved_outside_native_path_id_sample"] == [12]
         assert result.source_outside_band_count_before_role_audit == 1
         assert result.to_dict()["source_outside_role_audit_noncommercial"] is True
         assert result.clockwise_pdf_pts == ()
