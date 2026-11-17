@@ -190,8 +190,25 @@ def test_acacia_222pt_gap_stays_open_and_unjoined():
     assert set(first["native_path_ids"]) | set(first["nearby_native_path_ids"]) == {0, 1}
     assert first["separation_pdf_pts"] == 222.6
     assert first["physical_join_authenticated"] is False
+    assert first["unique_jamb_authenticated"] is False
+    assert first["disposition"] == "abstain_unclosed_exterior_no_unique_jamb"
     assert cycle["measurement_authorized"] is False
     assert cycle["layer_name_physical_promotion"] is False
+
+
+def test_sub_snap_unclosed_endpoint_abstains_with_competing_body_disposition():
+    """Acacia ~0.93 pt tip: nearby body inside 2.5 pt must not invent a join."""
+    bars = (_strip(0, (0, 0, 10, 1)), _strip(1, (10.93, 0, 20.93, 1)))
+    drawings = (_drawing(), _drawing())
+    cycle = audit_source_native_exterior_cycle(bars, drawings, page_index=1)
+    first = cycle["first_unclosed_endpoint"]
+    assert first is not None
+    assert first["separation_pdf_pts"] == 0.93
+    assert first["competing_bodies_within_association_pt"] >= 1
+    assert first["unique_jamb_authenticated"] is False
+    assert first["physical_join_authenticated"] is False
+    assert first["disposition"] == "abstain_competing_bodies_within_association"
+    assert first["status"] == EvidenceResolutionStatus.ABSTAINED.value
 
 
 def test_point4252_collinear_gap_is_not_a_join():

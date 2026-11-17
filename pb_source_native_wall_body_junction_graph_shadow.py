@@ -388,11 +388,31 @@ def _open_endpoint_receipts(bars: Sequence[Any]) -> tuple[dict[str, object], ...
                 if nearest_sep is None or sep < nearest_sep:
                     nearest_sep = sep
                     nearby = _path_ids(other)
+            # Sub-snap separations still abstain without a unique jamb/owner.
+            # Count competing nearby bodies inside the 2.5 pt association window
+            # so audits can prove the gap is contested rather than silently joinable.
+            association_pt = 2.5
+            competing = 0
+            for j, other in enumerate(valid):
+                if j == i:
+                    continue
+                if float(Point(tip).distance(other.polygon)) <= association_pt:
+                    competing += 1
+            if competing > 0:
+                disposition = "abstain_competing_bodies_within_association"
+            elif nearest_sep is not None and nearest_sep <= association_pt:
+                disposition = "abstain_sub_snap_gap_without_unique_jamb"
+            else:
+                disposition = "abstain_unclosed_exterior_no_unique_jamb"
             opens.append({
                 "tip_pdf_pts": [round(float(tip[0]), 3), round(float(tip[1]), 3)],
                 "native_path_ids": list(_path_ids(bar)),
                 "nearby_native_path_ids": list(nearby),
                 "separation_pdf_pts": None if nearest_sep is None else round(float(nearest_sep), 4),
+                "competing_bodies_within_association_pt": competing,
+                "association_window_pt": association_pt,
+                "unique_jamb_authenticated": False,
+                "disposition": disposition,
                 "status": EvidenceResolutionStatus.ABSTAINED.value,
                 "reason": REASON_UNCLOSED_EXTERIOR,
                 "physical_join_authenticated": False,

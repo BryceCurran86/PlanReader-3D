@@ -44,6 +44,33 @@ def _abstain(sha: str, index: int, reason: str, drawings: int = 0) -> ExternalFo
     return ExternalFootprintTrace(sha, index, "ABSTAINED", reason, page_drawings_examined=drawings)
 
 
+def _bounded_raster_scale(page_width_pts: float, page_height_pts: float) -> float:
+    """Keep the diagnostic raster longest axis at or under 2400 pixels."""
+    axes = (page_width_pts, page_height_pts)
+    if not all(math.isfinite(d) and d > 0 for d in axes):
+        raise ValueError("external_footprint_invalid_page_dimensions")
+    return min(1.8, 2400.0 / max(axes))
+
+
+def _competing_disjoint_envelopes(
+    ranked: Sequence[tuple[float, tuple[int, int, int, int], object]],
+) -> bool:
+    """Two separate large shapes cannot be called one unique building footprint.
+
+    Nested contours from a thick wall are normal; only comparably sized,
+    NON-overlapping enclosing contours compete. Never join them with raster ink.
+    """
+    if len(ranked) < 2:
+        return False
+    leading_area, (x, y, w, h), _ = ranked[0]
+    for area, (rx, ry, rw, rh), _ in ranked[1:]:
+        if area < leading_area * 0.8:
+            continue
+        if x + w < rx or rx + rw < x or y + h < ry or ry + rh < y:
+            return True
+    return False
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -77,8 +104,7 @@ def trace_external_footprint_first(
                 raise ValueError("external_footprint_page_outside_original")
             page = doc[index]
             # Bound raster memory on high-resolution A0/A1 plans.
-            scale = min(1.8, 2400.0 / max(float(page.rect.width), float(page.rect.height)))
-            scale = max(0.7, scale)
+            scale = _bounded_raster_scale(float(page.rect.width), float(page.rect.height))
             raster = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False, colorspace=fitz.csRGB)
             width, height = raster.width, raster.height
             pixels = np.frombuffer(raster.samples, dtype=np.uint8).reshape(height, width, 3)
@@ -93,6 +119,7 @@ def trace_external_footprint_first(
             # permanently from the original source PDF.
             ink[int(height * .82):, :] = 0
             outer = []
+            competing_envelopes = 0
             for radius in (3, 5, 8):
                 # The graduated close is for SHADOW connectivity only. It does
                 # not instantiate a physical door, wall, or commercial area.
@@ -126,8 +153,18 @@ def trace_external_footprint_first(
                     # The largest bounded enclosing trace is a *candidate*
                     # only. A competing building/site envelope cannot be
                     # independently authenticated by visual ink alone.
-                    outer = sorted(candidates, key=lambda item: item[0], reverse=True)
+                    ranked = sorted(candidates, key=lambda item: item[0], reverse=True)
+                    if _competing_disjoint_envelopes(ranked):
+                        competing_envelopes = len(ranked)
+                        break
+                    outer = ranked
                     break
+            if competing_envelopes:
+                results.append(replace(
+                    _abstain(source_sha256, index, "external_footprint_competing_disjoint_envelopes"),
+                    candidate_count=competing_envelopes,
+                ))
+                continue
             if not outer:
                 results.append(_abstain(
                     source_sha256, index, "external_footprint_no_closed_wall_ink_candidate",
@@ -216,7 +253,10 @@ def bound_native_drawings_to_footprint(
         except (TypeError, ValueError, AttributeError):
             retained.append(inert)
             continue
-        if not all(math.isfinite(v) for v in (a, b, c, d)):
+        # A malformed/reversed source path rect cannot prove that its ink
+        # falls inside this viewport. Treat as inert, never sort the reversed
+        # coordinates into fabricated native wall ownership.
+        if not all(math.isfinite(v) for v in (a, b, c, d)) or c < a or d < b:
             retained.append(inert)
             continue
         if c < x0 - padx or a > x1 + padx or d < y0 - pady or b > y1 + pady:
@@ -225,14 +265,20 @@ def bound_native_drawings_to_footprint(
         indices.append(index)
         retained.append(row)
 
-    # Count the exact primitives that the unchanged existing wall tracer
-    # considers wall ink, rather than trusting path container count.
+    # Count only true wall-support primitives (named/black/dark). Mid-gray
+    # doorway/glazing evidence rows stay in the index-preserving keep-list
+    # but must not alone authorize a bounded footprint viewport.
     from pb_layered_wall_doorway_room_ring_shadow import (
+        _is_source_wall_support_row,
         _source_wall_ink_candidate_drawings,
     )
 
     wall_ink, _count, _green = _source_wall_ink_candidate_drawings(retained)
-    primitives = sum(len(row.get("items", ())) for row in wall_ink)
+    primitives = sum(
+        len(row.get("items", ()))
+        for row in wall_ink
+        if isinstance(row, Mapping) and _is_source_wall_support_row(row)
+    )
     # The raster can return a closed contour from furniture, labels or a
     # page border. A candidate source-native viewport must actually retain
     # at least one eligible original wall-ink primitive. Otherwise it is an
@@ -283,9 +329,20 @@ def refine_external_footprint_against_wall_ink(
     )
     if receipt.collapsed_detour_count <= 0:
         return trace, receipt.to_dict()
+    # The old raster bbox still contains the rejected fake excursions.
+    # Crop native-source review using the corrected, source-backed outline;
+    # keep the regular scoping pad and all original source path indices.
+    coords = receipt.polygon_pdf_pts
+    corrected_bbox = (
+        round(min(x for x, _ in coords), 3),
+        round(min(y for _, y in coords), 3),
+        round(max(x for x, _ in coords), 3),
+        round(max(y for _, y in coords), 3),
+    )
     refined = replace(
         trace,
-        polygon_pdf_pts=receipt.polygon_pdf_pts,
+        polygon_pdf_pts=coords,
+        bbox_pdf_pts=corrected_bbox,
         reason=(
             "external_footprint_ink_trace_collapsed_unsupported_detours_"
             "needs_physical_wall_owner_and_scale"
