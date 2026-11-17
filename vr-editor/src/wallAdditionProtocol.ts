@@ -170,3 +170,76 @@ export function verifyWallAssemblyPreview(
   }
   return raw as WallAssemblyPreview;
 }
+
+
+export interface WallConstructionImpactPreview {
+  accepted:true;
+  reviewOnly:true;
+  persisted:false;
+  wallCreated:false;
+  relatedPagesRevised:false;
+  commercialPublicationAllowed:false;
+  quoteReady:false;
+  proposalId:string;
+  revisionScopeKey:string;
+  currency:string|null;
+  rateBookRevision:string|null;
+  pricedSubtotalOnly:string;
+  pricedComplete:boolean;
+  relatedPagesVerified:boolean;
+  affectedPages:{pageIndex:number;sheetId:string;registrationEvidenceId:string}[];
+  unpricedLines:{lineId:string;reason:string}[];
+  constructionHolds:string[];
+  impactReceiptSha256:string;
+}
+
+/** Verify the linked provisional costing/related-sheet receipt before UI display. */
+export function verifyWallConstructionImpact(
+  raw:unknown, preview:WallAssemblyPreview,
+):WallConstructionImpactPreview | null {
+  const envelope=obj(raw);
+  if(envelope.impactPreview===undefined)return null; // older preview-only hosts
+  const impact=obj(envelope.impactPreview);
+  if(impact.accepted!==true||impact.reviewOnly!==true||
+     impact.persisted!==false||impact.wallCreated!==false||
+     impact.relatedPagesRevised!==false||impact.commercialPublicationAllowed!==false||
+     impact.quoteReady!==false||impact.proposalId!==preview.proposalId||
+     impact.revisionScopeKey!==preview.package.revision_scope_key||
+     typeof impact.pricedSubtotalOnly!=="string"||
+     !/^(0|[1-9][0-9]*)\\.[0-9]{2}$/.test(impact.pricedSubtotalOnly)||
+     !["boolean"].includes(typeof impact.pricedComplete)||
+     typeof impact.relatedPagesVerified!=="boolean"||
+     typeof impact.impactReceiptSha256!=="string"||!HASH.test(impact.impactReceiptSha256)||
+     !Array.isArray(impact.affectedPages)||impact.affectedPages.length>1000||
+     !Array.isArray(impact.unpricedLines)||impact.unpricedLines.length>1000||
+     !Array.isArray(impact.constructionHolds)||impact.constructionHolds.length>1000||
+     !impact.constructionHolds.every(x=>typeof x==="string"&&x.length>0)||
+     !(impact.currency===null||typeof impact.currency==="string"&&/^[A-Z]{3}$/.test(impact.currency))||
+     !(impact.rateBookRevision===null||typeof impact.rateBookRevision==="string"&&impact.rateBookRevision.length<=128)){
+    throw new Error("Unverified added-wall pricing or drawing coordination receipt");
+  }
+  const pages=new Set<number>();
+  for(const item of impact.affectedPages){
+    const p=obj(item);
+    if(!Number.isSafeInteger(p.pageIndex)||Number(p.pageIndex)<0||
+       typeof p.sheetId!=="string"||!ID.test(p.sheetId)||
+       typeof p.registrationEvidenceId!=="string"||!ID.test(p.registrationEvidenceId)||
+       pages.has(Number(p.pageIndex)))
+      throw new Error("Duplicate or malformed registered drawing page");
+    pages.add(Number(p.pageIndex));
+  }
+  const known=new Set(preview.package.quantities.map(q=>q.line_id));
+  const unpriced=new Set<string>();
+  for(const item of impact.unpricedLines){
+    const m=obj(item);
+    if(typeof m.lineId!=="string"||!known.has(m.lineId)||
+       unpriced.has(m.lineId)||typeof m.reason!=="string"||!m.reason)
+      throw new Error("Malformed unpriced construction scope line");
+    unpriced.add(m.lineId);
+  }
+  if(impact.pricedComplete===true&&
+     (unpriced.size>0||!impact.currency||!impact.rateBookRevision)||
+     impact.relatedPagesVerified===true&&pages.size===0)
+    throw new Error("Unsupported complete construction preview claim");
+  return impact as unknown as WallConstructionImpactPreview;
+}
