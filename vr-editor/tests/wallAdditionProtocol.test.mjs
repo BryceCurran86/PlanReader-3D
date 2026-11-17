@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  validateAdditionSketch,makeWallAdditionCommand,verifyWallAssemblyPreview,
+  validateAdditionSketch,makeWallAdditionCommand,verifyWallAssemblyPreview,verifyWallConstructionImpact,
 } from "../src/wallAdditionProtocol.ts";
 function scene(){
   return {
@@ -119,4 +119,23 @@ test("proposed doorway remains a typed hosted opening, not a source approval",()
  assert.equal(command.openings[0].widthM,.9);
  assert.equal(Object.hasOwn(command,"approved"),false);
  assert.equal(Object.hasOwn(command,"companyRates"),false);
+});
+
+test("verified wall impact accepts canonical exact-cent subtotal; rejects malformed values",()=>{
+  const p=preview();
+  const valid={
+    accepted:true,reviewOnly:true,persisted:false,wallCreated:false,
+    relatedPagesRevised:false,commercialPublicationAllowed:false,
+    quoteReady:false,proposalId:p.proposalId,
+    revisionScopeKey:p.package.revision_scope_key,
+    currency:"AUD",rateBookRevision:"r1",pricedSubtotalOnly:"123.45",
+    pricedComplete:true,relatedPagesVerified:true,
+    affectedPages:[{pageIndex:0,sheetId:"A101",registrationEvidenceId:"proof1"}],
+    unpricedLines:[],constructionHolds:[],impactReceiptSha256:"b".repeat(64),
+  };
+  assert.equal(verifyWallConstructionImpact({impactPreview:valid},p)?.pricedSubtotalOnly,"123.45");
+  assert.equal(verifyWallConstructionImpact({impactPreview:{...valid,pricedSubtotalOnly:"0.00"}},p)?.pricedSubtotalOnly,"0.00");
+  for(const invalid of ["12x45","12\\.45","12.4","01.45"]){
+    assert.throws(()=>verifyWallConstructionImpact({impactPreview:{...valid,pricedSubtotalOnly:invalid}},p));
+  }
 });
