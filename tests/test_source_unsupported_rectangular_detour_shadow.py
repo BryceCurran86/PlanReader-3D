@@ -94,7 +94,8 @@ def test_ambiguous_wide_box_without_ink_must_not_invent_replacement_wall():
     assert receipt.collapsed_detour_count == 0
     assert tuple(poly) == receipt.polygon_pdf_pts
     assert receipt.measurement_authorized is False
-    assert "collapsed_unsupported_rectangular_detour" in receipt.reason_codes
+    assert "collapsed_unsupported_rectangular_detour" not in receipt.reason_codes
+    assert "no_unsupported_rectangular_detour" in receipt.reason_codes
 
 
 def test_wide_detour_retained_when_only_unrelated_wall_ink_exists():
