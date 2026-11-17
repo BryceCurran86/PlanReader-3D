@@ -1,0 +1,43 @@
+name: GPT1 Acacia exact native source chain branch CI
+
+on:
+  push:
+    branches:
+      - gpt1/acacia-exact-segment-chain-20261117
+    paths:
+      - pb_source_native_exterior_edge_path_ownership.py
+      - pb_external_footprint_first_trace.py
+      - tests/test_source_native_exterior_edge_path_ownership.py
+      - tests/test_external_footprint_first_trace.py
+      - .github/workflows/gpt1-acacia-native-chain-branch-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-exact-acacia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install source and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Check exact native Acacia chain and footprint source guards
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_external_footprint_first_trace.py tests/test_source_native_exterior_edge_path_ownership.py
