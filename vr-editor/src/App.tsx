@@ -4,6 +4,7 @@ import { isSceneManifest } from "./types";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
+import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { freshReviewNotes } from "./reviewNotes";
 import type { ReviewNotesState } from "./reviewNotes";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
@@ -442,6 +443,12 @@ export function App() {
                     mode:current.mode, focus:"selected", serial:current.serial+1,
                   }));
                 }} />
+            </div>
+          )}
+          {manifest && (
+            <div className="section-block" aria-label="Document revisions">
+              <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}
+                workspace={manifest} authenticated={authenticatedSource} />
             </div>
           )}
           <div className="section-block caution">
