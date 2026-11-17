@@ -346,3 +346,56 @@ clears the UI, and desktop remains functional when WebXR is unavailable.
 Choose **Move** in the Wall Position Editing inspector, use either Sense trigger to select a source-backed wall, then hold and move that controller's grip and release to snap its purple review ghost to a 50 mm grid. Runtime standard `squeezestart`/`squeezeend` actions take priority; the `xr-standard` grip fallback supports SteamVR configurations with no native squeeze events. Desktop arrows nudge 50 mm; Shift+arrows nudge 500 mm. Undo, redo and reset are available.
 
 Movement is **local only**: translations do not persist, change original PDF geometry, approve hosted openings, recalculate billable quantities or price materials. Cross-wall collisions at the same level are blocked, but this does not prove complete topology. A production `MOVE_WALL` transaction and real PS VR2 headset acceptance test are separate gates.
+
+## Adding a wall must add its associated trades
+
+The authenticated VR Editor now includes a **new-wall construction scope**
+panel. Enter source-level endpoints, height, a real project **assembly profile
+ID** (framing/lining/skirting/bracing schedule owned by the server), and any
+user-positioned door opening. The browser can preview a translucent purple
+*new wall proposal*, not an approved physical wall.
+
+The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`
+endpoint calls `pb_vr_wall_assembly_dependencies.py`, using only
+server-retrieved project assembly specifications and verified existing
+electric/hydraulic routes to calculate all potential dependent work:
+
+- **Framing:** wall plate runs in lm, approximate full-height stud stock and
+  stud counts from *specified* spacing, and noggins from *specified* rows.
+  Door lintels, jambs and junctions remain explicit design holds.
+- **Bracing:** specified schedule area only; unknown structural design is a
+  hold, never a guessed amount.
+- **Plasterboard:** net wall face area per specified side; deduct actual
+  user-positioned openings from each affected face.
+- **Skirting:** linear length per specified finished face, less floor-level
+  door/passage widths, never window sills or undocumented faces.
+- **Electrical and plumbing:** include only fittings/branch runs explicitly
+  tied to the wall by the server-owned schedule; identify collisions with
+  independently verified same-level service routes for engineering review.
+  Unresolved services are flagged, not counted as zero or invented from
+  generic building code assumptions.
+
+The project source PDF, canonical object, approved quantities, ratebook and
+JobHub outputs are *not modified*. The returned quantities are
+`review_only`, with deterministic line identities so a wall geometry
+change **replaces rather than duplicates** the dependent bill. The service
+does not issue construction costs or claim electrical/plumbing design is
+complete. This remains an authenticated *preview* until the future
+wall-create + multi-sheet geometric revision transaction and trade-specific
+approval gates are connected.
+
+### Deploying the preview
+
+A production app must supply all five real callbacks to
+`make_wall_addition_scope_wsgi_app`: authentication, an authorized original
+workspace loader, CSRF verification, a server-owned profile resolver, and a
+trusted service-route census. No demo or user-submitted specification can
+become authority. Real company rates can be applied only through the
+existing commercial ratebook bridge after each new quantity is approved
+against original/user-authorized revision evidence.
+
+Focused tests:
+```
+python -m pytest -q tests/editable_3d/test_vr_wall_assembly_dependencies.py tests/editable_3d/test_vr_wall_assembly_wsgi.py
+cd vr-editor && npm test && npm run build
+```
