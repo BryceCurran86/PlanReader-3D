@@ -223,10 +223,12 @@ def test_second_saved_version_inherits_prior_page_marks_and_stale_edits_fail():
     with fitz.open(stream=last_pdf,filetype="pdf") as pdf:
         assert [_annotation_count(pdf[i]) for i in range(3)] == [4,2,0]
     assert get_plan_edit_pdf(db, user, ws, first["revisionId"])[1] == first_sha
+    stale_ledger = Editable3DCorrectionLedger()
+    stale_ledger.register_object(ws.objects[0])
     with pytest.raises(PlanRevisionConflict, match="stale_document_model_revision"):
         save_plan_edit_revision(
             db, principal=user, workspace=ws, workspace_db_id=1,
-            ledger=Editable3DCorrectionLedger(), command=dict(cmd,
+            ledger=stale_ledger, command=dict(cmd,
                 commandId="command-3", idempotencyKey="key-3"),
             original_pdf_bytes=original, page_coverage=coverage,
         )
