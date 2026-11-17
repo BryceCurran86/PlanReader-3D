@@ -156,6 +156,13 @@ def _candidates(drawings, centre, width_mm, page_index, cs_index, width_index):
                             caps.append(cap_id)
                     if not 1 <= len(caps) <= 2:
                         break
+                    if len(caps) == 2:
+                        # A repeated identical white frame path is not two
+                        # independent source jamb returns.
+                        ca = next(b for i, b in white if i == caps[0])
+                        cb = next(b for i, b in white if i == caps[1])
+                        if all(abs(x - y) <= .05 for x, y in zip(ca, cb)):
+                            break
                     endcaps.append(caps)
                 if len(endcaps) != 2 or set(endcaps[0]) & set(endcaps[1]):
                     continue
