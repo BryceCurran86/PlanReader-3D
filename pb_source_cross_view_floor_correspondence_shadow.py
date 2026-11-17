@@ -4710,6 +4710,15 @@ def authenticate_maryborough_pwd_rcp_ceiling_correspondence(
     elif doc is not None:
         has_authentic_doc = False
 
+    # A declared SHA or caller-supplied marks/geometry are not an authenticated
+    # original-source receipt. Diagnostic observations may inform review, but
+    # cannot register commercial ceiling authority without verified PDF bytes.
+    if not has_authentic_doc:
+        return _abstained(
+            reason_codes=("original_source_bytes_unavailable",),
+            authority_blockers=("authenticated_original_pdf_required",),
+        )
+
     try:
         if doc is not None:
             try:
