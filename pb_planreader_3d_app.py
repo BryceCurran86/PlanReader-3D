@@ -6329,6 +6329,48 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 break
     chosen=st.selectbox("Drawing page",labels,index=default_page_index,key=f"plan_mapper_page_select_{workspace['id']}")
     page=pages.iloc[labels.index(chosen)].to_dict()
+    # Live progress is drawn into bounded Streamlit placeholders while the
+    # same source-native worker runs. This NEVER persists a wall/door/quantity.
+    live_status=st.empty()
+    live_meter=st.empty()
+    live_overlay=st.empty()
+    selected_pdf_page=int(page["page_no"])
+
+    def _show_live_trace(event: dict) -> None:
+        if int(event.get("page_number", 0)) != selected_pdf_page:
+            return
+        stage_names={
+            "reading_original_page": "Loading original drawing",
+            "classifying_page_ink": "Separating plan walls from annotations",
+            "tracing_outer_boundary": "Checking exterior boundary",
+            "resolving_wall_and_room_topology": "Tracing walls and doorway gaps",
+            "drawing_wall_candidates": "Drawing source wall candidates",
+            "drawing_outer_boundary": "Drawing exterior footprint",
+            "drawing_openings_and_wall_ends": "Marking doors, windows and wall ends",
+            "drawing_enclosed_room_candidates": "Drawing room boundaries",
+            "trace_complete": "Source trace complete",
+        }
+        stage=stage_names.get(str(event.get("stage")), "Tracing source drawing")
+        page_number=int(event.get("page_number", selected_pdf_page))
+        page_count=int(event.get("page_count", 0))
+        fraction=max(0.,min(1.,float(event.get("fraction", 0.))))
+        total=f" of {page_count}" if page_count else ""
+        live_status.info(
+            f"**Live tracing — PDF page {page_number}{total}** · {stage}"
+        )
+        live_meter.progress(
+            fraction,
+            text=f"{round(fraction * 100)}% · {stage} · "
+                 f"{int(event.get('wall_candidates_drawn',0))} source wall candidates",
+        )
+        image=event.get("overlay_png")
+        if isinstance(image, bytes) and image:
+            live_overlay.image(
+                image, use_container_width=True,
+                caption="LIVE original-plan overlay · provisional wall, doorway "
+                        "and room evidence only — no authorised quantities.",
+            )
+
     # Owner mandate: the first automatic plan geometry is the newer
     # SOURCE-NATIVE wall/room tracer. Never call the old raster envelope
     # detector as fallback or convert a guessed outline into measurements.
@@ -6352,11 +6394,27 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 with st.spinner("Tracing original PDF wall ink and room closures (new engine only)..."):
                     trace_summary,trace_png=source_native_trace_preview(
                         doc_path,int(page["page_no"])-1,
+                        progress_callback=_show_live_trace,
                     )
                 st.session_state[native_trace_key]={
                     "digest":digest,"summary":trace_summary,"png":trace_png,
                 }
+                live_meter.empty()
+                live_overlay.empty()
+                live_status.success(
+                    f"PDF page {selected_pdf_page} of "
+                    f"{trace_summary.get('document_page_count','?')} traced. "
+                    "Final colour overlay is in Draw measurements below. "
+                    "Candidate geometry is not a measured quantity."
+                )
             except Exception as trace_error:
+                live_meter.empty()
+                live_overlay.empty()
+                live_status.warning(
+                    f"PDF page {selected_pdf_page} source trace failed "
+                    f"({type(trace_error).__name__}). No estimated walls or "
+                    "measurements were created."
+                )
                 st.session_state[native_trace_key]={
                     "digest":digest,"summary":{
                         "status":"abstained",
@@ -6379,6 +6437,13 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         pxpm=to_float(page.get("px_per_m"))
         st.markdown("### New source-native wall trace — first stage")
         native_report=native_trace.get("summary") or {}
+        st.caption(
+            f"Selected original PDF page {int(page['page_no'])} of "
+            f"{native_report.get('document_page_count', '?')} · "
+            f"{page.get('page_label') or 'Drawing'} · "
+            "Live stages show original wall candidates, openings and "
+            "candidate rooms; they do not produce commercial takeoffs."
+        )
         source_mode=(native_report.get("source_modality") or {}).get("route")
         if source_mode == "tiled_raster_underlay":
             raster_count=len(
