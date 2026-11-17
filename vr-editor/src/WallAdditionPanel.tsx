@@ -29,6 +29,8 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   const [savedWall,setSavedWall]=useState<SavedNewWallRevision|null>(null);
   const [savingWall,setSavingWall]=useState(false);
   const saveController=useRef<AbortController|null>(null);
+  const saveToken=useRef<string|null>(null);
+  const activeScope=useRef("");
   // Purely local unapproved construction scope. Recreated on source switch.
   const [batch,setBatch]=useState(()=>freshWallBatch(scene));
   const activeBatch=currentWallBatch(scene,batch);
@@ -52,9 +54,10 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     (s):s is string=>typeof s==="string"&&!!s,
   ))].sort();
   const sceneIdentity=wallBatchSourceKey(scene);
+  activeScope.current=sceneIdentity;
   useEffect(()=>{
     controller.current?.abort();saveController.current?.abort();
-    proposal.current=null;
+    proposal.current=null;saveToken.current=null;
     setProfile("");setLevel("");setCoords({x1:"",z1:"",x2:"",z2:"",height:""});
     setDoor({enabled:false,offset:"",width:"",height:""});
     setResult(null);setImpact(null);setLastCommand(null);
@@ -76,7 +79,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     controller.current=null;
     setWorking(false);
     setResult(null);setImpact(null);setLastCommand(null);
-    setSavedWall(null);setError(null);onSketch(null);
+    setSavedWall(null);saveToken.current=null;setError(null);onSketch(null);
   }
   // Automatic replanning never adds a wall to the persistent review batch.
   useEffect(()=>{
@@ -177,7 +180,8 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     setSavingWall(true);setError(null);
     const exactScope=sceneIdentity;
     try{
-      const body={...lastCommand,idempotencyKey:`save-${crypto.randomUUID()}`};
+      if(!saveToken.current)saveToken.current=`save-${crypto.randomUUID()}`;
+      const body={...lastCommand,idempotencyKey:saveToken.current};
       const response=await fetch(
         `/api/editor/workspaces/${encodeURIComponent(scene.scope.workspaceId)}/walls/add/commit`,
         {method:"POST",credentials:"include",cache:"no-store",
@@ -191,7 +195,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         throw new Error("Wall not saved: "+reason);
       }
       const saved=verifySavedNewWallRevision(raw,scene,lastCommand);
-      if(!abort.signal.aborted&&sceneIdentity===exactScope){
+      if(!abort.signal.aborted&&activeScope.current===exactScope){
         setSavedWall(saved);setLastCommand(null);
         setResult(null);setImpact(null);
         setAutoReprice(false);
@@ -200,7 +204,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         onSketch(null);
       }
     }catch(e){
-      if(!abort.signal.aborted)
+      if(!abort.signal.aborted&&activeScope.current===exactScope)
         setError(e instanceof Error?e.message:"Wall creation unavailable");
     }finally{
       if(!abort.signal.aborted){setSavingWall(false);saveController.current=null;}
