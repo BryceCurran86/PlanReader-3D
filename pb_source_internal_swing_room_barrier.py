@@ -114,26 +114,32 @@ def detect_source_internal_swing_room_barriers(
         ))
     )
     if source_words:
-        resolved.extend(_source_partial_internal_swing_candidates(
+        partial = _source_partial_internal_swing_candidates(
             drawings, source_words, page_index=page_index,
-        ))
-    # Even an unusual partial curve cannot claim an existing jamb/host or
-    # share its original arc with another authenticated door.
-    from collections import Counter
-    owner_uses = Counter(
-        i for r in resolved for i in (
-            r.swing_arc_path_id, r.first_host_path_id, r.second_host_path_id,
-            *r.jamb_cap_path_ids,
         )
-    )
-    return tuple(sorted(
-        (r for r in resolved if all(owner_uses[i] == 1 for i in (
-            r.swing_arc_path_id, r.first_host_path_id, r.second_host_path_id,
-            *r.jamb_cap_path_ids,
-        ))),
-        key=lambda r: r.swing_arc_path_id,
-    ))
-
+        existing_arcs = {r.swing_arc_path_id for r in resolved}
+        existing_gaps = {
+            (r.axis, tuple(round(x, 1) for x in r.bounds_pdf_pts))
+            for r in resolved
+        }
+        from collections import Counter
+        duplicates = Counter(
+            (r.axis, tuple(round(x, 1) for x in r.bounds_pdf_pts))
+            for r in partial
+        )
+        for r in partial:
+            key = (r.axis, tuple(round(x, 1) for x in r.bounds_pdf_pts))
+            # Distinct doors may share a physical wall stub. Competing
+            # claims for the SAME source aperture may not.
+            if (
+                r.swing_arc_path_id not in existing_arcs
+                and key not in existing_gaps
+                and duplicates[key] == 1
+            ):
+                resolved.append(r)
+                existing_arcs.add(r.swing_arc_path_id)
+                existing_gaps.add(key)
+    return tuple(sorted(resolved, key=lambda r: r.swing_arc_path_id))
 
 def _source_native_internal_cap_host_pair(
     drawings: Sequence[Mapping[str, Any] | object], arc: Mapping[str, Any],
