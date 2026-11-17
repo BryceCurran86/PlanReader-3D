@@ -39,7 +39,7 @@ function make(){
     oldValue:null,proposedValue:null,unit:"m²",reason:"source unresolved"},
   ],
  };
- return {
+ return structuredClone({
   accepted:true,quantityPreview,
   costingPreview:{
    accepted:true,validationState:"cost_preview_only",
@@ -57,7 +57,7 @@ function make(){
    unpriced:[{target:"wall_net_area",reason:"manual_review_or_missing_quantity"}],
    totals:{before,after,delta},
   },
- };
+ });
 }
 test("accepts cent-exact incomplete preview without quote authority",()=>{
  const result=verifyLiveCostingResponse(make(),request);
