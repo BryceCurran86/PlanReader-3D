@@ -193,6 +193,42 @@ def _polygon_bbox(pts: Sequence[Point]) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _orthogonal_corner(a: Point, b: Point, c: Point, d: Point, *, snap_pt: float) -> Point | None:
+    """Intersection of axis-aligned AB and CD when they are perpendicular faces."""
+    ab_horiz = abs(a[1] - b[1]) <= snap_pt
+    ab_vert = abs(a[0] - b[0]) <= snap_pt
+    cd_horiz = abs(c[1] - d[1]) <= snap_pt
+    cd_vert = abs(c[0] - d[0]) <= snap_pt
+    if ab_horiz and cd_vert:
+        return (c[0], a[1])
+    if ab_vert and cd_horiz:
+        return (a[0], c[1])
+    return None
+
+
+def _near_corner_face_supported(
+    far: Point,
+    near: Point,
+    members: Sequence[Segment],
+    *,
+    alignment_tolerance_pt: float,
+    sample_pt: float = 24.0,
+) -> bool:
+    """True when painted wall ink covers a short run of the face ending at ``near``."""
+    length = _dist(far, near)
+    if not math.isfinite(length) or length <= 0.0:
+        return False
+    span = min(sample_pt, length)
+    t = span / length
+    start = (
+        near[0] - t * (near[0] - far[0]),
+        near[1] - t * (near[1] - far[1]),
+    )
+    return _segment_covered_by_wall_ink(
+        start, near, members, alignment_tolerance_pt=alignment_tolerance_pt,
+    )
+
+
 def collapse_unsupported_rectangular_detours(
     vertices: Sequence[Point],
     wall_segments: Sequence[Segment],
@@ -203,10 +239,13 @@ def collapse_unsupported_rectangular_detours(
     min_width_pt: float = 8.0,
     max_depth_fraction: float = 0.28,
     max_width_fraction: float = 0.35,
+    max_unmatched_stub_pt: float = 8.0,
 ) -> RectangularDetourCollapseReceipt:
     """Replace unsupported A-B-C-D rectangular boxes with the base chord A-D.
 
-    Also collapses zero-width antenna spikes (A -> tip -> A') already within snap.
+    Also collapses zero-width antenna spikes (A -> tip -> A') already within snap,
+    and short morphological corner stubs that have no continuous wall-ink owner
+    between two perpendicular source-backed faces (Acacia p2 NE unmatched edge).
     Does not invent walls; does not authorize measurement.
     """
     pts = [(float(x), float(y)) for x, y in vertices]
@@ -243,6 +282,63 @@ def collapse_unsupported_rectangular_detours(
                 reasons.append("collapsed_antenna_spike_without_base_separation")
                 changed = True
                 break
+        if changed:
+            continue
+        # Pass 1b: short unmatched morphological corner stub between two
+        # perpendicular wall-ink faces. Replace B-C with their orthogonal corner.
+        n = len(pts)
+        for i in range(n):
+            a = pts[i]
+            b = pts[(i + 1) % n]
+            c = pts[(i + 2) % n]
+            d = pts[(i + 3) % n]
+            stub_len = _dist(b, c)
+            if stub_len <= 0.0 or stub_len >= max_unmatched_stub_pt:
+                continue
+            if _segment_covered_by_wall_ink(
+                b, c, wall_segments,
+                alignment_tolerance_pt=alignment_tolerance_pt,
+            ):
+                continue
+            corner = _orthogonal_corner(a, b, c, d, snap_pt=snap_tolerance_pt)
+            if corner is None:
+                continue
+            # Morphological contour y/x can sit ~1-2 pt off painted faces; use the
+            # established 2.5 pt association window only for near-corner face proof.
+            # Prove ink on each face ending at the orthogonal corner (not the false tip).
+            face_align = max(alignment_tolerance_pt, snap_tolerance_pt)
+            if not _near_corner_face_supported(
+                a, corner, wall_segments, alignment_tolerance_pt=face_align,
+            ):
+                continue
+            if not _near_corner_face_supported(
+                d, corner, wall_segments, alignment_tolerance_pt=face_align,
+            ):
+                continue
+            # Corner must lie on both face lines within snap (no invented offset).
+            if (
+                abs(corner[0] - b[0]) > snap_tolerance_pt
+                and abs(corner[1] - b[1]) > snap_tolerance_pt
+            ):
+                continue
+            if (
+                abs(corner[0] - c[0]) > snap_tolerance_pt
+                and abs(corner[1] - c[1]) > snap_tolerance_pt
+            ):
+                continue
+            skip = {(i + 1) % n, (i + 2) % n}
+            rebuilt: list[Point] = []
+            for index, point in enumerate(pts):
+                if index in skip:
+                    if index == (i + 1) % n:
+                        rebuilt.append((round(corner[0], 3), round(corner[1], 3)))
+                    continue
+                rebuilt.append(point)
+            pts = rebuilt
+            collapsed += 1
+            reasons.append("collapsed_unmatched_morphological_corner_stub")
+            changed = True
+            break
         if changed:
             continue
         # Pass 2: rectangular U-detours lacking wall-ink support.

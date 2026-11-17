@@ -138,3 +138,47 @@ def test_wide_detour_collapses_with_two_contiguous_base_ink_strokes():
     assert (40.0, 40.0) not in result.polygon_pdf_pts
     assert (70.0, 40.0) not in result.polygon_pdf_pts
     assert result.measurement_authorized is False
+
+
+def test_unmatched_morphological_corner_stub_collapses_to_orthogonal_ink_corner():
+    """Acacia p2 NE: short contour stub with no native owner between H+V faces."""
+    poly = (
+        (328.0, 140.0),
+        (328.0, 449.0),
+        (311.0, 450.0),
+        (910.0, 450.0),
+        (903.9, 448.9),
+        (903.9, 140.0),
+    )
+    walls = (
+        (328.0, 448.9, 903.1, 448.9),  # north face ink
+        (903.1, 140.0, 903.1, 448.9),  # east face ink
+        (328.0, 140.0, 328.0, 448.9),  # west face ink
+        (328.0, 140.0, 903.1, 140.0),  # south face ink
+    )
+    result = collapse_unsupported_rectangular_detours(poly, walls)
+    assert result.collapsed_detour_count >= 1
+    assert "collapsed_unmatched_morphological_corner_stub" in result.reason_codes
+    assert (910.0, 450.0) not in result.polygon_pdf_pts
+    assert (903.9, 448.9) not in result.polygon_pdf_pts
+    assert (903.9, 450.0) in result.polygon_pdf_pts
+    assert result.measurement_authorized is False
+    assert result.commercial_publishable is False
+
+
+def test_short_corner_stub_with_painted_chamfer_is_preserved():
+    """A short corner cut that is itself painted must not be collapsed."""
+    poly = (
+        (0.0, 0.0), (100.0, 0.0), (100.0, 96.0), (96.0, 100.0), (0.0, 100.0),
+    )
+    walls = (
+        (0.0, 0.0, 100.0, 0.0),
+        (100.0, 0.0, 100.0, 96.0),
+        (100.0, 96.0, 96.0, 100.0),  # painted chamfer
+        (96.0, 100.0, 0.0, 100.0),
+        (0.0, 100.0, 0.0, 0.0),
+    )
+    result = collapse_unsupported_rectangular_detours(poly, walls)
+    assert "collapsed_unmatched_morphological_corner_stub" not in result.reason_codes
+    assert (100.0, 96.0) in result.polygon_pdf_pts
+    assert (96.0, 100.0) in result.polygon_pdf_pts

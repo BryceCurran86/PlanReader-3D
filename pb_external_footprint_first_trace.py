@@ -265,14 +265,20 @@ def bound_native_drawings_to_footprint(
         indices.append(index)
         retained.append(row)
 
-    # Count the exact primitives that the unchanged existing wall tracer
-    # considers wall ink, rather than trusting path container count.
+    # Count only true wall-support primitives (named/black/dark). Mid-gray
+    # doorway/glazing evidence rows stay in the index-preserving keep-list
+    # but must not alone authorize a bounded footprint viewport.
     from pb_layered_wall_doorway_room_ring_shadow import (
+        _is_source_wall_support_row,
         _source_wall_ink_candidate_drawings,
     )
 
     wall_ink, _count, _green = _source_wall_ink_candidate_drawings(retained)
-    primitives = sum(len(row.get("items", ())) for row in wall_ink)
+    primitives = sum(
+        len(row.get("items", ()))
+        for row in wall_ink
+        if isinstance(row, Mapping) and _is_source_wall_support_row(row)
+    )
     # The raster can return a closed contour from furniture, labels or a
     # page border. A candidate source-native viewport must actually retain
     # at least one eligible original wall-ink primitive. Otherwise it is an

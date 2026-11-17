@@ -172,6 +172,27 @@ def _owner_excluded_green_ink(color: Any) -> bool:
     )
 
 
+def _is_source_wall_support_row(row: Mapping[str, Any]) -> bool:
+    """Named wall layer, black unfilled stroke, or near-black fill — not mid-gray evidence."""
+    fill, stroke = row.get("fill"), row.get("color")
+    if _owner_excluded_green_ink(fill) or _owner_excluded_green_ink(stroke):
+        return False
+    return bool(
+        is_explicit_wall_layer_name(str(row.get("layer") or ""))
+        or (fill is None and _is_black(stroke) and _visible_source_stroke_paint(row))
+        or (
+            isinstance(fill, (tuple, list))
+            and len(fill) == 3
+            and all(
+                type(v) in (int, float)
+                and math.isfinite(v) and 0 <= v <= 0.25
+                for v in fill
+            )
+            and max(fill) - min(fill) <= 0.03
+        )
+    )
+
+
 def _source_wall_ink_candidate_drawings(
     drawings: Sequence[Mapping[str, Any]],
 ) -> tuple[tuple[Mapping[str, Any], ...], int, int]:
@@ -202,21 +223,7 @@ def _source_wall_ink_candidate_drawings(
             kept.append(blank)
             green_excluded += 1
             continue
-        candidate = (
-            is_explicit_wall_layer_name(str(row.get("layer") or ""))
-            or (fill is None and _is_black(stroke) and _visible_source_stroke_paint(row))
-            or (
-                isinstance(fill, (tuple, list))
-                and len(fill) == 3
-                and all(
-                    type(v) in (int, float)
-                    and math.isfinite(v) and 0 <= v <= 0.25
-                    for v in fill
-                )
-                and max(fill) - min(fill) <= 0.03
-            )
-        )
-        if candidate:
+        if _is_source_wall_support_row(row):
             supported += 1
             kept.append(row)
         elif row.get("fill") is not None and _opaque(row):
