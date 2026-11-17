@@ -46,7 +46,7 @@ function sourcePage(input:unknown):RevisedPage {
   return x as unknown as RevisedPage;
 }
 export function verifySavedPlanRevision(
-  raw:unknown, scene:SceneManifest,
+  raw:unknown, scene:SceneManifest, historical=false,
 ):SavedPlanRevision{
   const x=record(raw), scope=scene.scope;
   if(x.saved!==true||x.requiresApproval!==true||
@@ -58,8 +58,9 @@ export function verifySavedPlanRevision(
      x.revisionLabel!==`PR-R${String(x.revisionNumber).padStart(4,"0")}`||
      !(x.parentRevisionId===null ||
        typeof x.parentRevisionId==="string"&&REVISION_ID.test(x.parentRevisionId)) ||
-     x.previousModelRevision!==scope.modelRevision ||
-     x.updatedModelRevision!==scope.modelRevision+1 ||
+     !Number.isSafeInteger(x.previousModelRevision) || Number(x.previousModelRevision)<0 ||
+     x.updatedModelRevision!==Number(x.previousModelRevision)+1 ||
+     (!historical && x.previousModelRevision!==scope.modelRevision) ||
      typeof x.updatedPdfSha256!=="string"||!SHA.test(x.updatedPdfSha256))
     throw Error("Saved revision does not match active model revision or review status");
   const pages = Array.isArray(x.pagesRevised)?x.pagesRevised.map(sourcePage):[];
@@ -71,4 +72,21 @@ export function verifySavedPlanRevision(
   if(x.downloadPath!==expected)
     throw Error("Saved PDF download is not bound to this workspace");
   return {...x,pagesRevised:pages} as unknown as SavedPlanRevision;
+}
+
+export function verifyPlanRevisionHistory(raw:unknown, scene:SceneManifest):SavedPlanRevision[]{
+  const payload=record(raw);
+  if(payload.readOnly!==true||!Array.isArray(payload.revisions)||
+     payload.revisions.length>200)
+    throw Error("Malformed authenticated plan revision history");
+  const result=payload.revisions.map(x=>verifySavedPlanRevision(x,scene,true));
+  const seen=new Set<string>();
+  let lastRevision=Number.MAX_SAFE_INTEGER;
+  for(const revision of result) {
+    if(seen.has(revision.revisionId)||revision.revisionNumber>=lastRevision)
+      throw Error("Duplicate or non-descending plan revision history");
+    seen.add(revision.revisionId);
+    lastRevision=revision.revisionNumber;
+  }
+  return result;
 }
