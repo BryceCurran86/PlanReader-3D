@@ -162,6 +162,7 @@ def render_related_page_revision(
     coverage: RelatedPageCoverage,
     revision_label: str,
     correction_field: str,
+    base_pdf_sha256: str | None = None,
     prior_value: object,
     new_value: object,
 ) -> RevisedPlanPdf:
@@ -174,8 +175,12 @@ def render_related_page_revision(
     if type(original_pdf_bytes) is not bytes or not 1 <= len(original_pdf_bytes) <= _MAX_PDF:
         raise ValueError("original_pdf_bytes_required_or_too_large")
     original_sha = sha256(original_pdf_bytes).hexdigest()
-    if original_sha != scope.source_sha256.lower():
-        raise ValueError("original_pdf_sha_mismatch")
+    expected_pdf_sha = base_pdf_sha256 or scope.source_sha256.lower()
+    if original_sha != expected_pdf_sha:
+        raise ValueError("base_revision_pdf_sha_mismatch")
+    if base_pdf_sha256 is not None and (type(base_pdf_sha256) is not str or
+                                       not _SHA.fullmatch(base_pdf_sha256)):
+        raise ValueError("parent_revision_pdf_sha_invalid")
     if not re.fullmatch(r"PR-R[0-9]{4,6}", revision_label):
         raise ValueError("revision_label_invalid")
     if type(correction_field) is not str or not 1 <= len(correction_field) <= 64:
@@ -253,7 +258,7 @@ def render_related_page_revision(
             raise ValueError("revised_pdf_too_large")
         return RevisedPlanPdf(
             bytes=rendered, sha256=sha256(rendered).hexdigest(),
-            original_sha256=original_sha, related_pages=tuple(pages),
+            original_sha256=scope.source_sha256.lower(), related_pages=tuple(pages),
             revision_label=revision_label,
         )
     finally:
