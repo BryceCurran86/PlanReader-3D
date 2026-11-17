@@ -23,7 +23,11 @@ def service(tmp_path, *, anonymous=False, viewer=True, other_tenant=False):
     source_db.close()
     destination.close()
     if not viewer:
-        principal = replace(principal, allowed_workspace_ids=frozenset())
+        principal = replace(
+            principal, allowed_workspace_ids=frozenset(),
+            allowed_preview_workspace_ids=frozenset(),
+            allowed_revision_workspace_ids=frozenset(),
+        )
     if other_tenant:
         principal = replace(principal, tenant_id="other")
     called = []
