@@ -12,6 +12,8 @@ import { freshReviewNotes } from "./reviewNotes";
 import type { ReviewNotesState } from "./reviewNotes";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
+import { applyWallMove, freshWallMoves, redoWallMove, resetWallMoves, safeWallMoves, undoWallMove } from "./wallMoveStudy";
+import type { MoveMode, WallMoveHistory } from "./wallMoveStudy";
 import type { SceneManifest } from "./types";
 import { VISUAL_PRESETS } from "./visualRealism";
 import type { LightingMood, RenderQuality } from "./visualRealism";
@@ -28,6 +30,9 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
+  const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
+  const [moveMode, setMoveMode] = useState<MoveMode>("inspect");
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
@@ -75,6 +80,18 @@ export function App() {
     });
   }, [manifest]);
 
+  const handleMoveDelta = useCallback((id: string, dx: number, dz: number) => {
+    if (!manifest || moveMode !== "move") return;
+    setWallMoveState(current => {
+      const state = current?.scopeKey === scopeKey(manifest) ? current : freshWallMoves(manifest);
+      const old = safeWallMoves(state, manifest).find(m => m.objectId === id);
+      const proposed = applyWallMove(state, manifest, id,
+        (old?.dx ?? 0) + dx, (old?.dz ?? 0) + dz);
+      setMoveError(proposed.reason);
+      return proposed.state;
+    });
+  }, [manifest, moveMode]);
+
   // A production backend must authenticate this same-origin endpoint and
   // build the scope from the session, never from user-supplied model JSON.
   useEffect(() => {
@@ -94,7 +111,9 @@ export function App() {
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
       if (!cancelled && !controller.signal.aborted) {
         setManifest(data); setAuthenticatedSource(true); setError(null);
-        setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data)); setSelectedId(null);
+        setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data));
+        setWallMoveState(freshWallMoves(data)); setMoveMode("inspect"); setMoveError(null);
+        setSelectedId(null);
         setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet("");
       }
     }).catch(e => {
@@ -125,6 +144,7 @@ export function App() {
       const localPreview: SceneManifest = downgradeLocalManifest(data);
       setManifest(localPreview);
       setDraftState(freshDrafts(localPreview));
+      setWallMoveState(freshWallMoves(localPreview)); setMoveMode("inspect"); setMoveError(null);
       setReviewNotes(freshReviewNotes(localPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
@@ -152,6 +172,7 @@ export function App() {
       };
       setManifest(syntheticPreview);
       setDraftState(freshDrafts(syntheticPreview));
+      setWallMoveState(freshWallMoves(syntheticPreview)); setMoveMode("inspect"); setMoveError(null);
       setReviewNotes(freshReviewNotes(syntheticPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
@@ -188,24 +209,49 @@ export function App() {
     ? reviewNotes : manifest ? freshReviewNotes(manifest) : null;
   const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
     ? draftState : manifest ? freshDrafts(manifest) : null;
+  const activeWallMoves = manifest && wallMoveState?.scopeKey === scopeKey(manifest)
+    ? wallMoveState : manifest ? freshWallMoves(manifest) : null;
+  const currentMove = activeWallMoves && manifest
+    ? safeWallMoves(activeWallMoves, manifest).find(m => m.objectId === selectedId)
+    : undefined;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
-  // Keyboard undo/redo works only outside editable fields and never changes PlanReader source.
+  // Keyboard undo/redo works only outside editable fields and cannot change the source.
   useEffect(() => {
     function keyDown(event: KeyboardEvent) {
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable ||
           ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
       if (!manifest) return;
+      if (moveMode === "move" && selectedId && !event.ctrlKey && !event.metaKey) {
+        const step = event.shiftKey ? 0.5 : 0.05;
+        const offset = event.key === "ArrowUp" ? [0,-step] :
+          event.key === "ArrowDown" ? [0,step] :
+          event.key === "ArrowLeft" ? [-step,0] :
+          event.key === "ArrowRight" ? [step,0] : null;
+        if (offset) {
+          event.preventDefault();
+          handleMoveDelta(selectedId, offset[0], offset[1]);
+          return;
+        }
+      }
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
       event.preventDefault();
-      setDraftState(current => {
-        const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
-        return event.shiftKey ? redoDraft(state) : undoDraft(state);
-      });
+      if (moveMode === "move") {
+        setWallMoveState(current => {
+          const state = current?.scopeKey === scopeKey(manifest) ? current : freshWallMoves(manifest);
+          return event.shiftKey ? redoWallMove(state) : undoWallMove(state);
+        });
+        setMoveError(null);
+      } else {
+        setDraftState(current => {
+          const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
+          return event.shiftKey ? redoDraft(state) : undoDraft(state);
+        });
+      }
     }
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);
-  }, [manifest]);
+  }, [manifest, moveMode, selectedId, handleMoveDelta]);
 
   return (
     <div className="app-shell">
@@ -227,6 +273,7 @@ export function App() {
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
                 captureSerial={captureSerial} onCapture={setCaptureStatus}
+                moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
           ) : (
@@ -356,6 +403,49 @@ export function App() {
             </div>
           )}
 
+          {manifest && activeWallMoves && (
+            <div className="section-block vr-move-panel" aria-label="Interactive VR wall positioning study">
+              <span className="eyebrow">WALL POSITION EDITING · REVIEW ONLY</span>
+              <p className="muted">The original endpoints and source geometry remain unchanged.
+                Proposed positions snap to 50mm. Same-level wall intersections block release.
+                Hosted doors, openings, quantities and drawing revisions remain unapproved.</p>
+              <label htmlFor="vr-move-mode">Controller interaction mode</label>
+              <select id="vr-move-mode" value={moveMode}
+                onChange={e => {setMoveMode(e.target.value as MoveMode);setMoveError(null);}}>
+                <option value="inspect">Inspect / grip cycles visual finish</option>
+                <option value="move">Move / grip drags selected wall</option>
+              </select>
+              {moveMode === "move" && <>
+                <p className="muted">PS VR2: trigger selects wall, hold Sense grip to drag,
+                  release to snap. Desktop: arrows nudge 50mm, Shift + arrows 500mm.
+                  Ctrl/Cmd+Z undo; Shift+Ctrl/Cmd+Z redo.</p>
+                <div className="review-control-grid">
+                  <button type="button" disabled={!selectedId}
+                    onClick={()=>selectedId&&handleMoveDelta(selectedId,0,-.05)}>↑ Forward</button>
+                  <button type="button" disabled={!selectedId}
+                    onClick={()=>selectedId&&handleMoveDelta(selectedId,0,.05)}>↓ Back</button>
+                  <button type="button" disabled={!selectedId}
+                    onClick={()=>selectedId&&handleMoveDelta(selectedId,-.05,0)}>← Left</button>
+                  <button type="button" disabled={!selectedId}
+                    onClick={()=>selectedId&&handleMoveDelta(selectedId,.05,0)}>→ Right</button>
+                  <button type="button" disabled={!activeWallMoves.past.length}
+                    onClick={()=>{setWallMoveState(undoWallMove(activeWallMoves));setMoveError(null);}}>Undo</button>
+                  <button type="button" disabled={!activeWallMoves.future.length}
+                    onClick={()=>{setWallMoveState(redoWallMove(activeWallMoves));setMoveError(null);}}>Redo</button>
+                  <button type="button" disabled={!activeWallMoves.moves.length}
+                    onClick={()=>{setWallMoveState(resetWallMoves(activeWallMoves));setMoveError(null);}}>Reset all</button>
+                </div>
+                <p className="muted">Selected offset: {currentMove
+                  ? `${currentMove.dx.toFixed(2)}m X / ${currentMove.dz.toFixed(2)}m Z`
+                  : "source position"}.
+                  Proposed wall count: {safeWallMoves(activeWallMoves,manifest).length}</p>
+                {moveError&&<p className="error" role="alert">{moveError}</p>}
+                <p className="muted">This is a reversible, non-commercial wall-position
+                  study. MOVE_WALL persistence, cross-page redraw and trade approvals
+                  must be connected before these changes may be saved or priced.</p>
+              </>}
+            </div>
+          )}
           <div className="section-block" aria-label="3D presentation settings">
             <span className="eyebrow">REALISM / RENDERING</span>
             <p className="muted">Lighting and shadow choices change presentation only — not the plan, geometry, material specifications or quantity authority.</p>
