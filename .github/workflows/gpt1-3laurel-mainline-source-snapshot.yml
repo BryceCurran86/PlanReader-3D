@@ -1,0 +1,33 @@
+name: GPT1 3Laurel mainline public source snapshot
+on:
+  push:
+    branches:
+      - gpt1/3laurel-footprint-mainline-integration-20261117
+    paths:
+      - .github/workflows/gpt1-3laurel-mainline-source-snapshot.yml
+      - pb_source_unbounded_building_face_walk_shadow.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Archive tracked public Python code only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.py' '*.toml' 'requirements*.txt' 'pytest.ini' 'setup.cfg' 'tox.ini' |
+            tar --null -T - -czf "$RUNNER_TEMP/planreader-mainline-public-python.tar.gz"
+          test -s "$RUNNER_TEMP/planreader-mainline-public-python.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-mainline-public-python-source
+          path: ${{ runner.temp }}/planreader-mainline-public-python.tar.gz
+          retention-days: 1
+          if-no-files-found: error
