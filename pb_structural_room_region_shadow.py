@@ -137,6 +137,7 @@ class StructuralRoomRegionReport:
     live_effect: bool = False
     room_authority_granted: bool = False
     scale_authority_granted: bool = False
+    suppressed_wall_covered_chord_ids: Tuple[str, ...] = ()  # diagnostic: physical wall overrides false opening
 
 
 def chord_id(gap: OpeningGapCandidate) -> str:
@@ -155,6 +156,43 @@ def _chords(*gap_sets: Iterable[OpeningGapCandidate]) -> Dict[str, OpeningGapCan
         for gap in gaps:
             out.setdefault(chord_id(gap), gap)
     return dict(sorted(out.items()))
+
+
+def _gap_covered_by_physical_wall(
+    gap: OpeningGapCandidate,
+    members: Mapping[str, Tuple[float, float, float, float]],
+    *,
+    alignment_tolerance_pt: float = 0.3,
+    min_covered_fraction: float = 0.90,
+) -> bool:
+    """Do not promote a guessed wall-face interruption through continuous wall ink.
+
+    A source-positive structural/partition member must overlap almost the whole
+    gap *along the same face*, not merely cross it at right angles. A shifted
+    parallel line does not prove that the face is uninterrupted. This only
+    arbitrates the noncommercial room-region preview: no opening/door is
+    authenticated, no walls are constructed, and source wall ids are retained.
+    """
+    ax, ay = gap.end_a
+    bx, by = gap.end_b
+    vx, vy = bx - ax, by - ay
+    length = math.hypot(vx, vy)
+    if not math.isfinite(length) or length <= 0.0:
+        return False
+    ux, uy = vx / length, vy / length
+    for sid, (x1, y1, x2, y2) in members.items():
+        if sid in (gap.source_primitive_id_a, gap.source_primitive_id_b):
+            continue
+        # Both ends of the supporting member must lie on this face's line.
+        offsets = (abs((x1 - ax) * uy - (y1 - ay) * ux),
+                   abs((x2 - ax) * uy - (y2 - ay) * ux))
+        if max(offsets) > alignment_tolerance_pt:
+            continue
+        p, q = sorted(((x1 - ax) * ux + (y1 - ay) * uy,
+                       (x2 - ax) * ux + (y2 - ay) * uy))
+        if max(0.0, min(length, q) - max(0.0, p)) >= min_covered_fraction * length:
+            return True
+    return False
 
 
 def derive_structural_room_regions(
@@ -186,7 +224,13 @@ def derive_structural_room_regions(
             if ident in geometry and ident not in tiers:
                 tiers[ident] = TIER_PARTITION
     members = {i: geometry[i] for i in sorted(tiers) if math.hypot(geometry[i][2] - geometry[i][0], geometry[i][3] - geometry[i][1]) > 0.0}
-    chords = _chords(report.opening_gaps, partition.opening_gaps if partition is not None else ())
+    proposed_chords = _chords(report.opening_gaps, partition.opening_gaps if partition is not None else ())
+    # A typed wall-face gap is still only a hypothesis. If its line is actually
+    # occupied by continuous authenticated wall-network ink, do not use it to
+    # divide a room. Keep the rejected chord IDs visible for the overlay.
+    suppressed = tuple(cid for cid, gap in proposed_chords.items()
+                       if _gap_covered_by_physical_wall(gap, members))
+    chords = {cid: gap for cid, gap in proposed_chords.items() if cid not in suppressed}
     if not members:
         return StructuralRoomRegionReport((), CLOSURE_HALF_WIDTH_PT, (), (), (), (), 0, (REASON_NO_STRUCTURAL_INK,))
     if len(members) + len(chords) > MAX_REGION_INPUT_PRIMITIVES:
@@ -298,4 +342,5 @@ def derive_structural_room_regions(
     return StructuralRoomRegionReport(
         regions=tuple(regions), closure_half_width_pt=half, exterior_adjacent_primitive_ids=tuple(sorted(exterior_ids)),
         interior_only_primitive_ids=tuple(interior_only), within_wall_body_primitive_ids=tuple(within),
-        chord_ids=tuple(chords), discarded_fragment_count=discarded)
+        chord_ids=tuple(chords), discarded_fragment_count=discarded,
+        suppressed_wall_covered_chord_ids=suppressed)
