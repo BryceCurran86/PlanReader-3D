@@ -248,3 +248,21 @@ def test_raster_candidate_empty_native_list_cannot_be_candidate():
     assert result.wall_native_primitive_count == 0
     assert result.source_total_paths == 0
     assert result.commercial_publishable is False
+
+
+@pytest.mark.parametrize("width,height", [
+    (100., 0.), (100., -1.), (100., float("nan")),
+    (100., float("inf")), (float("nan"), 100.), (0., 100.),
+])
+def test_acacia_bounded_raster_rejects_invalid_page_axes(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    with pytest.raises(ValueError, match="external_footprint_invalid_page_dimensions"):
+        _bounded_raster_scale(width, height)
+
+
+@pytest.mark.parametrize("width,height", [(4000., 1000.), (1000., 4000.), (12000., 8000.)])
+def test_acacia_raster_cap_never_exceeds_2400px(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    scale = _bounded_raster_scale(width, height)
+    assert 0. < scale <= 1.8
+    assert max(width, height) * scale <= 2400. + 1e-9
