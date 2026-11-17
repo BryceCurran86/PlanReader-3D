@@ -15,8 +15,9 @@ type Props={
   scene:SceneManifest;
   authenticated:boolean;
   onSketch:(sketch:WallAdditionSketch|null)=>void;
+  onBatchSketches:(sketches:WallAdditionSketch[])=>void;
 };
-export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
+export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}:Props){
   const [profile,setProfile]=useState("");
   const [level,setLevel]=useState("");
   const [coords,setCoords]=useState({x1:"",z1:"",x2:"",z2:"",height:""});
@@ -26,6 +27,13 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
   const [batch,setBatch]=useState(()=>freshWallBatch(scene));
   const activeBatch=currentWallBatch(scene,batch);
   const batchReport=summarizeWallBatch(scene,activeBatch);
+  // Only original-source-scoped previewed proposals can be projected in 3D.
+  const verifiedBatchSketches=activeBatch.entries.map(({command})=>({
+    scopeKey:activeBatch.sourceKey,
+    proposalId:command.proposalId,levelId:command.levelId,
+    start:[...command.startPt] as [number,number],
+    end:[...command.endPt] as [number,number],heightM:command.heightM,
+  }));
   const [error,setError]=useState<string|null>(null);
   const [working,setWorking]=useState(false);
   const controller=useRef<AbortController|null>(null);
@@ -45,8 +53,14 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
     setResult(null);setError(null);setWorking(false);
     setBatch(freshWallBatch(scene));
     onSketch(null);
+    onBatchSketches([]);
     return ()=>controller.current?.abort();
   },[sceneIdentity,onSketch]);
+
+  useEffect(()=>{
+    onBatchSketches(verifiedBatchSketches);
+  // Depend on immutable accepted batch entries, not a new mapped array each render.
+  },[activeBatch.entries,onBatchSketches]);
 
   function stale(){
     controller.current?.abort();
