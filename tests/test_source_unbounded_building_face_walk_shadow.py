@@ -719,3 +719,86 @@ def test_unique_title_bearing_source_frame_can_be_excluded_without_viewport():
     )
     assert changed.status == "ABSTAINED"
     assert changed.clockwise_pdf_pts == ()
+
+
+
+def test_original_layer_annotation_without_viewport_needs_matching_native_line():
+    """Nonwall source has actual layer and ink, not merely a keyword or ID."""
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+            for _ in range(12)]
+    original = {
+        "type": "s",
+        "layer": "Annotation_FloorPlan",
+        "color": (0, 0, 0), "fill": None,
+        "items": [("l", (281.5, 20), (281.5, 90))],
+        "width": .3,
+    }
+    rows.append(original)
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert result.status == "CANDIDATE"
+    assert not result.building_footprint_authenticated
+    assert not result.measurement_authorized
+
+    # A correct negative-role label on the WRONG source geometry cannot
+    # discard the outside bar. The original native line must overlap it.
+    rows[12] = {**original,
+                "items": [("l", (350, 20), (350, 90))]}
+    far = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert far.status == "ABSTAINED"
+    assert far.other_source_wall_band_count == 1
+    assert far.clockwise_pdf_pts == ()
+
+    # Changing the actual path to a structural wall overrides any other
+    # shape or text. No wall can be disclaimed via this negative-only rule.
+    rows[12] = {**original, "layer": "Enclosure_WallExternal"}
+    structural = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert structural.status == "ABSTAINED"
+    assert structural.other_source_wall_band_count == 1
+
+    # A made-up annotation layer without source primitive geometry cannot
+    # authenticate nonwall source even if a path ID is in range.
+    rows[12] = {**original, "items": []}
+    fake = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert fake.status == "ABSTAINED"
+    assert fake.other_source_wall_band_count == 1
+
+
+def test_original_native_slab_and_service_lines_need_same_strict_geometry():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+            for _ in range(12)]
+    for native_layer in ("Structure_Slab", "Service_StormwaterGeneral",
+                         "Annotation_General"):
+        rows12 = [*rows, {
+            "type": "s", "layer": native_layer, "fill": None,
+            "color": (0, 0, 0), "width": .5,
+            "items": [("l", (281.5, 20), (281.5, 90))],
+        }]
+        result = walk_source_unbounded_building_face(
+            bars, _source_words(), shared_dividers=(_party(),),
+            source_drawings=rows12,
+        )
+        assert result.status == "CANDIDATE"
+        assert result.measurement_authorized is False
+    # A compact source post with an EXTERIOR wall layer is explicitly
+    # *not* an eligible negative layer, even if a primitive overlaps.
+    rows12[12]["layer"] = "Enclosure_WallExternal"
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows12,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.other_source_wall_band_count == 1
