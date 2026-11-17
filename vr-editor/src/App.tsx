@@ -6,6 +6,8 @@ import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
+import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
+import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
 import type { ReviewNotesState } from "./reviewNotes";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
@@ -37,6 +39,7 @@ export function App() {
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
   const [captureSerial,setCaptureSerial]=useState(0);
   const [captureStatus,setCaptureStatus]=useState<string|null>(null);
+  const [pcVrSession, setPcVrSession] = useState<PcVrSessionReport>({presenting:false,controllers:[]});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -223,7 +226,8 @@ export function App() {
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
-                captureSerial={captureSerial} onCapture={setCaptureStatus} />
+                captureSerial={captureSerial} onCapture={setCaptureStatus}
+                onPcVrSessionReport={setPcVrSession} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -247,11 +251,14 @@ export function App() {
           )}
           <div className="viewer-footer">
             <span>Desktop: drag to orbit · scroll to zoom · click to inspect</span>
-            <span>VR: HTTPS + headset · trigger selects · squeeze cycles temporary finish colours</span>
+            <span>VR: SteamVR / OpenXR · L2/R2 selects · grip cycles visual finishes</span>
           </div>
         </section>
 
         <aside className="inspector" aria-label="Evidence inspector">
+          <div className="section-block" aria-label="PS VR2 on PC setup">
+            <PcVr2SetupPanel session={pcVrSession} />
+          </div>
           <div className="section-block">
             <span className="eyebrow">WORKSPACE</span>
             <label className="file-upload">
