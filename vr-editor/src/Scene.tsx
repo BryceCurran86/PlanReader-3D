@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -86,6 +86,7 @@ function labelSprite(value: string): THREE.Sprite {
 
 export function SceneView({ manifest, selectedId, onSelect }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const picked = useRef(selectedId);
@@ -105,7 +106,18 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
     scene.add(grid);
 
     const camera = new THREE.PerspectiveCamera(65, 1, 0.01, 2500);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    } catch {
+      setRenderError("WebGL is unavailable. The source evidence inspector remains usable without 3D.");
+      return;
+    }
+    setRenderError(null);
+    renderer.domElement.tabIndex = 0;
+    renderer.domElement.setAttribute(
+      "aria-label", "Read-only building scene. Use Escape to clear selection."
+    );
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.xr.enabled = true;
@@ -152,8 +164,17 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
       select(typeof hit?.object.userData.objectId === "string"
         ? hit.object.userData.objectId : null);
     }
+    let startPointer: { id: number; x: number; y: number } | null = null;
     function pointerDown(e: PointerEvent) {
       if (renderer.xr.isPresenting) return;
+      startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    }
+    function pointerUp(e: PointerEvent) {
+      const start = startPointer;
+      startPointer = null;
+      if (renderer.xr.isPresenting || !start || start.id !== e.pointerId) return;
+      // Orbiting the camera must not silently select a different wall.
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) return;
       const rect = renderer.domElement.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       mouse.set(
@@ -163,7 +184,12 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
       raycaster.setFromCamera(mouse, camera);
       pick();
     }
-    renderer.domElement.addEventListener("pointerup", pointerDown);
+    function keyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") select(null);
+    }
+    renderer.domElement.addEventListener("pointerdown", pointerDown);
+    renderer.domElement.addEventListener("pointerup", pointerUp);
+    renderer.domElement.addEventListener("keydown", keyDown);
 
     // Controller selection uses exactly the same pickables and canonical
     // object IDs as desktop. No headset state changes any building geometry.
@@ -234,7 +260,9 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
     return () => {
       renderer.setAnimationLoop(null);
       resizeObserver.disconnect();
-      renderer.domElement.removeEventListener("pointerup", pointerDown);
+      renderer.domElement.removeEventListener("pointerdown", pointerDown);
+      renderer.domElement.removeEventListener("pointerup", pointerUp);
+      renderer.domElement.removeEventListener("keydown", keyDown);
       controllers[0].removeEventListener("select", select0);
       controllers[1].removeEventListener("select", select1);
       controls.dispose();
@@ -257,5 +285,7 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
   }, [manifest]);
 
   return <div className="scene-canvas" ref={host}
-    aria-label="Read-only 3D building scene; click or point to select an object" />;
+    aria-label="Read-only 3D building scene; click or point to select an object">
+    {renderError && <div className="scene-loading" role="alert">{renderError}</div>}
+  </div>;
 }
