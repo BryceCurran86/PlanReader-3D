@@ -1,0 +1,30 @@
+name: Private Sandbox Public Source Checkout Export
+on:
+  push:
+    branches:
+      - benchmarks/source-archive-for-private-original-run-20261118
+permissions:
+  contents: read
+jobs:
+  export-public-tracked-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Package tracked source only (no untracked original PDF data)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          git archive --format=tar.gz --output=output/planreader-tracked-source.tar.gz HEAD
+          sha256sum output/planreader-tracked-source.tar.gz | tee output/sha256.txt
+          printf '%s\n' "$GITHUB_SHA" > output/source_commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-public-source-private-sandbox
+          path: output/
+          retention-days: 1
+          if-no-files-found: error
