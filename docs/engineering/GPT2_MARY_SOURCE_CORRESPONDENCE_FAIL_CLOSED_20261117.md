@@ -5,12 +5,12 @@
 ## Observed repository behaviour
 
 - Read `AGENTS.md`, `docs/AI_ENGINEERING_PLAYBOOK.md` and existing GPT2 source-authority reviews; traced `pb_source_cross_view_floor_correspondence_shadow.SourceCrossViewFloorCorrespondenceProducer.evaluate_synthetic` -> `box_correspondence` -> `classify_floor` -> source-only `SourceCrossViewFloorCorrespondenceRecord`.
-- `classify_floor` indexed `correspondence["wall_bounded_on_both_sheets"]` and `correspondence["wall_evidence_identical_on_both_sheets"]` directly. A missing or malformed provenance receipt therefore could raise `KeyError`/`TypeError` instead of a typed abstention. A missing, string, boolean or negative `other_labelled_boxes_overlapping` value could also be treated as an innocuous zero through truthiness.
+- `classify_floor` indexed `correspondence["wall_bounded_on_both_sheets"]` and `correspondence["wall_evidence_identical_on_both_sheets"]` directly. A missing or malformed provenance receipt therefore could raise `KeyError`/`TypeError` instead of a typed abstention. An explicitly supplied malformed `other_labelled_boxes_overlapping` value could also be coerced through truthiness, discarding its source-receipt type. The optional absent hint remains a typed zero **only because** the producer independently sweeps all measured boxes for actual overlap.
 - Even a valid source registration returns **CANDIDATE only**; `authenticated_physical_wall_face_equivalence=False`. This is not enough for the room, metric, finish, issuer, sealed customer or scorer gates.
 
 ## Inference and correction
 
-A caller with a partial wall/overlap receipt must never be permitted to imply a unique physically bounded finish region, nor crash a batch in place of an auditable abstention. Validate both wall receipts via literal `is True`, and require a nonnegative, nonboolean integer overlap count. If a field is absent or malformed, emit the existing `BOX_NOT_WALL_BOUNDED`, `WALL_EVIDENCE_DIFFERS` or `OVERLAPPING_MEASURED_BOXES` code rather than inventing a new evidence vocabulary. Preserve authentic single-mark, fully typed candidate behaviour and all competing mark conflicts.
+A caller with a partial wall/overlap receipt must never be permitted to imply a unique physically bounded finish region, nor crash a batch in place of an auditable abstention. Validate both wall receipts via literal `is True`, and require an exact nonnegative, nonboolean integer overlap count; only an omitted optional hint uses the producer's computed geometric overlap census. If a field is absent or malformed, emit the existing `BOX_NOT_WALL_BOUNDED`, `WALL_EVIDENCE_DIFFERS` or `OVERLAPPING_MEASURED_BOXES` code rather than inventing a new evidence vocabulary. Preserve authentic single-mark, fully typed candidate behaviour and all competing mark conflicts.
 
 ## Validation boundary
 
