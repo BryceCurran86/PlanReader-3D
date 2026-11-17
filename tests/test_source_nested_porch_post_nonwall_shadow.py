@@ -84,3 +84,10 @@ def test_non_ring_source_path_mixed_with_true_post_owners_must_not_disappear():
         "items": [("l", (94, 93), (106, 93))],
     })
     assert not recognize(_outside_band(), (12, 16), drawings, _source_words())
+
+
+def test_ring_owner_id_without_native_local_line_overlap_is_not_enough():
+    # Even a real nested porch symbol at the right coordinates is NOT proof
+    # that an unrelated residual wall band belongs to the original symbol.
+    assert not recognize(box(95, 95, 105, 96), (12,),
+                         _concentric_source(), _source_words())
