@@ -3,7 +3,7 @@ import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
-import { applyDraft, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
+import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
 
@@ -264,6 +264,8 @@ export function App() {
                   workspace={visible!}
                   object={selected}
                   authenticated={authenticatedSource}
+                  suggestion={activeDraftState && manifest
+                    ? draftHeightSuggestion(selected, activeDraftState, manifest) : null}
                 />
               </>
             ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}
