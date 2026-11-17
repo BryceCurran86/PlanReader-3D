@@ -1,0 +1,30 @@
+name: GPT1 3Laurel mergebase public source snapshot
+on:
+  push:
+    branches:
+      - gpt1/3laurel-mergebase-public-source-snapshot-20261117
+    paths:
+      - .github/workflows/gpt1-3laurel-mergebase-public-source-snapshot.yml
+permissions:
+  contents: read
+jobs:
+  public-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked public Python only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.py' '*.toml' 'requirements*.txt' 'pytest.ini' 'setup.cfg' 'tox.ini' |
+            tar --null -T - -czf "$RUNNER_TEMP/mergebase-public-python.tar.gz"
+          test -s "$RUNNER_TEMP/mergebase-public-python.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-mergebase-public-python-source
+          path: ${{ runner.temp }}/mergebase-public-python.tar.gz
+          retention-days: 1
+          if-no-files-found: error
