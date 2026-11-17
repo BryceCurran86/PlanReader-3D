@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from pb_external_footprint_first_trace import (  # noqa: E402
     bound_native_drawings_to_footprint,
+    refine_external_footprint_against_wall_ink,
     trace_external_footprint_first,
 )
 from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
@@ -45,6 +46,9 @@ def main() -> int:
     import fitz
     with fitz.open(stream=raw, filetype="pdf") as doc:
         drawings = doc[args.page].get_drawings()
+    trace, detour_receipt = refine_external_footprint_against_wall_ink(
+        trace, drawings,
+    )
     scope = bound_native_drawings_to_footprint(
         drawings, trace=trace, expected_source_sha256=sha,
     )
@@ -84,6 +88,7 @@ def main() -> int:
         "source_sha256": sha,
         "page_index_0based": args.page,
         "exterior_trace_status": trace.status,
+        "unsupported_rectangular_detour": dict(detour_receipt),
         "edge_ownership": [edge.to_dict() for edge in owned],
         "classification_counts": _counts(owned),
         "first_open_to_exterior_span": None if first_span is None else first_span.to_dict(),
