@@ -215,6 +215,43 @@ def _new_pdf(parent: bytes, coverage: VerifiedWallDrawingCoverage,
         doc.close()
 
 
+
+def _segment_conflict(a, b, c, d) -> bool:
+    """Reject overlapping segments and mid-wall intersections, allow joined endpoints."""
+    def cross(u, v, w):
+        return (v[0]-u[0])*(w[1]-u[1])-(v[1]-u[1])*(w[0]-u[0])
+    def on_segment(u, v, w):
+        return (abs(cross(u,v,w)) <= 1e-7 and
+                min(u[0],v[0])-1e-7 <= w[0] <= max(u[0],v[0])+1e-7 and
+                min(u[1],v[1])-1e-7 <= w[1] <= max(u[1],v[1])+1e-7)
+    if all(abs(cross(a,b,p)) <= 1e-7 for p in (c,d)):
+        axis = 0 if abs(a[0]-b[0]) >= abs(a[1]-b[1]) else 1
+        lo1,hi1 = sorted([a[axis],b[axis]])
+        lo2,hi2 = sorted([c[axis],d[axis]])
+        return min(hi1,hi2)-max(lo1,lo2) > 1e-7
+    signs = (cross(a,b,c),cross(a,b,d),cross(c,d,a),cross(c,d,b))
+    intersects = ((signs[0]*signs[1] < 0 and signs[2]*signs[3] < 0) or
+                  any(on_segment(a,b,p) for p in (c,d)) or
+                  any(on_segment(c,d,p) for p in (a,b)))
+    if not intersects:
+        return False
+    return not any(math.dist(p, q) < 1e-7 for p in (a,b) for q in (c,d))
+
+
+def _check_existing_created_wall_clashes(db, key, wall):
+    existing = db.execute("""
+        SELECT wall_json FROM vr_created_wall_revisions
+         WHERE tenant_id=? AND workspace_id=? AND document_id=?
+           AND source_sha256=? AND snapshot_id=?
+    """, key).fetchall()
+    for (raw,) in existing:
+        prior = json.loads(raw)
+        if prior["level_id"] == wall.level_id and _segment_conflict(
+            wall.start_pt, wall.end_pt, prior["start_pt"], prior["end_pt"]
+        ):
+            raise WallCreateConflict("created_wall_intersection_requires_topology_review")
+
+
 def create_wall_and_related_page_revision(
     db: sqlite3.Connection, *, principal: EditorPrincipal,
     workspace: AuthorizedSceneWorkspace, wall: NewWallDesign,
@@ -283,6 +320,7 @@ def create_wall_and_related_page_revision(
         """, (*key, wall.proposal_id)).fetchone()
         if duplicate:
             raise WallCreateConflict("wall_create_proposal_already_exists")
+        _check_existing_created_wall_clashes(db, key, wall)
         head = db.execute("""
             SELECT revision_number, model_revision, revision_id, updated_pdf_sha256
               FROM vr_created_wall_heads
