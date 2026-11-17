@@ -44,6 +44,7 @@ from pb_next_wall_ring_preview import (
     build_layered_wall_doorway_room_rings,
 )
 from pb_source_ocr_glyph_fastpath import get_source_words_with_glyph_fastpath
+from pb_source_internal_door_completeness_shadow import inspect_source_internal_door_completeness
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -213,6 +214,13 @@ def source_native_trace_preview(
                 viewport_pdf_pts=viewport_pdf_pts,
             )
         _report("outer_boundary_evidence_ready", .38)
+        # Source-only inventory of internal swing and cavity-slider witnesses.
+        # This never upgrades a callout to a physical opening or quantity.
+        internal_door_review = (
+            inspect_source_internal_door_completeness(
+                drawings, source_words, page_index=page_index,
+            ) if source_modality.route != "tiled_raster_underlay" else None
+        )
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
         # a failed exterior trace. Missing key evidence is explicitly shown.
@@ -459,6 +467,14 @@ def source_native_trace_preview(
             "legacy_fallback_allowed": False,
             "source_modality": source_modality.to_dict(),
             "raster_source_trace": raster_trace.to_dict(),
+            "source_internal_door_completeness": (
+                internal_door_review.to_dict() if internal_door_review else {
+                    "status": "ABSTAINED",
+                    "reason": "native_internal_door_source_unavailable",
+                    "physical_openings_authenticated": False,
+                    "measurement_authorized": False,
+                }
+            ),
             "stage_order": (
                 "attempt_raster_source_walls_first"
                 if source_modality.route == "tiled_raster_underlay"
