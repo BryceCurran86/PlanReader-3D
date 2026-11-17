@@ -105,13 +105,35 @@ def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | Non
     return True
 
 
+def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
+                                   expected_title: str | None) -> bool:
+    """Optional page-identity gate: never mistake site/roof for floor plan."""
+    if expected_title is None:
+        return False
+    if (type(expected_title) is not str or not expected_title.strip()
+            or len(expected_title) > 100):
+        raise ValueError("original_footprint_expected_page_title_invalid")
+    import fitz
+
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        if type(page_index) is not int or not 0 <= page_index < len(document):
+            raise ValueError("original_footprint_original_page_index_invalid")
+        if expected_title not in document[page_index].get_text():
+            raise ValueError("original_footprint_original_page_title_mismatch")
+    return True
+
+
 def run(pdf: Path, page_index: int, out_dir: Path, *,
-        expected_sha256: str | None = None):
+        expected_sha256: str | None = None,
+        expected_drawing_title: str | None = None):
     import fitz
 
     original_bytes = pdf.read_bytes()
     sha = hashlib.sha256(original_bytes).hexdigest()
     sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
+    title_verified = _verify_original_drawing_title(
+        original_bytes, page_index, expected_drawing_title,
+    )
     (outer,) = trace_external_footprint_first(
         original_bytes, source_sha256=sha, page_indices=(page_index,),
     )
@@ -136,6 +158,7 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
         result = {
             "source_sha256": sha,
             "source_sha_pin_verified": sha_pin_verified,
+            "source_page_title_verified": title_verified,
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
@@ -208,13 +231,17 @@ if __name__ == "__main__":
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--expected-sha256",
                         help="Exact lowercase SHA-256 of the intended original PDF; reject wrong regional copies")
+    parser.add_argument("--expected-drawing-title",
+                        help="Exact original PDF page title, e.g. 'Floor Plan'; reject site/roof page substitution")
     arguments = parser.parse_args()
     result, js, png = run(
         arguments.pdf, arguments.page, arguments.out_dir,
         expected_sha256=arguments.expected_sha256,
+        expected_drawing_title=arguments.expected_drawing_title,
     )
     print(json.dumps({
         "source_sha_pin_verified": result["source_sha_pin_verified"],
+        "source_page_title_verified": result["source_page_title_verified"],
         "exterior_status": result["exterior"]["status"],
         "source_native_ink_primitives": result["bounded_source"]["candidate_wall_native_primitives"],
         "room_topology_status": result["topology"]["status"],
