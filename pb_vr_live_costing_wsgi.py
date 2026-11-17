@@ -115,6 +115,19 @@ def make_vr_live_costing_wsgi_app(
             return respond("400 Bad Request", {"error": "invalid_json"})
         if not isinstance(command, dict):
             return respond("400 Bad Request", {"error": "cost_preview_object_required"})
+        # Reject browser-supplied commercial fields before any workspace/ledger/rate
+        # provider is called. These are never part of the typed edit command.
+        from pb_vr_editor_command_preview import _REQUIRED as _COMMAND_FIELDS
+        if set(command) != _COMMAND_FIELDS:
+            return respond("422 Unprocessable Entity", {
+                "accepted": False,
+                "quantityPreview": {
+                    "accepted": False, "validationState": "invalid",
+                    "blockingReasons": ["typed_command_schema_mismatch"],
+                    "commercialPublicationAllowed": False,
+                },
+                "costingPreview": None,
+            })
         try:
             workspace = load_authorized_workspace(principal, workspace_id)
             if not isinstance(workspace, AuthorizedSceneWorkspace):
