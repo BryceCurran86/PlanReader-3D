@@ -177,6 +177,7 @@ def source_native_trace_preview(
         wall_drawings, neutral_dark_added = include_source_neutral_dark_strokes(
             vector_scope.drawings, wall_drawings,
         )
+        _report("tracing_outer_boundary", .22)
         if source_modality.route == "tiled_raster_underlay":
             # First geometry is from raster SOURCE PIXELS. Do not silently
             # misclassify native dimension overlays as architectural walls.
@@ -211,7 +212,7 @@ def source_native_trace_preview(
                 source_page_index=page_index,
                 viewport_pdf_pts=viewport_pdf_pts,
             )
-        _report("tracing_outer_boundary", .38)
+        _report("outer_boundary_evidence_ready", .38)
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
         # a failed exterior trace. Missing key evidence is explicitly shown.
@@ -228,6 +229,7 @@ def source_native_trace_preview(
         panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
+        _report("resolving_wall_and_room_topology", .44)
         result = build_layered_wall_doorway_room_rings(
             wall_drawings,
             source_sha256=sha,
@@ -253,7 +255,7 @@ def source_native_trace_preview(
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
         )
-        _report("resolving_wall_and_room_topology", .56)
+        _report("wall_room_topology_ready", .56)
         preview = fitz.open()
         canvas = preview.new_page(width=rect.width, height=rect.height)
         canvas.show_pdf_page(canvas.rect, document, page_index)
