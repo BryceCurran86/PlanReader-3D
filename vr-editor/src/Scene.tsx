@@ -11,6 +11,9 @@ import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
+import { PcVrSqueezeTracker, inspectPcVrController, standardSqueezePressed } from "./pcVr2Support";
+import type { PcVrControllerInfo, PcVrInputSource } from "./pcVr2Support";
+import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
@@ -26,6 +29,7 @@ type Props = {
   detail: SurfaceDetail;
   captureSerial: number;
   onCapture: (message:string)=>void;
+  onPcVrSessionReport: (status: PcVrSessionReport) => void;
   inspection: InspectionSettings;
   cameraRequest: {mode: CameraView; focus: FocusTarget; serial: number};
 };
@@ -132,13 +136,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const sessionReportCallback = useRef(onPcVrSessionReport);
+  sessionReportCallback.current = onPcVrSessionReport;
   const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
   visualSettings.current = { mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
@@ -332,14 +338,66 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     const select0 = () => xrPick(controllers[0]);
     const select1 = () => xrPick(controllers[1]);
-    // Grip/squeeze cycles a cosmetic colour on the currently selected wall.
-    // Trigger selection remains independent. No source command is generated.
-    const squeeze = () => {
+    // SteamVR presents Sony Sense controllers as standard XR input sources.
+    // Do not rely on a proprietary profile name or guessed Sony button IDs:
+    // WebXR 'select' aims with the trigger, 'squeeze' invokes the grip action.
+    // Some OpenXR/browser combinations omit squeeze events, so xr-standard
+    // Gamepad button #1 is an opt-in semantic fallback (one action per release).
+    const inputSources: (PcVrInputSource | null)[] = [null, null];
+    const squeezeTracker = new PcVrSqueezeTracker();
+    const report = (presenting = renderer.xr.isPresenting) => {
+      const controllerInfos = inputSources.map(inspectPcVrController)
+        .filter((item): item is PcVrControllerInfo => item !== null);
+      sessionReportCallback.current({presenting, controllers: controllerInfos});
+    };
+    function applyFinishSqueeze() {
       const id = picked.current;
       if (id && sourceById.has(id)) cycleCallback.current(id);
+    }
+    const nativeStart0 = () => squeezeTracker.onNativeStart("0");
+    const nativeStart1 = () => squeezeTracker.onNativeStart("1");
+    const squeeze0 = () => {
+      if (squeezeTracker.onNativeSqueeze("0")) applyFinishSqueeze();
     };
-    controllers[0].addEventListener("squeeze", squeeze);
-    controllers[1].addEventListener("squeeze", squeeze);
+    const squeeze1 = () => {
+      if (squeezeTracker.onNativeSqueeze("1")) applyFinishSqueeze();
+    };
+    const connected = (event: unknown, index: number) => {
+      const source = event && typeof event === "object" && "data" in event
+        ? (event as {data?: PcVrInputSource}).data ?? null : null;
+      inputSources[index] = source;
+      squeezeTracker.clear(String(index));
+      report();
+    };
+    const disconnect = (index: number) => {
+      inputSources[index] = null;
+      squeezeTracker.clear(String(index));
+      report();
+    };
+    const connected0 = (event: unknown) => connected(event, 0);
+    const connected1 = (event: unknown) => connected(event, 1);
+    const disconnected0 = () => disconnect(0);
+    const disconnected1 = () => disconnect(1);
+    const onSessionStart = () => {
+      squeezeTracker.clear();
+      report(true);
+    };
+    const onSessionEnd = () => {
+      inputSources[0] = null;
+      inputSources[1] = null;
+      squeezeTracker.clear();
+      report(false);
+    };
+    renderer.xr.addEventListener("sessionstart", onSessionStart);
+    renderer.xr.addEventListener("sessionend", onSessionEnd);
+    controllers[0].addEventListener("connected", connected0);
+    controllers[1].addEventListener("connected", connected1);
+    controllers[0].addEventListener("disconnected", disconnected0);
+    controllers[1].addEventListener("disconnected", disconnected1);
+    controllers[0].addEventListener("squeezestart", nativeStart0);
+    controllers[1].addEventListener("squeezestart", nativeStart1);
+    controllers[0].addEventListener("squeeze", squeeze0);
+    controllers[1].addEventListener("squeeze", squeeze1);
     controllers[0].addEventListener("select", select0);
     controllers[1].addEventListener("select", select1);
     for (const controller of controllers) {
@@ -353,7 +411,11 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       scene.add(controller);
     }
 
-    const vrButton = VRButton.createButton(renderer);
+    // Keep local-floor / bounded-floor optional for the SteamVR OpenXR runtime.
+    // The browser remains responsible for opening the immersive session.
+    const vrButton = VRButton.createButton(renderer, {
+      optionalFeatures: ["local-floor", "bounded-floor"],
+    });
     vrButton.setAttribute("aria-label", "Enter or exit VR");
     parent.append(vrButton);
 
@@ -379,6 +441,15 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     renderer.setAnimationLoop(() => {
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
+      // Poll only standard WebXR gamepad squeeze states when native action
+      // events are absent. Never map arbitrary raw hardware button arrays.
+      if (renderer.xr.isPresenting) {
+        for (let index = 0; index < inputSources.length; index++) {
+          if (squeezeTracker.poll(String(index), standardSqueezePressed(inputSources[index]))) {
+            applyFinishSqueeze();
+          }
+        }
+      }
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
       presentationFloor.visible = activeInspection.showShadows;
@@ -552,8 +623,18 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       renderer.domElement.removeEventListener("keydown", keyDown);
-      controllers[0].removeEventListener("squeeze", squeeze);
-      controllers[1].removeEventListener("squeeze", squeeze);
+      renderer.xr.removeEventListener("sessionstart", onSessionStart);
+      renderer.xr.removeEventListener("sessionend", onSessionEnd);
+      controllers[0].removeEventListener("connected", connected0);
+      controllers[1].removeEventListener("connected", connected1);
+      controllers[0].removeEventListener("disconnected", disconnected0);
+      controllers[1].removeEventListener("disconnected", disconnected1);
+      controllers[0].removeEventListener("squeezestart", nativeStart0);
+      controllers[1].removeEventListener("squeezestart", nativeStart1);
+      controllers[0].removeEventListener("squeeze", squeeze0);
+      controllers[1].removeEventListener("squeeze", squeeze1);
+      squeezeTracker.clear();
+      sessionReportCallback.current({presenting:false,controllers:[]});
       controllers[0].removeEventListener("select", select0);
       controllers[1].removeEventListener("select", select1);
       controls.dispose();
