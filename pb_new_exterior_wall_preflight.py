@@ -446,7 +446,22 @@ def attempt_source_native_outer_wall_first(
     # Candidate topology cannot authenticate the role of every independent
     # outside structural band. Retain ABSTAIN until each residual is proven
     # non-exterior by its source evidence; polygon equality is not sufficient.
-    structural_outside = [
+    # Independent source-negative receipt from the canonical outside walker
+    # may resolve every outside band missed by the old generic word-only gate.
+    # A CANDIDATE/self-matching polygon is never enough on its own: all bars
+    # must be original source-authenticated nonwalls, with matching count and
+    # independently source-owned external wall path indices. Still no FIRM.
+    fully_proven_nonwall_outside = bool(
+        party_dividers and walk is not None
+        and walk.status == "CANDIDATE"
+        and walk.source_outside_role_audit_applied
+        and walk.other_source_wall_band_count == 0
+        and walk.source_outside_band_count_before_role_audit == len(outside_bars)
+        and walk.source_proven_nonwall_band_count == len(outside_bars)
+        and len(walk.outer_wall_native_path_ids) >= 4
+        and outer.equals_exact(Polygon(walk.clockwise_pdf_pts), tolerance=CONTACT_PT)
+    )
+    structural_outside = [] if fully_proven_nonwall_outside else [
         bar for bar in outside_bars
         if not bar_proven_outside_envelope(bar, wall_ink, source_words)
     ]
