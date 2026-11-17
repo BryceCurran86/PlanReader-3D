@@ -79,7 +79,7 @@ def test_thin_antenna_boxes_collapse_without_requiring_wall_proof():
     assert not any(abs(p[1] - 132.78) <= 1.0 for p in receipt.polygon_pdf_pts)
 
 
-def test_ambiguous_wide_box_without_ink_collapses_as_candidate_only():
+def test_ambiguous_wide_box_without_ink_must_not_invent_replacement_wall():
     poly = [
         (0.0, 0.0),
         (100.0, 0.0),
@@ -91,6 +91,49 @@ def test_ambiguous_wide_box_without_ink_collapses_as_candidate_only():
         (0.0, 200.0),
     ]
     receipt = collapse_unsupported_rectangular_detours(poly, ())
-    assert receipt.collapsed_detour_count == 1
+    assert receipt.collapsed_detour_count == 0
+    assert tuple(poly) == receipt.polygon_pdf_pts
     assert receipt.measurement_authorized is False
     assert "collapsed_unsupported_rectangular_detour" in receipt.reason_codes
+
+
+def test_wide_detour_retained_when_only_unrelated_wall_ink_exists():
+    poly = (
+        (0.0, 100.0), (40.0, 100.0), (40.0, 40.0),
+        (70.0, 40.0), (70.0, 100.0),
+        (200.0, 100.0), (200.0, 300.0), (0.0, 300.0),
+    )
+    # A wall on the other face is not evidence that the missing A-D base
+    # across the rectangular detour is a real continuous original wall.
+    unrelated = ((80.0, 110.0, 160.0, 110.0),)
+    result = collapse_unsupported_rectangular_detours(poly, unrelated)
+    assert result.collapsed_detour_count == 0
+    assert result.polygon_pdf_pts == poly
+
+
+def test_wide_detour_retained_when_replacement_wall_has_a_real_gap():
+    poly = (
+        (0.0, 100.0), (40.0, 100.0), (40.0, 40.0),
+        (70.0, 40.0), (70.0, 100.0),
+        (200.0, 100.0), (200.0, 300.0), (0.0, 300.0),
+    )
+    # The two touching boundary legs don't prove that the recess is false.
+    incomplete = ((40.0, 100.0, 53.0, 100.0),
+                  (56.0, 100.0, 70.0, 100.0))
+    result = collapse_unsupported_rectangular_detours(poly, incomplete)
+    assert result.collapsed_detour_count == 0
+
+
+def test_wide_detour_collapses_with_two_contiguous_base_ink_strokes():
+    poly = (
+        (0.0, 100.0), (40.0, 100.0), (40.0, 40.0),
+        (70.0, 40.0), (70.0, 100.0),
+        (200.0, 100.0), (200.0, 300.0), (0.0, 300.0),
+    )
+    painted_base = ((40.0, 100.0, 55.0, 100.0),
+                    (55.0, 100.0, 70.0, 100.0))
+    result = collapse_unsupported_rectangular_detours(poly, painted_base)
+    assert result.collapsed_detour_count == 1
+    assert (40.0, 40.0) not in result.polygon_pdf_pts
+    assert (70.0, 40.0) not in result.polygon_pdf_pts
+    assert result.measurement_authorized is False
