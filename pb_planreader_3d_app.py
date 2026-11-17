@@ -6335,9 +6335,13 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
     live_meter=st.empty()
     live_overlay=st.empty()
     selected_pdf_page=int(page["page_no"])
+    batch_live={"enabled": False, "first": 1, "count": 1}
 
     def _show_live_trace(event: dict) -> None:
-        if int(event.get("page_number", 0)) != selected_pdf_page:
+        if (
+            not batch_live["enabled"]
+            and int(event.get("page_number", 0)) != selected_pdf_page
+        ):
             return
         stage_names={
             "reading_original_page": "Loading original drawing",
@@ -6354,9 +6358,19 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         page_number=int(event.get("page_number", selected_pdf_page))
         page_count=int(event.get("page_count", 0))
         fraction=max(0.,min(1.,float(event.get("fraction", 0.))))
+        batch_note=""
+        if batch_live["enabled"]:
+            fraction=(
+                page_number-batch_live["first"]+fraction
+            )/max(1,batch_live["count"])
+            batch_note=(
+                f" · batch page {page_number-batch_live['first']+1}"
+                f"/{batch_live['count']}"
+            )
         total=f" of {page_count}" if page_count else ""
         live_status.info(
-            f"**Live tracing — PDF page {page_number}{total}** · {stage}"
+            f"**Live tracing — PDF page {page_number}{total}**"
+            f"{batch_note} · {stage}"
         )
         live_meter.progress(
             fraction,
@@ -6383,6 +6397,85 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
     if doc_path and doc_path.is_file() and doc_path.suffix.lower()==".pdf":
         digest=hashlib.sha256(doc_path.read_bytes()).hexdigest()
         stored_sha=str(doc_rows[0].get("sha256") or "").strip().lower()
+        # Optional document-wide live monitor, deliberately user-triggered.
+        # Default page viewing still traces only the selected drawing. A
+        # bounded batch lets people WATCH each PDF page without retaining
+        # large overlays for every page in session memory.
+        batch_clicked=False
+        try:
+            import fitz as _live_fitz
+            with _live_fitz.open(str(doc_path)) as _live_pdf:
+                live_pdf_page_count=len(_live_pdf)
+        except (RuntimeError, ValueError, OSError):
+            live_pdf_page_count=0
+        if live_pdf_page_count:
+            with st.expander(
+                "Live document scan — watch each PDF page as it traces",
+                expanded=False,
+            ):
+                scan_a,scan_b=st.columns(2)
+                start_page=int(scan_a.number_input(
+                    "Start at PDF page",min_value=1,
+                    max_value=live_pdf_page_count,
+                    value=min(max(1,selected_pdf_page),live_pdf_page_count),
+                    step=1,key=f"live_scan_start_{page['document_id']}",
+                ))
+                max_batch=min(25,live_pdf_page_count-start_page+1)
+                batch_pages=int(scan_b.number_input(
+                    "Pages in this pass",min_value=1,max_value=max_batch,
+                    value=min(3,max_batch),step=1,
+                    key=f"live_scan_count_{page['document_id']}",
+                ))
+                batch_clicked=st.button(
+                    "Start live page-by-page trace",type="secondary",
+                    key=f"live_scan_batch_{page['document_id']}",
+                )
+                st.caption(
+                    "Shows source walls, exterior candidates, openings and "
+                    "room outlines page by page. This can be slow on detailed "
+                    "drawings. No source preview becomes a measured quantity."
+                )
+        if batch_clicked and (not stored_sha or stored_sha==digest):
+            from pb_new_source_trace_preview import source_native_trace_preview
+            batch_live.update(enabled=True,first=start_page,count=batch_pages)
+            batch_results=[]
+            for pdf_page_number in range(start_page,start_page+batch_pages):
+                try:
+                    item_summary,item_png=source_native_trace_preview(
+                        doc_path,pdf_page_number-1,
+                        progress_callback=_show_live_trace,
+                    )
+                    batch_results.append({
+                        "page": pdf_page_number,
+                        "status": item_summary.get("status","abstained"),
+                        "reason_codes": item_summary.get("reason_codes",[]),
+                    })
+                    if pdf_page_number==selected_pdf_page:
+                        st.session_state[native_trace_key]={
+                            "digest":digest,"summary":item_summary,"png":item_png,
+                        }
+                except Exception as live_error:
+                    batch_results.append({
+                        "page":pdf_page_number,"status":"abstained",
+                        "reason_codes":[
+                            "source_trace_failed:"+type(live_error).__name__
+                        ],
+                    })
+            batch_live["enabled"]=False
+            st.session_state[f"live_scan_results_{int(page['document_id'])}"]={
+                "digest":digest,"results":batch_results,
+            }
+            live_meter.empty()
+            live_overlay.empty()
+            failed=sum(
+                row["status"]=="abstained" for row in batch_results
+            )
+            live_status.info(
+                f"Live scan completed PDF pages {start_page}–"
+                f"{start_page+batch_pages-1} of {live_pdf_page_count}. "
+                f"{failed} page(s) returned ABSTAIN/review; none created "
+                "customer quantities. Select a page to inspect its overlay."
+            )
         if stored_sha and stored_sha!=digest:
             st.session_state[native_trace_key]={
                 "digest":digest,"summary":{"status":"abstained","reason_codes":[
