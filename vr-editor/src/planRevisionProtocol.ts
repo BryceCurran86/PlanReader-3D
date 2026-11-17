@@ -11,6 +11,8 @@ interface RevisedPage {
   evidenceIds:string[];
   geometryRedrawn:false;
   requiresDrawingCoordination:true;
+  vectorGeometryOverlayDrawn?:boolean;
+  vectorOverlayKind?:"source_verified_plan"|"source_verified_elevation"|null;
 }
 export interface SavedPlanRevision {
   saved:true;
@@ -26,6 +28,7 @@ export interface SavedPlanRevision {
   commercialPublicationAllowed:false;
   geometryRedrawn:false;
   reviewRevisionOnly:true;
+  sourceVerifiedVectorOverlayComplete?:boolean;
   downloadPath:string;
 }
 function record(x:unknown):Record<string,unknown> {
@@ -41,7 +44,14 @@ function sourcePage(input:unknown):RevisedPage {
      typeof x.originalGeometryRef!=="string"||!x.originalGeometryRef ||
      !Array.isArray(x.evidenceIds)||x.evidenceIds.length<1||
      !x.evidenceIds.every(item=>typeof item==="string"&&!!item) ||
-     x.geometryRedrawn!==false||x.requiresDrawingCoordination!==true)
+     x.geometryRedrawn!==false||x.requiresDrawingCoordination!==true ||
+     !(x.vectorGeometryOverlayDrawn===undefined ||
+       typeof x.vectorGeometryOverlayDrawn==="boolean") ||
+     !(x.vectorOverlayKind===undefined || x.vectorOverlayKind===null ||
+       x.vectorOverlayKind==="source_verified_plan" ||
+       x.vectorOverlayKind==="source_verified_elevation") ||
+     (x.vectorGeometryOverlayDrawn===true &&
+       !["source_verified_plan","source_verified_elevation"].includes(String(x.vectorOverlayKind))))
     throw Error("Saved plan page lacks original-source review lineage");
   return x as unknown as RevisedPage;
 }
@@ -68,6 +78,13 @@ export function verifySavedPlanRevision(
       pages.filter(p=>p.relationship==="origin").length!==1 ||
       new Set(pages.map(p=>p.pageIndex)).size!==pages.length)
     throw Error("Saved revision lacks complete unique related-page entries");
+  if (!(x.sourceVerifiedVectorOverlayComplete===undefined ||
+        typeof x.sourceVerifiedVectorOverlayComplete==="boolean") ||
+      (x.sourceVerifiedVectorOverlayComplete===true &&
+        !pages.every(page=>page.vectorGeometryOverlayDrawn===true)) ||
+      (x.sourceVerifiedVectorOverlayComplete===false &&
+        pages.every(page=>page.vectorGeometryOverlayDrawn===true)))
+    throw Error("Vector overlay coverage and page receipts disagree");
   const expected=`/api/editor/workspaces/${encodeURIComponent(scope.workspaceId)}/revisions/${x.revisionId}/pdf`;
   if(x.downloadPath!==expected)
     throw Error("Saved PDF download is not bound to this workspace");
