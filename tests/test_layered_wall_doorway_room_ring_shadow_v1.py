@@ -840,3 +840,17 @@ def test_equally_near_competing_through_jambs_abstain():
     # Low end abstains → opening stays unresolved (no jamb stroke closure).
     assert result.unresolved_gap_count >= 1
     assert all(c.kind != KIND_STROKE for c in result.closures)
+
+
+def test_closed_layered_rings_remain_fail_closed_on_commercial_authority():
+    rows = room()
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.rings
+    for rec in result.rings:
+        assert rec.commercial_projection_allowed is False
+        assert rec.takeoff_eligible is False
+        assert rec.metric_area_issued is False
+        assert rec.physical_room_identity_issued is False
+        assert rec.diagnostic_only is True

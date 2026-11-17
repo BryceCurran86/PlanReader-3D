@@ -176,9 +176,12 @@ class ExteriorEdgeNativeOwnership:
     physical_wall_authenticated: bool = False
     can_issue_area: bool = False
     commercial_publishable: bool = False
+    chain_start_shortfall_pt: float | None = None
+    chain_end_shortfall_pt: float | None = None
+    contour_endpoint_association_pt: float | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        row: dict[str, object] = {
             "edge_index": self.edge_index,
             "start_pdf_pts": list(self.start_pdf_pts),
             "end_pdf_pts": list(self.end_pdf_pts),
@@ -192,6 +195,13 @@ class ExteriorEdgeNativeOwnership:
             "can_issue_area": False,
             "commercial_publishable": False,
         }
+        if self.chain_start_shortfall_pt is not None:
+            row["chain_start_shortfall_pt"] = self.chain_start_shortfall_pt
+        if self.chain_end_shortfall_pt is not None:
+            row["chain_end_shortfall_pt"] = self.chain_end_shortfall_pt
+        if self.contour_endpoint_association_pt is not None:
+            row["contour_endpoint_association_pt"] = self.contour_endpoint_association_pt
+        return row
 
 
 @dataclass(frozen=True)
@@ -278,11 +288,14 @@ def _source_exact_collinear_chain(
     segments: Sequence[
         tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]]
     ],
-) -> tuple[str, tuple[int, ...], bool] | None:
-    """Retain original touching CAD strokes, never use a 2.5pt wall join.
+) -> tuple[str, tuple[int, ...], bool, float, float] | None:
+    """Retain original touching CAD strokes; never invent a 2.5 pt wall join.
 
-    This can only bind source ink to a review contour. Even an exact full
-    stroke chain does not authenticate a physical wall or customer area.
+    Stroke-to-stroke continuity still uses representation noise only. Contour
+    endpoint witnessing may use the 2.5 pt association window so a painted
+    face that stops ~1 pt short of a morphological corner (Acacia east after
+    tip/stub collapse) is not rejected as unwitnessed. Even a complete chain
+    remains candidate topology and never authenticates a physical wall or area.
     """
     axis = 1 if horizontal else 0
     along = 0 if horizontal else 1
@@ -337,10 +350,22 @@ def _source_exact_collinear_chain(
     plausible.sort(key=lambda run: (-run[0], run[1], run[2], run[3]))
     if len(plausible) != 1:
         ids = tuple(sorted({i for run in plausible for i in run[3]}))
-        return "ambiguous", ids, False
+        return "ambiguous", ids, False, 0.0, 0.0
     _covered, first, last, ids = plausible[0]
-    complete = first <= low + NOISE_PT and last >= high - NOISE_PT
-    return ("complete" if complete else "incomplete"), ids, complete
+    start_shortfall = max(0.0, first - low)
+    end_shortfall = max(0.0, high - last)
+    # Association window for contour corners only — not a stroke join snap.
+    complete = (
+        start_shortfall <= _EDGE_SEARCH_PT
+        and end_shortfall <= _EDGE_SEARCH_PT
+    )
+    return (
+        ("complete" if complete else "incomplete"),
+        ids,
+        complete,
+        round(start_shortfall, 4),
+        round(end_shortfall, 4),
+    )
 
 
 def _own_one_edge(
@@ -403,7 +428,7 @@ def _own_one_edge(
     if not hits:
         chain = _source_exact_collinear_chain(start, end, horizontal, segments)
         if chain is not None:
-            kind, ids, complete = chain
+            kind, ids, complete, start_shortfall, end_shortfall = chain
             if kind == "ambiguous":
                 return ExteriorEdgeNativeOwnership(
                     edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
@@ -419,6 +444,9 @@ def _own_one_edge(
                 ("source_native_wall_ink_chain_candidate"
                  if complete else "incomplete_source_native_wall_ink_chain"),
                 ids, diagonal,
+                chain_start_shortfall_pt=start_shortfall,
+                chain_end_shortfall_pt=end_shortfall,
+                contour_endpoint_association_pt=_EDGE_SEARCH_PT,
             )
         return ExteriorEdgeNativeOwnership(
             edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,

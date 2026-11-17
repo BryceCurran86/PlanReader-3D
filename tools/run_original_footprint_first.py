@@ -163,6 +163,13 @@ def run(pdf: Path, page_index: int, out_dir: Path):
             class_counts: dict[str, int] = {}
             for edge in owned:
                 class_counts[edge.classification] = class_counts.get(edge.classification, 0) + 1
+            chain_edges = [
+                edge for edge in owned
+                if edge.classification in {
+                    "source_native_wall_ink_chain_candidate",
+                    "incomplete_source_native_wall_ink_chain",
+                }
+            ]
             result["exterior_edge_ownership"] = {
                 "classification_counts": class_counts,
                 "edge_count": len(owned),
@@ -176,8 +183,45 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                         "competing_source_ink_chains",
                     }
                 ),
+                "complete_source_chain_count": sum(
+                    1 for edge in owned
+                    if edge.classification == "source_native_wall_ink_chain_candidate"
+                ),
+                "incomplete_source_chain_count": sum(
+                    1 for edge in owned
+                    if edge.classification == "incomplete_source_native_wall_ink_chain"
+                ),
+                "chain_endpoint_shortfalls_pt": [
+                    {
+                        "edge_index": edge.edge_index,
+                        "classification": edge.classification,
+                        "start_shortfall_pt": edge.chain_start_shortfall_pt,
+                        "end_shortfall_pt": edge.chain_end_shortfall_pt,
+                        "association_pt": edge.contour_endpoint_association_pt,
+                        "native_path_indices": list(edge.native_path_indices),
+                    }
+                    for edge in chain_edges
+                ],
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
+            }
+            result["layered_ring_authority"] = {
+                "ring_count": 0 if ring is None else len(ring.rings),
+                "commercial_projection_allowed": False,
+                "takeoff_eligible": False,
+                "metric_area_issued": False,
+                "physical_room_identity_issued": False,
+                "rings": [
+                    {
+                        "record_id": rec.record_id,
+                        "status": rec.status.value,
+                        "commercial_projection_allowed": False,
+                        "takeoff_eligible": False,
+                        "metric_area_issued": False,
+                        "physical_room_identity_issued": False,
+                    }
+                    for rec in (() if ring is None else ring.rings)
+                ],
             }
         canvas = fitz.open()
         layer = canvas.new_page(width=source[page_index].rect.width,

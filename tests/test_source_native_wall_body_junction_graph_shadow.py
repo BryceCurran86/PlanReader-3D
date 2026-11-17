@@ -301,6 +301,22 @@ def test_window_continuity_without_unique_jambs_abstains():
     assert all(item.reason == REASON_WINDOW_NO_UNIQUE_JAMB for item in edges)
     assert all(item.measurement_authorized is False for item in edges)
     assert all(item.provenance_geometry_kind == GEOMETRY_INFERRED for item in edges)
+    assert all(
+        item.disposition == "abstain_sub_snap_window_gap_without_unique_jamb"
+        for item in edges
+    )
+
+
+def test_wide_window_gap_disposition_is_not_sub_snap():
+    bars = (_strip(0, (0, 0, 10, 1)), _strip(1, (14.0, 0, 24, 1)))
+    drawings = (_drawing(), _drawing())
+    _bodies, junctions = classify_source_wall_body_junctions(bars, drawings)
+    edges = classify_window_continuity_edges(junctions, drawings, page_index=2)
+    assert edges
+    assert all(
+        item.disposition == "abstain_window_gap_no_unique_jamb" for item in edges
+    )
+    assert all(item.physical_join_authenticated is False for item in edges)
 
 
 def test_wide_unhosted_window_span_is_aperture_continuity_not_a_wall():
