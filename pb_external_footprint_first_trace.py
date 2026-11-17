@@ -44,6 +44,14 @@ def _abstain(sha: str, index: int, reason: str, drawings: int = 0) -> ExternalFo
     return ExternalFootprintTrace(sha, index, "ABSTAINED", reason, page_drawings_examined=drawings)
 
 
+def _bounded_raster_scale(page_width_pts: float, page_height_pts: float) -> float:
+    """Keep the diagnostic raster longest axis at or under 2400 pixels."""
+    axes = (page_width_pts, page_height_pts)
+    if not all(math.isfinite(d) and d > 0 for d in axes):
+        raise ValueError("external_footprint_invalid_page_dimensions")
+    return min(1.8, 2400.0 / max(axes))
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -77,8 +85,7 @@ def trace_external_footprint_first(
                 raise ValueError("external_footprint_page_outside_original")
             page = doc[index]
             # Bound raster memory on high-resolution A0/A1 plans.
-            scale = min(1.8, 2400.0 / max(float(page.rect.width), float(page.rect.height)))
-            scale = max(0.7, scale)
+            scale = _bounded_raster_scale(float(page.rect.width), float(page.rect.height))
             raster = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False, colorspace=fitz.csRGB)
             width, height = raster.width, raster.height
             pixels = np.frombuffer(raster.samples, dtype=np.uint8).reshape(height, width, 3)
