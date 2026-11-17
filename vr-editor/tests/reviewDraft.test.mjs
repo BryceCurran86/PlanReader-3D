@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyDraft, applyLevelSwatch, diffSummary, exportDrafts, freshDrafts,
+  applyDraft, applyLevelSwatch, diffSummary, draftHeightSuggestion, exportDrafts, freshDrafts,
   importDrafts, redoDraft, resetDraft, safeDrafts, scopeKey, undoDraft,
 } from "../src/reviewDraft.ts";
 
@@ -108,4 +108,18 @@ test("capacity bound forbids ambiguous mass edits", () => {
   });
   const s=freshDrafts(m);
   assert.equal(applyLevelSwatch(s,m,"big","chalk"),s);
+});
+
+test("ghost proposal only prefills source-checked preview; no anonymous or unowned identity", () => {
+  const m=scene();
+  m.objects[0].canonicalObjectId="canonical-wall";
+  const draft=applyDraft(freshDrafts(m),m,"W1",{heightM:2.85});
+  assert.deepEqual(draftHeightSuggestion(m.objects[0],draft,m),{
+    command:"SET_WALL_HEIGHT",value:"2.85",objectRevision:"rev-W1",
+  });
+  assert.equal(draftHeightSuggestion(m.objects[1],draft,m),null);
+  const unowned=structuredClone(m);unowned.objects[0].canonicalObjectId=null;
+  assert.equal(draftHeightSuggestion(unowned.objects[0],draft,unowned),null);
+  const changed=structuredClone(m);changed.scope.snapshotId="rev2";
+  assert.equal(draftHeightSuggestion(changed.objects[0],draft,changed),null);
 });
