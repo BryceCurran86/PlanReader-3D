@@ -526,16 +526,26 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     walk = attempt.source_outside_face_walk
     assert walk is not None
     assert walk.measurement_authorized is False
-    assert walk.status == "ABSTAINED"
-    # All source-NAMED dwelling zones now close after ASSD and porch entry
-    # swing are independently hosted. Still fail closed for wall evidence
-    # elsewhere on this unscoped original sheet.
-    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    # Original two-dwelling building wall graph now yields one source-backed
+    # exterior review candidate. PARTY remains internal and no physical
+    # measurement or commercial wall quantity is authorized.
+    assert walk.status == "CANDIDATE"
+    assert walk.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
     assert walk.unclosed_dwelling_sides == ()
     assert walk.enclosed_dwelling_zone_count == 2
-    assert walk.clockwise_pdf_pts == ()  # no firm exterior geometry
-    assert walk.outer_wall_native_path_ids == ()
-    assert len(walk.diagnostic_unsealed_ring_pdf_pts) >= 5
+    assert len(walk.clockwise_pdf_pts) >= 5
+    assert walk.clockwise_pdf_pts[0] == walk.clockwise_pdf_pts[-1]
+    assert len(walk.outer_wall_native_path_ids) >= 4
+    assert not walk.building_footprint_authenticated
+    assert not walk.measurement_authorized
+    assert attempt.status == "CANDIDATE"
+    assert attempt.source_outside_face_walk is not None
+    assert attempt.shared_dwelling_divider_candidates
+    # Preflight displays 0.001pt-rounded points while the source walker
+    # preserves full original PDF precision and a terminal close vertex.
+    assert Polygon(attempt.polygon_pdf_pts).hausdorff_distance(
+        Polygon(walk.clockwise_pdf_pts)
+    ) < 0.005
     # Source-negative role audit must run through preflight drawings and
     # only drop independently proven non-walls. Genuine residual outside
     # structural/unlabelled bands keep the hard ABSTAIN.
@@ -775,3 +785,190 @@ def test_local_wallexternal_residual_still_abstains():
     assert walk.status == "ABSTAINED"
     assert walk.reason == "source_other_structural_walls_outside_candidate"
     assert walk.other_source_wall_band_count == 1
+
+
+def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0),
+             "viewport_id": "floor"} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0),
+                "viewport_id": "floor"}
+    accepted = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert accepted.status == "CANDIDATE"
+    for wrong_view in ("", "elevation"):
+        rows[12]["viewport_id"] = wrong_view
+        failed = walk_source_unbounded_building_face(
+            bars, _source_words(), shared_dividers=(_party(),),
+            source_drawings=rows,
+        )
+        assert failed.status == "ABSTAINED"
+        assert failed.reason == "source_other_structural_walls_outside_candidate"
+        assert failed.source_proven_nonwall_band_count == 0
+        assert failed.other_source_wall_band_count == 1
+        assert failed.clockwise_pdf_pts == ()
+        assert not failed.measurement_authorized
+    rows[12]["viewport_id"] = "floor"
+    # An otherwise matching outside path is not trusted when the interior
+    # source wall has no source-positive viewport identity either.
+    for row in rows[:5]:
+        row.pop("viewport_id")
+    failed = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert failed.status == "ABSTAINED"
+    assert failed.other_source_wall_band_count == 1
+    assert failed.clockwise_pdf_pts == ()
+
+
+def test_unique_title_bearing_source_frame_can_be_excluded_without_viewport():
+    from tests.test_source_sheet_frame_roles_shadow import source
+
+    source_lines, source_titles = source()
+    dx, dy = 300, 200
+    shifted = []
+    for row in source_lines:
+        cloned = dict(row)
+        _kind, a, b = row["items"][0]
+        cloned["items"] = [(
+            "l", (a[0] + dx, a[1] + dy), (b[0] + dx, b[1] + dy)
+        )]
+        shifted.append(cloned)
+    shifted_titles = tuple(
+        (x0 + dx, y0 + dy, x1 + dx, y1 + dy, label, 0, 0, 0)
+        for x0, y0, x1, y1, label, *_rest in source_titles
+    )
+    # Original sheet frame line 13 is the left-side rule; the alleged
+    # outside wall-like bar must itself physically overlay that exact rule.
+    rows = [
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+        for _ in range(12)
+    ] + shifted
+    rect = box(309.7, 210, 310.3, 360)
+    bars = (*_building_bars(), SourceBar(rect, 13))
+    result = walk_source_unbounded_building_face(
+        bars, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert result.status == "CANDIDATE"
+    assert result.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
+    assert result.outer_wall_native_path_ids == (0, 1, 2, 3)
+    assert not result.building_footprint_authenticated
+    assert not result.measurement_authorized
+
+    # Path ID by itself is not enough. Geometry anywhere else is an
+    # unresolved structural candidate regardless of the genuine frame.
+    mismatched = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 13))
+    foreign = walk_source_unbounded_building_face(
+        mismatched, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert foreign.status == "ABSTAINED"
+    assert foreign.other_source_wall_band_count == 1
+    assert foreign.source_proven_nonwall_band_count == 0
+
+    # Missing native title evidence or wall-layer reclassification cannot
+    # turn an unknown physical bar into a source-confirmed nonwall.
+    without_titles = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert without_titles.status == "ABSTAINED"
+    rows[13] = {**rows[13], "layer": "Enclosure_WallExternal"}
+    changed = walk_source_unbounded_building_face(
+        bars, (*_source_words(), *shifted_titles),
+        shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert changed.status == "ABSTAINED"
+    assert changed.clockwise_pdf_pts == ()
+
+
+def test_original_layer_annotation_without_viewport_needs_matching_native_line():
+    """Nonwall source has actual layer and ink, not merely a keyword or ID."""
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+            for _ in range(12)]
+    original = {
+        "type": "s",
+        "layer": "Annotation_FloorPlan",
+        "color": (0, 0, 0), "fill": None,
+        "items": [("l", (281.5, 20), (281.5, 90))],
+        "width": .3,
+    }
+    rows.append(original)
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert result.status == "CANDIDATE"
+    assert not result.building_footprint_authenticated
+    assert not result.measurement_authorized
+
+    # A correct negative-role label on the WRONG source geometry cannot
+    # discard the outside bar. The original native line must overlap it.
+    rows[12] = {**original,
+                "items": [("l", (350, 20), (350, 90))]}
+    far = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert far.status == "ABSTAINED"
+    assert far.other_source_wall_band_count == 1
+    assert far.clockwise_pdf_pts == ()
+
+    # Changing the actual path to a structural wall overrides any other
+    # shape or text. No wall can be disclaimed via this negative-only rule.
+    rows[12] = {**original, "layer": "Enclosure_WallExternal"}
+    structural = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert structural.status == "ABSTAINED"
+    assert structural.other_source_wall_band_count == 1
+
+    # A made-up annotation layer without source primitive geometry cannot
+    # authenticate nonwall source even if a path ID is in range.
+    rows[12] = {**original, "items": []}
+    fake = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert fake.status == "ABSTAINED"
+    assert fake.other_source_wall_band_count == 1
+
+
+def test_original_native_slab_and_service_lines_need_same_strict_geometry():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
+            for _ in range(12)]
+    for native_layer in ("Structure_Slab", "Annotation_General"):
+        rows12 = [*rows, {
+            "type": "s", "layer": native_layer, "fill": None,
+            "color": (0, 0, 0), "width": .5,
+            "items": [("l", (281.5, 20), (281.5, 90))],
+        }]
+        result = walk_source_unbounded_building_face(
+            bars, _source_words(), shared_dividers=(_party(),),
+            source_drawings=rows12,
+        )
+        assert result.status == "CANDIDATE"
+        assert result.measurement_authorized is False
+    # A service layer is not independently classified as ROLE_EXCLUSION
+    # in the original source classifier; refuse rather than assume.
+    rows12[12]["layer"] = "Service_StormwaterGeneral"
+    unknown_service = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows12,
+    )
+    assert unknown_service.status == "ABSTAINED"
+    assert unknown_service.other_source_wall_band_count == 1
+    # A compact source post with an EXTERIOR wall layer is explicitly
+    # *not* an eligible negative layer, even if a primitive overlaps.
+    rows12[12]["layer"] = "Enclosure_WallExternal"
+    result = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows12,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.other_source_wall_band_count == 1

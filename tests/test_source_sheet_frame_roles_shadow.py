@@ -1,9 +1,6 @@
 """Title-bearing original source frame rules are non-walls only with full proof."""
 from copy import deepcopy
-
-from pb_source_sheet_frame_roles_shadow import (
-    source_sheet_frame_nonwall_path_ids as detect,
-)
+from pb_source_sheet_frame_roles_shadow import source_sheet_frame_nonwall_path_ids as detect
 
 
 def line(a,b, *, layer="", width=0.7, fill=None):
@@ -60,3 +57,40 @@ def test_nonwall_requires_footer_text_and_relative_page_coverage():
     assert not detect(unrelated,words)
     outside_words=[(190,165,215,171,word[4],0,0,0) for word in words]
     assert not detect(rows,outside_words)
+
+
+
+def test_original_3laurel_p3_source_owned_title_frame_without_viewport():
+    """Held-out original: source-only sheet ink, never building wall authority."""
+    import hashlib
+
+    import fitz
+
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+
+    source = require_original_3laurel()
+    raw = source.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        page = doc[2]
+        drawings = page.get_drawings()
+        words = page.get_text("words")
+        assert len(drawings) == 11030
+        assert len(words) >= 1200
+        # Four full-page source rule segments (26-29) and their exact
+        # original title-grid drawing items (2-25,30-40), not walls.
+        ids = detect(drawings, words)
+        assert ids == frozenset(range(2, 41))
+        assert {26, 27, 28, 29} <= ids
+        assert all(
+            drawings[idx].get("fill") is None and
+            not str(drawings[idx].get("layer") or "").strip()
+            for idx in ids
+        )
+        assert all(
+            not drawings[idx].get("source_viewport_id")
+            and not drawings[idx].get("viewport_id")
+            for idx in ids
+        )
+        # This detector must not fabricate closure or emit quantities.
+        assert len(page.get_drawings()) == len(drawings)

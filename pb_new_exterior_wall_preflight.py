@@ -443,6 +443,9 @@ def attempt_source_native_outer_wall_first(
         bar for bar in bars
         if not (expanded_outer.covers(bar.polygon) or envelope.covers(bar.polygon))
     ]
+    # Candidate topology cannot authenticate the role of every independent
+    # outside structural band. Retain ABSTAIN until each residual is proven
+    # non-exterior by its source evidence; polygon equality is not sufficient.
     structural_outside = [
         bar for bar in outside_bars
         if not bar_proven_outside_envelope(bar, wall_ink, source_words)
@@ -508,20 +511,10 @@ def attempt_source_native_outer_wall_first(
     return SourceNativeOuterWallAttempt(
         "CANDIDATE", "source_closed_painted_wall_ring_needs_exterior_role_authentication",
         points, sources,
-        source_wall_band_count=counts["source_wall_band_count"],
-        source_stroke_pair_band_count=counts["source_stroke_pair_band_count"],
-        source_heavy_stroke_band_count=counts["source_heavy_stroke_band_count"],
-        source_cavity_multi_face_band_count=counts["source_cavity_multi_face_band_count"],
-        source_wide_face_pair_band_count=counts["source_wide_face_pair_band_count"],
-        source_wall_path_count=counts["source_wall_path_count"],
-        graph=graph,
-        window_footprint_bridges=window_bridges,
-        garage_door_footprint_bridges=garage_bridges,
-        swing_door_footprint_bridges=swing_bridges,
-        sliding_door_footprint_bridges=sliding_bridges,
-        neutral_wall_seams=neutral_seams,
-        viewport_pdf_pts=tuple(viewports) if viewports is not None else None,
         diagnostic_closed_wall_loop_count=len(closed),
         diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
         diagnostic_wall_bands_outside_loop=0,
+        # Retain source-positive PARTY / original aperture / outside-walk
+        # evidence on the successful path, just as on ABSTAIN paths.
+        **counts,
     )

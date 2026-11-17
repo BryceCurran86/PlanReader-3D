@@ -344,7 +344,7 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
     assert any(lbl.startswith("ASD") for lbl in labels)
     assert any(lbl.startswith("ASSD") for lbl in labels)
     assert walk is not None
-    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
     assert walk.unclosed_dwelling_sides == ()
     assert walk.enclosed_dwelling_zone_count == 2
     assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
@@ -375,7 +375,8 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
             "ambiguous_competing_source_roles",
         }
     assert walk is not None
-    assert walk.status == "ABSTAINED"
+    assert walk.status == "CANDIDATE"
+    assert not walk.building_footprint_authenticated
     assert walk.measurement_authorized is False
     party = set(walk.internal_party_wall_native_path_ids or ())
     outer = set(walk.outer_wall_native_path_ids or ())

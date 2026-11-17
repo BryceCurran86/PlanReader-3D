@@ -7,8 +7,8 @@ guess, project ID, threshold snap, wall synthesis, FIRM or quantity promotion.
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
+import math
 from typing import Any
 
 _NOISE_PT = 0.05
