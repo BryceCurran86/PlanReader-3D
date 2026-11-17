@@ -98,3 +98,8 @@
 .wall-assembly-result th,.wall-assembly-result td{padding:7px 4px;border-bottom:1px solid #514760;vertical-align:top;overflow-wrap:anywhere}
 .wall-assembly-result td small{display:block;color:#af9cc5;margin-top:3px}
 .wall-assembly-result li{font-size:11px;color:#dfcce2;padding:3px 0}
+
+.vr-teleport-panel{border-left:3px solid #41bcaa}
+.vr-teleport-toggle{display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600}
+.vr-teleport-toggle input{accent-color:#32bc9c;margin:3px 0 0;flex-shrink:0}
+.vr-teleport-panel .muted{line-height:1.5}
