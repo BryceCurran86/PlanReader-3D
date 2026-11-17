@@ -401,7 +401,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           }
           controls.target.copy(center);
           camera.position.copy(center).add(offset);
-          camera.up.set(...(requestedCamera.mode === "plan" ? [0, 0, -1] as const : [0, 1, 0] as const));
+          camera.up.set(0, requestedCamera.mode === "plan" ? 0 : 1,
+            requestedCamera.mode === "plan" ? -1 : 0);
           camera.lookAt(center);
           controls.update();
         }
