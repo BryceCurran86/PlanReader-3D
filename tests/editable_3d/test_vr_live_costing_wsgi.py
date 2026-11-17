@@ -7,8 +7,8 @@ import json
 
 from pb_vr_live_costing import LiveCostBook
 from pb_vr_live_costing_wsgi import make_vr_live_costing_wsgi_app
-from tests.editable_3d.test_vr_editor_command_preview import _fixture
-from tests.editable_3d.test_vr_live_costing import _book
+from test_vr_editor_command_preview import _fixture
+from test_vr_live_costing import _book
 
 
 def _app(*, authenticated=True, csrf=True, loaded=True, book=True, viewer=False):
