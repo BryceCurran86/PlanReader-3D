@@ -103,6 +103,32 @@ def _word(row: Sequence[Any] | Mapping[str, Any]) -> tuple[tuple[float, float, f
         return None
 
 
+def _nearest_native_hinge_width(
+    box: tuple[float, float, float, float],
+    source_words: Sequence[Sequence[Any] | Mapping[str, Any]],
+) -> tuple[int | None, int | None]:
+    """A hinge gets a printed width only from a UNIQUE nearby source token."""
+    cx, cy = (box[0] + box[2]) / 2., (box[1] + box[3]) / 2.
+    options = []
+    for index, row in enumerate(source_words):
+        parsed = _word(row)
+        if parsed is None:
+            continue
+        bounds, token = parsed
+        if token not in ("720", "870"):
+            continue
+        x, y = (bounds[0] + bounds[2]) / 2., (bounds[1] + bounds[3]) / 2.
+        distance = math.hypot(x - cx, y - cy)
+        if distance < 15:
+            options.append((distance, index, int(token)))
+    options.sort()
+    if not options or (
+        len(options) > 1 and options[1][0] - options[0][0] <= 2.
+    ):
+        return None, None
+    return options[0][1], options[0][2]
+
+
 def inspect_source_internal_door_completeness(
     drawings: Sequence[Mapping[str, Any] | object],
     source_words: Sequence[Sequence[Any] | Mapping[str, Any]] = (),
@@ -139,11 +165,19 @@ def inspect_source_internal_door_completeness(
         native = ((arc_id, leaf_id, matches[0].first_host_path_id,
                    matches[0].second_host_path_id, *matches[0].jamb_cap_path_ids)
                   if matches else (arc_id, leaf_id))
+        width_index, width_mm = _nearest_native_hinge_width(bounds, source_words)
         marks.append(SourceInternalDoorMark(
             "native_swing_arc_leaf",
             "HOSTED_TOPOLOGY_ONLY" if matches else "NEEDS_HOST",
             bounds,
             native_path_ids=tuple(native),
+            label_width_word_index=width_index,
+            label_width_mm=width_mm,
+            host_wall_native_path_ids=(
+                (matches[0].first_host_path_id, matches[0].second_host_path_id)
+                if matches else ()
+            ),
+            jamb_native_path_ids=matches[0].jamb_cap_path_ids if matches else (),
         ))
 
     # A partial 25-65 degree original swing plus diagonal leaf may not
@@ -161,11 +195,14 @@ def inspect_source_internal_door_completeness(
         if rect is None:
             continue
         bounds = tuple(float(v) for v in rect)
+        width_index, width_mm = _nearest_native_hinge_width(bounds, source_words)
         marks.append(SourceInternalDoorMark(
             "native_swing_arc_leaf", "HOSTED_TOPOLOGY_ONLY",
             bounds,
             native_path_ids=(r.swing_arc_path_id, r.first_host_path_id,
                              r.second_host_path_id, *r.jamb_cap_path_ids),
+            label_width_word_index=width_index,
+            label_width_mm=width_mm,
             host_wall_native_path_ids=(r.first_host_path_id, r.second_host_path_id),
             jamb_native_path_ids=r.jamb_cap_path_ids,
         ))
