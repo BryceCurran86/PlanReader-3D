@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SceneManifest } from "./types";
 import {
   freshWallBatch,currentWallBatch,addOrReplaceWallStudy,removeWallStudy,
-  undoWallBatch,redoWallBatch,summarizeWallBatch,exportWallBatchReview,
+  undoWallBatch,redoWallBatch,summarizeWallBatch,compareWallBatches,exportWallBatchReview,
 } from "./wallBatchStudy";
 import {
   makeWallAdditionCommand,validateAdditionSketch,verifyWallAssemblyPreview,
@@ -27,6 +27,10 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   const [batch,setBatch]=useState(()=>freshWallBatch(scene));
   const activeBatch=currentWallBatch(scene,batch);
   const batchReport=summarizeWallBatch(scene,activeBatch);
+  const lastBatchDelta=activeBatch.past.length?compareWallBatches(
+    scene,{...activeBatch,entries:activeBatch.past[activeBatch.past.length-1]},
+    activeBatch,
+  ):[];
   // Only original-source-scoped previewed proposals can be projected in 3D.
   const verifiedBatchSketches=activeBatch.entries.map(({command})=>({
     scopeKey:activeBatch.sourceKey,
@@ -236,11 +240,26 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
             <td>{q.value.toFixed(2)} {q.unit}</td>
           </tr>)}</tbody>
         </table>
+        <strong>Changes since prior review checkpoint</strong>
+        {lastBatchDelta.length?
+          <table><thead><tr><th>Trade</th><th>Work item</th><th>Difference</th></tr></thead>
+            <tbody>{lastBatchDelta.map(q=><tr
+              key={JSON.stringify([q.trade,q.element,q.description,q.specificationId,q.unit])}>
+              <td>{q.trade}</td><td>{q.element}</td>
+              <td>{q.value>0?"+":""}{q.value.toFixed(2)} {q.unit}</td>
+            </tr>)}</tbody></table>:
+          <p className="muted">No changed construction quantities from the previous checkpoint.</p>}
         <strong>Level totals</strong>
-        <ul>{batchReport.perLevelTotals.map(group=>
-          <li key={group.levelId}>{group.levelId}: {
-            batchReport.levels.find(l=>l.levelId===group.levelId)?.wallCount
-          } wall(s), {group.totals.length} grouped trade item(s)</li>)}</ul>
+        {batchReport.perLevelTotals.map(group=>
+          <div key={group.levelId}>
+            <strong>{group.levelId} · {
+              batchReport.levels.find(l=>l.levelId===group.levelId)?.wallCount
+            } wall(s)</strong>
+            <ul>{group.totals.map(q=><li
+              key={JSON.stringify([q.trade,q.element,q.description,q.specificationId,q.unit])}>
+              {q.trade}: {q.element} — {q.value.toFixed(2)} {q.unit}
+            </li>)}</ul>
+          </div>)}
         <strong>Wall intersection / overlap coordination</strong>
         {batchReport.geometryConflicts.length?
           <ul>{batchReport.geometryConflicts.map((c,i)=>
