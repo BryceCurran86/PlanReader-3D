@@ -4,6 +4,8 @@ import { verifyPreviewResponse } from "./previewProtocol";
 import type { VerifiedPreview } from "./previewProtocol";
 import { verifyLiveCostingResponse } from "./liveCostingProtocol";
 import type { VerifiedCostPreview } from "./liveCostingProtocol";
+import { verifySavedPlanRevision } from "./planRevisionProtocol";
+import type { SavedPlanRevision } from "./planRevisionProtocol";
 
 type Props = {
   workspace: SceneManifest;
@@ -33,6 +35,11 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   const [preview, setPreview] = useState<VerifiedPreview | null>(null);
   const [costPreview, setCostPreview] = useState<VerifiedCostPreview | null>(null);
   const [autoLive, setAutoLive] = useState(false);
+  const [previewedCommand, setPreviewedCommand] = useState<Record<string, unknown> | null>(null);
+  const [savingRevision, setSavingRevision] = useState(false);
+  const [savedRevision, setSavedRevision] = useState<SavedPlanRevision | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const pendingSave = useRef<AbortController | null>(null);
   const previewRequestId = useRef(0);
   const pendingPreview = useRef<AbortController | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
@@ -45,6 +52,8 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     setWorking(false);
     setPreview(null);
     setCostPreview(null);
+    setPreviewedCommand(null);
+    setSaveError(null);
   }
 
   useEffect(() => {
@@ -63,7 +72,14 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     }
     setPreview(null);
     setCostPreview(null);
-    return () => { previewRequestId.current += 1; pendingPreview.current?.abort(); };
+    setPreviewedCommand(null);
+    setSavedRevision(null);
+    setSaveError(null);
+    return () => {
+      previewRequestId.current += 1;
+      pendingPreview.current?.abort();
+      pendingSave.current?.abort();
+    };
   }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
 
   // Opt-in, debounced LIVE repricing: never dispatch incomplete corrections,
@@ -82,6 +98,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     setError(null);
     setPreview(null);
     setCostPreview(null);
+    setPreviewedCommand(null);
     if (!enabled || !control) return;
     const csrf = document.querySelector<HTMLMetaElement>('meta[name="planreader-csrf-token"]')?.content;
     if (!csrf) {
@@ -151,6 +168,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       if (requestId === previewRequestId.current && !controller.signal.aborted) {
         setPreview(validated);
         setCostPreview(live?.costingPreview ?? null);
+        setPreviewedCommand(command);
       }
     } catch (e) {
       if (requestId === previewRequestId.current && !controller.signal.aborted)
@@ -159,6 +177,54 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       if (requestId === previewRequestId.current) {
         pendingPreview.current = null;
         setWorking(false);
+      }
+    }
+  }
+
+  async function saveRevision() {
+    if (!preview || !previewedCommand || !enabled || savingRevision) return;
+    const csrf = document.querySelector<HTMLMetaElement>('meta[name="planreader-csrf-token"]')?.content;
+    if (!csrf) {
+      setSaveError("Authenticated workspace CSRF token required.");
+      return;
+    }
+    pendingSave.current?.abort();
+    const controller = new AbortController();
+    pendingSave.current = controller;
+    setSavingRevision(true);
+    setSaveError(null);
+    try {
+      const response = await fetch(
+        `/api/editor/workspaces/${encodeURIComponent(workspace.scope.workspaceId)}/revisions`,
+        {
+          method: "POST", credentials: "include", cache: "no-store",
+          signal: controller.signal,
+          headers: {"Content-Type":"application/json","X-CSRF-Token":csrf},
+          body: JSON.stringify(previewedCommand),
+        }
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        const issue = body && typeof body === "object" && "error" in body &&
+          typeof body.error === "string" ? body.error : "revision_save_rejected";
+        throw new Error(`Could not save a complete, source-verified drawing revision: ${issue}`);
+      }
+      const saved = verifySavedPlanRevision(body, workspace);
+      if (!controller.signal.aborted) {
+        setSavedRevision(saved);
+        setPreviewedCommand(null);
+        setPreview(null);
+        setCostPreview(null);
+        setAutoLive(false);
+        setError(null);
+      }
+    } catch (e) {
+      if (!controller.signal.aborted)
+        setSaveError(e instanceof Error ? e.message : "Revision save unavailable");
+    } finally {
+      if (!controller.signal.aborted) {
+        pendingSave.current = null;
+        setSavingRevision(false);
       }
     }
   }
@@ -208,6 +274,42 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         </button>
       </div>
       <p className="muted">Live costs use the logged-in company's current server-owned rate book. Prices cannot be supplied by the browser; missing rates remain unpriced.</p>
+      {preview && previewedCommand && !savedRevision && (
+        <div className="plan-edit-save-panel">
+          <strong>Save an updated drawing set</strong>
+          <p className="muted">
+            Save a new immutable PDF version. Every independently verified
+            related sheet receives a review revision annotation; original
+            geometry is not automatically redrawn, and every page still
+            requires drawing coordination. Unverified links block the save.
+          </p>
+          <button type="button" disabled={working || savingRevision || !enabled}
+            onClick={() => void saveRevision()}>
+            {savingRevision ? "Saving verified related pages…" :
+              "Save new plan revision and linked pages"}
+          </button>
+        </div>
+      )}
+      {saveError && <p role="alert" className="error">{saveError}</p>}
+      {savedRevision && (
+        <div className="plan-edit-saved" role="status">
+          <strong>Saved {savedRevision.revisionLabel} · review copy</strong>
+          <p>Updated {savedRevision.pagesRevised.length} source-verified page(s).
+            Existing source PDF preserved; geometry was NOT redrawn.</p>
+          <ul>{savedRevision.pagesRevised.map(page =>
+            <li key={page.pageIndex}>Page {page.pageLabel} · {page.sheet}
+              · {page.relationship === "origin" ? "edited source" : "verified cross-sheet link"}
+            </li>)}</ul>
+          <a href={savedRevision.downloadPath} download>
+            Download saved revised PDF
+          </a>
+          <p className="muted">
+            Correction history and revised PDF committed together. Reload
+            the workspace to load the new model revision before another edit.
+            Commercial approval remains separate.
+          </p>
+        </div>
+      )}
       {error && <p role="alert" className="error">{error}</p>}
       {costPreview && (
         <div role="status" className="preview-results live-cost-results" aria-label="Unapproved live cost preview">
