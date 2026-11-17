@@ -3,6 +3,7 @@ import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
+import { BatchImpactPreview } from "./BatchImpactPreview";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
@@ -259,6 +260,13 @@ export function App() {
                   key={visible.scope.snapshotId}
                   scene={manifest!} selected={selected} selectedLevel={level}
                   state={activeDraftState} onChange={setDraftState} />}
+                {manifest && activeDraftState && (
+                  <BatchImpactPreview
+                    scene={manifest}
+                    drafts={activeDraftState}
+                    authenticated={authenticatedSource}
+                  />
+                )}
                 <CommandPreview
                   key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}
