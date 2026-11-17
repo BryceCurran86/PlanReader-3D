@@ -43,3 +43,43 @@ def test_original_north_dim_extension_lines_are_not_physical_exterior_walls():
         assert row.get("layer") == "Enclosure_WallExternal"
         assert row.get("type") == "f"
         assert row.get("fill") == (0.0, 0.0, 0.0)
+
+
+
+def test_original_p3_entire_exterior_has_only_source_proven_outside_roles():
+    """End-to-end original: two dwellings, no invented join or customer area."""
+    from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    import hashlib
+
+    original = require_original_3laurel()
+    raw = original.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        page = doc[2]
+        paths = tuple(page.get_drawings())
+        words = tuple(page.get_text("words"))
+    attempt = attempt_source_native_outer_wall_first(
+        paths, source_words=words, window_source_drawings=paths,
+        source_page_index=2,
+    )
+    walk = attempt.source_outside_face_walk
+    assert walk is not None
+    assert walk.status == "CANDIDATE"
+    assert walk.enclosed_dwelling_zone_count == 2
+    assert walk.unclosed_dwelling_sides == ()
+    assert walk.other_source_wall_band_count == 0
+    assert walk.source_outside_role_audit_applied is True
+    assert walk.source_outside_band_count_before_role_audit >= 11
+    assert walk.source_proven_nonwall_band_count == (
+        walk.source_outside_band_count_before_role_audit
+    )
+    assert walk.unresolved_outside_native_path_id_sample == ()
+    assert attempt.status == "CANDIDATE"
+    assert attempt.reason == "source_closed_painted_wall_ring_needs_exterior_role_authentication"
+    assert len(attempt.polygon_pdf_pts) >= 4
+    assert len(walk.outer_wall_native_path_ids) >= 4
+    assert len(attempt.shared_dwelling_divider_candidates) == 1
+    assert not walk.measurement_authorized
+    assert not walk.building_footprint_authenticated
+    assert not attempt.measurement_authorized
