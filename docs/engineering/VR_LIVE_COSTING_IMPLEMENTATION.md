@@ -103,6 +103,32 @@ stale results. All responses always report `quoteReady=false`,
 `requiresApproval=true`, `persisted=false`,
 `commercialPublicationAllowed=false`.
 
+### Versioned company rate book adapter (optional SQLite)
+
+The additional `pb_vr_live_ratebook_store.py` implements opt-in rate-book
+persistence for teams using SQLite. It is **not** an anonymous rate editor.
+
+- Run `install_rate_book_schema(connection)` only in deployment migration.
+- Real role-aware admin code calls `activate_rate_book(connection, principal=...,
+  workspace=..., book=..., authorize_rate_manager=...)`. The last callback must
+  independently confirm the user's company financial administration permission.
+- The rate revision is immutable; changing any price requires a NEW revision.
+  Historical revisions remain stored; the active revision pointer changes
+  only by explicit authorized action.
+- Only canonical objects that match the protected original-source witness
+  may receive bound rates in the stored book.
+- For read/preview, connect
+  `load_authorized_cost_book(connection, principal, workspace)` through the
+  production repository callback. It refuses missing, corrupt, cross-tenant
+  or stale-source snapshots and never creates default prices.
+- A source SHA/snapshot change requires re-attesting a rate book to the new
+  source. Do NOT expose its SQLite DB or any raw rate-book file through a
+  public repository, CDN or unauthenticated endpoint.
+
+This adapter provides local/server storage semantics, **not** a hosted
+company-admin management interface, supplier live pricing connector,
+deployment migration of existing user data, or verified customer quote.
+
 ### Release gates not completed by the formula code
 
 - Connect tested production tenant rate-book storage and a versioned rate
@@ -120,6 +146,6 @@ stale results. All responses always report `quoteReady=false`,
 To run focused tests:
 
 ```bash
-python -m pytest -q tests/editable_3d/test_vr_live_costing.py tests/editable_3d/test_vr_live_costing_wsgi.py
+python -m pytest -q tests/editable_3d/test_vr_live_costing.py tests/editable_3d/test_vr_live_costing_wsgi.py tests/editable_3d/test_vr_live_ratebook_store.py
 cd vr-editor && npm ci && npm test && npm run build
 ```
