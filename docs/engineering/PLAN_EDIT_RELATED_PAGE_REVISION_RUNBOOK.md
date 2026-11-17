@@ -69,3 +69,28 @@ An editor user must explicitly choose **Save new plan revision and linked pages*
 python -m pytest -q tests/editable_3d/test_plan_edit_revision_store.py tests/editable_3d/test_plan_edit_revision_wsgi.py
 cd vr-editor && npm ci && npm test && npm run build
 ```
+
+## Independently source-verified 2D vector revision overlays
+
+When *all* independently discovered related pages contain a producer-confirmed
+source PDF native stroke, a page-specific calibrated new vector, and a source
+correction receipt for the current command, PlanReader can add an actual new
+PDF vector line to each related sheet. The original native line stays intact
+as a reversible reference; the new line is highlighted **PROPOSED VECTOR
+(REVIEW)**. This is not a destructive original CAD rewrite or an architect's
+signed revised drawing.
+
+Use `RelatedPageCoverage.vector_overlays` only from the protected
+source/vector registration provider, with
+`vector_projection_complete=True` **only** if every related page is
+independently verified. Missing/mismatched page geometry, ambiguous original
+PDF line, rotated page without calibrated transform, orphan command receipt,
+or a repeated geometry stroke aborts the entire save transaction. The
+client cannot submit these vector overlays in the HTTP request.
+
+The returned `pagesRevised[]` now contains `vectorGeometryOverlayDrawn` and
+`vectorOverlayKind`; the saved revision summary contains
+`sourceVerifiedVectorOverlayComplete`. `geometryRedrawn` remains false
+because the original architectural drafting is preserved and the overlay
+has not replaced the native source. This is an explicit step toward
+cross-sheet geometric coordination, not a claim of full BIM re-projection.
