@@ -15,6 +15,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SourceCrossViewFloorCorrespondenceProducer,
     SourceCrossViewFloorCorrespondenceSelector,
     BOX_NOT_WALL_BOUNDED,
+    WALL_EVIDENCE_DIFFERS,
     COMPETING_FINISH_CODES_IN_BOX,
     NO_FINISH_MARK_IN_BOX,
     BOX_OWNED_BY_OTHER_FINISH_CODE,
@@ -506,6 +507,48 @@ def test_original_finish_source_identity_and_threshold_inputs_fail_closed(kwargs
     result = classify_floor(_source_complete_correspondence(), **args)
     assert result["status"] is EvidenceResolutionStatus.ABSTAINED
     assert reason in result["reason_codes"]
+
+
+@pytest.mark.parametrize(("correspondence", "reason"), [
+    (None, BOX_NOT_WALL_BOUNDED),
+    ({}, BOX_NOT_WALL_BOUNDED),
+    ({"wall_bounded_on_both_sheets": False}, BOX_NOT_WALL_BOUNDED),
+    ({"wall_bounded_on_both_sheets": 1}, BOX_NOT_WALL_BOUNDED),
+    ({"wall_bounded_on_both_sheets": True}, WALL_EVIDENCE_DIFFERS),
+    ({"wall_bounded_on_both_sheets": True,
+      "wall_evidence_identical_on_both_sheets": "True"}, WALL_EVIDENCE_DIFFERS),
+    ({"wall_bounded_on_both_sheets": True,
+      "wall_evidence_identical_on_both_sheets": False}, WALL_EVIDENCE_DIFFERS),
+])
+def test_missing_or_malformed_wall_correspondence_abstains_without_crash(
+    correspondence, reason,
+):
+    before = copy.deepcopy(correspondence)
+    result = classify_floor(
+        correspondence,
+        registration_unique=True, marks_inside=[_source_complete_mark()],
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert correspondence == before
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert reason in result["reason_codes"]
+    assert result["authority_blockers"] == ()
+    assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+@pytest.mark.parametrize("overlap", [
+    None, False, True, "0", 0.0, -1, 1, float("nan"), [],
+])
+def test_missing_or_malformed_labelled_box_overlap_abstains(overlap):
+    result = classify_floor(
+        _source_complete_correspondence(),
+        registration_unique=True, marks_inside=[_source_complete_mark()],
+        other_labelled_boxes_overlapping=overlap, material_code="FT3",
+    )
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert OVERLAPPING_MEASURED_BOXES in result["reason_codes"]
+    assert result["authority_blockers"] == ()
+    assert result["authenticated_physical_wall_face_equivalence"] is False
 
 
 def test_duplicated_ft3_marks_abstain_through_real_source_shadow_producer():
