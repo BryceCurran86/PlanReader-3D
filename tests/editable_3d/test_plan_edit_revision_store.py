@@ -127,12 +127,16 @@ def _conn():
     return db
 
 
-def _save(db, fixture):
+def _locked_unified_head(_principal, _workspace, connection):
+    return connection.in_transaction
+
+
+def _save(db, fixture, *, verifier=_locked_unified_head):
     original, user, ws, ledger, coverage, command = fixture
     return save_plan_edit_revision(
         db, principal=user, workspace=ws, workspace_db_id=1,
         ledger=ledger, command=command, original_pdf_bytes=original,
-        page_coverage=coverage,
+        page_coverage=coverage, unified_head_verifier=verifier,
     )
 
 
@@ -190,7 +194,7 @@ def test_idempotent_replay_does_not_insert_duplicate_event_or_pdf():
         save_plan_edit_revision(
             db, principal=user, workspace=ws, workspace_db_id=1,
             ledger=ledger, command=bad, original_pdf_bytes=original,
-            page_coverage=coverage,
+            page_coverage=coverage, unified_head_verifier=_locked_unified_head,
         )
 
 
@@ -230,7 +234,7 @@ def test_second_saved_version_inherits_prior_page_marks_and_stale_edits_fail():
             db, principal=user, workspace=ws, workspace_db_id=1,
             ledger=stale_ledger, command=dict(cmd,
                 commandId="command-3", idempotencyKey="key-3"),
-            original_pdf_bytes=original, page_coverage=coverage,
+            original_pdf_bytes=original, page_coverage=coverage, unified_head_verifier=_locked_unified_head,
         )
     assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 2
 
@@ -250,7 +254,7 @@ def test_any_unresolved_or_missing_related_page_abstains_without_partial_save():
             save_plan_edit_revision(
                 db, principal=user, workspace=ws, workspace_db_id=1,
                 ledger=ledger, command=cmd, original_pdf_bytes=original,
-                page_coverage=candidate,
+                page_coverage=candidate, unified_head_verifier=_locked_unified_head,
             )
     assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM editable_3d_correction_events").fetchone()[0] == 0
@@ -263,14 +267,14 @@ def test_wrong_source_pdf_and_missing_write_grant_block_before_writes():
         save_plan_edit_revision(
             db, principal=user, workspace=ws, workspace_db_id=1,
             ledger=ledger, command=cmd, original_pdf_bytes=original + b"F",
-            page_coverage=coverage,
+            page_coverage=coverage, unified_head_verifier=_locked_unified_head,
         )
     viewer = replace(user, allowed_revision_workspace_ids=frozenset())
     with pytest.raises(PermissionError, match="revision_save_permission"):
         save_plan_edit_revision(
             db, principal=viewer, workspace=ws, workspace_db_id=1,
             ledger=ledger, command=cmd, original_pdf_bytes=original,
-            page_coverage=coverage,
+            page_coverage=coverage, unified_head_verifier=_locked_unified_head,
         )
     assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 0
 
@@ -299,3 +303,59 @@ def test_wrong_tenant_cannot_fetch_revision_or_history():
         get_plan_edit_pdf(db, attacker, ws, saved["revisionId"])
     with pytest.raises(PermissionError):
         list_plan_edit_revisions(db, attacker, ws)
+
+
+def test_unified_document_head_verifier_runs_inside_sqlite_write_transaction():
+    fx = _fixture()
+    db = _conn()
+    observed = []
+
+    def check(_principal, _workspace, connection):
+        observed.append(connection.in_transaction)
+        return connection.in_transaction
+
+    saved = _save(db, fx, verifier=check)
+    assert saved["saved"] is True
+    assert observed == [True]
+    assert not db.in_transaction
+
+
+def test_unified_document_head_rejection_rolls_back_all_plan_edit_writes():
+    fx = _fixture()
+    db = _conn()
+    observed = []
+
+    def reject(_principal, _workspace, connection):
+        observed.append(connection.in_transaction)
+        return False
+
+    with pytest.raises(PlanRevisionConflict, match="another_editor_or_document_revision"):
+        _save(db, fx, verifier=reject)
+    assert observed == [True]
+    for table in ("plan_edit_revisions", "plan_edit_revision_heads",
+                  "editable_3d_correction_events", "editable_3d_object_state"):
+        assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+    assert not db.in_transaction
+
+
+def test_plan_revision_refuses_missing_unified_head_provider():
+    fx = _fixture()
+    db = _conn()
+    with pytest.raises(ValueError, match="transactional_unified_head_verifier"):
+        _save(db, fx, verifier=None)
+    assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 0
+
+
+def test_unified_document_head_exception_rolls_back_plan_edit():
+    fx = _fixture()
+    db = _conn()
+
+    def broken(_principal, _workspace, connection):
+        assert connection.in_transaction
+        raise RuntimeError("document_head_unavailable")
+
+    with pytest.raises(RuntimeError, match="document_head_unavailable"):
+        _save(db, fx, verifier=broken)
+    assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM plan_edit_revision_heads").fetchone()[0] == 0
+    assert not db.in_transaction
