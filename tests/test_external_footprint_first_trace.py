@@ -248,3 +248,63 @@ def test_raster_candidate_empty_native_list_cannot_be_candidate():
     assert result.wall_native_primitive_count == 0
     assert result.source_total_paths == 0
     assert result.commercial_publishable is False
+
+
+def test_original_acacia_regional_sha_pins_are_distinct_and_fail_closed():
+    """Source-backed SHA identities, no private PDF bytes committed."""
+    from tools.run_original_footprint_first import _enforce_original_source_sha_pin
+
+    brisbane = "435a6b610fea904f2b27dc330667d92a25919ada3368e5905e58ff92e047f37a"
+    sydney = "f5ac166a21c9348c5ee55a7e518ec487140e9888d8af21fa39dbc5a9ca28000e"
+    melbourne = "fcc5e032968f62028dd4254db61bb676582027655881ecbad7a21001ef12cd2a"
+    assert len({brisbane, sydney, melbourne}) == 3
+    assert _enforce_original_source_sha_pin(brisbane, brisbane) is True
+    assert _enforce_original_source_sha_pin(brisbane, None) is False
+    for different_original in (sydney, melbourne):
+        with pytest.raises(ValueError, match="original_footprint_source_sha256_mismatch"):
+            _enforce_original_source_sha_pin(different_original, brisbane)
+
+
+@pytest.mark.parametrize("bad", [
+    "a" * 63, "a" * 65, "A" * 64, "g" * 64, "", 123, True,
+])
+def test_original_footprint_sha_pin_requires_full_lowercase_hex(bad):
+    from tools.run_original_footprint_first import _enforce_original_source_sha_pin
+
+    with pytest.raises(ValueError, match="original_footprint_expected_sha256_invalid"):
+        _enforce_original_source_sha_pin("a" * 64, bad)
+
+
+def test_original_footprint_runner_fails_before_geometry_or_files_on_wrong_pin(
+    tmp_path, monkeypatch,
+):
+    import tools.run_original_footprint_first as runner
+
+    original = _plan(tmp_path, walls=True)
+    invoked = []
+
+    def never_trace(*args, **kwargs):
+        invoked.append(True)
+        raise AssertionError("must refuse foreign revision before tracing")
+
+    monkeypatch.setattr(runner, "trace_external_footprint_first", never_trace)
+    destination = tmp_path / "pinned_output"
+    with pytest.raises(ValueError, match="original_footprint_source_sha256_mismatch"):
+        runner.run(original, 0, destination, expected_sha256="f" * 64)
+    assert invoked == []
+    assert not destination.exists()
+
+
+def test_original_footprint_runner_reports_verified_source_pin_without_firm(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    output, report, overlay = run(
+        original, 0, tmp_path / "pinned_result", expected_sha256=sha,
+    )
+    assert output["source_sha256"] == sha
+    assert output["source_sha_pin_verified"] is True
+    assert output["commercial_quantity_rows"] == 0
+    assert output["topology"]["room_quantity_authorized"] is False
+    assert report.is_file() and overlay.is_file()
