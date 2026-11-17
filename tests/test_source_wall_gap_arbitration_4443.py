@@ -114,3 +114,31 @@ def test_reverse_direction_fragmented_wall_is_still_continuous():
         "first": (195, 100, 170, 100),
         "second": (220, 100, 195, 100),
     })
+
+
+
+def test_continuous_wall_identified_as_gap_anchor_overrides_false_opening():
+    # The same source primitive can be misidentified as a gap endpoint.
+    gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "top", "top")
+    assert _gap_covered_by_physical_wall(gap, {"top": (100, 100, 400, 100)})
+    scene = [
+        line("top", 100, 100, 400, 100),
+        line("right", 400, 100, 400, 300),
+        line("bottom", 400, 300, 100, 300),
+        line("left", 100, 300, 100, 100),
+    ]
+    report = derive_structural_room_regions(scene, ink_for(scene, [gap]))
+    assert report.chord_ids == ()
+    assert report.suppressed_wall_covered_chord_ids == (chord_id(gap),)
+    assert len(report.regions) == 1
+
+
+def test_authentic_named_jambs_remain_a_real_footprint_closure():
+    gap = OpeningGapCandidate(
+        (170, 100), (220, 100), 50, 2.6, "left_jamb", "right_jamb"
+    )
+    source = {
+        "left_jamb": (100, 100, 170, 100),
+        "right_jamb": (220, 100, 400, 100),
+    }
+    assert not _gap_covered_by_physical_wall(gap, source)
