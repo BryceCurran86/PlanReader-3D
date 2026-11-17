@@ -361,17 +361,6 @@ def walk_source_unbounded_building_face(
             source_drawings, source_words,
         )
 
-        def _unfilled_empty_thin_stroke(row: Mapping[str, Any]) -> bool:
-            if str(row.get("layer") or "").strip() or row.get("fill") is not None:
-                return False
-            if row.get("type") not in ("s", None):
-                return False
-            try:
-                width = float(row.get("width"))
-            except (TypeError, ValueError):
-                return False
-            return 0 < width <= 1.0
-
         def _service_or_roof_layer(row: Mapping[str, Any]) -> bool:
             compact = "".join(
                 c for c in str(row.get("layer") or "").lower() if c.isalnum()
@@ -381,15 +370,13 @@ def walk_source_unbounded_building_face(
             )
 
         def _nonwall_residual_path(idx: int) -> bool:
-            # Annotation exclusions still go through classify_outside_envelope_role
-            # so house-named garage/porch context can refuse the drop. This
-            # branch only covers empty thin strokes, sheet-frame rules, and
-            # pure service/roof paint.
+            # Only *independently source-authenticated* nonwalls can be
+            # excluded. A thin unlayered, unfilled source stroke may be a real
+            # external wall face: its style alone cannot prove sheet furniture.
+            # Genuine full title-frame membership is verified separately.
             if idx in sheet_nonwall:
                 return True
             row = source_drawings[idx]
-            if _unfilled_empty_thin_stroke(row):
-                return True
             return (
                 classify_source_native_path_role(row) == ROLE_EXCLUSION
                 and _service_or_roof_layer(row)
