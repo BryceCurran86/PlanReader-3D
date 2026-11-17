@@ -11,6 +11,7 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   finishStudy: FinishStudy | null;
+  onCycleStudy: (objectId: string) => void;
 };
 
 function point2(value: unknown): value is [number, number] {
@@ -87,11 +88,13 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, finishStudy }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycleStudy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
+  const cycleCallback = useRef(onCycleStudy);
+  cycleCallback.current = onCycleStudy;
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const currentStudy = useRef(finishStudy);
@@ -212,6 +215,14 @@ export function SceneView({ manifest, selectedId, onSelect, finishStudy }: Props
     }
     const select0 = () => xrPick(controllers[0]);
     const select1 = () => xrPick(controllers[1]);
+    // Grip/squeeze cycles a cosmetic colour on the currently selected wall.
+    // Trigger selection remains independent. No source command is generated.
+    const squeeze = () => {
+      const id = picked.current;
+      if (id && sourceById.has(id)) cycleCallback.current(id);
+    };
+    controllers[0].addEventListener("squeeze", squeeze);
+    controllers[1].addEventListener("squeeze", squeeze);
     controllers[0].addEventListener("select", select0);
     controllers[1].addEventListener("select", select1);
     for (const controller of controllers) {
@@ -283,6 +294,8 @@ export function SceneView({ manifest, selectedId, onSelect, finishStudy }: Props
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       renderer.domElement.removeEventListener("keydown", keyDown);
+      controllers[0].removeEventListener("squeeze", squeeze);
+      controllers[1].removeEventListener("squeeze", squeeze);
       controllers[0].removeEventListener("select", select0);
       controllers[1].removeEventListener("select", select1);
       controls.dispose();
