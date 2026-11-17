@@ -35,6 +35,8 @@ def audit_plan_edit_revision_chain(
         or any(char not in "0123456789abcdef" for char in key[3])
     ):
         raise ValueError("authorized_revision_scope_required")
+    # Stream the indexed chain: a large PDF blob per revision must never be
+    # accumulated into a single Python list merely to audit ancestry.
     rows = connection.execute(
         """SELECT revision_id, revision_number, parent_revision_id,
                   parent_pdf_sha256, updated_pdf_sha256, updated_pdf_blob,
@@ -44,7 +46,7 @@ def audit_plan_edit_revision_chain(
              AND source_pdf_sha256=? AND source_snapshot_id=?
            ORDER BY revision_number ASC""",
         key,
-    ).fetchall()
+    )
     head = connection.execute(
         """SELECT revision_id, revision_number, updated_pdf_sha256,
                   model_revision
@@ -54,14 +56,12 @@ def audit_plan_edit_revision_chain(
         key,
     ).fetchone()
     errors: list[str] = []
-    if not rows:
-        if head is not None:
-            errors.append("orphan_revision_head")
-        return RevisionChainAudit(not errors, 0, tuple(errors))
     previous_id = None
     previous_pdf_sha = key[3]
     previous_model_revision = None
+    count = 0
     for index, row in enumerate(rows, 1):
+        count = index
         (revision_id, number, parent_id, parent_sha, pdf_sha,
          pdf_blob, before_model, after_model) = tuple(row)
         if type(number) is not int or number != index:
@@ -80,10 +80,14 @@ def audit_plan_edit_revision_chain(
         previous_id = revision_id
         previous_pdf_sha = pdf_sha
         previous_model_revision = after_model
+    if count == 0:
+        if head is not None:
+            errors.append("orphan_revision_head")
+        return RevisionChainAudit(not errors, 0, tuple(errors))
     if head is None:
         errors.append("revision_head_missing")
     elif tuple(head) != (
-        previous_id, len(rows), previous_pdf_sha, previous_model_revision
+        previous_id, count, previous_pdf_sha, previous_model_revision
     ):
         errors.append("revision_head_mismatch")
-    return RevisionChainAudit(not errors, len(rows), tuple(errors))
+    return RevisionChainAudit(not errors, count, tuple(errors))
