@@ -189,3 +189,13 @@ wall heights, finish tags, measurements or quotes. Unknown-height wall lines
 stay source lines. Camera modes are perspective review aids, **not** surveyed
 elevations, orthophotos or accuracy proofs. Hidden objects continue to exist
 in the source manifest and must not be omitted from commercial takeoffs.
+
+## Evidence-bound dimensions in desktop/VR
+
+An optional **Source dimensions** toggle shows length and height on the selected
+wall face, but only when the server-provided scene has a verified, issue-free
+wall object with a canonical ID, original source path and documented height.
+Local JSON files are downgraded to REVIEW, and unknown-height source lines
+never receive numerical overlays. This is a visual inspection of supplied
+source geometry, not a new independent measured takeoff, pricing authority or
+approval. The original 120 benchmark items remain unchanged.
