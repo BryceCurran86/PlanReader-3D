@@ -193,3 +193,17 @@ export function diffSummary(state: DraftHistory, scene: SceneManifest): string[]
     return `${d.objectId}: ${swatch}; ${height}; source revision ${d.objectRevision}`;
   });
 }
+
+/** A local ghost can suggest a controlled server preview, never submit it. */
+export function draftHeightSuggestion(
+  row: EditorObject | null, state: DraftHistory, scene: SceneManifest,
+): { command: "SET_WALL_HEIGHT"; value: string; objectRevision: string } | null {
+  if (!row || !allowedHeight(row) || !row.canonicalObjectId) return null;
+  const draft = safeDrafts(state, scene).find(d => d.objectId === row.objectId);
+  if (!draft || draft.heightM === null) return null;
+  return {
+    command: "SET_WALL_HEIGHT",
+    value: String(draft.heightM),
+    objectRevision: row.objectRevision,
+  };
+}
