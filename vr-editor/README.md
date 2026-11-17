@@ -263,3 +263,80 @@ triangulation producer into `compile_editor_scene(...)`. Passing
 cannot mint a `SourceVerified3DSurface`. Source-surface area is a display
 consistency cross-check, not a billable takeoff. The full room/wall/opening
 BIM-authority workflow remains a separate gate.
+
+## PlayStation VR2 PC adapter (Windows / SteamVR)
+
+The VR editor now includes a **PS VR2 PC adapter** readiness panel with a
+live `navigator.xr.isSessionSupported("immersive-vr")` check, a retry button,
+left/right controller diagnostics, and Standard WebXR controller-input support.
+It does **not** communicate directly with Sony's hardware, SteamVR's native
+C++ APIs or a proprietary driver. The PC browser must provide an immersive
+WebXR session using the Windows SteamVR/OpenXR runtime.
+
+### Setup checklist
+
+1. Use a compatible Windows 10/11 PC. Sony recommends RTX 3060 or RX 6600 XT
+   or better for performance (higher than their minimum GPU specification).
+2. Connect Sony's official PS VR2 PC adapter to a direct USB 3.0 Type-A port.
+   Attach power, the PS VR2 headset and a separate DisplayPort **1.4** cable
+   from the adapter to a **physical GPU DisplayPort output**. DisplayPort
+   delivered via USB-C does not work with the official adapter.
+3. Pair both PS VR2 Sense controllers separately over Bluetooth in Windows.
+   Install Steam, SteamVR and the official PlayStation VR2 App. Complete the
+   initial setup, headset tracking, controller calibration and play area.
+4. Start SteamVR and ensure it is selected as the active **OpenXR runtime**.
+   Keep the PlayStation VR2 App installed.
+5. Open PlanReader's VR editor from the **Windows desktop browser** via
+   HTTPS (or `localhost`), rather than from the PS5 browser. Use the
+   **PlayStation VR2 · PC Adapter** readiness panel's **Check VR availability
+   again** button after SteamVR is started.
+6. If the browser reports `immersive-vr` supported, open a real scene or
+   the synthetic example and click the viewer's **Enter VR** button. A
+   successful capability check is **not proof of hardware compatibility**.
+   Check the live left/right controller diagnostics.
+7. Use either Sense controller's L2/R2 primary action (WebXR `select`)
+   to point at/select an existing wall. Squeeze/grip (WebXR `squeeze`)
+   cycles temporary study finish colours. For a runtime that does not emit
+   native squeeze actions, a standard WebXR `xr-standard` gamepad button
+   index 1 fallback acts **once on grip release**. It is never enabled for
+   unknown/raw gamepad mappings and cannot publish costs or approvals.
+
+Native `squeeze` events win over gamepad polling to avoid duplicated
+corrections. The browser session and controller state are shown in the
+inspector, but the Sony serial number or hardware identity is neither read
+nor stored. Controller discovery uses WebXR handedness and generic profiles,
+not fixed PS VR2 product strings.
+
+### Important limitations
+
+- **Browser support is runtime-dependent.** Some browser/SteamVR/OpenXR
+  combinations do not expose immersive WebXR for the PC adapter even though
+  native SteamVR games work. In those cases, the app remains usable in
+  desktop 3D; a native OpenXR wrapper would be a separate deliverable.
+- The headset is **not yet physically tested** with PlanReader on a PC and
+  we do not claim PS VR2 adapter certification. Test target: Windows
+  PC + adapter + SteamVR + Sony app + compatible browser + both controllers.
+- HDR, eye tracking, headset feedback and adaptive triggers are not
+  available in Sony's supported PC adapter feature set. PlanReader does not
+  require them. PSVR2 inside-out tracking, Bluetooth pairing and the
+  room's play area remain managed by Sony/SteamVR, not the browser app.
+- If tracking or connection fails, use Sony's troubleshooting advice:
+  direct USB adapter connection, correct DP cable, updated GPU drivers,
+  SteamVR Direct Mode and Bluetooth adapter pairing.
+- Headset rendering is a visualization of a source-scoped review scene.
+  Moving, colouring or selecting objects never overrides PlanReader's
+  protected source drawings, signed quantities or approval gates.
+
+**Official references**
+
+- [Sony PC requirements](https://www.playstation.com/en-au/support/hardware/psvr2/)
+- [Sony PC setup](https://www.playstation.com/en-au/support/hardware/pc-ps-vr2-set-up/)
+- [Sony PC troubleshooting](https://www.playstation.com/en-us/support/hardware/pc-ps-vr2-troubleshoot/)
+- [PlayStation VR2 App on Steam](https://store.steampowered.com/app/2580190/PlayStationVR2_App/)
+- [Three.js VRButton](https://threejs.org/docs/pages/VRButton.html)
+- [WebXR input sources](https://developer.mozilla.org/en-US/docs/Web/API/WebXR_Device_API/Inputs)
+
+Local checks: `cd vr-editor && npm ci && npm test && npm run build`.
+Required hardware smoke: check immersive session starts/exits, left/right
+controller tracking, trigger picks, grip changes once, session disconnect
+clears the UI, and desktop remains functional when WebXR is unavailable.
