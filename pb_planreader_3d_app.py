@@ -6615,6 +6615,44 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                             "score or final customer publication."
                         )
         source_mode=(native_report.get("source_modality") or {}).get("route")
+        internal_doors=native_report.get("source_internal_door_completeness") or {}
+        door_marks=internal_doors.get("marks") or []
+        if door_marks:
+            hinged=int(internal_doors.get("hosted_swing_count") or 0)
+            cavity=int(
+                internal_doors.get("cavity_slider_geometry_authenticated_count") or 0
+            )
+            unhosted=int(internal_doors.get("unhosted_swing_symbol_count") or 0)
+            unknown_sliders=max(
+                0,int(internal_doors.get("cavity_slider_callout_count") or 0)-cavity,
+            )
+            st.caption(
+                f"Internal doorway source topology: {hinged} hosted hinged "
+                f"+ {cavity} source-jamb cavity sliders; "
+                f"{unhosted + unknown_sliders} unhosted symbol(s). "
+                "Door areas and frozen scoring are NOT authorised by this overlay."
+            )
+            with st.expander(
+                "Internal door source evidence — hinges, jambs, cavity sliders",
+                expanded=False,
+            ):
+                st.dataframe(pd.DataFrame([{
+                    "Type": mark.get("kind"),
+                    "Source status": mark.get("status"),
+                    "Width (mm)": mark.get("label_width_mm"),
+                    "Original path IDs": ", ".join(
+                        str(pid) for pid in mark.get("native_path_ids",())
+                    ),
+                    "Native wall hosts": ", ".join(
+                        str(pid) for pid in mark.get("host_wall_native_path_ids",())
+                    ),
+                    "Physical opening approved": False,
+                } for mark in door_marks]),hide_index=True,use_container_width=True)
+                st.warning(
+                    "Original wall and jamb witnesses prove provisional "
+                    "door topology, not a room-area measurement, frame height, "
+                    "wall deduction or customer-approved door quantity."
+                )
         if source_mode == "tiled_raster_underlay":
             raster_count=len(
                 (native_report.get("raster_source_trace") or {}).get(
