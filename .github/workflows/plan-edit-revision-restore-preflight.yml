@@ -1,0 +1,31 @@
+name: Plan edit restore preflight safety
+on:
+  pull_request:
+    paths:
+      - 'pb_plan_edit_revision_restore_preflight.py'
+      - 'tests/editable_3d/test_plan_edit_revision_restore_preflight.py'
+      - '.github/workflows/plan-edit-revision-restore-preflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pb_plan_edit_revision_restore_preflight.py'
+      - 'tests/editable_3d/test_plan_edit_revision_restore_preflight.py'
+      - '.github/workflows/plan-edit-revision-restore-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  restore-preflight:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test dependencies
+        run: python -m pip install pytest PyMuPDF numpy pandas plotly
+      - name: Test no-write working revision restore preview
+        run: python -m pytest -q tests/editable_3d/test_plan_edit_revision_restore_preflight.py
