@@ -167,9 +167,10 @@ class SourceJunctionRecord:
     reason: str
     physical_join_authenticated: bool = False
     measurement_authorized: bool = False
+    disposition: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        row: dict[str, object] = {
             "junction_kind": self.junction_kind,
             "left_body_id": self.left_body_id,
             "right_body_id": self.right_body_id,
@@ -184,6 +185,25 @@ class SourceJunctionRecord:
             "physical_join_authenticated": False,
             "measurement_authorized": False,
         }
+        if self.disposition is not None:
+            row["disposition"] = self.disposition
+        return row
+
+
+def _window_continuity_disposition(
+    *,
+    status: EvidenceResolutionStatus,
+    separation_pdf_pts: float | None,
+) -> str:
+    """Align window-gap receipts with unclosed-endpoint abstain vocabulary."""
+    if status is EvidenceResolutionStatus.CANDIDATE:
+        return "candidate_window_continuity_topology_only"
+    if separation_pdf_pts is None:
+        return "abstain_window_gap_no_unique_jamb"
+    sep = float(separation_pdf_pts)
+    if sep <= 2.5:
+        return "abstain_sub_snap_window_gap_without_unique_jamb"
+    return "abstain_window_gap_no_unique_jamb"
 
 
 def _body_id(paths: Sequence[int], bounds: Sequence[float]) -> str:
@@ -558,6 +578,10 @@ def classify_window_continuity_edges(
             drawings=drawings,
             window_designation=witness.get("window_designation") or "",
         )
+        resolved_reason = (
+            reason if status is EvidenceResolutionStatus.ABSTAINED
+            else "window_continuity_topology_only_not_wall"
+        )
         return SourceJunctionRecord(
             junction_kind=JUNCTION_WINDOW_CONTINUITY,
             left_body_id=left_body,
@@ -569,8 +593,9 @@ def classify_window_continuity_edges(
             page_index=page_index,
             provenance_geometry_kind=GEOMETRY_INFERRED,
             status=status,
-            reason=reason if status is EvidenceResolutionStatus.ABSTAINED else (
-                "window_continuity_topology_only_not_wall"
+            reason=resolved_reason,
+            disposition=_window_continuity_disposition(
+                status=status, separation_pdf_pts=sep,
             ),
         )
 
@@ -777,6 +802,18 @@ def build_source_native_wall_body_junction_graph(
         "window_continuity_abstain_count": sum(
             1 for item in window_edges if item.status is EvidenceResolutionStatus.ABSTAINED
         ),
+        "window_continuity_disposition_counts": {
+            key: sum(1 for item in window_edges if item.disposition == key)
+            for key in sorted({item.disposition for item in window_edges if item.disposition})
+        },
+        "open_endpoint_disposition_counts": {
+            key: sum(1 for item in opens if item.get("disposition") == key)
+            for key in sorted({
+                str(item.get("disposition"))
+                for item in opens
+                if item.get("disposition")
+            })
+        },
         "exterior_cycle": cycle,
         "first_unclosed_endpoint": cycle["first_unclosed_endpoint"],
         "open_endpoint_count": cycle["open_endpoint_count"],
