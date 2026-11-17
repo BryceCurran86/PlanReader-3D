@@ -63,3 +63,8 @@
 .plan-edit-saved a,.plan-revision-history a{color:#9be5c4;text-decoration:underline;font-weight:600;font-size:12px}
 .plan-revision-history-row{padding:11px 0;border-top:1px solid #49645d;margin-top:12px}
 .plan-revision-history-row p{overflow-wrap:anywhere;font-size:12px}
+
+.vr-move-panel{border-left:3px solid #9cb5e5}
+.vr-move-panel p{line-height:1.55}
+.vr-move-panel .review-control-grid button{min-width:0}
+.vr-move-panel button:focus-visible{outline:2px solid #d6ddff;outline-offset:2px}
