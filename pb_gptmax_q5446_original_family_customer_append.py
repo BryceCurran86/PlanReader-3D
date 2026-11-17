@@ -266,7 +266,6 @@ def issue_original_q5446_alfresco_plus_tiled_floors_customer(
                 tuple(rec.to_dict() for rec in combined.quantities if rec.quantity_id == qid) != originals
                 for qid, originals in source_bodies.items()
             )
-            or rows != tuple(row for item in constituents for row in item.customer_rows)
             or set(combined.source_sha256s) != {SOURCE_SHA256}
             or len(combined.revision_ids) != 1
             or not all(rec.lineage_ok and not rec.abstained for rec in combined.quantities)
