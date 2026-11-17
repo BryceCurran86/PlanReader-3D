@@ -677,6 +677,37 @@ def walk_source_unbounded_building_face(
             source_drawings, source_words,
         )
 
+        # If the real wall network carries an explicit native viewport, an
+        # outside nonwall candidate cannot inherit a different/blank
+        # viewport. When original source has *no* viewport metadata at all,
+        # keep the existing exact geometry + native-layer role checks.
+        inside_viewports: list[str] = []
+        for owned_geom, owned_ids in owners:
+            if not candidate_outer_domain.covers(owned_geom):
+                continue
+            for idx in owned_ids:
+                if type(idx) is not int or not 0 <= idx < len(source_drawings):
+                    continue
+                row = source_drawings[idx]
+                if not isinstance(row, Mapping):
+                    continue
+                if classify_source_native_path_role(row) not in (
+                    ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL,
+                ):
+                    continue
+                inside_viewports.append(str(
+                    row.get("source_viewport_id") or row.get("viewport_id") or ""
+                ).strip())
+        stated_viewports = {value for value in inside_viewports if value}
+        scoped_inside_viewport = (
+            next(iter(stated_viewports))
+            if len(stated_viewports) == 1
+            and len(inside_viewports) >= 4
+            and all(inside_viewports)
+            else ""
+        )
+        ambiguous_inside_viewport = bool(stated_viewports) and not scoped_inside_viewport
+
         def _service_or_roof_layer(row: Mapping[str, Any]) -> bool:
             compact = "".join(
                 c for c in str(row.get("layer") or "").lower() if c.isalnum()
@@ -726,6 +757,17 @@ def walk_source_unbounded_building_face(
                 for idx in local_ids
             }
             if len(viewports) != 1:
+                unresolved.append((bar, local_ids))
+                continue
+            # A positively attributed native annotation from another plan
+            # viewport is not a floor-wall exclusion. Empty original viewport
+            # remains valid only if the complete primary network also has no
+            # declared viewport; role and ink must still prove nonwall status.
+            candidate_viewport = next(iter(viewports))
+            if (
+                ambiguous_inside_viewport
+                or (scoped_inside_viewport and candidate_viewport != scoped_inside_viewport)
+            ):
                 unresolved.append((bar, local_ids))
                 continue
             local_bar = _LocalResidualBar(bar, local_ids)
