@@ -217,7 +217,7 @@ export function App() {
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
                 </div>
                 <CommandPreview
-                  key={`${manifest.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
+                  key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}
                   object={selected}
                   authenticated={authenticatedSource}
