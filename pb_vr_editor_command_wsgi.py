@@ -37,6 +37,12 @@ def _unique_object_pairs(pairs):
     return result
 
 
+def _reject_non_json_constant(value: str):
+    # Python's default json.loads accepts NaN / Infinity, which are NOT JSON.
+    # Never let a nonstandard number enter an editing/quantity command.
+    raise ValueError(f"nonfinite JSON constant is forbidden: {value}")
+
+
 def make_editor_preview_wsgi_app(
     authenticate_session: Callable[[Mapping[str, Any]], EditorPrincipal | None],
     load_authorized_workspace: Callable[
@@ -116,7 +122,11 @@ def make_editor_preview_wsgi_app(
         if not isinstance(data, bytes) or len(data) != count:
             return respond("400 Bad Request", {"error": "truncated_request_body"})
         try:
-            command = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object_pairs)
+            command = json.loads(
+                data.decode("utf-8"),
+                object_pairs_hook=_unique_object_pairs,
+                parse_constant=_reject_non_json_constant,
+            )
         except (UnicodeError, ValueError):
             return respond("400 Bad Request", {"error": "invalid_json"})
         if not isinstance(command, dict):
