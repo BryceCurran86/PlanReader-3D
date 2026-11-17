@@ -168,3 +168,17 @@ def test_provider_must_supply_matching_native_source_receipt_for_verified_scene(
     assert status.startswith("200")
     assert result["objects"][0]["renderState"] == "review"
     assert "source_ownership_unverified" in result["objects"][0]["unresolvedIssues"]
+
+
+def test_readonly_source_api_cannot_be_framed_or_cross_origin_cached():
+    app = make_editor_readonly_wsgi_app(
+        lambda env: _principal(), lambda principal, requested: _workspace(),
+    )
+    status, headers, manifest = _test_call(app)
+    assert status.startswith("200")
+    assert manifest["commercialQuantityPublicationAllowed"] is False
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert headers["Cache-Control"] == "no-store, private"
+    assert "Access-Control-Allow-Origin" not in headers
