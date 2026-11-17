@@ -34,7 +34,7 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     row.unresolvedIssues.length === 0;
   const color = trustworthy ? 0x48b8a6 : 0xe3ad58;
   const name = row.objectId;
-  if (mayRenderWallFace(shape.kind, "heightM" in shape ? shape.heightM : null)) {
+  if (shape.kind === "wallFace" && mayRenderWallFace(shape.kind, shape.heightM)) {
     const h = shape.heightM;
     const data = new Float32Array([
       a.x, 0, a.z, b.x, 0, b.z, b.x, h, b.z,
@@ -54,8 +54,8 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.objectId = name;
-    mesh.castShadow = trustworthy;
-    mesh.receiveShadow = trustworthy;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     return mesh;
   }
   // Unverified height is shown ONLY as source XY linework, never an extruded
@@ -207,6 +207,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         Math.min(300, Math.max(20, size.z * 1.5)), 1);
       presentationFloor.position.x = center.x;
       presentationFloor.position.z = center.z;
+      sunlight.target.position.copy(center);
+      sunlight.position.add(center);
+      scene.add(sunlight.target);
       camera.position.set(center.x + radius, center.y + radius * 0.7,
         center.z + radius);
       camera.near = Math.max(0.01, radius / 5000);
