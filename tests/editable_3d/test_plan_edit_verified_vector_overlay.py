@@ -166,3 +166,14 @@ def test_nonvector_revision_still_uses_safe_coordination_annotations():
     result=_generate((original,user,ws,ledger,without,cmd))
     assert all(p["vectorGeometryOverlayDrawn"] is False for p in result.related_pages)
     assert all(p["geometryRedrawn"] is False for p in result.related_pages)
+
+
+def test_native_source_line_counts_distinct_paths_not_pymupdf_forward_back_edges():
+    source=_source_pdf()
+    with fitz.open(stream=source,filetype="pdf") as doc:
+        page=doc[0]
+        assert original_pdf_line_count(
+            page,((40.,100.),(240.,100.))) == 1
+        page.draw_line((40,100),(240,100),color=(0,0,0),width=0.8)
+        assert original_pdf_line_count(
+            page,((40.,100.),(240.,100.))) == 2
