@@ -176,3 +176,24 @@ def test_wall_cannot_invent_structural_bracing_or_count_unverified_route_as_rewo
     assert not [q for q in out.quantities if q.trade=="plumbing"]
     with pytest.raises(ValueError):
         calculate_new_wall_construction_package(wall,_spec(bracing_area_m2=100))
+
+def test_route_touch_and_collinear_overlap_trigger_coordination_without_meps_turned_into_prices():
+    overlapping=KnownServiceRoute(
+        "power-trunk","electrical","ground",
+        (0.,0.),(2.,0.),True,
+    )
+    endpoint=KnownServiceRoute(
+        "cold-water-end","plumbing","ground",
+        (1.,0.),(1.,2.),True,
+    )
+    far=KnownServiceRoute(
+        "unaffected","electrical","upper",
+        (1.,0.),(1.,2.),True,
+    )
+    package=calculate_new_wall_construction_package(
+        _wall(),_spec(),known_service_routes=(overlapping,endpoint,far),
+    )
+    assert "electrical_route_conflict_power-trunk_requires_redesign" in package.coordination_required
+    assert "plumbing_route_conflict_cold-water-end_requires_redesign" in package.coordination_required
+    assert not any("unaffected" in x for x in package.coordination_required)
+    assert not any(x.trade in ("plumbing","electrical") for x in package.quantities)
