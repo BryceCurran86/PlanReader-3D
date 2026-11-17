@@ -10,3 +10,6 @@
 
 .demo-button{background:#1b756e;color:#eafff9;border:1px solid #399b90;border-radius:8px;padding:13px 19px;cursor:pointer;font-weight:700;margin:16px 0}
 .demo-button:focus-visible{outline:3px solid #e9f2cd}
+
+.scene-loading{position:absolute;inset:0;z-index:4;display:grid;place-items:center;text-align:center;padding:24px;background:#121f27;color:#dbecef;font-size:13px;line-height:1.6}
+.scene-canvas:focus-within{outline:2px solid #55ccbf;outline-offset:-2px}
