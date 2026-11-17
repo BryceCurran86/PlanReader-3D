@@ -11,6 +11,8 @@ import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
+import { safeWallMoves } from "./wallMoveStudy";
+import type { MoveMode, WallMoveHistory } from "./wallMoveStudy";
 import { PcVrSqueezeTracker, inspectPcVrController, standardSqueezePressed } from "./pcVr2Support";
 import type { PcVrControllerInfo, PcVrInputSource } from "./pcVr2Support";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
@@ -27,6 +29,9 @@ type Props = {
   mood: LightingMood;
   quality: RenderQuality;
   detail: SurfaceDetail;
+  moveMode: MoveMode;
+  wallMoveState: WallMoveHistory | null;
+  onMoveDelta: (objectId: string, dx: number, dz: number) => void;
   captureSerial: number;
   onCapture: (message:string)=>void;
   onPcVrSessionReport: (status: PcVrSessionReport) => void;
@@ -136,13 +141,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
+  moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
   const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
@@ -354,19 +361,56 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       const id = picked.current;
       if (id && sourceById.has(id)) cycleCallback.current(id);
     }
-    const nativeStart0 = () => squeezeTracker.onNativeStart("0");
-    const nativeStart1 = () => squeezeTracker.onNativeStart("1");
+    // Standard Sense grip actions start/finish a reversible wall translation.
+    // Original geometry stays untouched: only renderer Object3D.position moves.
+    let activeGrip: { index:number; objectId:string; from:THREE.Vector3 } | null = null;
+    const nativeGripSeen = [false,false], fallbackGripDown = [false,false];
+    const beginGrip = (index:number) => {
+      if (moveSettings.current.moveMode !== "move" || activeGrip) return;
+      const id = picked.current;
+      const row = sourceById.get(id ?? "");
+      if (!id || !row || row.objectType !== "wall" ||
+          !row.geometry || !["wallFace","wallLine"].includes(row.geometry.kind)) return;
+      activeGrip = {index,objectId:id,
+        from:controllers[index].getWorldPosition(new THREE.Vector3())};
+    };
+    const endGrip = (index:number) => {
+      const held=activeGrip;
+      if (!held || held.index !== index) return;
+      activeGrip=null;
+      if (moveSettings.current.moveMode !== "move") return;
+      const p=controllers[index].getWorldPosition(new THREE.Vector3());
+      const dx=p.x-held.from.x,dz=p.z-held.from.z;
+      if (Number.isFinite(dx)&&Number.isFinite(dz))
+        moveSettings.current.onMoveDelta(held.objectId,dx,dz);
+    };
+    const nativeStart0 = () => {
+      squeezeTracker.onNativeStart("0");
+      nativeGripSeen[0] = true;
+      beginGrip(0);
+    };
+    const nativeStart1 = () => {
+      squeezeTracker.onNativeStart("1");
+      nativeGripSeen[1] = true;
+      beginGrip(1);
+    };
+    const nativeEnd0 = () => endGrip(0), nativeEnd1 = () => endGrip(1);
     const squeeze0 = () => {
-      if (squeezeTracker.onNativeSqueeze("0")) applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("0") && moveSettings.current.moveMode !== "move")
+        applyFinishSqueeze();
     };
     const squeeze1 = () => {
-      if (squeezeTracker.onNativeSqueeze("1")) applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("1") && moveSettings.current.moveMode !== "move")
+        applyFinishSqueeze();
     };
     const connected = (event: unknown, index: number) => {
       const source = event && typeof event === "object" && "data" in event
         ? (event as {data?: PcVrInputSource}).data ?? null : null;
       inputSources[index] = source;
       squeezeTracker.clear(String(index));
+      nativeGripSeen[index]=false;
+      fallbackGripDown[index]=false;
+      if(activeGrip?.index===index)activeGrip=null;
       report();
     };
     const disconnect = (index: number) => {
@@ -380,12 +424,18 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
       squeezeTracker.clear();
+      nativeGripSeen.fill(false);
+      fallbackGripDown.fill(false);
+      activeGrip=null;
       report(true);
     };
     const onSessionEnd = () => {
       inputSources[0] = null;
       inputSources[1] = null;
       squeezeTracker.clear();
+      nativeGripSeen.fill(false);
+      fallbackGripDown.fill(false);
+      activeGrip=null;
       report(false);
     };
     renderer.xr.addEventListener("sessionstart", onSessionStart);
@@ -396,6 +446,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     controllers[1].addEventListener("disconnected", disconnected1);
     controllers[0].addEventListener("squeezestart", nativeStart0);
     controllers[1].addEventListener("squeezestart", nativeStart1);
+    controllers[0].addEventListener("squeezeend", nativeEnd0);
+    controllers[1].addEventListener("squeezeend", nativeEnd1);
     controllers[0].addEventListener("squeeze", squeeze0);
     controllers[1].addEventListener("squeeze", squeeze1);
     controllers[0].addEventListener("select", select0);
@@ -441,14 +493,37 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     renderer.setAnimationLoop(() => {
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
-      // Poll only standard WebXR gamepad squeeze states when native action
-      // events are absent. Never map arbitrary raw hardware button arrays.
+      // Fallback xr-standard grips when SteamVR omits native squeeze events.
+      // Native grip events always take precedence. Neither path changes source.
+      if (moveSettings.current.moveMode !== "move") activeGrip=null;
       if (renderer.xr.isPresenting) {
-        for (let index = 0; index < inputSources.length; index++) {
-          if (squeezeTracker.poll(String(index), standardSqueezePressed(inputSources[index]))) {
-            applyFinishSqueeze();
+        for (let index=0;index<inputSources.length;index++) {
+          const pressed=standardSqueezePressed(inputSources[index]);
+          if (moveSettings.current.moveMode === "move" &&
+              !nativeGripSeen[index] && pressed !== null) {
+            if (pressed && !fallbackGripDown[index]) beginGrip(index);
+            if (!pressed && fallbackGripDown[index]) endGrip(index);
+            fallbackGripDown[index] = pressed;
           }
+          if (squeezeTracker.poll(String(index),pressed) &&
+              moveSettings.current.moveMode !== "move") applyFinishSqueeze();
         }
+      }
+      const activeMoves = moveSettings.current.wallMoveState
+        ? safeWallMoves(moveSettings.current.wallMoveState, manifest) : [];
+      let dragX=0,dragZ=0;
+      if (activeGrip && moveSettings.current.moveMode === "move") {
+        const p=controllers[activeGrip.index].getWorldPosition(new THREE.Vector3());
+        dragX=p.x-activeGrip.from.x;dragZ=p.z-activeGrip.from.z;
+      }
+      for (const obj of pickables) {
+        const id=obj.userData.objectId as string|undefined;
+        const move=activeMoves.find(m=>m.objectId===id);
+        const held=activeGrip?.objectId===id;
+        const dx=(move?.dx??0)+(held?dragX:0);
+        const dz=(move?.dz??0)+(held?dragZ:0);
+        if (Number.isFinite(dx)&&Number.isFinite(dz))
+          obj.position.set(dx,0,dz);
       }
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
@@ -530,8 +605,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const swatch = studyColor(row, draft?.swatch ? { objectId: id, swatch: draft.swatch } : null);
         const originalHeight = item.userData.originalHeight as number | undefined;
         const ghostHeight = draft?.heightM;
-        const ghost = activeInspection.showGhosts && ghostHeight !== null && ghostHeight !== undefined &&
-          originalHeight !== undefined;
+        const moved=activeMoves.some(m=>m.objectId===id) ||
+          activeGrip?.objectId===id;
+        const ghost=(activeInspection.showGhosts && ghostHeight !== null &&
+          ghostHeight !== undefined && originalHeight !== undefined) || moved;
         const colour = swatch ?? (ghost ? 0xb899de : item.userData.originalReviewColor as number);
         if (item.material.color.getHex() !== colour) item.material.color.setHex(colour);
         const originalOpacity = item.userData.originalOpacity as number;
@@ -543,7 +620,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         item.material.emissive.setHex(selected ? 0x173b36 : 0x000000);
         item.material.emissiveIntensity = selected ? 0.32 : 0;
         if (originalHeight !== undefined) {
-          const height = ghost ? ghostHeight : originalHeight;
+          const height=activeInspection.showGhosts && ghostHeight !== null &&
+            ghostHeight !== undefined ? ghostHeight : originalHeight;
           const position = item.geometry.getAttribute("position");
           if (position instanceof THREE.BufferAttribute && position.getY(2) !== height) {
             // Triangle vertices 2, 4 and 5 are the upper face vertices.
@@ -631,6 +709,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       controllers[1].removeEventListener("disconnected", disconnected1);
       controllers[0].removeEventListener("squeezestart", nativeStart0);
       controllers[1].removeEventListener("squeezestart", nativeStart1);
+      controllers[0].removeEventListener("squeezeend", nativeEnd0);
+      controllers[1].removeEventListener("squeezeend", nativeEnd1);
       controllers[0].removeEventListener("squeeze", squeeze0);
       controllers[1].removeEventListener("squeeze", squeeze1);
       squeezeTracker.clear();
