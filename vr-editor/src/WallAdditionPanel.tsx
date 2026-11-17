@@ -124,6 +124,9 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         setBatch(previous=>addOrReplaceWallStudy(
           scene,currentWallBatch(scene,previous),command,verified,
         ));
+        // Once the validated proposal joins the batch, remove the transient
+        // single-wall ghost. Otherwise a removed wall would still appear.
+        onSketch(null);
         setResult(verified);
         setError(null);
       }
