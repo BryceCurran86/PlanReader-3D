@@ -14,7 +14,7 @@ from test_plan_edit_revision_store import _fixture, _conn
 
 
 def _service(tmp_path, *, auth=True, csrf=True, save_grant=True,
-             coverage_complete=True, same_tenant=True):
+             coverage_complete=True, same_tenant=True, head_ok=True):
     original,user,ws,ledger,coverage,command=_fixture()
     source_db=_conn()
     db_path=str(tmp_path/"workspaces.sqlite")
@@ -50,9 +50,12 @@ def _service(tmp_path, *, auth=True, csrf=True, save_grant=True,
     def workspace_db_id(p,current):
         calls.append("workspace_db_id")
         return 1
+    def unified_head(p, current, connection):
+        calls.append("unified_head_locked" if connection.in_transaction else "unified_head_unlocked")
+        return head_ok and connection.in_transaction
     app=make_plan_edit_revision_wsgi_app(
         session,load_workspace,load_ledger,verify_csrf,
-        load_db,load_source,related,workspace_db_id,
+        load_db,load_source,related,workspace_db_id,unified_head,
     )
     return app,command,original,calls,db_path
 
@@ -89,6 +92,7 @@ def test_post_creates_revision_get_history_and_download_edited_pdf(tmp_path):
     assert "csrf" in calls
     assert "source" in calls
     assert "coverage" in calls
+    assert "unified_head_locked" in calls
 
     status,headers,history=_request(app,method="GET",data={})
     assert status.startswith("200")
@@ -184,3 +188,21 @@ def test_nonexistent_pdf_and_non_post_methods_cannot_escape_scope(tmp_path):
     status,_,r=_request(app,path="/api/editor/workspaces/w1/commands/preview",data=cmd)
     assert status.startswith("200")
     assert r["persisted"] is False
+
+
+def test_plan_revision_api_refuses_conflicting_unified_document_head(tmp_path):
+    app, cmd, _, calls, db_path = _service(tmp_path, head_ok=False)
+    status, _, body = _request(app, data=cmd)
+    assert status.startswith("409")
+    assert body["error"] == "stale_or_conflicting_plan_revision"
+    assert "unified_head_locked" in calls
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM plan_edit_revisions").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM plan_edit_revision_heads").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM editable_3d_correction_events").fetchone()[0] == 0
+
+
+def test_plan_revision_api_factory_refuses_missing_unified_head_provider():
+    callbacks = [lambda *_args: None for _ in range(8)]
+    with pytest.raises(ValueError, match="all_nine_real_providers"):
+        make_plan_edit_revision_wsgi_app(*callbacks, None)
