@@ -308,3 +308,54 @@ def test_original_footprint_runner_reports_verified_source_pin_without_firm(tmp_
     assert output["commercial_quantity_rows"] == 0
     assert output["topology"]["room_quantity_authorized"] is False
     assert report.is_file() and overlay.is_file()
+
+
+def test_original_page_title_pin_blocks_wrong_page_before_tracing(tmp_path, monkeypatch):
+    import tools.run_original_footprint_first as runner
+
+    original = _plan(tmp_path, walls=True)
+    with fitz.open(original) as document:
+        document[0].insert_text((40, 30), "Floor Plan", fontsize=12)
+        document.saveIncr()
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    destination = tmp_path / "wrong_page_result"
+    calls = []
+
+    def never_trace(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("wrong source page must never trace")
+
+    monkeypatch.setattr(runner, "trace_external_footprint_first", never_trace)
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        runner.run(
+            original, 0, destination, expected_sha256=sha,
+            expected_drawing_title="Site Plan",
+        )
+    assert calls == []
+    assert not destination.exists()
+
+
+def test_original_page_title_pin_verified_on_matching_floor_plan(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    with fitz.open(original) as document:
+        document[0].insert_text((40, 30), "Floor Plan", fontsize=12)
+        document.saveIncr()
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        original, 0, tmp_path / "verified_page_result",
+        expected_sha256=sha, expected_drawing_title="Floor Plan",
+    )
+    assert result["source_sha_pin_verified"] is True
+    assert result["source_page_title_verified"] is True
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
+
+
+@pytest.mark.parametrize("invalid_title", ["", " ", "a" * 101, 17, True])
+def test_original_page_title_pin_rejects_invalid_expectations(invalid_title):
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    with pytest.raises(ValueError, match="original_footprint_expected_page_title_invalid"):
+        _verify_original_drawing_title(b"not a pdf", 0, invalid_title)
