@@ -181,8 +181,10 @@ def _gap_covered_by_physical_wall(
     ux, uy = vx / length, vy / length
     intervals: List[Tuple[float, float]] = []
     for sid, (x1, y1, x2, y2) in members.items():
-        if sid in (gap.source_primitive_id_a, gap.source_primitive_id_b):
-            continue
+        # A false gap may name the intact native wall as its endpoint.
+        # Excluding that source ID erases the only proof of continuity.
+        # Real jamb strokes terminate at the aperture, so the full-span
+        # collinear-coverage test below still preserves genuine door gaps.
         # Both ends of the supporting member must lie on this face's line.
         offsets = (abs((x1 - ax) * uy - (y1 - ay) * ux),
                    abs((x2 - ax) * uy - (y2 - ay) * ux))
