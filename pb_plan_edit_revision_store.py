@@ -213,6 +213,9 @@ def save_plan_edit_revision(
         raise ValueError("trusted_workspace_db_id_required")
     if type(ledger) is not Editable3DCorrectionLedger or not isinstance(command, Mapping):
         raise ValueError("trusted_correction_ledger_required")
+    if (type(original_pdf_bytes) is not bytes or
+        sha256(original_pdf_bytes).hexdigest() != workspace.scope.source_sha256.lower()):
+        raise PlanRevisionConflict("original_source_pdf_identity_mismatch")
     raw = dict(command)
     token = raw.get("idempotencyKey")
     if not isinstance(token, str) or not 1 <= len(token) <= 128:
