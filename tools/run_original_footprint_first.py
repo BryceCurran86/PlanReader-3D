@@ -27,6 +27,9 @@ from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     own_exterior_contour_native_paths,
 )
+from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
+    build_source_native_wall_body_junction_graph,
+)
 
 
 def _draw_source_overlay(page, original, trace, scope, ring):
@@ -170,6 +173,10 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                     "incomplete_source_native_wall_ink_chain",
                 }
             ]
+            unique_edges = [
+                edge for edge in owned
+                if edge.classification == "source_native_wall_ink_candidate"
+            ]
             result["exterior_edge_ownership"] = {
                 "classification_counts": class_counts,
                 "edge_count": len(owned),
@@ -202,6 +209,41 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                     }
                     for edge in chain_edges
                 ],
+                "unique_owner_coverage": [
+                    {
+                        "edge_index": edge.edge_index,
+                        "native_path_indices": list(edge.native_path_indices),
+                        "overlap_fraction": edge.unique_owner_overlap_fraction,
+                        "uncovered_start_pt": edge.unique_owner_uncovered_start_pt,
+                        "uncovered_end_pt": edge.unique_owner_uncovered_end_pt,
+                    }
+                    for edge in unique_edges
+                ],
+                "physical_wall_authenticated": False,
+                "commercial_publishable": False,
+            }
+            graph = build_source_native_wall_body_junction_graph(
+                drawings,
+                page_index=page_index,
+                # Optional Acacia host-stroke audit filter only; never a join.
+                focus_native_path_ids=(4000, 4002, 5862, 5848, 5849),
+            )
+            result["junction_graph_summary"] = {
+                "exterior_preflight_status": graph.get("exterior_preflight_status"),
+                "exterior_preflight_reason": graph.get("exterior_preflight_reason"),
+                "exterior_preflight_connectivity_status": graph.get(
+                    "exterior_preflight_connectivity_status"
+                ),
+                "junction_disposition_counts": graph.get("junction_disposition_counts"),
+                "endpoint_near_miss_count": graph.get("endpoint_near_miss_count"),
+                "focus_path_near_miss_count": graph.get("focus_path_near_miss_count"),
+                "focus_path_near_misses": graph.get("focus_path_near_misses"),
+                "open_endpoint_disposition_counts": graph.get(
+                    "open_endpoint_disposition_counts"
+                ),
+                "window_continuity_disposition_counts": graph.get(
+                    "window_continuity_disposition_counts"
+                ),
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
             }
