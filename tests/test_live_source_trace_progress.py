@@ -22,7 +22,9 @@ def test_live_trace_reports_page_count_progress_and_incremental_images(tmp_path)
     stages = [event["stage"] for event in events]
     assert "classifying_page_ink" in stages
     assert "tracing_outer_boundary" in stages
+    assert "outer_boundary_evidence_ready" in stages
     assert "resolving_wall_and_room_topology" in stages
+    assert "wall_room_topology_ready" in stages
     assert "drawing_wall_candidates" in stages
     assert "drawing_outer_boundary" in stages
     assert "drawing_openings_and_wall_ends" in stages
@@ -80,3 +82,24 @@ def test_original_plan_mapper_streamlit_page_and_overlay_are_wired():
     assert "live_meter.progress(" in body
     assert "selected_pdf_page=int(page[\"page_no\"])" in body
     assert "Re-run new native wall trace" in body
+
+
+def test_live_document_scan_can_move_across_source_pages_with_bounded_batch():
+    path = Path(__file__).resolve().parents[1] / "pb_planreader_3d_app.py"
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next(
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "plan_mapper_page"
+    )
+    body = ast.get_source_segment(src, fn)
+    assert body is not None
+    assert "Live document scan — watch each PDF page as it traces" in body
+    assert "Start live page-by-page trace" in body
+    assert "max_batch=min(25,live_pdf_page_count-start_page+1)" in body
+    assert "for pdf_page_number in range(start_page,start_page+batch_pages)" in body
+    assert "batch_live.update(enabled=True,first=start_page,count=batch_pages)" in body
+    assert "if pdf_page_number==selected_pdf_page" in body
+    assert "st.session_state[f\"live_scan_results_" in body
+    assert "if batch_clicked and (not stored_sha or stored_sha==digest):" in body
+    assert "No source preview becomes a measured quantity" in body
