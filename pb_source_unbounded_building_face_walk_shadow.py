@@ -82,6 +82,7 @@ class OutsideFacingBuildingWalk:
                 {
                     "bounds_pdf_pts": list(bounds),
                     "source_local_native_path_ids": list(ids),
+                    "owner_locality_authenticated": bool(ids),
                     "physical_wall_authenticated": False,
                     "measurement_authorized": False,
                 }
@@ -755,7 +756,9 @@ def walk_source_unbounded_building_face(
                 for idx in ids
             )
             if not valid:
-                unresolved.append((bar, ids))
+                # Keep this real residual unresolved, but do not describe
+                # unverified/foreign composite IDs as *local* source owners.
+                unresolved.append((bar, ()))
                 continue
             local_ids = _local_residual_path_ids(geom, ids, source_drawings)
             if not local_ids:
