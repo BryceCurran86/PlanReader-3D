@@ -6,6 +6,8 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS } from "./visualRealism";
+import type { LightingMood, RenderQuality } from "./visualRealism";
 
 type Props = {
   manifest: SceneManifest;
@@ -13,6 +15,8 @@ type Props = {
   onSelect: (id: string | null) => void;
   draftState: DraftHistory | null;
   onCycleStudy: (objectId: string) => void;
+  mood: LightingMood;
+  quality: RenderQuality;
 };
 
 function point2(value: unknown): value is [number, number] {
@@ -20,7 +24,7 @@ function point2(value: unknown): value is [number, number] {
     value.every((v) => typeof v === "number" && Number.isFinite(v));
 }
 
-function displayObject(row: EditorObject): THREE.Object3D | null {
+function displayObject(row: EditorObject, roughness: number): THREE.Object3D | null {
   const shape = row.geometry;
   if (!shape || !point2(shape.start) || !point2(shape.end)) return null;
   const a = new THREE.Vector3(shape.start[0], 0, shape.start[1]);
@@ -28,10 +32,9 @@ function displayObject(row: EditorObject): THREE.Object3D | null {
   if (a.distanceTo(b) <= 1e-8) return null;
   const trustworthy = row.renderState === "verified" &&
     row.unresolvedIssues.length === 0;
-  const color = trustworthy ? 0x48b8a6 : 0xe3ad58;
+  const color = trustworthy ? 0xe8e4dc : 0xd5a56d;
   const name = row.objectId;
-  if (shape.kind === "wallFace" && Number.isFinite(shape.heightM) &&
-      shape.heightM > 0 && shape.heightM < 1000) {
+  if (shape.kind === "wallFace" && mayRenderWallFace(shape.kind, shape.heightM)) {
     const h = shape.heightM;
     const data = new Float32Array([
       a.x, 0, a.z, b.x, 0, b.z, b.x, h, b.z,
@@ -45,12 +48,14 @@ function displayObject(row: EditorObject): THREE.Object3D | null {
       transparent: !trustworthy,
       opacity: trustworthy ? 0.92 : 0.4,
       side: THREE.DoubleSide,
-      roughness: 0.8,
+      roughness,
       metalness: 0,
       depthWrite: trustworthy,
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.objectId = name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     return mesh;
   }
   // Unverified height is shown ONLY as source XY linework, never an extruded
@@ -89,13 +94,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const visualSettings = useRef({ mood, quality });
+  visualSettings.current = { mood, quality };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const draftMap = useRef<Map<string, WallDraft>>(new Map());
@@ -107,12 +114,24 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     if (!parent) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x101920);
-    scene.add(new THREE.HemisphereLight(0xdceef5, 0x2e3340, 2));
-    const sunlight = new THREE.DirectionalLight(0xffffff, 1.4);
-    sunlight.position.set(8, 16, 7);
+    const initialPreset = VISUAL_PRESETS[visualSettings.current.mood];
+    scene.background = new THREE.Color(initialPreset.background);
+    const ambient = new THREE.HemisphereLight(
+      initialPreset.ambientSky, initialPreset.ambientGround, initialPreset.ambientIntensity,
+    );
+    scene.add(ambient);
+    const sunlight = new THREE.DirectionalLight(initialPreset.sunColor, initialPreset.sunIntensity);
+    sunlight.position.set(...initialPreset.sunPosition);
+    const lightCenter = new THREE.Vector3();
+    sunlight.castShadow = true;
+    sunlight.shadow.mapSize.set(shadowMapSize(visualSettings.current.quality),
+      shadowMapSize(visualSettings.current.quality));
+    sunlight.shadow.bias = -0.0001;
+    sunlight.shadow.normalBias = 0.03;
+    sunlight.shadow.radius = 2;
     scene.add(sunlight);
-    const grid = new THREE.GridHelper(50, 50, 0x36515a, 0x283842);
+    const grid = new THREE.GridHelper(50, 50, 0x72919f, 0x91a9b0);
+    grid.position.y = 0.005;
     scene.add(grid);
 
     const camera = new THREE.PerspectiveCamera(65, 1, 0.01, 2500);
@@ -128,8 +147,13 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     renderer.domElement.setAttribute(
       "aria-label", "Read-only building scene. Use Escape to clear selection."
     );
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
+      maxRenderPixelRatio(visualSettings.current.quality, false)));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = initialPreset.exposure;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     parent.append(renderer.domElement);
@@ -144,7 +168,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const pickables: THREE.Object3D[] = [];
     const sourceById = new Map(manifest.objects.map(row => [row.objectId, row]));
     for (const row of manifest.objects) {
-      const item = displayObject(row);
+      const item = displayObject(row, initialPreset.materialRoughness);
       if (!item) continue;
       physical.add(item);
       pickables.push(item);
@@ -156,11 +180,38 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (geometry?.kind === "wallFace") item.userData.originalHeight = geometry.heightM;
       }
     }
+    // Presentation-only shadow-catching floor; never a sourced slab, floor finish or quantity.
+    // It exists solely below existing linework and cannot be selected.
+    const presentationFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.ShadowMaterial({ color: 0x293440, opacity: 0.15 }),
+    );
+    presentationFloor.rotation.x = -Math.PI / 2;
+    presentationFloor.position.y = -0.01;
+    presentationFloor.receiveShadow = true;
+    scene.add(presentationFloor);
     const bbox = new THREE.Box3().setFromObject(physical);
     if (!bbox.isEmpty()) {
       const center = bbox.getCenter(new THREE.Vector3());
       const radius = Math.max(bbox.getSize(new THREE.Vector3()).length(), 4);
       controls.target.copy(center);
+      const size = bbox.getSize(new THREE.Vector3());
+      const shadowExtent = Math.min(150, Math.max(12, size.x, size.z) * 1.4);
+      sunlight.shadow.camera.left = -shadowExtent;
+      sunlight.shadow.camera.right = shadowExtent;
+      sunlight.shadow.camera.top = shadowExtent;
+      sunlight.shadow.camera.bottom = -shadowExtent;
+      sunlight.shadow.camera.near = 0.5;
+      sunlight.shadow.camera.far = 180;
+      sunlight.shadow.camera.updateProjectionMatrix();
+      presentationFloor.scale.set(Math.min(300, Math.max(20, size.x * 1.5)),
+        Math.min(300, Math.max(20, size.z * 1.5)), 1);
+      presentationFloor.position.x = center.x;
+      presentationFloor.position.z = center.z;
+      lightCenter.copy(center);
+      sunlight.target.position.copy(center);
+      sunlight.position.add(center);
+      scene.add(sunlight.target);
       camera.position.set(center.x + radius, center.y + radius * 0.7,
         center.z + radius);
       camera.near = Math.max(0.01, radius / 5000);
@@ -259,7 +310,39 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
 
     let selectedLabel: THREE.Sprite | null = null;
     let lastLabelId: string | null = null;
+    let lastMood: LightingMood | null = null;
+    let lastQuality: RenderQuality | null = null;
     renderer.setAnimationLoop(() => {
+      const { mood: activeMood, quality: activeQuality } = visualSettings.current;
+      if (lastMood !== activeMood) {
+        const preset = VISUAL_PRESETS[activeMood];
+        scene.background = new THREE.Color(preset.background);
+        ambient.color.setHex(preset.ambientSky);
+        ambient.groundColor.setHex(preset.ambientGround);
+        ambient.intensity = preset.ambientIntensity;
+        sunlight.color.setHex(preset.sunColor);
+        sunlight.intensity = preset.sunIntensity;
+        sunlight.position.set(...preset.sunPosition).add(lightCenter);
+        renderer.toneMappingExposure = preset.exposure;
+        for (const item of pickables) {
+          if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial) {
+            item.material.roughness = preset.materialRoughness;
+          }
+        }
+        lastMood = activeMood;
+      }
+      if (lastQuality !== activeQuality) {
+        const size = shadowMapSize(activeQuality);
+        sunlight.shadow.mapSize.set(size, size);
+        if (sunlight.shadow.map) {
+          sunlight.shadow.map.dispose();
+          sunlight.shadow.map = null;
+        }
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
+          maxRenderPixelRatio(activeQuality, renderer.xr.isPresenting)));
+        onResize();
+        lastQuality = activeQuality;
+      }
       // Render-only proposals; underlying source geometry and manifest are untouched.
       // Ghost heights may only modify an EXISTING display wall-face mesh.
       for (const item of pickables) {
@@ -336,6 +419,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           materials.forEach(m => m.dispose());
         }
       });
+      presentationFloor.geometry.dispose();
+      presentationFloor.material.dispose();
+      sunlight.shadow.dispose();
       renderer.dispose();
       vrButton.remove();
       renderer.domElement.remove();
