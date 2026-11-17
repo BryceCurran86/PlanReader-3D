@@ -128,6 +128,8 @@ def run(pdf: Path, page_number: int, png: Path | None, summary_path: Path | None
             "interior_only_primitives": len(regions.interior_only_primitive_ids),
             "within_wall_body_primitives": len(regions.within_wall_body_primitive_ids),
             "typed_opening_chords": len(regions.chord_ids),
+            "false_opening_chords_suppressed_by_continuous_wall": len(regions.suppressed_wall_covered_chord_ids),
+            "suppressed_false_chord_ids": list(regions.suppressed_wall_covered_chord_ids),
             "reason_codes": list(regions.reason_codes),
         },
         "region_rows": [
@@ -209,8 +211,22 @@ def _draw(page, segments, ink, partition, regions, labels, ocr, png: Path, dpi: 
         else:
             continue
         draw.line([view(segment["x1"], segment["y1"]), view(segment["x2"], segment["y2"])], fill=colour, width=width)
-    for gap in partition.opening_gaps or ink.opening_gaps:
-        draw.line([view(*gap.end_a), view(*gap.end_b)], fill=(0, 190, 190, 255), width=3)
+    # Accepted virtual room-closure chords are cyan; source-wall-overridden
+    # false opening hypotheses are orange. Neither is a built physical wall.
+    from pb_structural_room_region_shadow import chord_id
+    seen_gap_ids = set()
+    for gap in (*ink.opening_gaps, *partition.opening_gaps):
+        cid = chord_id(gap)
+        if cid in seen_gap_ids:
+            continue
+        seen_gap_ids.add(cid)
+        if cid in regions.suppressed_wall_covered_chord_ids:
+            colour = (255, 125, 0, 255)
+        elif cid in regions.chord_ids:
+            colour = (0, 190, 190, 255)
+        else:
+            continue
+        draw.line([view(*gap.end_a), view(*gap.end_b)], fill=colour, width=3)
     for lab in labels:
         x0, y0, x1, y1 = lab.bbox
         draw.polygon([view(x0, y0), view(x1, y0), view(x1, y1), view(x0, y1)], outline=(0, 140, 0, 255))
