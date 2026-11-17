@@ -116,6 +116,15 @@ def test_browser_cannot_provide_rates_tax_approvals_or_fake_quote_status():
     assert ledger.events == ()
 
 
+def test_browser_commercial_fields_rejected_even_when_server_ratebook_missing():
+    app, cmd, ledger = _app(book=False)
+    status, _, result = _request(app, {**cmd, "rates": [{"material_cost_per_unit": 0}]})
+    assert status.startswith("422")
+    assert result["quantityPreview"]["blockingReasons"] == ["typed_command_schema_mismatch"]
+    assert result["costingPreview"] is None
+    assert ledger.events == ()
+
+
 def test_same_origin_json_body_size_and_method_gate():
     app, cmd, ledger = _app()
     status, _, r = _request(app, cmd, method="GET")
