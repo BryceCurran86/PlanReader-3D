@@ -10,6 +10,7 @@ import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS }
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
+import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 
 type Props = {
   manifest: SceneManifest;
@@ -20,6 +21,8 @@ type Props = {
   mood: LightingMood;
   quality: RenderQuality;
   detail: SurfaceDetail;
+  inspection: InspectionSettings;
+  cameraRequest: {mode: CameraView; focus: FocusTarget; serial: number};
 };
 
 function point2(value: unknown): value is [number, number] {
@@ -101,15 +104,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
-  const visualSettings = useRef({ mood, quality, detail });
-  visualSettings.current = { mood, quality, detail };
+  const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest });
+  visualSettings.current = { mood, quality, detail, inspection, cameraRequest };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const draftMap = useRef<Map<string, WallDraft>>(new Map());
@@ -332,8 +335,13 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
     let lastDetail: SurfaceDetail | null = null;
+    let lastCameraSerial: number | null = null;
     renderer.setAnimationLoop(() => {
-      const { mood: activeMood, quality: activeQuality, detail: activeDetail } = visualSettings.current;
+      const { mood: activeMood, quality: activeQuality, detail: activeDetail,
+        inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
+      grid.visible = activeInspection.showGrid;
+      sunlight.castShadow = activeInspection.showShadows;
+      presentationFloor.visible = activeInspection.showShadows;
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -376,6 +384,30 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         onResize();
         lastQuality = activeQuality;
       }
+      if (requestedCamera.serial !== lastCameraSerial && !renderer.xr.isPresenting) {
+        const focus = requestedCamera.focus === "selected" ?
+          pickables.find(obj => obj.userData.objectId === picked.current) : null;
+        const bounds = new THREE.Box3().setFromObject(focus ?? physical);
+        if (!bounds.isEmpty()) {
+          const center = bounds.getCenter(new THREE.Vector3());
+          const diagonal = Math.max(3, bounds.getSize(new THREE.Vector3()).length());
+          const distance = Math.max(4, diagonal * 1.15);
+          const offset = new THREE.Vector3();
+          switch (requestedCamera.mode) {
+            case "plan": offset.set(0.0001, distance, 0); break;
+            case "north": offset.set(0, diagonal * 0.3, distance); break;
+            case "east": offset.set(distance, diagonal * 0.3, 0); break;
+            default: offset.set(distance * 0.75, distance * 0.6, distance * 0.75);
+          }
+          controls.target.copy(center);
+          camera.position.copy(center).add(offset);
+          camera.up.set(0, requestedCamera.mode === "plan" ? 0 : 1,
+            requestedCamera.mode === "plan" ? -1 : 0);
+          camera.lookAt(center);
+          controls.update();
+        }
+        lastCameraSerial = requestedCamera.serial;
+      }
       // Render-only proposals; underlying source geometry and manifest are untouched.
       // Ghost heights may only modify an EXISTING display wall-face mesh.
       for (const item of pickables) {
@@ -387,7 +419,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const swatch = studyColor(row, draft?.swatch ? { objectId: id, swatch: draft.swatch } : null);
         const originalHeight = item.userData.originalHeight as number | undefined;
         const ghostHeight = draft?.heightM;
-        const ghost = ghostHeight !== null && ghostHeight !== undefined &&
+        const ghost = activeInspection.showGhosts && ghostHeight !== null && ghostHeight !== undefined &&
           originalHeight !== undefined;
         const colour = swatch ?? (ghost ? 0xb899de : item.userData.originalReviewColor as number);
         if (item.material.color.getHex() !== colour) item.material.color.setHex(colour);
@@ -410,7 +442,14 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           }
         }
       }
-      if (picked.current !== lastLabelId) {
+      if (!activeInspection.showLabels && selectedLabel) {
+        scene.remove(selectedLabel);
+        selectedLabel.material.map?.dispose();
+        selectedLabel.material.dispose();
+        selectedLabel = null;
+        lastLabelId = null;
+      }
+      if (activeInspection.showLabels && (picked.current !== lastLabelId || !selectedLabel && !!picked.current)) {
         if (selectedLabel) {
           scene.remove(selectedLabel);
           selectedLabel.material.map?.dispose();
