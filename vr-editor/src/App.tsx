@@ -6,6 +6,8 @@ import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
+import { WallAdditionPanel } from "./WallAdditionPanel";
+import type { WallAdditionSketch } from "./wallAdditionProtocol";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -30,6 +32,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
+  const [addedWallSketch, setAddedWallSketch] = useState<WallAdditionSketch | null>(null);
   const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
   const [moveMode, setMoveMode] = useState<MoveMode>("inspect");
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -214,6 +217,8 @@ export function App() {
   const currentMove = activeWallMoves && manifest
     ? safeWallMoves(activeWallMoves, manifest).find(m => m.objectId === selectedId)
     : undefined;
+  const activeAddedWallSketch = visible && addedWallSketch?.scopeKey === scopeKey(visible)
+    ? addedWallSketch : null;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
   // Keyboard undo/redo works only outside editable fields and cannot change the source.
   useEffect(() => {
@@ -274,6 +279,7 @@ export function App() {
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
                 captureSerial={captureSerial} onCapture={setCaptureStatus}
                 moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
+                addedWallSketch={activeAddedWallSketch}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
           ) : (
@@ -444,6 +450,13 @@ export function App() {
                   study. MOVE_WALL persistence, cross-page redraw and trade approvals
                   must be connected before these changes may be saved or priced.</p>
               </>}
+            </div>
+          )}
+          {manifest && (
+            <div className="section-block" aria-label="New wall construction work">
+              <WallAdditionPanel
+                scene={manifest} authenticated={authenticatedSource}
+                onSketch={setAddedWallSketch} />
             </div>
           )}
           <div className="section-block" aria-label="3D presentation settings">
