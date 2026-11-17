@@ -257,7 +257,7 @@ export function App() {
                 </div>
                 {visible && activeDraftState && <ReviewWorkbench
                   key={visible.scope.snapshotId}
-                  scene={visible} selected={selected} selectedLevel={level}
+                  scene={manifest!} selected={selected} selectedLevel={level}
                   state={activeDraftState} onChange={setDraftState} />}
                 <CommandPreview
                   key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
