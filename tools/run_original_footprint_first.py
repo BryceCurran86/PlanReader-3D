@@ -184,8 +184,11 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 ],
                 "candidate_room_rings": len(ring.rings) if ring else 0,
                 "temporary_doorway_closures": len(ring.closures) if ring else 0,
-                "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else 0,
-                "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else 0,
+                # A skipped source scope has UNKNOWN gap status, not zero gaps.
+                # Never report an unexecuted inspection as a clean topology.
+                "gap_review_performed": ring is not None,
+                "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else None,
+                "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else None,
                 "source_gap_witnesses_sample": [
                     dict(w) for w in ring.unresolved_gap_witnesses
                 ] if ring else [],
