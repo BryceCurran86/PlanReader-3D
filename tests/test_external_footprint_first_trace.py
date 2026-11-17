@@ -248,3 +248,22 @@ def test_raster_candidate_empty_native_list_cannot_be_candidate():
     assert result.wall_native_primitive_count == 0
     assert result.source_total_paths == 0
     assert result.commercial_publishable is False
+
+
+@pytest.mark.parametrize("width,height", [
+    (100.0, 0.0), (100.0, -1.0), (100.0, float("nan")),
+    (100.0, float("inf")), (100.0, -float("inf")),
+    (0.0, 100.0), (float("nan"), 100.0),
+])
+def test_raster_scale_rejects_each_invalid_axis(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    with pytest.raises(ValueError, match="external_footprint_invalid_page_dimensions"):
+        _bounded_raster_scale(width, height)
+
+
+@pytest.mark.parametrize("width,height", [(4000.0, 1000.0), (1000.0, 4000.0), (12000.0, 8000.0)])
+def test_raster_scale_longest_axis_never_exceeds_2400(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    scale = _bounded_raster_scale(width, height)
+    assert 0 < scale <= 1.8
+    assert max(width, height) * scale <= 2400.0 + 1e-9
