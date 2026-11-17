@@ -399,3 +399,33 @@ Focused tests:
 python -m pytest -q tests/editable_3d/test_vr_wall_assembly_dependencies.py tests/editable_3d/test_vr_wall_assembly_wsgi.py
 cd vr-editor && npm test && npm run build
 ```
+
+### PS VR2 comfort navigation: source-floor-only teleport
+
+The authenticated editor has a separate **Verified floor teleport** checkbox.
+In immersive SteamVR, select the checkbox, aim a PS VR2 Sense trigger at a
+source-attested floor and release. A green ring is displayed only on validated
+floor targets. A teleport is allowed only when the existing canonical source
+floor triangles match the original document SHA and snapshot, the target is
+more than 12cm from the outer floor boundary and 20cm to 7m from the current
+headset, and the floor is on the local ground stage (approximately Y=0).
+Interior triangle seams are not confused with external room boundaries.
+
+The navigation uses `XRReferenceSpace.getOffsetReferenceSpace` and
+`XRRigidTransform`; **no source geometry, wall object, quantities, rates
+or saved PDFs are moved**. Selecting a wall and grip-to-move studies are
+still available when teleport mode is disabled. Local JSON/synthetic
+examples without authenticated floor triangles cannot enable teleport;
+decorative shadow planes never authorise movement. Vertical jumps, stairs,
+physical collision and room-level accessibility routing remain unsupported
+until separately verified.
+
+This is a comfort-navigation preview pending actual SteamVR/PS VR2 PC
+headset testing. The SteamVR/PS VR2 physical play-area guardian remains
+in force: teleportation does not physically move a person or guarantee
+there is no obstacle around them.
+
+See the WebXR native reference-space documentation at
+https://developer.mozilla.org/en-US/docs/Web/API/XRReferenceSpace/getOffsetReferenceSpace
+and Three.js's official WebXR teleport example for the reference-space
+offset approach.
