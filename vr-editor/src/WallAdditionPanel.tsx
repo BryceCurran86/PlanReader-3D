@@ -24,6 +24,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   const [door,setDoor]=useState({enabled:false,offset:"",width:"",height:""});
   const [result,setResult]=useState<WallAssemblyPreview|null>(null);
   const [impact,setImpact]=useState<WallConstructionImpactPreview|null>(null);
+  const [autoReprice,setAutoReprice]=useState(false);
   // Purely local unapproved construction scope. Recreated on source switch.
   const [batch,setBatch]=useState(()=>freshWallBatch(scene));
   const activeBatch=currentWallBatch(scene,batch);
@@ -53,6 +54,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     setProfile("");setLevel("");setCoords({x1:"",z1:"",x2:"",z2:"",height:""});
     setDoor({enabled:false,offset:"",width:"",height:""});
     setResult(null);setImpact(null);setError(null);setWorking(false);
+    setAutoReprice(false);
     setBatch(freshWallBatch(scene));
     onSketch(null);
     onBatchSketches([]);
@@ -70,7 +72,18 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     setWorking(false);
     setResult(null);setImpact(null);setError(null);onSketch(null);
   }
-  async function addWallStudy(){
+  // Automatic replanning never adds a wall to the persistent review batch.
+  useEffect(()=>{
+    if(!autoReprice||!authenticated||!level||
+       !/^[A-Za-z0-9_.:-]{1,128}$/.test(profile)||
+       Object.values(coords).some(v=>!v.trim())||
+       (door.enabled&&[door.offset,door.width,door.height].some(v=>!v.trim())))
+      return;
+    const timer=window.setTimeout(()=>{void addWallStudy(false);},700);
+    return ()=>window.clearTimeout(timer);
+  },[autoReprice,authenticated,sceneIdentity,level,profile,coords,door]);
+
+  async function addWallStudy(addToBatch=true){
     stale();
     if(!authenticated){
       setError("Authenticate the original PlanReader workspace to request a trusted assembly scope.");
@@ -123,7 +136,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
       const verified=verifyWallAssemblyPreview(body,scene,command);
       const verifiedImpact=verifyWallConstructionImpact(body,verified);
       if(!abort.signal.aborted){
-        setBatch(previous=>addOrReplaceWallStudy(
+        if(addToBatch)setBatch(previous=>addOrReplaceWallStudy(
           scene,currentWallBatch(scene,previous),command,verified,
         ));
         // Once the validated proposal joins the batch, remove the transient
@@ -197,8 +210,13 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
       {label("Door height (m)","Documented height",door.height,
         v=>setDoor(c=>({...c,height:v})))}
     </div>}
+    <label className="added-wall-checkbox">
+      <input type="checkbox" checked={autoReprice} disabled={!authenticated}
+        onChange={e=>{stale();setAutoReprice(e.target.checked);}} />
+      Live preview construction costs and related pages after wall changes (700 ms pause)
+    </label>
     <button type="button" disabled={working||!authenticated}
-      onClick={()=>void addWallStudy()}>
+      onClick={()=>void addWallStudy(true)}>
       {working?"Checking all dependent trades…":
        "Add wall to review and calculate associated work"}
     </button>
