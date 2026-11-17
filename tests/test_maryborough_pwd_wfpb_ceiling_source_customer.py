@@ -231,3 +231,51 @@ def test_tampered_source_sha_abstains(tmp_path, maryborough_pdf_path):
     )
     assert result.status == "ABSTAIN"
     assert result.reason_codes == ("maryborough_source_sha_mismatch",)
+
+
+@pytest.mark.parametrize("with_unverified_document", [False, True])
+def test_pwd_rcp_unverified_observation_dictionaries_cannot_authorize_ceiling(
+    with_unverified_document,
+):
+    """A claimed original SHA and forged/loose marks cannot create a FIRM ceiling."""
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_maryborough_customer_authority import (
+        MARYBOROUGH_DOCUMENT_ID,
+        MARYBOROUGH_REVISION_ID,
+        MARYBOROUGH_SOURCE_SHA256,
+        PWD_PHYSICAL_ROOM_ID,
+        PWD_SOURCE_ROOM_FACE_ID,
+    )
+    from pb_source_cross_view_floor_correspondence_shadow import (
+        authenticate_maryborough_pwd_rcp_ceiling_correspondence,
+    )
+
+    unverified_doc = fitz.open() if with_unverified_document else None
+    try:
+        record = authenticate_maryborough_pwd_rcp_ceiling_correspondence(
+            document_id=MARYBOROUGH_DOCUMENT_ID,
+            revision_id=MARYBOROUGH_REVISION_ID,
+            source_sha256=MARYBOROUGH_SOURCE_SHA256,
+            snapshot_id="unverified-pwd-ceiling-test-v1",
+            canonical_ceiling_id=ceiling_authority.PWD_PHYSICAL_CEILING_ID,
+            physical_room_id=PWD_PHYSICAL_ROOM_ID,
+            canonical_room_id=PWD_PHYSICAL_ROOM_ID,
+            source_room_face_record_id=PWD_SOURCE_ROOM_FACE_ID,
+            doc=unverified_doc,
+            legend_observations=[
+                {"code": "WFPB", "description": "WET AREA FLUSHSET PLASTERBOARD"}
+            ],
+            marks=[{"code": "WFPB"}],
+            room_label_observations=[{"label": "PWD"}],
+        )
+    finally:
+        if unverified_doc is not None:
+            unverified_doc.close()
+
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert record.reason_codes == ("original_source_bytes_unavailable",)
+    assert record.authority_blockers == ("authenticated_original_pdf_required",)
+    assert record.commercial_projection_allowed is False
+    assert record.takeoff_eligible is False
+    assert record.definition_record_id == ""
+    assert record.occurrence_record_id == ""
