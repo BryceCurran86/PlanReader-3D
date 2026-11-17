@@ -387,7 +387,7 @@ def test_acacia_wrapped_window_and_door_schedule_page_title(tmp_path):
     pdf = tmp_path / "original_schedule.pdf"
     with fitz.open() as document:
         page = document.new_page()
-        page.insert_text((30, 45), "Window\\nand Door Schedule")
+        page.insert_text((30, 45), "Window\nand Door Schedule")
         document.save(pdf)
     raw = pdf.read_bytes()
     assert _verify_original_drawing_title(
