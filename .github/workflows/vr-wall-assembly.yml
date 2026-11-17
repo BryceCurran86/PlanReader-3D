@@ -5,6 +5,9 @@ on:
       - 'pb_vr_wall_assembly_dependencies.py'
       - 'pb_vr_wall_assembly_wsgi.py'
       - 'pb_vr_wall_change_impact.py'
+      - 'pb_vr_wall_create_revision_store.py'
+      - 'pb_vr_wall_create_revision_wsgi.py'
+      - 'tests/editable_3d/test_vr_wall_create_revision_store.py'
       - 'tests/editable_3d/test_vr_wall_change_impact.py'
       - 'tests/editable_3d/test_vr_wall_assembly_*.py'
       - '.github/workflows/vr-wall-assembly.yml'
@@ -14,6 +17,9 @@ on:
       - 'pb_vr_wall_assembly_dependencies.py'
       - 'pb_vr_wall_assembly_wsgi.py'
       - 'pb_vr_wall_change_impact.py'
+      - 'pb_vr_wall_create_revision_store.py'
+      - 'pb_vr_wall_create_revision_wsgi.py'
+      - 'tests/editable_3d/test_vr_wall_create_revision_store.py'
       - 'tests/editable_3d/test_vr_wall_change_impact.py'
       - 'tests/editable_3d/test_vr_wall_assembly_*.py'
       - '.github/workflows/vr-wall-assembly.yml'
@@ -33,4 +39,4 @@ jobs:
         run: python -m pip install pytest PyMuPDF numpy pandas plotly
       - name: Test wall framing/skirting/plasterboard, route collisions and auth
         run: |
-          python -m pytest -q tests/editable_3d/test_vr_wall_assembly_dependencies.py tests/editable_3d/test_vr_wall_assembly_wsgi.py tests/editable_3d/test_vr_wall_change_impact.py
+          python -m pytest -q tests/editable_3d/test_vr_wall_assembly_dependencies.py tests/editable_3d/test_vr_wall_assembly_wsgi.py tests/editable_3d/test_vr_wall_change_impact.py tests/editable_3d/test_vr_wall_create_revision_store.py

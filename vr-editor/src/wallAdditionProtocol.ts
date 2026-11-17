@@ -243,3 +243,53 @@ export function verifyWallConstructionImpact(
     throw new Error("Unsupported complete construction preview claim");
   return impact as unknown as WallConstructionImpactPreview;
 }
+
+
+export interface SavedNewWallRevision {
+  revisionId:string;
+  revisionNumber:number;
+  canonicalWallId:string;
+  modelRevision:number;
+  pdfSha256:string;
+  pagesRevised:{pageIndex:number;sheetId:string;pageKind:string;registrationEvidenceId:string;newWallVectorDrawn:true;approved:false}[];
+  persisted:true;
+  workingDesignOnly:true;
+  commercialPublicationAllowed:false;
+  idempotentReplay:boolean;
+  downloadPath:string;
+}
+export function verifySavedNewWallRevision(
+  raw:unknown, scene:SceneManifest, command:WallAdditionCommand,
+):SavedNewWallRevision{
+  const p=obj(raw);
+  if(typeof p.revisionId!=="string"||!/^[0-9a-f]{40}$/.test(p.revisionId)||
+     typeof p.revisionNumber!=="number"||!Number.isSafeInteger(p.revisionNumber)||
+     p.revisionNumber<1||
+     typeof p.canonicalWallId!=="string"||!/^vr-wall:[0-9a-f]{32}$/.test(p.canonicalWallId)||
+     p.modelRevision!==scene.scope.modelRevision+1||
+     typeof p.pdfSha256!=="string"||!HASH.test(p.pdfSha256)||
+     p.persisted!==true||p.workingDesignOnly!==true||
+     p.commercialPublicationAllowed!==false||
+     typeof p.idempotentReplay!=="boolean"||
+     !Array.isArray(p.pagesRevised)||p.pagesRevised.length<1||
+     p.pagesRevised.length>700||
+     p.downloadPath!==(
+       "/api/editor/workspaces/"+scene.scope.workspaceId+
+       "/walls/revisions/"+p.revisionId+"/pdf"
+     ))throw new Error("Wall creation save receipt invalid or source-stale");
+  const pages=new Set<number>();
+  for(const item of p.pagesRevised){
+    const page=obj(item);
+    if(typeof page.pageIndex!=="number"||!Number.isSafeInteger(page.pageIndex)||
+       page.pageIndex<0||pages.has(page.pageIndex)||
+       typeof page.sheetId!=="string"||!ID.test(page.sheetId)||
+       typeof page.pageKind!=="string"||!ID.test(page.pageKind)||
+       typeof page.registrationEvidenceId!=="string"||
+       !ID.test(page.registrationEvidenceId)||
+       page.newWallVectorDrawn!==true||page.approved!==false)
+      throw new Error("Saved wall revised-sheet manifest malformed");
+    pages.add(page.pageIndex);
+  }
+  if(!ID.test(command.proposalId))throw new Error("Unsaved proposal identity");
+  return raw as SavedNewWallRevision;
+}
