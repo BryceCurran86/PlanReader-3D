@@ -32,6 +32,8 @@ export function App() {
   const [sourceSheet, setSourceSheet] = useState("");
   const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+  const [captureSerial,setCaptureSerial]=useState(0);
+  const [captureStatus,setCaptureStatus]=useState<string|null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -223,7 +225,8 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
+                captureSerial={captureSerial} onCapture={setCaptureStatus} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -235,6 +238,14 @@ export function App() {
                 Open synthetic 3D / VR example
               </button>
               <p>This demonstration contains no real construction source or measured quantities.</p>
+            </div>
+          )}
+          {visible && (
+            <div className="review-image-toolbar">
+              <button type="button" onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}>
+                Export watermarked review PNG
+              </button>
+              {captureStatus && <span role="status">{captureStatus}</span>}
             </div>
           )}
           <div className="viewer-footer">
