@@ -316,6 +316,103 @@ def _source_named_compact_outside_post(geom: Polygon, ids, drawings, words) -> b
     )
 
 
+def _source_nested_concentric_porch_post_nonwall(
+    geom: Polygon, ids, drawings, words,
+) -> bool:
+    """Source-positive nested porch-column ink, not a continuous wall.
+
+    Require at least three concentric CLOSED original square stroke rings,
+    positive native ring owners for the exact outside residual and PORCH/TILES
+    printed on the same sheet. This is a negative outside-WALL-NETWORK role
+    only; real porch posts remain as physical elements and no quantity issues.
+    """
+    if not ids or not _native_source_stroke_only(ids, drawings):
+        return False
+    if any(
+        "wall" not in str(drawings[i].get("layer") or "").lower()
+        or "external" not in str(drawings[i].get("layer") or "").lower()
+        for i in ids
+    ):
+        return False
+    x0, y0, x1, y1 = geom.bounds
+    if max(x1 - x0, y1 - y0) > 18 or min(x1 - x0, y1 - y0) < 0:
+        return False
+    labels = _source_words_near_bar(geom, words, radius=100)
+    if "PORCH" not in labels or "TILES" not in labels:
+        return False
+
+    center = geom.centroid
+    edges: dict[frozenset[tuple[float, float]], int] = {}
+    horizontal: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
+    for index, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or row.get("type") != "s" or row.get("fill") is not None:
+            continue
+        layer = str(row.get("layer") or "").lower()
+        if "wall" not in layer or "external" not in layer:
+            continue
+        width = row.get("width")
+        if type(width) not in (int, float) or not 0 < width <= 0.85:
+            continue
+        items = row.get("items") or ()
+        if len(items) != 1 or not items[0] or items[0][0] != "l":
+            continue
+        try:
+            points = []
+            for point in items[0][1:3]:
+                xy = ((float(point.x), float(point.y)) if hasattr(point, "x")
+                      else (float(point[0]), float(point[1])))
+                if not all(math.isfinite(v) for v in xy):
+                    raise ValueError("nonfinite")
+                points.append((round(xy[0], 3), round(xy[1], 3)))
+            a, b = points
+        except (ValueError, TypeError, IndexError, OverflowError):
+            continue
+        if not (center.x - 20 <= a[0] <= center.x + 20
+                and center.x - 20 <= b[0] <= center.x + 20
+                and center.y - 20 <= a[1] <= center.y + 20
+                and center.y - 20 <= b[1] <= center.y + 20):
+            continue
+        if (abs(a[0] - b[0]) > .03 and abs(a[1] - b[1]) > .03):
+            continue
+        edges[frozenset((a, b))] = index
+        if abs(a[1] - b[1]) <= .03 and 6 < abs(a[0] - b[0]) < 18:
+            horizontal.append((index, a, b))
+
+    rings: set[tuple[float, float, float, frozenset[int]]] = set()
+    for top_id, a, b in horizontal:
+        lx, rx = sorted((a[0], b[0]))
+        top_y = a[1]
+        for bottom_id, c, d in horizontal:
+            if bottom_id == top_id:
+                continue
+            l2, r2 = sorted((c[0], d[0]))
+            bottom_y = c[1]
+            if abs(lx - l2) > .03 or abs(rx - r2) > .03:
+                continue
+            if not (6 < abs(bottom_y - top_y) < 18
+                    and abs((rx - lx) - abs(bottom_y - top_y)) < 1.0):
+                continue
+            left_id = edges.get(frozenset(((lx, top_y), (lx, bottom_y))))
+            right_id = edges.get(frozenset(((rx, top_y), (rx, bottom_y))))
+            if left_id is None or right_id is None:
+                continue
+            ring_ids = frozenset((top_id, bottom_id, left_id, right_id))
+            rings.add((round((lx + rx) / 2, 2),
+                       round((top_y + bottom_y) / 2, 2),
+                       round(rx - lx, 2), ring_ids))
+
+    for center_x, center_y, _size, _owners in rings:
+        grouped = [ring for ring in rings
+                   if abs(ring[0] - center_x) <= .10
+                   and abs(ring[1] - center_y) <= .10]
+        if len({ring[2] for ring in grouped}) < 3:
+            continue
+        actual_ring_ids = set().union(*(ring[3] for ring in grouped))
+        if set(ids).issubset(actual_ring_ids):
+            return True
+    return False
+
+
 def _source_named_service_nonwall(geom: Polygon, ids, drawings, words) -> bool:
     """Original stormwater downpipe or bottled gas source symbols, not walls."""
     if len(ids) < 2 or not _native_source_stroke_only(ids, drawings):
@@ -798,6 +895,14 @@ def walk_source_unbounded_building_face(
             )
             if role in (ROLE_OUTDOOR, ROLE_POST):
                 excluded_nonwall += 1
+            elif _source_nested_concentric_porch_post_nonwall(
+                geom, local_ids, source_drawings, source_words,
+            ):
+                excluded_nonwall += 1
+            elif _source_printed_scale_graphic_nonwall(
+                geom, local_ids, source_drawings, source_words,
+            ):
+                excluded_nonwall += 1
             elif sheet_nonwall and all(
                 idx in sheet_nonwall
                 or classify_source_native_path_role(source_drawings[idx])
@@ -901,6 +1006,11 @@ def walk_source_unbounded_building_face(
         internal_party_wall_native_path_ids=party_ids,
         enclosed_region_count=len(holes),
         enclosed_dwelling_zone_count=dwelling_count,
+        # This candidate is returned only after EVERY original outside band
+        # received independent source-positive negative-role evidence.
+        source_outside_band_count_before_role_audit=len(outside),
+        source_proven_nonwall_band_count=excluded_nonwall,
+        source_outside_role_audit_applied=source_drawings is not None,
     )
 
 
