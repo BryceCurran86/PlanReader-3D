@@ -1,0 +1,31 @@
+name: VR Desktop Installer Lifecycle Smoke
+on:
+  pull_request:
+    paths:
+      - "vr-editor/windows/**"
+      - ".github/workflows/vr-desktop-install-smoke.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  install-uninstall:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress --limit-output
+      - name: Build installer from pinned review-only viewer
+        shell: pwsh
+        run: .\vr-editor\windows\Build-Desktop.ps1
+      - name: Real Windows installer lifecycle smoke
+        shell: pwsh
+        run: |
+          .\vr-editor\windows\Test-InstalledViewer.ps1 -InstallerPath "vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe"

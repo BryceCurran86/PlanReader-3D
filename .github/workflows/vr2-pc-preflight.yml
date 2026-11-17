@@ -1,0 +1,28 @@
+name: PS VR2 Windows PC Preflight
+on:
+  pull_request:
+    paths:
+      - "tools/vr2_pc_preflight.ps1"
+      - "tests/test_vr2_pc_preflight_contract.py"
+      - ".github/workflows/vr2-pc-preflight.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-windows-report:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run read-only local preflight
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "planreader-vr2-preflight.json"
+          .\tools\vr2_pc_preflight.ps1 -OutputPath $out
+          $report = Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+          if ($report.schema_version -ne 1) { throw "Unexpected schema" }
+          if ($report.result -ne "informational-preflight-only") { throw "Unsafe completion claim" }
+          if ($report.checks.Count -lt 7) { throw "Missing checks" }
+          if (@($report.checks | Where-Object { $_.status -eq "passed" }).Count) {
+            throw "Preflight must not claim headset acceptance"
+          }

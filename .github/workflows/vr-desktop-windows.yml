@@ -1,0 +1,47 @@
+name: VR Desktop Windows Installer
+on:
+  pull_request:
+    paths:
+      - "vr-editor/windows/**"
+      - "vr-editor/src/**"
+      - "vr-editor/package*.json"
+      - "vr-editor/vite.config.ts"
+      - ".github/workflows/vr-desktop-windows.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress --limit-output
+      - name: Build and package Windows desktop viewer
+        shell: pwsh
+        run: .\vr-editor\windows\Build-Desktop.ps1
+      - name: Verify unsigned installer
+        shell: pwsh
+        run: |
+          $path = "vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe"
+          if (!(Test-Path $path)) { throw "Missing installer" }
+          if ((Get-Item $path).Length -lt 100000) { throw "Installer unexpectedly small" }
+          Get-FileHash $path -Algorithm SHA256
+      - name: Upload unsigned installer test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlanReader-VR-Desktop-Preview-unsigned
+          path: vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
