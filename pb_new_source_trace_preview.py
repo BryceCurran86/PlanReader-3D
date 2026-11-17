@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import fitz
@@ -98,12 +98,17 @@ def source_native_trace_preview(
     page_index: int,
     *,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
+    progress_callback: Callable[[dict], None] | None = None,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
     The function DOES NOT call legacy auto_detect_building_envelope or generate
     measurement_lines, m²/lm takeoff quantities, exterior walls or footprint.
     Source-endpoint connectivity and identity remain candidate until verified.
+
+    An optional callback receives bounded source-only stage updates, current
+    page/total counts and progressive overlay PNGs. No source files are saved
+    and callback errors cannot alter physical or commercial authority.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
@@ -118,6 +123,37 @@ def source_native_trace_preview(
         page = document[page_index]
         drawings = page.get_drawings()
         rect = page.rect
+        page_count = len(document)
+
+        def _report(stage: str, fraction: float, *,
+                    snapshot=None, wall_candidates: int = 0) -> None:
+            if progress_callback is None:
+                return
+            payload = {
+                "stage": stage,
+                "fraction": max(0., min(1., float(fraction))),
+                "page_index": page_index,
+                "page_number": page_index + 1,
+                "page_count": page_count,
+                "source_only": True,
+                "physical_wall_authenticated": False,
+                "measurement_authorized": False,
+                "wall_candidates_drawn": wall_candidates,
+                "overlay_png": None,
+            }
+            try:
+                if snapshot is not None:
+                    zoom_progress = min(.95, 1500 / max(float(rect.width), float(rect.height)))
+                    payload["overlay_png"] = snapshot.get_pixmap(
+                        matrix=fitz.Matrix(zoom_progress, zoom_progress),
+                        alpha=False,
+                    ).tobytes("png")
+                progress_callback(payload)
+            except Exception:
+                # A UI renderer error must not change source evidence/scoring.
+                return
+
+        _report("reading_original_page", .02, snapshot=page)
         # Source representation must be checked BEFORE choosing a physical
         # tracing lane. A full tiled raster architectural page does not gain
         # physical wall authority from its unrelated vector dimensions.
@@ -127,6 +163,7 @@ def source_native_trace_preview(
         raster_trace = RasterSourceSegmentTrace(
             "ABSTAINED", "not_raster_source_page", page_index, 0.,
         )
+        _report("classifying_page_ink", .12)
         # Preflight source hygiene is not a physical tracing stage:
         # remove only source-proven non-wall vector glyphs and green ink,
         # keeping native path IDs and original bytes unchanged.
@@ -140,6 +177,7 @@ def source_native_trace_preview(
         wall_drawings, neutral_dark_added = include_source_neutral_dark_strokes(
             vector_scope.drawings, wall_drawings,
         )
+        _report("tracing_outer_boundary", .22)
         if source_modality.route == "tiled_raster_underlay":
             # First geometry is from raster SOURCE PIXELS. Do not silently
             # misclassify native dimension overlays as architectural walls.
@@ -174,6 +212,7 @@ def source_native_trace_preview(
                 source_page_index=page_index,
                 viewport_pdf_pts=viewport_pdf_pts,
             )
+        _report("outer_boundary_evidence_ready", .38)
         # Room semantics are an automatic READ of source-printed numbered
         # key entries. This stage cannot draw walls, create areas, or override
         # a failed exterior trace. Missing key evidence is explicitly shown.
@@ -190,6 +229,7 @@ def source_native_trace_preview(
         panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
+        _report("resolving_wall_and_room_topology", .44)
         result = build_layered_wall_doorway_room_rings(
             wall_drawings,
             source_sha256=sha,
@@ -215,12 +255,13 @@ def source_native_trace_preview(
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
         )
+        _report("wall_room_topology_ready", .56)
         preview = fitz.open()
         canvas = preview.new_page(width=rect.width, height=rect.height)
         canvas.show_pdf_page(canvas.rect, document, page_index)
         native_wall_counts = {}
         seen = set()
-        for pane in panes:
+        for pane_number, pane in enumerate(panes, start=1):
             clipped = _clip_drawing_items(wall_drawings, pane)
             clipped_baseline = (
                 _clip_drawing_items(strict_wall_drawings, pane)
@@ -256,6 +297,16 @@ def source_native_trace_preview(
                         canvas.draw_polyline(points, color=color, width=1.7, stroke_opacity=0.78)
                     except (ValueError, TypeError, AttributeError):
                         continue
+            if progress_callback is not None and (
+                pane_number == len(panes)
+                or pane_number % max(1, (len(panes) + 4) // 5) == 0
+            ):
+                _report(
+                    "drawing_wall_candidates",
+                    .58 + .22 * pane_number / max(1, len(panes)),
+                    snapshot=canvas,
+                    wall_candidates=sum(native_wall_counts.values()),
+                )
         # Raster branch shows actual source image line-candidate geometry,
         # not any native-vector page furniture or old envelope contour.
         # The render is a diagnostic: magenta may include dimension lines.
@@ -276,6 +327,8 @@ def source_native_trace_preview(
                 color=(0.95, 0.07, 0.13),
                 width=2.8,
             )
+        _report("drawing_outer_boundary", .83, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         # Blue spans are native window aperture CONTINUITY of the footprint,
         # not solid walls or customer-measurable material.
         for bridge in outer_wall.window_footprint_bridges:
@@ -371,6 +424,8 @@ def source_native_trace_preview(
                 fitz.Point(*hit.tip_pdf_pts), radius=4.0,
                 color=(0.70, 0.08, 0.72), width=1.5,
             )
+        _report("drawing_openings_and_wall_ends", .91, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         for closure in result.closures:
             lo, hi = closure.gap_interval
             a, b = closure.band
@@ -390,12 +445,15 @@ def source_native_trace_preview(
                     dashes="[5 3] 0",
                     width=1.5,
                 )
+        _report("drawing_enclosed_room_candidates", .97, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         zoom = min(1.2, 1800 / max(float(rect.width), float(rect.height)))
         png = canvas.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
         preview.close()
         summary = {
             "source_sha256": sha,
             "page_index": page_index,
+            "document_page_count": page_count,
             "producer": "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings",
             "legacy_envelope_used": False,
             "legacy_fallback_allowed": False,
@@ -591,4 +649,5 @@ def source_native_trace_preview(
                 "green": "candidate room enclosure",
             },
         }
+        _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png
