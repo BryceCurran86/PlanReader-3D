@@ -5,10 +5,10 @@ import {
   undoWallBatch,redoWallBatch,summarizeWallBatch,compareWallBatches,exportWallBatchReview,
 } from "./wallBatchStudy";
 import {
-  makeWallAdditionCommand,validateAdditionSketch,verifyWallAssemblyPreview,
+  makeWallAdditionCommand,validateAdditionSketch,verifyWallAssemblyPreview,verifyWallConstructionImpact,
 } from "./wallAdditionProtocol";
 import type {
-  WallAdditionOpening,WallAdditionSketch,WallAssemblyPreview,
+  WallAdditionOpening,WallAdditionSketch,WallAssemblyPreview,WallConstructionImpactPreview,
 } from "./wallAdditionProtocol";
 
 type Props={
@@ -23,6 +23,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   const [coords,setCoords]=useState({x1:"",z1:"",x2:"",z2:"",height:""});
   const [door,setDoor]=useState({enabled:false,offset:"",width:"",height:""});
   const [result,setResult]=useState<WallAssemblyPreview|null>(null);
+  const [impact,setImpact]=useState<WallConstructionImpactPreview|null>(null);
   // Purely local unapproved construction scope. Recreated on source switch.
   const [batch,setBatch]=useState(()=>freshWallBatch(scene));
   const activeBatch=currentWallBatch(scene,batch);
@@ -51,7 +52,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     proposal.current=null;
     setProfile("");setLevel("");setCoords({x1:"",z1:"",x2:"",z2:"",height:""});
     setDoor({enabled:false,offset:"",width:"",height:""});
-    setResult(null);setError(null);setWorking(false);
+    setResult(null);setImpact(null);setError(null);setWorking(false);
     setBatch(freshWallBatch(scene));
     onSketch(null);
     onBatchSketches([]);
@@ -67,7 +68,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     controller.current?.abort();
     controller.current=null;
     setWorking(false);
-    setResult(null);setError(null);onSketch(null);
+    setResult(null);setImpact(null);setError(null);onSketch(null);
   }
   async function addWallStudy(){
     stale();
@@ -120,6 +121,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         throw new Error(`Wall trade scope blocked: ${err}`);
       }
       const verified=verifyWallAssemblyPreview(body,scene,command);
+      const verifiedImpact=verifyWallConstructionImpact(body,verified);
       if(!abort.signal.aborted){
         setBatch(previous=>addOrReplaceWallStudy(
           scene,currentWallBatch(scene,previous),command,verified,
@@ -128,11 +130,12 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         // single-wall ghost. Otherwise a removed wall would still appear.
         onSketch(null);
         setResult(verified);
+        setImpact(verifiedImpact);
         setError(null);
       }
     }catch(e){
       if(!controller.current?.signal.aborted){
-        setResult(null);
+        setResult(null);setImpact(null);
         setError(e instanceof Error?e.message:"Wall study unavailable");
       }
     }finally{
@@ -277,6 +280,23 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         server-side wall assembly previews and original drawing source remain
         the only inputs. Saved-plan revisions are a separate controlled workflow.</p>
     </section>
+    {impact&&<section className="wall-assembly-result" role="status" aria-label="New wall preliminary costing and drawing impact">
+      <strong>LIVE CONSTRUCTION COST STUDY · NOT A QUOTE</strong>
+      <p>Priced construction subtotal: {impact.currency??"Currency unavailable"} {impact.pricedSubtotalOnly}
+        {" · "}{impact.pricedComplete?"All returned work lines have a rate":"Incomplete rates — subtotal only"}</p>
+      <p className="muted">Company rate revision: {impact.rateBookRevision??"not connected"}.
+        Taxes, margins, unspecified work and coordination holds are not included
+        in this provisional subtotal.</p>
+      <strong>Related drawing pages — coordination review</strong>
+      {impact.affectedPages.length?
+        <ul>{impact.affectedPages.map(page=>
+          <li key={page.pageIndex}>Page {page.pageIndex+1}: {page.sheetId}</li>)}</ul>:
+        <p className="muted">No verified linked pages supplied by the drawing provider.</p>}
+      <p>{impact.relatedPagesVerified?"Registered related pages identified for review.":"Related-page registration incomplete."}
+        {" "}No drawing pages have been revised.</p>
+      {impact.constructionHolds.length>0&&
+        <p className="muted">Outstanding holds: {impact.constructionHolds.join("; ")}</p>}
+    </section>}
     {result&&<div className="wall-assembly-result" role="status">
       <strong>Linked construction scope for {result.proposalId}</strong>
       <p className="muted">Length {result.package.wall_length_m.toFixed(2)} m
