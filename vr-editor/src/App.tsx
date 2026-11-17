@@ -3,12 +3,18 @@ import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
+import { ReviewNotesPanel } from "./ReviewNotesPanel";
+import { freshReviewNotes } from "./reviewNotes";
+import type { ReviewNotesState } from "./reviewNotes";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
 import { VISUAL_PRESETS } from "./visualRealism";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import type { SurfaceDetail } from "./surfaceDetail";
+import { DEFAULT_INSPECTION, filterEvidence, nextReview, sourceSheets, summarizeEvidence } from "./reviewInspection";
+import { sourceDimensionCount } from "./sourceDimensions";
+import type { CameraView, FocusTarget, InspectionSettings, ReviewFilter } from "./reviewInspection";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
 const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView })));
@@ -18,15 +24,41 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
+  const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
   const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
+  const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
+  const [sourceSheet, setSourceSheet] = useState("");
+  const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
+  const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+  const [captureSerial,setCaptureSerial]=useState(0);
+  const [captureStatus,setCaptureStatus]=useState<string|null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const pendingWorkspaceRequest = useRef<AbortController | null>(null);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
+  const inspect = (patch: Partial<InspectionSettings>) =>
+    setInspection(current => ({ ...current, ...patch }));
+  const requestCamera = (mode: CameraView, focus: FocusTarget = "scene") =>
+    setCameraRequest(current => ({ mode, focus, serial: current.serial + 1 }));
+  async function copySelectedRef() {
+    const row = manifest?.objects.find(o => o.objectId === selectedId);
+    if (!row) return;
+    const value = [
+      manifest!.scope.projectId, manifest!.scope.documentId,
+      manifest!.scope.revisionId, manifest!.scope.snapshotId,
+      row.objectId, row.source.sheet ?? "unknown-sheet",
+      row.source.page ?? "unknown-page",
+      row.source.originalGeometryRef ?? "unresolved-source",
+    ].join(" | ");
+    try {
+      await navigator.clipboard.writeText(value);
+      setClipboardMessage("Copied source reference (not measurement authority).");
+    } catch { setClipboardMessage("Clipboard permission denied."); }
+  }
   const handleCycleStudy = useCallback((objectId: string) => {
     if (!manifest) return;
     const row = manifest.objects.find(o => o.objectId === objectId) ?? null;
@@ -57,7 +89,8 @@ export function App() {
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
       if (!cancelled && !controller.signal.aborted) {
         setManifest(data); setAuthenticatedSource(true); setError(null);
-        setDraftState(freshDrafts(data)); setSelectedId(null);
+        setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data)); setSelectedId(null);
+        setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet("");
       }
     }).catch(e => {
       if (!cancelled && !controller.signal.aborted)
@@ -93,9 +126,10 @@ export function App() {
       };
       setManifest(localPreview);
       setDraftState(freshDrafts(localPreview));
+      setReviewNotes(freshReviewNotes(localPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
-      setLevel("all");
+      setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid JSON scene manifest");
     }
@@ -119,9 +153,10 @@ export function App() {
       };
       setManifest(syntheticPreview);
       setDraftState(freshDrafts(syntheticPreview));
+      setReviewNotes(freshReviewNotes(syntheticPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
-      setLevel("all");
+      setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Synthetic demo unavailable");
     }
@@ -130,11 +165,28 @@ export function App() {
   const levels = useMemo(() => [...new Set(
     (manifest?.objects ?? []).map(o => o.levelId).filter((id): id is string => !!id)
   )].sort(), [manifest]);
+  // Preserve Three.js / WebXR renderer identity across selection and cosmetic
+  // toggles. Only actual object-filter changes reconstruct the scene.
+  const isolateId = inspection.isolateSelected ? selectedId : null;
   const visible = useMemo<SceneManifest | null>(() => manifest ? {
     ...manifest,
-    objects: manifest.objects.filter(o => level === "all" || o.levelId === level),
-  } : null, [manifest, level]);
+    objects: filterEvidence(manifest, level, isolateId, {
+      ...DEFAULT_INSPECTION,
+      reviewFilter: inspection.reviewFilter,
+      search: inspection.search,
+      isolateSelected: inspection.isolateSelected,
+    }).filter(row => !sourceSheet || row.source.sheet === sourceSheet),
+  } : null, [manifest, level, isolateId, inspection.isolateSelected,
+    inspection.reviewFilter, inspection.search, sourceSheet]);
+  const allForLevel = useMemo(() => manifest ? filterEvidence(manifest, level, null,
+    {...inspection, isolateSelected:false})
+    .filter(o=>!sourceSheet || o.source.sheet===sourceSheet) : [],
+    [manifest, level, sourceSheet, inspection]);
+  const summaries = summarizeEvidence(visible?.objects ?? []);
+  const sheets = sourceSheets(manifest?.objects ?? []);
   const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
+  const activeNotes = manifest && reviewNotes?.scopeKey === scopeKey(manifest)
+    ? reviewNotes : manifest ? freshReviewNotes(manifest) : null;
   const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
     ? draftState : manifest ? freshDrafts(manifest) : null;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
@@ -174,7 +226,8 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
+                captureSerial={captureSerial} onCapture={setCaptureStatus} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -186,6 +239,14 @@ export function App() {
                 Open synthetic 3D / VR example
               </button>
               <p>This demonstration contains no real construction source or measured quantities.</p>
+            </div>
+          )}
+          {visible && (
+            <div className="review-image-toolbar">
+              <button type="button" onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}>
+                Export watermarked review PNG
+              </button>
+              {captureStatus && <span role="status">{captureStatus}</span>}
             </div>
           )}
           <div className="viewer-footer">
@@ -224,6 +285,71 @@ export function App() {
                 <option value="all">All source levels</option>
                 {levels.map(id => <option value={id} key={id}>{id}</option>)}
               </select>
+            </div>
+          )}
+
+          {manifest && (
+            <div className="section-block" aria-label="VR evidence navigation">
+              <span className="eyebrow">CAMERA & SOURCE NAVIGATION</span>
+              <p className="muted">Presentation controls only. Changing views, filters or isolation never edits the building model.</p>
+              <div className="review-control-grid">
+                <button type="button" onClick={() => requestCamera("isometric")}>Fit / 3D</button>
+                <button type="button" onClick={() => requestCamera("plan")}>Top view</button>
+                <button type="button" onClick={() => requestCamera("north")}>Front view</button>
+                <button type="button" onClick={() => requestCamera("east")}>Side view</button>
+                <button type="button" disabled={!selectedId}
+                  onClick={() => requestCamera(cameraRequest.mode, "selected")}>Focus selected</button>
+                <button type="button" onClick={() => requestCamera("isometric", "scene")}>Reset camera</button>
+              </div>
+              <label htmlFor="review-search">SEARCH SOURCE OBJECTS</label>
+              <input id="review-search" type="search" value={inspection.search}
+                maxLength={128} placeholder="Wall ID, canonical ID, sheet or source path"
+                onChange={e => inspect({search:e.target.value})} />
+              <label htmlFor="review-status">EVIDENCE STATUS</label>
+              <select id="review-status" value={inspection.reviewFilter}
+                onChange={e => inspect({reviewFilter:e.target.value as ReviewFilter})}>
+                <option value="all">All source objects</option>
+                <option value="verified">Verified only</option>
+                <option value="review">Unresolved / review only</option>
+                <option value="source-lines">Unknown-height source lines</option>
+              </select>
+              <label htmlFor="review-sheet">SOURCE DRAWING SHEET</label>
+              <select id="review-sheet" value={sourceSheet} onChange={e => {setSourceSheet(e.target.value);setSelectedId(null);}}>
+                <option value="">All sheets</option>
+                {sheets.map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
+              </select>
+              <div className="review-control-grid">
+                <button type="button" onClick={() => setSelectedId(nextReview(allForLevel, selectedId, -1))}
+                  disabled={!allForLevel.length}>Previous unresolved</button>
+                <button type="button" onClick={() => setSelectedId(nextReview(allForLevel, selectedId, 1))}
+                  disabled={!allForLevel.length}>Next unresolved</button>
+                <button type="button" disabled={!selectedId}
+                  onClick={() => inspect({isolateSelected:!inspection.isolateSelected})}>
+                  {inspection.isolateSelected ? "Show all visible" : "Isolate selected"}
+                </button>
+                <button type="button" onClick={() => {
+                  setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all"); setSelectedId(null);
+                  requestCamera("isometric");
+                }}>Reset inspection</button>
+              </div>
+              <div className="review-control-toggles">
+                <label><input type="checkbox" checked={inspection.showGrid}
+                  onChange={e=>inspect({showGrid:e.target.checked})}/> Grid</label>
+                <label><input type="checkbox" checked={inspection.showShadows}
+                  onChange={e=>inspect({showShadows:e.target.checked})}/> Shadows</label>
+                <label><input type="checkbox" checked={inspection.showLabels}
+                  onChange={e=>inspect({showLabels:e.target.checked})}/> Selected label</label>
+                <label><input type="checkbox" checked={inspection.showGhosts}
+                  onChange={e=>inspect({showGhosts:e.target.checked})}/> Ghost heights</label>
+                <label><input type="checkbox" checked={inspection.showDimensions}
+                  onChange={e=>inspect({showDimensions:e.target.checked})}/> Source dimensions</label>
+              </div>
+              <p className="muted">
+                Visible {summaries.total} · verified {summaries.verified} · review {summaries.review}
+                · wall faces {summaries.faces} · source lines {summaries.lines}
+                · without display geometry {summaries.withoutDisplayGeometry}
+                · source-backed dimension labels {sourceDimensionCount(visible?.objects??[])}.
+              </p>
             </div>
           )}
 
@@ -282,6 +408,9 @@ export function App() {
                   <div className="issues"><strong>Unresolved evidence</strong>
                     <ul>{selected.unresolvedIssues.map(issue => <li key={issue}>{issue.replace(/_/g, " ")}</li>)}</ul>
                   </div>}
+                <button className="review-source-copy" type="button"
+                  onClick={() => void copySelectedRef()}>Copy source reference</button>
+                {clipboardMessage && <p role="status" className="muted">{clipboardMessage}</p>}
                 <div className="quantity-links">
                   Quantity references: {selected.quantityLinks.length
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
@@ -302,6 +431,19 @@ export function App() {
             ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}
           </div>
 
+          {manifest && activeNotes && (
+            <div className="section-block" aria-label="Review findings">
+              <ReviewNotesPanel scene={manifest} selectedId={selectedId}
+                state={activeNotes} onChange={setReviewNotes}
+                onSelect={id => {
+                  setInspection({...DEFAULT_INSPECTION});
+                  setLevel("all"); setSourceSheet(""); setSelectedId(id);
+                  setCameraRequest(current=>({
+                    mode:current.mode, focus:"selected", serial:current.serial+1,
+                  }));
+                }} />
+            </div>
+          )}
           <div className="section-block caution">
             <strong>Commercial safety</strong>
             <p>This scene is for inspection only. Meshes do not establish wall thickness, scale, area or billable quantities. Corrections, approval and pricing remain in the existing authenticated PlanReader workflow.</p>

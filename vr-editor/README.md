@@ -155,3 +155,89 @@ presentation highlight rather than replacing the colour of a finish study.
 The wall geometry, original-source witness, ledger, frozen quantities and
 commercial controls do not change. The effect is off by default and uses one
 small disposable texture for the whole scene, with no asset downloads.
+
+## Source-bound immersive review navigation (20+ workflows)
+
+The evidence inspector now includes:
+1. Fit the active scene in 3D perspective.
+2. Top-down plan camera view (perspective, not a surveyed orthophoto).
+3. Front elevation-like camera view.
+4. Side elevation-like camera view.
+5. Focus on the selected source object.
+6. Reset to the whole-scene isometric camera.
+7. Search by source object ID.
+8. Search by canonical object ID.
+9. Search by source primitive path.
+10. Restrict to only source-verified objects.
+11. Restrict to unresolved/review objects.
+12. Restrict to unknown-height source wall lines.
+13. Select source drawing sheet.
+14. Jump to the next unresolved object.
+15. Jump to the previous unresolved object.
+16. Isolate the selected existing object.
+17. Restore all inspection filters and camera.
+18. Toggle presentation grid.
+19. Toggle presentation shadows.
+20. Toggle the selected source label.
+21. Toggle local ghost-height proposals.
+22. Inspect visible evidence totals and source status counts.
+23. Copy a selected object's source identification to the clipboard.
+
+The controls only change local camera pose, visibility and read-only inspection
+metadata. They do not modify manifest objects, canonical identity, approvals,
+wall heights, finish tags, measurements or quotes. Unknown-height wall lines
+stay source lines. Camera modes are perspective review aids, **not** surveyed
+elevations, orthophotos or accuracy proofs. Hidden objects continue to exist
+in the source manifest and must not be omitted from commercial takeoffs.
+
+## Source-locked reviewer findings
+
+The VR review notes panel lets a reviewer pin up to 250 bounded questions to
+specific source object IDs and their exact object revisions. It supports
+low/normal/high priority, open/reviewed local state, find-in-model navigation,
+and handoff import/export. Imports fail closed on stale workspace, drawing SHA,
+snapshot, model revision or object revision. Data stays in memory unless the
+reviewer explicitly downloads a local JSON handoff (max 256 KB).
+
+No notes go into the construction source, correction ledger, commercial
+takeoff, quote, pricing or original PDF. "Reviewed" means a reviewer has
+looked at a note; it does **not** mean source-verified, approved or FIRM.
+Uploaded handoff files remain untrusted and cannot carry authority fields.
+
+## Explicit visual review image export
+
+Use **Export watermarked review PNG** to capture the current desktop WebGL
+view, including local visual proposals and source filters. The resulting
+image is stamped with project/document/revision/snapshot and an unavoidable
+**not a source measurement or approved quote** watermark. Browser export is
+bounded to 4096 pixels per axis; no screenshot is automatically uploaded,
+saved or shared. WebXR headset screenshot export is intentionally disabled
+until hardware/browser consent and privacy support are validated. This is
+not a certified drawing sheet or a source-authenticated quantity record.
+
+## Evidence-bound dimensions in desktop/VR
+
+An optional **Source dimensions** toggle shows length and height on the selected
+wall face, but only when the server-provided scene has a verified, issue-free
+wall object with a canonical ID, original source path and documented height.
+Local JSON files are downgraded to REVIEW, and unknown-height source lines
+never receive numerical overlays. This is a visual inspection of supplied
+source geometry, not a new independent measured takeoff, pricing authority or
+approval. The original 120 benchmark items remain unchanged.
+
+## Source-authenticated live costing preview
+
+The selected-wall correction inspector now has two explicit options:
+**Preview quantity only** (the existing authenticated endpoint) and
+**Recalculate live costs** (the new source-checked, rate-book-bound endpoint).
+The second option displays prior/proposed material, waste, labour, plant,
+subcontract, overhead, contingency, gross margin, tax, selling price and signed
+price impact. The UI never accepts browser-supplied rates, tax or publishing
+claims, and will invalidate a previous result when the proposal changes.
+Every incomplete price total is marked PARTIAL; missing rates are unpriced
+rather than free work.
+
+This is a server-owned **what-if estimate** only, not a persisted correction,
+approved client quote, JobHub publication, invoice or sale. It needs a genuine
+production company rate-book callback; the frontend never supplies a fallback.
+See [the live costing formula and deployment contract](../docs/engineering/VR_LIVE_COSTING_IMPLEMENTATION.md).

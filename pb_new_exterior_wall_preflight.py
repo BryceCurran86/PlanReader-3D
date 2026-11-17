@@ -106,6 +106,41 @@ class SourceNativeOuterWallAttempt:
     )
 
 
+def _independent_outside_nonwall_audit_complete(
+    walk: Any, outer: Polygon, *, outside_band_count: int,
+    party_divider_count: int,
+) -> bool:
+    """Only complete ORIGINAL source-negative receipts bypass legacy veto.
+
+    Comparing a candidate polygon to its own tracing walker is insufficient.
+    The walker must have audited every actual outside band with native ink,
+    source-local role evidence and no unresolved structural wall candidate.
+    Never authenticates the physical wall or authorizes a quantity.
+    """
+    if not party_divider_count or walk is None:
+        return False
+    if (
+        getattr(walk, "status", None) != "CANDIDATE"
+        or not getattr(walk, "source_outside_role_audit_applied", False)
+        or getattr(walk, "other_source_wall_band_count", None) != 0
+        or getattr(walk, "source_outside_band_count_before_role_audit", None)
+           != outside_band_count
+        or getattr(walk, "source_proven_nonwall_band_count", None)
+           != outside_band_count
+        or len(getattr(walk, "outer_wall_native_path_ids", ()) or ()) < 4
+    ):
+        return False
+    try:
+        other = Polygon(walk.clockwise_pdf_pts)
+        return bool(
+            outer.is_valid and other.is_valid
+            and not outer.is_empty and not other.is_empty
+            and outer.equals_exact(other, tolerance=CONTACT_PT)
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def attempt_source_native_outer_wall_first(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -446,7 +481,16 @@ def attempt_source_native_outer_wall_first(
     # Candidate topology cannot authenticate the role of every independent
     # outside structural band. Retain ABSTAIN until each residual is proven
     # non-exterior by its source evidence; polygon equality is not sufficient.
-    structural_outside = [
+    # Independent source-negative receipt from the canonical outside walker
+    # may resolve every outside band missed by the old generic word-only gate.
+    # A CANDIDATE/self-matching polygon is never enough on its own: all bars
+    # must be original source-authenticated nonwalls, with matching count and
+    # independently source-owned external wall path indices. Still no FIRM.
+    fully_proven_nonwall_outside = _independent_outside_nonwall_audit_complete(
+        walk, outer, outside_band_count=len(outside_bars),
+        party_divider_count=len(party_dividers),
+    )
+    structural_outside = [] if fully_proven_nonwall_outside else [
         bar for bar in outside_bars
         if not bar_proven_outside_envelope(bar, wall_ink, source_words)
     ]
