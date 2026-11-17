@@ -168,3 +168,27 @@ def test_successive_wall_revision_reuses_previous_pdf_and_increments_model():
     finally:
         pdf.close()
     assert len(list_created_walls(db, principal, updated_ws)) == 2
+
+
+def test_scene_hydration_preserves_original_source_authority():
+    from pb_vr_wall_create_revision_store import attach_created_walls_to_scene
+    from pb_vr_editor_scene_manifest import compile_editor_scene
+    fx = fixture()
+    db, principal, ws, wall, spec, coverage, original = fx
+    saved = save(fx)
+    updated_ws = replace(ws, scope=replace(ws.scope, model_revision=1))
+    scene = compile_editor_scene(updated_ws.scope, [], canonical_object_ids={})
+    shown = attach_created_walls_to_scene(
+        scene, list_created_walls(db, principal, updated_ws))
+    assert len(shown["objects"]) == 1
+    item = shown["objects"][0]
+    assert item["renderState"] == "review"
+    assert item["objectType"] == "wall"
+    assert item["canonicalObjectId"] == saved["canonicalWallId"]
+    assert item["geometry"]["kind"] == "wallFace"
+    assert item["source"]["originalGeometryRef"] is None
+    assert item["canEdit"] is False
+    assert shown["commercialQuantityPublicationAllowed"] is False
+    stale = compile_editor_scene(ws.scope, [], canonical_object_ids={})
+    with pytest.raises(ValueError, match="revision"):
+        attach_created_walls_to_scene(stale, list_created_walls(db, principal, ws))
