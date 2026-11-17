@@ -24,6 +24,9 @@ from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
     _source_wall_ink_candidate_drawings,
     build_layered_wall_doorway_room_rings,
 )
+from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
+    own_exterior_contour_native_paths,
+)
 
 
 def _draw_source_overlay(page, original, trace, scope, ring):
@@ -189,8 +192,6 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 ],
                 "candidate_room_rings": len(ring.rings) if ring else 0,
                 "temporary_doorway_closures": len(ring.closures) if ring else 0,
-                # A skipped source scope has UNKNOWN gap status, not zero gaps.
-                # Never report an unexecuted inspection as a clean topology.
                 "gap_review_performed": ring is not None,
                 "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else None,
                 "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else None,
@@ -203,6 +204,29 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "commercial_quantity_rows": 0,
             "official_frozen120_score_change": 0,
         }
+        if scope.status == "CANDIDATE":
+            owned = own_exterior_contour_native_paths(
+                scope.drawings, outer, closures=() if ring is None else ring.closures,
+            )
+            class_counts: dict[str, int] = {}
+            for edge in owned:
+                class_counts[edge.classification] = class_counts.get(edge.classification, 0) + 1
+            result["exterior_edge_ownership"] = {
+                "classification_counts": class_counts,
+                "edge_count": len(owned),
+                "unmatched_or_incomplete": sum(
+                    1 for edge in owned
+                    if edge.classification in {
+                        "unmatched_contour_segment",
+                        "incomplete_source_native_wall_ink_chain",
+                        "incorrect_geometric_bridge",
+                        "competing_exterior_path_owners",
+                        "competing_source_ink_chains",
+                    }
+                ),
+                "physical_wall_authenticated": False,
+                "commercial_publishable": False,
+            }
         canvas = fitz.open()
         layer = canvas.new_page(width=source[page_index].rect.width,
                                 height=source[page_index].rect.height)
@@ -240,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--expected-sha256",
                         help="Exact lowercase SHA-256 of the intended original PDF; reject wrong regional copies")
     parser.add_argument("--expected-drawing-title",
-                        help="Exact original PDF page title, e.g. 'Floor Plan'; reject site/roof page substitution")
+                        help="Original PDF page title, e.g. 'Floor Plan'; reject site/roof page substitution")
     arguments = parser.parse_args()
     result, js, png = run(
         arguments.pdf, arguments.page, arguments.out_dir,

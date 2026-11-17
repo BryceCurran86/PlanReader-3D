@@ -354,3 +354,112 @@ def test_nonfinite_closure_bounds_never_authenticate_an_exterior_gap():
             horizontal=True, band=(100.0, 102.0), gap_interval=(10.0, bad),
         )
         assert not _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (closure,))
+
+
+def test_pale_compound_source_fill_never_owns_contour_edge():
+    # Acacia p2 has a pale sheet-sized compound fill with nested segments.
+    # Its rectangle may align with a red raster contour, but not a wall.
+    trace = _trace(((200, 130), (800, 130), (800, 490), (200, 490)))
+    pale = {
+        "type": "f", "fill": (0.98, 0.98, 0.98), "color": None,
+        "layer": "", "items": [
+            ("re", fitz.Rect(200, 130, 800, 490), 1),
+            ("l", fitz.Point(200, 130), fitz.Point(800, 130)),
+        ],
+    }
+    grey = {
+        "type": "s", "fill": None, "color": (0.48, 0.48, 0.48),
+        "layer": "", "items": [
+            ("l", fitz.Point(200, 130), fitz.Point(800, 130)),
+        ],
+    }
+    top = own_exterior_contour_native_paths((pale, grey), trace)[0]
+    assert top.status is EvidenceResolutionStatus.ABSTAINED
+    assert top.native_path_indices == ()
+    assert top.classification == "unmatched_contour_segment"
+    assert not top.physical_wall_authenticated
+    assert not top.can_issue_area
+
+
+def test_dark_source_wall_kept_even_with_pale_surrounding_fill():
+    trace = _trace(((200, 130), (800, 130), (800, 490), (200, 490)))
+    pale = {
+        "type": "f", "fill": (0.98, 0.98, 0.98), "color": None,
+        "items": [("l", fitz.Point(200, 130), fitz.Point(800, 130))],
+    }
+    ink = _stroke((200, 130), (800, 130))
+    ink["type"] = "s"
+    top = own_exterior_contour_native_paths((pale, ink), trace)[0]
+    assert top.status is EvidenceResolutionStatus.CANDIDATE
+    assert top.native_path_indices == (1,)
+    assert not top.physical_wall_authenticated
+
+
+def test_native_dark_ink_rejects_nonfinite_and_wrong_draw_modes():
+    from pb_source_native_exterior_edge_path_ownership import (
+        _dark_original_ink, _visible_native_dark_wall_ink,
+    )
+    assert not _dark_original_ink((float("nan"), 0, 0))
+    assert not _dark_original_ink((float("inf"), 0, 0))
+    assert not _dark_original_ink((True, False, 0))
+    assert not _dark_original_ink((0, 0))
+    assert not _dark_original_ink(None)
+    assert not _dark_original_ink((0.48, 0.48, 0.48))
+    assert _dark_original_ink((0.0, 0.0, 0.0))
+    assert not _visible_native_dark_wall_ink(
+        {"type": "f", "color": (0, 0, 0), "fill": (0.98, 0.98, 0.98)}
+    )
+    assert _visible_native_dark_wall_ink(
+        {"type": "fs", "color": (0, 0, 0), "fill": (0.98, 0.98, 0.98)}
+    )
+
+
+def test_exact_multi_path_original_stroke_chain_never_mints_wall_area():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = [_stroke((200, i * 25), (200, (i + 1) * 25))
+               for i in range(4)]
+    edge = own_exterior_contour_native_paths(strokes, trace)[3]
+    assert edge.status is EvidenceResolutionStatus.CANDIDATE
+    assert edge.native_path_indices == (0, 1, 2, 3)
+    assert edge.classification == "source_native_wall_ink_chain_candidate"
+    assert edge.physical_wall_authenticated is False
+    assert edge.can_issue_area is False
+    assert edge.commercial_publishable is False
+
+
+def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    middle = [
+        _stroke((200, 0), (200, 25)),
+        _stroke((200, 25.425), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    missing = own_exterior_contour_native_paths(middle, trace)[3]
+    assert missing.status is EvidenceResolutionStatus.ABSTAINED
+    assert missing.classification == "incomplete_source_native_wall_ink_chain"
+    assert not missing.physical_wall_authenticated
+    end_gap = [
+        _stroke((200, 0.5), (200, 25)),
+        _stroke((200, 25), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    tip = own_exterior_contour_native_paths(end_gap, trace)[3]
+    assert tip.status is EvidenceResolutionStatus.ABSTAINED
+    assert tip.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+
+
+def test_parallel_source_chains_cannot_be_selected_as_one_wall():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = (
+        [_stroke((200, i * 25), (200, (i + 1) * 25))
+         for i in range(4)]
+        + [_stroke((201, i * 25), (201, (i + 1) * 25))
+           for i in range(4)]
+    )
+    edge = own_exterior_contour_native_paths(strokes, trace)[3]
+    assert edge.status is EvidenceResolutionStatus.ABSTAINED
+    assert edge.reason == "ambiguous_competing_native_path_owners"
+    assert set(edge.native_path_indices) == set(range(8))
+    assert not edge.physical_wall_authenticated

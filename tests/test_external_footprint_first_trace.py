@@ -250,6 +250,211 @@ def test_raster_candidate_empty_native_list_cannot_be_candidate():
     assert result.commercial_publishable is False
 
 
+@pytest.mark.parametrize("width,height", [
+    (100., 0.), (100., -1.), (100., float("nan")),
+    (100., float("inf")), (float("nan"), 100.), (0., 100.),
+])
+def test_acacia_bounded_raster_rejects_invalid_page_axes(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    with pytest.raises(ValueError, match="external_footprint_invalid_page_dimensions"):
+        _bounded_raster_scale(width, height)
+
+
+@pytest.mark.parametrize("width,height", [(4000., 1000.), (1000., 4000.), (12000., 8000.)])
+def test_acacia_raster_cap_never_exceeds_2400px(width, height):
+    from pb_external_footprint_first_trace import _bounded_raster_scale
+    scale = _bounded_raster_scale(width, height)
+    assert 0. < scale <= 1.8
+    assert max(width, height) * scale <= 2400. + 1e-9
+
+
+def test_two_disconnected_buildings_do_not_get_selected_as_one_external_footprint(tmp_path):
+    path = tmp_path / "two_buildings.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1100, height=780)
+    page.draw_rect(fitz.Rect(125, 130, 480, 470), color=(0, 0, 0), width=4)
+    page.draw_rect(fitz.Rect(615, 130, 970, 470), color=(0, 0, 0), width=4)
+    doc.save(path)
+    doc.close()
+    raw = path.read_bytes()
+    (result,) = trace_external_footprint_first(
+        raw, source_sha256=hashlib.sha256(raw).hexdigest(), page_indices=(0,),
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "external_footprint_competing_disjoint_envelopes"
+    assert result.candidate_count >= 2
+    assert result.polygon_pdf_pts == ()
+    assert result.commercial_publishable is False
+    assert result.measurement_authorized is False
+
+
+def test_nested_raster_outlines_from_one_thick_wall_are_not_competing():
+    from pb_external_footprint_first_trace import _competing_disjoint_envelopes
+    ranked = ((10000., (100, 100, 220, 190), object()),
+              (9500., (104, 103, 212, 184), object()))
+    assert _competing_disjoint_envelopes(ranked) is False
+
+
+def test_refined_footprint_recalculates_bbox_after_false_top_box_removal(monkeypatch):
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+    from pb_source_unsupported_rectangular_detour_shadow import RectangularDetourCollapseReceipt
+    import pb_source_unsupported_rectangular_detour_shadow as detours
+
+    candidate = ExternalFootprintTrace(
+        "a" * 64, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((0., 100.), (40., 100.), (40., 40.),
+                         (70., 40.), (70., 100.), (200., 100.),
+                         (200., 300.), (0., 300.)),
+        bbox_pdf_pts=(0., 40., 200., 300.),
+    )
+    expected = ((0., 100.), (40., 100.), (70., 100.),
+                (200., 100.), (200., 300.), (0., 300.))
+    monkeypatch.setattr(
+        detours, "collapse_unsupported_rectangular_detours",
+        lambda polygon, members: RectangularDetourCollapseReceipt(
+            original_vertex_count=8, repaired_vertex_count=6,
+            collapsed_detour_count=1, polygon_pdf_pts=expected,
+            reason_codes=("collapsed_unsupported_rectangular_detour",),
+        ),
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, ())
+    assert receipt["collapsed_detour_count"] == 1
+    assert refined.polygon_pdf_pts == expected
+    assert refined.bbox_pdf_pts == (0., 100., 200., 300.)
+    assert refined.source_sha256 == candidate.source_sha256
+    assert refined.page_index == candidate.page_index
+    assert refined.commercial_publishable is False
+    assert refined.measurement_authorized is False
+
+
+def test_unrepaired_footprint_keeps_its_original_raster_bbox():
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+    candidate = ExternalFootprintTrace(
+        "a" * 64, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((0., 100.), (200., 100.), (200., 300.), (0., 300.)),
+        bbox_pdf_pts=(-2., 98., 202., 302.),
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, ())
+    assert receipt["collapsed_detour_count"] == 0
+    assert refined.bbox_pdf_pts == candidate.bbox_pdf_pts
+
+
+def test_refine_seam_collapses_unmatched_stub_and_outward_tip():
+    """NE unmatched stub + NW tip must both land through refine, not only the helper."""
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+
+    candidate = ExternalFootprintTrace(
+        "e" * 64, 1, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=(
+            (328.0, 140.0),
+            (328.0, 449.0),
+            (311.0, 450.0),
+            (910.0, 450.0),
+            (903.9, 448.9),
+            (903.9, 140.0),
+        ),
+        bbox_pdf_pts=(310.0, 138.0, 912.0, 452.0),
+    )
+    # Named dark wall paths so wall_ink_segments_from_drawings keeps them.
+    drawings = (
+        {
+            "layer": "Enclosure_WallExternal",
+            "color": (0.05, 0.05, 0.05),
+            "fill": None,
+            "items": (
+                ("l", fitz.Point(328.0, 140.0), fitz.Point(328.0, 449.0)),
+                ("l", fitz.Point(328.0, 449.0), fitz.Point(904.0, 449.0)),
+                ("l", fitz.Point(331.0, 449.5), fitz.Point(311.0, 449.5)),
+                ("l", fitz.Point(904.0, 140.0), fitz.Point(904.0, 449.0)),
+                ("l", fitz.Point(328.0, 140.0), fitz.Point(904.0, 140.0)),
+            ),
+        },
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, drawings)
+    assert receipt["collapsed_detour_count"] >= 1
+    codes = set(receipt["reason_codes"])
+    assert "collapsed_outward_corner_tip_excursion" in codes
+    assert "collapsed_unmatched_morphological_corner_stub" in codes
+    assert (311.0, 450.0) not in refined.polygon_pdf_pts
+    assert (910.0, 450.0) not in refined.polygon_pdf_pts
+    assert (328.0, 450.0) in refined.polygon_pdf_pts
+    assert (903.9, 450.0) in refined.polygon_pdf_pts or (904.0, 450.0) in {
+        (round(x, 1), round(y, 1)) for x, y in refined.polygon_pdf_pts
+    }
+    assert receipt["measurement_authorized"] is False
+    assert receipt["commercial_publishable"] is False
+
+
+def test_mid_gray_doorway_evidence_does_not_count_as_wall_support_primitives():
+    """Gray glazing/doorway strokes stay indexable but never alone authorize a scope."""
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace,
+        bound_native_drawings_to_footprint,
+    )
+
+    sha = "d" * 64
+    trace = ExternalFootprintTrace(
+        sha, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((10., 10.), (100., 10.), (100., 100.), (10., 100.)),
+        bbox_pdf_pts=(10., 10., 100., 100.),
+    )
+    gray_only = (
+        {
+            "rect": fitz.Rect(20, 20, 80, 80),
+            "layer": "Enclosure_WallExternal",
+            "fill": None,
+            "color": (0.55, 0.55, 0.55),
+            "items": tuple(
+                ("l", fitz.Point(20 + i, 20), fitz.Point(20 + i, 80))
+                for i in range(30)
+            ),
+        },
+    )
+    result = bound_native_drawings_to_footprint(
+        gray_only, trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.commercial_publishable is False
+
+
+@pytest.mark.parametrize("coords", [
+    (40., 40., 20., 50.), (40., 40., 50., 20.),
+])
+def test_inverted_native_path_bbox_cannot_authenticate_wall_ink(coords):
+    from types import SimpleNamespace
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, bound_native_drawings_to_footprint,
+    )
+    sha = "c" * 64
+    trace = ExternalFootprintTrace(
+        sha, 0, "CANDIDATE", "source_review",
+        polygon_pdf_pts=((10., 10.), (100., 10.), (100., 100.), (10., 100.)),
+        bbox_pdf_pts=(10., 10., 100., 100.),
+    )
+    invalid_source = {
+        "rect": SimpleNamespace(x0=coords[0], y0=coords[1],
+                                x1=coords[2], y1=coords[3]),
+        "layer": "Enclosure_WallExternal",
+        "color": (0., 0., 0.), "fill": (0., 0., 0.),
+        "items": (("l", fitz.Point(20, 20), fitz.Point(80, 20)),),
+    }
+    result = bound_native_drawings_to_footprint(
+        (invalid_source,), trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.selected_source_path_indices == ()
+    assert result.commercial_publishable is False
+
 def test_original_acacia_regional_sha_pins_are_distinct_and_fail_closed():
     """Source-backed SHA identities, no private PDF bytes committed."""
     from tools.run_original_footprint_first import _enforce_original_source_sha_pin
