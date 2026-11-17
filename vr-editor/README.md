@@ -340,3 +340,9 @@ Local checks: `cd vr-editor && npm ci && npm test && npm run build`.
 Required hardware smoke: check immersive session starts/exits, left/right
 controller tracking, trigger picks, grip changes once, session disconnect
 clears the UI, and desktop remains functional when WebXR is unavailable.
+
+### PS VR2 wall drag review mode
+
+Choose **Move** in the Wall Position Editing inspector, use either Sense trigger to select a source-backed wall, then hold and move that controller's grip and release to snap its purple review ghost to a 50 mm grid. Runtime standard `squeezestart`/`squeezeend` actions take priority; the `xr-standard` grip fallback supports SteamVR configurations with no native squeeze events. Desktop arrows nudge 50 mm; Shift+arrows nudge 500 mm. Undo, redo and reset are available.
+
+Movement is **local only**: translations do not persist, change original PDF geometry, approve hosted openings, recalculate billable quantities or price materials. Cross-wall collisions at the same level are blocked, but this does not prove complete topology. A production `MOVE_WALL` transaction and real PS VR2 headset acceptance test are separate gates.
