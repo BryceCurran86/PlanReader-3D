@@ -4,13 +4,14 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
-import type { FinishStudy } from "./finishStudy";
+import { safeDrafts } from "./reviewDraft";
+import type { DraftHistory, WallDraft } from "./reviewDraft";
 
 type Props = {
   manifest: SceneManifest;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  finishStudy: FinishStudy | null;
+  draftState: DraftHistory | null;
   onCycleStudy: (objectId: string) => void;
 };
 
@@ -88,7 +89,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycleStudy }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
@@ -97,8 +98,9 @@ export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycle
   cycleCallback.current = onCycleStudy;
   const picked = useRef(selectedId);
   picked.current = selectedId;
-  const currentStudy = useRef(finishStudy);
-  currentStudy.current = finishStudy;
+  const draftMap = useRef<Map<string, WallDraft>>(new Map());
+  draftMap.current = new Map((draftState ? safeDrafts(draftState, manifest) : [])
+    .map(d => [d.objectId, d]));
 
   useEffect(() => {
     const parent = host.current;
@@ -147,8 +149,12 @@ export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycle
       physical.add(item);
       pickables.push(item);
       // Keep the original review material as the fallback after any study clears.
-      if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial)
+      if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial) {
         item.userData.originalReviewColor = item.material.color.getHex();
+        item.userData.originalOpacity = item.material.opacity;
+        const geometry = row.geometry;
+        if (geometry?.kind === "wallFace") item.userData.originalHeight = geometry.heightM;
+      }
     }
     const bbox = new THREE.Box3().setFromObject(physical);
     if (!bbox.isEmpty()) {
@@ -254,16 +260,35 @@ export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycle
     let selectedLabel: THREE.Sprite | null = null;
     let lastLabelId: string | null = null;
     renderer.setAnimationLoop(() => {
-      // Only the existing rendered mesh tint changes. No scene DTO/geometry/
-      // ledger mutation, and no new mesh or billable wall is ever created.
+      // Render-only proposals; underlying source geometry and manifest are untouched.
+      // Ghost heights may only modify an EXISTING display wall-face mesh.
       for (const item of pickables) {
         if (!(item instanceof THREE.Mesh) || !(item.material instanceof THREE.MeshStandardMaterial)) continue;
-        const row = sourceById.get(item.userData.objectId as string);
+        const id = item.userData.objectId as string;
+        const row = sourceById.get(id);
         if (!row) continue;
-        const swatch = studyColor(row, currentStudy.current);
-        const fallback = item.userData.originalReviewColor as number;
-        const colour = swatch ?? fallback;
+        const draft = draftMap.current.get(id);
+        const swatch = studyColor(row, draft?.swatch ? { objectId: id, swatch: draft.swatch } : null);
+        const originalHeight = item.userData.originalHeight as number | undefined;
+        const ghostHeight = draft?.heightM;
+        const ghost = ghostHeight !== null && ghostHeight !== undefined &&
+          originalHeight !== undefined;
+        const colour = swatch ?? (ghost ? 0xb899de : item.userData.originalReviewColor as number);
         if (item.material.color.getHex() !== colour) item.material.color.setHex(colour);
+        const originalOpacity = item.userData.originalOpacity as number;
+        item.material.opacity = ghost ? 0.30 : originalOpacity;
+        item.material.transparent = ghost || originalOpacity < 1;
+        item.material.depthWrite = !ghost && originalOpacity >= 0.9;
+        if (originalHeight !== undefined) {
+          const height = ghost ? ghostHeight : originalHeight;
+          const position = item.geometry.getAttribute("position");
+          if (position instanceof THREE.BufferAttribute && position.getY(2) !== height) {
+            // Triangle vertices 2, 4 and 5 are the upper face vertices.
+            position.setY(2, height); position.setY(4, height); position.setY(5, height);
+            position.needsUpdate = true;
+            item.geometry.computeVertexNormals();
+          }
+        }
       }
       if (picked.current !== lastLabelId) {
         if (selectedLabel) {
