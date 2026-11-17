@@ -3,11 +3,15 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import type { EditorObject, SceneManifest } from "./types";
+import { studyColor } from "./finishStudy";
+import type { FinishStudy } from "./finishStudy";
 
 type Props = {
   manifest: SceneManifest;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  finishStudy: FinishStudy | null;
+  onCycleStudy: (objectId: string) => void;
 };
 
 function point2(value: unknown): value is [number, number] {
@@ -84,13 +88,17 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, finishStudy, onCycleStudy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
+  const cycleCallback = useRef(onCycleStudy);
+  cycleCallback.current = onCycleStudy;
   const picked = useRef(selectedId);
   picked.current = selectedId;
+  const currentStudy = useRef(finishStudy);
+  currentStudy.current = finishStudy;
 
   useEffect(() => {
     const parent = host.current;
@@ -132,11 +140,15 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
     const physical = new THREE.Group();
     scene.add(physical);
     const pickables: THREE.Object3D[] = [];
+    const sourceById = new Map(manifest.objects.map(row => [row.objectId, row]));
     for (const row of manifest.objects) {
       const item = displayObject(row);
       if (!item) continue;
       physical.add(item);
       pickables.push(item);
+      // Keep the original review material as the fallback after any study clears.
+      if (item instanceof THREE.Mesh && item.material instanceof THREE.MeshStandardMaterial)
+        item.userData.originalReviewColor = item.material.color.getHex();
     }
     const bbox = new THREE.Box3().setFromObject(physical);
     if (!bbox.isEmpty()) {
@@ -203,6 +215,14 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
     }
     const select0 = () => xrPick(controllers[0]);
     const select1 = () => xrPick(controllers[1]);
+    // Grip/squeeze cycles a cosmetic colour on the currently selected wall.
+    // Trigger selection remains independent. No source command is generated.
+    const squeeze = () => {
+      const id = picked.current;
+      if (id && sourceById.has(id)) cycleCallback.current(id);
+    };
+    controllers[0].addEventListener("squeeze", squeeze);
+    controllers[1].addEventListener("squeeze", squeeze);
     controllers[0].addEventListener("select", select0);
     controllers[1].addEventListener("select", select1);
     for (const controller of controllers) {
@@ -234,6 +254,17 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
     let selectedLabel: THREE.Sprite | null = null;
     let lastLabelId: string | null = null;
     renderer.setAnimationLoop(() => {
+      // Only the existing rendered mesh tint changes. No scene DTO/geometry/
+      // ledger mutation, and no new mesh or billable wall is ever created.
+      for (const item of pickables) {
+        if (!(item instanceof THREE.Mesh) || !(item.material instanceof THREE.MeshStandardMaterial)) continue;
+        const row = sourceById.get(item.userData.objectId as string);
+        if (!row) continue;
+        const swatch = studyColor(row, currentStudy.current);
+        const fallback = item.userData.originalReviewColor as number;
+        const colour = swatch ?? fallback;
+        if (item.material.color.getHex() !== colour) item.material.color.setHex(colour);
+      }
       if (picked.current !== lastLabelId) {
         if (selectedLabel) {
           scene.remove(selectedLabel);
@@ -263,6 +294,8 @@ export function SceneView({ manifest, selectedId, onSelect }: Props) {
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       renderer.domElement.removeEventListener("keydown", keyDown);
+      controllers[0].removeEventListener("squeeze", squeeze);
+      controllers[1].removeEventListener("squeeze", squeeze);
       controllers[0].removeEventListener("select", select0);
       controllers[1].removeEventListener("select", select1);
       controls.dispose();

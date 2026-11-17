@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
+import { FINISH_SWATCHES, nextStudy, visualStudyAllowed } from "./finishStudy";
+import type { FinishStudy, FinishSwatch } from "./finishStudy";
 import type { SceneManifest } from "./types";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
@@ -9,12 +11,18 @@ const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView
 export function App() {
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Transient cosmetic colour study: never persisted, priced or added to the source manifest.
+  const [finishStudy, setFinishStudy] = useState<FinishStudy | null>(null);
   const [level, setLevel] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const pendingWorkspaceRequest = useRef<AbortController | null>(null);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
+  const handleCycleStudy = useCallback((objectId: string) => {
+    const row = manifest?.objects.find(o => o.objectId === objectId) ?? null;
+    setFinishStudy(current => nextStudy(row, current));
+  }, [manifest]);
 
   // A production backend must authenticate this same-origin endpoint and
   // build the scope from the session, never from user-supplied model JSON.
@@ -35,6 +43,7 @@ export function App() {
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
       if (!cancelled && !controller.signal.aborted) {
         setManifest(data); setAuthenticatedSource(true); setError(null);
+        setFinishStudy(null); setSelectedId(null);
       }
     }).catch(e => {
       if (!cancelled && !controller.signal.aborted)
@@ -69,6 +78,7 @@ export function App() {
         })),
       };
       setManifest(localPreview);
+      setFinishStudy(null);
       setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all");
@@ -86,6 +96,7 @@ export function App() {
       if (!response.ok) throw new Error("Synthetic demo fixture unavailable");
       const result: unknown = await response.json();
       if (!isSceneManifest(result)) throw new Error("Synthetic manifest invalid");
+      setFinishStudy(null);
       setManifest({
         ...result,
         objects: result.objects.map(o => ({
@@ -109,6 +120,8 @@ export function App() {
     objects: manifest.objects.filter(o => level === "all" || o.levelId === level),
   } : null, [manifest, level]);
   const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
+  const selectedStudy = selected && finishStudy?.objectId === selected.objectId
+    ? finishStudy.swatch : "";
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
 
   return (
@@ -129,7 +142,7 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} finishStudy={finishStudy} onCycleStudy={handleCycleStudy} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -145,7 +158,7 @@ export function App() {
           )}
           <div className="viewer-footer">
             <span>Desktop: drag to orbit · scroll to zoom · click to inspect</span>
-            <span>VR: HTTPS + compatible headset · controller trigger to select</span>
+            <span>VR: HTTPS + headset · trigger selects · squeeze cycles temporary finish colours</span>
           </div>
         </section>
 
@@ -216,6 +229,26 @@ export function App() {
                   Quantity references: {selected.quantityLinks.length
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
                 </div>
+                {visualStudyAllowed(selected) && (
+                  <div className="preview-section" aria-label="Local finish colour study">
+                    <span className="eyebrow">WALL FINISH · VISUAL STUDY ONLY</span>
+                    <p className="muted">Choose an illustrative colour for this wall in desktop/VR. No finish schedule, dimensions, quantity, rate or saved edit is changed.</p>
+                    <label htmlFor="wall-finish-study">Local preview colour</label>
+                    <select id="wall-finish-study" value={selectedStudy}
+                      onChange={e => {
+                        const swatch = e.target.value as FinishSwatch;
+                        setFinishStudy(FINISH_SWATCHES.some(s => s.id === swatch)
+                          ? { objectId: selected.objectId, swatch } : null);
+                      }}>
+                      <option value="">Original review appearance</option>
+                      {FINISH_SWATCHES.map(s => <option value={s.id} key={s.id}>{s.label}</option>)}
+                    </select>
+                    {selectedStudy && <button type="button" onClick={() => setFinishStudy(null)}>
+                      Clear visual study
+                    </button>}
+                    <p className="muted">For an actual priced finish-code proposal, use Controlled Correction Preview below. The server must independently approve the source context; no visual swatch is sent.</p>
+                  </div>
+                )}
                 <CommandPreview
                   key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}

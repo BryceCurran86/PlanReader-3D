@@ -73,3 +73,17 @@ A mesh selection is not permission to change a canonical wall or invoice.
 This viewer must pass its own strict TypeScript build, Python 3.13 and 3.14
 tests for the backend manifest, server-side source/security checks, and
 headset/browser smoke tests before it is considered production-capable.
+
+## Local finish-colour study (noncommercial)
+
+Select an existing **wall face with documented height**, then choose one of four
+illustrative colours in the object inspector. The same temporary tint appears
+in the desktop renderer and headset view. Clearing the study, switching scenes
+or reloading removes it. Unknown-height wall lines and non-wall objects cannot
+be coloured as surfaces. The palette is not a materials/finish schedule and
+has **no pricing, quantity, persistence, canonical approval or source authority**.
+For a genuine finish-code quantity-impact proposal, use the existing separate
+authenticated + CSRF-bound **Controlled Correction Preview**. That preview is
+also non-persistent and is never automatically applied from a colour choice.
+
+With a supported WebXR controller, **trigger** selects an existing source object and **grip/squeeze** cycles the temporary wall colour palette (last squeeze clears it). Non-wall items and source lines with unknown height cannot be given a visual wall face. VR squeeze never sends a server command.\n
