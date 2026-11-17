@@ -12,7 +12,7 @@ Implemented in `pb_vr_wall_create_revision_store.py` and
   derived trade work package, a new immutable PDF, independently registered
   affected-page evidence and a new model-revision head. If any page fails
   projection or the PDF is malformed, all changes roll back.
-- Each independently verified affected page receives a **blue dashed
+- New user-created segments reject overlapping and mid-wall intersecting\n  previously saved user-created walls on the same level; verified shared\n  endpoints remain possible junctions. Existing source-wall clashes still\n  require the production host's separate topology provider.\n- Each independently verified affected page receives a **blue dashed
   proposed-wall vector** and `PR-W0001` review annotation. Related pages
   missing from the producer's complete census block the entire save.
 - Subsequent wall revisions use the prior revised PDF as their parent;
