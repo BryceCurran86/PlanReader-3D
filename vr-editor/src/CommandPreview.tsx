@@ -42,6 +42,18 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   const pendingSave = useRef<AbortController | null>(null);
   const previewRequestId = useRef(0);
   const pendingPreview = useRef<AbortController | null>(null);
+  // Scope every in-flight edit to the exact source AND selected object.
+  // Object revision hashes may coincide across different objects, so an
+  // objectRevision-only effect dependency is insufficient.
+  const editSourceIdentity = JSON.stringify([
+    workspace.scope.workspaceId, workspace.scope.projectId,
+    workspace.scope.documentId, workspace.scope.revisionId,
+    workspace.scope.snapshotId, workspace.scope.sourceSha256,
+    workspace.scope.modelRevision, object.objectId, object.objectRevision,
+    object.canonicalObjectId,
+  ]);
+  const latestSourceIdentity = useRef(editSourceIdentity);
+  latestSourceIdentity.current = editSourceIdentity;
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
@@ -59,7 +71,10 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   useEffect(() => {
     previewRequestId.current += 1;
     pendingPreview.current?.abort();
+    pendingSave.current?.abort();
+    pendingSave.current = null;
     setWorking(false);
+    setSavingRevision(false);
     // A local visual study can only prefill this unsubmitted form, never
     // supply server authority, a reason, pricing or an approval.
     if (suggestion?.objectRevision === object.objectRevision &&
@@ -80,18 +95,18 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       pendingPreview.current?.abort();
       pendingSave.current?.abort();
     };
-  }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
+  }, [editSourceIdentity, suggestion?.command, suggestion?.value, suggestion?.objectRevision]);
 
   // Opt-in, debounced LIVE repricing: never dispatch incomplete corrections,
   // and every typed change aborts the prior source/rate request.
   useEffect(() => {
-    if (!autoLive || !enabled || reason.trim().length < 8 || !control) return;
+    if (!autoLive || !enabled || savingRevision || reason.trim().length < 8 || !control) return;
     const trimmed = value.trim();
     if (!trimmed || (control.numeric &&
       (!Number.isFinite(Number(trimmed)) || Number(trimmed) <= 0))) return;
     const timer = window.setTimeout(() => { void sendPreview(true); }, 650);
     return () => window.clearTimeout(timer);
-  }, [autoLive, enabled, kind, value, reason,
+  }, [autoLive, enabled, savingRevision, kind, value, reason,
       object.objectRevision, workspace.scope.snapshotId, control?.numeric]);
 
   async function sendPreview(withCost: boolean) {
@@ -99,7 +114,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     setPreview(null);
     setCostPreview(null);
     setPreviewedCommand(null);
-    if (!enabled || !control) return;
+    if (!enabled || !control || savingRevision) return;
     const csrf = document.querySelector<HTMLMetaElement>('meta[name="planreader-csrf-token"]')?.content;
     if (!csrf) {
       setError("An authenticated PlanReader CSRF token is required. Preview unavailable.");
@@ -182,7 +197,11 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   }
 
   async function saveRevision() {
-    if (!preview || !previewedCommand || !enabled || savingRevision) return;
+    if (!preview || !previewedCommand || !enabled || savingRevision ||
+        preview.commandId !== previewedCommand.commandId ||
+        preview.targetObjectId !== object.objectId ||
+        preview.previousObjectRevision !== object.objectRevision) return;
+    const savingSourceIdentity = editSourceIdentity;
     const csrf = document.querySelector<HTMLMetaElement>('meta[name="planreader-csrf-token"]')?.content;
     if (!csrf) {
       setSaveError("Authenticated workspace CSRF token required.");
@@ -210,7 +229,8 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         throw new Error(`Could not save a complete, source-verified drawing revision: ${issue}`);
       }
       const saved = verifySavedPlanRevision(body, workspace);
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted &&
+          latestSourceIdentity.current === savingSourceIdentity) {
         setSavedRevision(saved);
         setPreviewedCommand(null);
         setPreview(null);
@@ -219,10 +239,12 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         setError(null);
       }
     } catch (e) {
-      if (!controller.signal.aborted)
+      if (!controller.signal.aborted &&
+          latestSourceIdentity.current === savingSourceIdentity)
         setSaveError(e instanceof Error ? e.message : "Revision save unavailable");
     } finally {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted &&
+          latestSourceIdentity.current === savingSourceIdentity) {
         pendingSave.current = null;
         setSavingRevision(false);
       }
@@ -237,26 +259,26 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       {suggestion && <p className="muted">Illustrative VR height prefilled for review; explicitly submit with a source-based reason to request a server-side impact preview.</p>}
       {!enabled && <p className="error">Requires an authenticated workspace with a proven canonical object identity. Local JSON imports cannot submit commands.</p>}
       <label htmlFor="correction-kind">Proposed correction</label>
-      <select id="correction-kind" value={kind} disabled={!enabled}
+      <select id="correction-kind" value={kind} disabled={!enabled || savingRevision}
         onChange={e => { invalidatePreview(); setKind(e.target.value); setValue(""); }}>
         {available.map(c =>
           <option key={c.command} value={c.command}>{c.label}</option>)}
       </select>
       <label htmlFor="correction-value">Proposed value</label>
-      <input id="correction-value" disabled={!enabled}
+      <input id="correction-value" disabled={!enabled || savingRevision}
         type={control?.numeric ? "number" : "text"} step={control?.numeric ? "any" : undefined}
         min={control?.numeric ? "0.000001" : undefined}
         value={value} onChange={e => { invalidatePreview(); setValue(e.target.value); }}
         placeholder={control?.numeric ? "Measured value in metres" : "Finish schedule code"}
       />
       <label htmlFor="correction-reason">Evidence / correction reason</label>
-      <textarea id="correction-reason" disabled={!enabled}
+      <textarea id="correction-reason" disabled={!enabled || savingRevision}
         maxLength={1024} value={reason} rows={3}
         onChange={e => { invalidatePreview(); setReason(e.target.value); }}
         placeholder="Identify the drawing, dimension or reviewed observation…"
       />
       <label className="live-cost-auto">
-        <input type="checkbox" disabled={!enabled} checked={autoLive}
+        <input type="checkbox" disabled={!enabled || savingRevision} checked={autoLive}
           onChange={e => {
             invalidatePreview();
             setAutoLive(e.target.checked);
@@ -264,11 +286,11 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         Live update after changes (650 ms pause, verified source and company rates required)
       </label>
       <div className="live-cost-actions">
-        <button type="button" disabled={!enabled || working}
+        <button type="button" disabled={!enabled || working || savingRevision}
           onClick={() => void sendPreview(false)}>
           {working ? "Checking source authority…" : "Preview quantity only"}
         </button>
-        <button type="button" disabled={!enabled || working}
+        <button type="button" disabled={!enabled || working || savingRevision}
           onClick={() => void sendPreview(true)}>
           {working ? "Calculating source-checked costs…" : "Recalculate live costs"}
         </button>
