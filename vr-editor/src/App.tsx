@@ -6,6 +6,8 @@ import { ReviewWorkbench } from "./ReviewWorkbench";
 import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
 import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
+import { VISUAL_PRESETS } from "./visualRealism";
+import type { LightingMood, RenderQuality } from "./visualRealism";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
 const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView })));
@@ -16,6 +18,8 @@ export function App() {
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
   const [level, setLevel] = useState("all");
+  const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
+  const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -168,7 +172,7 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -220,6 +224,24 @@ export function App() {
               </select>
             </div>
           )}
+
+          <div className="section-block" aria-label="3D presentation settings">
+            <span className="eyebrow">REALISM / RENDERING</span>
+            <p className="muted">Lighting and shadow choices change presentation only — not the plan, geometry, material specifications or quantity authority.</p>
+            <label htmlFor="lighting-mood" className="eyebrow">LIGHTING ENVIRONMENT</label>
+            <select id="lighting-mood" value={lightingMood}
+              onChange={e => setLightingMood(e.target.value as LightingMood)}>
+              {(Object.entries(VISUAL_PRESETS) as [LightingMood, typeof VISUAL_PRESETS.daylight][])
+                .map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
+            </select>
+            <label htmlFor="render-quality" className="eyebrow">RENDER QUALITY</label>
+            <select id="render-quality" value={renderQuality}
+              onChange={e => setRenderQuality(e.target.value as RenderQuality)}>
+              <option value="balanced">Balanced — responsive desktop / VR</option>
+              <option value="high">High fidelity — sharper desktop shadows</option>
+            </select>
+            <p className="muted">Photographic lighting is illustrative. Unknown-height walls remain lines; no unsourced doors, windows, floors, ceilings or textures are manufactured.</p>
+          </div>
 
           <div className="section-block detail">
             <span className="eyebrow">OBJECT INSPECTOR</span>
