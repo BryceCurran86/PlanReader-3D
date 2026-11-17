@@ -1,4 +1,6 @@
 // Browser DTO mirrors pb_vr_editor_scene_manifest.py, never the geometry source of truth.
+import { validatedSourceSurfaces } from "./sourceSurfaces.ts";
+import type { SourceSurface } from "./sourceSurfaces";
 export interface WorkspaceScope {
   workspaceId: string;
   projectId: string;
@@ -46,6 +48,7 @@ export interface SceneManifest {
   };
   readOnly: true;
   objects: EditorObject[];
+  sourceSurfaces?: SourceSurface[];
   commercialQuantityPublicationAllowed: false;
 }
 
@@ -104,7 +107,7 @@ export function isSceneManifest(value: unknown): value is SceneManifest {
   const x = value as Partial<SceneManifest>;
   const s = x.scope;
   const c = x.coordinateSystem;
-  return x.schemaVersion === "1.0.0"
+  const baseline = x.schemaVersion === "1.0.0"
     && x.readOnly === true
     && x.commercialQuantityPublicationAllowed === false
     && !!s && typeof s.workspaceId === "string" && !!s.workspaceId
@@ -122,4 +125,12 @@ export function isSceneManifest(value: unknown): value is SceneManifest {
     && x.objects.length <= 20000
     && x.objects.every(validObject)
     && new Set(x.objects.map(o => o.objectId)).size === x.objects.length;
+  if (!baseline) return false;
+  try {
+    validatedSourceSurfaces(x.objects as EditorObject[], s as WorkspaceScope,
+      x.sourceSurfaces);
+  } catch {
+    return false;
+  }
+  return true;
 }
