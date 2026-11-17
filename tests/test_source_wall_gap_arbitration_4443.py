@@ -114,3 +114,10 @@ def test_reverse_direction_fragmented_wall_is_still_continuous():
         "first": (195, 100, 170, 100),
         "second": (220, 100, 195, 100),
     })
+
+
+def test_gap_producer_may_have_mistaken_the_continuous_host_itself_for_an_opening():
+    gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "source_wall", "other")
+    assert _gap_covered_by_physical_wall(gap, {
+        "source_wall": (160, 100, 230, 100),
+    })
