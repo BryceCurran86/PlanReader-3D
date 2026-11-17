@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
-import { FINISH_SWATCHES, visualStudyAllowed } from "./finishStudy";
+import { FINISH_SWATCHES, nextStudy, visualStudyAllowed } from "./finishStudy";
 import type { FinishStudy, FinishSwatch } from "./finishStudy";
 import type { SceneManifest } from "./types";
 
@@ -19,6 +19,10 @@ export function App() {
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const pendingWorkspaceRequest = useRef<AbortController | null>(null);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
+  const handleCycleStudy = useCallback((objectId: string) => {
+    const row = manifest?.objects.find(o => o.objectId === objectId) ?? null;
+    setFinishStudy(current => nextStudy(row, current));
+  }, [manifest]);
 
   // A production backend must authenticate this same-origin endpoint and
   // build the scope from the session, never from user-supplied model JSON.
@@ -138,7 +142,7 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} finishStudy={finishStudy} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} finishStudy={finishStudy} onCycleStudy={handleCycleStudy} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -154,7 +158,7 @@ export function App() {
           )}
           <div className="viewer-footer">
             <span>Desktop: drag to orbit · scroll to zoom · click to inspect</span>
-            <span>VR: HTTPS + compatible headset · controller trigger to select</span>
+            <span>VR: HTTPS + headset · trigger selects · squeeze cycles temporary finish colours</span>
           </div>
         </section>
 
