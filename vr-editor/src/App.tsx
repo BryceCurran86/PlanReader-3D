@@ -48,6 +48,8 @@ export function App() {
   const [captureSerial,setCaptureSerial]=useState(0);
   const [captureStatus,setCaptureStatus]=useState<string|null>(null);
   const [pcVrSession, setPcVrSession] = useState<PcVrSessionReport>({presenting:false,controllers:[]});
+  const [teleportMode,setTeleportMode] = useState(false);
+  const [teleportMessage,setTeleportMessage] = useState<string|null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
@@ -116,6 +118,7 @@ export function App() {
         setManifest(data); setAuthenticatedSource(true); setError(null);
         setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data));
         setWallMoveState(freshWallMoves(data)); setMoveMode("inspect"); setMoveError(null);
+        setTeleportMode(false); setTeleportMessage(null);
         setSelectedId(null);
         setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet("");
       }
@@ -148,6 +151,7 @@ export function App() {
       setManifest(localPreview);
       setDraftState(freshDrafts(localPreview));
       setWallMoveState(freshWallMoves(localPreview)); setMoveMode("inspect"); setMoveError(null);
+      setTeleportMode(false); setTeleportMessage(null);
       setReviewNotes(freshReviewNotes(localPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
@@ -176,6 +180,7 @@ export function App() {
       setManifest(syntheticPreview);
       setDraftState(freshDrafts(syntheticPreview));
       setWallMoveState(freshWallMoves(syntheticPreview)); setMoveMode("inspect"); setMoveError(null);
+      setTeleportMode(false); setTeleportMessage(null);
       setReviewNotes(freshReviewNotes(syntheticPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
@@ -280,6 +285,7 @@ export function App() {
                 captureSerial={captureSerial} onCapture={setCaptureStatus}
                 moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch}
+                teleportMode={teleportMode} onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
           ) : (
@@ -417,7 +423,7 @@ export function App() {
                 Hosted doors, openings, quantities and drawing revisions remain unapproved.</p>
               <label htmlFor="vr-move-mode">Controller interaction mode</label>
               <select id="vr-move-mode" value={moveMode}
-                onChange={e => {setMoveMode(e.target.value as MoveMode);setMoveError(null);}}>
+                onChange={e => {setMoveMode(e.target.value as MoveMode);if(e.target.value==="move")setTeleportMode(false);setMoveError(null);}}>
                 <option value="inspect">Inspect / grip cycles visual finish</option>
                 <option value="move">Move / grip drags selected wall</option>
               </select>
@@ -457,6 +463,38 @@ export function App() {
               <WallAdditionPanel
                 scene={manifest} authenticated={authenticatedSource}
                 onSketch={setAddedWallSketch} />
+            </div>
+          )}
+          {manifest && (
+            <div className="section-block vr-teleport-panel" aria-label="PS VR2 comfort locomotion">
+              <span className="eyebrow">PS VR2 · VERIFIED FLOOR TELEPORT</span>
+              <p className="muted">Move through the building without smooth-motion
+                sickness: switch to teleport mode and aim either Sense trigger
+                at a verified ground-floor surface. Landing points must stay
+                inside its source triangulation, at least 12cm from external
+                boundaries, and within 7m of the current headset position.</p>
+              <label className="vr-teleport-toggle">
+                <input type="checkbox" checked={teleportMode}
+                  disabled={!authenticatedSource || !manifest.sourceSurfaces?.some(s=>s.kind==="floor")}
+                  onChange={e=>{
+                    setTeleportMode(e.target.checked);
+                    if(e.target.checked)setMoveMode("inspect");
+                    setTeleportMessage(null);
+                  }}/>
+                Use trigger for source-verified floor teleport
+              </label>
+              {!manifest.sourceSurfaces?.some(s=>s.kind==="floor") &&
+                <p className="muted">No authenticated, source-derived floor mesh
+                  is available, so teleport is disabled rather than permitting
+                  movement onto a guessed or decorative floor.</p>}
+              {!authenticatedSource && <p className="muted">Local JSON and
+                synthetic scenes are review-only and cannot authorise
+                teleport destinations.</p>}
+              <p className="muted">Teleport does not move you physically.
+                Your PS VR2/SteamVR guardian boundaries remain in force.
+                No stair/floor-level jumps or hardware-specific
+                thumbstick mappings are assumed.</p>
+              {teleportMessage && <p role="status" className="muted">{teleportMessage}</p>}
             </div>
           )}
           <div className="section-block" aria-label="3D presentation settings">
