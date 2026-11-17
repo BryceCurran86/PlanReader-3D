@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EditorObject, SceneManifest } from "./types";
 import { verifyPreviewResponse } from "./previewProtocol";
 import type { VerifiedPreview } from "./previewProtocol";
@@ -7,6 +7,7 @@ type Props = {
   workspace: SceneManifest;
   object: EditorObject;
   authenticated: boolean;
+  suggestion?: { command: "SET_WALL_HEIGHT"; value: string; objectRevision: string } | null;
 };
 
 const CONTROLS: Record<string, { command: string; label: string; numeric: boolean }[]> = {
@@ -20,7 +21,7 @@ const CONTROLS: Record<string, { command: string; label: string; numeric: boolea
   ],
 };
 
-export function CommandPreview({ workspace, object, authenticated }: Props) {
+export function CommandPreview({ workspace, object, authenticated, suggestion }: Props) {
   const available = CONTROLS[object.objectType] || [];
   const [kind, setKind] = useState(available[0]?.command ?? "");
   const [value, setValue] = useState("");
@@ -28,9 +29,29 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<VerifiedPreview | null>(null);
+  const previewRequestId = useRef(0);
+  const pendingPreview = useRef<AbortController | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
+
+  useEffect(() => {
+    previewRequestId.current += 1;
+    pendingPreview.current?.abort();
+    setWorking(false);
+    // A local visual study can only prefill this unsubmitted form, never
+    // supply server authority, a reason, pricing or an approval.
+    if (suggestion?.objectRevision === object.objectRevision &&
+        available.some(c => c.command === suggestion.command)) {
+      setKind(suggestion.command);
+      setValue(suggestion.value);
+    } else {
+      setKind(available[0]?.command ?? "");
+      setValue("");
+    }
+    setPreview(null);
+    return () => { previewRequestId.current += 1; pendingPreview.current?.abort(); };
+  }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
 
   async function sendPreview() {
     setError(null);
@@ -68,6 +89,10 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
       payload: { newValue },
       reason: reason.trim(),
     };
+    const requestId = ++previewRequestId.current;
+    pendingPreview.current?.abort();
+    const controller = new AbortController();
+    pendingPreview.current = controller;
     setWorking(true);
     try {
       const response = await fetch(
@@ -76,6 +101,7 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
           method: "POST",
           credentials: "include",
           cache: "no-store",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
           body: JSON.stringify(command),
         }
@@ -89,11 +115,16 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
         throw new Error(issues || "Source authority rejected preview");
       }
       const validated = verifyPreviewResponse(result, command);
-      setPreview(validated);
+      if (requestId === previewRequestId.current && !controller.signal.aborted)
+        setPreview(validated);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Preview unavailable");
+      if (requestId === previewRequestId.current && !controller.signal.aborted)
+        setError(e instanceof Error ? e.message : "Preview unavailable");
     } finally {
-      setWorking(false);
+      if (requestId === previewRequestId.current) {
+        pendingPreview.current = null;
+        setWorking(false);
+      }
     }
   }
 
@@ -102,6 +133,7 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
     <div className="preview-section">
       <span className="eyebrow">CONTROLLED CORRECTION PREVIEW</span>
       <p className="muted">Preview uses current PlanReader correction formulas. No change is saved or approved.</p>
+      {suggestion && <p className="muted">Illustrative VR height prefilled for review; explicitly submit with a source-based reason to request a server-side impact preview.</p>}
       {!enabled && <p className="error">Requires an authenticated workspace with a proven canonical object identity. Local JSON imports cannot submit commands.</p>}
       <label htmlFor="correction-kind">Proposed correction</label>
       <select id="correction-kind" value={kind} disabled={!enabled}

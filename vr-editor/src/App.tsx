@@ -1,8 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
-import { FINISH_SWATCHES, nextStudy, visualStudyAllowed } from "./finishStudy";
-import type { FinishStudy, FinishSwatch } from "./finishStudy";
+import { nextStudy } from "./finishStudy";
+import { ReviewWorkbench } from "./ReviewWorkbench";
+import { applyDraft, draftHeightSuggestion, freshDrafts, redoDraft, safeDrafts, scopeKey, undoDraft } from "./reviewDraft";
+import type { DraftHistory } from "./reviewDraft";
 import type { SceneManifest } from "./types";
 
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
@@ -11,8 +13,8 @@ const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView
 export function App() {
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Transient cosmetic colour study: never persisted, priced or added to the source manifest.
-  const [finishStudy, setFinishStudy] = useState<FinishStudy | null>(null);
+  // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
+  const [draftState, setDraftState] = useState<DraftHistory | null>(null);
   const [level, setLevel] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20,8 +22,14 @@ export function App() {
   const pendingWorkspaceRequest = useRef<AbortController | null>(null);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
   const handleCycleStudy = useCallback((objectId: string) => {
-    const row = manifest?.objects.find(o => o.objectId === objectId) ?? null;
-    setFinishStudy(current => nextStudy(row, current));
+    if (!manifest) return;
+    const row = manifest.objects.find(o => o.objectId === objectId) ?? null;
+    setDraftState(current => {
+      const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
+      const existing = safeDrafts(state, manifest).find(d => d.objectId === objectId);
+      const next = nextStudy(row, existing?.swatch ? { objectId, swatch: existing.swatch } : null);
+      return applyDraft(state, manifest, objectId, { swatch: next?.swatch ?? null });
+    });
   }, [manifest]);
 
   // A production backend must authenticate this same-origin endpoint and
@@ -43,7 +51,7 @@ export function App() {
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
       if (!cancelled && !controller.signal.aborted) {
         setManifest(data); setAuthenticatedSource(true); setError(null);
-        setFinishStudy(null); setSelectedId(null);
+        setDraftState(freshDrafts(data)); setSelectedId(null);
       }
     }).catch(e => {
       if (!cancelled && !controller.signal.aborted)
@@ -78,7 +86,7 @@ export function App() {
         })),
       };
       setManifest(localPreview);
-      setFinishStudy(null);
+      setDraftState(freshDrafts(localPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all");
@@ -96,14 +104,15 @@ export function App() {
       if (!response.ok) throw new Error("Synthetic demo fixture unavailable");
       const result: unknown = await response.json();
       if (!isSceneManifest(result)) throw new Error("Synthetic manifest invalid");
-      setFinishStudy(null);
-      setManifest({
+      const syntheticPreview: SceneManifest = {
         ...result,
         objects: result.objects.map(o => ({
           ...o, renderState: "review" as const,
           unresolvedIssues: [...new Set([...o.unresolvedIssues, "synthetic_fixture_only"])],
         })),
-      });
+      };
+      setManifest(syntheticPreview);
+      setDraftState(freshDrafts(syntheticPreview));
       setAuthenticatedSource(false);
       setSelectedId(null);
       setLevel("all");
@@ -120,9 +129,26 @@ export function App() {
     objects: manifest.objects.filter(o => level === "all" || o.levelId === level),
   } : null, [manifest, level]);
   const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
-  const selectedStudy = selected && finishStudy?.objectId === selected.objectId
-    ? finishStudy.swatch : "";
+  const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
+    ? draftState : manifest ? freshDrafts(manifest) : null;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
+  // Keyboard undo/redo works only outside editable fields and never changes PlanReader source.
+  useEffect(() => {
+    function keyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+      if (!manifest) return;
+      event.preventDefault();
+      setDraftState(current => {
+        const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
+        return event.shiftKey ? redoDraft(state) : undoDraft(state);
+      });
+    }
+    window.addEventListener("keydown", keyDown);
+    return () => window.removeEventListener("keydown", keyDown);
+  }, [manifest]);
 
   return (
     <div className="app-shell">
@@ -142,7 +168,7 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} finishStudy={finishStudy} onCycleStudy={handleCycleStudy} />
+              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} />
             </Suspense>
           ) : (
             <div className="viewer-empty">
@@ -229,31 +255,17 @@ export function App() {
                   Quantity references: {selected.quantityLinks.length
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
                 </div>
-                {visualStudyAllowed(selected) && (
-                  <div className="preview-section" aria-label="Local finish colour study">
-                    <span className="eyebrow">WALL FINISH · VISUAL STUDY ONLY</span>
-                    <p className="muted">Choose an illustrative colour for this wall in desktop/VR. No finish schedule, dimensions, quantity, rate or saved edit is changed.</p>
-                    <label htmlFor="wall-finish-study">Local preview colour</label>
-                    <select id="wall-finish-study" value={selectedStudy}
-                      onChange={e => {
-                        const swatch = e.target.value as FinishSwatch;
-                        setFinishStudy(FINISH_SWATCHES.some(s => s.id === swatch)
-                          ? { objectId: selected.objectId, swatch } : null);
-                      }}>
-                      <option value="">Original review appearance</option>
-                      {FINISH_SWATCHES.map(s => <option value={s.id} key={s.id}>{s.label}</option>)}
-                    </select>
-                    {selectedStudy && <button type="button" onClick={() => setFinishStudy(null)}>
-                      Clear visual study
-                    </button>}
-                    <p className="muted">For an actual priced finish-code proposal, use Controlled Correction Preview below. The server must independently approve the source context; no visual swatch is sent.</p>
-                  </div>
-                )}
+                {visible && activeDraftState && <ReviewWorkbench
+                  key={visible.scope.snapshotId}
+                  scene={manifest!} selected={selected} selectedLevel={level}
+                  state={activeDraftState} onChange={setDraftState} />}
                 <CommandPreview
                   key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}
                   object={selected}
                   authenticated={authenticatedSource}
+                  suggestion={activeDraftState && manifest
+                    ? draftHeightSuggestion(selected, activeDraftState, manifest) : null}
                 />
               </>
             ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}

@@ -87,3 +87,36 @@ authenticated + CSRF-bound **Controlled Correction Preview**. That preview is
 also non-persistent and is never automatically applied from a colour choice.
 
 With a supported WebXR controller, **trigger** selects an existing source object and **grip/squeeze** cycles the temporary wall colour palette (last squeeze clears it). Non-wall items and source lines with unknown height cannot be given a visual wall face. VR squeeze never sends a server command.\n
+## Multi-wall VR review workbench
+
+The inspector now offers a **strictly local what-if draft** for walls already represented
+by a source-bound wall face with an existing documented height. Ten workflow
+capabilities are grouped in this review slice:
+
+1. Scope-lock each local session to workspace, document, revision, SHA256, snapshot
+   and model revision; switching source resets the local session.
+2. Maintain independently selected colours on multiple existing wall faces.
+3. Show an illustrative height as a translucent ghost of an existing wall mesh
+   without changing any backend geometry, scale, source receipt or quantity.
+4. Apply a colour in one bounded operation to up to 500 existing wall faces on
+   an explicitly selected level (never silently across all levels).
+5. Undo local visual studies with a bounded 30-step history.
+6. Redo or clear local studies without affecting approved corrections.
+7. Compare original and proposed visual heights and swatches by source object ID.
+8. Export a deterministic, review-only, local JSON file.
+9. Import only a strictly validated file matching the exact current source scope
+   and every current object revision; malformed, stale or oversized payloads fail.
+10. Use VR grip/squeeze for per-wall colour cycling and keyboard Ctrl/Cmd+Z
+    (Shift+Ctrl/Cmd+Z for redo) away from text inputs.
+
+An additional bridge prefills **SET_WALL_HEIGHT** in the existing authenticated
+correction-preview form from a selected ghost proposal. This cannot automatically
+submit or approve anything. The user must supply an evidence-based reason and
+click Preview; CSRF, workspace access, canonical identity and source-witness
+checks remain server-owned. Preview quantity impacts are not a monetary quote.
+There is still no persistent VR correction/approval endpoint or live pricing.
+The Python correction ledger remains the only source of commercial revisions.
+
+To test locally, run `npm ci && npm test && npm run build` in `vr-editor`.
+On headsets, source-trace, browser compatibility, controller grip mapping and
+production tenant authentication still require hardware and real-original replay.
