@@ -120,3 +120,25 @@ The Python correction ledger remains the only source of commercial revisions.
 To test locally, run `npm ci && npm test && npm run build` in `vr-editor`.
 On headsets, source-trace, browser compatibility, controller grip mapping and
 production tenant authentication still require hardware and real-original replay.
+
+## Physically plausible lighting (visual realism)
+
+The viewer offers three **illustrative** lighting presets: architectural daylight,
+neutral studio and warm dusk. These use ACES filmic tone mapping, physically based
+rough dielectric wall materials, sRGB output, hemisphere fill and directional
+lighting with soft contact-shadow presentation. Neutral wall colours avoid
+mistaking the old teal highlight for actual paint. Review-only walls remain warm
+and translucent. The shadows are a rendering aid, not a construction witness.
+
+Balanced rendering limits desktop pixel density to 1.5 and directional shadow
+resolution to 1024; High mode uses at most 2 and 2048. Headset rendering respects
+the XR compositor and limits extra desktop pixel density. The non-selectable
+shadow-catching ground plane is purely a visual reference, **not a measured floor
+or slab**. Unknown-height walls remain source lines and no fake thickness, rooms,
+doors, windows, floor coverings or fixtures are synthesized.
+
+These presets improve the lighting of available evidence; they do **not** establish
+photorealistic source materials, missing 3D BIM geometry or headset compatibility.
+Use original-source floor/ceiling and opening witnesses before extending to
+measured interiors. Profile on real desktop GPUs and supported headsets before
+shipping as an immersive production feature.
