@@ -125,6 +125,10 @@ def preflight_cross_document_revision(
         if not verified:
             issues.add("unverified_document:" + doc.document_id)
     connected: dict[str, set[str]] = {key: set() for key in indexed}
+    # A connected document graph alone is not a complete related-PAGE census.
+    # Every page in the trusted affected-page universe must have a verified
+    # cross-document physical-source witness; missing pages force ABSTAIN.
+    witnessed_pages: dict[str, set[int]] = {key: set() for key in indexed}
     seen_links: set[tuple[str, str, int, int, str]] = set()
     for link in links:
         if not isinstance(link, CrossDocumentSourceLink):
@@ -159,6 +163,11 @@ def preflight_cross_document_revision(
             continue
         connected[a.document_id].add(b.document_id)
         connected[b.document_id].add(a.document_id)
+        witnessed_pages[a.document_id].add(link.from_page_index)
+        witnessed_pages[b.document_id].add(link.to_page_index)
+    for doc in documents:
+        if set(doc.affected_page_indices) != witnessed_pages[doc.document_id]:
+            issues.add("cross_document_affected_page_unwitnessed:" + doc.document_id)
     visited: set[str] = set()
     frontier = [next(iter(indexed))]
     while frontier:
