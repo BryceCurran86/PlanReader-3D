@@ -68,6 +68,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: planreader-public-python-source-head
-          path: \${{ runner.temp }}/planreader-public-python.tar.gz
+          path: ${{ runner.temp }}/planreader-public-python.tar.gz
           retention-days: 1
           if-no-files-found: error
