@@ -442,11 +442,17 @@ def classify_floor(
         reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
     if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
-    if correspondence["wall_bounded_on_both_sheets"] is not True:
+    # A partial or caller-forged wall receipt must ABSTAIN, never raise or
+    # fall through into a source-correspondence CANDIDATE.
+    if not isinstance(correspondence, Mapping) or correspondence.get("wall_bounded_on_both_sheets") is not True:
         reasons.append(BOX_NOT_WALL_BOUNDED)
-    elif correspondence["wall_evidence_identical_on_both_sheets"] is not True:
+    elif correspondence.get("wall_evidence_identical_on_both_sheets") is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
-    if other_labelled_boxes_overlapping:
+    # Missing or malformed overlap counts are not evidence of zero rivals.
+    # bool is deliberately excluded despite being a subclass of int.
+    if (type(other_labelled_boxes_overlapping) is not int
+            or other_labelled_boxes_overlapping < 0
+            or other_labelled_boxes_overlapping > 0):
         reasons.append(OVERLAPPING_MEASURED_BOXES)
     # Source-face / physical-room / canonical-floor identifiers are a
     # one-to-one claim for this shadow correspondence. Repeating an identity
