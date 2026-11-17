@@ -269,6 +269,15 @@ def collapse_unsupported_rectangular_detours(
                 continue
             if width > max_width_fraction * max(bbox_w, bbox_h):
                 continue
+            # It is unsafe to substitute a straight wall simply because a
+            # rectangular excursion lacks wall ink. The replacement base must
+            # itself be continuously supported by painted source wall strokes;
+            # otherwise preserve the geometry as an unresolved candidate.
+            if not _segment_covered_by_wall_ink(
+                a, d, wall_segments,
+                alignment_tolerance_pt=alignment_tolerance_pt,
+            ):
+                continue
             if _detour_supported_by_wall_ink(
                 a, b, c, d, wall_segments,
                 alignment_tolerance_pt=alignment_tolerance_pt,
