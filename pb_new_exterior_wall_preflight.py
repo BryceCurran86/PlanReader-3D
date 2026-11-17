@@ -443,24 +443,13 @@ def attempt_source_native_outer_wall_first(
         bar for bar in bars
         if not (expanded_outer.covers(bar.polygon) or envelope.covers(bar.polygon))
     ]
-    if party_dividers and walk is not None and walk.status == "CANDIDATE":
-        # The SAME source-owned unbounded-face walker already audited
-        # every outside band using native owner/geometry and sheet roles.
-        # The older generic text-only outside check lacks that source
-        # audit; preserve it for unproved or single-building inputs.
-        if not outer.equals_exact(
-            Polygon(walk.clockwise_pdf_pts), tolerance=CONTACT_PT,
-        ):
-            return SourceNativeOuterWallAttempt(
-                "ABSTAINED", "source_outside_walk_polygon_authority_mismatch",
-                **counts,
-            )
-        structural_outside = []
-    else:
-        structural_outside = [
-            bar for bar in outside_bars
-            if not bar_proven_outside_envelope(bar, wall_ink, source_words)
-        ]
+    # Candidate topology cannot authenticate the role of every independent
+    # outside structural band. Retain ABSTAIN until each residual is proven
+    # non-exterior by its source evidence; polygon equality is not sufficient.
+    structural_outside = [
+        bar for bar in outside_bars
+        if not bar_proven_outside_envelope(bar, wall_ink, source_words)
+    ]
     if structural_outside:
         # The short receipt contains actual original path_index owners for
         # rejected source wall BANDS; composite bars may reference many more
