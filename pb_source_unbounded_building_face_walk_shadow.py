@@ -38,6 +38,10 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Review-only sample of exact source path indices from unresolved outside
+    # wall-like bands. A composite can include conflicting owners: these are
+    # candidate IDs to investigate, NOT authenticated exterior wall faces.
+    unresolved_outside_native_path_id_sample: tuple[int, ...] = ()
     # Native role audit never manufactures exterior wall evidence.
     source_outside_band_count_before_role_audit: int = 0
     source_proven_nonwall_band_count: int = 0
@@ -68,6 +72,11 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        if self.unresolved_outside_native_path_id_sample:
+            payload["unresolved_outside_native_path_id_sample"] = list(
+                self.unresolved_outside_native_path_id_sample
+            )
+            payload["unresolved_owner_ids_are_review_only"] = True
         if self.source_outside_role_audit_applied:
             payload["source_outside_band_count_before_role_audit"] = (
                 self.source_outside_band_count_before_role_audit
@@ -761,6 +770,10 @@ def walk_source_unbounded_building_face(
             enclosed_region_count=len(holes),
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
+            unresolved_outside_native_path_id_sample=tuple(dict.fromkeys(
+                int(pid) for _bar, ids in unresolved for pid in ids
+                if type(pid) is int and pid >= 0
+            ))[:64],
             source_outside_band_count_before_role_audit=len(outside),
             source_proven_nonwall_band_count=excluded_nonwall,
             source_outside_role_audit_applied=source_drawings is not None,
