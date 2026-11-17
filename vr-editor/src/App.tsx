@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPreview } from "./CommandPreview";
 import { isSceneManifest } from "./types";
 import type { SceneManifest } from "./types";
@@ -13,6 +13,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
+  const pendingWorkspaceRequest = useRef<AbortController | null>(null);
   const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
 
   // A production backend must authenticate this same-origin endpoint and
@@ -21,24 +22,35 @@ export function App() {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
     if (!workspace) return;
     let cancelled = false;
+    const controller = new AbortController();
+    pendingWorkspaceRequest.current = controller;
     setBusy(true);
     fetch(`/api/editor/workspaces/${encodeURIComponent(workspace)}/manifest`, {
       credentials: "include", headers: { Accept: "application/json" },
-      cache: "no-store",
+      cache: "no-store", signal: controller.signal,
     }).then(async response => {
       if (!response.ok) throw new Error(`Workspace API returned ${response.status}`);
       const data: unknown = await response.json();
       if (!isSceneManifest(data)) throw new Error("Invalid or untrusted scene manifest");
       if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
-      if (!cancelled) { setManifest(data); setAuthenticatedSource(true); setError(null); }
+      if (!cancelled && !controller.signal.aborted) {
+        setManifest(data); setAuthenticatedSource(true); setError(null);
+      }
     }).catch(e => {
-      if (!cancelled) setError(e instanceof Error ? e.message : "Workspace failed to load");
-    }).finally(() => { if (!cancelled) setBusy(false); });
-    return () => { cancelled = true; };
+      if (!cancelled && !controller.signal.aborted)
+        setError(e instanceof Error ? e.message : "Workspace failed to load");
+    }).finally(() => {
+      if (!cancelled && !controller.signal.aborted) setBusy(false);
+    });
+    return () => { cancelled = true; controller.abort(); };
   }, []);
 
   async function importManifest(file: File | undefined) {
     if (!file) return;
+    // An in-flight authenticated fetch must not overwrite a user's explicitly
+    // selected local review file after its response eventually arrives.
+    pendingWorkspaceRequest.current?.abort();
+    setBusy(false);
     setError(null);
     if (file.size > 25 * 1024 * 1024) {
       setError("The scene manifest exceeds the 25 MB local preview limit");
@@ -66,6 +78,8 @@ export function App() {
   }
 
   async function openSyntheticDemo() {
+    pendingWorkspaceRequest.current?.abort();
+    setBusy(false);
     setError(null);
     try {
       const response = await fetch("/synthetic-review-scene.json", { cache: "no-store" });
@@ -203,7 +217,7 @@ export function App() {
                     ? selected.quantityLinks.join(", ") : "None source-linked"}
                 </div>
                 <CommandPreview
-                  key={selected.objectId}
+                  key={`${manifest.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}
                   object={selected}
                   authenticated={authenticatedSource}
