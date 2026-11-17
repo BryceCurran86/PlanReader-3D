@@ -1,0 +1,32 @@
+name: VR new wall dependent trade scope
+on:
+  pull_request:
+    paths:
+      - 'pb_vr_wall_assembly_dependencies.py'
+      - 'pb_vr_wall_assembly_wsgi.py'
+      - 'tests/editable_3d/test_vr_wall_assembly_*.py'
+      - '.github/workflows/vr-wall-assembly.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pb_vr_wall_assembly_dependencies.py'
+      - 'pb_vr_wall_assembly_wsgi.py'
+      - 'tests/editable_3d/test_vr_wall_assembly_*.py'
+      - '.github/workflows/vr-wall-assembly.yml'
+jobs:
+  wall-assembly:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13','3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test requirements
+        run: python -m pip install pytest PyMuPDF numpy pandas plotly
+      - name: Test wall framing/skirting/plasterboard, route collisions and auth
+        run: |
+          python -m pytest -q tests/editable_3d/test_vr_wall_assembly_dependencies.py tests/editable_3d/test_vr_wall_assembly_wsgi.py

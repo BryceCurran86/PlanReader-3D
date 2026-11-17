@@ -11,6 +11,8 @@ import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
+import type { WallAdditionSketch } from "./wallAdditionProtocol";
+import { scopeKey } from "./reviewDraft";
 import { safeWallMoves } from "./wallMoveStudy";
 import type { MoveMode, WallMoveHistory } from "./wallMoveStudy";
 import { PcVrSqueezeTracker, inspectPcVrController, standardSqueezePressed } from "./pcVr2Support";
@@ -30,6 +32,7 @@ type Props = {
   quality: RenderQuality;
   detail: SurfaceDetail;
   moveMode: MoveMode;
+  addedWallSketch: WallAdditionSketch | null;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
   captureSerial: number;
@@ -141,13 +144,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const addedWallRef = useRef(addedWallSketch);
+  addedWallRef.current = addedWallSketch;
   const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
@@ -253,6 +258,48 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         (mesh.material as THREE.MeshStandardMaterial).color.getHex();
       mesh.userData.originalOpacity = 1;
     }
+    // Source-independent wall proposals stay in a clearly tinted review layer.
+    // Never insert them into pickables, original source witness, or quantity DTO.
+    const wallAdditionLayer = new THREE.Group();
+    wallAdditionLayer.name = "UnapprovedNewWallStudy";
+    scene.add(wallAdditionLayer);
+    let lastAddedWall = "";
+    function refreshWallAddition() {
+      const request = addedWallRef.current;
+      const valid = !!request && request.scopeKey === scopeKey(manifest) &&
+        request.heightM > 0 && request.heightM <= 20 &&
+        Number.isFinite(request.heightM) &&
+        request.start.every(Number.isFinite) &&
+        request.end.every(Number.isFinite);
+      const state = valid ? JSON.stringify(request) : "";
+      if (lastAddedWall === state) return;
+      lastAddedWall = state;
+      for (const child of [...wallAdditionLayer.children]) {
+        wallAdditionLayer.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(material=>material.dispose());
+        }
+      }
+      if (!valid || !request) return;
+      const a=request.start,b=request.end,h=request.heightM;
+      const length=Math.hypot(a[0]-b[0],a[1]-b[1]);
+      if(length<.05||length>200)return;
+      const geometry=new THREE.BufferGeometry();
+      geometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array([
+        a[0],0,a[1],b[0],0,b[1],b[0],h,b[1],
+        a[0],0,a[1],b[0],h,b[1],a[0],h,a[1],
+      ]),3));
+      geometry.computeVertexNormals();
+      const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
+        color:0x9472d9,side:THREE.DoubleSide,transparent:true,
+        opacity:0.35,depthWrite:false,roughness:.85,metalness:0,
+      }));
+      mesh.userData.reviewOnlyWallProposal=true;
+      wallAdditionLayer.add(mesh);
+    }
+
     // Presentation-only shadow-catching floor; never a sourced slab, floor finish or quantity.
     // It exists solely below existing linework and cannot be selected.
     const presentationFloor = new THREE.Mesh(
@@ -525,6 +572,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (Number.isFinite(dx)&&Number.isFinite(dz))
           obj.position.set(dx,0,dz);
       }
+      refreshWallAddition();
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
       presentationFloor.visible = activeInspection.showShadows;
