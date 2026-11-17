@@ -206,7 +206,7 @@ export function verifyWallConstructionImpact(
      impact.quoteReady!==false||impact.proposalId!==preview.proposalId||
      impact.revisionScopeKey!==preview.package.revision_scope_key||
      typeof impact.pricedSubtotalOnly!=="string"||
-     !/^(0|[1-9][0-9]*)\\.[0-9]{2}$/.test(impact.pricedSubtotalOnly)||
+     !/^(0|[1-9][0-9]*)\.[0-9]{2}$/.test(impact.pricedSubtotalOnly)||
      !["boolean"].includes(typeof impact.pricedComplete)||
      typeof impact.relatedPagesVerified!=="boolean"||
      typeof impact.impactReceiptSha256!=="string"||!HASH.test(impact.impactReceiptSha256)||
