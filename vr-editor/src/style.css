@@ -24,3 +24,8 @@
 .section-block>label:not(.file-upload){font-size:11px;color:#a9c5c7;display:block;margin-top:13px}
 .section-block input[type=search]{width:100%;border:1px solid #45616c;background:#202f38;color:#e3edf0;border-radius:6px;padding:10px;margin-top:8px}
 .review-source-copy{width:100%;margin:10px 0}
+
+.review-image-toolbar{position:absolute;right:14px;top:14px;z-index:3;display:flex;align-items:center;gap:9px;max-width:65%;flex-wrap:wrap}
+.review-image-toolbar button{background:#183d39;border:1px solid #62a59b;color:#effbf8;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:650}
+.review-image-toolbar span{color:#ffdfb9;font-size:11px;background:#23323a;padding:5px 8px;border-radius:5px}
+.review-image-toolbar button:focus-visible{outline:2px solid white}
