@@ -354,3 +354,61 @@ def test_nonfinite_closure_bounds_never_authenticate_an_exterior_gap():
             horizontal=True, band=(100.0, 102.0), gap_interval=(10.0, bad),
         )
         assert not _closure_covers_edge((10.0, 101.0), (30.0, 101.0), (closure,))
+
+
+def test_pale_compound_source_fill_never_owns_contour_edge():
+    # Acacia p2 has a pale sheet-sized compound fill with nested segments.
+    # Its rectangle may align with a red raster contour, but not a wall.
+    trace = _trace(((200, 130), (800, 130), (800, 490), (200, 490)))
+    pale = {
+        "type": "f", "fill": (0.98, 0.98, 0.98), "color": None,
+        "layer": "", "items": [
+            ("re", fitz.Rect(200, 130, 800, 490), 1),
+            ("l", fitz.Point(200, 130), fitz.Point(800, 130)),
+        ],
+    }
+    grey = {
+        "type": "s", "fill": None, "color": (0.48, 0.48, 0.48),
+        "layer": "", "items": [
+            ("l", fitz.Point(200, 130), fitz.Point(800, 130)),
+        ],
+    }
+    top = own_exterior_contour_native_paths((pale, grey), trace)[0]
+    assert top.status is EvidenceResolutionStatus.ABSTAINED
+    assert top.native_path_indices == ()
+    assert top.classification == "unmatched_contour_segment"
+    assert not top.physical_wall_authenticated
+    assert not top.can_issue_area
+
+
+def test_dark_source_wall_kept_even_with_pale_surrounding_fill():
+    trace = _trace(((200, 130), (800, 130), (800, 490), (200, 490)))
+    pale = {
+        "type": "f", "fill": (0.98, 0.98, 0.98), "color": None,
+        "items": [("l", fitz.Point(200, 130), fitz.Point(800, 130))],
+    }
+    ink = _stroke((200, 130), (800, 130))
+    ink["type"] = "s"
+    top = own_exterior_contour_native_paths((pale, ink), trace)[0]
+    assert top.status is EvidenceResolutionStatus.CANDIDATE
+    assert top.native_path_indices == (1,)
+    assert not top.physical_wall_authenticated
+
+
+def test_native_dark_ink_rejects_nonfinite_and_wrong_draw_modes():
+    from pb_source_native_exterior_edge_path_ownership import (
+        _dark_original_ink, _visible_native_dark_wall_ink,
+    )
+    assert not _dark_original_ink((float("nan"), 0, 0))
+    assert not _dark_original_ink((float("inf"), 0, 0))
+    assert not _dark_original_ink((True, False, 0))
+    assert not _dark_original_ink((0, 0))
+    assert not _dark_original_ink(None)
+    assert not _dark_original_ink((0.48, 0.48, 0.48))
+    assert _dark_original_ink((0.0, 0.0, 0.0))
+    assert not _visible_native_dark_wall_ink(
+        {"type": "f", "color": (0, 0, 0), "fill": (0.98, 0.98, 0.98)}
+    )
+    assert _visible_native_dark_wall_ink(
+        {"type": "fs", "color": (0, 0, 0), "fill": (0.98, 0.98, 0.98)}
+    )

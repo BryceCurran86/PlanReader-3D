@@ -63,6 +63,37 @@ def _rect_edges(x0: float, y0: float, x1: float, y1: float) -> tuple[tuple[tuple
     )
 
 
+def _dark_original_ink(rgb: Any) -> bool:
+    """Original PDF ink color, not raster-inferred physical wall authority.
+
+    Pale background fills and mid-grey design guide lines may draw geometric
+    edges but are not physical black wall ink. Even a dark path needs later
+    original-source physical-wall authority before any customer quantity.
+    """
+    if not isinstance(rgb, (tuple, list)) or len(rgb) != 3:
+        return False
+    if any(type(v) is bool or type(v) not in (int, float) for v in rgb):
+        return False
+    values = tuple(float(v) for v in rgb)
+    return all(math.isfinite(v) and 0.0 <= v <= 0.4 for v in values)
+
+
+def _visible_native_dark_wall_ink(row: Mapping[str, Any]) -> bool:
+    """Respect rendered stroke/fill mode; a pale PDF fill is not a wall."""
+    kind = str(row.get("type") or "")
+    if kind == "s":
+        return _dark_original_ink(row.get("color"))
+    if kind == "f":
+        return _dark_original_ink(row.get("fill"))
+    if kind == "fs":
+        return (_dark_original_ink(row.get("color"))
+                or _dark_original_ink(row.get("fill")))
+    # Some synthetic producer records have no PyMuPDF type, but still provide
+    # actual ink colors. Never treat missing RGB as a black source stroke.
+    return (_dark_original_ink(row.get("color"))
+            or _dark_original_ink(row.get("fill")))
+
+
 def _native_line_segments(
     drawings: Sequence[Mapping[str, Any] | object],
 ) -> tuple[tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]], ...]:
@@ -71,7 +102,7 @@ def _native_line_segments(
     for index, raw in enumerate(drawings):
         if not isinstance(raw, Mapping):
             continue
-        if _dashed(raw):
+        if _dashed(raw) or not _visible_native_dark_wall_ink(raw):
             continue
         for item in raw.get("items") or ():
             if not item:
