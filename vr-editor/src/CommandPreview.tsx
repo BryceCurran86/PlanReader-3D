@@ -1,27 +1,12 @@
 import { useState } from "react";
 import type { EditorObject, SceneManifest } from "./types";
+import { verifyPreviewResponse } from "./previewProtocol";
+import type { VerifiedPreview } from "./previewProtocol";
 
 type Props = {
   workspace: SceneManifest;
   object: EditorObject;
   authenticated: boolean;
-};
-
-type QuantityImpact = {
-  target: string;
-  status: string;
-  oldValue: number | null;
-  proposedValue: number | null;
-  unit: string;
-  reason: string | null;
-};
-type Preview = {
-  accepted: boolean;
-  validationState: string;
-  persisted: boolean;
-  commercialPublicationAllowed: boolean;
-  quantityImpacts?: QuantityImpact[];
-  blockingReasons?: string[];
 };
 
 const CONTROLS: Record<string, { command: string; label: string; numeric: boolean }[]> = {
@@ -42,7 +27,7 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
   const [reason, setReason] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<VerifiedPreview | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
@@ -96,15 +81,15 @@ export function CommandPreview({ workspace, object, authenticated }: Props) {
         }
       );
       const result: unknown = await response.json();
-      if (!result || typeof result !== "object") throw new Error("Invalid preview response");
-      const data = result as Preview;
-      if (!response.ok || data.accepted !== true
-          || data.persisted !== false || data.commercialPublicationAllowed !== false) {
-        const issues = Array.isArray(data.blockingReasons)
-          ? data.blockingReasons.join("; ") : `Preview rejected (${response.status})`;
+      if (!response.ok) {
+        const issues = result && typeof result === "object" &&
+          "blockingReasons" in result && Array.isArray(result.blockingReasons)
+          ? result.blockingReasons.filter((issue): issue is string => typeof issue === "string").join("; ")
+          : `Preview rejected (${response.status})`;
         throw new Error(issues || "Source authority rejected preview");
       }
-      setPreview(data);
+      const validated = verifyPreviewResponse(result, command);
+      setPreview(validated);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Preview unavailable");
     } finally {
