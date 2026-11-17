@@ -155,3 +155,37 @@ presentation highlight rather than replacing the colour of a finish study.
 The wall geometry, original-source witness, ledger, frozen quantities and
 commercial controls do not change. The effect is off by default and uses one
 small disposable texture for the whole scene, with no asset downloads.
+
+## Source-bound immersive review navigation (20+ workflows)
+
+The evidence inspector now includes:
+1. Fit the active scene in 3D perspective.
+2. Top-down plan camera view (perspective, not a surveyed orthophoto).
+3. Front elevation-like camera view.
+4. Side elevation-like camera view.
+5. Focus on the selected source object.
+6. Reset to the whole-scene isometric camera.
+7. Search by source object ID.
+8. Search by canonical object ID.
+9. Search by source primitive path.
+10. Restrict to only source-verified objects.
+11. Restrict to unresolved/review objects.
+12. Restrict to unknown-height source wall lines.
+13. Select source drawing sheet.
+14. Jump to the next unresolved object.
+15. Jump to the previous unresolved object.
+16. Isolate the selected existing object.
+17. Restore all inspection filters and camera.
+18. Toggle presentation grid.
+19. Toggle presentation shadows.
+20. Toggle the selected source label.
+21. Toggle local ghost-height proposals.
+22. Inspect visible evidence totals and source status counts.
+23. Copy a selected object's source identification to the clipboard.
+
+The controls only change local camera pose, visibility and read-only inspection
+metadata. They do not modify manifest objects, canonical identity, approvals,
+wall heights, finish tags, measurements or quotes. Unknown-height wall lines
+stay source lines. Camera modes are perspective review aids, **not** surveyed
+elevations, orthophotos or accuracy proofs. Hidden objects continue to exist
+in the source manifest and must not be omitted from commercial takeoffs.
