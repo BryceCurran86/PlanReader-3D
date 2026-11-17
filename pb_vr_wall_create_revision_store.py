@@ -188,7 +188,7 @@ def _new_pdf(parent: bytes, coverage: VerifiedWallDrawingCoverage,
             shape.draw_line(start, end)
             shape.finish(color=(0, 0.45, 0.9), width=2.0, dashes="[4 3] 0")
             shape.commit(overlay=True)
-            label = ("PR-W%04d | PROPOSED NEW WALL | REVIEW ONLY\\n"
+            label = ("PR-W%04d | PROPOSED NEW WALL | REVIEW ONLY\n"
                      "%.3f m length × %.3f m height; %d openings (coordination required)"
                      % (number, wall.length_m, wall.height_m, len(wall.openings)))
             loc = fitz.Rect(page.rect.x0 + 8, page.rect.y0 + 8,
