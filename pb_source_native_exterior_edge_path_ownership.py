@@ -179,6 +179,9 @@ class ExteriorEdgeNativeOwnership:
     chain_start_shortfall_pt: float | None = None
     chain_end_shortfall_pt: float | None = None
     contour_endpoint_association_pt: float | None = None
+    unique_owner_overlap_fraction: float | None = None
+    unique_owner_uncovered_start_pt: float | None = None
+    unique_owner_uncovered_end_pt: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         row: dict[str, object] = {
@@ -201,7 +204,84 @@ class ExteriorEdgeNativeOwnership:
             row["chain_end_shortfall_pt"] = self.chain_end_shortfall_pt
         if self.contour_endpoint_association_pt is not None:
             row["contour_endpoint_association_pt"] = self.contour_endpoint_association_pt
+        if self.unique_owner_overlap_fraction is not None:
+            row["unique_owner_overlap_fraction"] = self.unique_owner_overlap_fraction
+        if self.unique_owner_uncovered_start_pt is not None:
+            row["unique_owner_uncovered_start_pt"] = self.unique_owner_uncovered_start_pt
+        if self.unique_owner_uncovered_end_pt is not None:
+            row["unique_owner_uncovered_end_pt"] = self.unique_owner_uncovered_end_pt
         return row
+
+
+def _unique_owner_span_coverage(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    horizontal: bool,
+    owner_ids: Sequence[int],
+    segments: Sequence[
+        tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]]
+    ],
+) -> tuple[float, float, float]:
+    """Return overlap fraction and uncovered start/end lengths along the contour edge."""
+    along = 0 if horizontal else 1
+    low, high = sorted((start[along], end[along]))
+    length = high - low
+    if length <= NOISE_PT:
+        return 0.0, 0.0, 0.0
+    owners = set(owner_ids)
+    intervals: list[tuple[float, float]] = []
+    for index, a, b, _row in segments:
+        if index not in owners:
+            continue
+        sa, sb = sorted((a[along], b[along]))
+        lo, hi = max(low, sa), min(high, sb)
+        if hi > lo:
+            intervals.append((lo, hi))
+    if not intervals:
+        return 0.0, round(length, 4), round(length, 4)
+    intervals.sort()
+    merged: list[tuple[float, float]] = [intervals[0]]
+    for lo, hi in intervals[1:]:
+        if lo <= merged[-1][1] + NOISE_PT:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    covered = sum(hi - lo for lo, hi in merged)
+    first, last = merged[0][0], merged[-1][1]
+    return (
+        round(min(1.0, covered / length), 4),
+        round(max(0.0, first - low), 4),
+        round(max(0.0, high - last), 4),
+    )
+
+
+def _ownership_from_chain(
+    edge_index: int,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    diagonal: bool,
+    chain: tuple[str, tuple[int, ...], bool, float, float],
+) -> ExteriorEdgeNativeOwnership:
+    kind, ids, complete, start_shortfall, end_shortfall = chain
+    if kind == "ambiguous":
+        return ExteriorEdgeNativeOwnership(
+            edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
+            "ambiguous_competing_native_path_owners",
+            "competing_source_ink_chains", ids, diagonal,
+        )
+    return ExteriorEdgeNativeOwnership(
+        edge_index, start, end,
+        EvidenceResolutionStatus.CANDIDATE if complete
+        else EvidenceResolutionStatus.ABSTAINED,
+        ("native_exact_source_chain_needs_physical_wall_proof"
+         if complete else "native_source_chain_has_unwitnessed_contour_endpoint"),
+        ("source_native_wall_ink_chain_candidate"
+         if complete else "incomplete_source_native_wall_ink_chain"),
+        ids, diagonal,
+        chain_start_shortfall_pt=start_shortfall,
+        chain_end_shortfall_pt=end_shortfall,
+        contour_endpoint_association_pt=_EDGE_SEARCH_PT,
+    )
 
 
 @dataclass(frozen=True)
@@ -425,29 +505,14 @@ def _own_one_edge(
         # Positive winding is CCW: interior is to the left of each edge.
         outward = -signed if winding > 0 else signed
         hits.append((round(outward, 3), index))
+    # Prefer a complete exact source chain over a single partial unique owner
+    # (Acacia south: 2934+2935 together witness the face better than 2935 alone).
+    chain = _source_exact_collinear_chain(start, end, horizontal, segments)
+    if chain is not None and chain[0] == "complete":
+        return _ownership_from_chain(edge_index, start, end, diagonal, chain)
     if not hits:
-        chain = _source_exact_collinear_chain(start, end, horizontal, segments)
         if chain is not None:
-            kind, ids, complete, start_shortfall, end_shortfall = chain
-            if kind == "ambiguous":
-                return ExteriorEdgeNativeOwnership(
-                    edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
-                    "ambiguous_competing_native_path_owners",
-                    "competing_source_ink_chains", ids, diagonal,
-                )
-            return ExteriorEdgeNativeOwnership(
-                edge_index, start, end,
-                EvidenceResolutionStatus.CANDIDATE if complete
-                else EvidenceResolutionStatus.ABSTAINED,
-                ("native_exact_source_chain_needs_physical_wall_proof"
-                 if complete else "native_source_chain_has_unwitnessed_contour_endpoint"),
-                ("source_native_wall_ink_chain_candidate"
-                 if complete else "incomplete_source_native_wall_ink_chain"),
-                ids, diagonal,
-                chain_start_shortfall_pt=start_shortfall,
-                chain_end_shortfall_pt=end_shortfall,
-                contour_endpoint_association_pt=_EDGE_SEARCH_PT,
-            )
+            return _ownership_from_chain(edge_index, start, end, diagonal, chain)
         return ExteriorEdgeNativeOwnership(
             edge_index, start, end, EvidenceResolutionStatus.ABSTAINED,
             "no_native_path_owner_for_morphological_edge",
@@ -462,10 +527,19 @@ def _own_one_edge(
             "ambiguous_competing_native_path_owners",
             "competing_exterior_path_owners", cluster, diagonal,
         )
+    frac, unc_start, unc_end = _unique_owner_span_coverage(
+        start, end, horizontal, cluster, segments,
+    )
+    # Incomplete multi-path chain that covers more than the unique owner still
+    # abstains, but the unique-owner receipt exposes the uncovered tails.
     return ExteriorEdgeNativeOwnership(
         edge_index, start, end, EvidenceResolutionStatus.CANDIDATE,
         "unique_outer_native_path_owner_needs_physical_wall_proof",
         "source_native_wall_ink_candidate", cluster, diagonal,
+        unique_owner_overlap_fraction=frac,
+        unique_owner_uncovered_start_pt=unc_start,
+        unique_owner_uncovered_end_pt=unc_end,
+        contour_endpoint_association_pt=_EDGE_SEARCH_PT,
     )
 
 
