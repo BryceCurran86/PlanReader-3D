@@ -494,6 +494,46 @@ def test_acacia_east_style_chain_short_of_morphological_corners_is_complete_cand
     assert east.commercial_publishable is False
 
 
+def test_complete_source_chain_preferred_over_partial_unique_owner():
+    """Acacia south: two touching strokes beat a single long outer owner alone."""
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = (
+        _stroke((200, 0), (200, 100)),  # west unique
+        _stroke((200, 100), (800, 100)),  # north unique
+        _stroke((800, 100), (800, 0)),  # east unique
+        _stroke((200, 0), (450, 0)),  # south left
+        _stroke((450, 0), (800, 0)),  # south right (also unique-length alone)
+    )
+    south = own_exterior_contour_native_paths(strokes, trace)[0]
+    assert south.classification == "source_native_wall_ink_chain_candidate"
+    assert south.native_path_indices == (3, 4)
+    assert south.physical_wall_authenticated is False
+
+
+def test_unique_owner_reports_uncovered_tail_fraction():
+    # Contour west edge is index 3: (200,100)->(200,0) in this winding.
+    trace = _trace(((200, 0), (800, 0), (800, 200), (200, 200)))
+    strokes = (
+        _stroke((200, 0), (200, 90)),  # west covers only lower portion
+        _stroke((200, 200), (800, 200)),
+        _stroke((800, 200), (800, 0)),
+        _stroke((800, 0), (200, 0)),
+    )
+    owned = own_exterior_contour_native_paths(strokes, trace)
+    west = next(
+        edge for edge in owned
+        if abs(edge.start_pdf_pts[0] - 200) <= 1 and abs(edge.end_pdf_pts[0] - 200) <= 1
+    )
+    assert west.classification == "source_native_wall_ink_candidate"
+    assert west.unique_owner_overlap_fraction is not None
+    assert west.unique_owner_overlap_fraction < 0.6
+    assert (
+        (west.unique_owner_uncovered_start_pt or 0)
+        + (west.unique_owner_uncovered_end_pt or 0)
+    ) > 50.0
+    assert west.physical_wall_authenticated is False
+
+
 def test_parallel_source_chains_cannot_be_selected_as_one_wall():
     trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
     strokes = (
