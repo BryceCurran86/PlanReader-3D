@@ -268,6 +268,9 @@ def test_large_original_sheet_raster_never_exceeds_2400px():
 @pytest.mark.parametrize("width,height", [
     (0, 100), (-1, 100), (float("nan"), 100),
     (float("inf"), 100), (100, float("-inf")),
+    (100, 0), (100, -1), (100, float("nan")),
+    (100, float("inf")), (100, float("-inf")),
+    (float("nan"), 200), (200, float("nan")),
 ])
 def test_invalid_source_page_dimensions_fail_closed(width, height):
     from pb_external_footprint_first_trace import _bounded_raster_scale
