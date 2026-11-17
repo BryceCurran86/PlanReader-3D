@@ -5,6 +5,8 @@ import { downgradeLocalManifest } from "./localManifestSafety";
 import { nextStudy } from "./finishStudy";
 import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
+import { WallAdditionPanel } from "./WallAdditionPanel";
+import type { WallAdditionSketch } from "./wallAdditionProtocol";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { freshReviewNotes } from "./reviewNotes";
 import type { ReviewNotesState } from "./reviewNotes";
@@ -26,6 +28,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
+  const [addedWallSketch, setAddedWallSketch] = useState<WallAdditionSketch|null>(null);
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
@@ -185,6 +188,8 @@ export function App() {
     ? reviewNotes : manifest ? freshReviewNotes(manifest) : null;
   const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
     ? draftState : manifest ? freshDrafts(manifest) : null;
+  const activeAddedWallSketch = visible && addedWallSketch?.scopeKey === scopeKey(visible)
+    ? addedWallSketch : null;
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
   // Keyboard undo/redo works only outside editable fields and never changes PlanReader source.
   useEffect(() => {
@@ -223,6 +228,7 @@ export function App() {
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
+                addedWallSketch={activeAddedWallSketch}
                 captureSerial={captureSerial} onCapture={setCaptureStatus} />
             </Suspense>
           ) : (
@@ -349,7 +355,15 @@ export function App() {
             </div>
           )}
 
-          <div className="section-block" aria-label="3D presentation settings">
+          {manifest && (
+            <div className="section-block" aria-label="New wall cross-trade scope">
+              <WallAdditionPanel
+                scene={manifest}
+                authenticated={authenticatedSource}
+                onSketch={setAddedWallSketch} />
+            </div>
+          )}
+                    <div className="section-block" aria-label="3D presentation settings">
             <span className="eyebrow">REALISM / RENDERING</span>
             <p className="muted">Lighting and shadow choices change presentation only — not the plan, geometry, material specifications or quantity authority.</p>
             <label htmlFor="lighting-mood" className="eyebrow">LIGHTING ENVIRONMENT</label>
