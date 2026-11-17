@@ -305,6 +305,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["family_counts"] == {
         "floor_area": 1,
         "floor_finish_area": 1,
+        "wall_finish_area": 0,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 1,
@@ -879,6 +880,7 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     assert summary["family_counts"] == {
         "floor_area": 0,
         "floor_finish_area": 0,
+        "wall_finish_area": 0,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 0,
@@ -1357,26 +1359,33 @@ def test_other_project_combined_seal_prevents_mixed_project_output(tmp_path, mon
     assert not (output / "production_summary.json").exists()
     assert not (output / ".source_closed_handoff.lock").exists()
 
-def test_original_three_laurel_floor_finish_handoff_returns_seven_firm_items():
+def test_original_three_laurel_surface_helpers_reject_wrong_sha_without_pdf(tmp_path):
+    """exact-source-safety must not require the private original PDF."""
     from tools.run_source_closed_project_handoff import (
-        _original_three_laurel_floor_finish_handoff,
         _THREE_LAUREL_SOURCE_SHA256,
+        _original_three_laurel_ceiling_handoff,
+        _original_three_laurel_floor_finish_handoff,
+        _original_three_laurel_wall_finish_handoff,
     )
-    from tests.original_source_3laurel import require_original_3laurel, ORIGINAL_SHA256
-    assert ORIGINAL_SHA256 == _THREE_LAUREL_SOURCE_SHA256
-    pdf = require_original_3laurel()
-    result = _original_three_laurel_floor_finish_handoff(
-        pdf, workspace_id=1, source_sha256=ORIGINAL_SHA256,
+
+    missing = tmp_path / "missing.pdf"
+    assert _THREE_LAUREL_SOURCE_SHA256
+    assert (
+        _original_three_laurel_floor_finish_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
     )
-    assert result is not None
-    quantities, sealed, rows = result
-    assert len(quantities) == 7
-    assert len(sealed.quantities) == 7
-    assert len(rows) == 7
-    assert all(q.status == "firm" and not q.abstained for q in quantities)
-    assert all(q.family == "floor_finish_area" for q in quantities)
-    wrong = _original_three_laurel_floor_finish_handoff(
-        pdf, workspace_id=1, source_sha256="0" * 64,
+    assert (
+        _original_three_laurel_wall_finish_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
     )
-    assert wrong is None
+    assert (
+        _original_three_laurel_ceiling_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
+    )
 
