@@ -56,12 +56,18 @@ function finitePoint(v: unknown): v is [number, number] {
     && v.every(n => typeof n === "number" && Number.isFinite(n));
 }
 
+function finiteWorldOrigin(v: unknown): v is [number, number, number] {
+  return Array.isArray(v) && v.length === 3
+    && v.every(n => typeof n === "number" && Number.isFinite(n));
+}
+
 function validObject(value: unknown): value is EditorObject {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
   if (typeof o.objectId !== "string" || !o.objectId.trim()
     || typeof o.objectType !== "string"
     || typeof o.objectRevision !== "string"
+    || typeof o.authority !== "string" || !o.authority
     || !["verified", "review"].includes(String(o.renderState))
     || o.canEdit !== false
     || !(o.canonicalObjectId === null || typeof o.canonicalObjectId === "string")
@@ -69,7 +75,8 @@ function validObject(value: unknown): value is EditorObject {
     || !Array.isArray(o.quantityLinks)
     || !o.quantityLinks.every(q => typeof q === "string")
     || !Array.isArray(o.unresolvedIssues)
-    || !o.unresolvedIssues.every(reason => typeof reason === "string")) return false;
+    || !o.unresolvedIssues.every(reason => typeof reason === "string")
+    || (o.renderState === "verified" && o.unresolvedIssues.length > 0)) return false;
   const dims = o.dimensions;
   if (!dims || typeof dims !== "object" || Array.isArray(dims)
       || !Object.values(dims).every(v => typeof v === "number" && Number.isFinite(v))) return false;
@@ -79,9 +86,11 @@ function validObject(value: unknown): value is EditorObject {
   if (!["sourceFileId", "sheet", "sourceRegion", "originalGeometryRef", "currentGeometryRef"]
     .every(k => trace[k] === null || typeof trace[k] === "string")) return false;
   if (!(trace.page === null || typeof trace.page === "string"
-        || typeof trace.page === "number")) return false;
+        || (typeof trace.page === "number" && Number.isSafeInteger(trace.page)
+            && trace.page >= 0))) return false;
   const geom = o.geometry;
   if (geom === null) return true;
+  if (o.objectType !== "wall") return false;
   if (!geom || typeof geom !== "object" || Array.isArray(geom)) return false;
   const g = geom as Record<string, unknown>;
   if (!finitePoint(g.start) || !finitePoint(g.end)) return false;
@@ -108,7 +117,7 @@ export function isSceneManifest(value: unknown): value is SceneManifest {
     && Number.isSafeInteger(s.modelRevision) && s.modelRevision >= 0
     && !!c && c.unit === "metres"
     && c.sourceToModelTransform === null
-    && finitePoint([c.renderOrigin?.[0], c.renderOrigin?.[1]])
+    && finiteWorldOrigin(c.renderOrigin)
     && Array.isArray(x.objects)
     && x.objects.length <= 20000
     && x.objects.every(validObject)
