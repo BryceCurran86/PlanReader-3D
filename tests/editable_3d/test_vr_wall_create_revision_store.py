@@ -261,3 +261,21 @@ def test_wall_create_wsgi_requires_revision_grant_and_unified_document_head():
     status, reply = run(make_app(principal, True),
                         {**payload, "companyRates": []})
     assert status.startswith("422 ")
+
+
+def test_created_wall_crossing_and_overlap_are_atomic_conflicts():
+    fx = fixture()
+    db, principal, ws, wall, spec, coverage, original = fx
+    save(fx)
+    updated_ws = replace(ws, scope=replace(ws.scope, model_revision=1))
+    coverage2 = replace(coverage, proposal_id="wall2")
+    for start, end in [((1., -1.), (1., 1.)), ((1., 0.), (4., 0.))]:
+        conflicting = replace(
+            wall, proposal_id="wall2", base_model_revision=1,
+            start_pt=start, end_pt=end,
+        )
+        with pytest.raises(WallCreateConflict, match="intersection"):
+            save(fx, workspace=updated_ws, wall=conflicting,
+                 coverage=coverage2, idempotency_key="request2",
+                 command_identity={"proposalId": "wall2"})
+        assert db.execute("SELECT COUNT(*) FROM vr_created_wall_revisions").fetchone()[0] == 1
