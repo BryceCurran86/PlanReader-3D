@@ -1,0 +1,21 @@
+name: Native VR Manifest Bridge
+on:
+  pull_request:
+    paths:
+      - "vr-native/manifest-bridge/**"
+      - ".github/workflows/vr-native-manifest-bridge.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-manifest:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Validate and downgrade source-neutral imported scene
+        shell: pwsh
+        run: .\vr-native\manifest-bridge\tests\Test-ManifestBridge.ps1
