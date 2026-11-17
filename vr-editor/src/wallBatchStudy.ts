@@ -219,7 +219,7 @@ export function compareWallBatches(
   for(const key of [...new Set([...prior.keys(),...now.keys()])].sort()){
     const a=prior.get(key),b=now.get(key);
     const change=Math.round(((b?.value??0)-(a?.value??0))*1e6)/1e6;
-    if(change!==0)delta.push({...b??a!,value:change,
+    if(change!==0)delta.push({...(b ?? a!),value:change,
       wallCount:(b?.wallCount??0)-(a?.wallCount??0)});
   }
   return delta;
