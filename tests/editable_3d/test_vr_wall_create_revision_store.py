@@ -192,3 +192,72 @@ def test_scene_hydration_preserves_original_source_authority():
     stale = compile_editor_scene(ws.scope, [], canonical_object_ids={})
     with pytest.raises(ValueError, match="revision"):
         attach_created_walls_to_scene(stale, list_created_walls(db, principal, ws))
+
+
+def test_wall_create_wsgi_requires_revision_grant_and_unified_document_head():
+    import json
+    from pb_vr_wall_create_revision_wsgi import make_wall_create_revision_wsgi_app
+    fx = fixture()
+    db, principal, ws, wall, spec, coverage, original = fx
+    payload = {
+        "workspaceId": ws.scope.workspace_id,
+        "projectId": ws.scope.project_id,
+        "documentId": ws.scope.document_id,
+        "revisionId": ws.scope.revision_id,
+        "snapshotId": ws.scope.snapshot_id,
+        "sourceSha256": ws.scope.source_sha256,
+        "baseModelRevision": ws.scope.model_revision,
+        "proposalId": wall.proposal_id,
+        "levelId": wall.level_id,
+        "startPt": list(wall.start_pt), "endPt": list(wall.end_pt),
+        "heightM": wall.height_m, "openings": [],
+        "assemblyProfileId": spec.specification_id,
+        "idempotencyKey": "request-wsgi-1",
+    }
+
+    def make_app(user, head_ok):
+        def new_connection(_principal, _workspace):
+            con = sqlite3.connect(":memory:")
+            install_wall_creation_schema(con)
+            return con
+
+        return make_wall_create_revision_wsgi_app(
+            authenticate_session=lambda _env: user,
+            load_authorized_workspace=lambda _p, _w: ws,
+            verify_csrf=lambda _env, _p: True,
+            load_project_assembly_profile=lambda _p, _w, _profile: spec,
+            load_verified_service_routes=lambda _p, _w, _level: (),
+            load_verified_wall_sheet_coverage=lambda _p, _w, _wall: coverage,
+            load_original_pdf_bytes=lambda _p, _w: original,
+            get_wall_create_db_connection=new_connection,
+            verify_unified_document_head=lambda _p, _w, _db: head_ok,
+        )
+
+    def run(app, data):
+        raw = json.dumps(data).encode()
+        env = {
+            "PATH_INFO": "/api/editor/workspaces/ws1/walls/add/commit",
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": "application/json",
+            "CONTENT_LENGTH": str(len(raw)),
+            "wsgi.input": io.BytesIO(raw),
+        }
+        statuses = []
+        result = app(env, lambda status, headers: statuses.append(status))
+        return statuses[0], json.loads(b"".join(result))
+
+    forbidden = replace(
+        principal, allowed_revision_workspace_ids=frozenset())
+    status, reply = run(make_app(forbidden, True), payload)
+    assert status.startswith("403 ")
+    status, reply = run(make_app(principal, False), payload)
+    assert status.startswith("409 ")
+    status, reply = run(make_app(principal, True), payload)
+    assert status.startswith("201 ")
+    assert reply["persisted"] is True
+    assert reply["workingDesignOnly"] is True
+    assert reply["commercialPublicationAllowed"] is False
+    assert len(reply["pagesRevised"]) == 2
+    status, reply = run(make_app(principal, True),
+                        {**payload, "companyRates": []})
+    assert status.startswith("422 ")
