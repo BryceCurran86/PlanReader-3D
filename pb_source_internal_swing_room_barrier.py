@@ -46,11 +46,45 @@ class SourceInternalSwingRoomBarrier:
         }
 
 
+def _authenticated_floor_plan_viewport_id(page_index: int) -> str | None:
+    if type(page_index) is not int or page_index < 0:
+        return None
+    return f"source-authenticated-floor-plan-page-{page_index}"
+
+
+def _stamp_blank_viewports_for_authenticated_page(
+    drawings: Sequence[Mapping[str, Any] | object],
+    authenticated_viewport_id: str,
+) -> tuple[Mapping[str, Any] | object, ...]:
+    """Bind page-authenticated scope onto paths that carry no viewport metadata.
+
+    Existing non-blank viewport identities are preserved so foreign/mixed
+    scopes still fail closed in the host/cap checker.
+    """
+    stamped: list[Mapping[str, Any] | object] = []
+    expected = str(authenticated_viewport_id).strip()
+    for row in drawings:
+        if not isinstance(row, Mapping):
+            stamped.append(row)
+            continue
+        current = str(
+            row.get("source_viewport_id") or row.get("viewport_id") or ""
+        ).strip()
+        if current:
+            stamped.append(row)
+            continue
+        copy = dict(row)
+        copy["viewport_id"] = expected
+        stamped.append(copy)
+    return tuple(stamped)
+
+
 def detect_source_internal_swing_room_barriers(
     drawings: Sequence[Mapping[str, Any] | object],
     source_words: Sequence[Any] = (),
     *,
     page_index: int = -1,
+    authenticated_viewport_id: str | None = None,
 ) -> tuple[SourceInternalSwingRoomBarrier, ...]:
     """Source native unique-host+arc+caps; internal cap widths vary slightly.
 
@@ -58,8 +92,18 @@ def detect_source_internal_swing_room_barriers(
     Internal 0.75pt tolerance is used only when a full original jamb cap,
     quarter-arc and both black internal faces prove the *same* opening.
     """
+    viewport_id = (
+        str(authenticated_viewport_id).strip()
+        if authenticated_viewport_id is not None
+        else _authenticated_floor_plan_viewport_id(page_index)
+    )
+    scoped_drawings = (
+        _stamp_blank_viewports_for_authenticated_page(drawings, viewport_id)
+        if viewport_id
+        else tuple(drawings)
+    )
     receipts = detect_exterior_swing_door_footprint_bridges(
-        drawings,
+        scoped_drawings,
         source_words,
         page_index=page_index,
         wall_layer_pattern=_INTERNAL_WALL_LAYER,
@@ -83,20 +127,21 @@ def detect_source_internal_swing_room_barriers(
     from pb_layered_wall_doorway_room_ring_shadow import _swing_arcs
     from collections import Counter
 
-    arcs, _ = _swing_arcs(drawings, unlabelled_source_ink=True)
+    arcs, _ = _swing_arcs(scoped_drawings, unlabelled_source_ink=True)
     already = {r.swing_arc_path_id for r in resolved}
     proposals = []
     for arc in arcs:
         arc_id = arc["arc"]
         if arc_id in already:
             continue
-        row = drawings[arc_id]
+        row = scoped_drawings[arc_id]
         if not isinstance(row, Mapping) or not _INTERNAL_WALL_LAYER.search(
             str(row.get("layer") or "")
         ):
             continue
         candidate = _source_native_internal_cap_host_pair(
-            drawings, arc, page_index=page_index,
+            scoped_drawings, arc, page_index=page_index,
+            authenticated_viewport_id=viewport_id,
         )
         if candidate is not None:
             proposals.append(candidate)
@@ -115,7 +160,8 @@ def detect_source_internal_swing_room_barriers(
     )
     if source_words:
         partial = _source_partial_internal_swing_candidates(
-            drawings, source_words, page_index=page_index,
+            scoped_drawings, source_words, page_index=page_index,
+            authenticated_viewport_id=viewport_id,
         )
         existing_arcs = {r.swing_arc_path_id for r in resolved}
         existing_gaps = {
@@ -144,12 +190,17 @@ def detect_source_internal_swing_room_barriers(
 def _source_native_internal_cap_host_pair(
     drawings: Sequence[Mapping[str, Any] | object], arc: Mapping[str, Any],
     *, page_index: int,
+    authenticated_viewport_id: str | None = None,
 ) -> SourceInternalSwingRoomBarrier | None:
     """Verify the source's short end-stub/white-cap internal swing opening.
 
     No artificial segment, nearest-room label or wall extension is admitted:
     each original cap must touch an actual black wall-end stub on the
     outside of the exact original native swing-and-radial-leaf opening.
+
+    All six arc/leaf/cap/host path viewport identities must be non-blank and
+    equal the independently authenticated floor-plan structural viewport.
+    Blank, mixed or foreign viewports fail closed.
     """
     import math
 
@@ -240,11 +291,21 @@ def _source_native_internal_cap_host_pair(
         bounds = (first[1][0], overlap_lo, second[1][2], overlap_hi)
     if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
         return None
-    scopes = {
-        str(drawings[idx].get("source_viewport_id") or drawings[idx].get("viewport_id") or "").strip()
-        for idx in (arc_id, leaf_id, cap_a, cap_b, host_a, host_b)
-    }
-    if len(scopes) > 1:
+    expected = str(authenticated_viewport_id or "").strip()
+    if not expected:
+        return None
+    scopes = []
+    for idx in (arc_id, leaf_id, cap_a, cap_b, host_a, host_b):
+        row = drawings[idx]
+        if not isinstance(row, Mapping):
+            return None
+        scope = str(
+            row.get("source_viewport_id") or row.get("viewport_id") or ""
+        ).strip()
+        if scope != expected:
+            return None
+        scopes.append(scope)
+    if len(set(scopes)) != 1:
         return None
     return SourceInternalSwingRoomBarrier(
         first_host_path_id=host_a,
@@ -257,7 +318,10 @@ def _source_native_internal_cap_host_pair(
     )
 
 
-def _source_partial_internal_swing_candidates(drawings, source_words, *, page_index):
+def _source_partial_internal_swing_candidates(
+    drawings, source_words, *, page_index,
+    authenticated_viewport_id: str | None = None,
+):
     """Original 25-65 degree source curve + radial leaf, not a guessed swing.
 
     One 3Laurel hinged door is drawn in this partial arc form. Only a unique
@@ -371,6 +435,7 @@ def _source_partial_internal_swing_candidates(drawings, source_words, *, page_in
             }
             candidate = _source_native_internal_cap_host_pair(
                 drawings, claimed, page_index=page_index,
+                authenticated_viewport_id=authenticated_viewport_id,
             )
             if candidate is not None:
                 matches.append(candidate)

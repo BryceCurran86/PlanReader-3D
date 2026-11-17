@@ -247,14 +247,11 @@ def source_native_trace_preview(
             page_index=page_index,
             sliding_leaf_frame_closure=True,
             panel_lift_label_closure=True,
-            # Strict source-owner witnesses, never printed labels alone;
-            # both new controls are candidate-only and separately default off.
-            source_native_cs_jamb_closure=(
-                source_modality.route != "tiled_raster_underlay"
-            ),
-            source_native_internal_swing_closure=(
-                source_modality.route != "tiled_raster_underlay"
-            ),
+            # Strict source-owner witnesses, never printed labels alone.
+            # Both candidate closure families stay default OFF until an
+            # explicit validated opt-in is supplied by a dedicated caller.
+            source_native_cs_jamb_closure=False,
+            source_native_internal_swing_closure=False,
             source_words=tuple(
                 {
                     "text": str(w[4]),

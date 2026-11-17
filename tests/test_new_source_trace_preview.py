@@ -920,3 +920,20 @@ def test_neutral_dark_baseline_rejects_reindexed_or_replaced_source_paths():
         _collect_monotonic_source_stroke_pairs((),(stroke,))
     with pytest.raises(ValueError,match="original_path_replaced"):
         _collect_monotonic_source_stroke_pairs((inert,),(stroke,))
+
+def test_default_source_native_trace_preview_keeps_new_closure_families_off():
+    from pathlib import Path
+    import ast
+    src = (Path(__file__).resolve().parents[1] / "pb_new_source_trace_preview.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    flags = {"source_native_cs_jamb_closure": None, "source_native_internal_swing_closure": None}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "build_layered_wall_doorway_room_rings":
+            for kw in node.keywords:
+                if kw.arg in flags and isinstance(kw.value, ast.Constant):
+                    flags[kw.arg] = kw.value.value
+    assert flags == {
+        "source_native_cs_jamb_closure": False,
+        "source_native_internal_swing_closure": False,
+    }
+

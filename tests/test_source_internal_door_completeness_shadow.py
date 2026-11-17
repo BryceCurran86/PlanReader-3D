@@ -11,24 +11,29 @@ from pb_source_internal_door_completeness_shadow import (
 from pb_layered_wall_doorway_room_ring_shadow import _swing_arcs
 
 
-def _filled(bounds, shade, *, viewport=""):
+_FLOOR_VP = "source-authenticated-floor-plan-page-2"
+
+
+def _filled(bounds, shade, *, viewport=_FLOOR_VP):
     return {"layer": "Enclosure_WallInternal", "rect": fitz.Rect(*bounds),
             "type": "f", "fill": (shade,) * 3, "viewport_id": viewport, "items": ()}
 
 
-def _source_native_door():
+def _source_native_door(*, viewport=_FLOOR_VP):
     # Synthetic example, not private drawing geometry.
     return [
-        _filled((97.8, 7, 99.8, 18.8), 0),
-        _filled((97.8, 46.2, 99.8, 59), 0),
-        _filled((97.5, 18.8, 100, 20), 1),
-        _filled((97.5, 45, 100, 46.2), 1),
+        _filled((97.8, 7, 99.8, 18.8), 0, viewport=viewport),
+        _filled((97.8, 46.2, 99.8, 59), 0, viewport=viewport),
+        _filled((97.5, 18.8, 100, 20), 1, viewport=viewport),
+        _filled((97.5, 45, 100, 46.2), 1, viewport=viewport),
         {"layer": "Enclosure_WallInternal", "rect": fitz.Rect(100, 20, 125, 45),
          "type": "s", "fill": None, "color": (0, 0, 0),
+         "viewport_id": viewport,
          "items": (("c", fitz.Point(125, 20), fitz.Point(125, 33.807),
                     fitz.Point(113.807, 45), fitz.Point(100, 45)),)},
         {"layer": "Enclosure_WallInternal", "rect": fitz.Rect(100, 20, 125, 20),
          "type": "s", "fill": None, "color": (0, 0, 0),
+         "viewport_id": viewport,
          "items": (("l", fitz.Point(100, 20), fitz.Point(125, 20)),)},
     ]
 
@@ -60,20 +65,53 @@ def test_competing_white_jamb_or_duplicate_swing_arc_fail_closed():
     rows.insert(4, rows[2].copy())
     arcs, _ = _swing_arcs(rows, unlabelled_source_ink=True)
     assert len(arcs) == 1
-    assert _source_native_internal_cap_host_pair(rows, arcs[0], page_index=2) is None
+    assert _source_native_internal_cap_host_pair(
+        rows, arcs[0], page_index=2,
+        authenticated_viewport_id=_FLOOR_VP,
+    ) is None
     rows = _source_native_door()
     rows.append(rows[4].copy())
-    assert detect_internal(rows) == ()
+    assert detect_internal(rows, page_index=2) == ()
 
 
 def test_mixed_original_viewports_and_joinery_are_not_native_wall_hosts():
     rows = _source_native_door()
     rows[0]["viewport_id"] = "floor"
     rows[1]["viewport_id"] = "elevation"
-    assert detect_internal(rows) == ()
+    assert detect_internal(rows, page_index=2) == ()
     rows = _source_native_door()
     rows[2]["layer"] = "Interior_Joinery"
-    assert detect_internal(rows) == ()
+    assert detect_internal(rows, page_index=2) == ()
+
+
+def test_blank_all_six_viewports_fail_closed_without_page_authority():
+    rows = _source_native_door(viewport="")
+    arcs, _ = _swing_arcs(rows, unlabelled_source_ink=True)
+    assert len(arcs) == 1
+    assert _source_native_internal_cap_host_pair(
+        rows, arcs[0], page_index=2, authenticated_viewport_id=_FLOOR_VP,
+    ) is None
+    assert _source_native_internal_cap_host_pair(
+        rows, arcs[0], page_index=2, authenticated_viewport_id=None,
+    ) is None
+
+
+def test_foreign_common_viewport_cannot_bind_floor_plan_hosts():
+    rows = _source_native_door(viewport="elevation-only")
+    arcs, _ = _swing_arcs(rows, unlabelled_source_ink=True)
+    # Common foreign viewport is not the authenticated floor-plan structural id.
+    assert _source_native_internal_cap_host_pair(
+        rows, arcs[0], page_index=2, authenticated_viewport_id=_FLOOR_VP,
+    ) is None
+
+
+def test_correct_floor_plan_viewport_scope_recovers_unique_internal_swing():
+    rows = _source_native_door()
+    arcs, _ = _swing_arcs(rows, unlabelled_source_ink=True)
+    assert _source_native_internal_cap_host_pair(
+        rows, arcs[0], page_index=2, authenticated_viewport_id=_FLOOR_VP,
+    ) is not None
+    assert len(detect_internal(rows, page_index=2)) == 1
 
 
 def test_source_cs_labels_are_recorded_without_fabricating_jamb_geometry():

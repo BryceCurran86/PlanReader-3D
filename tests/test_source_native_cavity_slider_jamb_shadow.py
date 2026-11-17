@@ -102,3 +102,46 @@ def test_private_sha_verified_original_has_six_distinct_cs_source_thresholds():
     assert len({idx for x in found for idx in x.jamb_path_ids}) == 18
     assert all(x.physical_opening_authenticated is False for x in found)
     assert all(x.customer_quantity_authorized is False for x in found)
+
+def test_two_distinct_cs_receipts_for_same_gap_fail_closed(monkeypatch):
+    """Conflicting native CS identities must not overwrite one gap closure."""
+    from pb_next_wall_ring_preview import (
+        KIND_CAVITY_SLIDER, build_layered_wall_doorway_room_rings,
+    )
+    from pb_source_native_cavity_slider_jamb_shadow import NativeCavitySliderThreshold
+
+    drawings, words = _scene()
+    first = NativeCavitySliderThreshold(
+        cs_word_index=1, width_word_index=0, printed_width_mm=720,
+        horizontal=True, band_pdf_pts=(100.0, 103.0),
+        clear_interval_pdf_pts=(40.0, 63.0), host_path_ids=(0, 1),
+        jamb_path_ids=(2, 3), leaf_path_id=4, page_index=2,
+    )
+    second = NativeCavitySliderThreshold(
+        cs_word_index=11, width_word_index=10, printed_width_mm=870,
+        horizontal=True, band_pdf_pts=(100.0, 103.0),
+        clear_interval_pdf_pts=(40.0, 63.0), host_path_ids=(10, 11),
+        jamb_path_ids=(12, 13), leaf_path_id=14, page_index=2,
+    )
+    monkeypatch.setattr(
+        "pb_source_native_cavity_slider_jamb_shadow.match_source_native_cavity_sliders",
+        lambda *a, **k: (first, second),
+    )
+    source_words = tuple(
+        {"text": str(w[4]), "bbox_pdf_pts": tuple(float(v) for v in w[:4]),
+         "source_ref": f"source-word:p2:w{i}"}
+        for i, w in enumerate(words)
+    )
+    result = build_layered_wall_doorway_room_rings(
+        drawings, source_sha256="a" * 64, page_index=2,
+        sliding_leaf_frame_closure=True,
+        source_words=source_words,
+        source_native_cs_jamb_closure=True,
+    )
+    source_cs = [
+        c for c in result.closures
+        if c.kind == KIND_CAVITY_SLIDER and len(c.native_path_indices) >= 5
+    ]
+    assert source_cs == []
+
+

@@ -39,7 +39,8 @@ def test_no_source_or_modified_bytes_never_issue_finish_customer_rows(tmp_path):
         tmp_path / "missing.pdf",
     )
     assert not_found.status == "ABSTAIN"
-    assert not_found.customer_rows
+    assert not_found.customer_rows == ()
+    assert "original_source_path_unavailable" in not_found.reason_codes
     wrong = tmp_path / "unverified.pdf"
     wrong.write_bytes(b"synthetic, not an original plan")
     result = issue_original_three_laurel_22_finish_customer_rows(wrong)

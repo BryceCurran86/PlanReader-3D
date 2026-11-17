@@ -2353,6 +2353,26 @@ def build_layered_wall_doorway_room_rings(
                     *receipt.clear_interval_pdf_pts,
                     (receipt.host_path_ids[0],), (receipt.host_path_ids[1],), True,
                 ))
+            # Two independently hosted CS receipts must not silently overwrite
+            # the same gap; conflicting source identities fail closed.
+            prior = native_cs_by_gap.get(selected)
+            if prior is not None and prior is not receipt:
+                prior_ids = (
+                    prior.cs_word_index,
+                    prior.leaf_path_id,
+                    prior.host_path_ids,
+                    prior.jamb_path_ids,
+                )
+                next_ids = (
+                    receipt.cs_word_index,
+                    receipt.leaf_path_id,
+                    receipt.host_path_ids,
+                    receipt.jamb_path_ids,
+                )
+                if prior_ids != next_ids:
+                    native_cs_duplicate_gaps.add(selected)
+                    native_cs_by_gap.pop(selected, None)
+                    continue
             native_cs_by_gap[selected] = receipt
     # PR #4300 only admits opaque source-black anonymous door arcs/leaf
     # strokes, never all furniture or coloured drawing ink as swing proof.

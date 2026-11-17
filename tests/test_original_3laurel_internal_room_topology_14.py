@@ -32,9 +32,10 @@ def test_sha_original_internal_door_thresholds_are_14_distinct_source_owned():
     assert all(r.first_host_path_id != r.second_host_path_id for r in hinges)
     assert all(r.host_path_ids[0] != r.host_path_ids[1] for r in sliders)
 
+    page_index = 2
     source_words = tuple(
         {"text": str(row[4]), "bbox_pdf_pts": tuple(float(v) for v in row[:4]),
-         "source_ref": f"source-word:p2:w{i}"}
+         "source_ref": f"source-word:p{page_index}:w{i}"}
         for i, row in enumerate(words)
     )
     candidate = build_layered_wall_doorway_room_rings(
