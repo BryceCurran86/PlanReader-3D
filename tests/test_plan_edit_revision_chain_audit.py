@@ -95,3 +95,34 @@ def test_cross_tenant_scope_isolated():
 def test_malformed_scope_rejected():
     with pytest.raises(ValueError):
         audit_plan_edit_revision_chain(fixture_db(), ("tenant",))
+
+
+class NoBulkCursor:
+    def __init__(self, cursor):
+        self.cursor = cursor
+    def __iter__(self):
+        return iter(self.cursor)
+    def fetchall(self):
+        raise AssertionError("revision PDFs must be streamed, never fetched in bulk")
+
+
+class StreamingGuardConnection(sqlite3.Connection):
+    def execute(self, sql, parameters=()):
+        cursor = super().execute(sql, parameters)
+        if "FROM plan_edit_revisions" in sql and "SELECT" in sql:
+            return NoBulkCursor(cursor)
+        return cursor
+
+
+def test_long_pdf_chain_uses_streaming_cursor_not_fetchall():
+    db = fixture_db()
+    for number in range(1, 101):
+        add_revision(db, number)
+    gated = sqlite3.connect(":memory:", factory=StreamingGuardConnection)
+    db.backup(gated)
+    result = audit_plan_edit_revision_chain(gated, KEY)
+    assert result.intact
+    assert result.revision_count == 100
+    # The empty-document case must remain valid without reading a blob.
+    other = ("different-tenant", *KEY[1:])
+    assert audit_plan_edit_revision_chain(gated, other).revision_count == 0
