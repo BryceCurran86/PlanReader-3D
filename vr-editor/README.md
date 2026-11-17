@@ -155,3 +155,17 @@ presentation highlight rather than replacing the colour of a finish study.
 The wall geometry, original-source witness, ledger, frozen quantities and
 commercial controls do not change. The effect is off by default and uses one
 small disposable texture for the whole scene, with no asset downloads.
+
+## Source-locked reviewer findings
+
+The VR review notes panel lets a reviewer pin up to 250 bounded questions to
+specific source object IDs and their exact object revisions. It supports
+low/normal/high priority, open/reviewed local state, find-in-model navigation,
+and handoff import/export. Imports fail closed on stale workspace, drawing SHA,
+snapshot, model revision or object revision. Data stays in memory unless the
+reviewer explicitly downloads a local JSON handoff (max 256 KB).
+
+No notes go into the construction source, correction ledger, commercial
+takeoff, quote, pricing or original PDF. "Reviewed" means a reviewer has
+looked at a note; it does **not** mean source-verified, approved or FIRM.
+Uploaded handoff files remain untrusted and cannot carry authority fields.
