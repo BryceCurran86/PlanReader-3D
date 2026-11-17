@@ -32,6 +32,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<VerifiedPreview | null>(null);
   const [costPreview, setCostPreview] = useState<VerifiedCostPreview | null>(null);
+  const [autoLive, setAutoLive] = useState(false);
   const previewRequestId = useRef(0);
   const pendingPreview = useRef<AbortController | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
@@ -64,6 +65,18 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
     setCostPreview(null);
     return () => { previewRequestId.current += 1; pendingPreview.current?.abort(); };
   }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
+
+  // Opt-in, debounced LIVE repricing: never dispatch incomplete corrections,
+  // and every typed change aborts the prior source/rate request.
+  useEffect(() => {
+    if (!autoLive || !enabled || reason.trim().length < 8 || !control) return;
+    const trimmed = value.trim();
+    if (!trimmed || (control.numeric &&
+      (!Number.isFinite(Number(trimmed)) || Number(trimmed) <= 0))) return;
+    const timer = window.setTimeout(() => { void sendPreview(true); }, 650);
+    return () => window.clearTimeout(timer);
+  }, [autoLive, enabled, kind, value, reason,
+      object.objectRevision, workspace.scope.snapshotId, control?.numeric]);
 
   async function sendPreview(withCost: boolean) {
     setError(null);
@@ -176,6 +189,14 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         onChange={e => { invalidatePreview(); setReason(e.target.value); }}
         placeholder="Identify the drawing, dimension or reviewed observation…"
       />
+      <label className="live-cost-auto">
+        <input type="checkbox" disabled={!enabled} checked={autoLive}
+          onChange={e => {
+            invalidatePreview();
+            setAutoLive(e.target.checked);
+          }}/>
+        Live update after changes (650 ms pause, verified source and company rates required)
+      </label>
       <div className="live-cost-actions">
         <button type="button" disabled={!enabled || working}
           onClick={() => void sendPreview(false)}>
@@ -201,9 +222,9 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
               : "PARTIAL COST TOTALS — unresolved targets or missing rates prevent a complete estimate."}
           </p>
           <div className="live-cost-summary">
-            <div><span>Before (inc. tax)</span><strong>{costPreview.currency} {costPreview.totals.before.sellIncTax}</strong></div>
-            <div><span>After (inc. tax)</span><strong>{costPreview.currency} {costPreview.totals.after.sellIncTax}</strong></div>
-            <div><span>Change (inc. tax)</span><strong>{costPreview.currency} {costPreview.totals.delta.sellIncTax}</strong></div>
+            <div><span>Before (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.before.sellIncTax}` : "UNPRICED"}</strong></div>
+            <div><span>After (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.after.sellIncTax}` : "UNPRICED"}</strong></div>
+            <div><span>Change (inc. tax)</span><strong>{costPreview.lines.length ? `${costPreview.currency} ${costPreview.totals.delta.sellIncTax}` : "UNPRICED"}</strong></div>
             <div><span>Direct cost change</span><strong>{costPreview.currency} {costPreview.totals.delta.direct}</strong></div>
             <div><span>Margin change</span><strong>{costPreview.currency} {costPreview.totals.delta.margin}</strong></div>
             <div><span>Tax change</span><strong>{costPreview.currency} {costPreview.totals.delta.tax}</strong></div>
