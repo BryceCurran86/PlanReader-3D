@@ -124,9 +124,25 @@ def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
         # Source title blocks may wrap a single drawing title across PDF
         # lines (Acacia p10: "Window" / "and Door Schedule"). Whitespace
         # layout is not part of the drawing's semantic title identity.
+        import re
+
         source_title_text = " ".join(document[page_index].get_text().split())
         normalized_expected_title = " ".join(expected_title.split())
-        if normalized_expected_title not in source_title_text:
+        # A cover sheet's drawing INDEX can mention "Floor Plan" without
+        # itself being that sheet (original 3Laurel A0.1 versus A0.3).
+        # Require one explicit title-block field, not arbitrary page text.
+        # Title/metadata may wrap across multiple PDF text lines.
+        titles = re.findall(
+            r"\\bDrawing\\s+(?:title|name)\\s*:\\s*(.*?)\\s*"
+            r"(?=\\bScale\\s*:|\\bPaper\\s+size\\s*:|"
+            r"\\bDrawing\\s+number\\s*:|\\bDate\\s+issued\\s*:|"
+            r"\\bProject\\s+stage\\s*:|$)",
+            source_title_text,
+            flags=re.IGNORECASE,
+        )
+        if (len(titles) != 1
+                or " ".join(titles[0].split()).casefold()
+                != normalized_expected_title.casefold()):
             raise ValueError("original_footprint_original_page_title_mismatch")
     return True
 
