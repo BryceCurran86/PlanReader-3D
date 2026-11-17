@@ -367,6 +367,9 @@ def attempt_source_native_outer_wall_first(
             bars, source_words,
             shared_dividers=party_dividers,
             source_wall_union=union,
+            # Preserve original native path indices, layers and viewport
+            # identity for source-positive non-wall role discrimination.
+            source_drawings=opening_drawings,
         )
     polygons = list(union.geoms) if hasattr(union, "geoms") else [union]
     # A true wall-band perimeter has an interior void. Open-ended lines,
@@ -440,10 +443,24 @@ def attempt_source_native_outer_wall_first(
         bar for bar in bars
         if not (expanded_outer.covers(bar.polygon) or envelope.covers(bar.polygon))
     ]
-    structural_outside = [
-        bar for bar in outside_bars
-        if not bar_proven_outside_envelope(bar, wall_ink, source_words)
-    ]
+    if party_dividers and walk is not None and walk.status == "CANDIDATE":
+        # The SAME source-owned unbounded-face walker already audited
+        # every outside band using native owner/geometry and sheet roles.
+        # The older generic text-only outside check lacks that source
+        # audit; preserve it for unproved or single-building inputs.
+        if not outer.equals_exact(
+            Polygon(walk.clockwise_pdf_pts), tolerance=CONTACT_PT,
+        ):
+            return SourceNativeOuterWallAttempt(
+                "ABSTAINED", "source_outside_walk_polygon_authority_mismatch",
+                **counts,
+            )
+        structural_outside = []
+    else:
+        structural_outside = [
+            bar for bar in outside_bars
+            if not bar_proven_outside_envelope(bar, wall_ink, source_words)
+        ]
     if structural_outside:
         # The short receipt contains actual original path_index owners for
         # rejected source wall BANDS; composite bars may reference many more
@@ -505,20 +522,10 @@ def attempt_source_native_outer_wall_first(
     return SourceNativeOuterWallAttempt(
         "CANDIDATE", "source_closed_painted_wall_ring_needs_exterior_role_authentication",
         points, sources,
-        source_wall_band_count=counts["source_wall_band_count"],
-        source_stroke_pair_band_count=counts["source_stroke_pair_band_count"],
-        source_heavy_stroke_band_count=counts["source_heavy_stroke_band_count"],
-        source_cavity_multi_face_band_count=counts["source_cavity_multi_face_band_count"],
-        source_wide_face_pair_band_count=counts["source_wide_face_pair_band_count"],
-        source_wall_path_count=counts["source_wall_path_count"],
-        graph=graph,
-        window_footprint_bridges=window_bridges,
-        garage_door_footprint_bridges=garage_bridges,
-        swing_door_footprint_bridges=swing_bridges,
-        sliding_door_footprint_bridges=sliding_bridges,
-        neutral_wall_seams=neutral_seams,
-        viewport_pdf_pts=tuple(viewports) if viewports is not None else None,
         diagnostic_closed_wall_loop_count=len(closed),
         diagnostic_party_wall_bounded_unit_loops=divider_bounded_unit_loops,
         diagnostic_wall_bands_outside_loop=0,
+        # Retain source-positive PARTY / original aperture / outside-walk
+        # evidence on the successful path, just as on ABSTAIN paths.
+        **counts,
     )

@@ -38,6 +38,10 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Native role audit never manufactures exterior wall evidence.
+    source_outside_band_count_before_role_audit: int = 0
+    source_proven_nonwall_band_count: int = 0
+    source_outside_role_audit_applied: bool = False
     # Shadow trace for review when other source-wall components remain.
     # Never use this ring to issue a customer quantity or report FIRM.
     diagnostic_unsealed_ring_pdf_pts: tuple[tuple[float, float], ...] = ()
@@ -64,6 +68,12 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        if self.source_outside_role_audit_applied:
+            payload["source_outside_band_count_before_role_audit"] = (
+                self.source_outside_band_count_before_role_audit
+            )
+            payload["source_proven_nonwall_band_count"] = self.source_proven_nonwall_band_count
+            payload["source_outside_role_audit_noncommercial"] = True
         # Preserve byte-compatible old receipts when no unsealed preview
         # exists. Only outside-component ABSTAIN adds a diagnostic field.
         if self.diagnostic_unsealed_ring_pdf_pts:
@@ -111,6 +121,228 @@ def _owner(bar):
     except (TypeError, ValueError, OverflowError):
         return None
     return (geom, ids) if ids and min(ids) >= 0 else None
+
+
+def _source_frame_rule_overlaps_bar(geom: Polygon, row: Mapping[str, Any]) -> bool:
+    """Require original frame-line geometry to match the alleged outside bar.
+
+    A source path index from a proven sheet frame is insufficient if the
+    supplied wall-like bar is physically somewhere else on the drawing.
+    """
+    from shapely.geometry import LineString
+
+    items = row.get("items") or ()
+    if len(items) != 1 or not items[0] or items[0][0] != "l":
+        return False
+    try:
+        points = []
+        for point in items[0][1:3]:
+            if hasattr(point, "x"):
+                coords = float(point.x), float(point.y)
+            else:
+                coords = float(point[0]), float(point[1])
+            if not all(math.isfinite(v) for v in coords):
+                return False
+            points.append(coords)
+        if len(points) != 2 or points[0] == points[1]:
+            return False
+        source_line = LineString(points)
+        overlap = geom.buffer(CONTACT_PT).intersection(source_line).length
+        return overlap >= min(1.0, 0.1 * source_line.length)
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _original_native_line_overlaps_bar(geom: Polygon, row: Mapping[str, Any]) -> bool:
+    """Native PDF source ink on the alleged bar, never a blind position snap."""
+    from shapely.geometry import LineString
+
+    for item in row.get("items") or ():
+        if not item or item[0] != "l" or len(item) < 3:
+            continue
+        try:
+            points = []
+            for point in item[1:3]:
+                xy = ((float(point.x), float(point.y)) if hasattr(point, "x")
+                      else (float(point[0]), float(point[1])))
+                if not all(map(math.isfinite, xy)):
+                    raise ValueError("source_nonfinite")
+                points.append(xy)
+            line = LineString(points)
+            if line.length >= 1.0 and geom.buffer(CONTACT_PT).intersection(line).length >= min(1.0, 0.1 * line.length):
+                return True
+        except (ValueError, TypeError, IndexError, OverflowError):
+            continue
+    return False
+
+
+def _pure_original_source_nonwall_bar(
+    geom: Polygon, ids: tuple[int, ...],
+    drawings: Sequence[Mapping[str, Any] | object],
+) -> bool:
+    """Every native owner must be independently classified non-wall, with ink."""
+    prefixes = ("annotation_", "structure_slab")
+    if not ids:
+        return False
+    owners = [drawings[i] for i in ids]
+    if not all(
+        isinstance(row, Mapping)
+        and str(row.get("layer") or "").lower().startswith(prefixes)
+        for row in owners
+    ):
+        return False
+    from pb_source_native_exterior_endpoint_authority_shadow import (
+        ROLE_EXCLUSION, classify_source_native_path_role,
+    )
+    if any(classify_source_native_path_role(row) != ROLE_EXCLUSION for row in owners):
+        return False
+    return any(_original_native_line_overlaps_bar(geom, row) for row in owners)
+
+
+def _source_words_near_bar(geom: Polygon, words, *, radius: float) -> tuple[str, ...]:
+    center = geom.centroid
+    return tuple(label for label, point in _word_centers(words)
+                 if center.distance(point) <= radius)
+
+
+def _native_source_stroke_only(ids, drawings) -> bool:
+    return bool(ids) and all(
+        drawings[i].get("type") == "s" and drawings[i].get("fill") is None
+        and type(drawings[i].get("width")) in (float, int)
+        and 0 < float(drawings[i]["width"]) <= 0.85
+        for i in ids
+    )
+
+
+def _source_mixed_title_frame_nonwall(geom: Polygon, ids, drawings, sheet_nonwall) -> bool:
+    """Source authenticated frame plus attached native annotation, no wall."""
+    if not sheet_nonwall or not any(i in sheet_nonwall for i in ids):
+        return False
+    if not all(
+        i in sheet_nonwall
+        or str(drawings[i].get("layer") or "").lower().startswith("annotation_")
+        for i in ids
+    ):
+        return False
+    if any(
+        i in sheet_nonwall
+        and not _original_native_line_overlaps_bar(geom, drawings[i])
+        for i in ids
+    ):
+        return False
+    return any(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids)
+
+
+def _source_printed_scale_graphic_nonwall(geom: Polygon, ids, drawings, words) -> bool:
+    """Require source drawn scale bar + SCALE and spaced original printed ticks."""
+    if not _native_source_stroke_only(ids, drawings):
+        return False
+    if not all(
+        str(drawings[i].get("layer") or "").lower() in ("", "annotation_general")
+        for i in ids
+    ):
+        return False
+    if not any(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
+    rows = _word_centers(words)
+    for name, title in rows:
+        if name != "SCALE":
+            continue
+        numbers = [
+            (int(label), point) for label, point in rows
+            if label in {str(k) for k in range(10)}
+            and 0 < point.x - title.x < 360
+            and 0 < point.y - title.y < 16
+        ]
+        by_number = {n: point for n, point in numbers}
+        if not all(n in by_number for n in range(7)):
+            continue
+        steps = [by_number[n + 1].x - by_number[n].x for n in range(6)]
+        if min(steps) <= 0 or max(steps) - min(steps) > 1.5:
+            continue
+        x0, y0, x1, y1 = geom.bounds
+        if (by_number[0].x - 10 <= x0 <= x1 <= by_number[6].x + 170
+                and title.y - 25 <= y0 <= y1 <= title.y + 27):
+            return True
+    return False
+
+
+def _source_named_compact_outside_post(geom: Polygon, ids, drawings, words) -> bool:
+    """Native compact solid square and original POST/ALFRESCO printed words."""
+    if len(ids) != 1:
+        return False
+    source = drawings[ids[0]]
+    layer = str(source.get("layer") or "").lower()
+    if "wall" not in layer or "external" not in layer:
+        return False
+    if source.get("type") != "f" or source.get("fill") is None:
+        return False
+    if max(source["fill"]) > 0.4:
+        return False
+    width, height = geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1]
+    if not (0.5 <= min(width, height) and max(width, height) <= 6.0
+            and max(width, height) / min(width, height) < 1.8):
+        return False
+    return (
+        "POST" in _source_words_near_bar(geom, words, radius=75)
+        and "ALFRESCO" in _source_words_near_bar(geom, words, radius=95)
+    )
+
+
+def _source_named_service_nonwall(geom: Polygon, ids, drawings, words) -> bool:
+    """Original stormwater downpipe or bottled gas source symbols, not walls."""
+    if len(ids) < 2 or not _native_source_stroke_only(ids, drawings):
+        return False
+    layers = {str(drawings[i].get("layer") or "").lower() for i in ids}
+    if not layers or not all(layer.startswith("service_") for layer in layers):
+        return False
+    if not any(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
+    labels = _source_words_near_bar(geom, words, radius=40)
+    if "service_stormwatergeneral" in layers:
+        return "DP" in labels
+    if layers == {"service_gas.bottled"} and len(ids) >= 3:
+        return geom.bounds[2] - geom.bounds[0] < 20 and geom.bounds[3] - geom.bounds[1] < 30
+    return False
+
+
+def _source_outdoor_nonwall_tick(geom: Polygon, ids, drawings, words) -> bool:
+    """Small native outdoor slab/roof/datum mark, not a solid filled wall."""
+    if len(ids) < 2 or not _native_source_stroke_only(ids, drawings):
+        return False
+    width, height = geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1]
+    if max(width, height) > 15.0 or min(width, height) <= 0:
+        return False
+    layers = {str(drawings[i].get("layer") or "").lower() for i in ids}
+    if "structure_slab" not in layers or not (
+        "structure_roof" in layers or "finish_floor" in layers
+    ):
+        return False
+    if not any(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
+    labels = _source_words_near_bar(geom, words, radius=95)
+    return any(x in labels for x in ("ALFRESCO", "PORCH", "DECK", "PATIO"))
+
+
+def _source_numbered_dimension_tick(geom: Polygon, ids, drawings, words) -> bool:
+    """Short, unfilled native extension intersecting printed dimension chain."""
+    import re
+
+    if len(ids) < 2 or not _native_source_stroke_only(ids, drawings):
+        return False
+    width, height = geom.bounds[2] - geom.bounds[0], geom.bounds[3] - geom.bounds[1]
+    if min(width, height) <= 0 or max(width, height) > 15.0:
+        return False
+    layers = {str(drawings[i].get("layer") or "").lower() for i in ids}
+    if not any("wall" in layer and "external" in layer for layer in layers):
+        return False
+    if any(layer.startswith("enclosure_wallinternal") for layer in layers):
+        return False
+    if not any(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
+    labels = _source_words_near_bar(geom, words, radius=55)
+    numbers = [label for label in labels if re.fullmatch(r"[0-9][0-9,]*", label)]
+    return len(set(numbers)) >= 2
 
 
 def _clockwise_page_ring(source_exterior):
@@ -214,6 +446,7 @@ def walk_source_unbounded_building_face(
     *,
     shared_dividers: Sequence[CandidateSharedBuildingDivider] = (),
     source_wall_union: Any | None = None,
+    source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
 ) -> OutsideFacingBuildingWalk:
     """Walk OUTSIDE-facing source wall network; fail closed on unjoined zones.
 
@@ -314,7 +547,136 @@ def walk_source_unbounded_building_face(
     # not the wall-paint polygon (whose holes would falsely eject it).
     # Truly outside structural bodies remain a hard abstention.
     candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
-    extra = sum(1 for geom, _ in owners if not candidate_outer_domain.covers(geom))
+    # Original p3 includes remote black annotation, slab and service paint
+    # which can be collected as wall-shaped geometry. Existing source role
+    # classification independently distinguishes those non-wall natives.
+    # The same physical exterior walker and union remain unchanged; this
+    # check never crops coordinates or creates a missing wall.
+    outside = [
+        (bar, owned) for bar in wall_bars
+        if (owned := _owner(bar)) is not None
+        and not candidate_outer_domain.covers(owned[0])
+    ]
+    excluded_nonwall = 0
+    unresolved = []
+    if source_drawings is not None:
+        from pb_source_outer_house_continuity_shadow import (
+            ROLE_OUTDOOR, ROLE_POST, classify_outside_envelope_role,
+        )
+        from pb_source_native_exterior_endpoint_authority_shadow import (
+            ROLE_EXCLUSION, classify_source_native_path_role,
+        )
+        from pb_source_sheet_frame_roles_shadow import (
+            source_sheet_frame_nonwall_path_ids,
+        )
+        sheet_nonwall = source_sheet_frame_nonwall_path_ids(
+            source_drawings, source_words,
+        )
+        # The native viewport of the authenticated *inside* wall graph is
+        # the only acceptable scope for non-wall exclusions outside the
+        # proposed ring. Matching empty strings are not source authority;
+        # drawings from a foreign sheet region cannot erase real walls.
+        from pb_source_native_exterior_endpoint_authority_shadow import (
+            ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL,
+        )
+
+        def _viewport(row):
+            return str(
+                row.get("source_viewport_id") or row.get("viewport_id") or ""
+            ).strip()
+
+        interior_wall_views = {
+            _viewport(source_drawings[idx])
+            for candidate_bar in wall_bars
+            if (owner := _owner(candidate_bar)) is not None
+            and candidate_outer_domain.covers(owner[0])
+            for idx in owner[1]
+            if type(idx) is int and 0 <= idx < len(source_drawings)
+            and isinstance(source_drawings[idx], Mapping)
+            and classify_source_native_path_role(source_drawings[idx])
+            in (ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL)
+            and _viewport(source_drawings[idx])
+        }
+        for bar, (geom, ids) in outside:
+            # A stale/partial native-path index or conflicting viewport
+            # makes the candidate unresolved. Never trust one excluded
+            # owner in a mixed structural/unknown composite.
+            valid = all(
+                type(idx) is int and 0 <= idx < len(source_drawings)
+                and isinstance(source_drawings[idx], Mapping)
+                for idx in ids
+            )
+            if not valid:
+                unresolved.append((bar, ids))
+                continue
+            # Strict native frame attestation is independent of viewport
+            # metadata: four exact original frame corners + three title
+            # tokens, AND each asserted source path physically overlaps
+            # the alleged wall-like outside bar. No path-index-only grant.
+            # This is negative *sheet* evidence, never exterior wall proof.
+            if sheet_nonwall and all(idx in sheet_nonwall for idx in ids):
+                if all(
+                    _source_frame_rule_overlaps_bar(geom, source_drawings[idx])
+                    for idx in ids
+                ):
+                    excluded_nonwall += 1
+                    continue
+            # Original CAD can have no viewport metadata at all. A single
+            # native straight line with an EXPLICIT nonwall source layer and
+            # the same original geometry as its outside-bar candidate is
+            # negative structural-role evidence independent of viewport.
+            # This is deliberately narrower than generic ROLE_EXCLUSION:
+            # dashed/green/compact unlabeled exterior posts stay unresolved.
+            if all(
+                classify_source_native_path_role(source_drawings[idx])
+                == ROLE_EXCLUSION
+                and str(source_drawings[idx].get("layer") or "").lower()
+                .startswith(("annotation_", "structure_slab", "service_"))
+                and _source_frame_rule_overlaps_bar(
+                    geom, source_drawings[idx]
+                )
+                for idx in ids
+            ):
+                excluded_nonwall += 1
+                continue
+            # Source-exact negative-only shadow roles. Every exception
+            # consumes original native source IDs plus printed source/ink;
+            # never infer physical wall joins or issue measurements.
+            if any((
+                _pure_original_source_nonwall_bar(geom, ids, source_drawings),
+                _source_mixed_title_frame_nonwall(geom, ids, source_drawings, sheet_nonwall),
+                _source_printed_scale_graphic_nonwall(geom, ids, source_drawings, source_words),
+                _source_named_compact_outside_post(geom, ids, source_drawings, source_words),
+                _source_named_service_nonwall(geom, ids, source_drawings, source_words),
+                _source_outdoor_nonwall_tick(geom, ids, source_drawings, source_words),
+                _source_numbered_dimension_tick(geom, ids, source_drawings, source_words),
+            )):
+                excluded_nonwall += 1
+                continue
+            viewports = {_viewport(source_drawings[idx]) for idx in ids}
+            if (len(viewports) != 1 or "" in viewports
+                    or len(interior_wall_views) != 1
+                    or viewports != interior_wall_views):
+                unresolved.append((bar, ids))
+                continue
+            role, _reason = classify_outside_envelope_role(
+                bar, source_drawings, source_words,
+            )
+            if role in (ROLE_OUTDOOR, ROLE_POST):
+                excluded_nonwall += 1
+            elif sheet_nonwall and all(
+                idx in sheet_nonwall
+                or classify_source_native_path_role(source_drawings[idx]) == ROLE_EXCLUSION
+                for idx in ids
+            ):
+                # A layerless sheet frame + annotation composite is neither
+                # a house wall nor an excuse to drop a mixed physical owner.
+                excluded_nonwall += 1
+            else:
+                unresolved.append((bar, ids))
+    else:
+        unresolved = [(bar, ids) for bar, (_geom, ids) in outside]
+    extra = len(unresolved)
     if extra:
         # Both occupied dwelling zones are independently enclosed, but
         # unresolved source-wall components exist beyond the outer ring.
@@ -327,6 +689,9 @@ def walk_source_unbounded_building_face(
             enclosed_region_count=len(holes),
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
+            source_outside_band_count_before_role_audit=len(outside),
+            source_proven_nonwall_band_count=excluded_nonwall,
+            source_outside_role_audit_applied=source_drawings is not None,
             internal_party_wall_native_path_ids=party_ids,
             diagnostic_unsealed_ring_pdf_pts=(
                 preview_ring if 5 <= len(preview_ring) <= 20_000 else ()
