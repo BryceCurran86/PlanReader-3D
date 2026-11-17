@@ -29,3 +29,13 @@ export function studyColor(row: EditorObject, study: FinishStudy | null): number
     return null;
   return FINISH_SWATCHES.find(s => s.id === study.swatch)?.color ?? null;
 }
+
+/** Advance one temporary colour per deliberate VR squeeze, then clear. */
+export function nextStudy(row: EditorObject | null, current: FinishStudy | null): FinishStudy | null {
+  if (!visualStudyAllowed(row) || !row) return null;
+  const index = current?.objectId === row.objectId
+    ? FINISH_SWATCHES.findIndex(s => s.id === current.swatch) : -1;
+  const next = index + 1;
+  return next < FINISH_SWATCHES.length
+    ? { objectId: row.objectId, swatch: FINISH_SWATCHES[next].id } : null;
+}
