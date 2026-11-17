@@ -341,3 +341,34 @@ def test_unrepaired_footprint_keeps_its_original_raster_bbox():
     refined, receipt = refine_external_footprint_against_wall_ink(candidate, ())
     assert receipt["collapsed_detour_count"] == 0
     assert refined.bbox_pdf_pts == candidate.bbox_pdf_pts
+
+
+@pytest.mark.parametrize("coords", [
+    (40., 40., 20., 50.), (40., 40., 50., 20.),
+])
+def test_inverted_native_path_bbox_cannot_authenticate_wall_ink(coords):
+    from types import SimpleNamespace
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, bound_native_drawings_to_footprint,
+    )
+    sha = "c" * 64
+    trace = ExternalFootprintTrace(
+        sha, 0, "CANDIDATE", "source_review",
+        polygon_pdf_pts=((10., 10.), (100., 10.), (100., 100.), (10., 100.)),
+        bbox_pdf_pts=(10., 10., 100., 100.),
+    )
+    invalid_source = {
+        "rect": SimpleNamespace(x0=coords[0], y0=coords[1],
+                                x1=coords[2], y1=coords[3]),
+        "layer": "Enclosure_WallExternal",
+        "color": (0., 0., 0.), "fill": (0., 0., 0.),
+        "items": (("l", fitz.Point(20, 20), fitz.Point(80, 20)),),
+    }
+    result = bound_native_drawings_to_footprint(
+        (invalid_source,), trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.selected_source_path_indices == ()
+    assert result.commercial_publishable is False
