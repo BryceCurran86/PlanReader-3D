@@ -715,7 +715,7 @@ def walk_source_unbounded_building_face(
             if not local_ids:
                 # No independently located native path on this residual
                 # band; fail closed rather than drop or invent owners.
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
                 continue
             viewports = {
                 str(
@@ -726,7 +726,7 @@ def walk_source_unbounded_building_face(
                 for idx in local_ids
             }
             if len(viewports) != 1:
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
                 continue
             local_bar = _LocalResidualBar(bar, local_ids)
             path_roles = {
@@ -754,7 +754,7 @@ def walk_source_unbounded_building_face(
             ):
                 excluded_nonwall += 1
             else:
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
     else:
         unresolved = [(bar, ids) for bar, (_geom, ids) in outside]
     extra = len(unresolved)
