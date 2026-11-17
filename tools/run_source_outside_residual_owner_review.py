@@ -10,7 +10,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
 
