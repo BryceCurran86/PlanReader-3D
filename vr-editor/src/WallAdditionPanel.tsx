@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SceneManifest } from "./types";
 import {
-  freshWallBatch,currentWallBatch,addOrReplaceWallStudy,removeWallStudy,
+  freshWallBatch,currentWallBatch,wallBatchSourceKey,addOrReplaceWallStudy,removeWallStudy,
   undoWallBatch,redoWallBatch,summarizeWallBatch,compareWallBatches,exportWallBatchReview,
 } from "./wallBatchStudy";
 import {
@@ -45,10 +45,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   const levelOptions=[...new Set(scene.objects.map(o=>o.levelId).filter(
     (s):s is string=>typeof s==="string"&&!!s,
   ))].sort();
-  const sceneIdentity=[
-    scene.scope.workspaceId,scene.scope.sourceSha256,
-    scene.scope.snapshotId,scene.scope.modelRevision,
-  ].join(":");
+  const sceneIdentity=wallBatchSourceKey(scene);
   useEffect(()=>{
     controller.current?.abort();
     proposal.current=null;
@@ -59,7 +56,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     onSketch(null);
     onBatchSketches([]);
     return ()=>controller.current?.abort();
-  },[sceneIdentity,onSketch]);
+  },[sceneIdentity,authenticated,onSketch,onBatchSketches]);
 
   useEffect(()=>{
     onBatchSketches(verifiedBatchSketches);
