@@ -781,7 +781,7 @@ def walk_source_unbounded_building_face(
             candidate_viewport = next(iter(viewports))
             if (
                 ambiguous_inside_viewport
-                or (scoped_inside_viewport and candidate_viewport != scoped_inside_viewport)
+                or candidate_viewport != scoped_inside_viewport
             ):
                 unresolved.append((bar, local_ids))
                 continue
