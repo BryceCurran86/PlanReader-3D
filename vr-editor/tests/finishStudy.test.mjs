@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FINISH_SWATCHES, studyColor, visualStudyAllowed } from "../src/finishStudy.ts";
+import { FINISH_SWATCHES, nextStudy, studyColor, visualStudyAllowed } from "../src/finishStudy.ts";
 
 function wall(kind = "wallFace") {
   return {
@@ -40,4 +40,18 @@ test("swatches are an explicit closed palette with no rates, finish codes or aut
     assert.match(swatch.label, /visual only/);
     assert.deepEqual(Object.keys(swatch).sort(), ["color", "id", "label"]);
   }
+});
+
+test("VR squeeze cycles only selected valid walls and eventually clears study", () => {
+  const row = wall();
+  let study = null;
+  for (const swatch of FINISH_SWATCHES) {
+    study = nextStudy(row, study);
+    assert.deepEqual(study, { objectId: row.objectId, swatch: swatch.id });
+  }
+  assert.equal(nextStudy(row, study), null);
+  assert.deepEqual(nextStudy(row, { objectId: "other", swatch: "clay" }),
+    { objectId: row.objectId, swatch: "chalk" });
+  assert.equal(nextStudy(wall("wallLine"), study), null);
+  assert.equal(nextStudy(null, study), null);
 });
