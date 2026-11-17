@@ -427,7 +427,7 @@ def test_exact_multi_path_original_stroke_chain_never_mints_wall_area():
     assert edge.commercial_publishable is False
 
 
-def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
+def test_segment_chain_fails_closed_on_real_middle_and_oversized_terminal_gaps():
     trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
     middle = [
         _stroke((200, 0), (200, 25)),
@@ -439,15 +439,59 @@ def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
     assert missing.status is EvidenceResolutionStatus.ABSTAINED
     assert missing.classification == "incomplete_source_native_wall_ink_chain"
     assert not missing.physical_wall_authenticated
-    end_gap = [
+    # Sub-association (~1 pt) terminal shortfall is witnessed; oversized is not.
+    near_tip = [
         _stroke((200, 0.5), (200, 25)),
         _stroke((200, 25), (200, 50)),
         _stroke((200, 50), (200, 75)),
         _stroke((200, 75), (200, 100)),
     ]
-    tip = own_exterior_contour_native_paths(end_gap, trace)[3]
-    assert tip.status is EvidenceResolutionStatus.ABSTAINED
-    assert tip.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+    tip_ok = own_exterior_contour_native_paths(near_tip, trace)[3]
+    assert tip_ok.status is EvidenceResolutionStatus.CANDIDATE
+    assert tip_ok.classification == "source_native_wall_ink_chain_candidate"
+    assert tip_ok.chain_start_shortfall_pt == 0.5
+    assert tip_ok.contour_endpoint_association_pt == 2.5
+    assert tip_ok.physical_wall_authenticated is False
+    far_tip = [
+        _stroke((200, 4.0), (200, 25)),
+        _stroke((200, 25), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    tip_far = own_exterior_contour_native_paths(far_tip, trace)[3]
+    assert tip_far.status is EvidenceResolutionStatus.ABSTAINED
+    assert tip_far.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+    assert tip_far.chain_start_shortfall_pt == 4.0
+
+
+def test_acacia_east_style_chain_short_of_morphological_corners_is_complete_candidate():
+    """Painted east ink ends ~1 pt inside collapsed NE/SE corners — association, not join."""
+    trace = _trace(((328, 140), (328, 450), (904, 450), (904, 140)))
+    strokes = [
+        _stroke((903.1, 140.6), (903.1, 168.9)),
+        _stroke((903.1, 168.9), (903.1, 244.6)),
+        _stroke((903.1, 244.6), (903.1, 270.1)),
+        _stroke((903.1, 270.1), (903.1, 308.2)),
+        _stroke((903.1, 308.2), (903.1, 333.8)),
+        _stroke((903.1, 333.8), (903.1, 348.2)),
+        _stroke((903.1, 348.2), (903.1, 373.7)),
+        _stroke((903.1, 373.7), (903.1, 441.8)),
+        _stroke((903.1, 441.8), (903.1, 448.9)),
+    ]
+    # Also paint west/north/south unique owners so only east uses the chain path.
+    strokes = [
+        _stroke((328, 140), (328, 450)),
+        _stroke((328, 450), (904, 450)),
+        _stroke((904, 140), (328, 140)),
+        *strokes,
+    ]
+    east = own_exterior_contour_native_paths(strokes, trace)[2]
+    assert east.classification == "source_native_wall_ink_chain_candidate"
+    assert east.status is EvidenceResolutionStatus.CANDIDATE
+    assert east.chain_end_shortfall_pt is not None
+    assert east.chain_end_shortfall_pt <= 2.5
+    assert east.physical_wall_authenticated is False
+    assert east.commercial_publishable is False
 
 
 def test_parallel_source_chains_cannot_be_selected_as_one_wall():
