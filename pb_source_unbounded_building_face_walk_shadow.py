@@ -123,6 +123,36 @@ def _owner(bar):
     return (geom, ids) if ids and min(ids) >= 0 else None
 
 
+def _source_frame_rule_overlaps_bar(geom: Polygon, row: Mapping[str, Any]) -> bool:
+    """Require original frame-line geometry to match the alleged outside bar.
+
+    A source path index from a proven sheet frame is insufficient if the
+    supplied wall-like bar is physically somewhere else on the drawing.
+    """
+    from shapely.geometry import LineString
+
+    items = row.get("items") or ()
+    if len(items) != 1 or not items[0] or items[0][0] != "l":
+        return False
+    try:
+        points = []
+        for point in items[0][1:3]:
+            if hasattr(point, "x"):
+                coords = float(point.x), float(point.y)
+            else:
+                coords = float(point[0]), float(point[1])
+            if not all(math.isfinite(v) for v in coords):
+                return False
+            points.append(coords)
+        if len(points) != 2 or points[0] == points[1]:
+            return False
+        source_line = LineString(points)
+        overlap = geom.buffer(CONTACT_PT).intersection(source_line).length
+        return overlap >= min(1.0, 0.1 * source_line.length)
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
 def _clockwise_page_ring(source_exterior):
     coords = [(float(x), float(y)) for x, y in list(source_exterior.coords)[:-1]]
     if len(coords) < 4 or not all(math.isfinite(v) for pt in coords for v in pt):
@@ -387,6 +417,18 @@ def walk_source_unbounded_building_face(
             if not valid:
                 unresolved.append((bar, ids))
                 continue
+            # Strict native frame attestation is independent of viewport
+            # metadata: four exact original frame corners + three title
+            # tokens, AND each asserted source path physically overlaps
+            # the alleged wall-like outside bar. No path-index-only grant.
+            # This is negative *sheet* evidence, never exterior wall proof.
+            if sheet_nonwall and all(idx in sheet_nonwall for idx in ids):
+                if all(
+                    _source_frame_rule_overlaps_bar(geom, source_drawings[idx])
+                    for idx in ids
+                ):
+                    excluded_nonwall += 1
+                    continue
             viewports = {_viewport(source_drawings[idx]) for idx in ids}
             if (len(viewports) != 1 or "" in viewports
                     or len(interior_wall_views) != 1
