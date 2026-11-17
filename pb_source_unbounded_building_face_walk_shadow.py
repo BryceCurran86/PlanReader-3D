@@ -677,6 +677,11 @@ def walk_source_unbounded_building_face(
                 for token in ("service", "storm", "gas", "roof", "finish")
             )
 
+        def _row_viewport(row: Mapping[str, Any]) -> str:
+            return str(
+                row.get("source_viewport_id") or row.get("viewport_id") or ""
+            ).strip()
+
         def _nonwall_residual_path(idx: int) -> bool:
             # Only *independently source-authenticated* nonwalls can be
             # excluded. A thin unlayered, unfilled source stroke may be a real
@@ -689,6 +694,17 @@ def walk_source_unbounded_building_face(
                 classify_source_native_path_role(row) == ROLE_EXCLUSION
                 and _service_or_roof_layer(row)
             )
+
+        sealed_viewports = {
+            _row_viewport(source_drawings[idx])
+            for bar in wall_bars
+            if (owned := _owner(bar)) is not None
+            and candidate_outer_domain.covers(owned[0])
+            for idx in owned[1]
+            if type(idx) is int
+            and 0 <= idx < len(source_drawings)
+            and isinstance(source_drawings[idx], Mapping)
+        }
 
         for bar, (geom, ids) in outside:
             # A stale/partial native-path index or conflicting viewport
@@ -709,14 +725,15 @@ def walk_source_unbounded_building_face(
                 unresolved.append((bar, ids))
                 continue
             viewports = {
-                str(
-                    source_drawings[idx].get("source_viewport_id")
-                    or source_drawings[idx].get("viewport_id")
-                    or ""
-                ).strip()
-                for idx in local_ids
+                _row_viewport(source_drawings[idx]) for idx in local_ids
             }
             if len(viewports) != 1:
+                unresolved.append((bar, ids))
+                continue
+            residual_viewport = next(iter(viewports))
+            # A foreign or blank viewport cannot erase an outside band that
+            # belongs to a different sealed floor-plan wall viewport.
+            if sealed_viewports and residual_viewport not in sealed_viewports:
                 unresolved.append((bar, ids))
                 continue
             local_bar = _LocalResidualBar(bar, local_ids)

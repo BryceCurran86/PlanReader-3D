@@ -791,8 +791,16 @@ def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
     rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0),
              "viewport_id": "floor"} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0),
-                "viewport_id": "floor"}
+    # Local residual ownership requires intersecting native geometry; a bare
+    # annotation dict without path bounds cannot prove a nonwall clearance.
+    rows[12] = {
+        "layer": "Annotation_FloorPlan",
+        "fill": (0, 0, 0),
+        "viewport_id": "floor",
+        "type": "s",
+        "width": 0.5,
+        "items": [("l", (281.5, 20), (281.5, 90))],
+    }
     accepted = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
@@ -954,15 +962,17 @@ def test_original_native_slab_and_service_lines_need_same_strict_geometry():
         )
         assert result.status == "CANDIDATE"
         assert result.measurement_authorized is False
-    # A service layer is not independently classified as ROLE_EXCLUSION
-    # in the original source classifier; refuse rather than assume.
+    # Named service layers are source-negative nonwalls under the same
+    # residual role audit as pure Service_Gas / storm residuals (#4444):
+    # they clear the outside veto rather than inventing a structural wall.
     rows12[12]["layer"] = "Service_StormwaterGeneral"
     unknown_service = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),),
         source_drawings=rows12,
     )
-    assert unknown_service.status == "ABSTAINED"
-    assert unknown_service.other_source_wall_band_count == 1
+    assert unknown_service.status == "CANDIDATE"
+    assert unknown_service.other_source_wall_band_count == 0
+    assert unknown_service.measurement_authorized is False
     # A compact source post with an EXTERIOR wall layer is explicitly
     # *not* an eligible negative layer, even if a primitive overlaps.
     rows12[12]["layer"] = "Enclosure_WallExternal"
