@@ -41,3 +41,76 @@ jobs:
           PYTHONPATH: .
         run: |
           python -m pytest -q tests/test_external_footprint_first_trace.py tests/test_source_native_exterior_edge_path_ownership.py
+
+  official-original-acacia-p2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install exact source replay dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify public YourHome original SHA and retain unproven edge roles
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import hashlib
+          import fitz
+          import requests
+          from pb_external_footprint_first_trace import trace_external_footprint_first
+          from pb_source_native_exterior_edge_path_ownership import (
+              own_exterior_contour_native_paths,
+          )
+
+          url = ("https://www.yourhome.gov.au/sites/default/files/2024-07/"
+                 "Technical%20drawings%20Acacia%20Brisbane.pdf")
+          source_sha = "435a6b610fea904f2b27dc330667d92a25919ada3368e5905e58ff92e047f37a"
+          response = requests.get(url, timeout=45)
+          response.raise_for_status()
+          data = response.content
+          if not data.startswith(b"%PDF") or len(data) > 8_000_000:
+              raise SystemExit("Public original was not an expected bounded PDF")
+          actual = hashlib.sha256(data).hexdigest()
+          if actual != source_sha:
+              raise SystemExit(
+                  "Original Acacia SOURCE SHA mismatch; do not substitute a different PDF"
+              )
+          with fitz.open(stream=data, filetype="pdf") as doc:
+              assert doc.page_count >= 2
+              drawings = doc[1].get_drawings()
+              assert len(drawings) == 6917
+          traces = trace_external_footprint_first(
+              data, source_sha256=source_sha, page_indices=(1,)
+          )
+          assert len(traces) == 1
+          trace = traces[0]
+          assert trace.page_index == 1
+          assert trace.status in ("CANDIDATE", "ABSTAINED")
+          assert not trace.commercial_publishable and not trace.measurement_authorized
+          if trace.status == "CANDIDATE":
+              edges = own_exterior_contour_native_paths(drawings, trace)
+              assert len(edges) == len(trace.polygon_pdf_pts)
+              assert all(
+                  not edge.physical_wall_authenticated
+                  and not edge.can_issue_area
+                  and not edge.commercial_publishable
+                  for edge in edges
+              )
+              print("ORIGINAL ACACIA EDGE SOURCE ROLES", [
+                  {"edge":edge.edge_index, "status":edge.status.value,
+                   "reason":edge.reason, "role":edge.classification,
+                   "path_ids":list(edge.native_path_indices)}
+                  for edge in edges
+              ])
+          print("SOURCE_SHA_VERIFIED",source_sha,
+                "ORIGINAL_PAGE",2,"SOURCE_INK_ONLY_NO_COMMERCIAL_AUTH",True)
+          PY
