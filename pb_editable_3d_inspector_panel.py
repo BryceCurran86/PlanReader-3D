@@ -85,6 +85,7 @@ stale and non-publishable as it already was.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -1044,6 +1045,80 @@ def _render_linked_quantities(obj: EditableGeometryObject, rows: Dict[str, Takeo
 # Panel entry point
 # ---------------------------------------------------------------------------
 
+def _render_vr_review_scene_export(
+    workspace: Dict[str, Any],
+    ledger: Editable3DCorrectionLedger,
+    object_ids: List[str],
+    correction_count: int,
+) -> None:
+    """Explicit user download into the separate VR viewer; no source authority.
+
+    A PDF uploaded into the same workspace as a mass does NOT establish a
+    native source path/host/canonical ID for that mass. The scene compiler
+    therefore marks every rendered object REVIEW and forbids edits/quantities.
+    """
+    from pb_planreader_3d_app import lquery
+    from pb_vr_editor_workspace_review_export import export_workspace_review_scene
+
+    workspace_id = int(workspace["id"])
+    docs = lquery(
+        "SELECT id, workspace_id, file_name, mime_type, sha256 FROM documents "
+        "WHERE workspace_id=? ORDER BY id",
+        (workspace_id,),
+    )
+    candidates = [
+        d for d in docs
+        if (str(d.get("mime_type") or "").lower().strip() == "application/pdf"
+            or str(d.get("file_name") or "").lower().endswith(".pdf"))
+        and isinstance(d.get("sha256"), str)
+        and len(d["sha256"]) == 64
+    ]
+    with st.expander("Download a 3D / VR review scene (unverified source)"):
+        st.caption(
+            "Uses the selected PDF's recorded document hash for *document identity "
+            "only*. Existing model masses lack authenticated native PDF wall paths; "
+            "all exported walls remain REVIEW, with no editable or billable authority. "
+            "Import the JSON in PlanReader's separate VR viewer."
+        )
+        if not candidates:
+            st.info("No source-hashed PDF is recorded for this workspace.")
+            return
+        indexed = {int(d["id"]): d for d in candidates}
+        chosen_id = st.selectbox(
+            "Document to identify this review",
+            sorted(indexed),
+            format_func=lambda doc_id: (
+                f"{indexed[doc_id].get('file_name') or 'PDF'} (document {doc_id})"
+            ),
+            key=f"_vr_review_document_{workspace_id}",
+        )
+        objects = [ledger.get_object(oid) for oid in object_ids]
+        if any(obj is None for obj in objects):
+            st.warning("Some workspace objects disappeared during hydration; export blocked.")
+            return
+        try:
+            manifest = export_workspace_review_scene(
+                workspace=workspace,
+                document=indexed[chosen_id],
+                objects=objects,
+                correction_count=correction_count,
+            )
+            data = json.dumps(manifest, sort_keys=True, allow_nan=False).encode("utf-8")
+            if len(data) > 10 * 1024 * 1024:
+                st.warning("Review scene exceeds the 10 MB browser export limit.")
+                return
+        except (TypeError, ValueError) as exc:
+            st.warning(f"Cannot export unverified scene: {exc}")
+            return
+        st.download_button(
+            "Download read-only VR review JSON",
+            data=data,
+            file_name=f"planreader_workspace_{workspace_id}_review_scene.json",
+            mime="application/json",
+            key=f"_vr_review_export_{workspace_id}",
+        )
+
+
 def render_editable_3d_inspector_panel(workspace: Optional[Dict[str, Any]] = None) -> None:
     """Inspector for the editable-3D correction/approval/quantity backend
     (D.1-D.10). Two mutation controls, both persisted: a length/height
@@ -1144,6 +1219,9 @@ def render_editable_3d_inspector_panel(workspace: Optional[Dict[str, Any]] = Non
             walls, zone_rows, selected_wall_id=st.session_state[_SELECTED_REAL_OBJECT_KEY],
         )
         st.plotly_chart(fig, key="_editable_3d_viewer")
+        _render_vr_review_scene_export(
+            workspace, ledger, object_ids, len(event_rows),
+        )
 
     if mode == "Real workspace objects":
         selected = st.selectbox(
