@@ -221,7 +221,6 @@ def render_related_page_revision(
                 location, label, fontsize=7, fontname="Helv",
                 text_color=(0.30, 0.03, 0.03),
                 fill_color=(1.0, 0.97, 0.83),
-                border_color=(0.70, 0.30, 0.12),
             )
             annot.set_info(
                 title="PlanReader - unapproved working revision",
