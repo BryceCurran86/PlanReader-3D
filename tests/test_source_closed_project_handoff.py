@@ -1356,3 +1356,27 @@ def test_other_project_combined_seal_prevents_mixed_project_output(tmp_path, mon
     assert not (output / "source_attempt_preflight.json").exists()
     assert not (output / "production_summary.json").exists()
     assert not (output / ".source_closed_handoff.lock").exists()
+
+def test_original_three_laurel_floor_finish_handoff_returns_seven_firm_items():
+    from tools.run_source_closed_project_handoff import (
+        _original_three_laurel_floor_finish_handoff,
+        _THREE_LAUREL_SOURCE_SHA256,
+    )
+    from tests.original_source_3laurel import require_original_3laurel, ORIGINAL_SHA256
+    assert ORIGINAL_SHA256 == _THREE_LAUREL_SOURCE_SHA256
+    pdf = require_original_3laurel()
+    result = _original_three_laurel_floor_finish_handoff(
+        pdf, workspace_id=1, source_sha256=ORIGINAL_SHA256,
+    )
+    assert result is not None
+    quantities, sealed, rows = result
+    assert len(quantities) == 7
+    assert len(sealed.quantities) == 7
+    assert len(rows) == 7
+    assert all(q.status == "firm" and not q.abstained for q in quantities)
+    assert all(q.family == "floor_finish_area" for q in quantities)
+    wrong = _original_three_laurel_floor_finish_handoff(
+        pdf, workspace_id=1, source_sha256="0" * 64,
+    )
+    assert wrong is None
+

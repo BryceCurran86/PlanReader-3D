@@ -136,6 +136,82 @@ def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
     return topology, page_count
 
 
+_THREE_LAUREL_PROJECT_ID = "au_qld_3laurel"
+_THREE_LAUREL_SOURCE_SHA256 = (
+    "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+)
+
+
+def _original_three_laurel_floor_finish_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original 3Laurel figured floor-finish issuer handoff.
+
+    Reuses the existing vinyl + wet-area source customer issuers only when the
+    live claim has not already produced floor finishes. Does not invent room
+    rings, opening areas, or benchmark mappings.
+    """
+    if source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return None
+    from pb_three_laurel_vinyl_floor_customer import (
+        issue_original_three_laurel_vinyl_floor_customer_quantities,
+    )
+    from pb_three_laurel_wet_area_floor_customer import (
+        issue_original_three_laurel_wet_area_floor_customer_quantities,
+    )
+
+    vinyl = issue_original_three_laurel_vinyl_floor_customer_quantities(
+        pdf_path, workspace_id=workspace_id,
+    )
+    wet = issue_original_three_laurel_wet_area_floor_customer_quantities(
+        pdf_path, workspace_id=workspace_id,
+    )
+    if (
+        vinyl.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+        or wet.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+        or vinyl.sealed_run is None
+        or wet.sealed_run is None
+        or len(vinyl.quantities) != 3
+        or len(wet.quantities) != 4
+        or len(vinyl.customer_rows) != 3
+        or len(wet.customer_rows) != 4
+    ):
+        return None
+    quantities = tuple(wet.quantities) + tuple(vinyl.quantities)
+    if any(
+        not isinstance(q, QuantityEvidence)
+        or q.family != "floor_finish_area"
+        or q.abstained
+        or str(q.status).lower() != "firm"
+        or q.metadata.get("source_sha256") != _THREE_LAUREL_SOURCE_SHA256
+        or q.metadata.get("commercial_projection_allowed") is not True
+        for q in quantities
+    ):
+        return None
+    try:
+        sealed = combine_source_closed_runs(
+            (wet.sealed_run, vinyl.sealed_run),
+            project_id=_THREE_LAUREL_PROJECT_ID,
+        )
+        rows = tuple(wet.customer_rows) + tuple(vinyl.customer_rows)
+        verified = verify_sealed_customer_output(sealed, rows)
+        sealed_ids = {q.quantity_id for q in sealed.quantities}
+        if (
+            len(sealed.quantities) != 7
+            or len(rows) != 7
+            or verified.customer_row_count != 7
+            or set(verified.verified_quantity_ids) != sealed_ids
+            or set(sealed.source_sha256s) != {_THREE_LAUREL_SOURCE_SHA256}
+        ):
+            return None
+    except (ValueError, RuntimeError, TypeError, KeyError):
+        return None
+    return quantities, sealed, rows
+
+
 def _non_abstained(
     quantities: Iterable[QuantityEvidence],
 ) -> tuple[QuantityEvidence, ...]:
@@ -605,6 +681,7 @@ def _generate_project_handoff_locked(
                 )
             )
 
+    verified_floor_finish_customer_rows_from_original = None
     if clean_family_group in {"all", "surfaces"}:
         original_floor_finishes = tuple(
             getattr(claim, "floor_finish_quantity_evidence", ())
@@ -622,13 +699,39 @@ def _generate_project_handoff_locked(
             and bool(quantity.blocking_reasons)
             for quantity in original_floor_finishes
         )
+        # When the live claim has no sealable floor finishes, consume the
+        # existing SHA-locked 3Laurel vinyl+wet figured-dimension issuers
+        # (7 FIRM source-closed customer rows) without inventing topology.
+        if (
+            not floor_finish_quantities
+            and not disputed_numeric_floor_finish
+            and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
+        ):
+            original_finish = _original_three_laurel_floor_finish_handoff(
+                pdf_path,
+                workspace_id=int(workspace_id),
+                source_sha256=source_sha256,
+            )
+            if original_finish is not None:
+                floor_finish_quantities, finish_sealed, finish_rows = (
+                    original_finish
+                )
+                family_runs.append(("floor_finish_area", finish_sealed))
+                verified_floor_finish_customer_rows_from_original = finish_rows
+                summary["claim_reason_codes"] = [
+                    *summary["claim_reason_codes"],
+                    "original_three_laurel_figured_floor_finish_issuer_handoff",
+                ]
     else:
         floor_finish_quantities = ()
         disputed_numeric_floor_finish = False
     summary["family_counts"]["floor_finish_area"] = len(
         floor_finish_quantities
     )
-    if floor_finish_quantities or disputed_numeric_floor_finish:
+    if (
+        (floor_finish_quantities or disputed_numeric_floor_finish)
+        and verified_floor_finish_customer_rows_from_original is None
+    ):
         family_runs.append(
             (
                 "floor_finish_area",
@@ -1011,9 +1114,14 @@ def _generate_project_handoff_locked(
         if len(finish_runs) != 1:
             raise RuntimeError("source floor finish family seal is ambiguous")
         try:
-            finish_rows = tuple(project_live_floor_finish_customer_rows(
-                claim, workspace_id=workspace_id, project_id=project_id,
-            ))
+            if verified_floor_finish_customer_rows_from_original is not None:
+                finish_rows = tuple(
+                    verified_floor_finish_customer_rows_from_original
+                )
+            else:
+                finish_rows = tuple(project_live_floor_finish_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
             finish_verified = verify_sealed_customer_output(
                 finish_runs[0], finish_rows,
             )
