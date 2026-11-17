@@ -38,6 +38,15 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Review-only sample of exact source path indices from unresolved outside
+    # wall-like bands. A composite can include conflicting owners: these are
+    # candidate IDs to investigate, NOT authenticated exterior wall faces.
+    unresolved_outside_native_path_id_sample: tuple[int, ...] = ()
+    # Each unresolved outside band and its OWN local path owners. Never an
+    # authenticated wall: source reviewers can locate the exact residuals.
+    unresolved_outside_band_review_sample: tuple[
+        tuple[tuple[float, float, float, float], tuple[int, ...]], ...
+    ] = ()
     # Native role audit never manufactures exterior wall evidence.
     source_outside_band_count_before_role_audit: int = 0
     source_proven_nonwall_band_count: int = 0
@@ -68,6 +77,22 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        if self.unresolved_outside_band_review_sample:
+            payload["unresolved_outside_band_review_sample"] = [
+                {
+                    "bounds_pdf_pts": list(bounds),
+                    "source_local_native_path_ids": list(ids),
+                    "owner_locality_authenticated": bool(ids),
+                    "physical_wall_authenticated": False,
+                    "measurement_authorized": False,
+                }
+                for bounds, ids in self.unresolved_outside_band_review_sample
+            ]
+        if self.unresolved_outside_native_path_id_sample:
+            payload["unresolved_outside_native_path_id_sample"] = list(
+                self.unresolved_outside_native_path_id_sample
+            )
+            payload["unresolved_owner_ids_are_review_only"] = True
         if self.source_outside_role_audit_applied:
             payload["source_outside_band_count_before_role_audit"] = (
                 self.source_outside_band_count_before_role_audit
@@ -289,6 +314,107 @@ def _source_named_compact_outside_post(geom: Polygon, ids, drawings, words) -> b
         "POST" in _source_words_near_bar(geom, words, radius=75)
         and "ALFRESCO" in _source_words_near_bar(geom, words, radius=95)
     )
+
+
+def _source_nested_concentric_porch_post_nonwall(
+    geom: Polygon, ids, drawings, words,
+) -> bool:
+    """Source-positive nested porch-column ink, not a continuous wall.
+
+    Require at least three concentric CLOSED original square stroke rings,
+    positive native ring owners for the exact outside residual and PORCH/TILES
+    printed on the same sheet. This is a negative outside-WALL-NETWORK role
+    only; real porch posts remain as physical elements and no quantity issues.
+    """
+    if not ids or not _native_source_stroke_only(ids, drawings):
+        return False
+    # Each alleged residual must truly overlap the native ink that forms the
+    # symbol, not merely carry a matching path ID or a nearby PORCH label.
+    if not all(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
+    if any(
+        "wall" not in str(drawings[i].get("layer") or "").lower()
+        or "external" not in str(drawings[i].get("layer") or "").lower()
+        for i in ids
+    ):
+        return False
+    x0, y0, x1, y1 = geom.bounds
+    if max(x1 - x0, y1 - y0) > 18 or min(x1 - x0, y1 - y0) < 0:
+        return False
+    labels = _source_words_near_bar(geom, words, radius=100)
+    if "PORCH" not in labels or "TILES" not in labels:
+        return False
+
+    center = geom.centroid
+    edges: dict[frozenset[tuple[float, float]], int] = {}
+    horizontal: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
+    for index, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or row.get("type") != "s" or row.get("fill") is not None:
+            continue
+        layer = str(row.get("layer") or "").lower()
+        if "wall" not in layer or "external" not in layer:
+            continue
+        width = row.get("width")
+        if type(width) not in (int, float) or not 0 < width <= 0.85:
+            continue
+        items = row.get("items") or ()
+        if len(items) != 1 or not items[0] or items[0][0] != "l":
+            continue
+        try:
+            points = []
+            for point in items[0][1:3]:
+                xy = ((float(point.x), float(point.y)) if hasattr(point, "x")
+                      else (float(point[0]), float(point[1])))
+                if not all(math.isfinite(v) for v in xy):
+                    raise ValueError("nonfinite")
+                points.append((round(xy[0], 3), round(xy[1], 3)))
+            a, b = points
+        except (ValueError, TypeError, IndexError, OverflowError):
+            continue
+        if not (center.x - 20 <= a[0] <= center.x + 20
+                and center.x - 20 <= b[0] <= center.x + 20
+                and center.y - 20 <= a[1] <= center.y + 20
+                and center.y - 20 <= b[1] <= center.y + 20):
+            continue
+        if (abs(a[0] - b[0]) > .03 and abs(a[1] - b[1]) > .03):
+            continue
+        edges[frozenset((a, b))] = index
+        if abs(a[1] - b[1]) <= .03 and 6 < abs(a[0] - b[0]) < 18:
+            horizontal.append((index, a, b))
+
+    rings: set[tuple[float, float, float, frozenset[int]]] = set()
+    for top_id, a, b in horizontal:
+        lx, rx = sorted((a[0], b[0]))
+        top_y = a[1]
+        for bottom_id, c, d in horizontal:
+            if bottom_id == top_id:
+                continue
+            l2, r2 = sorted((c[0], d[0]))
+            bottom_y = c[1]
+            if abs(lx - l2) > .03 or abs(rx - r2) > .03:
+                continue
+            if not (6 < abs(bottom_y - top_y) < 18
+                    and abs((rx - lx) - abs(bottom_y - top_y)) < 1.0):
+                continue
+            left_id = edges.get(frozenset(((lx, top_y), (lx, bottom_y))))
+            right_id = edges.get(frozenset(((rx, top_y), (rx, bottom_y))))
+            if left_id is None or right_id is None:
+                continue
+            ring_ids = frozenset((top_id, bottom_id, left_id, right_id))
+            rings.add((round((lx + rx) / 2, 2),
+                       round((top_y + bottom_y) / 2, 2),
+                       round(rx - lx, 2), ring_ids))
+
+    for center_x, center_y, _size, _owners in rings:
+        grouped = [ring for ring in rings
+                   if abs(ring[0] - center_x) <= .10
+                   and abs(ring[1] - center_y) <= .10]
+        if len({ring[2] for ring in grouped}) < 3:
+            continue
+        actual_ring_ids = set().union(*(ring[3] for ring in grouped))
+        if set(ids).issubset(actual_ring_ids):
+            return True
+    return False
 
 
 def _source_named_service_nonwall(geom: Polygon, ids, drawings, words) -> bool:
@@ -668,6 +794,37 @@ def walk_source_unbounded_building_face(
             source_drawings, source_words,
         )
 
+        # If the real wall network carries an explicit native viewport, an
+        # outside nonwall candidate cannot inherit a different/blank
+        # viewport. When original source has *no* viewport metadata at all,
+        # keep the existing exact geometry + native-layer role checks.
+        inside_viewports: list[str] = []
+        for owned_geom, owned_ids in owners:
+            if not candidate_outer_domain.covers(owned_geom):
+                continue
+            for idx in owned_ids:
+                if type(idx) is not int or not 0 <= idx < len(source_drawings):
+                    continue
+                row = source_drawings[idx]
+                if not isinstance(row, Mapping):
+                    continue
+                if classify_source_native_path_role(row) not in (
+                    ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL,
+                ):
+                    continue
+                inside_viewports.append(str(
+                    row.get("source_viewport_id") or row.get("viewport_id") or ""
+                ).strip())
+        stated_viewports = {value for value in inside_viewports if value}
+        scoped_inside_viewport = (
+            next(iter(stated_viewports))
+            if len(stated_viewports) == 1
+            and len(inside_viewports) >= 4
+            and all(inside_viewports)
+            else ""
+        )
+        ambiguous_inside_viewport = bool(stated_viewports) and not scoped_inside_viewport
+
         def _service_or_roof_layer(row: Mapping[str, Any]) -> bool:
             compact = "".join(
                 c for c in str(row.get("layer") or "").lower() if c.isalnum()
@@ -700,13 +857,15 @@ def walk_source_unbounded_building_face(
                 for idx in ids
             )
             if not valid:
-                unresolved.append((bar, ids))
+                # Keep this real residual unresolved, but do not describe
+                # unverified/foreign composite IDs as *local* source owners.
+                unresolved.append((bar, ()))
                 continue
             local_ids = _local_residual_path_ids(geom, ids, source_drawings)
             if not local_ids:
                 # No independently located native path on this residual
                 # band; fail closed rather than drop or invent owners.
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
                 continue
             viewports = {
                 str(
@@ -717,7 +876,18 @@ def walk_source_unbounded_building_face(
                 for idx in local_ids
             }
             if len(viewports) != 1:
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
+                continue
+            # A positively attributed native annotation from another plan
+            # viewport is not a floor-wall exclusion. Empty original viewport
+            # remains valid only if the complete primary network also has no
+            # declared viewport; role and ink must still prove nonwall status.
+            candidate_viewport = next(iter(viewports))
+            if (
+                ambiguous_inside_viewport
+                or candidate_viewport != scoped_inside_viewport
+            ):
+                unresolved.append((bar, local_ids))
                 continue
             local_bar = _LocalResidualBar(bar, local_ids)
             path_roles = {
@@ -728,6 +898,14 @@ def walk_source_unbounded_building_face(
                 local_bar, source_drawings, source_words,
             )
             if role in (ROLE_OUTDOOR, ROLE_POST):
+                excluded_nonwall += 1
+            elif _source_nested_concentric_porch_post_nonwall(
+                geom, local_ids, source_drawings, source_words,
+            ):
+                excluded_nonwall += 1
+            elif _source_printed_scale_graphic_nonwall(
+                geom, local_ids, source_drawings, source_words,
+            ):
                 excluded_nonwall += 1
             elif sheet_nonwall and all(
                 idx in sheet_nonwall
@@ -745,7 +923,7 @@ def walk_source_unbounded_building_face(
             ):
                 excluded_nonwall += 1
             else:
-                unresolved.append((bar, ids))
+                unresolved.append((bar, local_ids))
     else:
         unresolved = [(bar, ids) for bar, (_geom, ids) in outside]
     extra = len(unresolved)
@@ -761,6 +939,17 @@ def walk_source_unbounded_building_face(
             enclosed_region_count=len(holes),
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
+            unresolved_outside_native_path_id_sample=tuple(dict.fromkeys(
+                int(pid) for _bar, ids in unresolved for pid in ids
+                if type(pid) is int and pid >= 0
+            ))[:64],
+            unresolved_outside_band_review_sample=tuple(
+                (
+                    tuple(round(float(v), 3) for v in bar.polygon.bounds),
+                    tuple(int(pid) for pid in ids if type(pid) is int and pid >= 0)[:16],
+                )
+                for bar, ids in unresolved[:32]
+            ),
             source_outside_band_count_before_role_audit=len(outside),
             source_proven_nonwall_band_count=excluded_nonwall,
             source_outside_role_audit_applied=source_drawings is not None,
@@ -821,6 +1010,11 @@ def walk_source_unbounded_building_face(
         internal_party_wall_native_path_ids=party_ids,
         enclosed_region_count=len(holes),
         enclosed_dwelling_zone_count=dwelling_count,
+        # This candidate is returned only after EVERY original outside band
+        # received independent source-positive negative-role evidence.
+        source_outside_band_count_before_role_audit=len(outside),
+        source_proven_nonwall_band_count=excluded_nonwall,
+        source_outside_role_audit_applied=source_drawings is not None,
     )
 
 
