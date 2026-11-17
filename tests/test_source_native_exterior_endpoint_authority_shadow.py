@@ -301,6 +301,18 @@ def test_native_roles_reject_exclusion_and_diagonal_without_raster_hull():
         _line("Interior_Joinery", (0, 30), (80, 30)),
     ) == ROLE_EXCLUSION
     assert classify_source_native_path_role(
+        _line("Service_Gas.Bottled", (0, 40), (20, 40)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("Service_StormwaterGeneral", (0, 50), (20, 50)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("Structure_Roof", (0, 60), (20, 60)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
+        _line("Finish_Floor", (0, 70), (20, 70)),
+    ) == ROLE_EXCLUSION
+    assert classify_source_native_path_role(
         _line("Enclosure_WallExternal", (210, 130), (800, 490)),
     ) == ROLE_DIAGONAL_BRIDGE
     assert classify_source_native_path_role(

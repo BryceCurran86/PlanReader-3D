@@ -67,6 +67,19 @@ def _party():
     )
 
 
+
+def _residual_row(layer, bounds, *, fill=(0, 0, 0), width=0.7, **extra):
+    row = {
+        "layer": layer,
+        "fill": fill,
+        "type": "s",
+        "width": width,
+        "rect": bounds,
+    }
+    row.update(extra)
+    return row
+
+
 def test_complete_two_dwelling_envelope_walk_skips_internal_party_edge():
     bars = _building_bars()
     result = walk_source_unbounded_building_face(
@@ -533,6 +546,16 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     assert Polygon(attempt.polygon_pdf_pts).hausdorff_distance(
         Polygon(walk.clockwise_pdf_pts)
     ) < 0.005
+    # Source-negative role audit must run through preflight drawings and
+    # only drop independently proven non-walls. Genuine residual outside
+    # structural/unlabelled bands keep the hard ABSTAIN.
+    assert walk.source_outside_role_audit_applied is True
+    assert walk.source_proven_nonwall_band_count >= 1
+    assert walk.source_outside_band_count_before_role_audit > (
+        walk.other_source_wall_band_count
+    )
+    assert walk.other_source_wall_band_count >= 1
+    assert walk.to_dict()["source_outside_role_audit_noncommercial"] is True
     assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
     assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     assert receipt["measurement_authorized"] is False
@@ -556,13 +579,14 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     ]
     assert east, "right-house/garage source bars must remain available"
 
-
 def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
     # A far native annotation mark can resemble wall paint. Its source
     # layer disqualifies it as a wall; all real outside paths still survive.
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(13)
+    ]
+    rows[12] = _residual_row("Annotation_FloorPlan", (280, 20, 283, 90))
     result = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),),
         source_drawings=rows,
@@ -573,14 +597,15 @@ def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
     assert result.source_proven_nonwall_band_count == 0  # CANDIDATE keeps no veto metrics
     assert result.measurement_authorized is False
 
-
 def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(13)
+    ]
+    rows[12] = _residual_row("Annotation_FloorPlan", (280, 20, 283, 90))
     for sources, words in (
         (rows[:-1], _source_words()),  # missing native path ID
-        ([*rows[:12], {"layer": "", "fill": (0, 0, 0)}], _source_words()),
+        ([*rows[:12], _residual_row("", (280, 20, 283, 90))], _source_words()),
         (rows, (*_source_words(), (280, 50, 283, 60, "GARAGE", 0, 0, 0))),
     ):
         result = walk_source_unbounded_building_face(
@@ -596,7 +621,6 @@ def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
         assert not result.building_footprint_authenticated
         assert not result.measurement_authorized
 
-
 def test_outside_composite_conflicting_wall_or_viewport_remains_unresolved():
     class CompositeBar:
         def __init__(self):
@@ -604,28 +628,37 @@ def test_outside_composite_conflicting_wall_or_viewport_remains_unresolved():
         def native_path_indices(self):
             return (12, 13)
     bars = (*_building_bars(), CompositeBar())
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(14)]
-    rows[12] = {"layer": "Annotation_General", "fill": (0, 0, 0), "viewport_id": "floor"}
-    rows[13] = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"}
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(14)
+    ]
+    rows[12] = _residual_row(
+        "Annotation_General", (280, 20, 281, 90), viewport_id="floor",
+    )
+    rows[13] = _residual_row(
+        "Enclosure_WallExternal", (281, 20, 283, 90), viewport_id="floor",
+    )
     mixed = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
     assert mixed.status == "ABSTAINED"
-    rows[13] = {"layer": "Annotation_General", "fill": (0, 0, 0), "viewport_id": "elevation"}
+    rows[13] = _residual_row(
+        "Annotation_General", (281, 20, 283, 90), viewport_id="elevation",
+    )
     wrong_view = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
     assert wrong_view.status == "ABSTAINED"
     assert wrong_view.other_source_wall_band_count == 1
 
-
 def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
     bars = (*_building_bars(),
             SourceBar(box(280, 20, 283, 90), 12),
             SourceBar(box(350, 20, 353, 90), 13))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(14)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
-    rows[13] = {"layer": "", "fill": (0, 0, 0)}
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(14)
+    ]
+    rows[12] = _residual_row("Annotation_FloorPlan", (280, 20, 283, 90))
+    rows[13] = _residual_row("", (350, 20, 353, 90))
     walk = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
@@ -636,6 +669,122 @@ def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
     assert walk.clockwise_pdf_pts == ()
     assert walk.outer_wall_native_path_ids == ()
     assert not walk.measurement_authorized
+
+
+def test_pure_service_or_empty_thin_outside_is_not_a_structural_veto():
+    # Pure service/gas ink is a source-negative non-wall. Empty thin
+    # unlayered strokes and WallExternal mixes still veto.
+    bars = (
+        *_building_bars(),
+        SourceBar(box(280, 20, 283, 90), 12),
+        SourceBar(box(350, 20, 353, 40), 13),
+        SourceBar(box(400, 20, 403, 90), 14),
+    )
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(15)
+    ]
+    rows[12] = _residual_row(
+        "Service_Gas.Bottled", (280, 20, 283, 90), fill=None, width=0.34,
+    )
+    rows[13] = _residual_row("", (350, 20, 353, 40), fill=None, width=0.34)
+    rows[14] = _residual_row("Enclosure_WallExternal", (400, 20, 403, 90))
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.source_outside_band_count_before_role_audit == 3
+    # Empty thin unlayered source paint is AMBIGUOUS, not a proven nonwall.
+    assert walk.source_proven_nonwall_band_count == 1
+    assert walk.other_source_wall_band_count == 2
+    assert not walk.measurement_authorized
+
+
+def test_filled_unlabelled_outside_stroke_is_not_dropped_as_sheet_ink():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(13)
+    ]
+    rows[12] = _residual_row("", (280, 20, 283, 90))
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.source_proven_nonwall_band_count == 0
+
+
+def test_unknown_unlayered_thin_line_never_excludes_a_physical_wall_candidate():
+    # A physical external wall may be drawn as a thin, unfilled native stroke
+    # when its original CAD layer metadata is missing. With no source-owned
+    # frame or service role, keep it unresolved; do not manufacture closure.
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(13)
+    ]
+    rows[12] = _residual_row("", (280, 20, 283, 90), fill=None, width=0.34)
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.source_proven_nonwall_band_count == 0
+    assert not walk.building_footprint_authenticated
+    assert not walk.measurement_authorized
+
+
+def test_foreign_wallexternal_id_does_not_veto_local_service_residual():
+    # Mega-composites can attach distant WallExternal path IDs to a local
+    # outside service/roof band. Residual audit must use locally intersecting
+    # native geometry only.
+    class CompositeBar:
+        def __init__(self):
+            self.polygon = box(280, 20, 283, 40)
+
+        def native_path_indices(self):
+            return (12, 13)
+
+    bars = (*_building_bars(), CompositeBar())
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(14)
+    ]
+    rows[12] = _residual_row(
+        "Service_StormwaterGeneral", (280, 20, 283, 40), fill=None, width=0.34,
+    )
+    # Foreign WallExternal lives on the sealed house, not on this residual.
+    rows[13] = _residual_row("Enclosure_WallExternal", (10, 10, 14, 50))
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.status == "CANDIDATE"
+    assert walk.other_source_wall_band_count == 0
+    assert not walk.measurement_authorized
+
+
+def test_local_wallexternal_residual_still_abstains():
+    class CompositeBar:
+        def __init__(self):
+            self.polygon = box(280, 20, 283, 40)
+
+        def native_path_indices(self):
+            return (12, 13)
+
+    bars = (*_building_bars(), CompositeBar())
+    rows = [
+        _residual_row("Enclosure_WallExternal", (0, 0, 3, 3)) for _ in range(14)
+    ]
+    rows[12] = _residual_row(
+        "Service_StormwaterGeneral", (280, 20, 281, 40), fill=None, width=0.34,
+    )
+    rows[13] = _residual_row("Enclosure_WallExternal", (281, 20, 283, 40))
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
 
 
 def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
@@ -733,7 +882,6 @@ def test_unique_title_bearing_source_frame_can_be_excluded_without_viewport():
     )
     assert changed.status == "ABSTAINED"
     assert changed.clockwise_pdf_pts == ()
-
 
 
 def test_original_layer_annotation_without_viewport_needs_matching_native_line():

@@ -1,0 +1,258 @@
+{
+  "schemaVersion": "1.0.0",
+  "scope": {
+    "workspaceId": "synthetic-preview",
+    "projectId": "SYNTHETIC-ONLY",
+    "documentId": "not-a-real-building",
+    "revisionId": "demo-r1",
+    "snapshotId": "not-verified",
+    "sourceSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "modelRevision": 0
+  },
+  "coordinateSystem": {
+    "unit": "metres",
+    "sourceToModelTransform": null,
+    "renderOrigin": [
+      0,
+      0,
+      0
+    ]
+  },
+  "readOnly": true,
+  "commercialQuantityPublicationAllowed": false,
+  "objects": [
+    {
+      "objectId": "demo-external-north",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallFace",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          9,
+          0
+        ],
+        "heightM": 2.4
+      },
+      "dimensions": {
+        "lengthM": 9,
+        "heightM": 2.4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-0",
+        "currentGeometryRef": "synthetic-path-0"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source"
+      ],
+      "canEdit": false
+    },
+    {
+      "objectId": "demo-external-east",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallFace",
+        "start": [
+          9,
+          0
+        ],
+        "end": [
+          9,
+          7
+        ],
+        "heightM": 2.4
+      },
+      "dimensions": {
+        "lengthM": 7,
+        "heightM": 2.4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-1",
+        "currentGeometryRef": "synthetic-path-1"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source"
+      ],
+      "canEdit": false
+    },
+    {
+      "objectId": "demo-external-south",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallFace",
+        "start": [
+          9,
+          7
+        ],
+        "end": [
+          0,
+          7
+        ],
+        "heightM": 2.4
+      },
+      "dimensions": {
+        "lengthM": 9,
+        "heightM": 2.4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-2",
+        "currentGeometryRef": "synthetic-path-2"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source"
+      ],
+      "canEdit": false
+    },
+    {
+      "objectId": "demo-external-west",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallFace",
+        "start": [
+          0,
+          7
+        ],
+        "end": [
+          0,
+          0
+        ],
+        "heightM": 2.4
+      },
+      "dimensions": {
+        "lengthM": 7,
+        "heightM": 2.4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-3",
+        "currentGeometryRef": "synthetic-path-3"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source"
+      ],
+      "canEdit": false
+    },
+    {
+      "objectId": "demo-interior",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallFace",
+        "start": [
+          4,
+          0
+        ],
+        "end": [
+          4,
+          7
+        ],
+        "heightM": 2.4
+      },
+      "dimensions": {
+        "lengthM": 7,
+        "heightM": 2.4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-4",
+        "currentGeometryRef": "synthetic-path-4"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source"
+      ],
+      "canEdit": false
+    },
+    {
+      "objectId": "demo-unknown-height",
+      "canonicalObjectId": null,
+      "objectType": "wall",
+      "levelId": "synthetic-ground",
+      "objectRevision": "not-source-verified",
+      "authority": "provisional",
+      "renderState": "review",
+      "geometry": {
+        "kind": "wallLine",
+        "start": [
+          0,
+          3.5
+        ],
+        "end": [
+          4,
+          3.5
+        ]
+      },
+      "dimensions": {
+        "lengthM": 4
+      },
+      "source": {
+        "sourceFileId": null,
+        "page": null,
+        "sheet": "SYNTHETIC DEMO — NOT A PLAN",
+        "sourceRegion": null,
+        "originalGeometryRef": "synthetic-path-5",
+        "currentGeometryRef": "synthetic-path-5"
+      },
+      "quantityLinks": [],
+      "unresolvedIssues": [
+        "synthetic_fixture_only",
+        "not_authenticated_source",
+        "wall_height_unverified"
+      ],
+      "canEdit": false
+    }
+  ]
+}

@@ -72,7 +72,9 @@ class OutsideFacingBuildingWalk:
             payload["source_outside_band_count_before_role_audit"] = (
                 self.source_outside_band_count_before_role_audit
             )
-            payload["source_proven_nonwall_band_count"] = self.source_proven_nonwall_band_count
+            payload["source_proven_nonwall_band_count"] = (
+                self.source_proven_nonwall_band_count
+            )
             payload["source_outside_role_audit_noncommercial"] = True
         # Preserve byte-compatible old receipts when no unsealed preview
         # exists. Only outside-component ABSTAIN adds a diagnostic field.
@@ -363,6 +365,91 @@ def _clockwise_page_ring(source_exterior):
     return tuple(coords + [coords[0]])
 
 
+def _native_path_bounds_pdf_pts(row: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
+    """Exact native rect or stroke AABB; never invents missing path geometry."""
+    rect = row.get("rect")
+    if rect is not None:
+        try:
+            x0, y0, x1, y1 = (float(v) for v in rect[:4])
+            if all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+                return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        except (TypeError, ValueError, IndexError):
+            pass
+    xs: list[float] = []
+    ys: list[float] = []
+    for item in row.get("items") or ():
+        if not item:
+            continue
+        kind = item[0]
+        try:
+            if kind == "l" and len(item) >= 3:
+                for point in item[1:3]:
+                    if hasattr(point, "x"):
+                        xs.append(float(point.x))
+                        ys.append(float(point.y))
+                    else:
+                        xs.append(float(point[0]))
+                        ys.append(float(point[1]))
+            elif kind in {"re", "qu"} and len(item) >= 2:
+                r = item[1]
+                x0, y0, x1, y1 = (float(v) for v in r[:4])
+                xs.extend((x0, x1))
+                ys.extend((y0, y1))
+        except (TypeError, ValueError, IndexError, AttributeError):
+            continue
+    if not xs or not ys:
+        return None
+    if not all(math.isfinite(v) for v in (*xs, *ys)):
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _local_residual_path_ids(
+    bar_geom: Any,
+    path_ids: Sequence[int],
+    source_drawings: Sequence[Mapping[str, Any] | object],
+) -> tuple[int, ...]:
+    """Path IDs whose native geometry intersects the outside residual bar.
+
+    Aggregated wall bars can carry foreign path IDs from distant co-merged
+    strokes. Residual role audit must not treat those foreign WallExternal
+    IDs as local owners of a remote outside band.
+    """
+    probe = bar_geom.buffer(CONTACT_PT)
+    local: list[int] = []
+    for idx in path_ids:
+        if not (type(idx) is int and 0 <= idx < len(source_drawings)):
+            continue
+        row = source_drawings[idx]
+        if not isinstance(row, Mapping):
+            continue
+        bounds = _native_path_bounds_pdf_pts(row)
+        if bounds is None:
+            continue
+        x0, y0, x1, y1 = bounds
+        # Degenerate strokes still need a positive probe footprint.
+        if abs(x1 - x0) <= CONTACT_PT and abs(y1 - y0) <= CONTACT_PT:
+            hit = Point(x0, y0).buffer(CONTACT_PT)
+        else:
+            hit = box(x0, y0, x1, y1)
+        if probe.intersects(hit):
+            local.append(idx)
+    return tuple(local)
+
+
+class _LocalResidualBar:
+    """Bar view exposing only locally intersecting native path IDs."""
+
+    __slots__ = ("_ids", "polygon")
+
+    def __init__(self, bar: Any, local_ids: Sequence[int]):
+        self.polygon = bar.polygon
+        self._ids = tuple(local_ids)
+
+    def native_path_indices(self) -> tuple[int, ...]:
+        return self._ids
+
+
 def _occupied_party_regions(
     holes: Sequence[Polygon],
     words: Sequence[tuple[str, Point]],
@@ -454,6 +541,8 @@ def walk_source_unbounded_building_face(
     source preflight when supplied; do not make duplicate OCR/geometry passes.
     A missing party wall or a source-named room still open to the outside
     is not repaired by a sketch, a bounding hull or a direct endpoint snap.
+    Optional ``source_drawings`` only supplies native path identity for
+    source-negative non-wall role discrimination; it never invents walls.
     """
     owners = tuple(v for b in wall_bars if (v := _owner(b)) is not None)
     if len(owners) < 4:
@@ -547,7 +636,7 @@ def walk_source_unbounded_building_face(
     # not the wall-paint polygon (whose holes would falsely eject it).
     # Truly outside structural bodies remain a hard abstention.
     candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
-    # Original p3 includes remote black annotation, slab and service paint
+    # Original sheets include remote black annotation, slab and service paint
     # which can be collected as wall-shaped geometry. Existing source role
     # classification independently distinguishes those non-wall natives.
     # The same physical exterior walker and union remain unchanged; this
@@ -558,45 +647,49 @@ def walk_source_unbounded_building_face(
         and not candidate_outer_domain.covers(owned[0])
     ]
     excluded_nonwall = 0
-    unresolved = []
+    unresolved: list[tuple[Any, tuple[int, ...]]] = []
     if source_drawings is not None:
-        from pb_source_outer_house_continuity_shadow import (
-            ROLE_OUTDOOR, ROLE_POST, classify_outside_envelope_role,
-        )
         from pb_source_native_exterior_endpoint_authority_shadow import (
-            ROLE_EXCLUSION, classify_source_native_path_role,
+            ROLE_EXCLUSION,
+            ROLE_EXTERIOR_OUTER_FACE,
+            ROLE_INTERNAL_WALL,
+            classify_source_native_path_role,
+        )
+        from pb_source_outer_house_continuity_shadow import (
+            ROLE_OUTDOOR,
+            ROLE_POST,
+            classify_outside_envelope_role,
         )
         from pb_source_sheet_frame_roles_shadow import (
             source_sheet_frame_nonwall_path_ids,
         )
+
         sheet_nonwall = source_sheet_frame_nonwall_path_ids(
             source_drawings, source_words,
         )
-        # The native viewport of the authenticated *inside* wall graph is
-        # the only acceptable scope for non-wall exclusions outside the
-        # proposed ring. Matching empty strings are not source authority;
-        # drawings from a foreign sheet region cannot erase real walls.
-        from pb_source_native_exterior_endpoint_authority_shadow import (
-            ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL,
-        )
 
-        def _viewport(row):
-            return str(
-                row.get("source_viewport_id") or row.get("viewport_id") or ""
-            ).strip()
+        def _service_or_roof_layer(row: Mapping[str, Any]) -> bool:
+            compact = "".join(
+                c for c in str(row.get("layer") or "").lower() if c.isalnum()
+            )
+            return any(
+                token in compact
+                for token in ("service", "storm", "gas", "roof", "finish")
+            )
 
-        interior_wall_views = {
-            _viewport(source_drawings[idx])
-            for candidate_bar in wall_bars
-            if (owner := _owner(candidate_bar)) is not None
-            and candidate_outer_domain.covers(owner[0])
-            for idx in owner[1]
-            if type(idx) is int and 0 <= idx < len(source_drawings)
-            and isinstance(source_drawings[idx], Mapping)
-            and classify_source_native_path_role(source_drawings[idx])
-            in (ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL)
-            and _viewport(source_drawings[idx])
-        }
+        def _nonwall_residual_path(idx: int) -> bool:
+            # Only *independently source-authenticated* nonwalls can be
+            # excluded. A thin unlayered, unfilled source stroke may be a real
+            # external wall face: its style alone cannot prove sheet furniture.
+            # Genuine full title-frame membership is verified separately.
+            if idx in sheet_nonwall:
+                return True
+            row = source_drawings[idx]
+            return (
+                classify_source_native_path_role(row) == ROLE_EXCLUSION
+                and _service_or_roof_layer(row)
+            )
+
         for bar, (geom, ids) in outside:
             # A stale/partial native-path index or conflicting viewport
             # makes the candidate unresolved. Never trust one excluded
@@ -609,68 +702,47 @@ def walk_source_unbounded_building_face(
             if not valid:
                 unresolved.append((bar, ids))
                 continue
-            # Strict native frame attestation is independent of viewport
-            # metadata: four exact original frame corners + three title
-            # tokens, AND each asserted source path physically overlaps
-            # the alleged wall-like outside bar. No path-index-only grant.
-            # This is negative *sheet* evidence, never exterior wall proof.
-            if sheet_nonwall and all(idx in sheet_nonwall for idx in ids):
-                if all(
-                    _source_frame_rule_overlaps_bar(geom, source_drawings[idx])
-                    for idx in ids
-                ):
-                    excluded_nonwall += 1
-                    continue
-            # Original CAD can have no viewport metadata at all. A single
-            # native straight line with an EXPLICIT nonwall source layer and
-            # the same original geometry as its outside-bar candidate is
-            # negative structural-role evidence independent of viewport.
-            # This is deliberately narrower than generic ROLE_EXCLUSION:
-            # dashed/green/compact unlabeled exterior posts stay unresolved.
-            if all(
-                classify_source_native_path_role(source_drawings[idx])
-                == ROLE_EXCLUSION
-                and str(source_drawings[idx].get("layer") or "").lower()
-                .startswith(("annotation_", "structure_slab", "service_"))
-                and _source_frame_rule_overlaps_bar(
-                    geom, source_drawings[idx]
-                )
-                for idx in ids
-            ):
-                excluded_nonwall += 1
-                continue
-            # Source-exact negative-only shadow roles. Every exception
-            # consumes original native source IDs plus printed source/ink;
-            # never infer physical wall joins or issue measurements.
-            if any((
-                _pure_original_source_nonwall_bar(geom, ids, source_drawings),
-                _source_mixed_title_frame_nonwall(geom, ids, source_drawings, sheet_nonwall),
-                _source_printed_scale_graphic_nonwall(geom, ids, source_drawings, source_words),
-                _source_named_compact_outside_post(geom, ids, source_drawings, source_words),
-                _source_named_service_nonwall(geom, ids, source_drawings, source_words),
-                _source_outdoor_nonwall_tick(geom, ids, source_drawings, source_words),
-                _source_numbered_dimension_tick(geom, ids, source_drawings, source_words),
-            )):
-                excluded_nonwall += 1
-                continue
-            viewports = {_viewport(source_drawings[idx]) for idx in ids}
-            if (len(viewports) != 1 or "" in viewports
-                    or len(interior_wall_views) != 1
-                    or viewports != interior_wall_views):
+            local_ids = _local_residual_path_ids(geom, ids, source_drawings)
+            if not local_ids:
+                # No independently located native path on this residual
+                # band; fail closed rather than drop or invent owners.
                 unresolved.append((bar, ids))
                 continue
+            viewports = {
+                str(
+                    source_drawings[idx].get("source_viewport_id")
+                    or source_drawings[idx].get("viewport_id")
+                    or ""
+                ).strip()
+                for idx in local_ids
+            }
+            if len(viewports) != 1:
+                unresolved.append((bar, ids))
+                continue
+            local_bar = _LocalResidualBar(bar, local_ids)
+            path_roles = {
+                classify_source_native_path_role(source_drawings[idx])
+                for idx in local_ids
+            }
             role, _reason = classify_outside_envelope_role(
-                bar, source_drawings, source_words,
+                local_bar, source_drawings, source_words,
             )
             if role in (ROLE_OUTDOOR, ROLE_POST):
                 excluded_nonwall += 1
             elif sheet_nonwall and all(
                 idx in sheet_nonwall
-                or classify_source_native_path_role(source_drawings[idx]) == ROLE_EXCLUSION
-                for idx in ids
+                or classify_source_native_path_role(source_drawings[idx])
+                == ROLE_EXCLUSION
+                for idx in local_ids
             ):
                 # A layerless sheet frame + annotation composite is neither
                 # a house wall nor an excuse to drop a mixed physical owner.
+                excluded_nonwall += 1
+            elif (
+                ROLE_EXTERIOR_OUTER_FACE not in path_roles
+                and ROLE_INTERNAL_WALL not in path_roles
+                and all(_nonwall_residual_path(idx) for idx in local_ids)
+            ):
                 excluded_nonwall += 1
             else:
                 unresolved.append((bar, ids))
