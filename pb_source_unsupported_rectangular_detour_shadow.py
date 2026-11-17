@@ -55,8 +55,16 @@ def _segment_covered_by_wall_ink(
     members: Sequence[Segment],
     *,
     alignment_tolerance_pt: float,
+    gap_merge_pt: float | None = None,
+    end_slack_pt: float | None = None,
 ) -> bool:
-    """True when original wall strokes continuously occupy the full segment face."""
+    """True when original wall strokes continuously occupy the full segment face.
+
+    ``gap_merge_pt`` tolerates CAD dash fragmentation along an otherwise painted
+    face; ``end_slack_pt`` tolerates short unpainted run-in/run-out at the
+    sample ends (dashed faces often start a few pt inside the sample window).
+    Both default to the alignment window so callers keep prior behaviour.
+    """
     ax, ay = a
     bx, by = b
     vx, vy = bx - ax, by - ay
@@ -64,6 +72,16 @@ def _segment_covered_by_wall_ink(
     if not math.isfinite(length) or length <= 0.0:
         return False
     ux, uy = vx / length, vy / length
+    merge_pt = (
+        float(gap_merge_pt)
+        if gap_merge_pt is not None
+        else float(alignment_tolerance_pt)
+    )
+    slack_pt = (
+        float(end_slack_pt)
+        if end_slack_pt is not None
+        else float(alignment_tolerance_pt)
+    )
     intervals: list[tuple[float, float]] = []
     for x1, y1, x2, y2 in members:
         offsets = (
@@ -86,13 +104,13 @@ def _segment_covered_by_wall_ink(
     intervals.sort()
     start, stop = intervals[0]
     for lo, hi in intervals[1:]:
-        if lo > stop + alignment_tolerance_pt:
-            if start <= alignment_tolerance_pt and stop >= length - alignment_tolerance_pt:
+        if lo > stop + merge_pt:
+            if start <= slack_pt and stop >= length - slack_pt:
                 return True
             start, stop = lo, hi
         else:
             stop = max(stop, hi)
-    return start <= alignment_tolerance_pt and stop >= length - alignment_tolerance_pt
+    return start <= slack_pt and stop >= length - slack_pt
 
 
 def _is_axis_aligned_u_detour(
@@ -214,7 +232,11 @@ def _near_corner_face_supported(
     alignment_tolerance_pt: float,
     sample_pt: float = 24.0,
 ) -> bool:
-    """True when painted wall ink covers a short run of the face ending at ``near``."""
+    """True when painted wall ink covers a short run of the face ending at ``near``.
+
+    CAD exterior faces are often dashed; merge gaps up to 4 pt so a painted
+    west/north meeting is not rejected solely for stroke fragmentation.
+    """
     length = _dist(far, near)
     if not math.isfinite(length) or length <= 0.0:
         return False
@@ -224,8 +246,14 @@ def _near_corner_face_supported(
         near[0] - t * (near[0] - far[0]),
         near[1] - t * (near[1] - far[1]),
     )
+    face_slack = max(alignment_tolerance_pt, 4.0)
     return _segment_covered_by_wall_ink(
-        start, near, members, alignment_tolerance_pt=alignment_tolerance_pt,
+        start,
+        near,
+        members,
+        alignment_tolerance_pt=alignment_tolerance_pt,
+        gap_merge_pt=face_slack,
+        end_slack_pt=face_slack,
     )
 
 
@@ -240,12 +268,14 @@ def collapse_unsupported_rectangular_detours(
     max_depth_fraction: float = 0.28,
     max_width_fraction: float = 0.35,
     max_unmatched_stub_pt: float = 8.0,
+    max_tip_excursion_pt: float = 24.0,
 ) -> RectangularDetourCollapseReceipt:
     """Replace unsupported A-B-C-D rectangular boxes with the base chord A-D.
 
     Also collapses zero-width antenna spikes (A -> tip -> A') already within snap,
-    and short morphological corner stubs that have no continuous wall-ink owner
-    between two perpendicular source-backed faces (Acacia p2 NE unmatched edge).
+    short morphological corner stubs with no wall-ink owner (Acacia p2 NE), and
+    short outward tip excursions past a painted orthogonal corner even when a tip
+    stroke exists (Acacia p2 NW path 6044 beyond west/north meeting).
     Does not invent walls; does not authorize measurement.
     """
     pts = [(float(x), float(y)) for x, y in vertices]
@@ -284,7 +314,7 @@ def collapse_unsupported_rectangular_detours(
                 break
         if changed:
             continue
-        # Pass 1b: short unmatched morphological corner stub between two
+        # Pass 1b: short morphological corner stub / outward tip between two
         # perpendicular wall-ink faces. Replace B-C with their orthogonal corner.
         n = len(pts)
         for i in range(n):
@@ -293,19 +323,38 @@ def collapse_unsupported_rectangular_detours(
             c = pts[(i + 2) % n]
             d = pts[(i + 3) % n]
             stub_len = _dist(b, c)
-            if stub_len <= 0.0 or stub_len >= max_unmatched_stub_pt:
-                continue
-            if _segment_covered_by_wall_ink(
-                b, c, wall_segments,
-                alignment_tolerance_pt=alignment_tolerance_pt,
-            ):
+            if stub_len <= 0.0 or stub_len >= max_tip_excursion_pt:
                 continue
             corner = _orthogonal_corner(a, b, c, d, snap_pt=snap_tolerance_pt)
             if corner is None:
                 continue
+            stub_covered = _segment_covered_by_wall_ink(
+                b, c, wall_segments,
+                alignment_tolerance_pt=alignment_tolerance_pt,
+            )
+            tip = b if _dist(b, corner) >= _dist(c, corner) else c
+            inner = c if tip is b else b
+            tip_excursion = _dist(tip, corner)
+            inner_near_corner = (
+                _dist(inner, corner) <= max(snap_tolerance_pt * 2.0, 4.0)
+            )
+            # Cases:
+            # - unmatched short stub (<8pt): morphological NE corner cut
+            # - tip excursion: one vertex near the painted orthogonal meeting,
+            #   the other past it (Acacia NW). Tip stroke may paint the tip
+            #   without covering the diagonal B-C stub continuously; a short
+            #   painted chamfer (both ends near corner) must be preserved.
+            if stub_covered:
+                if tip_excursion < max_unmatched_stub_pt or not inner_near_corner:
+                    continue
+            elif stub_len < max_unmatched_stub_pt:
+                pass  # unmatched short morphological stub
+            elif tip_excursion >= max_unmatched_stub_pt and inner_near_corner:
+                pass  # uncovered tip stroke past painted corner
+            else:
+                continue
             # Morphological contour y/x can sit ~1-2 pt off painted faces; use the
             # established 2.5 pt association window only for near-corner face proof.
-            # Prove ink on each face ending at the orthogonal corner (not the false tip).
             face_align = max(alignment_tolerance_pt, snap_tolerance_pt)
             if not _near_corner_face_supported(
                 a, corner, wall_segments, alignment_tolerance_pt=face_align,
@@ -336,7 +385,14 @@ def collapse_unsupported_rectangular_detours(
                 rebuilt.append(point)
             pts = rebuilt
             collapsed += 1
-            reasons.append("collapsed_unmatched_morphological_corner_stub")
+            tip_excursion_collapse = (
+                tip_excursion >= max_unmatched_stub_pt and inner_near_corner
+            )
+            reasons.append(
+                "collapsed_outward_corner_tip_excursion"
+                if tip_excursion_collapse
+                else "collapsed_unmatched_morphological_corner_stub"
+            )
             changed = True
             break
         if changed:

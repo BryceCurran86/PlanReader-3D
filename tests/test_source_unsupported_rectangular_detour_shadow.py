@@ -180,5 +180,29 @@ def test_short_corner_stub_with_painted_chamfer_is_preserved():
     )
     result = collapse_unsupported_rectangular_detours(poly, walls)
     assert "collapsed_unmatched_morphological_corner_stub" not in result.reason_codes
+    assert "collapsed_outward_corner_tip_excursion" not in result.reason_codes
     assert (100.0, 96.0) in result.polygon_pdf_pts
     assert (96.0, 100.0) in result.polygon_pdf_pts
+
+
+def test_outward_tip_excursion_past_painted_corner_collapses():
+    """Acacia p2 NW: tip stroke west of the west/north meeting is not a wall corner."""
+    poly = (
+        (328.0, 140.0),
+        (328.0, 449.0),
+        (311.0, 450.0),
+        (904.0, 450.0),
+        (904.0, 140.0),
+    )
+    walls = (
+        (328.0, 140.0, 328.0, 449.0),  # west face
+        (328.0, 449.0, 904.0, 449.0),  # north face
+        (331.0, 449.5, 311.0, 449.5),  # tip stroke beyond the corner
+        (904.0, 140.0, 904.0, 449.0),
+        (328.0, 140.0, 904.0, 140.0),
+    )
+    result = collapse_unsupported_rectangular_detours(poly, walls)
+    assert "collapsed_outward_corner_tip_excursion" in result.reason_codes
+    assert (311.0, 450.0) not in result.polygon_pdf_pts
+    assert (328.0, 450.0) in result.polygon_pdf_pts
+    assert result.measurement_authorized is False

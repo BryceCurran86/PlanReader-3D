@@ -343,6 +343,88 @@ def test_unrepaired_footprint_keeps_its_original_raster_bbox():
     assert refined.bbox_pdf_pts == candidate.bbox_pdf_pts
 
 
+def test_refine_seam_collapses_unmatched_stub_and_outward_tip():
+    """NE unmatched stub + NW tip must both land through refine, not only the helper."""
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace, refine_external_footprint_against_wall_ink,
+    )
+
+    candidate = ExternalFootprintTrace(
+        "e" * 64, 1, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=(
+            (328.0, 140.0),
+            (328.0, 449.0),
+            (311.0, 450.0),
+            (910.0, 450.0),
+            (903.9, 448.9),
+            (903.9, 140.0),
+        ),
+        bbox_pdf_pts=(310.0, 138.0, 912.0, 452.0),
+    )
+    # Named dark wall paths so wall_ink_segments_from_drawings keeps them.
+    drawings = (
+        {
+            "layer": "Enclosure_WallExternal",
+            "color": (0.05, 0.05, 0.05),
+            "fill": None,
+            "items": (
+                ("l", fitz.Point(328.0, 140.0), fitz.Point(328.0, 449.0)),
+                ("l", fitz.Point(328.0, 449.0), fitz.Point(904.0, 449.0)),
+                ("l", fitz.Point(331.0, 449.5), fitz.Point(311.0, 449.5)),
+                ("l", fitz.Point(904.0, 140.0), fitz.Point(904.0, 449.0)),
+                ("l", fitz.Point(328.0, 140.0), fitz.Point(904.0, 140.0)),
+            ),
+        },
+    )
+    refined, receipt = refine_external_footprint_against_wall_ink(candidate, drawings)
+    assert receipt["collapsed_detour_count"] >= 1
+    codes = set(receipt["reason_codes"])
+    assert "collapsed_outward_corner_tip_excursion" in codes
+    assert "collapsed_unmatched_morphological_corner_stub" in codes
+    assert (311.0, 450.0) not in refined.polygon_pdf_pts
+    assert (910.0, 450.0) not in refined.polygon_pdf_pts
+    assert (328.0, 450.0) in refined.polygon_pdf_pts
+    assert (903.9, 450.0) in refined.polygon_pdf_pts or (904.0, 450.0) in {
+        (round(x, 1), round(y, 1)) for x, y in refined.polygon_pdf_pts
+    }
+    assert receipt["measurement_authorized"] is False
+    assert receipt["commercial_publishable"] is False
+
+
+def test_mid_gray_doorway_evidence_does_not_count_as_wall_support_primitives():
+    """Gray glazing/doorway strokes stay indexable but never alone authorize a scope."""
+    from pb_external_footprint_first_trace import (
+        ExternalFootprintTrace,
+        bound_native_drawings_to_footprint,
+    )
+
+    sha = "d" * 64
+    trace = ExternalFootprintTrace(
+        sha, 0, "CANDIDATE", "visual_only",
+        polygon_pdf_pts=((10., 10.), (100., 10.), (100., 100.), (10., 100.)),
+        bbox_pdf_pts=(10., 10., 100., 100.),
+    )
+    gray_only = (
+        {
+            "rect": fitz.Rect(20, 20, 80, 80),
+            "layer": "Enclosure_WallExternal",
+            "fill": None,
+            "color": (0.55, 0.55, 0.55),
+            "items": tuple(
+                ("l", fitz.Point(20 + i, 20), fitz.Point(20 + i, 80))
+                for i in range(30)
+            ),
+        },
+    )
+    result = bound_native_drawings_to_footprint(
+        gray_only, trace=trace, expected_source_sha256=sha,
+    )
+    assert result.status == "ABSTAINED"
+    assert result.reason == "bounded_source_viewport_has_no_native_wall_ink"
+    assert result.wall_native_primitive_count == 0
+    assert result.commercial_publishable is False
+
+
 @pytest.mark.parametrize("coords", [
     (40., 40., 20., 50.), (40., 40., 50., 20.),
 ])
