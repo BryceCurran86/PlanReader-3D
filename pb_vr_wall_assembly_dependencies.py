@@ -256,8 +256,28 @@ def _orient(a, b, c) -> float:
 
 
 def _crosses(a,b,c,d) -> bool:
-    return _orient(a,b,c)*_orient(a,b,d) < -1e-8 and (
-        _orient(c,d,a)*_orient(c,d,b) < -1e-8
+    """Conservative 2D service conflict: crossing, touch or route overlap.
+
+    Touching a newly added partition may require a trade to redirect, protect
+    or penetrate an existing service. This does NOT quantify that work.
+    """
+    eps=1e-7
+    def on_segment(u, v, p) -> bool:
+        return (
+            abs(_orient(u,v,p)) <= eps and
+            min(u[0],v[0])-eps <= p[0] <= max(u[0],v[0])+eps and
+            min(u[1],v[1])-eps <= p[1] <= max(u[1],v[1])+eps
+        )
+    ab_c,ab_d=_orient(a,b,c),_orient(a,b,d)
+    cd_a,cd_b=_orient(c,d,a),_orient(c,d,b)
+    if (
+        (ab_c > eps and ab_d < -eps or ab_c < -eps and ab_d > eps) and
+        (cd_a > eps and cd_b < -eps or cd_a < -eps and cd_b > eps)
+    ):
+        return True
+    return (
+        on_segment(a,b,c) or on_segment(a,b,d) or
+        on_segment(c,d,a) or on_segment(c,d,b)
     )
 
 
