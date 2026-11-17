@@ -65,6 +65,9 @@ def make_editor_preview_wsgi_app(
         ("Cache-Control", "no-store, private"),
         ("X-Content-Type-Options", "nosniff"),
         ("Referrer-Policy", "no-referrer"),
+        ("X-Frame-Options", "DENY"),
+        ("Cross-Origin-Resource-Policy", "same-origin"),
+        ("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"),
         ("Vary", "Cookie, Authorization"),
     ]
 
