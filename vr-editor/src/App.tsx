@@ -161,10 +161,10 @@ export function App() {
     objects: filterEvidence(manifest, level, selectedId, inspection)
       .filter(row => !sourceSheet || row.source.sheet === sourceSheet),
   } : null, [manifest, level, selectedId, inspection, sourceSheet]);
-  const allForLevel = useMemo(() => manifest?.objects.filter(o =>
-    (level === "all" || o.levelId === level) &&
-    (!sourceSheet || o.source.sheet === sourceSheet)) ?? [],
-    [manifest, level, sourceSheet]);
+  const allForLevel = useMemo(() => manifest ? filterEvidence(manifest, level, null,
+    {...inspection, isolateSelected:false})
+    .filter(o=>!sourceSheet || o.source.sheet===sourceSheet) : [],
+    [manifest, level, sourceSheet, inspection]);
   const summaries = summarizeEvidence(visible?.objects ?? []);
   const sheets = sourceSheets(manifest?.objects ?? []);
   const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
