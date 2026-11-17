@@ -802,8 +802,14 @@ def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
     rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0),
              "viewport_id": "floor"} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0),
-                "viewport_id": "floor"}
+    # A label/viewport alone is NOT source-negative proof. Supply the
+    # actual source-native line coinciding with the outside candidate.
+    rows[12] = {
+        "layer": "Annotation_FloorPlan", "fill": None,
+        "type": "s", "width": .34, "color": (0, 0, 0),
+        "items": [("l", (281.5, 20), (281.5, 90))],
+        "viewport_id": "floor",
+    }
     accepted = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
     )
@@ -965,15 +971,25 @@ def test_original_native_slab_and_service_lines_need_same_strict_geometry():
         )
         assert result.status == "CANDIDATE"
         assert result.measurement_authorized is False
-    # A service layer is not independently classified as ROLE_EXCLUSION
-    # in the original source classifier; refuse rather than assume.
+    # The present source-native classifier positively recognizes this
+    # explicit stormwater/service layer as NONWALL, but only with the
+    # overlapping original path line provided above. Never grant a wall.
     rows12[12]["layer"] = "Service_StormwaterGeneral"
-    unknown_service = walk_source_unbounded_building_face(
+    service = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),),
         source_drawings=rows12,
     )
-    assert unknown_service.status == "ABSTAINED"
-    assert unknown_service.other_source_wall_band_count == 1
+    assert service.status == "CANDIDATE"
+    assert service.measurement_authorized is False
+    assert service.building_footprint_authenticated is False
+    rows12[12]["items"] = [("l", (350, 20), (350, 90))]
+    foreign_service = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows12,
+    )
+    assert foreign_service.status == "ABSTAINED"
+    assert foreign_service.other_source_wall_band_count == 1
+    rows12[12]["items"] = [("l", (281.5, 20), (281.5, 90))]
     # A compact source post with an EXTERIOR wall layer is explicitly
     # *not* an eligible negative layer, even if a primitive overlaps.
     rows12[12]["layer"] = "Enclosure_WallExternal"
