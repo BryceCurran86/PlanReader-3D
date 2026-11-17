@@ -429,3 +429,40 @@ See the WebXR native reference-space documentation at
 https://developer.mozilla.org/en-US/docs/Web/API/XRReferenceSpace/getOffsetReferenceSpace
 and Three.js's official WebXR teleport example for the reference-space
 offset approach.
+
+
+## Multi-wall desktop / PS VR2 construction review batch (local what-if)
+
+The wall-addition panel can now accumulate up to **25** independently validated
+wall assembly previews against one exact project, drawing, source SHA, snapshot,
+and model revision. When the original authenticated wall assembly API accepts a
+new design, its reviewed quantities replace the previous version of that same
+proposal rather than being summed twice. All active proposals appear together
+as translucent purple **review ghosts** in desktop and WebXR rendering; they
+are not selectable physical wall entities or a new source measurement.
+
+Included operations:
+1. Keep source-scoped independent wall proposals.
+2. Replace a prior proposed wall's quantities without double billing.
+3. Remove a wall from the local design review.
+4. Undo local batch changes (bounded history).
+5. Redo local batch changes.
+6. Aggregate framing, bracing, plasterboard, skirting and specifically sourced
+   electrical/plumbing work **only by identical trade, item, specification and unit**.
+7. Inspect proposal quantities independently by level.
+8. Flag same-level intersects, touches and collinear overlaps for structural review.
+9. Show signed quantity deltas between successive accepted batch checkpoints.
+10. Deduplicate outstanding MEP/structural/finish coordination holds and export
+    a bounded JSON **review summary** (no replayable commands, source receipts,
+    prices, or automatic approval).
+
+The workbench resets on source-scope or authentication changes. It never creates
+a new wall in the canonical PlanReader model, assigns electrical/plumbing routes
+by guesswork, commits a multi-object PDF revision, derives a sell price from
+browser data, or approves commercial quantities. The single-wall work package
+still comes from the server's existing project assembly provider with every
+missing design input placed on HOLD. Batch totals are illustrative coordination
+summaries, not FIRM takeoffs. Headset output requires actual WebXR support and
+PS VR2 hardware testing; green TypeScript/Node CI is not headset proof.
+
+Test via `cd vr-editor && npm ci && npm test && npm run build`.

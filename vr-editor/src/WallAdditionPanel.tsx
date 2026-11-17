@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { SceneManifest } from "./types";
 import {
+  freshWallBatch,currentWallBatch,wallBatchSourceKey,addOrReplaceWallStudy,removeWallStudy,
+  undoWallBatch,redoWallBatch,summarizeWallBatch,compareWallBatches,exportWallBatchReview,
+} from "./wallBatchStudy";
+import {
   makeWallAdditionCommand,validateAdditionSketch,verifyWallAssemblyPreview,
 } from "./wallAdditionProtocol";
 import type {
@@ -11,13 +15,29 @@ type Props={
   scene:SceneManifest;
   authenticated:boolean;
   onSketch:(sketch:WallAdditionSketch|null)=>void;
+  onBatchSketches:(sketches:WallAdditionSketch[])=>void;
 };
-export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
+export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}:Props){
   const [profile,setProfile]=useState("");
   const [level,setLevel]=useState("");
   const [coords,setCoords]=useState({x1:"",z1:"",x2:"",z2:"",height:""});
   const [door,setDoor]=useState({enabled:false,offset:"",width:"",height:""});
   const [result,setResult]=useState<WallAssemblyPreview|null>(null);
+  // Purely local unapproved construction scope. Recreated on source switch.
+  const [batch,setBatch]=useState(()=>freshWallBatch(scene));
+  const activeBatch=currentWallBatch(scene,batch);
+  const batchReport=summarizeWallBatch(scene,activeBatch);
+  const lastBatchDelta=activeBatch.past.length?compareWallBatches(
+    scene,{...activeBatch,entries:activeBatch.past[activeBatch.past.length-1]},
+    activeBatch,
+  ):[];
+  // Only original-source-scoped previewed proposals can be projected in 3D.
+  const verifiedBatchSketches=activeBatch.entries.map(({command})=>({
+    scopeKey:activeBatch.sourceKey,
+    proposalId:command.proposalId,levelId:command.levelId,
+    start:[...command.startPt] as [number,number],
+    end:[...command.endPt] as [number,number],heightM:command.heightM,
+  }));
   const [error,setError]=useState<string|null>(null);
   const [working,setWorking]=useState(false);
   const controller=useRef<AbortController|null>(null);
@@ -25,19 +45,23 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
   const levelOptions=[...new Set(scene.objects.map(o=>o.levelId).filter(
     (s):s is string=>typeof s==="string"&&!!s,
   ))].sort();
-  const sceneIdentity=[
-    scene.scope.workspaceId,scene.scope.sourceSha256,
-    scene.scope.snapshotId,scene.scope.modelRevision,
-  ].join(":");
+  const sceneIdentity=wallBatchSourceKey(scene);
   useEffect(()=>{
     controller.current?.abort();
     proposal.current=null;
     setProfile("");setLevel("");setCoords({x1:"",z1:"",x2:"",z2:"",height:""});
     setDoor({enabled:false,offset:"",width:"",height:""});
     setResult(null);setError(null);setWorking(false);
+    setBatch(freshWallBatch(scene));
     onSketch(null);
+    onBatchSketches([]);
     return ()=>controller.current?.abort();
-  },[sceneIdentity,onSketch]);
+  },[sceneIdentity,authenticated,onSketch,onBatchSketches]);
+
+  useEffect(()=>{
+    onBatchSketches(verifiedBatchSketches);
+  // Depend on immutable accepted batch entries, not a new mapped array each render.
+  },[activeBatch.entries,onBatchSketches]);
 
   function stale(){
     controller.current?.abort();
@@ -97,6 +121,12 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
       }
       const verified=verifyWallAssemblyPreview(body,scene,command);
       if(!abort.signal.aborted){
+        setBatch(previous=>addOrReplaceWallStudy(
+          scene,currentWallBatch(scene,previous),command,verified,
+        ));
+        // Once the validated proposal joins the batch, remove the transient
+        // single-wall ghost. Otherwise a removed wall would still appear.
+        onSketch(null);
         setResult(verified);
         setError(null);
       }
@@ -110,6 +140,17 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
         controller.current=null;setWorking(false);
       }
     }
+  }
+  function downloadBatchReview(){
+    try{
+      const json=exportWallBatchReview(scene,activeBatch);
+      const blob=new Blob([json],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const anchor=document.createElement("a");
+      anchor.href=url;anchor.download="planreader-vr-multi-wall-review.json";
+      document.body.appendChild(anchor);anchor.click();anchor.remove();
+      URL.revokeObjectURL(url);
+    }catch(e){setError(e instanceof Error?e.message:"Review export unavailable");}
   }
   const label=(name:string,text:string,value:string,onChange:(s:string)=>void)=>
     <label className="added-wall-field">{name}
@@ -161,6 +202,81 @@ export function WallAdditionPanel({scene,authenticated,onSketch}:Props){
     {error&&<p role="alert" className="error">{error}</p>}
     {!authenticated&&<p className="muted">Source-authenticated workspace and
       project assembly schedule required. Local demo cannot create commercial work.</p>}
+    <section className="wall-assembly-result" aria-label="Multi-wall review batch">
+      <strong>MULTI-WALL REVIEW · LOCAL WHAT-IF</strong>
+      <p className="muted">{batchReport.wallCount} proposed wall(s) across
+        {batchReport.levels.length} level(s). Totals are preliminary construction
+        work scopes, not canonical takeoff rows or priced quotations.</p>
+      <div className="live-cost-actions">
+        <button type="button" disabled={working||!activeBatch.past.length}
+          onClick={()=>setBatch(b=>undoWallBatch(currentWallBatch(scene,b)))}>
+          Undo batch change
+        </button>
+        <button type="button" disabled={working||!activeBatch.future.length}
+          onClick={()=>setBatch(b=>redoWallBatch(currentWallBatch(scene,b)))}>
+          Redo batch change
+        </button>
+        <button type="button" disabled={!batchReport.wallCount||working}
+          onClick={downloadBatchReview}>
+          Export review summary
+        </button>
+      </div>
+      {activeBatch.entries.map(entry=><div key={entry.command.proposalId}>
+        <strong>{entry.command.proposalId}</strong>
+        <span> · {entry.command.levelId}
+          · {entry.preview.package.wall_length_m.toFixed(2)} m
+          · {entry.preview.package.quantities.length} trade lines</span>
+        <button type="button" disabled={working}
+          onClick={()=>setBatch(b=>removeWallStudy(
+            scene,currentWallBatch(scene,b),entry.command.proposalId,
+          ))}>Remove from batch</button>
+      </div>)}
+      {batchReport.wallCount>0&&<>
+        <strong>Combined trade takeoff study</strong>
+        <table><thead><tr><th>Trade</th><th>Work item</th><th>Quantity</th></tr></thead>
+          <tbody>{batchReport.tradeTotals.map(q=><tr
+            key={JSON.stringify([q.trade,q.element,q.description,q.specificationId,q.unit])}>
+            <td>{q.trade}</td><td>{q.element}<small>{q.description}</small></td>
+            <td>{q.value.toFixed(2)} {q.unit}</td>
+          </tr>)}</tbody>
+        </table>
+        <strong>Changes since prior review checkpoint</strong>
+        {lastBatchDelta.length?
+          <table><thead><tr><th>Trade</th><th>Work item</th><th>Difference</th></tr></thead>
+            <tbody>{lastBatchDelta.map(q=><tr
+              key={JSON.stringify([q.trade,q.element,q.description,q.specificationId,q.unit])}>
+              <td>{q.trade}</td><td>{q.element}</td>
+              <td>{q.value>0?"+":""}{q.value.toFixed(2)} {q.unit}</td>
+            </tr>)}</tbody></table>:
+          <p className="muted">No changed construction quantities from the previous checkpoint.</p>}
+        <strong>Level totals</strong>
+        {batchReport.perLevelTotals.map(group=>
+          <div key={group.levelId}>
+            <strong>{group.levelId} · {
+              batchReport.levels.find(l=>l.levelId===group.levelId)?.wallCount
+            } wall(s)</strong>
+            <ul>{group.totals.map(q=><li
+              key={JSON.stringify([q.trade,q.element,q.description,q.specificationId,q.unit])}>
+              {q.trade}: {q.element} — {q.value.toFixed(2)} {q.unit}
+            </li>)}</ul>
+          </div>)}
+        <strong>Wall intersection / overlap coordination</strong>
+        {batchReport.geometryConflicts.length?
+          <ul>{batchReport.geometryConflicts.map((c,i)=>
+            <li key={i}>{c.levelId}: {c.first} ↔ {c.second}
+              · {c.type.replaceAll("_"," ")} — inspect connection/detail</li>)}</ul>:
+          <p className="muted">No proposed wall segment conflicts detected within this batch.</p>}
+        <strong>Outstanding design and service coordination</strong>
+        {batchReport.coordinationHolds.length?
+          <ul>{batchReport.coordinationHolds.map(h=>
+            <li key={h}>{h.replaceAll("_"," ")}</li>)}</ul>:
+          <p className="muted">No further coordination holds returned for these proposals.</p>}
+      </>}
+      <p className="muted">This batch does not persist walls, change a PDF,
+        authorize new services or publish commercial quantities. The explicit
+        server-side wall assembly previews and original drawing source remain
+        the only inputs. Saved-plan revisions are a separate controlled workflow.</p>
+    </section>
     {result&&<div className="wall-assembly-result" role="status">
       <strong>Linked construction scope for {result.proposalId}</strong>
       <p className="muted">Length {result.package.wall_length_m.toFixed(2)} m
