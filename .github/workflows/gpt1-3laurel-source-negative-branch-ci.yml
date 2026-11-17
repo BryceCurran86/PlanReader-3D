@@ -46,3 +46,28 @@ jobs:
           # tests fail closed rather than pretending to skip: run them only
           # on the authorised source-positive owner/private runner.
           python -m pytest -q tests/test_source_outer_house_continuity_shadow.py tests/test_source_unbounded_building_face_walk_shadow.py tests/test_source_sheet_frame_roles_shadow.py -k 'not original_3laurel'
+
+
+  public-python-source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Archive only tracked public Python and dependency files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.py' '*.toml' 'requirements*.txt' \
+            'pytest.ini' 'setup.cfg' 'tox.ini' |
+            tar --null -T - -czf "$RUNNER_TEMP/planreader-public-python.tar.gz"
+          test -s "$RUNNER_TEMP/planreader-public-python.tar.gz"
+          echo "Public Python source only; no PDF, secret, plan, image or private source"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-public-python-source-head
+          path: \${{ runner.temp }}/planreader-public-python.tar.gz
+          retention-days: 1
+          if-no-files-found: error
