@@ -18,6 +18,7 @@ from pb_source_internal_swing_room_barrier import detect_source_internal_swing_r
 from pb_source_native_cavity_slider_jamb_shadow import (
     match_source_native_cavity_sliders,
 )
+from pb_source_native_vsd_joinery_shadow import match_source_native_vsd_joinery
 
 _INTERNAL_WALL = re.compile(r"(?:WallInternal|Wall_Internal|InternalWall)", re.I)
 _WIDTH = re.compile(r"^(?:6\d\d|7\d\d|8\d\d|9\d\d|1[,]?[0-4]\d\d)$")
@@ -68,6 +69,8 @@ class SourceInternalDoorCompleteness:
     cavity_slider_callout_count: int
     cavity_slider_geometry_authenticated_count: int
     marks: tuple[SourceInternalDoorMark, ...]
+    vertical_sliding_joinery_callout_count: int = 0
+    vertical_sliding_joinery_geometry_authenticated_count: int = 0
     physical_openings_authenticated: bool = False
     measurement_authorized: bool = False
 
@@ -78,6 +81,10 @@ class SourceInternalDoorCompleteness:
             "unhosted_swing_symbol_count": self.unhosted_swing_symbol_count,
             "cavity_slider_callout_count": self.cavity_slider_callout_count,
             "cavity_slider_geometry_authenticated_count": self.cavity_slider_geometry_authenticated_count,
+            "vertical_sliding_joinery_callout_count": self.vertical_sliding_joinery_callout_count,
+            "vertical_sliding_joinery_geometry_authenticated_count": (
+                self.vertical_sliding_joinery_geometry_authenticated_count
+            ),
             "marks": [m.to_dict() for m in self.marks],
             "physical_openings_authenticated": False,
             "measurement_authorized": False,
@@ -254,6 +261,35 @@ def inspect_source_internal_door_completeness(
             clear_interval_pdf_pts=native.clear_interval_pdf_pts if native else None,
         ))
 
+    # VSD labels identify robe/linen joinery, NOT cavity slider room
+    # thresholds. Even a complete frame has no room-wall or deduction scope.
+    joinery_by_word = {
+        w.vsd_word_index: w
+        for w in match_source_native_vsd_joinery(
+            drawings, source_words, page_index=page_index,
+        )
+    } if page_index >= 0 else {}
+    for word_index, value in enumerate(parsed):
+        if value is None or value[1] != "VSD":
+            continue
+        bounds,_ = value
+        native = joinery_by_word.get(word_index)
+        marks.append(SourceInternalDoorMark(
+            "native_vsd_joinery_callout",
+            "HOSTED_JOINERY_FRAME_ONLY" if native else "NEEDS_FRAME_WITNESS",
+            bounds,
+            native_path_ids=tuple(sorted({
+                *native.wall_host_path_ids, *native.jamb_cap_path_ids,
+                *native.sliding_leaf_path_ids,
+            })) if native else (),
+            source_word_index=word_index,
+            label_width_word_index=native.width_word_index if native else None,
+            label_width_mm=native.printed_width_mm if native else None,
+            host_wall_native_path_ids=native.wall_host_path_ids if native else (),
+            jamb_native_path_ids=native.jamb_cap_path_ids if native else (),
+            leaf_native_path_id=native.sliding_leaf_path_ids[0] if native else None,
+            clear_interval_pdf_pts=native.clear_interval_pdf_pts if native else None,
+        ))
     marks.sort(key=lambda m: (m.bounds_pdf_pts[1], m.bounds_pdf_pts[0], m.kind, m.native_path_ids))
     swings = [m for m in marks if m.kind == "native_swing_arc_leaf"]
     sliders = [m for m in marks if m.kind == "native_cavity_slider_callout"]
@@ -266,4 +302,11 @@ def inspect_source_internal_door_completeness(
             m.status == "HOSTED_TOPOLOGY_ONLY" for m in sliders
         ),
         marks=tuple(marks),
+        vertical_sliding_joinery_callout_count=sum(
+            m.kind == "native_vsd_joinery_callout" for m in marks
+        ),
+        vertical_sliding_joinery_geometry_authenticated_count=sum(
+            m.kind == "native_vsd_joinery_callout"
+            and m.status == "HOSTED_JOINERY_FRAME_ONLY" for m in marks
+        ),
     )
