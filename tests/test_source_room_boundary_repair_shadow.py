@@ -60,6 +60,29 @@ def test_antenna_spike_pruning():
     assert rec.total_area_pt2 == 5000.0
 
 
+def test_unsupported_rectangular_detour_collapses_when_wall_ink_absent():
+    authority = SourceRoomBoundaryRepairShadowAuthority(snap_tolerance_pt=2.5)
+    pts = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, -50.0),
+        (80.0, -50.0),
+        (80.0, 0.0),
+        (200.0, 0.0),
+        (200.0, 100.0),
+        (0.0, 100.0),
+    ]
+    # Continuous face along y=0 only — box sides are unsupported.
+    walls = ((0.0, 0.0, 200.0, 0.0), (200.0, 0.0, 200.0, 100.0),
+             (200.0, 100.0, 0.0, 100.0), (0.0, 100.0, 0.0, 0.0))
+    rec = authority.repair_room_boundary(
+        room_id="ROOM_BOX", vertices=pts, wall_segments=walls,
+    )
+    assert rec.was_repaired is True
+    assert BoundaryDefectKind.UNSUPPORTED_RECTANGULAR_DETOUR in rec.defects_detected
+    assert not any(abs(p[1] + 50.0) <= 1.0 for poly in rec.repaired_polygons for p in poly)
+
+
 def test_bowtie_self_intersection_split():
     authority = SourceRoomBoundaryRepairShadowAuthority()
 
