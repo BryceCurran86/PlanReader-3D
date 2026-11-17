@@ -328,6 +328,10 @@ def _source_nested_concentric_porch_post_nonwall(
     """
     if not ids or not _native_source_stroke_only(ids, drawings):
         return False
+    # Each alleged residual must truly overlap the native ink that forms the
+    # symbol, not merely carry a matching path ID or a nearby PORCH label.
+    if not all(_original_native_line_overlaps_bar(geom, drawings[i]) for i in ids):
+        return False
     if any(
         "wall" not in str(drawings[i].get("layer") or "").lower()
         or "external" not in str(drawings[i].get("layer") or "").lower()
