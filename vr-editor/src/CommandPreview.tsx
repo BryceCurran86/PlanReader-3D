@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EditorObject, SceneManifest } from "./types";
 import { verifyPreviewResponse } from "./previewProtocol";
 import type { VerifiedPreview } from "./previewProtocol";
@@ -29,11 +29,16 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<VerifiedPreview | null>(null);
+  const previewRequestId = useRef(0);
+  const pendingPreview = useRef<AbortController | null>(null);
   const control = available.find(c => c.command === kind) ?? available[0];
   const sourceReady = !!object.canonicalObjectId && !!object.objectRevision;
   const enabled = authenticated && sourceReady && !!control;
 
   useEffect(() => {
+    previewRequestId.current += 1;
+    pendingPreview.current?.abort();
+    setWorking(false);
     // A local visual study can only prefill this unsubmitted form, never
     // supply server authority, a reason, pricing or an approval.
     if (suggestion?.objectRevision === object.objectRevision &&
@@ -45,6 +50,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       setValue("");
     }
     setPreview(null);
+    return () => { previewRequestId.current += 1; pendingPreview.current?.abort(); };
   }, [suggestion?.command, suggestion?.value, suggestion?.objectRevision, object.objectRevision]);
 
   async function sendPreview() {
@@ -83,6 +89,10 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
       payload: { newValue },
       reason: reason.trim(),
     };
+    const requestId = ++previewRequestId.current;
+    pendingPreview.current?.abort();
+    const controller = new AbortController();
+    pendingPreview.current = controller;
     setWorking(true);
     try {
       const response = await fetch(
@@ -91,6 +101,7 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
           method: "POST",
           credentials: "include",
           cache: "no-store",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
           body: JSON.stringify(command),
         }
@@ -104,11 +115,16 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         throw new Error(issues || "Source authority rejected preview");
       }
       const validated = verifyPreviewResponse(result, command);
-      setPreview(validated);
+      if (requestId === previewRequestId.current && !controller.signal.aborted)
+        setPreview(validated);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Preview unavailable");
+      if (requestId === previewRequestId.current && !controller.signal.aborted)
+        setError(e instanceof Error ? e.message : "Preview unavailable");
     } finally {
-      setWorking(false);
+      if (requestId === previewRequestId.current) {
+        pendingPreview.current = null;
+        setWorking(false);
+      }
     }
   }
 
