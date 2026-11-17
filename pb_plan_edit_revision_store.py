@@ -295,6 +295,7 @@ def save_plan_edit_revision(
         prior_value=outcome.event.old_value,
         new_value=outcome.event.new_value,
         base_pdf_sha256=parent_sha,
+        correction_id=outcome.event.correction_id,
     )
     revision_id = sha256(_encode({
         "scope": key, "number": number, "commandSha": command_sha,
@@ -382,6 +383,11 @@ def get_plan_edit_revision(connection: sqlite3.Connection,
         "pagesRevised": json.loads(row[7]), "event": json.loads(row[8]),
         "requiresApproval": True, "commercialPublicationAllowed": False,
         "geometryRedrawn": False, "reviewRevisionOnly": True,
+        "sourceVerifiedVectorOverlayComplete": (
+            bool(json.loads(row[7])) and
+            all(p.get("vectorGeometryOverlayDrawn") is True
+                for p in json.loads(row[7]))
+        ),
     }
 
 

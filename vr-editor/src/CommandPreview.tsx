@@ -295,10 +295,11 @@ export function CommandPreview({ workspace, object, authenticated, suggestion }:
         <div className="plan-edit-saved" role="status">
           <strong>Saved {savedRevision.revisionLabel} · review copy</strong>
           <p>Updated {savedRevision.pagesRevised.length} source-verified page(s).
-            Existing source PDF preserved; geometry was NOT redrawn.</p>
+            Existing source PDF preserved; source-verified vector proposals are shown only on corroborated pages.</p>
           <ul>{savedRevision.pagesRevised.map(page =>
             <li key={page.pageIndex}>Page {page.pageLabel} · {page.sheet}
               · {page.relationship === "origin" ? "edited source" : "verified cross-sheet link"}
+              · {page.vectorGeometryOverlayDrawn ? "verified proposed vector drawn" : "coordination annotation only"}
             </li>)}</ul>
           <a href={savedRevision.downloadPath} download>
             Download saved revised PDF

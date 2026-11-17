@@ -4,16 +4,20 @@ on:
     paths:
       - 'pb_plan_edit_revision_*.py'
       - 'pb_plan_edit_related_page_resolver.py'
+      - 'pb_plan_edit_verified_vector_overlay.py'
       - 'pb_vr_editor_readonly_wsgi.py'
       - 'tests/editable_3d/test_plan_edit_revision_*.py'
+      - 'tests/editable_3d/test_plan_edit_verified_vector_overlay.py'
       - '.github/workflows/plan-edit-related-page-revisions.yml'
   push:
     branches: [main]
     paths:
       - 'pb_plan_edit_revision_*.py'
       - 'pb_plan_edit_related_page_resolver.py'
+      - 'pb_plan_edit_verified_vector_overlay.py'
       - 'pb_vr_editor_readonly_wsgi.py'
       - 'tests/editable_3d/test_plan_edit_revision_*.py'
+      - 'tests/editable_3d/test_plan_edit_verified_vector_overlay.py'
       - '.github/workflows/plan-edit-related-page-revisions.yml'
 jobs:
   related-page-transaction:
@@ -31,4 +35,4 @@ jobs:
         run: python -m pip install pytest PyMuPDF numpy pandas plotly
       - name: Test original source, related pages, PDF lineage and atomic save
         run: |
-          python -m pytest -q tests/editable_3d/test_plan_edit_revision_store.py tests/editable_3d/test_plan_edit_revision_wsgi.py
+          python -m pytest -q tests/editable_3d/test_plan_edit_revision_store.py tests/editable_3d/test_plan_edit_revision_wsgi.py tests/editable_3d/test_plan_edit_verified_vector_overlay.py
