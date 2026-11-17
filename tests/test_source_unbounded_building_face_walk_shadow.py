@@ -509,16 +509,26 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
     walk = attempt.source_outside_face_walk
     assert walk is not None
     assert walk.measurement_authorized is False
-    assert walk.status == "ABSTAINED"
-    # All source-NAMED dwelling zones now close after ASSD and porch entry
-    # swing are independently hosted. Still fail closed for wall evidence
-    # elsewhere on this unscoped original sheet.
-    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    # Original two-dwelling building wall graph now yields one source-backed
+    # exterior review candidate. PARTY remains internal and no physical
+    # measurement or commercial wall quantity is authorized.
+    assert walk.status == "CANDIDATE"
+    assert walk.reason == "unbounded_outside_wall_walk_requires_independent_source_seal"
     assert walk.unclosed_dwelling_sides == ()
     assert walk.enclosed_dwelling_zone_count == 2
-    assert walk.clockwise_pdf_pts == ()  # no firm exterior geometry
-    assert walk.outer_wall_native_path_ids == ()
-    assert len(walk.diagnostic_unsealed_ring_pdf_pts) >= 5
+    assert len(walk.clockwise_pdf_pts) >= 5
+    assert walk.clockwise_pdf_pts[0] == walk.clockwise_pdf_pts[-1]
+    assert len(walk.outer_wall_native_path_ids) >= 4
+    assert not walk.building_footprint_authenticated
+    assert not walk.measurement_authorized
+    assert attempt.status == "CANDIDATE"
+    assert attempt.source_outside_face_walk is not None
+    assert attempt.shared_dwelling_divider_candidates
+    # Preflight displays 0.001pt-rounded points while the source walker
+    # preserves full original PDF precision and a terminal close vertex.
+    assert Polygon(attempt.polygon_pdf_pts).hausdorff_distance(
+        Polygon(walk.clockwise_pdf_pts)
+    ) < 0.005
     assert any(b.label_text.lower() == "assd" for b in attempt.sliding_door_footprint_bridges)
     assert any(b.swing_arc_path_id == 1912 for b in attempt.swing_door_footprint_bridges)
     assert receipt["measurement_authorized"] is False
