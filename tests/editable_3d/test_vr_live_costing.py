@@ -15,7 +15,7 @@ from pb_vr_editor_command_preview import preview_editor_command
 from pb_vr_live_costing import (
     LiveCostBook, LiveRateBinding, price_live_correction_preview,
 )
-from tests.editable_3d.test_vr_editor_command_preview import _fixture
+from test_vr_editor_command_preview import _fixture
 
 
 def _rate(**overrides):
