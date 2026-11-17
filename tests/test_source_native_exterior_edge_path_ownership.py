@@ -412,3 +412,54 @@ def test_native_dark_ink_rejects_nonfinite_and_wrong_draw_modes():
     assert _visible_native_dark_wall_ink(
         {"type": "fs", "color": (0, 0, 0), "fill": (0.98, 0.98, 0.98)}
     )
+
+
+def test_exact_multi_path_original_stroke_chain_never_mints_wall_area():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = [_stroke((200, i * 25), (200, (i + 1) * 25))
+               for i in range(4)]
+    edge = own_exterior_contour_native_paths(strokes, trace)[3]
+    assert edge.status is EvidenceResolutionStatus.CANDIDATE
+    assert edge.native_path_indices == (0, 1, 2, 3)
+    assert edge.classification == "source_native_wall_ink_chain_candidate"
+    assert edge.physical_wall_authenticated is False
+    assert edge.can_issue_area is False
+    assert edge.commercial_publishable is False
+
+
+def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    middle = [
+        _stroke((200, 0), (200, 25)),
+        _stroke((200, 25.425), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    missing = own_exterior_contour_native_paths(middle, trace)[3]
+    assert missing.status is EvidenceResolutionStatus.ABSTAINED
+    assert missing.classification == "incomplete_source_native_wall_ink_chain"
+    assert not missing.physical_wall_authenticated
+    end_gap = [
+        _stroke((200, 0.5), (200, 25)),
+        _stroke((200, 25), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    tip = own_exterior_contour_native_paths(end_gap, trace)[3]
+    assert tip.status is EvidenceResolutionStatus.ABSTAINED
+    assert tip.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+
+
+def test_parallel_source_chains_cannot_be_selected_as_one_wall():
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = (
+        [_stroke((200, i * 25), (200, (i + 1) * 25))
+         for i in range(4)]
+        + [_stroke((201, i * 25), (201, (i + 1) * 25))
+           for i in range(4)]
+    )
+    edge = own_exterior_contour_native_paths(strokes, trace)[3]
+    assert edge.status is EvidenceResolutionStatus.ABSTAINED
+    assert edge.reason == "ambiguous_competing_native_path_owners"
+    assert set(edge.native_path_indices) == set(range(8))
+    assert not edge.physical_wall_authenticated
