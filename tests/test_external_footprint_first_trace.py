@@ -359,3 +359,22 @@ def test_original_page_title_pin_rejects_invalid_expectations(invalid_title):
 
     with pytest.raises(ValueError, match="original_footprint_expected_page_title_invalid"):
         _verify_original_drawing_title(b"not a pdf", 0, invalid_title)
+
+
+def test_unattempted_original_gap_review_does_not_report_false_zero(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=False)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        original, 0, tmp_path / "abstained_original", expected_sha256=sha,
+    )
+    assert result["exterior"]["status"] == "ABSTAINED"
+    assert result["bounded_source"]["status"] == "ABSTAINED"
+    assert result["topology"]["status"] == "ABSTAINED"
+    assert result["topology"]["gap_review_performed"] is False
+    assert result["topology"]["unresolved_collinear_gap_count"] is None
+    assert result["topology"]["source_gap_witness_count"] is None
+    assert result["topology"]["room_quantity_authorized"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
