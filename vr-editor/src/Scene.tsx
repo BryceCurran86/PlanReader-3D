@@ -10,6 +10,8 @@ import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS }
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
+import { safeWallMoves } from "./wallMoveStudy";
+import type { MoveMode, WallMoveHistory } from "./wallMoveStudy";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
@@ -23,6 +25,9 @@ type Props = {
   mood: LightingMood;
   quality: RenderQuality;
   detail: SurfaceDetail;
+  moveMode: MoveMode;
+  wallMoveState: WallMoveHistory | null;
+  onMoveDelta: (id: string, dx: number, dz: number) => void;
   captureSerial: number;
   onCapture: (message:string)=>void;
   inspection: InspectionSettings;
@@ -108,13 +113,15 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, moveMode, wallMoveState, onMoveDelta }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
+  const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
+  moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
   visualSettings.current = { mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
@@ -298,12 +305,40 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     const select0 = () => xrPick(controllers[0]);
     const select1 = () => xrPick(controllers[1]);
-    // Grip/squeeze cycles a cosmetic colour on the currently selected wall.
-    // Trigger selection remains independent. No source command is generated.
+    // Squeeze/grip moves the LOCAL ghost only after explicit move-mode choice.
+    let activeGrip: {index: number; objectId: string; from: THREE.Vector3} | null = null;
+    const beginGrip = (index: number) => {
+      if (moveSettings.current.moveMode !== "move" || activeGrip) return;
+      const id = picked.current;
+      const row = sourceById.get(id ?? "");
+      if (!id || !row || row.objectType !== "wall" ||
+          !row.geometry || !["wallFace", "wallLine"].includes(row.geometry.kind)) return;
+      activeGrip = {
+        index, objectId: id,
+        from: controllers[index].getWorldPosition(new THREE.Vector3()),
+      };
+    };
+    const endGrip = (index: number) => {
+      const held = activeGrip;
+      if (!held || held.index !== index) return;
+      activeGrip = null;
+      if (moveSettings.current.moveMode !== "move") return;
+      const position = controllers[index].getWorldPosition(new THREE.Vector3());
+      const dx = position.x - held.from.x, dz = position.z - held.from.z;
+      if (Number.isFinite(dx) && Number.isFinite(dz))
+        moveSettings.current.onMoveDelta(held.objectId, dx, dz);
+    };
+    const begin0 = () => beginGrip(0), begin1 = () => beginGrip(1);
+    const end0 = () => endGrip(0), end1 = () => endGrip(1);
     const squeeze = () => {
+      if (moveSettings.current.moveMode === "move") return;
       const id = picked.current;
       if (id && sourceById.has(id)) cycleCallback.current(id);
     };
+    controllers[0].addEventListener("squeezestart", begin0);
+    controllers[1].addEventListener("squeezestart", begin1);
+    controllers[0].addEventListener("squeezeend", end0);
+    controllers[1].addEventListener("squeezeend", end1);
     controllers[0].addEventListener("squeeze", squeeze);
     controllers[1].addEventListener("squeeze", squeeze);
     controllers[0].addEventListener("select", select0);
@@ -345,6 +380,25 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     renderer.setAnimationLoop(() => {
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
+      // Source BufferGeometry never changes. Local proposal translations only
+      // affect Three.js Object3D.position, and are reversible per frame.
+      const activeMoves = moveSettings.current.wallMoveState
+        ? safeWallMoves(moveSettings.current.wallMoveState, manifest) : [];
+      let gripDeltaX = 0, gripDeltaZ = 0;
+      if (activeGrip && moveSettings.current.moveMode === "move") {
+        const position = controllers[activeGrip.index].getWorldPosition(new THREE.Vector3());
+        gripDeltaX = position.x - activeGrip.from.x;
+        gripDeltaZ = position.z - activeGrip.from.z;
+      }
+      for (const item of pickables) {
+        const id = item.userData.objectId as string | undefined;
+        const old = activeMoves.find(m => m.objectId === id);
+        const held = activeGrip?.objectId === id && moveSettings.current.moveMode === "move";
+        const dx = (old?.dx ?? 0) + (held ? gripDeltaX : 0);
+        const dz = (old?.dz ?? 0) + (held ? gripDeltaZ : 0);
+        if (Number.isFinite(dx) && Number.isFinite(dz))
+          item.position.set(dx, 0, dz);
+      }
       grid.visible = activeInspection.showGrid;
       sunlight.castShadow = activeInspection.showShadows;
       presentationFloor.visible = activeInspection.showShadows;
@@ -425,8 +479,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const swatch = studyColor(row, draft?.swatch ? { objectId: id, swatch: draft.swatch } : null);
         const originalHeight = item.userData.originalHeight as number | undefined;
         const ghostHeight = draft?.heightM;
-        const ghost = activeInspection.showGhosts && ghostHeight !== null && ghostHeight !== undefined &&
-          originalHeight !== undefined;
+        const moving = activeMoves.some(m => m.objectId === id) ||
+          activeGrip?.objectId === id;
+        const ghost = (activeInspection.showGhosts && ghostHeight !== null && ghostHeight !== undefined &&
+          originalHeight !== undefined) || moving;
         const colour = swatch ?? (ghost ? 0xb899de : item.userData.originalReviewColor as number);
         if (item.material.color.getHex() !== colour) item.material.color.setHex(colour);
         const originalOpacity = item.userData.originalOpacity as number;
@@ -438,7 +494,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         item.material.emissive.setHex(selected ? 0x173b36 : 0x000000);
         item.material.emissiveIntensity = selected ? 0.32 : 0;
         if (originalHeight !== undefined) {
-          const height = ghost ? ghostHeight : originalHeight;
+          const height = activeInspection.showGhosts && ghostHeight !== null &&
+            ghostHeight !== undefined ? ghostHeight : originalHeight;
           const position = item.geometry.getAttribute("position");
           if (position instanceof THREE.BufferAttribute && position.getY(2) !== height) {
             // Triangle vertices 2, 4 and 5 are the upper face vertices.
@@ -518,6 +575,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       renderer.domElement.removeEventListener("keydown", keyDown);
+      controllers[0].removeEventListener("squeezestart", begin0);
+      controllers[1].removeEventListener("squeezestart", begin1);
+      controllers[0].removeEventListener("squeezeend", end0);
+      controllers[1].removeEventListener("squeezeend", end1);
       controllers[0].removeEventListener("squeeze", squeeze);
       controllers[1].removeEventListener("squeeze", squeeze);
       controllers[0].removeEventListener("select", select0);
