@@ -520,7 +520,7 @@ def test_original_page_title_pin_blocks_wrong_page_before_tracing(tmp_path, monk
 
     original = _plan(tmp_path, walls=True)
     with fitz.open(original) as document:
-        document[0].insert_text((40, 30), "Floor Plan", fontsize=12)
+        document[0].insert_text((40, 30), "Drawing title: Floor Plan\nScale: 1:100", fontsize=12)
         document.saveIncr()
     sha = hashlib.sha256(original.read_bytes()).hexdigest()
     destination = tmp_path / "wrong_page_result"
@@ -545,7 +545,7 @@ def test_original_page_title_pin_verified_on_matching_floor_plan(tmp_path):
 
     original = _plan(tmp_path, walls=True)
     with fitz.open(original) as document:
-        document[0].insert_text((40, 30), "Floor Plan", fontsize=12)
+        document[0].insert_text((40, 30), "Drawing title: Floor Plan\nScale: 1:100", fontsize=12)
         document.saveIncr()
     sha = hashlib.sha256(original.read_bytes()).hexdigest()
     result, report, overlay = run(
@@ -592,7 +592,7 @@ def test_acacia_wrapped_window_and_door_schedule_page_title(tmp_path):
     pdf = tmp_path / "original_schedule.pdf"
     with fitz.open() as document:
         page = document.new_page()
-        page.insert_text((30, 45), "Window\nand Door Schedule")
+        page.insert_text((30, 45), "Drawing title: Window\nand Door Schedule\nScale: 1:50")
         document.save(pdf)
     raw = pdf.read_bytes()
     assert _verify_original_drawing_title(
@@ -600,3 +600,32 @@ def test_acacia_wrapped_window_and_door_schedule_page_title(tmp_path):
     ) is True
     with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
         _verify_original_drawing_title(raw, 0, "Setout Plan")
+
+
+def test_original_cover_contents_floor_plan_is_not_drawing_title(tmp_path):
+    """3Laurel p1 lists A0.3 Floor Plan, but actual sheet is A0.1 Cover."""
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    path = tmp_path / "cover_with_floor_plan_index.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text(
+            (30, 45),
+            "Drawing title: Cover Sheet\\nA0.3 Floor Plan\\nScale: 1:100",
+        )
+        doc.save(path)
+    raw = path.read_bytes()
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(raw, 0, "Floor Plan")
+
+
+def test_page_without_title_field_cannot_claim_floor_plan(tmp_path):
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    path = tmp_path / "index_without_title.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((30, 45), "A0.3 Floor Plan")
+        doc.save(path)
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(path.read_bytes(), 0, "Floor Plan")
