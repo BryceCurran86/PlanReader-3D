@@ -780,8 +780,7 @@ def test_original_native_slab_and_service_lines_need_same_strict_geometry():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
     rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)}
             for _ in range(12)]
-    for native_layer in ("Structure_Slab", "Service_StormwaterGeneral",
-                         "Annotation_General"):
+    for native_layer in ("Structure_Slab", "Annotation_General"):
         rows12 = [*rows, {
             "type": "s", "layer": native_layer, "fill": None,
             "color": (0, 0, 0), "width": .5,
@@ -793,6 +792,15 @@ def test_original_native_slab_and_service_lines_need_same_strict_geometry():
         )
         assert result.status == "CANDIDATE"
         assert result.measurement_authorized is False
+    # A service layer is not independently classified as ROLE_EXCLUSION
+    # in the original source classifier; refuse rather than assume.
+    rows12[12]["layer"] = "Service_StormwaterGeneral"
+    unknown_service = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows12,
+    )
+    assert unknown_service.status == "ABSTAINED"
+    assert unknown_service.other_source_wall_band_count == 1
     # A compact source post with an EXTERIOR wall layer is explicitly
     # *not* an eligible negative layer, even if a primitive overlaps.
     rows12[12]["layer"] = "Enclosure_WallExternal"
