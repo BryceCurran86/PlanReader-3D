@@ -42,6 +42,11 @@ class OutsideFacingBuildingWalk:
     # wall-like bands. A composite can include conflicting owners: these are
     # candidate IDs to investigate, NOT authenticated exterior wall faces.
     unresolved_outside_native_path_id_sample: tuple[int, ...] = ()
+    # Each unresolved outside band and its OWN local path owners. Never an
+    # authenticated wall: source reviewers can locate the exact residuals.
+    unresolved_outside_band_review_sample: tuple[
+        tuple[tuple[float, float, float, float], tuple[int, ...]], ...
+    ] = ()
     # Native role audit never manufactures exterior wall evidence.
     source_outside_band_count_before_role_audit: int = 0
     source_proven_nonwall_band_count: int = 0
@@ -72,6 +77,16 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        if self.unresolved_outside_band_review_sample:
+            payload["unresolved_outside_band_review_sample"] = [
+                {
+                    "bounds_pdf_pts": list(bounds),
+                    "source_local_native_path_ids": list(ids),
+                    "physical_wall_authenticated": False,
+                    "measurement_authorized": False,
+                }
+                for bounds, ids in self.unresolved_outside_band_review_sample
+            ]
         if self.unresolved_outside_native_path_id_sample:
             payload["unresolved_outside_native_path_id_sample"] = list(
                 self.unresolved_outside_native_path_id_sample
@@ -816,6 +831,13 @@ def walk_source_unbounded_building_face(
                 int(pid) for _bar, ids in unresolved for pid in ids
                 if type(pid) is int and pid >= 0
             ))[:64],
+            unresolved_outside_band_review_sample=tuple(
+                (
+                    tuple(round(float(v), 3) for v in bar.polygon.bounds),
+                    tuple(int(pid) for pid in ids if type(pid) is int and pid >= 0)[:16],
+                )
+                for bar, ids in unresolved[:32]
+            ),
             source_outside_band_count_before_role_audit=len(outside),
             source_proven_nonwall_band_count=excluded_nonwall,
             source_outside_role_audit_applied=source_drawings is not None,
