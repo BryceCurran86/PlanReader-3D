@@ -82,3 +82,19 @@ def test_crossing_or_parallel_nearby_wall_is_not_coverage_of_door_gap():
 def test_short_fragment_does_not_fabricate_continuity():
     gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "a", "b")
     assert not _gap_covered_by_physical_wall(gap, {"short": (180, 100, 195, 100)})
+
+
+def test_fragmented_but_contiguous_source_wall_suppresses_false_gap():
+    gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "a", "b")
+    assert _gap_covered_by_physical_wall(gap, {
+        "stroke1": (165, 100, 194, 100),
+        "stroke2": (194, 100, 226, 100),
+    })
+
+
+def test_two_end_stubs_with_genuine_gap_do_not_count_as_continuous_wall():
+    gap = OpeningGapCandidate((170, 100), (220, 100), 50, 2.6, "a", "b")
+    assert not _gap_covered_by_physical_wall(gap, {
+        "stub1": (165, 100, 190, 100),
+        "stub2": (200, 100, 225, 100),
+    })
