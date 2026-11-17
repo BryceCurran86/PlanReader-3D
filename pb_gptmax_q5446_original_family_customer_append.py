@@ -188,8 +188,15 @@ def issue_original_q5446_alfresco_plus_tiled_floors_customer(
     if (
         not isinstance(alf, OriginalQ5446AlfrescoCustomerResult)
         or alf.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
-        or alf.quantity is None
+        or not isinstance(alf.quantity, QuantityEvidence)
+        or alf.quantity.abstained
+        or alf.quantity.family != "floor_area"
+        or alf.trace is None
+        or alf.trace.source_sha256 != SOURCE_SHA256
+        or alf.trace.project_id != Q5446_PROJECT_ID
+        or alf.trace.document_id != Q5446_DOCUMENT_ID
         or alf.sealed_run is None
+        or len(alf.sealed_run.quantities) != 1
         or len(alf.customer_rows) != 1
     ):
         return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_alfresco_signed_customer_retention_unavailable",))
@@ -210,10 +217,20 @@ def issue_original_q5446_alfresco_plus_tiled_floors_customer(
         if (
             not isinstance(item, OriginalQ5446TiledFloorCustomerResult)
             or item.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
-            or item.quantity is None
+            or not isinstance(item.quantity, QuantityEvidence)
+            or item.quantity.abstained
+            or item.quantity.family != "floor_finish_area"
+            or item.trace is None
+            or item.trace.source_sha256 != SOURCE_SHA256
+            or item.trace.project_id != Q5446_PROJECT_ID
+            or item.trace.document_id != Q5446_DOCUMENT_ID
             or item.sealed_run is None
+            or len(item.sealed_run.quantities) != 1
             or len(item.customer_rows) != 1
+            or item.quantity.metadata.get("tiled_floor_finish_authorized") is not True
+            or item.quantity.metadata.get("net_internal_finished_face_authorized") is not True
             or item.quantity.quantity_id in seen_qids
+            or not item.quantity.input_entity_ids
             or seen_entities.intersection(item.quantity.input_entity_ids)
         ):
             return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_tiled_floor_signed_customer_retention_unavailable",))
@@ -221,13 +238,39 @@ def issue_original_q5446_alfresco_plus_tiled_floors_customer(
         seen_entities.update(item.quantity.input_entity_ids)
 
     try:
+        constituents = (alf, *tiled)
+        source_bodies = {
+            item.quantity.quantity_id: tuple(rec.to_dict() for rec in item.sealed_run.quantities)
+            for item in constituents
+        }
+        for item in constituents:
+            single_verified = verify_sealed_customer_output(item.sealed_run, item.customer_rows)
+            if (
+                single_verified.customer_row_count != 1
+                or set(single_verified.verified_quantity_ids) != {item.quantity.quantity_id}
+            ):
+                return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("original_family_customer_source_bijection_unavailable",))
         combined = combine_source_closed_runs(
-            (alf.sealed_run, *(t.sealed_run for t in tiled if t.sealed_run is not None)),
+            tuple(item.sealed_run for item in constituents),
             project_id=Q5446_PROJECT_ID,
         )
-        rows = (*alf.customer_rows, *(r for t in tiled for r in t.customer_rows))
+        rows = tuple(row for item in constituents for row in item.customer_rows)
         verified = verify_sealed_customer_output(combined, rows)
-        if len(combined.quantities) != 4 or verified.customer_row_count != 4:
+        combined_ids = {rec.quantity_id for rec in combined.quantities}
+        if (
+            len(combined.quantities) != 4
+            or verified.customer_row_count != 4
+            or set(verified.verified_quantity_ids) != seen_qids
+            or len(combined_ids) != 4
+            or any(
+                tuple(rec.to_dict() for rec in combined.quantities if rec.quantity_id == qid) != originals
+                for qid, originals in source_bodies.items()
+            )
+            or rows != tuple(row for item in constituents for row in item.customer_rows)
+            or set(combined.source_sha256s) != {SOURCE_SHA256}
+            or len(combined.revision_ids) != 1
+            or not all(rec.lineage_ok and not rec.abstained for rec in combined.quantities)
+        ):
             return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("combined_original_family_retention_unavailable",))
     except (ValueError, RuntimeError, TypeError, KeyError, SourceClosedRunConflictError):
         return Q5446MultiRoomTiledCustomerResult("ABSTAIN", ("combined_original_family_seal_or_customer_conflict",))
