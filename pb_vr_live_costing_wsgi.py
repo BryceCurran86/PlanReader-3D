@@ -115,6 +115,23 @@ def make_vr_live_costing_wsgi_app(
             return respond("400 Bad Request", {"error": "invalid_json"})
         if not isinstance(command, dict):
             return respond("400 Bad Request", {"error": "cost_preview_object_required"})
+        # Browser must never supply rates, tax, approvals or publication flags.
+        # Reject these before quantity/revision evaluation so the denial stays a
+        # validation failure (422), not a stale-revision conflict (409).
+        forbidden = (
+            "rates", "taxPct", "approved", "commercialPublicationAllowed",
+        )
+        if any(key in command for key in forbidden):
+            return respond(
+                "422 Unprocessable Entity",
+                {
+                    "accepted": False,
+                    "quantityPreview": {
+                        "blockingReasons": ["browser_cost_override_forbidden"],
+                    },
+                    "costingPreview": None,
+                },
+            )
         try:
             workspace = load_authorized_workspace(principal, workspace_id)
             if not isinstance(workspace, AuthorizedSceneWorkspace):
