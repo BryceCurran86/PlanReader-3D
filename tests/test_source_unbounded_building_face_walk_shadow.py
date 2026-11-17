@@ -633,3 +633,64 @@ def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
     assert walk.outer_wall_native_path_ids == ()
     assert not walk.measurement_authorized
 
+
+def test_pure_service_or_empty_thin_outside_is_not_a_structural_veto():
+    # Pure service/gas ink and empty thin unfilled strokes outside the ring
+    # are source-negative non-walls. WallExternal mixes still veto.
+    bars = (
+        *_building_bars(),
+        SourceBar(box(280, 20, 283, 90), 12),
+        SourceBar(box(350, 20, 353, 40), 13),
+        SourceBar(box(400, 20, 403, 90), 14),
+    )
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "type": "s", "width": 0.7} for _ in range(15)]
+    rows[12] = {"layer": "Service_Gas.Bottled", "fill": None, "type": "s", "width": 0.34}
+    rows[13] = {"layer": "", "fill": None, "type": "s", "width": 0.34}
+    rows[14] = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "type": "s", "width": 0.7}
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.source_outside_band_count_before_role_audit == 3
+    # Empty thin unlayered source paint is AMBIGUOUS, not a proven nonwall.
+    assert walk.source_proven_nonwall_band_count == 1
+    assert walk.other_source_wall_band_count == 2
+    assert not walk.measurement_authorized
+
+
+def test_filled_unlabelled_outside_stroke_is_not_dropped_as_sheet_ink():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "type": "s", "width": 0.7} for _ in range(13)]
+    rows[12] = {"layer": "", "fill": (0, 0, 0), "type": "s", "width": 0.7}
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.source_proven_nonwall_band_count == 0
+
+
+
+
+def test_unknown_unlayered_thin_line_never_excludes_a_physical_wall_candidate():
+    # A physical external wall may be drawn as a thin, unfilled native stroke
+    # when its original CAD layer metadata is missing. With no source-owned
+    # frame or service role, keep it unresolved; do not manufacture closure.
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [
+        {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0),
+         "type": "s", "width": 0.7}
+        for _ in range(13)
+    ]
+    rows[12] = {"layer": "", "fill": None, "type": "s", "width": 0.34}
+    walk = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),),
+        source_drawings=rows,
+    )
+    assert walk.status == "ABSTAINED"
+    assert walk.reason == "source_other_structural_walls_outside_candidate"
+    assert walk.other_source_wall_band_count == 1
+    assert walk.source_proven_nonwall_band_count == 0
+    assert not walk.building_footprint_authenticated
+    assert not walk.measurement_authorized
