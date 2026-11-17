@@ -33,6 +33,7 @@ export function App() {
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
   const [addedWallSketch, setAddedWallSketch] = useState<WallAdditionSketch | null>(null);
+  const [addedWallBatchSketches, setAddedWallBatchSketches] = useState<WallAdditionSketch[]>([]);
   const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
   const [moveMode, setMoveMode] = useState<MoveMode>("inspect");
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -285,6 +286,9 @@ export function App() {
                 captureSerial={captureSerial} onCapture={setCaptureStatus}
                 moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch}
+                addedWallSketches={visible ? addedWallBatchSketches.filter(
+                  sketch=>sketch.scopeKey===scopeKey(visible),
+                ) : []}
                 teleportMode={teleportMode} onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
@@ -462,7 +466,8 @@ export function App() {
             <div className="section-block" aria-label="New wall construction work">
               <WallAdditionPanel
                 scene={manifest} authenticated={authenticatedSource}
-                onSketch={setAddedWallSketch} />
+                onSketch={setAddedWallSketch}
+                onBatchSketches={setAddedWallBatchSketches} />
             </div>
           )}
           {manifest && (
