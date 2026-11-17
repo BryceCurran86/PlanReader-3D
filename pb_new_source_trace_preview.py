@@ -259,7 +259,7 @@ def source_native_trace_preview(
         canvas.show_pdf_page(canvas.rect, document, page_index)
         native_wall_counts = {}
         seen = set()
-        for pane in panes:
+        for pane_number, pane in enumerate(panes, start=1):
             clipped = _clip_drawing_items(wall_drawings, pane)
             clipped_baseline = (
                 _clip_drawing_items(strict_wall_drawings, pane)
@@ -295,6 +295,16 @@ def source_native_trace_preview(
                         canvas.draw_polyline(points, color=color, width=1.7, stroke_opacity=0.78)
                     except (ValueError, TypeError, AttributeError):
                         continue
+            if progress_callback is not None and (
+                pane_number == len(panes)
+                or pane_number % max(1, (len(panes) + 4) // 5) == 0
+            ):
+                _report(
+                    "drawing_wall_candidates",
+                    .58 + .22 * pane_number / max(1, len(panes)),
+                    snapshot=canvas,
+                    wall_candidates=sum(native_wall_counts.values()),
+                )
         # Raster branch shows actual source image line-candidate geometry,
         # not any native-vector page furniture or old envelope contour.
         # The render is a diagnostic: magenta may include dimension lines.
@@ -315,6 +325,8 @@ def source_native_trace_preview(
                 color=(0.95, 0.07, 0.13),
                 width=2.8,
             )
+        _report("drawing_outer_boundary", .83, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         # Blue spans are native window aperture CONTINUITY of the footprint,
         # not solid walls or customer-measurable material.
         for bridge in outer_wall.window_footprint_bridges:
@@ -410,6 +422,8 @@ def source_native_trace_preview(
                 fitz.Point(*hit.tip_pdf_pts), radius=4.0,
                 color=(0.70, 0.08, 0.72), width=1.5,
             )
+        _report("drawing_openings_and_wall_ends", .91, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         for closure in result.closures:
             lo, hi = closure.gap_interval
             a, b = closure.band
@@ -429,12 +443,15 @@ def source_native_trace_preview(
                     dashes="[5 3] 0",
                     width=1.5,
                 )
+        _report("drawing_enclosed_room_candidates", .97, snapshot=canvas,
+                wall_candidates=sum(native_wall_counts.values()))
         zoom = min(1.2, 1800 / max(float(rect.width), float(rect.height)))
         png = canvas.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
         preview.close()
         summary = {
             "source_sha256": sha,
             "page_index": page_index,
+            "document_page_count": page_count,
             "producer": "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings",
             "legacy_envelope_used": False,
             "legacy_fallback_allowed": False,
@@ -630,4 +647,5 @@ def source_native_trace_preview(
                 "green": "candidate room enclosure",
             },
         }
+        _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png
