@@ -97,7 +97,7 @@ def test_unique_alfresco_label_excludes_only_that_bar():
 
 def test_unique_post_label_is_not_a_wall():
     post = _strip(0, (410, 200, 414, 204))
-    drawings = (_drawing(),)
+    drawings = (_drawing("Structure_Post"),)
     words = ((409, 199, 416, 205, "POST"),)
     role, _reason = classify_outside_envelope_role(post, drawings, words)
     assert role == ROLE_POST
@@ -243,3 +243,13 @@ def test_post_label_next_to_long_wall_does_not_turn_wall_into_post():
     role, _reason = classify_outside_envelope_role(bar, drawings, words)
     assert role == ROLE_STRUCTURAL
     assert bar_proven_outside_envelope(bar, drawings, words) is False
+
+
+def test_compact_post_label_must_not_override_original_wall_layer():
+    bar = _strip(0, (410, 200, 414, 204))
+    drawings = (_drawing("Enclosure_WallExternal"),)
+    words = ((409, 199, 416, 205, "POST"),)
+    role, reason = classify_outside_envelope_role(bar, drawings, words)
+    assert role == ROLE_STRUCTURAL
+    assert reason == "original_source_wall_kept_despite_outdoor_text"
+    assert not bar_proven_outside_envelope(bar, drawings, words)

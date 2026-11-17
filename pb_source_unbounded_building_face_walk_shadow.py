@@ -350,6 +350,31 @@ def walk_source_unbounded_building_face(
         sheet_nonwall = source_sheet_frame_nonwall_path_ids(
             source_drawings, source_words,
         )
+        # The native viewport of the authenticated *inside* wall graph is
+        # the only acceptable scope for non-wall exclusions outside the
+        # proposed ring. Matching empty strings are not source authority;
+        # drawings from a foreign sheet region cannot erase real walls.
+        from pb_source_native_exterior_endpoint_authority_shadow import (
+            ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL,
+        )
+
+        def _viewport(row):
+            return str(
+                row.get("source_viewport_id") or row.get("viewport_id") or ""
+            ).strip()
+
+        interior_wall_views = {
+            _viewport(source_drawings[idx])
+            for candidate_bar in wall_bars
+            if (owner := _owner(candidate_bar)) is not None
+            and candidate_outer_domain.covers(owner[0])
+            for idx in owner[1]
+            if type(idx) is int and 0 <= idx < len(source_drawings)
+            and isinstance(source_drawings[idx], Mapping)
+            and classify_source_native_path_role(source_drawings[idx])
+            in (ROLE_EXTERIOR_OUTER_FACE, ROLE_INTERNAL_WALL)
+            and _viewport(source_drawings[idx])
+        }
         for bar, (geom, ids) in outside:
             # A stale/partial native-path index or conflicting viewport
             # makes the candidate unresolved. Never trust one excluded
@@ -362,15 +387,10 @@ def walk_source_unbounded_building_face(
             if not valid:
                 unresolved.append((bar, ids))
                 continue
-            viewports = {
-                str(
-                    source_drawings[idx].get("source_viewport_id")
-                    or source_drawings[idx].get("viewport_id")
-                    or ""
-                ).strip()
-                for idx in ids
-            }
-            if len(viewports) != 1:
+            viewports = {_viewport(source_drawings[idx]) for idx in ids}
+            if (len(viewports) != 1 or "" in viewports
+                    or len(interior_wall_views) != 1
+                    or viewports != interior_wall_views):
                 unresolved.append((bar, ids))
                 continue
             role, _reason = classify_outside_envelope_role(

@@ -117,15 +117,17 @@ def classify_outside_envelope_role(
     )
     if house and outdoor:
         return ROLE_STRUCTURAL, "shared_house_outdoor_wall_kept_as_envelope"
-    # A uniquely marked compact post is a discrete element, not a long
-    # masonry wall crossing a PORCH/POST annotation.
-    if len(set(map(_padded_name, post))) == 1 and not house and compact_post:
-        return ROLE_POST, "source_named_compact_post_not_wall"
+    # Authenticated source wall identity outranks a nearby POST word and
+    # compact geometry. Label overlap alone may never discard a wall.
     if (
         ROLE_EXTERIOR_OUTER_FACE in owner_roles
         or ROLE_INTERNAL_WALL in owner_roles
     ):
         return ROLE_STRUCTURAL, "original_source_wall_kept_despite_outdoor_text"
+    # A uniquely named compact post can be excluded only after source
+    # role classification has failed to authenticate a physical wall.
+    if len(set(map(_padded_name, post))) == 1 and not house and compact_post:
+        return ROLE_POST, "source_named_compact_post_not_wall"
     # Genuine green/site/roof/hatch exclusion is independently source-owned.
     # Mixed source roles cannot use one excluded component to drop another.
     if owner_roles == {ROLE_EXCLUSION} and not house:

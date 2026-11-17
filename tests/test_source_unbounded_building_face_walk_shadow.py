@@ -547,8 +547,8 @@ def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
     # A far native annotation mark can resemble wall paint. Its source
     # layer disqualifies it as a wall; all real outside paths still survive.
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
     result = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),),
         source_drawings=rows,
@@ -562,8 +562,8 @@ def test_source_explicit_nonwall_outside_is_not_a_structural_wall_veto():
 
 def test_unknown_mixed_or_house_owned_outside_path_never_disappears():
     bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(13)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
     for sources, words in (
         (rows[:-1], _source_words()),  # missing native path ID
         ([*rows[:12], {"layer": "", "fill": (0, 0, 0)}], _source_words()),
@@ -590,7 +590,7 @@ def test_outside_composite_conflicting_wall_or_viewport_remains_unresolved():
         def native_path_indices(self):
             return (12, 13)
     bars = (*_building_bars(), CompositeBar())
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(14)]
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(14)]
     rows[12] = {"layer": "Annotation_General", "fill": (0, 0, 0), "viewport_id": "floor"}
     rows[13] = {"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"}
     mixed = walk_source_unbounded_building_face(
@@ -609,8 +609,8 @@ def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
     bars = (*_building_bars(),
             SourceBar(box(280, 20, 283, 90), 12),
             SourceBar(box(350, 20, 353, 90), 13))
-    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0)} for _ in range(14)]
-    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0)}
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0), "viewport_id": "floor"} for _ in range(14)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0), "viewport_id": "floor"}
     rows[13] = {"layer": "", "fill": (0, 0, 0)}
     walk = walk_source_unbounded_building_face(
         bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
@@ -622,3 +622,38 @@ def test_source_role_audit_cannot_promote_other_unlabelled_outside_bars():
     assert walk.clockwise_pdf_pts == ()
     assert walk.outer_wall_native_path_ids == ()
     assert not walk.measurement_authorized
+
+
+def test_blank_or_foreign_nonwall_viewport_cannot_erase_outside_wall():
+    bars = (*_building_bars(), SourceBar(box(280, 20, 283, 90), 12))
+    rows = [{"layer": "Enclosure_WallExternal", "fill": (0, 0, 0),
+             "viewport_id": "floor"} for _ in range(13)]
+    rows[12] = {"layer": "Annotation_FloorPlan", "fill": (0, 0, 0),
+                "viewport_id": "floor"}
+    accepted = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert accepted.status == "CANDIDATE"
+    for wrong_view in ("", "elevation"):
+        rows[12]["viewport_id"] = wrong_view
+        failed = walk_source_unbounded_building_face(
+            bars, _source_words(), shared_dividers=(_party(),),
+            source_drawings=rows,
+        )
+        assert failed.status == "ABSTAINED"
+        assert failed.reason == "source_other_structural_walls_outside_candidate"
+        assert failed.source_proven_nonwall_band_count == 0
+        assert failed.other_source_wall_band_count == 1
+        assert failed.clockwise_pdf_pts == ()
+        assert not failed.measurement_authorized
+    rows[12]["viewport_id"] = "floor"
+    # An otherwise matching outside path is not trusted when the interior
+    # source wall has no source-positive viewport identity either.
+    for row in rows[:5]:
+        row.pop("viewport_id")
+    failed = walk_source_unbounded_building_face(
+        bars, _source_words(), shared_dividers=(_party(),), source_drawings=rows,
+    )
+    assert failed.status == "ABSTAINED"
+    assert failed.other_source_wall_band_count == 1
+    assert failed.clockwise_pdf_pts == ()
