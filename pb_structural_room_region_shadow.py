@@ -163,12 +163,11 @@ def _gap_covered_by_physical_wall(
     members: Mapping[str, Tuple[float, float, float, float]],
     *,
     alignment_tolerance_pt: float = 0.3,
-    min_covered_fraction: float = 0.90,
 ) -> bool:
     """Do not promote a guessed wall-face interruption through continuous wall ink.
 
-    A source-positive structural/partition member must overlap almost the whole
-    gap *along the same face*, not merely cross it at right angles. A shifted
+    A source-classified structural/partition member must continuously span the
+    full gap *along the same face*, not merely cross it at right angles. A shifted
     parallel line does not prove that the face is uninterrupted. This only
     arbitrates the noncommercial room-region preview: no opening/door is
     authenticated, no walls are constructed, and source wall ids are retained.
@@ -203,12 +202,12 @@ def _gap_covered_by_physical_wall(
     start, stop = intervals[0]
     for lo, hi in intervals[1:]:
         if lo > stop + alignment_tolerance_pt:
-            if stop - start >= min_covered_fraction * length:
+            if start <= alignment_tolerance_pt and stop >= length - alignment_tolerance_pt:
                 return True
             start, stop = lo, hi
         else:
             stop = max(stop, hi)
-    return stop - start >= min_covered_fraction * length
+    return start <= alignment_tolerance_pt and stop >= length - alignment_tolerance_pt
 
 
 def derive_structural_room_regions(
