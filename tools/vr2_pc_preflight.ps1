@@ -19,9 +19,9 @@ function Get-RegisteredValue([string[]]$paths, [string]$propertyName) {
     }
     return $null
 }
-$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+$runningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows)
-if (!$isWindows) { throw "The PS VR2 PC preflight runs on Windows only." }
+if (!$runningOnWindows) { throw "The PS VR2 PC preflight runs on Windows only." }
 $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
 $build = [Environment]::OSVersion.Version.Build
 $is64 = [Environment]::Is64BitOperatingSystem
