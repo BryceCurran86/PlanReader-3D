@@ -32,7 +32,7 @@ def _setup():
             original_geometry_ref="path-18",
         )},
     )
-    principal = EditorPrincipal("user1", "tenant1", frozenset({"w1"}))
+    principal = EditorPrincipal("user1", "tenant1", frozenset({"w1"}), frozenset({"w1"}))
     ledger = Editable3DCorrectionLedger()
     ledger.register_object(obj)
     command = {
@@ -150,3 +150,20 @@ def test_anonymous_or_wrong_tenant_never_leaks_private_source_geometry():
     status, _, result = _request(factory(tenant=False), command)
     assert status.startswith("404")
     assert "path-18" not in str(result)
+
+
+def test_readonly_member_denied_preview_before_ledger_or_csrf_invocation():
+    factory, command, ledger = _setup()
+    viewer = EditorPrincipal("viewer", "tenant1", frozenset({"w1"}))
+    called = []
+    app = make_editor_preview_wsgi_app(
+        lambda env: viewer,
+        lambda p, w: called.append("workspace"),
+        lambda p, w: called.append("ledger"),
+        lambda env, p: called.append("csrf"),
+    )
+    status, _, result = _request(app, command)
+    assert status.startswith("403")
+    assert result["error"] == "correction_preview_permission_denied"
+    assert called == []
+    assert ledger.events == ()
