@@ -113,7 +113,26 @@ def detect_source_internal_swing_room_barriers(
             candidate.second_host_path_id,
         ))
     )
-    return tuple(sorted(resolved, key=lambda r: r.swing_arc_path_id))
+    if source_words:
+        resolved.extend(_source_partial_internal_swing_candidates(
+            drawings, source_words, page_index=page_index,
+        ))
+    # Even an unusual partial curve cannot claim an existing jamb/host or
+    # share its original arc with another authenticated door.
+    from collections import Counter
+    owner_uses = Counter(
+        i for r in resolved for i in (
+            r.swing_arc_path_id, r.first_host_path_id, r.second_host_path_id,
+            *r.jamb_cap_path_ids,
+        )
+    )
+    return tuple(sorted(
+        (r for r in resolved if all(owner_uses[i] == 1 for i in (
+            r.swing_arc_path_id, r.first_host_path_id, r.second_host_path_id,
+            *r.jamb_cap_path_ids,
+        ))),
+        key=lambda r: r.swing_arc_path_id,
+    ))
 
 
 def _source_native_internal_cap_host_pair(
@@ -230,3 +249,125 @@ def _source_native_internal_cap_host_pair(
         axis=axis,
         page_index=page_index,
     )
+
+
+def _source_partial_internal_swing_candidates(drawings, source_words, *, page_index):
+    """Original 25-65 degree source curve + radial leaf, not a guessed swing.
+
+    One 3Laurel hinged door is drawn in this partial arc form. Only a unique
+    real wall-layer cubic, diagonal radial leaf, source width word, two white
+    jamb caps and two black end-hosts can supply a topology-only barrier.
+    """
+    import math
+
+    def point(p):
+        try:
+            return (float(p.x), float(p.y)) if hasattr(p, "x") else (
+                float(p[0]), float(p[1]),
+            )
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+
+    lines = []
+    for idx, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or not _INTERNAL_WALL_LAYER.search(
+            str(row.get("layer") or "")
+        ):
+            continue
+        if row.get("fill") is not None or row.get("type") != "s":
+            continue
+        ink = row.get("color")
+        if not (isinstance(ink, (tuple, list)) and len(ink) >= 3
+                and all(isinstance(v, (float, int)) and math.isfinite(v)
+                        and 0 <= v < .02 for v in ink[:3])):
+            continue
+        items = row.get("items") or ()
+        if len(items) == 1 and items[0][0] == "l":
+            a, b = map(point, items[0][1:3])
+            if a and b and all(map(math.isfinite, (*a, *b))):
+                lines.append((idx, a, b))
+
+    proposals = []
+    for arc_id, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or not _INTERNAL_WALL_LAYER.search(
+            str(row.get("layer") or "")
+        ):
+            continue
+        if row.get("type") != "s" or row.get("fill") is not None:
+            continue
+        items = row.get("items") or ()
+        if len(items) != 1 or items[0][0] != "c":
+            continue
+        source_points = tuple(point(p) for p in items[0][1:5])
+        if None in source_points:
+            continue
+        start, cp1, cp2, end = source_points
+        if not all(map(math.isfinite, (*start, *cp1, *cp2, *end))):
+            continue
+        matches = []
+        for leaf_id, a, b in lines:
+            if leaf_id == arc_id:
+                continue
+            if math.dist(a, end) <= .16:
+                hinge = b
+            elif math.dist(b, end) <= .16:
+                hinge = a
+            else:
+                continue
+            v1 = (start[0] - hinge[0], start[1] - hinge[1])
+            v2 = (end[0] - hinge[0], end[1] - hinge[1])
+            r1, r2 = math.hypot(*v1), math.hypot(*v2)
+            if not (15 < r1 < 50 and abs(r1 - r2) < .035 * r1):
+                continue
+            if not ((abs(v1[0]) < .15) != (abs(v1[1]) < .15)):
+                continue
+            if abs(v2[0]) <= 3 or abs(v2[1]) <= 3:
+                continue
+            dot = (v1[0] * v2[0] + v1[1] * v2[1]) / (r1 * r2)
+            angle = math.degrees(math.acos(max(-1, min(1, dot))))
+            if not 25 <= angle <= 65:
+                continue
+            lowx, miny = min(start[0], end[0]), min(start[1], end[1])
+            highx, maxy = max(start[0], end[0]), max(start[1], end[1])
+            if any(
+                not lowx - .2 <= x <= highx + .2
+                or not miny - .2 <= y <= maxy + .2
+                for x, y in (cp1, cp2)
+            ):
+                continue
+            mid = ((start[0] + hinge[0]) / 2, (start[1] + hinge[1]) / 2)
+            widths = []
+            for word in source_words:
+                try:
+                    txt = str(
+                        word.get("text") if isinstance(word, Mapping) else word[4]
+                    ).strip().replace(",", "")
+                    if not txt.isdigit() or not 600 <= int(txt) <= 1400:
+                        continue
+                    bbox = (
+                        word.get("bbox_pdf_pts")
+                        if isinstance(word, Mapping) else word[:4]
+                    )
+                    q = tuple(float(t) for t in bbox)
+                    cx, cy = (q[0] + q[2]) / 2, (q[1] + q[3]) / 2
+                    if (
+                        math.hypot(cx - mid[0], cy - mid[1]) <= 20
+                        and .021 * int(txt) <= r1 <= .043 * int(txt)
+                    ):
+                        widths.append(int(txt))
+                except (ValueError, TypeError, IndexError, AttributeError):
+                    continue
+            if len(widths) != 1:
+                continue
+            claimed = {
+                "arc": arc_id, "leaf": leaf_id,
+                "centre": hinge, "closed_tip": start,
+            }
+            candidate = _source_native_internal_cap_host_pair(
+                drawings, claimed, page_index=page_index,
+            )
+            if candidate is not None:
+                matches.append(candidate)
+        if len(matches) == 1:
+            proposals.append(matches[0])
+    return tuple(proposals)
