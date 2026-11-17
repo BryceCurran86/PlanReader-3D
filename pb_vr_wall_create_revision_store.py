@@ -162,7 +162,7 @@ def _assert_scope(principal, workspace, wall, coverage):
 
 
 def _new_pdf(parent: bytes, coverage: VerifiedWallDrawingCoverage,
-             number: int, proposal_id: str) -> tuple[bytes, tuple[dict, ...]]:
+             number: int, wall: NewWallDesign) -> tuple[bytes, tuple[dict, ...]]:
     if type(parent) is not bytes or len(parent) > _MAX_BYTES or not parent:
         raise WallCreateConflict("wall_create_parent_pdf_unavailable")
     try:
@@ -188,7 +188,10 @@ def _new_pdf(parent: bytes, coverage: VerifiedWallDrawingCoverage,
             shape.draw_line(start, end)
             shape.finish(color=(0, 0.45, 0.9), width=2.0, dashes="[4 3] 0")
             shape.commit(overlay=True)
-            label = "PR-W%04d | PROPOSED NEW WALL | REVIEW ONLY" % number
+            label = ("PR-W%04d | PROPOSED NEW WALL | REVIEW ONLY\
+"
+                     "%.3f m length × %.3f m height; %d openings (coordination required)"
+                     % (number, wall.length_m, wall.height_m, len(wall.openings)))
             loc = fitz.Rect(page.rect.x0 + 8, page.rect.y0 + 8,
                             min(page.rect.x1 - 8, page.rect.x0 + 290),
                             min(page.rect.y1 - 8, page.rect.y0 + 42))
@@ -197,7 +200,7 @@ def _new_pdf(parent: bytes, coverage: VerifiedWallDrawingCoverage,
             a = page.add_freetext_annot(loc, label, fontsize=8,
                                        text_color=(0, 0.15, 0.45),
                                        fill_color=(0.9, 0.96, 1))
-            a.set_info(title="PlanReader proposed wall", subject=proposal_id,
+            a.set_info(title="PlanReader proposed wall", subject=wall.proposal_id,
                        content=label)
             a.update()
             result.append({
@@ -346,7 +349,7 @@ def create_wall_and_related_page_revision(
             number, parent = 1, original_pdf
         if number > 999999:
             raise WallCreateConflict("wall_create_revision_limit")
-        new_pdf, pages = _new_pdf(parent, coverage, number, wall.proposal_id)
+        new_pdf, pages = _new_pdf(parent, coverage, number, wall)
         digest = sha256(new_pdf).hexdigest()
         rev_id = sha256(_as_json([*key, canonical_id, number, command_hash,
                                   digest]).encode()).hexdigest()[:40]
