@@ -10,6 +10,7 @@ import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS }
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
+import type { SourceSurface } from "./sourceSurfaces";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
@@ -83,6 +84,29 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
   );
   line.userData.objectId = name;
   return line;
+}
+
+/** Render exactly the server-backed triangles. No inferred room closures,
+ * thicknesses, heights, opening cutouts or default slabs.
+ */
+function displaySourceSurface(surface: SourceSurface): THREE.Mesh {
+  const coordinates = new Float32Array(surface.vertices.flat());
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(coordinates, 3));
+  geometry.computeVertexNormals();
+  const tint = surface.kind === "floor" ? 0xbbb4a2 :
+    surface.kind === "ceiling" ? 0xebedf1 : 0x777f87;
+  const material = new THREE.MeshStandardMaterial({
+    color: tint, roughness: 0.9, metalness: 0,
+    side: THREE.DoubleSide, transparent: false,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.objectId = surface.objectId;
+  mesh.userData.surfaceId = surface.surfaceId;
+  mesh.userData.sourceWitnessedSurface = true;
+  mesh.castShadow = surface.kind === "roof";
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 function labelSprite(value: string): THREE.Sprite {
@@ -205,6 +229,16 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const geometry = row.geometry;
         if (geometry?.kind === "wallFace") item.userData.originalHeight = geometry.heightM;
       }
+    }
+    // Optional verified room/ceiling/roof triangles are genuine existing
+    // source-derived surface evidence, not the synthetic shadow ground plane.
+    for (const surface of manifest.sourceSurfaces ?? []) {
+      const mesh = displaySourceSurface(surface);
+      physical.add(mesh);
+      pickables.push(mesh);
+      mesh.userData.originalReviewColor =
+        (mesh.material as THREE.MeshStandardMaterial).color.getHex();
+      mesh.userData.originalOpacity = 1;
     }
     // Presentation-only shadow-catching floor; never a sourced slab, floor finish or quantity.
     // It exists solely below existing linework and cannot be selected.
