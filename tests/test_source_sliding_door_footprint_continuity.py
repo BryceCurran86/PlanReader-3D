@@ -145,3 +145,65 @@ def test_layerless_sliding_door_detected_via_rails_and_caps():
     assert rows[0].first_host_path_id == 0
     assert rows[0].second_host_path_id == 1
     assert rows[0].bounds_pdf_pts == (5.0, 0.0, 45.0, 2.5)
+
+
+def test_source_assd_stack_slider_requires_full_host_caps_and_tracks():
+    # Source label "ASSD" is separate from "ASD"; the full hosted
+    # physical opening witness, never the acronym, provides topology.
+    d = _vertical()
+    rows = detect(d, [(66, 19, 71, 28, "ASSD")], page_index=2)
+    assert len(rows) == 1
+    bridge = rows[0]
+    assert bridge.label_text == "ASSD"
+    assert bridge.axis == "v"
+    assert (bridge.first_host_path_id, bridge.second_host_path_id) == (0, 1)
+    assert bridge.jamb_cap_path_ids == (2, 3)
+    assert bridge.sliding_track_path_ids == (4, 5)
+    assert not bridge.physical_wall_authenticated
+    assert not bridge.measurement_authorized
+    for absent in range(len(d)):
+        assert detect(
+            d[:absent] + d[absent + 1:],
+            [(66, 19, 71, 28, "ASSD")],
+        ) == ()
+
+
+def test_assd_not_guessed_from_similar_text_or_competing_windows():
+    d = _vertical()
+    assert detect(d, [(66, 19, 71, 28, "ASS")]) == ()
+    assert detect(d, [(66, 19, 71, 28, "ASSD?")]) == ()
+    assert detect(d, [(66, 19, 71, 28, "ASSD"), (66, 19, 71, 28, "ASW")]) == ()
+    d[0]["viewport_id"] = "floor-plan"
+    d[1]["viewport_id"] = "elevation"
+    assert detect(d, [(66, 19, 71, 28, "ASSD")]) == ()
+
+
+def test_original_3laurel_p3_source_assd_closes_only_hosted_aperture():
+    import hashlib
+    from tests.original_source_3laurel import ORIGINAL_SHA256, require_original_3laurel
+    from pb_source_native_wall_body_junction_graph_shadow import _unique_source_wall_bars
+
+    path = require_original_3laurel()
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == ORIGINAL_SHA256
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        page = doc[2]
+        drawings = page.get_drawings()
+        words = page.get_text("words")
+        bars = _unique_source_wall_bars(drawings)
+        before = (len(drawings), len(words))
+        bridges = detect(drawings, words, page_index=2, wall_bars=bars)
+        after = (len(page.get_drawings()), len(page.get_text("words")))
+    assert before == after
+    assd = [row for row in bridges if row.label_text.lower() == "assd"]
+    assert len(assd) == 1
+    opening = assd[0]
+    # The two original painted wall hosts are separately source-positive;
+    # no project-specific path lookup appears in the producer.
+    assert opening.first_host_path_id != opening.second_host_path_id
+    assert opening.jamb_cap_path_ids[0] != opening.jamb_cap_path_ids[1]
+    assert len(opening.sliding_track_path_ids) >= 2
+    assert opening.bounds_pdf_pts[0] < opening.bounds_pdf_pts[2]
+    assert opening.bounds_pdf_pts[1] < opening.bounds_pdf_pts[3]
+    assert not opening.physical_wall_authenticated
+    assert not opening.measurement_authorized

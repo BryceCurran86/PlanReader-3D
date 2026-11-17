@@ -38,11 +38,14 @@ class OutsideFacingBuildingWalk:
     enclosed_dwelling_zone_count: int = 0
     unclosed_dwelling_sides: tuple[str, ...] = ()
     other_source_wall_band_count: int = 0
+    # Shadow trace for review when other source-wall components remain.
+    # Never use this ring to issue a customer quantity or report FIRM.
+    diagnostic_unsealed_ring_pdf_pts: tuple[tuple[float, float], ...] = ()
     building_footprint_authenticated: bool = False
     measurement_authorized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "status": self.status,
             "reason": self.reason,
             "clockwise_pdf_pts": [list(p) for p in self.clockwise_pdf_pts],
@@ -61,6 +64,14 @@ class OutsideFacingBuildingWalk:
             "layer_name_is_not_outer_role": True,
             "undirected_degree_is_not_outside_face_authority": True,
         }
+        # Preserve byte-compatible old receipts when no unsealed preview
+        # exists. Only outside-component ABSTAIN adds a diagnostic field.
+        if self.diagnostic_unsealed_ring_pdf_pts:
+            payload["diagnostic_unsealed_ring_pdf_pts"] = [
+                list(point) for point in self.diagnostic_unsealed_ring_pdf_pts
+            ]
+            payload["diagnostic_unsealed_not_measurement"] = True
+        return payload
 
 
 def _word_centers(source_words: Sequence[Mapping[str, Any] | Sequence[Any]]):
@@ -296,8 +307,20 @@ def walk_source_unbounded_building_face(
                 enclosed_dwelling_zone_count=dwelling_count,
                 internal_party_wall_native_path_ids=party_ids,
             )
-    extra = sum(1 for geom, _ in owners if not primary.buffer(0.05).covers(geom))
+    # The wall paint is a polygon with ROOM holes. An independently drawn
+    # internal physical partition or cabinet wall can occupy a room hole
+    # without touching the primary wall-paint network; it remains INSIDE
+    # the building exterior ring. Compare to the filled outer footprint,
+    # not the wall-paint polygon (whose holes would falsely eject it).
+    # Truly outside structural bodies remain a hard abstention.
+    candidate_outer_domain = Polygon(primary.exterior).buffer(0.05)
+    extra = sum(1 for geom, _ in owners if not candidate_outer_domain.covers(geom))
     if extra:
+        # Both occupied dwelling zones are independently enclosed, but
+        # unresolved source-wall components exist beyond the outer ring.
+        # Retain a source-native preview for reviewer attribution ONLY.
+        # The authoritative clockwise_pdf_pts and wall IDs stay empty.
+        preview_ring = _clockwise_page_ring(primary.exterior)
         return OutsideFacingBuildingWalk(
             "ABSTAINED",
             "source_other_structural_walls_outside_candidate",
@@ -305,6 +328,9 @@ def walk_source_unbounded_building_face(
             enclosed_dwelling_zone_count=dwelling_count,
             other_source_wall_band_count=extra,
             internal_party_wall_native_path_ids=party_ids,
+            diagnostic_unsealed_ring_pdf_pts=(
+                preview_ring if 5 <= len(preview_ring) <= 20_000 else ()
+            ),
         )
     for label, point in _word_centers(source_words):
         if label in {

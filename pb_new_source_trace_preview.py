@@ -7,6 +7,7 @@ are created by this preview.
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -58,6 +59,38 @@ def _full_page_source_tiles(width: float, height: float, drawing_count: int):
         )
         for y in range(n) for x in range(n)
     )
+
+
+def _draw_unsealed_source_ring_preview(canvas, outside_walk) -> bool:
+    """Dashed amber review aid only; never a physical/quantity footprint.
+
+    The canonical walker may have two closed occupied source regions yet
+    still reject outside page components. Keep authoritative ring fields
+    empty, and make the unresolved shape visually unmistakable.
+    """
+    if (
+        outside_walk is None
+        or outside_walk.status != "ABSTAINED"
+        or outside_walk.reason != "source_other_structural_walls_outside_candidate"
+        or outside_walk.measurement_authorized
+        or outside_walk.building_footprint_authenticated
+    ):
+        return False
+    ring = outside_walk.diagnostic_unsealed_ring_pdf_pts
+    if not 5 <= len(ring) <= 20_000 or ring[0] != ring[-1]:
+        return False
+    try:
+        coords = [(float(x), float(y)) for x, y in ring]
+    except (ValueError, TypeError, OverflowError):
+        return False
+    if not all(math.isfinite(x) and math.isfinite(y) for x, y in coords):
+        return False
+    points = [fitz.Point(x, y) for x, y in coords]
+    canvas.draw_polyline(
+        points, color=(0.92, 0.58, 0.08),
+        dashes="[6 4] 0", width=2.2, stroke_opacity=0.88,
+    )
+    return True
 
 
 def source_native_trace_preview(
@@ -311,6 +344,9 @@ def source_native_trace_preview(
                 canvas.draw_polyline(
                     polyline, color=(0.02, 0.42, 0.97), width=3.0,
                 )
+        # Do NOT turn unresolved components into a blue/firm footprint.
+        # Amber dashed tracing is the exact-source unsealed review receipt.
+        _draw_unsealed_source_ring_preview(canvas, outside_walk)
         # Proposed 0.5pt joins are SMALL CYAN dots/segments only; never
         # applied to native geometry and never counted as physical walls.
         for ax,ay,bx,by,distance in (
