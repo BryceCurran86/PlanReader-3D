@@ -163,6 +163,11 @@ def make_plan_edit_revision_wsgi_app(
                 return [blob]
             if method == "GET":
                 items = list_plan_edit_revisions(connection, principal, ws)
+                for item in items:
+                    item["downloadPath"] = (
+                        "/api/editor/workspaces/" + quote(workspace_id, safe="") +
+                        "/revisions/" + item["revisionId"] + "/pdf"
+                    )
                 return reply("200 OK", {"revisions": items, "readOnly": True})
             ledger, existing_rows = load_authorized_ledger(principal, ws)
             if type(ledger) is not Editable3DCorrectionLedger:
