@@ -123,7 +123,7 @@ def _title_block(text: str, page_index: int, region: str) -> tuple[str, str, str
     # Options note. All FOUR actual measuring/schedule sheets repeat it.
     # Do not reject an entire genuine region because the cover differs.
     if (page_index in {i for i, _title, _scale in ACACIA_REQUIRED_ROLES}
-            and "Design Options" not in text):
+            and "Design Options" not in " ".join(text.split())):
         raise ValueError("acacia_source_missing_reference_to_unprovided_spec")
     return title, number, scale
 
