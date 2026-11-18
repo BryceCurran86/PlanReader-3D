@@ -257,17 +257,34 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "wall_ink_segments_shown": shown,
             "all_segments_shown": shown < 1600,
         }
+        # Render both artifacts completely before publishing either one.
+        # A failed raster render must not leave a JSON-only acceptance receipt.
+        png_bytes = layer.get_pixmap(
+            matrix=fitz.Matrix(1.2, 1.2), alpha=False
+        ).tobytes("png")
+        json_bytes = json.dumps(result, indent=2).encode("utf8")
         out_dir.mkdir(parents=True, exist_ok=True)
         json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
         png_file = out_dir / f"page_{page_index+1}_footprint_first.png"
-        # No source PDF is ever copied or added to the repo.
-        with json_file.open("x", encoding="utf8") as target:
-            json.dump(result, target, indent=2)
-        with png_file.open("xb") as target:
-            target.write(layer.get_pixmap(
-                matrix=fitz.Matrix(1.2, 1.2), alpha=False).tobytes("png")
-            )
-        canvas.close()
+        # Refuse to replace either prior receipt; no partial new pair if one
+        # destination is occupied. This is fail-closed, not a two-file
+        # filesystem transaction against concurrent external writers.
+        if json_file.exists() or png_file.exists():
+            raise FileExistsError("original_footprint_evidence_pair_already_exists")
+        created = []
+        try:
+            for destination, payload in (
+                (png_file, png_bytes), (json_file, json_bytes),
+            ):
+                with destination.open("xb") as target:
+                    created.append(destination)
+                    target.write(payload)
+        except Exception:
+            for destination in reversed(created):
+                destination.unlink(missing_ok=True)
+            raise
+        finally:
+            canvas.close()
     return result, json_file, png_file
 
 
