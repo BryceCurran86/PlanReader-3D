@@ -17,6 +17,9 @@ P4 = (
     "of double storey dwelling and garage including roof tilers guardrail in lieu of standard."
 )
 P5 = (
+    "Promotion S 43 - 22 Provide 2340mm high x up to 820mm wide flush panel hinged "
+    "doors to ground floor of dwelling in lieu of standard 2040mm high flush panel hinged doors. "
+    "Note: Including standard rear garage access door (if applicable) (design specific). "
     "Promotion S 44 - 3 Provide 2400mm high standard hinged, sliding, alfresco "
     "door(s) in lieu of standard. Note: Only available with 2740mm ceiling heights."
 )
@@ -45,6 +48,8 @@ def test_ground_promotion_does_not_falsely_override_first_floor():
 def test_door_and_master_ensuite_scope_are_not_broadcast():
     q = _derive()
     assert q.promoted_hinged_sliding_alfresco_door_height_mm == 2400
+    assert q.promoted_ground_flush_panel_hinged_door_height_mm == 2340
+    assert q.promoted_ground_flush_panel_maximum_width_mm == 820
     assert q.installed_opening_height_authorized is False
     assert q.master_ensuite_full_height_wall_tile_scope is True
     assert q.other_wet_rooms_full_height_tile_scope is False
@@ -64,6 +69,25 @@ def test_missing_master_ensuite_promotion_preserves_other_source_fields():
 def test_missing_door_promotion_does_not_assume_nominal_door_height():
     q = _derive(p5="No authenticated door promotion")
     assert q.promoted_hinged_sliding_alfresco_door_height_mm is None
+    assert q.promoted_ground_flush_panel_hinged_door_height_mm is None
+
+
+def test_ground_flush_only_never_sets_2400mm_external_door_height():
+    q = _derive(p5=P5.split("Promotion S 44 - 3")[0])
+    assert q.status == "SOURCE_CORROBORATED_VERTICAL_SCOPE_REVIEW"
+    assert q.promoted_ground_flush_panel_hinged_door_height_mm == 2340
+    assert q.promoted_ground_flush_panel_maximum_width_mm == 820
+    assert q.promoted_hinged_sliding_alfresco_door_height_mm is None
+    assert q.installed_opening_height_authorized is False
+
+
+def test_sliding_alfresco_only_never_promotes_ground_internal_flush_door():
+    q = _derive(p5="Promotion S 44 - 3" + P5.split("Promotion S 44 - 3")[1])
+    assert q.status == "SOURCE_CORROBORATED_VERTICAL_SCOPE_REVIEW"
+    assert q.promoted_hinged_sliding_alfresco_door_height_mm == 2400
+    assert q.promoted_ground_flush_panel_hinged_door_height_mm is None
+    assert q.promoted_ground_flush_panel_maximum_width_mm is None
+    assert q.commercial_quantity_authorized is False
 
 
 @pytest.mark.parametrize("role", ["plan_sha256", "inclusions_sha256", "sales_sha256"])
@@ -97,6 +121,8 @@ def test_private_original_three_document_height_scope_positive():
     assert q.promoted_ground_dwelling_and_garage_height_mm == 2740
     assert q.first_floor_nominal_reference_height_mm == 2440
     assert q.promoted_hinged_sliding_alfresco_door_height_mm == 2400
+    assert q.promoted_ground_flush_panel_hinged_door_height_mm == 2340
+    assert q.promoted_ground_flush_panel_maximum_width_mm == 820
     assert q.master_ensuite_full_height_wall_tile_scope is True
     assert q.commercial_quantity_authorized is False
 
