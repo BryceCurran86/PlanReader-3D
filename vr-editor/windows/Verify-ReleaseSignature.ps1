@@ -30,6 +30,6 @@ if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid)
     throw "Production requires a valid trusted Authenticode signature (actual: $($signature.Status))"
 }
 if ($null -eq $signature.SignerCertificate) { throw 'Production signer certificate missing' }
-$actual = ($signature.SignerCertificate.Thumbprint -replace '\\s','').ToUpperInvariant()
+$actual = ($signature.SignerCertificate.Thumbprint -replace '\s','').ToUpperInvariant()
 if ($actual -ne $ExpectedSignerThumbprint.ToUpperInvariant()) { throw 'Signer thumbprint mismatch' }
 [pscustomobject]@{ schema=1; channel='production'; sha256=$sha256; signed=$true; signer_thumbprint=$actual; hardware_verified=$false } | ConvertTo-Json -Compress
