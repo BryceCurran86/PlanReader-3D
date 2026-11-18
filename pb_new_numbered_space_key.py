@@ -115,7 +115,7 @@ def parse_numbered_key(
     # multi-word names into adjacent boxes, or read "1. OFFICE" in one box.
     # Keep the SOURCE glyph rectangles; these are semantic candidates only.
     numbers = []
-    inline_pattern = re.compile(r"^([1-9][0-9]?)[.):-]?\s+([A-Za-z][\w &'/-]*)$")
+    inline_pattern = re.compile(r"^([1-9][0-9]?)\s*[.):-]?\s+([A-Za-z][\w &'/-]*)$")
     for item in rows:
         if item["cy"] <= anchor_y + 8:
             continue
