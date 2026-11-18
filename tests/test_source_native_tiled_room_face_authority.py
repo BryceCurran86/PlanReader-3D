@@ -211,3 +211,27 @@ def test_confident_different_room_label_blocks_majority_promotion(ocr):
         ) is None
     finally:
         page.close()
+
+
+def test_native_source_float_tolerances_do_not_reject_exact_closed_face():
+    """Original Q5446 p2 1982 had rounded bounds 0.000018pt too tall."""
+    # These numbers are a synthetic float-representation example, not a
+    # benchmark target or a source PDF copy. Ring geometry remains unmodified.
+    points = [(50, 60.00002), (110, 60.00002), (110, 75),
+              (112, 75), (112, 80), (110, 80), (110, 120.0),
+              (50, 120.0), (50, 60.00002)]
+    source_ring = _path(points)
+    candidate = a._candidate_ring(source_ring)
+    assert candidate is not None
+    polygon, box = candidate
+    assert polygon.is_valid and polygon.is_simple
+    assert box == (50.0, 60.00002, 110.0, 120.0)
+    assert box[3] - box[1] <= polygon.bounds[3] - polygon.bounds[1]
+    # A ring candidate is only ink geometry: still cannot publish a floor.
+    page = _Page([source_ring])
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
