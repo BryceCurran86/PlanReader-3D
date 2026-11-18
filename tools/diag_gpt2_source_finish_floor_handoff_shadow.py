@@ -48,7 +48,8 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
             or sha!=finish_graph.get("source_sha256")):
         return {**base,"first_failure":"original_source_pdf_root_mismatch"}
     if (type(translation_pdf_pts) is not tuple or len(translation_pdf_pts)!=2
-            or any(type(z) not in (int,float) or not math.isfinite(z)
+            or any(type(z) not in (int,float) or abs(z)>2**53
+                   or not math.isfinite(float(z))
                    for z in translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_transform_invalid"}
     reg=original_source_registration
@@ -76,10 +77,51 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     if not floor_ring or not finish_ring:
         return {**base,"first_failure":"physical_floor_or_finish_source_ring_open"}
     dx,dy=translation_pdf_pts
-    transferred={(round(x+dx,3),round(y+dy,3))
-                 for x,y in floor_ring["vertices_pdf_pts"]}
-    received={tuple(v) for v in finish_ring["vertices_pdf_pts"]}
-    if transferred != received or len(transferred)!=len(received):
+
+    def canonical_vertices(ring, *, shift_x=0.0, shift_y=0.0):
+        # Native source producers may close a perimeter by repeating its
+        # first point. Check the full input before applying the *existing*
+        # 0.001pt precision equally to both sheets.
+        native=ring.get("vertices_pdf_pts")
+        if type(native) not in (tuple,list) or not 4<=len(native)<=20000:
+            return None
+        points=[]
+        for point in native:
+            if (type(point) not in (tuple,list) or len(point)!=2
+                    or any(type(z) not in (int,float) or abs(z)>2**53
+                           or not math.isfinite(float(z)) for z in point)):
+                return None
+            x,y=float(point[0])+shift_x,float(point[1])+shift_y
+            if not (math.isfinite(x) and math.isfinite(y)
+                    and abs(x)<=2**53 and abs(y)<=2**53):
+                return None
+            points.append((x,y))
+        if points[0]==points[-1]:
+            points.pop()
+        if len(points)<3 or len(set(points))!=len(points):
+            return None
+        rounded=tuple((round(x,3),round(y,3)) for x,y in points)
+        # Never conflate genuinely distinct native corners because they
+        # happen to occupy the same precision bin.
+        if len(set(rounded))!=len(points):
+            return None
+        return rounded
+
+    transferred=canonical_vertices(floor_ring,shift_x=dx,shift_y=dy)
+    received=canonical_vertices(finish_ring)
+    if transferred is None or received is None or len(transferred)!=len(received):
+        return {**base,"first_failure":"competing_cross_sheet_original_perimeter"}
+
+    def cyclic_edges(vertices):
+        return frozenset(
+            frozenset((vertices[i],vertices[(i+1)%len(vertices)]))
+            for i in range(len(vertices))
+        )
+
+    # The same unordered corners are not necessarily the same *perimeter*.
+    # Preserve cyclic rotations and reverse walks but reject crossed or
+    # rewired sides, even when source edge counts happen to coincide.
+    if cyclic_edges(transferred)!=cyclic_edges(received):
         return {**base,"first_failure":"competing_cross_sheet_original_perimeter"}
     # Vertex equality alone is insufficient: source perimeter must have the
     # same number of actual independently issued original source side edges.
