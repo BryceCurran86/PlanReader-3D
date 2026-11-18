@@ -1,0 +1,26 @@
+name: VR graphics binding contract
+on:
+  pull_request:
+    paths:
+      - 'vr-editor/windows/graphics_binding_contract.py'
+      - 'tests/test_vr_graphics_binding_contract.py'
+      - '.github/workflows/vr-graphics-binding-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Offline graphics binding contract tests
+        run: python -m unittest discover -s tests -p 'test_vr_graphics_binding_contract.py' -v
