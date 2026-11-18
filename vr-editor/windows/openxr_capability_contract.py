@@ -14,7 +14,7 @@ KNOWN_EXTENSIONS = frozenset({
     "XR_KHR_vulkan_enable", "XR_KHR_vulkan_enable2",
     "XR_KHR_opengl_enable", "XR_EXT_hand_tracking",
 })
-VERSION = re.compile(r"^[0-9]+\\.[0-9]+\\.[0-9]+$")
+VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 RUNTIME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()/-]{0,127}$")
 
 
