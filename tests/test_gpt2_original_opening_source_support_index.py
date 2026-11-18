@@ -121,3 +121,63 @@ def test_large_disjoint_source_universe_avoids_quadratic_support_reads(monkeypat
     # A full cross-product repeats generic support extraction ~360k times.
     # The indexed live path reads each producer's support only once.
     assert source_reads[0] <= len(strong) + len(generic) + 2
+
+
+
+def test_indexed_combination_matches_reference_from_an_ingested_pdf_snapshot():
+    """Real native-PDF ingest, no private source or FIRM customer promotion."""
+    import fitz
+
+    from pb_source_observation_authority import ObservationSelector
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    doc = fitz.open()
+    page = doc.new_page(width=680, height=430)
+    for start, end in (
+        ((50, 100), (180, 100)),
+        ((240, 100), (400, 100)),
+        ((50, 124), (180, 124)),
+        ((240, 124), (400, 124)),
+        ((180, 100), (180, 124)),
+        ((240, 100), (240, 124)),
+        ((50, 230), (190, 230)),
+        ((50, 250), (190, 250)),
+    ):
+        page.draw_line(fitz.Point(*start), fitz.Point(*end), width=1.0)
+    original_pdf = doc.tobytes()
+    doc.close()
+
+    source = SourceVisibilityProducer(
+        producer_method="gpt2-support-index-source-parity",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="gpt2-support-index-test-document",
+        source_bytes=original_pdf,
+        source_locator="memory://gpt2-support-index-source.pdf",
+    )
+    authority = PhysicalOpeningAuthority(source.authority())
+    selector = ObservationSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        observation_id=published.visible_observation_ids[0],
+    )
+    observed = source.authority().resolve_visible(selector)
+    assert observed.observation is not None
+    records, failures = authority._visible_snapshot_records(observed)
+    assert not failures
+    strong = authority._visible_structural_candidates(observed.observation, records)
+    generic = authority._visible_generic_correlated_candidates(
+        observed.observation, records
+    )
+    actual = authority._visible_all_structural_candidates(
+        observed.observation, records
+    )
+    assert actual == _reference(strong, generic)
+    # Source IDs and candidate source provenance are not rewritten by indexing.
+    assert all(
+        item.source_sha256 == published.revision.source_sha256
+        for item in actual
+    )
