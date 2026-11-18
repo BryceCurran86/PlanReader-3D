@@ -1,0 +1,37 @@
+name: Original external-door source-role accuracy
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_live_opening_external_door_height_estimate_publication.py
+      - tests/test_live_external_door_accuracy_guards.py
+      - .github/workflows/test-live-external-door-accuracy-guards.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-neutral-external-door-accuracy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install original PlanReader test dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-neutral estimated door regressions
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m compileall -q pb_live_opening_external_door_height_estimate_publication.py tests/test_live_external_door_accuracy_guards.py
+          python -m pytest -q -p no:cacheprovider tests/test_external_door_height_estimate_policy.py tests/test_live_opening_external_door_height_estimate_publication.py tests/test_live_external_door_accuracy_guards.py
+      # This job cannot confirm held-out original PDFs, customer retention or frozen120 accuracy.
