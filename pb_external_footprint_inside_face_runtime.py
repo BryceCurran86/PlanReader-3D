@@ -20,6 +20,10 @@ from pb_source_external_footprint_inside_face_start_shadow import (
     build_external_footprint_inside_face_bundle,
     classify_wall_ink_band,
 )
+from pb_source_wall_stub_junction_geometry_runtime import (
+    GeometryPrimitive,
+    run_wall_stub_junction_geometry_stage,
+)
 
 _WALL_LAYER = re.compile(r"Wall|WALL|A-WALL|Enclosure", re.I)
 _NON_WALL = re.compile(r"dim|anno|text|grid|title|border|note|hatch", re.I)
@@ -197,6 +201,19 @@ def run_inside_face_footprint_runtime_stage(
             "commercial_publishable": False,
         }
 
+    geom_prims = tuple(
+        GeometryPrimitive(
+            primitive_id=s.wall_id,
+            start_pdf_pts=s.start_pdf_pts,
+            end_pdf_pts=s.end_pdf_pts,
+            kind="wall",
+            label=s.label,
+            stroke_weight_pt=s.stroke_weight_pt,
+        )
+        for s in segments
+    )
+    stub_junction = run_wall_stub_junction_geometry_stage(geom_prims)
+
     return {
         "status": bundle.start.status if bundle.walk.status == "CANDIDATE" else (
             bundle.start.status if bundle.start.status != "CANDIDATE" else bundle.walk.status
@@ -212,8 +229,12 @@ def run_inside_face_footprint_runtime_stage(
         "clockwise_walk": bundle.walk.to_dict(),
         "ink_sample_count": len(bundle.ink_samples),
         "dual_dwelling": dual,
+        "wall_stub_junction_geometry": stub_junction,
         "segment_count": len(segments),
-        "tasks_covered": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"],
+        "tasks_covered": [
+            "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+            "11", "12", "13", "14", "15",
+        ],
         "measurement_authorized": False,
         "commercial_publishable": False,
         "official_frozen120_score_change": 0,
