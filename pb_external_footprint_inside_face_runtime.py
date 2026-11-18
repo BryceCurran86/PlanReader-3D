@@ -20,6 +20,9 @@ from pb_source_external_footprint_inside_face_start_shadow import (
     build_external_footprint_inside_face_bundle,
     classify_wall_ink_band,
 )
+from pb_source_footprint_geometry_hardening_runtime import (
+    run_footprint_geometry_hardening_stage,
+)
 from pb_source_wall_stub_junction_geometry_runtime import (
     GeometryPrimitive,
     run_wall_stub_junction_geometry_stage,
@@ -213,6 +216,19 @@ def run_inside_face_footprint_runtime_stage(
         for s in segments
     )
     stub_junction = run_wall_stub_junction_geometry_stage(geom_prims)
+    horizontal_spans = tuple(
+        (s.start_pdf_pts, s.end_pdf_pts)
+        for s in segments
+        if abs(s.end_pdf_pts[1] - s.start_pdf_pts[1]) <= 2.0
+        and abs(s.end_pdf_pts[0] - s.start_pdf_pts[0]) >= 20.0
+    )
+    hardening = run_footprint_geometry_hardening_stage(
+        horizontal_spans=horizontal_spans,
+        curved_controls=tuple(bundle.walk.vertices_pdf_pts[:12]),
+        vector_segments=tuple(
+            (s.start_pdf_pts, s.end_pdf_pts) for s in segments
+        ),
+    )
 
     return {
         "status": bundle.start.status if bundle.walk.status == "CANDIDATE" else (
@@ -230,10 +246,11 @@ def run_inside_face_footprint_runtime_stage(
         "ink_sample_count": len(bundle.ink_samples),
         "dual_dwelling": dual,
         "wall_stub_junction_geometry": stub_junction,
+        "footprint_geometry_hardening": hardening,
         "segment_count": len(segments),
         "tasks_covered": [
             "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-            "11", "12", "13", "14", "15",
+            "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
         ],
         "measurement_authorized": False,
         "commercial_publishable": False,
