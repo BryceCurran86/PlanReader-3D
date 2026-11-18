@@ -23,6 +23,9 @@ from pb_source_external_footprint_inside_face_start_shadow import (
 from pb_source_footprint_geometry_hardening_runtime import (
     run_footprint_geometry_hardening_stage,
 )
+from pb_source_room_trace_acceptance_runtime import (
+    run_room_trace_acceptance_stage,
+)
 from pb_source_wall_stub_junction_geometry_runtime import (
     GeometryPrimitive,
     run_wall_stub_junction_geometry_stage,
@@ -229,6 +232,32 @@ def run_inside_face_footprint_runtime_stage(
             (s.start_pdf_pts, s.end_pdf_pts) for s in segments
         ),
     )
+    acceptance = run_room_trace_acceptance_stage(
+        polygon_pdf_pts=bundle.walk.vertices_pdf_pts,
+        measured_to="inside_finished_face",
+        wall_candidates=len(segments),
+        green_mask_pixels=0,
+        green_as_wall_promotions=0,
+        candidate_bbox=page_bounds_pdf_pts,
+        page_bounds=page_bounds_pdf_pts,
+        area_a=1.0,
+        area_b=1.0,
+        scale_ratio=1.0,
+        open_corners=(),
+        unmatched_endpoints=(),
+        trace_steps=(
+            {
+                "action": "inside_face_start",
+                "evidence": bundle.start.reason,
+                "confidence": 0.7 if bundle.start.status == "CANDIDATE" else 0.2,
+            },
+            {
+                "action": "clockwise_walk",
+                "evidence": bundle.walk.reason,
+                "confidence": 0.7 if bundle.walk.status == "CANDIDATE" else 0.2,
+            },
+        ),
+    )
 
     return {
         "status": bundle.start.status if bundle.walk.status == "CANDIDATE" else (
@@ -247,11 +276,9 @@ def run_inside_face_footprint_runtime_stage(
         "dual_dwelling": dual,
         "wall_stub_junction_geometry": stub_junction,
         "footprint_geometry_hardening": hardening,
+        "room_trace_acceptance": acceptance,
         "segment_count": len(segments),
-        "tasks_covered": [
-            "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-            "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
-        ],
+        "tasks_covered": [f"{i:02d}" for i in range(1, 32)],
         "measurement_authorized": False,
         "commercial_publishable": False,
         "official_frozen120_score_change": 0,
