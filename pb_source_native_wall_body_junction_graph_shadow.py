@@ -167,9 +167,10 @@ class SourceJunctionRecord:
     reason: str
     physical_join_authenticated: bool = False
     measurement_authorized: bool = False
+    disposition: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        row: dict[str, object] = {
             "junction_kind": self.junction_kind,
             "left_body_id": self.left_body_id,
             "right_body_id": self.right_body_id,
@@ -184,6 +185,42 @@ class SourceJunctionRecord:
             "physical_join_authenticated": False,
             "measurement_authorized": False,
         }
+        if self.disposition is not None:
+            row["disposition"] = self.disposition
+        return row
+
+
+def _window_continuity_disposition(
+    *,
+    status: EvidenceResolutionStatus,
+    separation_pdf_pts: float | None,
+) -> str:
+    """Align window-gap receipts with unclosed-endpoint abstain vocabulary."""
+    if status is EvidenceResolutionStatus.CANDIDATE:
+        return "candidate_window_continuity_topology_only"
+    if separation_pdf_pts is None:
+        return "abstain_window_gap_no_unique_jamb"
+    sep = float(separation_pdf_pts)
+    if sep <= 2.5:
+        return "abstain_sub_snap_window_gap_without_unique_jamb"
+    return "abstain_window_gap_no_unique_jamb"
+
+
+def _junction_disposition(*, kind: str, reason: str, separation_pdf_pts: float) -> str:
+    """Explicit abstain/candidate disposition for body-junction audits."""
+    if kind == JUNCTION_COLLINEAR_GAP or reason == REASON_INFERRED_JOIN_FORBIDDEN:
+        return "abstain_collinear_gap_no_source_ink_join"
+    if "near_miss" in reason:
+        if separation_pdf_pts <= 2.5:
+            return "abstain_sub_snap_near_miss_no_elbow_jamb_or_opening"
+        return "abstain_near_miss_no_elbow_jamb_or_opening"
+    if "multi_face_meeting" in reason:
+        return "abstain_multi_face_meeting_needs_source_owned_wall_body"
+    if reason == REASON_NON_STRUCTURAL:
+        return "abstain_non_structural_crossing"
+    if reason == REASON_COMPETING:
+        return "abstain_competing_junction_owners"
+    return "candidate_junction_topology_only"
 
 
 def _body_id(paths: Sequence[int], bounds: Sequence[float]) -> str:
@@ -344,6 +381,9 @@ def classify_source_wall_body_junctions(
                 provenance_geometry_kind=GEOMETRY_OBSERVED,
                 status=status,
                 reason=reason,
+                disposition=_junction_disposition(
+                    kind=kind, reason=reason, separation_pdf_pts=separation,
+                ),
             ))
             if separation <= CONTACT_PT:
                 contacts[i].add(j)
@@ -356,6 +396,7 @@ def classify_source_wall_body_junctions(
         if members in seen_multi:
             continue
         seen_multi.add(members)
+        multi_reason = "multi_face_meeting_needs_source_owned_wall_body"
         junctions.append(SourceJunctionRecord(
             junction_kind=JUNCTION_MULTI,
             left_body_id=index_for[members[0]],
@@ -367,7 +408,10 @@ def classify_source_wall_body_junctions(
             page_index=page_index,
             provenance_geometry_kind=GEOMETRY_OBSERVED,
             status=EvidenceResolutionStatus.ABSTAINED,
-            reason="multi_face_meeting_needs_source_owned_wall_body",
+            reason=multi_reason,
+            disposition=_junction_disposition(
+                kind=JUNCTION_MULTI, reason=multi_reason, separation_pdf_pts=0.0,
+            ),
         ))
     return tuple(bodies), tuple(junctions)
 
@@ -558,6 +602,10 @@ def classify_window_continuity_edges(
             drawings=drawings,
             window_designation=witness.get("window_designation") or "",
         )
+        resolved_reason = (
+            reason if status is EvidenceResolutionStatus.ABSTAINED
+            else "window_continuity_topology_only_not_wall"
+        )
         return SourceJunctionRecord(
             junction_kind=JUNCTION_WINDOW_CONTINUITY,
             left_body_id=left_body,
@@ -569,8 +617,9 @@ def classify_window_continuity_edges(
             page_index=page_index,
             provenance_geometry_kind=GEOMETRY_INFERRED,
             status=status,
-            reason=reason if status is EvidenceResolutionStatus.ABSTAINED else (
-                "window_continuity_topology_only_not_wall"
+            reason=resolved_reason,
+            disposition=_window_continuity_disposition(
+                status=status, separation_pdf_pts=sep,
             ),
         )
 
@@ -729,8 +778,13 @@ def build_source_native_wall_body_junction_graph(
     drawings: Sequence[Mapping[str, Any] | object],
     *,
     page_index: int = -1,
+    focus_native_path_ids: Sequence[int] = (),
 ) -> dict[str, object]:
-    """P0–P2 shadow graph. Zero quantities; collinear gaps are not walls."""
+    """P0–P2 shadow graph. Zero quantities; collinear gaps are not walls.
+
+    ``focus_native_path_ids`` is an optional audit filter only (e.g. Acacia
+    host strokes 4000/4002/5862/5848/5849). It never authorizes joins.
+    """
     attempt = attempt_source_native_outer_wall_first(drawings)
     bars = _unique_source_wall_bars(drawings)
     bodies, junctions = classify_source_wall_body_junctions(
@@ -755,10 +809,40 @@ def build_source_native_wall_body_junction_graph(
         and item.junction_kind != JUNCTION_COLLINEAR_GAP
     )
     refused = sum(1 for item in junctions if item.status is EvidenceResolutionStatus.ABSTAINED)
+    graph_diag = getattr(attempt, "graph", None)
+    near_misses = tuple(getattr(graph_diag, "endpoint_near_misses", ()) or ())
+    near_miss_rows = []
+    for miss in near_misses:
+        sep = float(getattr(miss, "separation_pdf_pts", 0.0) or 0.0)
+        tip = getattr(miss, "tip_pdf_pts", ())
+        near_miss_rows.append({
+            "tip_pdf_pts": list(tip) if tip else [],
+            "native_path_ids": list(getattr(miss, "native_path_ids", ()) or ()),
+            "nearby_native_path_ids": list(getattr(miss, "nearby_native_path_ids", ()) or ()),
+            "separation_pdf_pts": sep,
+            "disposition": (
+                "abstain_sub_snap_near_miss_no_elbow_jamb_or_opening"
+                if sep <= 2.5
+                else "abstain_near_miss_no_elbow_jamb_or_opening"
+            ),
+            "physical_join_authenticated": False,
+            "same_painted_exterior_layer_hint": bool(
+                getattr(miss, "same_painted_exterior_layer_hint", False)
+            ),
+        })
+    focus_paths = {int(i) for i in focus_native_path_ids}
+    focus_near_misses = [
+        row for row in near_miss_rows
+        if focus_paths.intersection(row["native_path_ids"] + row["nearby_native_path_ids"])
+    ]
     return {
         "page_index": page_index,
         "exterior_preflight_status": attempt.status,
         "exterior_preflight_reason": attempt.reason,
+        "exterior_preflight_component_count": getattr(graph_diag, "component_count", None),
+        "exterior_preflight_connectivity_status": getattr(
+            graph_diag, "connectivity_status", None
+        ),
         "component_count": cycle["component_count"],
         "body_count": len(bodies),
         "junction_count": len(junctions),
@@ -770,6 +854,14 @@ def build_source_native_wall_body_junction_graph(
         "collinear_gap_unsnapped_count": sum(
             1 for item in junctions if item.junction_kind == JUNCTION_COLLINEAR_GAP
         ),
+        "junction_disposition_counts": {
+            key: sum(1 for item in junctions if item.disposition == key)
+            for key in sorted({item.disposition for item in junctions if item.disposition})
+        },
+        "endpoint_near_misses": near_miss_rows,
+        "endpoint_near_miss_count": len(near_miss_rows),
+        "focus_path_near_misses": focus_near_misses,
+        "focus_path_near_miss_count": len(focus_near_misses),
         "window_continuity_edges": [item.to_dict() for item in window_edges],
         "window_continuity_candidate_count": sum(
             1 for item in window_edges if item.status is EvidenceResolutionStatus.CANDIDATE
@@ -777,6 +869,18 @@ def build_source_native_wall_body_junction_graph(
         "window_continuity_abstain_count": sum(
             1 for item in window_edges if item.status is EvidenceResolutionStatus.ABSTAINED
         ),
+        "window_continuity_disposition_counts": {
+            key: sum(1 for item in window_edges if item.disposition == key)
+            for key in sorted({item.disposition for item in window_edges if item.disposition})
+        },
+        "open_endpoint_disposition_counts": {
+            key: sum(1 for item in opens if item.get("disposition") == key)
+            for key in sorted({
+                str(item.get("disposition"))
+                for item in opens
+                if item.get("disposition")
+            })
+        },
         "exterior_cycle": cycle,
         "first_unclosed_endpoint": cycle["first_unclosed_endpoint"],
         "open_endpoint_count": cycle["open_endpoint_count"],

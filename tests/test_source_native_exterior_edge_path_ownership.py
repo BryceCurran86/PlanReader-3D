@@ -427,11 +427,12 @@ def test_exact_multi_path_original_stroke_chain_never_mints_wall_area():
     assert edge.commercial_publishable is False
 
 
-def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
+def test_segment_chain_fails_closed_on_real_middle_and_oversized_terminal_gaps():
     trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    # Gaps beyond CAD dash merge (~4 pt) stay unwitnessed middle breaks.
     middle = [
         _stroke((200, 0), (200, 25)),
-        _stroke((200, 25.425), (200, 50)),
+        _stroke((200, 29.5), (200, 50)),
         _stroke((200, 50), (200, 75)),
         _stroke((200, 75), (200, 100)),
     ]
@@ -439,23 +440,143 @@ def test_segment_chain_fails_closed_on_real_middle_and_terminal_gaps():
     assert missing.status is EvidenceResolutionStatus.ABSTAINED
     assert missing.classification == "incomplete_source_native_wall_ink_chain"
     assert not missing.physical_wall_authenticated
-    end_gap = [
+    # Sub-association (~1 pt) terminal shortfall is witnessed; oversized is not.
+    near_tip = [
         _stroke((200, 0.5), (200, 25)),
         _stroke((200, 25), (200, 50)),
         _stroke((200, 50), (200, 75)),
         _stroke((200, 75), (200, 100)),
     ]
-    tip = own_exterior_contour_native_paths(end_gap, trace)[3]
-    assert tip.status is EvidenceResolutionStatus.ABSTAINED
-    assert tip.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+    tip_ok = own_exterior_contour_native_paths(near_tip, trace)[3]
+    assert tip_ok.status is EvidenceResolutionStatus.CANDIDATE
+    assert tip_ok.classification == "source_native_wall_ink_chain_candidate"
+    assert tip_ok.chain_start_shortfall_pt == 0.5
+    assert tip_ok.contour_endpoint_association_pt == 2.5
+    assert tip_ok.physical_wall_authenticated is False
+    far_tip = [
+        _stroke((200, 4.0), (200, 25)),
+        _stroke((200, 25), (200, 50)),
+        _stroke((200, 50), (200, 75)),
+        _stroke((200, 75), (200, 100)),
+    ]
+    tip_far = own_exterior_contour_native_paths(far_tip, trace)[3]
+    assert tip_far.status is EvidenceResolutionStatus.ABSTAINED
+    assert tip_far.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
+    assert tip_far.chain_start_shortfall_pt == 4.0
+
+
+def test_cad_dash_gap_merges_into_complete_face_chain_candidate():
+    """Acacia-style ~3.5 pt dash gaps on one face complete; never mint area."""
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    dashes = [
+        _stroke((200, 0), (200, 22), dashes="[3 2] 0"),
+        _stroke((200, 25.5), (200, 47.5), dashes="[3 2] 0"),
+        _stroke((200, 51), (200, 73), dashes="[3 2] 0"),
+        _stroke((200, 76.5), (200, 100), dashes="[3 2] 0"),
+    ]
+    west = own_exterior_contour_native_paths(dashes, trace)[3]
+    assert west.status is EvidenceResolutionStatus.CANDIDATE
+    assert west.classification == "source_native_wall_ink_chain_candidate"
+    assert west.native_path_indices == (0, 1, 2, 3)
+    assert west.physical_wall_authenticated is False
+    assert west.can_issue_area is False
+
+
+def test_inner_parallel_face_does_not_compete_with_contour_face_chain():
+    """Inner continuous face inside search window is not a nearest-tie rival."""
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = [
+        _stroke((200, 0), (200, 25), dashes="[3 2] 0"),
+        _stroke((200, 28), (200, 50), dashes="[3 2] 0"),
+        _stroke((200, 53), (200, 75), dashes="[3 2] 0"),
+        _stroke((200, 78), (200, 100), dashes="[3 2] 0"),
+        # Inner parallel continuous face ~0.7 pt inside search window.
+        _stroke((200.7, 0), (200.7, 100)),
+    ]
+    west = own_exterior_contour_native_paths(strokes, trace)[3]
+    assert west.classification == "source_native_wall_ink_chain_candidate"
+    assert west.native_path_indices == (0, 1, 2, 3)
+    assert 4 not in west.native_path_indices
+    assert west.physical_wall_authenticated is False
+
+
+def test_acacia_east_style_chain_short_of_morphological_corners_is_complete_candidate():
+    """Painted east ink ends ~1 pt inside collapsed NE/SE corners — association, not join."""
+    trace = _trace(((328, 140), (328, 450), (904, 450), (904, 140)))
+    strokes = [
+        _stroke((903.1, 140.6), (903.1, 168.9)),
+        _stroke((903.1, 168.9), (903.1, 244.6)),
+        _stroke((903.1, 244.6), (903.1, 270.1)),
+        _stroke((903.1, 270.1), (903.1, 308.2)),
+        _stroke((903.1, 308.2), (903.1, 333.8)),
+        _stroke((903.1, 333.8), (903.1, 348.2)),
+        _stroke((903.1, 348.2), (903.1, 373.7)),
+        _stroke((903.1, 373.7), (903.1, 441.8)),
+        _stroke((903.1, 441.8), (903.1, 448.9)),
+    ]
+    # Also paint west/north/south unique owners so only east uses the chain path.
+    strokes = [
+        _stroke((328, 140), (328, 450)),
+        _stroke((328, 450), (904, 450)),
+        _stroke((904, 140), (328, 140)),
+        *strokes,
+    ]
+    east = own_exterior_contour_native_paths(strokes, trace)[2]
+    assert east.classification == "source_native_wall_ink_chain_candidate"
+    assert east.status is EvidenceResolutionStatus.CANDIDATE
+    assert east.chain_end_shortfall_pt is not None
+    assert east.chain_end_shortfall_pt <= 2.5
+    assert east.physical_wall_authenticated is False
+    assert east.commercial_publishable is False
+
+
+def test_complete_source_chain_preferred_over_partial_unique_owner():
+    """Acacia south: two touching strokes beat a single long outer owner alone."""
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    strokes = (
+        _stroke((200, 0), (200, 100)),  # west unique
+        _stroke((200, 100), (800, 100)),  # north unique
+        _stroke((800, 100), (800, 0)),  # east unique
+        _stroke((200, 0), (450, 0)),  # south left
+        _stroke((450, 0), (800, 0)),  # south right (also unique-length alone)
+    )
+    south = own_exterior_contour_native_paths(strokes, trace)[0]
+    assert south.classification == "source_native_wall_ink_chain_candidate"
+    assert south.native_path_indices == (3, 4)
+    assert south.physical_wall_authenticated is False
+
+
+def test_unique_owner_reports_uncovered_tail_fraction():
+    # Contour west edge is index 3: (200,100)->(200,0) in this winding.
+    trace = _trace(((200, 0), (800, 0), (800, 200), (200, 200)))
+    strokes = (
+        _stroke((200, 0), (200, 90)),  # west covers only lower portion
+        _stroke((200, 200), (800, 200)),
+        _stroke((800, 200), (800, 0)),
+        _stroke((800, 0), (200, 0)),
+    )
+    owned = own_exterior_contour_native_paths(strokes, trace)
+    west = next(
+        edge for edge in owned
+        if abs(edge.start_pdf_pts[0] - 200) <= 1 and abs(edge.end_pdf_pts[0] - 200) <= 1
+    )
+    assert west.classification == "source_native_wall_ink_candidate"
+    assert west.unique_owner_overlap_fraction is not None
+    assert west.unique_owner_overlap_fraction < 0.6
+    assert (
+        (west.unique_owner_uncovered_start_pt or 0)
+        + (west.unique_owner_uncovered_end_pt or 0)
+    ) > 50.0
+    assert west.physical_wall_authenticated is False
 
 
 def test_parallel_source_chains_cannot_be_selected_as_one_wall():
     trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    # Both faces sit inside contour-face coincidence; neither may win by nearest.
     strokes = (
         [_stroke((200, i * 25), (200, (i + 1) * 25))
          for i in range(4)]
-        + [_stroke((201, i * 25), (201, (i + 1) * 25))
+        + [_stroke((200.3, i * 25), (200.3, (i + 1) * 25))
            for i in range(4)]
     )
     edge = own_exterior_contour_native_paths(strokes, trace)[3]

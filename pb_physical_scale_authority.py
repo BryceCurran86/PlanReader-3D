@@ -13,6 +13,7 @@ viewport boxes are never accepted as truth inputs.
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
+from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 import math
@@ -710,6 +711,13 @@ class PhysicalScaleProducer:
         # authority publication semantics remain unchanged.
         self._attempt_cache: dict[_Key, PhysicalScaleResult] = {}
         self._scope_bbox_cache: dict[_Key, tuple[object, object]] = {}
+        # Different scale/viewport selectors on the same immutable CAD page
+        # reuse source segmentation, never a physical scale or publication.
+        # Each publish_scope still verifies current revision, original bytes
+        # and snapshot coverage before reading these source-derived boxes.
+        self._page_viewports_cache: OrderedDict[
+            tuple[str, str, int], tuple[object, ...]
+        ] = OrderedDict()
         self._bar_candidates_cache: dict[_Key, tuple[object, ...]] = {}
         self._trusted_words_by_snapshot: dict[
             tuple[str, str, str, str], dict[str, tuple[_TrustedWord, ...]]
@@ -863,7 +871,16 @@ class PhysicalScaleProducer:
             if page_index >= pdf.page_count:
                 return None, PHYSICAL_SCALE_SCOPE_UNAVAILABLE
             page = pdf.load_page(page_index)
-            viewports = segment_page_viewports(page, page_number=page_index + 1)
+            page_key = (selector.revision_id, selector.source_sha256, page_index)
+            viewports = self._page_viewports_cache.get(page_key)
+            if viewports is None:
+                viewports = tuple(segment_page_viewports(
+                    page, page_number=page_index + 1,
+                ))
+                self._page_viewports_cache[page_key] = viewports
+            self._page_viewports_cache.move_to_end(page_key)
+            while len(self._page_viewports_cache) > 4:
+                self._page_viewports_cache.popitem(last=False)
             usable = tuple(
                 viewport
                 for viewport in viewports

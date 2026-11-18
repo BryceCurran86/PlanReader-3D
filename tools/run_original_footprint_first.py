@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -26,6 +27,9 @@ from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
 )
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     own_exterior_contour_native_paths,
+)
+from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
+    build_source_native_wall_body_junction_graph,
 )
 
 
@@ -214,6 +218,20 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 "source_gap_witnesses_sample": [
                     dict(w) for w in ring.unresolved_gap_witnesses
                 ] if ring else [],
+                "wall_strip_count": ring.wall_strip_count if ring else 0,
+                "merged_collinear_dark_face_strip_count": (
+                    ring.merged_collinear_dark_face_strip_count if ring else 0
+                ),
+                "free_space_part_count": ring.free_space_part_count if ring else 0,
+                "free_space_exterior_touching_count": (
+                    ring.free_space_exterior_touching_count if ring else 0
+                ),
+                "free_space_enclosed_part_count": (
+                    ring.free_space_enclosed_part_count if ring else 0
+                ),
+                "free_space_max_enclosed_area_pt2": (
+                    ring.free_space_max_enclosed_area_pt2 if ring else 0.0
+                ),
                 "commercial_publishable": False,
                 "room_quantity_authorized": False,
             },
@@ -227,6 +245,17 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             class_counts: dict[str, int] = {}
             for edge in owned:
                 class_counts[edge.classification] = class_counts.get(edge.classification, 0) + 1
+            chain_edges = [
+                edge for edge in owned
+                if edge.classification in {
+                    "source_native_wall_ink_chain_candidate",
+                    "incomplete_source_native_wall_ink_chain",
+                }
+            ]
+            unique_edges = [
+                edge for edge in owned
+                if edge.classification == "source_native_wall_ink_candidate"
+            ]
             result["exterior_edge_ownership"] = {
                 "classification_counts": class_counts,
                 "edge_count": len(owned),
@@ -240,8 +269,109 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                         "competing_source_ink_chains",
                     }
                 ),
+                "complete_source_chain_count": sum(
+                    1 for edge in owned
+                    if edge.classification == "source_native_wall_ink_chain_candidate"
+                ),
+                "incomplete_source_chain_count": sum(
+                    1 for edge in owned
+                    if edge.classification == "incomplete_source_native_wall_ink_chain"
+                ),
+                "chain_endpoint_shortfalls_pt": [
+                    {
+                        "edge_index": edge.edge_index,
+                        "classification": edge.classification,
+                        "start_shortfall_pt": edge.chain_start_shortfall_pt,
+                        "end_shortfall_pt": edge.chain_end_shortfall_pt,
+                        "association_pt": edge.contour_endpoint_association_pt,
+                        "native_path_indices": list(edge.native_path_indices),
+                    }
+                    for edge in chain_edges
+                ],
+                "unique_owner_coverage": [
+                    {
+                        "edge_index": edge.edge_index,
+                        "native_path_indices": list(edge.native_path_indices),
+                        "overlap_fraction": edge.unique_owner_overlap_fraction,
+                        "uncovered_start_pt": edge.unique_owner_uncovered_start_pt,
+                        "uncovered_end_pt": edge.unique_owner_uncovered_end_pt,
+                    }
+                    for edge in unique_edges
+                ],
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
+            }
+            graph = build_source_native_wall_body_junction_graph(
+                drawings,
+                page_index=page_index,
+                # Optional Acacia host-stroke audit filter only; never a join.
+                focus_native_path_ids=(4000, 4002, 5862, 5848, 5849),
+            )
+            result["junction_graph_summary"] = {
+                "exterior_preflight_status": graph.get("exterior_preflight_status"),
+                "exterior_preflight_reason": graph.get("exterior_preflight_reason"),
+                "exterior_preflight_connectivity_status": graph.get(
+                    "exterior_preflight_connectivity_status"
+                ),
+                "junction_disposition_counts": graph.get("junction_disposition_counts"),
+                "endpoint_near_miss_count": graph.get("endpoint_near_miss_count"),
+                "focus_path_near_miss_count": graph.get("focus_path_near_miss_count"),
+                "focus_path_near_misses": graph.get("focus_path_near_misses"),
+                "open_endpoint_disposition_counts": graph.get(
+                    "open_endpoint_disposition_counts"
+                ),
+                "window_continuity_disposition_counts": graph.get(
+                    "window_continuity_disposition_counts"
+                ),
+                "physical_wall_authenticated": False,
+                "commercial_publishable": False,
+            }
+            # Longest unique/chain edges — west face audit without hardcoding IDs.
+            longest_edges = sorted(
+                owned,
+                key=lambda edge: math.hypot(
+                    edge.end_pdf_pts[0] - edge.start_pdf_pts[0],
+                    edge.end_pdf_pts[1] - edge.start_pdf_pts[1],
+                ),
+                reverse=True,
+            )[:6]
+            result["exterior_edge_ownership"]["longest_edge_sample"] = [
+                {
+                    "edge_index": edge.edge_index,
+                    "classification": edge.classification,
+                    "start_pdf_pts": list(edge.start_pdf_pts),
+                    "end_pdf_pts": list(edge.end_pdf_pts),
+                    "native_path_indices": list(edge.native_path_indices),
+                    "overlap_fraction": edge.unique_owner_overlap_fraction,
+                    "chain_start_shortfall_pt": edge.chain_start_shortfall_pt,
+                    "chain_end_shortfall_pt": edge.chain_end_shortfall_pt,
+                }
+                for edge in longest_edges
+            ]
+            result["layered_ring_authority"] = {
+                "ring_count": 0 if ring is None else len(ring.rings),
+                "commercial_projection_allowed": False,
+                "takeoff_eligible": False,
+                "metric_area_issued": False,
+                "physical_room_identity_issued": False,
+                "free_space_enclosed_part_count": (
+                    0 if ring is None else ring.free_space_enclosed_part_count
+                ),
+                "merged_collinear_dark_face_strip_count": (
+                    0 if ring is None else ring.merged_collinear_dark_face_strip_count
+                ),
+                "rings": [
+                    {
+                        "record_id": rec.record_id,
+                        "status": rec.status.value,
+                        "area_pt2": rec.area_pt2,
+                        "commercial_projection_allowed": False,
+                        "takeoff_eligible": False,
+                        "metric_area_issued": False,
+                        "physical_room_identity_issued": False,
+                    }
+                    for rec in (() if ring is None else ring.rings)
+                ],
             }
         canvas = fitz.open()
         layer = canvas.new_page(width=source[page_index].rect.width,
@@ -278,9 +408,9 @@ if __name__ == "__main__":
                         help="0-based page index")
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--expected-sha256",
-                        help="Exact lowercase SHA-256 of the intended original PDF; reject wrong regional copies")
+                        help="Exact SHA256 of the intended original drawing")
     parser.add_argument("--expected-drawing-title",
-                        help="Original PDF page title, e.g. 'Floor Plan'; reject site/roof page substitution")
+                        help="Require drawing-title field of the intended page")
     arguments = parser.parse_args()
     result, js, png = run(
         arguments.pdf, arguments.page, arguments.out_dir,

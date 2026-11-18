@@ -38,10 +38,17 @@ jobs:
           if (!(Test-Path $path)) { throw "Missing installer" }
           if ((Get-Item $path).Length -lt 100000) { throw "Installer unexpectedly small" }
           Get-FileHash $path -Algorithm SHA256
+      - name: Verify packaged payload against offline inventory
+        shell: pwsh
+        run: |
+          python vr-editor/windows/release_integrity.py verify vr-editor/windows/out/publish vr-editor/windows/out/desktop-release-inventory.json
+          if ($LASTEXITCODE -ne 0) { throw "Release inventory verification failed" }
       - name: Upload unsigned installer test artifact
         uses: actions/upload-artifact@v4
         with:
           name: PlanReader-VR-Desktop-Preview-unsigned
-          path: vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe
+          path: |
+            vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe
+            vr-editor/windows/out/desktop-release-inventory.json
           if-no-files-found: error
           retention-days: 7

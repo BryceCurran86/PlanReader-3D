@@ -25,6 +25,13 @@ New-Item $web -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $dist "*") $web -Recurse -Force
 if (!(Test-Path (Join-Path $publish "PlanReaderDesktop.exe"))) { throw "Missing desktop executable" }
 if (!(Test-Path (Join-Path $web "index.html"))) { throw "Missing embedded viewer" }
+# Fail closed before packaging; the inventory stays outside the installed tree.
+$integrity = Join-Path $PSScriptRoot "release_integrity.py"
+$inventory = Join-Path $out "desktop-release-inventory.json"
+& python $integrity create $publish $inventory
+if ($LASTEXITCODE -ne 0) { throw "Desktop release inventory creation failed" }
+& python $integrity verify $publish $inventory
+if ($LASTEXITCODE -ne 0) { throw "Desktop release inventory verification failed" }
 if (!$SkipInstaller) {
     $inno = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) "Inno Setup 6\ISCC.exe"
     if (!(Test-Path $inno)) { throw "Install Inno Setup 6 before building the installer" }
