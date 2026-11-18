@@ -141,12 +141,20 @@ def parse_numbered_key(
                 and label["x"] <= nbox[2] + 180.
                 and abs(label["cy"]-num_item["cy"]) <= max(
                     4.2, (nbox[3]-nbox[1])*.50)
-                and len(re.findall(r"[A-Za-z]", label["text"])) >= 2
-                and not re.fullmatch(r"[0-9.]+", label["text"])
+                and (
+                    len(re.findall(r"[A-Za-z]", label["text"])) >= 2
+                    or re.fullmatch(r"[1-9][0-9]?", label["text"])
+                    or label["text"] in ("&", "+", "/")
+                )
             ]
             if not near:
                 continue
             near.sort(key=lambda x: (x["x"], abs(x["cy"]-num_item["cy"])))
+            # The first glyph immediately after the key number must be
+            # alphabetic. Only subsequent adjacent glyphs may be suffix
+            # numerals, ampersands or punctuation between source words.
+            if len(re.findall(r"[A-Za-z]", near[0]["text"])) < 2:
+                continue
             fragments = [near[0]]
             end_x = near[0]["bbox"][2]
             max_gap = max(12., (nbox[3]-nbox[1]) * 1.6)
