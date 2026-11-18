@@ -1,0 +1,24 @@
+name: VR Desktop Offline Release Integrity
+on:
+  pull_request:
+    paths:
+      - "vr-editor/windows/release_integrity.py"
+      - "tests/test_vr_desktop_release_integrity.py"
+      - ".github/workflows/vr-desktop-release-integrity.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrity-python:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify offline inventory fail-closed tests
+        run: python -m unittest discover -s tests -p test_vr_desktop_release_integrity.py -v
