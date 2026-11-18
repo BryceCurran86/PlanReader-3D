@@ -25,6 +25,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
     _source_wall_ink_candidate_drawings,
     build_layered_wall_doorway_room_rings,
 )
+from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     own_exterior_contour_native_paths,
 )
@@ -94,6 +95,52 @@ def _draw_source_overlay(page, original, trace, scope, ring):
             shape.commit()
     # No heading overlay over the actual building; legend left in JSON.
     return candidate_count
+
+
+def _original_source_native_outer_wall_review(drawings, words, page_index):
+    """Read-only original-native evidence; never upgrade raster to a wall.
+
+    Use the existing outside-facing walker and wall/opening graph. Missing
+    ownership or a nearby source stroke may guide review, but cannot grant
+    an invented seam, snapped corner, measurement or customer publication.
+    """
+    try:
+        proof = attempt_source_native_outer_wall_first(
+            drawings, source_words=words, source_page_index=page_index,
+        )
+        graph = proof.graph
+        misses = tuple(graph.endpoint_near_misses)
+        return {
+            "status": proof.status,
+            "reason": proof.reason,
+            "source_wall_band_count": proof.source_wall_band_count,
+            "connected_native_wall_components": graph.component_count,
+            "source_endpoint_near_miss_count": len(misses),
+            "near_miss_witnesses_sample": [
+                {
+                    "tip_pdf_pts": list(w.tip_pdf_pts),
+                    "nearby_native_path_ids": list(w.nearby_native_path_ids),
+                    "separation_pdf_pts": w.separation_pdf_pts,
+                    "physical_join_authenticated": False,
+                }
+                for w in misses[:8]
+            ],
+            "physical_wall_authenticated": False,
+            "measurement_authorized": False,
+            "commercial_publishable": False,
+        }
+    except (RuntimeError, ValueError, TypeError, OverflowError, IndexError):
+        return {
+            "status": "ABSTAINED",
+            "reason": "original_native_outer_source_review_unavailable",
+            "source_wall_band_count": 0,
+            "connected_native_wall_components": 0,
+            "source_endpoint_near_miss_count": 0,
+            "near_miss_witnesses_sample": [],
+            "physical_wall_authenticated": False,
+            "measurement_authorized": False,
+            "commercial_publishable": False,
+        }
 
 
 def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | None) -> bool:
@@ -167,6 +214,9 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
     )
     with fitz.open(stream=original_bytes, filetype="pdf") as source:
         drawings = tuple(source[page_index].get_drawings())
+        source_native_outer_review = _original_source_native_outer_wall_review(
+            drawings, source[page_index].get_text("words"), page_index,
+        )
         outer, detour_receipt = refine_external_footprint_against_wall_ink(
             outer, drawings,
         )
@@ -195,6 +245,7 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 "physical_wall_metric_and_customer_UNAUTHORIZED",
             ],
             "exterior": outer.to_dict(),
+            "source_native_outer_wall_review": source_native_outer_review,
             "unsupported_rectangular_detour": dict(detour_receipt),
             "bounded_source": {
                 "status": scope.status,
