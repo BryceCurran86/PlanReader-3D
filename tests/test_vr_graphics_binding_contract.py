@@ -31,6 +31,11 @@ class GraphicsContractTests(unittest.TestCase):
             with self.subTest(luid=luid):
                 self.assertTrue(module.validate({**GOOD, "runtime_adapter_luid": luid}))
 
+    def test_unhashable_feature_levels_abstain(self):
+        for value in ([], {}, ["11_0"], {"level": "11_0"}):
+            with self.subTest(value=value):
+                self.assertTrue(module.validate({**GOOD, "feature_level": value}))
+
     def test_boolean_fail_closed(self):
         for value in (0, 1, "true", None, False):
             with self.subTest(value=value):
