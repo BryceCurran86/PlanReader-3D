@@ -28,7 +28,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_wall_role_authority import WallRoleClassification
 
 _NON_PERSONNEL_DOOR_RE = re.compile(
-    r"\b(?:garage|overhead|roller|joinery|panel\s*lift)\b",
+    r"\b(?:garage|overhead|roller|joinery|panel\s*lift|sectional|shutter|tilt.a.door)\b",
     re.IGNORECASE,
 )
 
@@ -65,6 +65,7 @@ def _blocked_non_personnel_door(opening: LiveCanonicalOpeningObject) -> bool:
         for part in (
             str(opening.schedule_row_description or ""),
             str(opening.type_mark or ""),
+            str(opening.profile_kind or ""),
         )
         if part
     )
@@ -156,7 +157,7 @@ def _apply_one(
         return opening
     if str(opening.opening_kind or "").strip().lower() != "door":
         return opening
-    if opening.height_m is not None:
+    if opening.height_m is not None or opening.height_record_id:
         return opening
     if _blocked_non_personnel_door(opening):
         return opening
