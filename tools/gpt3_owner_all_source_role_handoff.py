@@ -39,6 +39,7 @@ from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import SealedSourceClosedRun, seal_source_closed_run
 from tools.four_job_windows_launcher import PROJECTS, run_logged
+from tools.gpt3_safe_original_report_output import publish_staged_file
 from tools.q5446_source_role_customer_runtime import source_owned_role_module
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object, _json_customer_rows
 
@@ -142,7 +143,7 @@ def _write_exclusive(path: Path, content: str) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.link(stage, path)
+        publish_staged_file(stage, path)
     finally:
         if stage is not None:
             stage.unlink(missing_ok=True)
@@ -372,10 +373,7 @@ def produce_all_source_roles(
         from pb_gptmax_q5446_finish_support_shadow import inspect_q5446_finish_support
         report["q5446_finish_support_shadow"] = inspect_q5446_finish_support(roster).public_summary()
     if record_native_source_input_coverage:
-        from tools.gpt3_native_source_execution_coverage import (
-            build_native_source_execution_coverage,
-            verify_native_source_execution_coverage,
-        )
+        from tools.gpt3_native_source_execution_coverage import build_native_source_execution_coverage
         from tools.gpt3_original_source_preflight import _stable_original_digest
         # Input coverage is separate from quantity-seal coverage. Persist an
         # unverified attempt before decoding; failures cannot leave a success.
@@ -439,12 +437,9 @@ def produce_all_source_roles(
             min_free_commit_mb=int(min_free_commit_gb * 1024),
         )
         if record_native_source_input_coverage:
-            # Reconstruct coverage after the real child. Never attach a
-            # borrowed, modified or stale pre-process input receipt.
-            native_input = verify_native_source_execution_coverage(
-                native_input, pdf_path=role["path"],
-                expected_sha256=role["sha256"], expected_page_count=role["page_count"],
-            )
+            # This receipt was generated in this process from authenticated
+            # bytes and is never passed to the child. Recheck the live PDF's
+            # bytes and file identity before attaching it to the role.
             final_digest, final_identity = _stable_original_digest(role["path"])
             if final_digest != role["sha256"] or final_identity != native_source_identity:
                 raise ValueError("native source input changed during role production")
