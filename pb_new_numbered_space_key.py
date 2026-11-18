@@ -76,9 +76,19 @@ def _unpack_line(line: Any, origin: tuple[float, float] = (0., 0.)):
         return None
     text = str(getattr(line, "text", "")).strip().strip('"“”')
     confidence = getattr(line, "confidence", None)
-    if not text or (confidence is not None and confidence < .68):
+    if not text:
         return None
-    a,b,c,d = map(float, line.bbox_pt)
+    if confidence is not None:
+        if type(confidence) not in (int, float):
+            return None
+        if not math.isfinite(confidence) or not .68 <= confidence <= 1.0:
+            return None
+    try:
+        if len(line.bbox_pt) != 4:
+            return None
+        a,b,c,d = map(float, line.bbox_pt)
+    except (ValueError, TypeError, OverflowError):
+        return None
     if not all(math.isfinite(v) for v in (a,b,c,d)) or a>=c or b>=d:
         return None
     return dict(
@@ -101,40 +111,68 @@ def parse_numbered_key(
     anchor_y = anchor_bbox_pdf_pts[1]
     rows = [r for line in cropped_ocr_lines
             if (r:=_unpack_line(line,crop_origin_pdf_pts)) is not None]
+    # OCR may emit "1" + "TRUCK DRIVER LOUNGE" as separate boxes, break
+    # multi-word names into adjacent boxes, or read "1. OFFICE" in one box.
+    # Keep the SOURCE glyph rectangles; these are semantic candidates only.
     numbers = []
+    inline_pattern = re.compile(r"^([1-9][0-9]?)[.):-]?\\s+([A-Za-z][\\w &'/-]*)$")
     for item in rows:
         if item["cy"] <= anchor_y + 8:
             continue
-        if not re.fullmatch(r"[1-9][0-9]?", item["text"]):
+        inline = inline_pattern.fullmatch(item["text"])
+        if re.fullmatch(r"[1-9][0-9]?", item["text"]):
+            number, embedded = int(item["text"]), None
+        elif inline:
+            number, embedded = int(inline.group(1)), inline.group(2).strip()
+        else:
             continue
-        number=int(item["text"])
-        if number>99:
-            continue
-        numbers.append((number,item))
-    pairs={}
-    for number, num_item in numbers:
+        numbers.append((number, item, embedded))
+
+    pairs = {}
+    for number, num_item, embedded in numbers:
         nbox = num_item["bbox"]
-        near = [
-            label for label in rows
-            if label["x"] > nbox[2]+1.
-            and label["x"] <= nbox[2]+180.
-            and abs(label["cy"]-num_item["cy"]) <= max(4.2,(nbox[3]-nbox[1])*.50)
-            and len(re.findall(r"[A-Za-z]",label["text"]))>=2
-            and not re.fullmatch(r"[0-9.]+",label["text"])
-        ]
-        if not near:
-            continue
-        near.sort(key=lambda x:(x["x"],abs(x["cy"]-num_item["cy"])))
-        name=near[0]
+        if embedded is not None:
+            name = dict(num_item, text=embedded)
+        else:
+            near = [
+                label for label in rows
+                if label is not num_item
+                and label["x"] > nbox[2] + 1.
+                and label["x"] <= nbox[2] + 180.
+                and abs(label["cy"]-num_item["cy"]) <= max(
+                    4.2, (nbox[3]-nbox[1])*.50)
+                and len(re.findall(r"[A-Za-z]", label["text"])) >= 2
+                and not re.fullmatch(r"[0-9.]+", label["text"])
+            ]
+            if not near:
+                continue
+            near.sort(key=lambda x: (x["x"], abs(x["cy"]-num_item["cy"])))
+            fragments = [near[0]]
+            end_x = near[0]["bbox"][2]
+            max_gap = max(12., (nbox[3]-nbox[1]) * 1.6)
+            for candidate in near[1:]:
+                if candidate["x"] < end_x - 1. or candidate["x"] - end_x > max_gap:
+                    break
+                fragments.append(candidate)
+                end_x = candidate["bbox"][2]
+            label_text = " ".join(fragment["text"] for fragment in fragments)
+            name = dict(
+                near[0],
+                text=label_text,
+                bbox=(
+                    min(fragment["bbox"][0] for fragment in fragments),
+                    min(fragment["bbox"][1] for fragment in fragments),
+                    max(fragment["bbox"][2] for fragment in fragments),
+                    max(fragment["bbox"][3] for fragment in fragments),
+                ),
+            )
         if number in pairs:
-            # Two conflicting names for the same numbered source key:
-            # fail closed rather than silently choosing a source view.
-            if pairs[number]["text"]!=name["text"]:
+            if pairs[number]["text"] != name["text"]:
                 return NumberedSpaceKeyResult(
                     "ABSTAINED", "numbered_key_duplicate_number_conflict",
                     page_index, source_sha256,
                 )
-        pairs[number]=name
+        pairs[number] = name
     if len(pairs)<3:
         return NumberedSpaceKeyResult(
             "ABSTAINED", "numbered_key_insufficient_source_rows",
@@ -154,10 +192,10 @@ def parse_numbered_key(
             page_index, source_sha256,
         )
     full=[r for line in fullpage_ocr_lines if (r:=_unpack_line(line)) is not None]
-    xlo=min(x["bbox"][0] for _,x in numbers)-4.
-    xhi=max(x["bbox"][2] for _,x in numbers)+200.
+    xlo=min(x["bbox"][0] for _,x,_ in numbers)-4.
+    xhi=max(x["bbox"][2] for _,x,_ in numbers)+200.
     ylo=anchor_y-5.
-    yhi=max(x["bbox"][3] for _,x in numbers)+6.
+    yhi=max(x["bbox"][3] for _,x,_ in numbers)+6.
     entries=[]
     matched=0
     for number in nums:
