@@ -29,6 +29,11 @@ from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_firs
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     own_exterior_contour_native_paths,
 )
+from pb_source_native_exterior_perimeter_graph_shadow import (  # noqa: E402
+    build_source_native_exterior_perimeter_graph,
+    export_exterior_face_evidence_packet,
+    select_outermost_vertical_face_edge_index,
+)
 from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
     build_source_native_wall_body_junction_graph,
 )
@@ -374,6 +379,39 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
             }
+            perimeter = build_source_native_exterior_perimeter_graph(
+                scope.drawings,
+                outer,
+                closures=() if ring is None else ring.closures,
+            )
+            east_face_index = select_outermost_vertical_face_edge_index(
+                perimeter.edges, prefer_max_x=True,
+            )
+            result["exterior_perimeter_graph"] = {
+                **{
+                    k: v
+                    for k, v in perimeter.to_dict().items()
+                    if k
+                    in {
+                        "owned_edge_count",
+                        "contact_corner_count",
+                        "near_miss_corner_count",
+                        "representation_contact_unauthenticated_count",
+                        "unwitnessed_corner_count",
+                        "closed_candidate",
+                        "corners",
+                    }
+                },
+                "physical_wall_authenticated": False,
+                "commercial_publishable": False,
+            }
+            result["outermost_vertical_face_handoff"] = (
+                None
+                if east_face_index is None
+                else export_exterior_face_evidence_packet(
+                    perimeter, edge_index=east_face_index,
+                )
+            )
             graph = build_source_native_wall_body_junction_graph(
                 drawings,
                 page_index=page_index,
