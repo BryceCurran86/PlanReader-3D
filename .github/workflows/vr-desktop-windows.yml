@@ -47,6 +47,11 @@ jobs:
         run: |
           python vr-editor/windows/release_integrity.py verify vr-editor/windows/out/publish vr-editor/windows/out/desktop-release-inventory.json
           if ($LASTEXITCODE -ne 0) { throw "Release inventory verification failed" }
+      - name: Bind unsigned installer and inventory to offline checksum receipt
+        shell: pwsh
+        run: |
+          python vr-editor/windows/release_receipt.py vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe vr-editor/windows/out/desktop-release-inventory.json vr-editor/windows/out/desktop-release-receipt.json
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned preview release receipt failed" }
       - name: Upload unsigned installer test artifact
         uses: actions/upload-artifact@v4
         with:
@@ -54,5 +59,6 @@ jobs:
           path: |
             vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe
             vr-editor/windows/out/desktop-release-inventory.json
+            vr-editor/windows/out/desktop-release-receipt.json
           if-no-files-found: error
           retention-days: 7
