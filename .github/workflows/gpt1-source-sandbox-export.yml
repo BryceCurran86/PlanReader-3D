@@ -1,0 +1,32 @@
+name: GPT1 Original Public Source Sandbox Snapshot
+on:
+  push:
+    branches:
+      - gpt1/acacia-q5446-ten-accuracy-20261119
+    paths:
+      - .github/workflows/gpt1-source-sandbox-export.yml
+permissions:
+  contents: read
+jobs:
+  tracked-public-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Export only tracked public code, NEVER original PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          git archive --format=tar.gz --output=output/original-planreader-tracked-source.tar.gz HEAD
+          sha256sum output/original-planreader-tracked-source.tar.gz > output/sha256.txt
+          printf '%s\n' "$GITHUB_SHA" > output/commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpt1-original-public-source-sandbox
+          path: output/
+          retention-days: 1
+          if-no-files-found: error
