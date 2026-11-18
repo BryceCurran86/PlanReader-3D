@@ -193,6 +193,9 @@ class ExteriorEdgeNativeOwnership:
     unique_owner_overlap_fraction: float | None = None
     unique_owner_uncovered_start_pt: float | None = None
     unique_owner_uncovered_end_pt: float | None = None
+    # Incomplete multi-path chain retained for audit when a partial unique wins.
+    competing_incomplete_chain_path_indices: tuple[int, ...] = ()
+    competing_incomplete_chain_coverage_fraction: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         row: dict[str, object] = {
@@ -221,6 +224,14 @@ class ExteriorEdgeNativeOwnership:
             row["unique_owner_uncovered_start_pt"] = self.unique_owner_uncovered_start_pt
         if self.unique_owner_uncovered_end_pt is not None:
             row["unique_owner_uncovered_end_pt"] = self.unique_owner_uncovered_end_pt
+        if self.competing_incomplete_chain_path_indices:
+            row["competing_incomplete_chain_path_indices"] = list(
+                self.competing_incomplete_chain_path_indices
+            )
+        if self.competing_incomplete_chain_coverage_fraction is not None:
+            row["competing_incomplete_chain_coverage_fraction"] = (
+                self.competing_incomplete_chain_coverage_fraction
+            )
         return row
 
 
@@ -291,7 +302,7 @@ def _ownership_from_chain(
         ids, diagonal,
         chain_start_shortfall_pt=start_shortfall,
         chain_end_shortfall_pt=end_shortfall,
-        contour_endpoint_association_pt=_EDGE_SEARCH_PT,
+        contour_endpoint_association_pt=_CAD_DASH_GAP_PT,
     )
 
 
@@ -464,9 +475,11 @@ def _source_exact_collinear_chain(
     for covered, first, last, ids in plausible:
         start_shortfall = max(0.0, first - low)
         end_shortfall = max(0.0, high - last)
+        # CAD dash faces often stop ~3–4 pt short of a morphological corner
+        # (Acacia south). Association uses dash-gap slack; never a wall join.
         if (
-            start_shortfall <= _EDGE_SEARCH_PT
-            and end_shortfall <= _EDGE_SEARCH_PT
+            start_shortfall <= _CAD_DASH_GAP_PT
+            and end_shortfall <= _CAD_DASH_GAP_PT
         ):
             completes.append((covered, first, last, ids, start_shortfall, end_shortfall))
         else:
@@ -548,7 +561,7 @@ def _own_one_edge(
         outward = -signed if winding > 0 else signed
         hits.append((round(outward, 3), index))
     # Prefer a complete exact source chain over a single partial unique owner
-    # (Acacia south: 2934+2935 together witness the face better than 2935 alone).
+    # (Acacia south: dashed multi-path face beats a continuous partial owner).
     chain = _source_exact_collinear_chain(start, end, horizontal, segments)
     if chain is not None and chain[0] == "complete":
         return _ownership_from_chain(edge_index, start, end, diagonal, chain)
@@ -572,8 +585,27 @@ def _own_one_edge(
     frac, unc_start, unc_end = _unique_owner_span_coverage(
         start, end, horizontal, cluster, segments,
     )
-    # Incomplete multi-path chain that covers more than the unique owner still
-    # abstains, but the unique-owner receipt exposes the uncovered tails.
+    # Prefer an incomplete multi-path chain that covers more of the contour than
+    # a partial unique owner. Never invent ink; still ABSTAINED as incomplete.
+    if (
+        chain is not None
+        and chain[0] == "incomplete"
+        and edge_len > NOISE_PT
+    ):
+        chain_cover = max(
+            0.0,
+            1.0 - (float(chain[3]) + float(chain[4])) / edge_len,
+        )
+        if chain_cover > frac + 0.05 and len(chain[1]) >= 2:
+            return _ownership_from_chain(edge_index, start, end, diagonal, chain)
+    competing_ids: tuple[int, ...] = ()
+    competing_cover: float | None = None
+    if chain is not None and chain[0] == "incomplete" and len(chain[1]) >= 2:
+        competing_ids = tuple(chain[1])
+        competing_cover = round(
+            max(0.0, 1.0 - (float(chain[3]) + float(chain[4])) / edge_len),
+            4,
+        )
     return ExteriorEdgeNativeOwnership(
         edge_index, start, end, EvidenceResolutionStatus.CANDIDATE,
         "unique_outer_native_path_owner_needs_physical_wall_proof",
@@ -582,6 +614,8 @@ def _own_one_edge(
         unique_owner_uncovered_start_pt=unc_start,
         unique_owner_uncovered_end_pt=unc_end,
         contour_endpoint_association_pt=_EDGE_SEARCH_PT,
+        competing_incomplete_chain_path_indices=competing_ids,
+        competing_incomplete_chain_coverage_fraction=competing_cover,
     )
 
 

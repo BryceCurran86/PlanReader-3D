@@ -65,6 +65,35 @@ def test_heavy_black_strokes_are_wall_bands_not_double_line_dependent():
     assert len(_collect_source_heavy_stroke_strips(long_medium)) == 1
 
 
+def test_drafting_pocket_rings_are_slivered_not_candidate_rooms():
+    """Wall-cavity pockets that survive half-thickness inset must not be rooms."""
+    # Outer room plus an inner ~3×3 cavity formed by four thick wall bars.
+    rows = (
+        strip(0, 0, 80, 4)
+        + strip(0, 4, 4, 76)
+        + strip(0, 76, 80, 80)
+        + strip(76, 4, 80, 76)
+        + strip(20, 20, 32, 23)
+        + strip(20, 23, 23, 32)
+        + strip(20, 32, 32, 35)
+        + strip(29, 23, 32, 32)
+    )
+    result = build_layered_wall_doorway_room_rings(
+        rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.drafting_pocket_sliver_count >= 1
+    assert all(
+        rec.area_pt2 >= 50.0
+        for rec in result.rings
+        if rec.status is EvidenceResolutionStatus.CANDIDATE
+    )
+    assert (
+        result.ring_area_tier_lt_100_count
+        + result.ring_area_tier_100_to_1000_count
+        + result.ring_area_tier_ge_1000_count
+    ) == len(result.rings)
+
+
 def test_merged_collinear_dashed_dark_face_becomes_topology_strip():
     dashes = [
         _stroke((200, 100), (200, 130), width=0.48, dashes="[3 2] 0"),
