@@ -6,6 +6,7 @@ import pytest
 
 from pb_external_footprint_first_trace import ExternalFootprintTrace
 from pb_layered_wall_doorway_room_ring_shadow import (
+    _collect_merged_collinear_dark_face_strips,
     _collect_source_heavy_stroke_strips,
     build_layered_wall_doorway_room_rings,
 )
@@ -59,6 +60,41 @@ def test_heavy_black_strokes_are_wall_bands_not_double_line_dependent():
         _stroke((0, 50), (40, 90), width=1.92),
     ]
     assert _collect_source_heavy_stroke_strips(negatives) == []
+    # Long medium-width black face is admitted; short medium is not.
+    long_medium = [_stroke((0, 0), (100, 0), width=0.84)]
+    assert len(_collect_source_heavy_stroke_strips(long_medium)) == 1
+
+
+def test_merged_collinear_dashed_dark_face_becomes_topology_strip():
+    dashes = [
+        _stroke((200, 100), (200, 130), width=0.48, dashes="[3 2] 0"),
+        _stroke((200, 133.5), (200, 163.5), width=0.48, dashes="[3 2] 0"),
+        _stroke((200, 167), (200, 197), width=0.48, dashes="[3 2] 0"),
+        _stroke((200, 200.5), (200, 240), width=0.48, dashes="[3 2] 0"),
+    ]
+    strips = _collect_merged_collinear_dark_face_strips(dashes)
+    assert len(strips) == 1
+    assert strips[0].path_indices == (0, 1, 2, 3)
+    assert strips[0].vertical
+    # Short single tick and non-dark paint stay out.
+    assert _collect_merged_collinear_dark_face_strips([
+        _stroke((0, 0), (20, 0), width=0.48, dashes="[3 2] 0"),
+        _stroke((0, 10), (80, 10), width=0.48, color=(0.1, 0.9, 0.1)),
+    ]) == []
+    room = (
+        strip(0, 0, 120, 2)
+        + strip(0, 2, 2, 98)
+        + strip(0, 98, 120, 100)
+        + strip(118, 2, 120, 98)
+        + dashes
+    )
+    result = build_layered_wall_doorway_room_rings(
+        room, source_sha256=SHA, page_index=0, dark_painted_wall_source=True,
+    )
+    assert result.merged_collinear_dark_face_strip_count >= 1
+    assert result.free_space_part_count >= 1
+    assert all(not ring.metric_area_issued for ring in result.rings)
+    assert all(not ring.commercial_projection_allowed for ring in result.rings)
 
 
 def test_default_off_heavy_stroke_flag_does_not_change_named_wall_rooms():

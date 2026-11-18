@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -153,6 +154,20 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 "source_gap_witnesses_sample": [
                     dict(w) for w in ring.unresolved_gap_witnesses
                 ] if ring else [],
+                "wall_strip_count": ring.wall_strip_count if ring else 0,
+                "merged_collinear_dark_face_strip_count": (
+                    ring.merged_collinear_dark_face_strip_count if ring else 0
+                ),
+                "free_space_part_count": ring.free_space_part_count if ring else 0,
+                "free_space_exterior_touching_count": (
+                    ring.free_space_exterior_touching_count if ring else 0
+                ),
+                "free_space_enclosed_part_count": (
+                    ring.free_space_enclosed_part_count if ring else 0
+                ),
+                "free_space_max_enclosed_area_pt2": (
+                    ring.free_space_max_enclosed_area_pt2 if ring else 0.0
+                ),
                 "commercial_publishable": False,
                 "room_quantity_authorized": False,
             },
@@ -247,16 +262,45 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
             }
+            # Longest unique/chain edges — west face audit without hardcoding IDs.
+            longest_edges = sorted(
+                owned,
+                key=lambda edge: math.hypot(
+                    edge.end_pdf_pts[0] - edge.start_pdf_pts[0],
+                    edge.end_pdf_pts[1] - edge.start_pdf_pts[1],
+                ),
+                reverse=True,
+            )[:6]
+            result["exterior_edge_ownership"]["longest_edge_sample"] = [
+                {
+                    "edge_index": edge.edge_index,
+                    "classification": edge.classification,
+                    "start_pdf_pts": list(edge.start_pdf_pts),
+                    "end_pdf_pts": list(edge.end_pdf_pts),
+                    "native_path_indices": list(edge.native_path_indices),
+                    "overlap_fraction": edge.unique_owner_overlap_fraction,
+                    "chain_start_shortfall_pt": edge.chain_start_shortfall_pt,
+                    "chain_end_shortfall_pt": edge.chain_end_shortfall_pt,
+                }
+                for edge in longest_edges
+            ]
             result["layered_ring_authority"] = {
                 "ring_count": 0 if ring is None else len(ring.rings),
                 "commercial_projection_allowed": False,
                 "takeoff_eligible": False,
                 "metric_area_issued": False,
                 "physical_room_identity_issued": False,
+                "free_space_enclosed_part_count": (
+                    0 if ring is None else ring.free_space_enclosed_part_count
+                ),
+                "merged_collinear_dark_face_strip_count": (
+                    0 if ring is None else ring.merged_collinear_dark_face_strip_count
+                ),
                 "rings": [
                     {
                         "record_id": rec.record_id,
                         "status": rec.status.value,
+                        "area_pt2": rec.area_pt2,
                         "commercial_projection_allowed": False,
                         "takeoff_eligible": False,
                         "metric_area_issued": False,

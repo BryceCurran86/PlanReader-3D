@@ -31,6 +31,13 @@ _DIAGONAL_PT = 2.0
 _MIN_OWNER_SPAN_PT = 8.0
 _SHORT_CONTOUR_PT = 8.0
 _GRAZE_EDGE_PT = 24.0
+# CAD exterior faces are often dashed (~3.5 pt gaps). Merge those gaps when
+# chaining source ink along one face; never a wall-body join snap.
+_CAD_DASH_GAP_PT = 4.0
+# Contour-face coincidence first; morphological painted-face slack second.
+# Parallel faces that share a tier abstain — never nearest among equals.
+_FACE_COINCIDENCE_PT = 0.5
+_MORPHOLOGICAL_FACE_PT = 1.0
 
 
 def _dashed(row: Mapping[str, Any]) -> bool:
@@ -97,12 +104,16 @@ def _visible_native_dark_wall_ink(row: Mapping[str, Any]) -> bool:
 def _native_line_segments(
     drawings: Sequence[Mapping[str, Any] | object],
 ) -> tuple[tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]], ...]:
-    """Original ``l`` / ``re`` / ``qu`` edges. Bezier door swings are not walls."""
+    """Original ``l`` / ``re`` / ``qu`` edges. Bezier door swings are not walls.
+
+    Dashed dark CAD faces are retained for multi-path chain ownership only.
+    Unique outer-owner hits still reject dashed site-perimeter strokes.
+    """
     out: list[tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]]] = []
     for index, raw in enumerate(drawings):
         if not isinstance(raw, Mapping):
             continue
-        if _dashed(raw) or not _visible_native_dark_wall_ink(raw):
+        if not _visible_native_dark_wall_ink(raw):
             continue
         for item in raw.get("items") or ():
             if not item:
@@ -369,13 +380,14 @@ def _source_exact_collinear_chain(
         tuple[int, tuple[float, float], tuple[float, float], Mapping[str, Any]]
     ],
 ) -> tuple[str, tuple[int, ...], bool, float, float] | None:
-    """Retain original touching CAD strokes; never invent a 2.5 pt wall join.
+    """Retain original CAD stroke chains on the contour face; never invent joins.
 
-    Stroke-to-stroke continuity still uses representation noise only. Contour
-    endpoint witnessing may use the 2.5 pt association window so a painted
-    face that stops ~1 pt short of a morphological corner (Acacia east after
-    tip/stub collapse) is not rejected as unwitnessed. Even a complete chain
-    remains candidate topology and never authenticates a physical wall or area.
+    Stroke-to-stroke continuity tolerates CAD dash gaps up to ``_CAD_DASH_GAP_PT``.
+    Contour endpoint witnessing uses the 2.5 pt association window. Only buckets
+    whose axis coincides with the contour face (``_FACE_COINCIDENCE_PT``) may own
+    it — parallel faces inside the wider search window are not chosen by nearest.
+    Multiple face-coincident plausible runs abstain as competing chains. Even a
+    complete chain remains candidate topology and never authenticates a wall.
     """
     axis = 1 if horizontal else 0
     along = 0 if horizontal else 1
@@ -383,6 +395,7 @@ def _source_exact_collinear_chain(
     length = high - low
     if length <= _SHORT_CONTOUR_PT:
         return None
+    contour_axis = (start[axis] + end[axis]) / 2.0
     nearby = []
     for index, a, b, _row in segments:
         if abs(a[axis] - b[axis]) > NOISE_PT:
@@ -397,48 +410,73 @@ def _source_exact_collinear_chain(
             nearby.append((coordinate, lo, hi, index))
     if len(nearby) < 2:
         return None
-    # Nearby parallel wall faces are separate groups, not one inferred strip.
-    buckets: list[tuple[float, list[tuple[float, float, int]]]] = []
-    for coord, lo, hi, index in sorted(nearby):
-        if buckets and abs(coord - buckets[-1][0]) <= NOISE_PT:
-            buckets[-1][1].append((lo, hi, index))
-        else:
-            buckets.append((coord, [(lo, hi, index)]))
-    runs = []
-    for _coord, spans in buckets:
-        current_lo = current_hi = None
-        current_ids: set[int] = set()
-        for lo, hi, index in sorted(spans):
-            if current_lo is None:
-                current_lo, current_hi, current_ids = lo, hi, {index}
-            elif lo <= current_hi + NOISE_PT:
-                current_hi = max(current_hi, hi)
-                current_ids.add(index)
+
+    def _runs_for_face_slack(slack: float) -> list[tuple[float, float, float, tuple[int, ...]]]:
+        face = [
+            item for item in nearby
+            if abs(item[0] - contour_axis) <= slack
+        ]
+        if len(face) < 2:
+            return []
+        buckets: list[tuple[float, list[tuple[float, float, int]]]] = []
+        for coord, lo, hi, index in sorted(face):
+            if buckets and abs(coord - buckets[-1][0]) <= NOISE_PT:
+                buckets[-1][1].append((lo, hi, index))
             else:
-                runs.append((current_hi - current_lo, current_lo,
-                             current_hi, tuple(sorted(current_ids))))
-                current_lo, current_hi, current_ids = lo, hi, {index}
-        if current_lo is not None:
-            runs.append((current_hi - current_lo, current_lo,
-                         current_hi, tuple(sorted(current_ids))))
-    plausible = [
-        run for run in runs
-        if run[0] >= 0.5 * length and len(run[3]) >= 2
-    ]
+                buckets.append((coord, [(lo, hi, index)]))
+        runs: list[tuple[float, float, float, tuple[int, ...]]] = []
+        for _coord, spans in buckets:
+            current_lo = current_hi = None
+            current_ids: set[int] = set()
+            for lo, hi, index in sorted(spans):
+                if current_lo is None:
+                    current_lo, current_hi, current_ids = lo, hi, {index}
+                elif lo <= current_hi + _CAD_DASH_GAP_PT:
+                    current_hi = max(current_hi, hi)
+                    current_ids.add(index)
+                else:
+                    runs.append((
+                        current_hi - current_lo, current_lo, current_hi,
+                        tuple(sorted(current_ids)),
+                    ))
+                    current_lo, current_hi, current_ids = lo, hi, {index}
+            if current_lo is not None:
+                runs.append((
+                    current_hi - current_lo, current_lo, current_hi,
+                    tuple(sorted(current_ids)),
+                ))
+        return [
+            run for run in runs
+            if run[0] >= 0.5 * length and len(run[3]) >= 2
+        ]
+
+    # Exact face first; morphological painted-face slack only if empty.
+    plausible = _runs_for_face_slack(_FACE_COINCIDENCE_PT)
+    if not plausible:
+        plausible = _runs_for_face_slack(_MORPHOLOGICAL_FACE_PT)
     if not plausible:
         return None
-    plausible.sort(key=lambda run: (-run[0], run[1], run[2], run[3]))
-    if len(plausible) != 1:
-        ids = tuple(sorted({i for run in plausible for i in run[3]}))
+    # Prefer a complete face-coincident chain over an incomplete one on the same
+    # face. Competing completes (or competing incompletes) stay ambiguous —
+    # never nearest / first / smallest among equals.
+    completes = []
+    incompletes = []
+    for covered, first, last, ids in plausible:
+        start_shortfall = max(0.0, first - low)
+        end_shortfall = max(0.0, high - last)
+        if (
+            start_shortfall <= _EDGE_SEARCH_PT
+            and end_shortfall <= _EDGE_SEARCH_PT
+        ):
+            completes.append((covered, first, last, ids, start_shortfall, end_shortfall))
+        else:
+            incompletes.append((covered, first, last, ids, start_shortfall, end_shortfall))
+    chosen = completes if completes else incompletes
+    if len(chosen) != 1:
+        ids = tuple(sorted({i for run in chosen for i in run[3]}))
         return "ambiguous", ids, False, 0.0, 0.0
-    _covered, first, last, ids = plausible[0]
-    start_shortfall = max(0.0, first - low)
-    end_shortfall = max(0.0, high - last)
-    # Association window for contour corners only — not a stroke join snap.
-    complete = (
-        start_shortfall <= _EDGE_SEARCH_PT
-        and end_shortfall <= _EDGE_SEARCH_PT
-    )
+    _covered, first, last, ids, start_shortfall, end_shortfall = chosen[0]
+    complete = bool(completes)
     return (
         ("complete" if complete else "incomplete"),
         ids,
@@ -479,7 +517,11 @@ def _own_one_edge(
     horizontal = abs(start[1] - end[1]) <= _AXIS_PT
     hits: list[tuple[float, int]] = []
     min_overlap = max(_MIN_OWNER_SPAN_PT, 0.35 * edge_len)
-    for index, a, b, _row in segments:
+    for index, a, b, row in segments:
+        # Dashed site-perimeter / guide strokes never become unique owners.
+        # Multi-path dashed CAD faces may still form a complete chain below.
+        if _dashed(row):
+            continue
         native_len = math.hypot(b[0] - a[0], b[1] - a[1])
         if native_len > 4.0 * edge_len and edge_len < _GRAZE_EDGE_PT:
             continue
