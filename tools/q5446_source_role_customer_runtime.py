@@ -337,14 +337,16 @@ def produce_q5446_source_role(
             elif supplemental.status != "ABSTAIN":
                 raise ValueError("supplemental family status unsupported")
 
-            # Preserve independently signed siblings if ground ENS abstains.
-            # No source label alone can create a customer row.
-            for issuer in (
+            # A verified two-family receipt already owns the ground ensuite.
+            # Keep its signed body and only try the independent issuer if no
+            # ground ensuite was appended by the two-family path.
+            independent_issuers = (
                 issue_original_q5446_ground_laundry_tiled_floor,
                 issue_original_q5446_first_ensuite_tiled_floor,
-                # Independent signed face only; OCR/physical authority may ABSTAIN.
-                issue_original_q5446_ground_ensuite_tiled_floor,
-            ):
+            )
+            if supplemental.status == "ABSTAIN":
+                independent_issuers += (issue_original_q5446_ground_ensuite_tiled_floor,)
+            for issuer in independent_issuers:
                 sealed, customer_rows, appended = _append_independent_source_tiled_floor(
                     original_plan=pdf_path, companions=companion_roles,
                     workspace_id=workspace_id, project_id=project_id,
