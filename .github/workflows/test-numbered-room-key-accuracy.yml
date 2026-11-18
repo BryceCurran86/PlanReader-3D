@@ -1,0 +1,37 @@
+name: Original numbered room key OCR accuracy
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_new_numbered_space_key.py
+      - tests/test_numbered_space_key_ocr_accuracy.py
+      - .github/workflows/test-numbered-room-key-accuracy.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  numbered-source-name-candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Numbered room key and source tracing regressions
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m compileall -q pb_new_numbered_space_key.py tests/test_numbered_space_key_ocr_accuracy.py
+          python -m pytest -q -p no:cacheprovider tests/test_numbered_space_key_ocr_accuracy.py tests/test_source_native_room_key_fastpath.py tests/test_new_source_trace_preview.py
+      # OCR names remain candidates; no room physical authority, issued area or frozen120 score.
