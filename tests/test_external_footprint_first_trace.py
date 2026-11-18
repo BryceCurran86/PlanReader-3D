@@ -667,3 +667,26 @@ def test_original_evidence_pair_rolls_back_on_second_write_failure(tmp_path, mon
         run(original, 0, destination, expected_sha256=sha)
     assert not (destination / "page_1_footprint_first.png").exists()
     assert not (destination / "page_1_footprint_first.json").exists()
+
+
+
+@pytest.mark.parametrize("bad_page", [-1, 1, True, 0.0])
+def test_original_runner_rejects_invalid_page_before_trace_without_title_pin(
+    tmp_path, monkeypatch, bad_page,
+):
+    """A negative page must never silently select the final original PDF sheet."""
+    import tools.run_original_footprint_first as runner
+
+    original = _plan(tmp_path, walls=True)
+    calls = []
+
+    def never_trace(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("invalid page must fail before native tracing")
+
+    monkeypatch.setattr(runner, "trace_external_footprint_first", never_trace)
+    destination = tmp_path / "invalid_page_output"
+    with pytest.raises(ValueError, match="original_footprint_original_page_index_invalid"):
+        runner.run(original, bad_page, destination)
+    assert not calls
+    assert not destination.exists()
