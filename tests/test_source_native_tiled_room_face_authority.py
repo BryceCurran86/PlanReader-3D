@@ -235,3 +235,32 @@ def test_native_source_float_tolerances_do_not_reject_exact_closed_face():
         ) is None
     finally:
         page.close()
+
+
+def test_original_native_dimension_precision_survives_until_metric_rounding(ocr):
+    """CAD float noise is not a reason to round source-space dimensions twice."""
+    drawings = _fixture()
+    source_ring = drawings[0]
+    # Reconstruct all endpoints preserving the native path's closed topology.
+    points = [(50.0 if p.x == 50 else
+               110.000021 if p.x == 110 else float(p.x),
+               50.000017 if p.y == 50 else float(p.y))
+              for _, p, _ in source_ring["items"]]
+    points.append(points[0])
+    drawings[0] = _path(points)
+    page = _Page(drawings)
+    try:
+        face = a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        )
+        assert face is not None
+        raw_width = face.source_bbox_pts[2] - face.source_bbox_pts[0]
+        raw_height = face.source_bbox_pts[3] - face.source_bbox_pts[1]
+        assert face.finished_width_pts == raw_width
+        assert face.finished_depth_pts == raw_height
+        assert face.finished_width_pts != round(raw_width, 5)
+        assert face.finished_depth_pts != round(raw_height, 5)
+        assert face.physical_source_verified
+        assert face.commercial_permission is False
+    finally:
+        page.close()
