@@ -153,6 +153,11 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
     import fitz
 
     original_bytes = pdf.read_bytes()
+    # Validate page identity even without an optional drawing-title pin. A
+    # negative index otherwise selects the last PDF page in PyMuPDF.
+    with fitz.open(stream=original_bytes, filetype="pdf") as document:
+        if type(page_index) is not int or not 0 <= page_index < len(document):
+            raise ValueError("original_footprint_original_page_index_invalid")
     sha = hashlib.sha256(original_bytes).hexdigest()
     sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
     title_verified = _verify_original_drawing_title(
