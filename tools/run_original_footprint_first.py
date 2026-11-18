@@ -115,6 +115,14 @@ def _acacia_source_scope_review(packet, outer_review):
         for key in sorted(ROOM_KEY)
     ]
     finish_status, finish_reason = review_acacia_finishes(packet)
+    # Source diagnostics must not promote truthy strings, numeric 1 or an
+    # explicitly ABSTAINED outer walker into a physical-perimeter witness.
+    # This remains a review-stage marker, never takeoff authorization.
+    outer_physical_verified = (
+        isinstance(outer_review, dict)
+        and outer_review.get("physical_wall_authenticated") is True
+        and outer_review.get("status") != "ABSTAINED"
+    )
     return {
         "source_scope_status": "ORIGINAL_ACACIA_SOURCE_REVIEW_ONLY",
         "original_source_roles_verified": packet.original_byte_roles_verified,
@@ -128,7 +136,7 @@ def _acacia_source_scope_review(packet, outer_review):
         "scheduled_prototype_codes_not_installed_count": list(SCHEDULE_CODES),
         "source_exterior_first_failing_gate": (
             "outside_original_wall_ink_not_physically_accepted"
-            if not outer_review.get("physical_wall_authenticated", False)
+            if not outer_physical_verified
             else "finished_inside_face_and_opening_host_not_verified"
         ),
         "material_finish_status": finish_status,
