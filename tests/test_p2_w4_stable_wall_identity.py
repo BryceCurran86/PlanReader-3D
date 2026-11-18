@@ -183,3 +183,30 @@ def test_p2_live_extractor_predictions_unchanged(tmp_path: Path) -> None:
         payload = pred.to_dict()
         assert "wall_candidate_id" not in payload
         assert "primitive_lineage" not in payload
+
+
+
+def test_p2_collinear_retrace_is_not_erased_into_a_direct_wall() -> None:
+    direct = [(0.0, 0.0), (5.0, 0.0)]
+    retraced = [(0.0, 0.0), (10.0, 0.0), (5.0, 0.0)]
+    assert canonical_path_fingerprint(retraced) != canonical_path_fingerprint(direct)
+    assert _canonical_wall_candidate_id("vp", retraced) != _canonical_wall_candidate_id(
+        "vp", direct
+    )
+    assert canonical_path_fingerprint(retraced) == canonical_path_fingerprint(
+        list(reversed(retraced))
+    )
+    assert canonical_path_fingerprint([(0, 0), (2.5, 0), (5, 0)]) == (
+        canonical_path_fingerprint(direct)
+    )
+
+
+def test_p2_source_u_turn_same_endpoints_is_not_zero_length_identity() -> None:
+    turn_back = [(0.0, 0.0), (10.0, 0.0), (0.0, 0.0)]
+    fingerprint = canonical_path_fingerprint(turn_back)
+    assert len(fingerprint) == 3
+    assert fingerprint == canonical_path_fingerprint(list(reversed(turn_back)))
+    assert fingerprint != canonical_path_fingerprint([(0.0, 0.0), (0.0, 0.0)])
+    assert _canonical_wall_candidate_id("vp", turn_back) != (
+        _canonical_wall_candidate_id("vp", [(0.0, 0.0), (0.0, 0.0)])
+    )
