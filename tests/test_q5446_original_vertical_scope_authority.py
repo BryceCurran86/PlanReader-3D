@@ -9,7 +9,12 @@ from pb_q5446_original_vertical_scope_authority import (
     inspect_original_q5446_vertical_scope,
 )
 
-INC = "CEILINGS: 2440mm nominal internal ceiling height, measured overall to frame plates."
+INC = (
+    "INSULATION: Bradford R2.5 Glasswool batts to ceiling of roof space "
+    "(excludes garage ceiling space). Reflective foil to external walls and "
+    "wall between garage and house. CEILINGS: 2440mm nominal internal "
+    "ceiling height, measured overall to frame plates."
+)
 P4 = (
     "Promotion S 43 - 14 Provide full height ceramic wall tiling "
     "(as per standard range and specification) to master ensuite in lieu of standard. "
@@ -53,6 +58,8 @@ def test_door_and_master_ensuite_scope_are_not_broadcast():
     assert q.installed_opening_height_authorized is False
     assert q.master_ensuite_full_height_wall_tile_scope is True
     assert q.other_wet_rooms_full_height_tile_scope is False
+    assert q.roof_space_r25_glasswool_garage_ceiling_excluded is True
+    assert q.reflective_wall_foil_between_garage_and_house_included is True
     assert q.commercial_quantity_authorized is False
 
 
@@ -124,6 +131,8 @@ def test_private_original_three_document_height_scope_positive():
     assert q.promoted_ground_flush_panel_hinged_door_height_mm == 2340
     assert q.promoted_ground_flush_panel_maximum_width_mm == 820
     assert q.master_ensuite_full_height_wall_tile_scope is True
+    assert q.roof_space_r25_glasswool_garage_ceiling_excluded is True
+    assert q.reflective_wall_foil_between_garage_and_house_included is True
     assert q.commercial_quantity_authorized is False
 
 
@@ -135,3 +144,26 @@ def test_tampered_private_inclusions_abstain(tmp_path):
     q = inspect_original_q5446_vertical_scope(plan, damaged, sales)
     assert q.status == "ABSTAINED"
     assert q.reason_codes == ("original_vertical_source_sha_or_role_mismatch",)
+
+
+def test_garage_ceiling_upgrade_does_not_claim_r25_batts_when_excluded():
+    q = _derive()
+    assert q.promoted_ground_dwelling_and_garage_height_mm == 2740
+    assert q.roof_space_r25_glasswool_garage_ceiling_excluded is True
+    assert q.reflective_wall_foil_between_garage_and_house_included is True
+    assert q.commercial_quantity_authorized is False
+
+
+def test_missing_insulation_statements_never_infer_garage_batts_scope():
+    q = _derive(inc=INC.replace(
+        "Bradford R2.5 Glasswool batts to ceiling of roof space "
+        "(excludes garage ceiling space). ",
+        "",
+    ).replace(
+        "Reflective foil to external walls and wall between garage and house. ",
+        "",
+    ))
+    assert q.status == "SOURCE_CORROBORATED_VERTICAL_SCOPE_REVIEW"
+    assert q.roof_space_r25_glasswool_garage_ceiling_excluded is False
+    assert q.reflective_wall_foil_between_garage_and_house_included is False
+    assert q.commercial_quantity_authorized is False
