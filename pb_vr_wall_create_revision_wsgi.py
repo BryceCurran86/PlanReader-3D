@@ -150,15 +150,14 @@ def make_wall_create_revision_wsgi_app(
                 type(r) is not KnownServiceRoute for r in routes
             ) or type(coverage) is not VerifiedWallDrawingCoverage:
                 raise WallCreateConflict("trusted_construction_and_sheet_evidence_missing")
-            # The host must check all other editing tracks' persisted heads.
-            # This MUST be enforced under the host's shared document lock.
-            if verify_unified_document_head(principal, ws, db) is not True:
-                raise WallCreateConflict("another_editor_or_document_revision_unresolved")
+            # The unified head comparison MUST run INSIDE the SQLite writer
+            # transaction. A preflight callback here creates a TOCTOU window.
             result = create_wall_and_related_page_revision(
                 db, principal=principal, workspace=ws, wall=wall,
                 assembly=assembly, routes=routes, coverage=coverage,
                 original_pdf=original, idempotency_key=token,
                 command_identity=command,
+                unified_head_verifier=verify_unified_document_head,
             )
             result["downloadPath"] = (
                 "/api/editor/workspaces/" + wid + "/walls/revisions/" +
