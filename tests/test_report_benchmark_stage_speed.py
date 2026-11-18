@@ -56,3 +56,13 @@ def test_real_journal_sampled_failure(tmp_path):
     result = summarize([path])["reports"][0]
     assert not result["complete"]
     assert result["stages"][0]["failed_calls"] == 1
+
+
+def test_empty_or_missing_source_receipt_never_complete(tmp_path):
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("", encoding="utf-8")
+    assert not summarize([empty])["reports"][0]["complete"]
+    unverified = tmp_path / "unverified.jsonl"
+    write(unverified, [row("outer", "entered", 1),
+                       row("outer", "completed", 1, elapsed_ms=1)])
+    assert not summarize([unverified])["reports"][0]["complete"]
