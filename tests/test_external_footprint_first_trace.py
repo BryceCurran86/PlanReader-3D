@@ -454,3 +454,227 @@ def test_inverted_native_path_bbox_cannot_authenticate_wall_ink(coords):
     assert result.wall_native_primitive_count == 0
     assert result.selected_source_path_indices == ()
     assert result.commercial_publishable is False
+
+def test_original_acacia_regional_sha_pins_are_distinct_and_fail_closed():
+    """Source-backed SHA identities, no private PDF bytes committed."""
+    from tools.run_original_footprint_first import _enforce_original_source_sha_pin
+
+    brisbane = "435a6b610fea904f2b27dc330667d92a25919ada3368e5905e58ff92e047f37a"
+    sydney = "f5ac166a21c9348c5ee55a7e518ec487140e9888d8af21fa39dbc5a9ca28000e"
+    melbourne = "fcc5e032968f62028dd4254db61bb676582027655881ecbad7a21001ef12cd2a"
+    assert len({brisbane, sydney, melbourne}) == 3
+    assert _enforce_original_source_sha_pin(brisbane, brisbane) is True
+    assert _enforce_original_source_sha_pin(brisbane, None) is False
+    for different_original in (sydney, melbourne):
+        with pytest.raises(ValueError, match="original_footprint_source_sha256_mismatch"):
+            _enforce_original_source_sha_pin(different_original, brisbane)
+
+
+@pytest.mark.parametrize("bad", [
+    "a" * 63, "a" * 65, "A" * 64, "g" * 64, "", 123, True,
+])
+def test_original_footprint_sha_pin_requires_full_lowercase_hex(bad):
+    from tools.run_original_footprint_first import _enforce_original_source_sha_pin
+
+    with pytest.raises(ValueError, match="original_footprint_expected_sha256_invalid"):
+        _enforce_original_source_sha_pin("a" * 64, bad)
+
+
+def test_original_footprint_runner_fails_before_geometry_or_files_on_wrong_pin(
+    tmp_path, monkeypatch,
+):
+    import tools.run_original_footprint_first as runner
+
+    original = _plan(tmp_path, walls=True)
+    invoked = []
+
+    def never_trace(*args, **kwargs):
+        invoked.append(True)
+        raise AssertionError("must refuse foreign revision before tracing")
+
+    monkeypatch.setattr(runner, "trace_external_footprint_first", never_trace)
+    destination = tmp_path / "pinned_output"
+    with pytest.raises(ValueError, match="original_footprint_source_sha256_mismatch"):
+        runner.run(original, 0, destination, expected_sha256="f" * 64)
+    assert invoked == []
+    assert not destination.exists()
+
+
+def test_original_footprint_runner_reports_verified_source_pin_without_firm(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    output, report, overlay = run(
+        original, 0, tmp_path / "pinned_result", expected_sha256=sha,
+    )
+    assert output["source_sha256"] == sha
+    assert output["source_sha_pin_verified"] is True
+    assert output["commercial_quantity_rows"] == 0
+    assert output["topology"]["room_quantity_authorized"] is False
+    assert report.is_file() and overlay.is_file()
+
+
+def test_original_page_title_pin_blocks_wrong_page_before_tracing(tmp_path, monkeypatch):
+    import tools.run_original_footprint_first as runner
+
+    original = _plan(tmp_path, walls=True)
+    with fitz.open(original) as document:
+        document[0].insert_text((40, 30), "Drawing title: Floor Plan\nScale: 1:100", fontsize=12)
+        document.saveIncr()
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    destination = tmp_path / "wrong_page_result"
+    calls = []
+
+    def never_trace(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("wrong source page must never trace")
+
+    monkeypatch.setattr(runner, "trace_external_footprint_first", never_trace)
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        runner.run(
+            original, 0, destination, expected_sha256=sha,
+            expected_drawing_title="Site Plan",
+        )
+    assert calls == []
+    assert not destination.exists()
+
+
+def test_original_page_title_pin_verified_on_matching_floor_plan(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    with fitz.open(original) as document:
+        document[0].insert_text((40, 30), "Drawing title: Floor Plan\nScale: 1:100", fontsize=12)
+        document.saveIncr()
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        original, 0, tmp_path / "verified_page_result",
+        expected_sha256=sha, expected_drawing_title="Floor Plan",
+    )
+    assert result["source_sha_pin_verified"] is True
+    assert result["source_page_title_verified"] is True
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
+
+
+@pytest.mark.parametrize("invalid_title", ["", " ", "a" * 101, 17, True])
+def test_original_page_title_pin_rejects_invalid_expectations(invalid_title):
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    with pytest.raises(ValueError, match="original_footprint_expected_page_title_invalid"):
+        _verify_original_drawing_title(b"not a pdf", 0, invalid_title)
+
+
+def test_unattempted_original_gap_review_does_not_report_false_zero(tmp_path):
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=False)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        original, 0, tmp_path / "abstained_original", expected_sha256=sha,
+    )
+    assert result["exterior"]["status"] == "ABSTAINED"
+    assert result["bounded_source"]["status"] == "ABSTAINED"
+    assert result["topology"]["status"] == "ABSTAINED"
+    assert result["topology"]["gap_review_performed"] is False
+    assert result["topology"]["unresolved_collinear_gap_count"] is None
+    assert result["topology"]["source_gap_witness_count"] is None
+    assert result["topology"]["room_quantity_authorized"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
+
+
+def test_acacia_wrapped_window_and_door_schedule_page_title(tmp_path):
+    """Original Acacia p10 has Window / and Door Schedule on separate PDF lines."""
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    pdf = tmp_path / "original_schedule.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((30, 45), "Drawing title: Window\nand Door Schedule\nScale: 1:50")
+        document.save(pdf)
+    raw = pdf.read_bytes()
+    assert _verify_original_drawing_title(
+        raw, 0, "Window and Door Schedule",
+    ) is True
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(raw, 0, "Setout Plan")
+
+
+def test_original_cover_contents_floor_plan_is_not_drawing_title(tmp_path):
+    """3Laurel p1 lists A0.3 Floor Plan, but actual sheet is A0.1 Cover."""
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    path = tmp_path / "cover_with_floor_plan_index.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text(
+            (30, 45),
+            "Drawing title: Cover Sheet\nA0.3 Floor Plan\nScale: 1:100",
+        )
+        doc.save(path)
+    raw = path.read_bytes()
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(raw, 0, "Floor Plan")
+
+
+def test_page_without_title_field_cannot_claim_floor_plan(tmp_path):
+    from tools.run_original_footprint_first import _verify_original_drawing_title
+
+    path = tmp_path / "index_without_title.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((30, 45), "A0.3 Floor Plan")
+        doc.save(path)
+    with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
+        _verify_original_drawing_title(path.read_bytes(), 0, "Floor Plan")
+
+
+def test_original_source_wall_review_reports_evidence_without_commercial_authority(
+    tmp_path,
+):
+    from tools.run_original_footprint_first import run
+
+    source = _plan(tmp_path, walls=True)
+    expected = hashlib.sha256(source.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        source, 0, tmp_path / "native_outer_review",
+        expected_sha256=expected,
+    )
+    receipt = result["source_native_outer_wall_review"]
+    assert receipt["status"] in ("ABSTAINED", "CANDIDATE")
+    assert type(receipt["source_wall_band_count"]) is int
+    assert type(receipt["connected_native_wall_components"]) is int
+    assert receipt["source_endpoint_near_miss_count"] >= 0
+    assert len(receipt["near_miss_witnesses_sample"]) <= 8
+    assert receipt["physical_wall_authenticated"] is False
+    assert receipt["measurement_authorized"] is False
+    assert receipt["commercial_publishable"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
+
+
+def test_missing_native_outer_review_abstains_without_blocking_honest_diagnostic(
+    tmp_path, monkeypatch,
+):
+    import tools.run_original_footprint_first as runner
+
+    source = _plan(tmp_path, walls=True)
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("native review unavailable")
+
+    monkeypatch.setattr(runner, "attempt_source_native_outer_wall_first",
+                        unavailable)
+    result, report, overlay = runner.run(
+        source, 0, tmp_path / "native_outer_abstained",
+        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    receipt = result["source_native_outer_wall_review"]
+    assert receipt["status"] == "ABSTAINED"
+    assert receipt["reason"] == "original_native_outer_source_review_unavailable"
+    assert receipt["near_miss_witnesses_sample"] == []
+    assert receipt["commercial_publishable"] is False
+    assert result["topology"]["room_quantity_authorized"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()

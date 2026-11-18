@@ -1,0 +1,31 @@
+name: Cross-document revision source preflight
+on:
+  pull_request:
+    paths:
+      - 'pb_cross_document_revision_preflight.py'
+      - 'tests/test_cross_document_revision_preflight.py'
+      - '.github/workflows/cross-document-revision-preflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pb_cross_document_revision_preflight.py'
+      - 'tests/test_cross_document_revision_preflight.py'
+      - '.github/workflows/cross-document-revision-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  cross-document-preflight:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: Test producer-authorized cross-document source graph
+        run: python -m pytest -q tests/test_cross_document_revision_preflight.py

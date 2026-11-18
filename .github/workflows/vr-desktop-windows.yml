@@ -38,6 +38,10 @@ jobs:
           if (!(Test-Path $path)) { throw "Missing installer" }
           if ((Get-Item $path).Length -lt 100000) { throw "Installer unexpectedly small" }
           Get-FileHash $path -Algorithm SHA256
+      - name: Enforce unsigned preview Authenticode release policy
+        shell: pwsh
+        run: |
+          .\\vr-editor\\windows\\Verify-ReleaseSignature.ps1 -Installer "vr-editor/windows/out/installer/PlanReader-VR-Desktop-Preview-Setup.exe" -Channel preview
       - name: Verify packaged payload against offline inventory
         shell: pwsh
         run: |
