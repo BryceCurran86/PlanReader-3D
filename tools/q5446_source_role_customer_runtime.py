@@ -37,6 +37,7 @@ from pb_gptmax_q5446_original_tiled_floor_customer import (
     OriginalQ5446TiledFloorCustomerResult,
     issue_original_q5446_ground_laundry_tiled_floor,
     issue_original_q5446_first_ensuite_tiled_floor,
+    issue_original_q5446_ground_ensuite_tiled_floor,
 )
 
 
@@ -325,6 +326,8 @@ def produce_q5446_source_role(
             for issuer in (
                 issue_original_q5446_ground_laundry_tiled_floor,
                 issue_original_q5446_first_ensuite_tiled_floor,
+                # Independent signed face only; OCR/physical authority may ABSTAIN.
+                issue_original_q5446_ground_ensuite_tiled_floor,
             ):
                 sealed, customer_rows, appended = _append_independent_source_tiled_floor(
                     original_plan=pdf_path, companions=companion_roles,
