@@ -44,10 +44,22 @@ make_wall_create_revision_wsgi_app(
 ```
 
 These names are **integration placeholders**, not implemented providers.
-`verify_unified_document_head` MUST acquire/retain a shared document lock
-through the creation transaction and compare other revision streams, the
-original source, current working head and source snapshot. Without that
-external host-level mechanism, do not expose the write endpoint.
+`verify_unified_document_head(principal, workspace, connection)` is mandatory.
+The wall-create store now invokes this verifier **after** SQLite
+`BEGIN IMMEDIATE`, before checking idempotency or altering any wall/PDF/head,
+and retains that write lock until commit/rollback. It must return the literal
+`True` only if the original source, this workspace's latest model head,
+all **other** correction/plan/PDF revision tracks, and source snapshot agree.
+A false value or exception aborts atomically.
+
+**Critical deployment assumption:** Every competing document editor must
+participate in the **same serialized document-head authority** (shared SQLite
+database or an independently held external lock across the full transaction).
+The SQLite lock by itself only protects writers using that database. Merely
+checking another process's head without locking that writer is NOT sufficient.
+Do not expose this endpoint until all existing editing routes use this shared
+lock and are tested with concurrent competing writers. No HTTP request may
+supply a verifier decision, head number, or source receipt.
 
 For scene reload, call `make_editor_readonly_wsgi_app(...,
 load_created_working_walls=trusted_wall_ledger_loader)`, where the loader
