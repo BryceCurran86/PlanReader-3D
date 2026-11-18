@@ -85,8 +85,9 @@ class AcaciaOriginalPackage:
 def _single_field(text: str, field: str, next_field: str) -> str:
     # The optional wrapped p10 title becomes "Window and Door Schedule".
     flattened = " ".join(text.split())
-    pattern = (r"\b" + re.escape(field) + r"\s*:\s*(.*?)\s*"
-               r"(?=\b" + re.escape(next_field) + r"\s*:)")
+    suffix = (r"(?=\bDISCLAIMER\b)" if next_field == "DISCLAIMER"
+              else r"(?=\b" + re.escape(next_field) + r"\s*:)")
+    pattern = r"\b" + re.escape(field) + r"\s*:\s*(.*?)\s*" + suffix
     matches = re.findall(pattern, flattened, flags=re.IGNORECASE)
     if len(matches) != 1 or not matches[0].strip():
         raise ValueError("acacia_source_title_block_missing_or_ambiguous_" +
