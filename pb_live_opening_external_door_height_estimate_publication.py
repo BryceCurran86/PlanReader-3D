@@ -7,6 +7,7 @@ grant a frozen120 score.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 import math
 import re
@@ -121,7 +122,7 @@ def _schedule_height_kwargs(opening: LiveCanonicalOpeningObject) -> dict[str, ob
         return {}
     owned = _positive_mm(height) and bool(evidence_id)
     return {
-        "schedule_height_mm": height if type(height) in (int, float) else None,
+        "schedule_height_mm": height if _positive_mm(height) else None,
         "schedule_height_evidence_id": evidence_id or None,
         "schedule_owned_to_opening": owned,
     }
@@ -255,31 +256,18 @@ def apply_live_external_door_height_estimates(
 
     # A duplicated canonical or physical opening would otherwise be counted
     # twice when the same provisional area is projected into customer rows.
-    seen_canonical: set[str] = set()
-    seen_physical: set[str] = set()
-    duplicates: set[int] = set()
-    for index, opening in enumerate(composition.canonical_openings):
-        if (opening.canonical_opening_id in seen_canonical
-                or opening.physical_opening_id in seen_physical):
-            duplicates.add(index)
-        seen_canonical.add(opening.canonical_opening_id)
-        seen_physical.add(opening.physical_opening_id)
-    duplicate_ids = {
+    canonical_counts = Counter(
         opening.canonical_opening_id for opening in composition.canonical_openings
-        if sum(item.canonical_opening_id == opening.canonical_opening_id
-               for item in composition.canonical_openings) > 1
-    }
-    duplicate_physical_ids = {
+    )
+    physical_counts = Counter(
         opening.physical_opening_id for opening in composition.canonical_openings
-        if sum(item.physical_opening_id == opening.physical_opening_id
-               for item in composition.canonical_openings) > 1
-    }
+    )
     updated = tuple(
         opening if (
             not _clean(opening.canonical_opening_id)
             or not _clean(opening.physical_opening_id)
-            or opening.canonical_opening_id in duplicate_ids
-            or opening.physical_opening_id in duplicate_physical_ids
+            or canonical_counts[opening.canonical_opening_id] != 1
+            or physical_counts[opening.physical_opening_id] != 1
             or opening.revision_id != composition.revision_id
         ) else _apply_one(
             opening,
