@@ -36,8 +36,16 @@ def preflight_new_diagnostic(
 
 
 
+def publish_staged_file(staged_path: Path, output: Path) -> None:
+    """Publish a complete same-directory file without replacing a destination."""
+    if os.name == "nt":
+        os.rename(staged_path, output)
+    else:
+        os.link(staged_path, output)
+
+
 def _assert_published_report_unchanged(
-    output: Path, staged_path: Path, expected_bytes: bytes,
+    output: Path, staged_path: Path | None, staged: os.stat_result, expected_bytes: bytes,
 ) -> None:
     """Bind the published path, opened descriptor and bytes to one stable inode.
 
@@ -53,7 +61,6 @@ def _assert_published_report_unchanged(
     fields = ("st_dev", "st_ino", "st_mode", "st_nlink",
               "st_size", "st_mtime_ns")
     try:
-        staged = staged_path.lstat()
         before = output.lstat()
         if not S_ISREG(staged.st_mode) or not S_ISREG(before.st_mode):
             raise ValueError("original-source diagnostic output changed during publication")
@@ -65,12 +72,14 @@ def _assert_published_report_unchanged(
             actual = stream.read(len(expected_bytes) + 1)
             completed = os.fstat(stream.fileno())
         after = output.lstat()
-        staged_after = staged_path.lstat()
+        path_snapshots = (before, after)
+        if staged_path is not None:
+            path_snapshots += (staged_path.lstat(),)
     except OSError as exc:
         raise ValueError("original-source diagnostic output changed during publication") from exc
     stable_path_ctime = all(
         snapshot.st_ctime_ns == staged.st_ctime_ns
-        for snapshot in (before, after, staged_after)
+        for snapshot in path_snapshots
     )
     stable_descriptor_ctime = opened.st_ctime_ns == completed.st_ctime_ns
     comparable_ctime = (
@@ -80,7 +89,7 @@ def _assert_published_report_unchanged(
         stable_path_ctime and stable_descriptor_ctime and comparable_ctime
     ) or any(
         getattr(snapshot, field) != getattr(staged, field)
-        for snapshot in (before, opened, completed, after, staged_after)
+        for snapshot in (*path_snapshots, opened, completed)
         for field in fields
     ):
         raise ValueError("original-source diagnostic output changed during publication")
@@ -90,11 +99,10 @@ def write_new_diagnostic(
     output: Path, encoded: str, *, protected_roots: Iterable[Path | None],
     verify_inputs: Callable[[], None] | None = None,
 ) -> None:
-    """Stage/fsync report before exclusive hard-link; unlink on failure.
+    """Stage and fsync the report before create-only publication.
 
-    os.link is exclusive: it does not replace an existing target even if
-    another producer claims that target after the first preflight. No private
-    document bytes are copied to the output.
+    A competing writer may claim the target after preflight. Publication
+    preserves that target and no private document bytes are copied to it.
     """
     protected = tuple(protected_roots)
     preflight_new_diagnostic(output, protected_roots=protected)
@@ -102,6 +110,7 @@ def write_new_diagnostic(
         raise TypeError("diagnostic payload must be a Unicode string")
     output.parent.mkdir(parents=True, exist_ok=True)
     temp: Path | None = None
+    staged: os.stat_result | None = None
     our_output_created = False
     try:
         with tempfile.NamedTemporaryFile(
@@ -117,19 +126,30 @@ def write_new_diagnostic(
         # through output staging, not just while the report was calculated.
         if verify_inputs is not None:
             verify_inputs()
-        os.link(temp, output)
+        staged = temp.lstat()
+        if not S_ISREG(staged.st_mode) or not staged.st_ino:
+            raise ValueError("original-source diagnostic output changed during publication")
+        publish_staged_file(temp, output)
         our_output_created = True
+        # POSIX hard-link publication changes the original link count and
+        # ctime. Windows rename leaves no staging path to re-stat.
+        staged_path = None if os.name == "nt" else temp
+        if staged_path is not None:
+            published_stage = staged_path.lstat()
+            if not os.path.samestat(staged, published_stage):
+                raise ValueError("original-source diagnostic staging identity changed")
+            staged = published_stage
         if verify_inputs is not None:
             verify_inputs()
         # Attest path identity and exact bytes through the SAME no-follow
         # descriptor; two independent path operations can accept a same-byte
         # replacement between their identity and content checks.
-        _assert_published_report_unchanged(output, temp, encoded.encode("utf-8"))
+        _assert_published_report_unchanged(output, staged_path, staged, encoded.encode("utf-8"))
     except BaseException:
-        if our_output_created and temp is not None:
-            # Retain another writer's output if it replaced ours after link.
+        if our_output_created and staged is not None:
+            # A different output inode belongs to the competing writer.
             try:
-                still_ours = output.samefile(temp)
+                still_ours = os.path.samestat(output.lstat(), staged)
             except OSError:
                 still_ours = False
             if still_ours:

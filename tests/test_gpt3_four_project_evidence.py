@@ -897,14 +897,14 @@ def test_full_four_project_cli_competing_writer_does_not_replace_existing_file(
     from tools import gpt3_safe_original_report_output as safe
     dirs = _dirs(tmp_path)
     report = tmp_path / "racing-report.json"
-    original_link = safe.os.link
+    publish = safe.publish_staged_file
 
     def competing_writer(temp, target):
         from pathlib import Path
         Path(target).write_text('{"another-run":"already-published"}')
-        return original_link(temp, target)
+        return publish(temp, target)
 
-    monkeypatch.setattr(safe.os, "link", competing_writer)
+    monkeypatch.setattr(safe, "publish_staged_file", competing_writer)
     with pytest.raises(FileExistsError):
         module.main([
             "--source-dir", str(dirs["source_dir"]),

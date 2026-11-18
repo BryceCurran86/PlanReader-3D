@@ -99,6 +99,11 @@ def test_companion_sources_use_sha_not_filename_and_preserve_full_prior(tmp_path
         calls.append(tuple(paths))
         return two
     monkeypatch.setattr(runtime, "issue_original_q5446_alfresco_plus_ensuite_customer", valid_two)
+    def unexpected_ground_ensuite(*_paths, **_kwargs):
+        pytest.fail("the verified ground ensuite must only be issued once")
+    monkeypatch.setattr(
+        runtime, "issue_original_q5446_ground_ensuite_tiled_floor", unexpected_ground_ensuite,
+    )
     assert runtime._authenticated_companion_roles(plan) == (inclusions, sales)
     result, output = _produce(tmp_path, plan, project)
     assert calls == [(plan, inclusions, sales)]
