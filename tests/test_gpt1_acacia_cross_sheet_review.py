@@ -189,3 +189,66 @@ def test_missing_design_options_spec_never_assigns_paint_tile_or_ceiling_finish(
     status, reason = review_acacia_finishes(_package())
     assert status == "ABSTAINED"
     assert reason == "acacia_house_design_options_material_specification_missing"
+
+
+@pytest.mark.parametrize("tamper", [
+    {"floor_host_native_path_ids": None},
+    {"floor_host_native_path_ids": []},
+    {"floor_host_native_path_ids": [400]},
+    {"floor_host_native_path_ids": (True,)},
+    {"floor_host_native_path_ids": ("400",)},
+    {"floor_host_native_path_ids": (400, 400)},
+    {"schedule_native_path_ids": None},
+    {"schedule_native_path_ids": []},
+    {"schedule_native_path_ids": [500]},
+    {"schedule_native_path_ids": (True,)},
+    {"schedule_native_path_ids": ("500",)},
+    {"schedule_native_path_ids": (500, 500)},
+    {"original_host_ink_authenticated": "yes"},
+    {"original_host_ink_authenticated": 1},
+    {"physical_aperture_identity": 15},
+    {"physical_aperture_identity": "   "},
+    {"assembly_identity": 15},
+    {"assembly_identity": "   "},
+])
+def test_malformed_acacia_host_receipt_abstains_without_exception(tamper):
+    receipt = replace(_receipt("W2"), **tamper)
+    result = reconcile_acacia_schedule_hosts(_package(), (receipt,))
+    assert result.status == "ABSTAINED"
+    assert result.reasons == ("unproved_floor_or_schedule_source_host",)
+    assert result.installed_opening_quantity_authorized is False
+    assert result.customer_row_authorized is False
+
+
+@pytest.mark.parametrize("field,invalid", [
+    ("floor", 0),
+    ("floor", True),
+    ("floor", -1),
+    ("floor", "6917"),
+    ("schedule", 0),
+    ("schedule", True),
+    ("schedule", -1),
+    ("schedule", "2841"),
+])
+def test_untrusted_acacia_original_path_census_rejects_opening_host(
+    field, invalid,
+):
+    packet = _package()
+    original_page = 1 if field == "floor" else 9
+    poisoned_sheets = tuple(
+        replace(s, source_page_path_count=invalid)
+        if s.page_index == original_page else s for s in packet.sheets
+    )
+    result = reconcile_acacia_schedule_hosts(
+        replace(packet, sheets=poisoned_sheets), (_receipt("W2"),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.customer_row_authorized is False
+
+
+def test_last_in_range_acacia_opening_path_stays_noncommercial():
+    witness = _receipt("SD3", floor_path=6916, schedule_path=2840)
+    result = reconcile_acacia_schedule_hosts(_package(), (witness,))
+    assert result.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert result.installed_opening_quantity_authorized is False
+    assert result.customer_row_authorized is False
