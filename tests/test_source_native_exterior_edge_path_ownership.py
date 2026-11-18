@@ -451,10 +451,11 @@ def test_segment_chain_fails_closed_on_real_middle_and_oversized_terminal_gaps()
     assert tip_ok.status is EvidenceResolutionStatus.CANDIDATE
     assert tip_ok.classification == "source_native_wall_ink_chain_candidate"
     assert tip_ok.chain_start_shortfall_pt == 0.5
-    assert tip_ok.contour_endpoint_association_pt == 2.5
+    assert tip_ok.contour_endpoint_association_pt == 4.0
     assert tip_ok.physical_wall_authenticated is False
+    # Beyond CAD dash association (~4 pt) the terminal remains unwitnessed.
     far_tip = [
-        _stroke((200, 4.0), (200, 25)),
+        _stroke((200, 5.0), (200, 25)),
         _stroke((200, 25), (200, 50)),
         _stroke((200, 50), (200, 75)),
         _stroke((200, 75), (200, 100)),
@@ -462,7 +463,24 @@ def test_segment_chain_fails_closed_on_real_middle_and_oversized_terminal_gaps()
     tip_far = own_exterior_contour_native_paths(far_tip, trace)[3]
     assert tip_far.status is EvidenceResolutionStatus.ABSTAINED
     assert tip_far.reason == "native_source_chain_has_unwitnessed_contour_endpoint"
-    assert tip_far.chain_start_shortfall_pt == 4.0
+    assert tip_far.chain_start_shortfall_pt == 5.0
+
+
+def test_cad_dash_terminal_shortfall_within_gap_is_complete_chain():
+    """Acacia south-style ~3.9 pt dash shortfall completes under CAD association."""
+    trace = _trace(((200, 0), (800, 0), (800, 100), (200, 100)))
+    dashes = [
+        _stroke((200, 0), (200, 24), dashes="[3 2] 0"),
+        _stroke((200, 27.5), (200, 50), dashes="[3 2] 0"),
+        _stroke((200, 53.5), (200, 75), dashes="[3 2] 0"),
+        _stroke((200, 78.5), (200, 96.2), dashes="[3 2] 0"),
+    ]
+    west = own_exterior_contour_native_paths(dashes, trace)[3]
+    assert west.status is EvidenceResolutionStatus.CANDIDATE
+    assert west.classification == "source_native_wall_ink_chain_candidate"
+    assert west.chain_end_shortfall_pt is not None
+    assert 2.5 < west.chain_end_shortfall_pt <= 4.0
+    assert west.physical_wall_authenticated is False
 
 
 def test_cad_dash_gap_merges_into_complete_face_chain_candidate():
