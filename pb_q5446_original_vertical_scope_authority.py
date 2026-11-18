@@ -31,6 +31,8 @@ class Q5446VerticalScopeReview:
     promoted_ground_flush_panel_maximum_width_mm: int | None = None
     master_ensuite_full_height_wall_tile_scope: bool = False
     other_wet_rooms_full_height_tile_scope: bool = False
+    roof_space_r25_glasswool_garage_ceiling_excluded: bool = False
+    reflective_wall_foil_between_garage_and_house_included: bool = False
     physical_wall_height_authorized: bool = False
     finished_ceiling_height_authorized: bool = False
     installed_opening_height_authorized: bool = False
@@ -49,6 +51,8 @@ class Q5446VerticalScopeReview:
             "promoted_ground_flush_panel_maximum_width_mm": self.promoted_ground_flush_panel_maximum_width_mm,
             "master_ensuite_full_height_wall_tile_scope": self.master_ensuite_full_height_wall_tile_scope,
             "other_wet_rooms_full_height_tile_scope": False,
+            "roof_space_r25_glasswool_garage_ceiling_excluded": self.roof_space_r25_glasswool_garage_ceiling_excluded,
+            "reflective_wall_foil_between_garage_and_house_included": self.reflective_wall_foil_between_garage_and_house_included,
             "physical_wall_height_authorized": False,
             "finished_ceiling_height_authorized": False,
             "installed_opening_height_authorized": False,
@@ -105,6 +109,17 @@ def correlate_authenticated_q5446_vertical_scope(
         r"doors to ground floor of dwelling in lieu of standard\s+"
         r"2040\s*mm high flush panel hinged doors", p5,
     ))
+    # Same original inclusions distinguish the attic/roof insulation from
+    # the 2740mm GARAGE ceiling promotion. A promoted garage ceiling does not
+    # imply R2.5 roof batts above garage; shared garage/house foil is named.
+    garage_roof_batts_excluded = bool(re.search(
+        r"bradford\s+r2\.5\s+glasswool batts to ceiling of roof space\s*"
+        r"\(excludes garage ceiling space\)", inc,
+    ))
+    garage_shared_wall_foil_included = bool(re.search(
+        r"reflective foil to external walls and wall between garage and house",
+        inc,
+    ))
     master = bool(re.search(
         r"provide full height ceramic wall tiling\s+"
         r"\(as per standard range and specification\)\s+"
@@ -126,6 +141,8 @@ def correlate_authenticated_q5446_vertical_scope(
         promoted_ground_flush_panel_maximum_width_mm=820 if ground_flush_panel else None,
         master_ensuite_full_height_wall_tile_scope=master,
         other_wet_rooms_full_height_tile_scope=False,
+        roof_space_r25_glasswool_garage_ceiling_excluded=garage_roof_batts_excluded,
+        reflective_wall_foil_between_garage_and_house_included=garage_shared_wall_foil_included,
     )
 
 
