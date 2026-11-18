@@ -22,6 +22,9 @@ from pb_portable_raster_ocr_authority import RapidOCRBackend
 
 SOURCE_PRIMITIVE_CAP = 20_000
 SOURCE_SNAP_PT = 2.5
+# PDF-native coordinate float32 jitter is not a physical wall/junction snap.
+# This tolerance is 25,000 times smaller than SOURCE_SNAP_PT.
+SOURCE_PDF_FLOAT_EPS_PT = 0.0001
 
 
 @dataclass(frozen=True)
@@ -34,7 +37,7 @@ class NativeTiledRoomFace:
     finished_depth_pts: float
     wall_support_source_path_ids: tuple[int, ...]
     hatch_support_source_path_ids: tuple[int, ...]
-    raster_ocr_render_dpis: tuple[int, int]
+    raster_ocr_render_dpis: tuple[int, ...]
     physical_source_verified: bool = True
     commercial_permission: bool = False
 
@@ -121,13 +124,18 @@ def _candidate_ring(path: dict[str, Any]):
     ), key=lambda z: z[1] - z[0], reverse=True)
     matching = sorted({round(item[2], 3) for item in equal_longest})
     if len(matching) == 2 and matching[1] - matching[0] >= 0.7 * h:
+        # Preserve the existing source-CAD grouping/quantity precision.
+        # The rounded boundary may exceed the raw float32 polygon by <0.0001pt,
+        # far below the physical snap threshold. Validate that difference
+        # numerically rather than rejecting a genuinely native closed face.
         top, bottom = matching
     elif verticals and verticals[0][1] - verticals[0][0] >= 0.7 * h:
         top, bottom = verticals[0][:2]
     else:
         return None
     box = (longest[0], top, longest[1], bottom)
-    if not 0 < box[2] - box[0] <= w or not 0 < box[3] - box[1] <= h:
+    if (not 0 < box[2] - box[0] <= w
+            or not 0 < box[3] - box[1] <= h + SOURCE_PDF_FLOAT_EPS_PT):
         return None
     return polygon, box
 
@@ -222,26 +230,49 @@ def _tiled_hatch_ids(drawings, box):
 
 
 def _source_ocr_label(page: fitz.Page, polygon, bbox, room_label: str, ocr):
-    observed = []
-    for dpi in (216, 288):
+    """Return only independently agreeing original raster label witnesses.
+
+    The original Q5446 ground ENS is confidently ENS on 216/360 dpi but
+    slightly below threshold at 288. One uncertain view may abstain without
+    erasing two independent strong reads; conflicting room labels or locations
+    always ABSTAIN, even if two other views support the requested name.
+    """
+    observed: list[tuple[int, float, float]] = []
+    room_words = frozenset({
+        "ENS", "BATH", "LDRY", "LAUNDRY", "WC", "POWDER", "BED",
+        "BEDROOM", "LIVING", "FAMILY", "MEALS", "KITCHEN",
+        "WIR", "GARAGE", "GUEST", "OFFICE", "ENTRY", "MPR",
+    })
+    for dpi in (216, 288, 360):
         clip = fitz.Rect(*bbox) + (-2.0, -2.0, 2.0, 2.0)
         pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
                               clip=clip, alpha=False)
         image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
         matches = []
         for line in ocr.extract_lines(image, dpi=dpi):
-            if _norm_room_label(line.text) != room_label:
-                continue
             if line.confidence is None or line.confidence < .90:
                 continue
             cx = clip.x0 + (line.bbox_pt[0] + line.bbox_pt[2]) / 2
             cy = clip.y0 + (line.bbox_pt[1] + line.bbox_pt[3]) / 2
-            if polygon.contains(Point(cx, cy)):
+            if not polygon.contains(Point(cx, cy)):
+                continue
+            text = _norm_room_label(line.text)
+            if text != room_label and text in room_words:
+                # A confident different room name must never be outvoted.
+                # Fixture labels and door dimensions are not room identities.
+                return None
+            if text == room_label:
                 matches.append((cx, cy))
-        if len(matches) != 1:
-            return False
-        observed.append(matches[0])
-    return math.dist(observed[0], observed[1]) <= SOURCE_SNAP_PT
+        if len(matches) > 1:
+            return None
+        if matches:
+            observed.append((dpi, *matches[0]))
+    if len(observed) < 2 or any(
+        math.dist(a[1:], b[1:]) > SOURCE_SNAP_PT
+        for i, a in enumerate(observed) for b in observed[i + 1:]
+    ):
+        return None
+    return tuple(dpi for dpi, _, _ in observed)
 
 
 def find_unique_native_tiled_room_face(
@@ -276,15 +307,18 @@ def find_unique_native_tiled_room_face(
         hatch_ids = _tiled_hatch_ids(drawings, box)
         if not hatch_ids:
             continue
-        if not _source_ocr_label(page, polygon, polygon.bounds, label, ocr):
+        accepted_dpis = _source_ocr_label(page, polygon, polygon.bounds, label, ocr)
+        if accepted_dpis is None:
             continue
         matches.append(NativeTiledRoomFace(
             page_number=page_number, source_boundary_path_id=path_id,
             room_label=label, source_bbox_pts=box,
+            # Preserve accepted original-source quantity precision across
+            # source-native float jitter, not a new metric or scale authority.
             finished_width_pts=round(box[2] - box[0], 5),
             finished_depth_pts=round(box[3] - box[1], 5),
             wall_support_source_path_ids=supports,
             hatch_support_source_path_ids=hatch_ids,
-            raster_ocr_render_dpis=(216, 288),
+            raster_ocr_render_dpis=accepted_dpis,
         ))
     return matches[0] if len(matches) == 1 else None
