@@ -81,10 +81,16 @@ def _admitted(packet: AcaciaOriginalPackage) -> bool:
     return bool(
         isinstance(packet, AcaciaOriginalPackage)
         and packet.status == "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY"
-        and packet.original_byte_roles_verified
+        and packet.original_byte_roles_verified is True
+        and type(packet.source_pages) is int and packet.source_pages == 10
         and len(packet.sheets) == 4
         and tuple((s.page_index, s.drawing_title, s.scale)
                   for s in packet.sheets) == ACACIA_REQUIRED_ROLES
+        # A right title and scale on the wrong original numbered sheet
+        # cannot authenticate a physical source-role packet.
+        and tuple(s.drawing_number for s in packet.sheets)
+            == tuple(f"{i + 1}/10" for i, _title, _scale
+                     in ACACIA_REQUIRED_ROLES)
         and all(type(s.source_page_path_count) is int
                 and s.source_page_path_count > 0 for s in packet.sheets)
         and packet.source_sha256 == ACACIA_ORIGINAL_SHA256.get(packet.region)
