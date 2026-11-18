@@ -307,3 +307,36 @@ def test_last_in_range_acacia_opening_path_stays_noncommercial():
     assert result.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
     assert result.installed_opening_quantity_authorized is False
     assert result.customer_row_authorized is False
+
+
+@pytest.mark.parametrize("bad_source_page_count", (0, 9, 11, True, "10"))
+def test_acacia_review_requires_exact_original_ten_page_role_packet(
+    bad_source_page_count,
+):
+    packet = replace(_package(), source_pages=bad_source_page_count)
+    assert review_acacia_finishes(packet) == (
+        "ABSTAINED", "original_four_sheet_roles_unverified"
+    )
+    assert review_acacia_dimension_or_height(packet, _dim("section_height"))[0] == "ABSTAINED"
+    assert reconcile_acacia_schedule_hosts(packet, (_receipt("W2"),)).status == "ABSTAINED"
+
+
+@pytest.mark.parametrize("invalid_number", ("3/10", "2/9", "", None))
+def test_acacia_review_rejects_wrong_scheduled_original_drawing_number(
+    invalid_number,
+):
+    packet = _package()
+    corrupted = tuple(
+        replace(sheet, drawing_number=invalid_number)
+        if sheet.page_index == 1 else sheet
+        for sheet in packet.sheets
+    )
+    rejected = replace(packet, sheets=corrupted)
+    assert review_acacia_legend_room(rejected, 3).status == "ABSTAINED"
+    assert reconcile_acacia_schedule_hosts(rejected, (_receipt("W2"),)).status == "ABSTAINED"
+
+
+def test_truthy_original_byte_roles_flag_does_not_authenticate_acacia():
+    poisoned = replace(_package(), original_byte_roles_verified="yes")
+    assert review_acacia_legend_room(poisoned, 3).status == "ABSTAINED"
+    assert review_acacia_finishes(poisoned)[0] == "ABSTAINED"
