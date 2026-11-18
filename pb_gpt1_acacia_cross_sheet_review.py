@@ -85,6 +85,8 @@ def _admitted(packet: AcaciaOriginalPackage) -> bool:
         and len(packet.sheets) == 4
         and tuple((s.page_index, s.drawing_title, s.scale)
                   for s in packet.sheets) == ACACIA_REQUIRED_ROLES
+        and all(type(s.source_page_path_count) is int
+                and s.source_page_path_count > 0 for s in packet.sheets)
         and packet.source_sha256 == ACACIA_ORIGINAL_SHA256.get(packet.region)
         and not packet.customer_quantities_authorized
         and not packet.finish_material_authorized
@@ -263,17 +265,30 @@ def review_acacia_dimension_or_height(
     required_page = {"figured_setout": 8, "section_height": 7}.get(witness.kind)
     if required_page is None:
         return "ABSTAINED", "unknown_source_dimension_role"
+    # Do not allow an apparent physical/figured link to borrow a path ID
+    # from the wrong original sheet. These are *native per-page indices*,
+    # not reusable global IDs or a geometry tolerance. They remain review
+    # witnesses, never independent measurement/quantity authority.
+    path_counts = {s.page_index: s.source_page_path_count for s in packet.sheets}
+    floor_count = path_counts.get(1, 0)
+    reference_count = path_counts.get(required_page, 0)
+    floor_paths = witness.floor_wall_face_native_path_ids
+    reference_paths = witness.reference_figure_native_path_ids
     if (witness.source_sha256 != packet.source_sha256
             or witness.floor_page_index != 1
             or witness.reference_page_index != required_page
-            or not witness.floor_wall_face_native_path_ids
-            or not witness.reference_figure_native_path_ids
-            or any(type(n) is not int or n < 0 for n in (
-                *witness.floor_wall_face_native_path_ids,
-                *witness.reference_figure_native_path_ids,
-            ))
+            or type(floor_paths) is not tuple or not floor_paths
+            or type(reference_paths) is not tuple or not reference_paths
+            or any(type(n) is not int or not 0 <= n < floor_count
+                   for n in floor_paths)
+            or any(type(n) is not int or not 0 <= n < reference_count
+                   for n in reference_paths)
+            or len(set(floor_paths)) != len(floor_paths)
+            or len(set(reference_paths)) != len(reference_paths)
             or type(witness.figured_value_mm) not in (float, int)
             or not 0 < witness.figured_value_mm < 100000
+            or type(witness.source_role_and_physical_host_independently_verified)
+               is not bool
             or not witness.source_role_and_physical_host_independently_verified):
         return "ABSTAINED", "original_cross_page_physical_host_or_figure_unverified"
     return ("SOURCE_FIGURE_AND_PHYSICAL_HOST_REVIEW_ONLY",
