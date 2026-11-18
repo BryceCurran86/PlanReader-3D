@@ -946,9 +946,10 @@ def _emit_merged_face_strip(
     if span < _MERGED_FACE_MIN_SPAN:
         return
     ids = tuple(sorted({item[0] for item in run}))
-    # Multi-dash faces need ≥2 original paths; a lone continuous face may be
-    # long enough on its own. Short single ticks stay out.
-    if len(ids) < 2 and span < _WALL_END_SUPPORT_SPAN:
+    # Require ≥2 original path indices so a lone wall-end closer stroke cannot
+    # mint a face band and bypass wall_end_stroke_closures. Dashed exterior
+    # faces (Acacia west) naturally supply many collinear dash paths.
+    if len(ids) < 2:
         return
     perp = sum(item[2] for item in run) / len(run)
     width = max(item[5] for item in run)
