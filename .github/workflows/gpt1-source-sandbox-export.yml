@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - gpt1/acacia-q5446-ten-accuracy-20261119
-    paths:
-      - .github/workflows/gpt1-source-sandbox-export.yml
 permissions:
   contents: read
 jobs:
