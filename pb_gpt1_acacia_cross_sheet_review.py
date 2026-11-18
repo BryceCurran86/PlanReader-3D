@@ -9,7 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from pb_gpt1_acacia_source_packet import AcaciaOriginalPackage
+from pb_gpt1_acacia_source_packet import (
+    ACACIA_ORIGINAL_SHA256, ACACIA_REQUIRED_ROLES, AcaciaOriginalPackage,
+)
 
 ROOM_KEY = {
     1: ("ENTRY PORTICO", "external"),
@@ -81,7 +83,9 @@ def _admitted(packet: AcaciaOriginalPackage) -> bool:
         and packet.status == "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY"
         and packet.original_byte_roles_verified
         and len(packet.sheets) == 4
-        and tuple(s.page_index for s in packet.sheets) == (1, 7, 8, 9)
+        and tuple((s.page_index, s.drawing_title, s.scale)
+                  for s in packet.sheets) == ACACIA_REQUIRED_ROLES
+        and packet.source_sha256 == ACACIA_ORIGINAL_SHA256.get(packet.region)
         and not packet.customer_quantities_authorized
         and not packet.finish_material_authorized
     )
@@ -176,9 +180,13 @@ def reconcile_acacia_schedule_hosts(
             return AcaciaScheduleHostReview(
                 "ABSTAINED", ("schedule_code_not_in_original_sheet",),
             )
+        floor_count = packet.sheets[0].source_page_path_count
+        schedule_count = packet.sheets[3].source_page_path_count
         if (
             r.original_source_sha256 != packet.source_sha256
             or r.floor_page_index != 1 or r.schedule_page_index != 9
+            or any(n >= floor_count for n in r.floor_host_native_path_ids)
+            or any(n >= schedule_count for n in r.schedule_native_path_ids)
             or not r.floor_host_native_path_ids
             or not r.schedule_native_path_ids
             or any(type(x) is not int or x < 0 for x in (
