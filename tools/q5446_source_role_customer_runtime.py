@@ -29,6 +29,9 @@ from pb_gpt1_q5446_source_declared_area_firm_handoff import (
     Q5446_PROJECT_ID,
 )
 from pb_gptmax_q5446_finish_support_shadow import SOURCE_IDS
+from pb_q5446_original_vertical_scope_authority import (
+    inspect_original_q5446_vertical_scope,
+)
 from pb_gptmax_q5446_original_family_customer_append import (
     Q5446TwoFamilyCustomerResult,
     issue_original_q5446_alfresco_plus_ensuite_customer,
@@ -217,6 +220,7 @@ def produce_q5446_source_role(
         "verified_customer_row_count": 0,
         "full_project_customer_first_gate": "SOURCE_AUTHORITY_UNAVAILABLE",
         "family_counts": {"floor_area": 0},
+        "source_vertical_scope_review": None,
         "benchmark_score_granted": False,
         "official_four_project_accuracy": None,
     }
@@ -276,6 +280,18 @@ def produce_q5446_source_role(
         family_counts = {"floor_area": 1}
         companion_roles = _authenticated_companion_roles(pdf_path)
         if companion_roles is not None:
+            # Add a SHA-verified ORIGINAL source-only vertical-scope receipt.
+            # This never touches canonical signed quantities, opening metrics,
+            # customer row IDs or the frozen scoring universe.
+            vertical = inspect_original_q5446_vertical_scope(
+                pdf_path, *companion_roles,
+            )
+            if (vertical.commercial_quantity_authorized
+                    or vertical.physical_wall_height_authorized
+                    or vertical.finished_ceiling_height_authorized
+                    or vertical.installed_opening_height_authorized):
+                raise ValueError("source_only_vertical_review_claims_commercial_authority")
+            result["source_vertical_scope_review"] = vertical.to_dict()
             supplemental = issue_original_q5446_alfresco_plus_ensuite_customer(
                 pdf_path, *companion_roles, workspace_id=workspace_id,
             )
