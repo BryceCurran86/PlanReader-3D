@@ -158,3 +158,16 @@ def test_valid_external_door_remains_provisional_not_measured():
     assert opening.area_m2 == pytest.approx(1.827)
     assert opening.height_m is None
     assert opening.area_basis == "assumed_external_door_height_2100_mm_owner_policy"
+
+
+@pytest.mark.parametrize("profile_kind", ["roller shutter", "sectional", "tilt-a-door"])
+def test_non_personnel_profiles_never_receive_door_height_default(profile_kind):
+    assert estimated(opening=_bare_external_door(
+        profile_kind=profile_kind,
+    )).area_m2 is None
+
+
+def test_unresolved_specific_height_record_blocks_generic_default():
+    assert estimated(opening=_bare_external_door(
+        height_record_id="explicit-but-unresolved-height",
+    )).area_m2 is None
