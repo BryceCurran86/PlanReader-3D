@@ -1,0 +1,191 @@
+"""Source-neutral Acacia room exclusions, schedule owner and figured-height vetoes."""
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+
+from pb_gpt1_acacia_source_packet import (
+    ACACIA_ORIGINAL_SHA256, ACACIA_REQUIRED_ROLES,
+    AcaciaOriginalPackage, AcaciaOriginalSheet,
+)
+from pb_gpt1_acacia_cross_sheet_review import (
+    ROOM_KEY, SCHEDULE_CODES,
+    AcaciaCrossSheetDimension, AcaciaOpeningWitness,
+    reconcile_acacia_schedule_hosts, review_acacia_dimension_or_height,
+    review_acacia_finishes, review_acacia_legend_room,
+)
+
+
+def _package():
+    return AcaciaOriginalPackage(
+        "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY", "source-verified-review",
+        ACACIA_ORIGINAL_SHA256["Brisbane"], "Brisbane", 10,
+        tuple(AcaciaOriginalSheet(i, name, f"{i + 1}/10", scale,
+                                  6917 if i == 1 else 2841 if i == 9 else 5000)
+              for i, name, scale in ACACIA_REQUIRED_ROLES),
+        original_byte_roles_verified=True,
+    )
+
+
+@pytest.mark.parametrize("outdoor_id", [1, 11, 12, 13, 14, 15])
+def test_outdoor_courts_carport_services_cannot_be_indoor_floor_finish(outdoor_id):
+    label, _kind = ROOM_KEY[outdoor_id]
+    r = review_acacia_legend_room(
+        _package(), outdoor_id, source_key_transcribed=label
+    )
+    assert r.status == "EXCLUDED_FROM_ENCLOSED_FINISH"
+    assert r.floor_or_wall_quantity_authorized is False
+    assert r.indoor_floor_finish_authorized is False
+
+
+@pytest.mark.parametrize("inside", [2, 3, 4, 5, 6, 7, 8, 9, 10])
+def test_nominal_room_key_name_is_not_a_physical_face(inside):
+    r = review_acacia_legend_room(_package(), inside)
+    assert r.status == "ROOM_LABEL_ONLY_NEEDS_PHYSICAL_FACE"
+    assert r.floor_or_wall_quantity_authorized is False
+    assert r.indoor_floor_finish_authorized is False
+
+
+@pytest.mark.parametrize("key", [0, 16, "3", True, -1])
+def test_spurious_unknown_or_untyped_key_never_mints_room(key):
+    r = review_acacia_legend_room(_package(), key)
+    assert r.status == "ABSTAINED"
+
+
+def test_source_key_alias_wrong_name_abstains():
+    r = review_acacia_legend_room(_package(), 11,
+                                  source_key_transcribed="LIVING")
+    assert r.status == "ABSTAINED"
+    assert r.floor_or_wall_quantity_authorized is False
+
+
+def test_forged_region_or_fake_source_packet_cannot_bind_physical_instances():
+    bad = replace(_package(), source_sha256="0" * 64)
+    assert review_acacia_legend_room(bad, 3).status == "ABSTAINED"
+    assert reconcile_acacia_schedule_hosts(
+        bad, (_receipt("W2"),)
+    ).status == "ABSTAINED"
+    assert review_acacia_finishes(bad)[0] == "ABSTAINED"
+
+
+def _receipt(code="W2", *, host="opening-1", assembly="assembly-1",
+             floor_path=400, schedule_path=500, verified=True):
+    return AcaciaOpeningWitness(
+        code, _package().source_sha256, 1, 9,
+        (floor_path,), (schedule_path,),
+        verified, host, assembly,
+    )
+
+
+def test_original_schedule_has_16_unique_codes_but_no_installation_count():
+    assert len(SCHEDULE_CODES) == 16
+    assert len(set(SCHEDULE_CODES)) == 16
+    result = reconcile_acacia_schedule_hosts(_package(), ())
+    assert result.status == "ABSTAINED"
+    assert result.customer_row_authorized is False
+
+
+def test_single_authentic_host_is_only_review_candidate():
+    result = reconcile_acacia_schedule_hosts(
+        _package(), (_receipt(),)
+    )
+    assert result.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert result.authenticated_candidate_codes == ("W2",)
+    assert result.candidate_assembly_ids == ("assembly-1",)
+    assert result.installed_opening_quantity_authorized is False
+    assert result.customer_row_authorized is False
+
+
+def test_composite_w1_d1_share_one_aperture_not_two_wall_holes():
+    windows = (
+        _receipt("W1", host="shared-exterior-frame", assembly="W1D1", schedule_path=15),
+        _receipt("D1", host="shared-exterior-frame", assembly="W1D1", schedule_path=16),
+    )
+    r = reconcile_acacia_schedule_hosts(_package(), windows)
+    assert r.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert r.composite_assembly_count == 1
+    assert r.candidate_assembly_ids == ("W1D1",)
+    assert r.customer_row_authorized is False
+
+
+@pytest.mark.parametrize("bad", [
+    _receipt("W8"),
+    _receipt("W2", floor_path=6917),
+    _receipt("W2", schedule_path=2841),
+    _receipt("W2", verified=False),
+    _receipt("W2", floor_path=-1),
+    _receipt("W2", host=""),
+    replace(_receipt("W2"), original_source_sha256="e" * 64),
+    replace(_receipt("W2"), floor_page_index=0),
+    replace(_receipt("W2"), schedule_page_index=8),
+])
+def test_unknown_unhosted_foreign_or_out_of_range_opening_abstains(bad):
+    r = reconcile_acacia_schedule_hosts(_package(), (bad,))
+    assert r.status == "ABSTAINED"
+    assert not r.authenticated_candidate_codes
+    assert r.customer_row_authorized is False
+
+
+def test_competing_codes_on_one_host_cannot_look_like_two_openings():
+    r = reconcile_acacia_schedule_hosts(
+        _package(),
+        (_receipt("W2"), _receipt("W3", schedule_path=501)),
+    )
+    assert r.status == "ABSTAINED"
+    assert r.reasons == ("competing_schedule_codes_one_physical_host",)
+
+
+def test_same_physical_aperture_and_same_code_cannot_be_counted_twice():
+    r = reconcile_acacia_schedule_hosts(
+        _package(), (_receipt("W2"), _receipt("W2")),
+    )
+    assert r.status == "ABSTAINED"
+    assert r.reasons == ("duplicate_physical_aperture_schedule_code",)
+
+
+def test_one_assembly_cannot_be_reused_on_two_distant_hosts():
+    r = reconcile_acacia_schedule_hosts(
+        _package(), (_receipt("SD1"), _receipt("SD2", host="distant", schedule_path=510)),
+    )
+    assert r.status == "ABSTAINED"
+    assert r.reasons == ("one_assembly_reused_on_distinct_floor_hosts",)
+
+
+def _dim(kind="figured_setout"):
+    return AcaciaCrossSheetDimension(
+        kind, _package().source_sha256, 8 if kind == "figured_setout" else 7,
+        1, (4000,), (100,), 2400., True,
+    )
+
+
+def test_setout_and_section_host_witnesses_are_not_quantities():
+    for kind in ("figured_setout", "section_height"):
+        status, reason = review_acacia_dimension_or_height(
+            _package(), _dim(kind)
+        )
+        assert status == "SOURCE_FIGURE_AND_PHYSICAL_HOST_REVIEW_ONLY"
+        assert "no_finished_face" in reason
+
+
+@pytest.mark.parametrize("tamper", [
+    {"source_sha256": "0" * 64},
+    {"reference_page_index": 7},
+    {"floor_page_index": 9},
+    {"floor_wall_face_native_path_ids": ()},
+    {"reference_figure_native_path_ids": ()},
+    {"figured_value_mm": 0.0},
+    {"figured_value_mm": float("nan")},
+    {"source_role_and_physical_host_independently_verified": False},
+])
+def test_dimension_wrong_provenance_or_host_abstains(tamper):
+    r = review_acacia_dimension_or_height(
+        _package(), replace(_dim(), **tamper)
+    )
+    assert r[0] == "ABSTAINED"
+
+
+def test_missing_design_options_spec_never_assigns_paint_tile_or_ceiling_finish():
+    status, reason = review_acacia_finishes(_package())
+    assert status == "ABSTAINED"
+    assert reason == "acacia_house_design_options_material_specification_missing"
