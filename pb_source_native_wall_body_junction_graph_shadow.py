@@ -203,16 +203,24 @@ def _window_continuity_disposition(
     sep = float(separation_pdf_pts)
     if sep <= 2.5:
         return "abstain_sub_snap_window_gap_without_unique_jamb"
+    if sep <= 4.0:
+        return "abstain_cad_dash_window_gap_without_unique_jamb"
     return "abstain_window_gap_no_unique_jamb"
 
 
 def _junction_disposition(*, kind: str, reason: str, separation_pdf_pts: float) -> str:
     """Explicit abstain/candidate disposition for body-junction audits."""
     if kind == JUNCTION_COLLINEAR_GAP or reason == REASON_INFERRED_JOIN_FORBIDDEN:
+        # CAD dash gaps (~3.5–4 pt) are not wall joins; keep them distinct from
+        # larger collinear field gaps for topology audit only.
+        if 0.0 < float(separation_pdf_pts) <= 4.0:
+            return "abstain_collinear_cad_dash_gap_no_source_ink_join"
         return "abstain_collinear_gap_no_source_ink_join"
     if "near_miss" in reason:
         if separation_pdf_pts <= 2.5:
             return "abstain_sub_snap_near_miss_no_elbow_jamb_or_opening"
+        if separation_pdf_pts <= 4.0:
+            return "abstain_cad_dash_near_miss_no_elbow_jamb_or_opening"
         return "abstain_near_miss_no_elbow_jamb_or_opening"
     if "multi_face_meeting" in reason:
         return "abstain_multi_face_meeting_needs_source_owned_wall_body"
@@ -823,7 +831,11 @@ def build_source_native_wall_body_junction_graph(
             "disposition": (
                 "abstain_sub_snap_near_miss_no_elbow_jamb_or_opening"
                 if sep <= 2.5
-                else "abstain_near_miss_no_elbow_jamb_or_opening"
+                else (
+                    "abstain_cad_dash_near_miss_no_elbow_jamb_or_opening"
+                    if sep <= 4.0
+                    else "abstain_near_miss_no_elbow_jamb_or_opening"
+                )
             ),
             "physical_join_authenticated": False,
             "same_painted_exterior_layer_hint": bool(

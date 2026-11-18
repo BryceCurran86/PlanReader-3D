@@ -418,6 +418,11 @@ class LayeredRoomRingResult:
     free_space_enclosed_part_count: int = 0
     free_space_max_enclosed_area_pt2: float = 0.0
     merged_collinear_dark_face_strip_count: int = 0
+    # Topology-only size tiers for candidate rings (not room quantity authority).
+    ring_area_tier_lt_100_count: int = 0
+    ring_area_tier_100_to_1000_count: int = 0
+    ring_area_tier_ge_1000_count: int = 0
+    drafting_pocket_sliver_count: int = 0
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -2391,14 +2396,26 @@ def build_layered_wall_doorway_room_rings(
     free_space_exterior_touching_count = 0
     free_space_enclosed_part_count = 0
     free_space_max_enclosed_area_pt2 = 0.0
+    drafting_pocket_sliver_count = 0
     for part in _polygon_parts(free):
         if part.area <= NOISE_PT * NOISE_PT:
             continue
         free_space_part_count += 1
-        # A free region narrower than the page's own median wall thickness is a drafting gap
-        # between wall pieces, not a room.
-        if part.buffer(-median_thickness / 2.0, join_style=2).is_empty:
+        # Full median-thickness inset: wall-cavity drafting pockets (~3×3 pt)
+        # are not rooms. Half-thickness previously left tiny false rings.
+        if part.buffer(-median_thickness, join_style=2).is_empty:
             sliver_count += 1
+            drafting_pocket_sliver_count += 1
+            continue
+        minx, miny, maxx, maxy = part.bounds
+        width, height = maxx - minx, maxy - miny
+        # Both extents inside a few wall thicknesses → cavity, not a room.
+        if (
+            width < 6.0 * median_thickness
+            and height < 6.0 * median_thickness
+        ):
+            sliver_count += 1
+            drafting_pocket_sliver_count += 1
             continue
         reasons: list[str] = []
         touches_domain = part.boundary.intersects(domain.boundary.buffer(NOISE_PT))
@@ -2449,7 +2466,6 @@ def build_layered_wall_doorway_room_rings(
         status = EvidenceResolutionStatus.ABSTAINED if reasons else EvidenceResolutionStatus.CANDIDATE
         if not reasons:
             reasons.append(REASON_RING_CLOSED)
-        minx, miny, maxx, maxy = part.bounds
         record_id = stable_contract_id(
             "layered_wall_doorway_room_ring",
             {"source_sha256": source_sha256, "page_index": page_index, "polygon": coords,
@@ -2468,6 +2484,9 @@ def build_layered_wall_doorway_room_rings(
     closures.sort(key=lambda c: c.closure_id)
     candidate = any(r.status is EvidenceResolutionStatus.CANDIDATE for r in rings)
     gap_witnesses, gap_witness_count = _source_unresolved_gap_witnesses(unresolved)
+    tier_lt_100 = sum(1 for r in rings if r.area_pt2 < 100.0)
+    tier_mid = sum(1 for r in rings if 100.0 <= r.area_pt2 < 1000.0)
+    tier_ge_1000 = sum(1 for r in rings if r.area_pt2 >= 1000.0)
     return LayeredRoomRingResult(
         status=EvidenceResolutionStatus.CANDIDATE if candidate else EvidenceResolutionStatus.ABSTAINED,
         reason_codes=(REASON_RING_CLOSED,) if candidate else (REASON_OPEN_EXTERIOR,),
@@ -2484,6 +2503,10 @@ def build_layered_wall_doorway_room_rings(
         free_space_enclosed_part_count=free_space_enclosed_part_count,
         free_space_max_enclosed_area_pt2=round(free_space_max_enclosed_area_pt2, 4),
         merged_collinear_dark_face_strip_count=len(merged_face_strips),
+        ring_area_tier_lt_100_count=tier_lt_100,
+        ring_area_tier_100_to_1000_count=tier_mid,
+        ring_area_tier_ge_1000_count=tier_ge_1000,
+        drafting_pocket_sliver_count=drafting_pocket_sliver_count,
     )
 
 
