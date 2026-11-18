@@ -629,3 +629,52 @@ def test_page_without_title_field_cannot_claim_floor_plan(tmp_path):
         doc.save(path)
     with pytest.raises(ValueError, match="original_footprint_original_page_title_mismatch"):
         _verify_original_drawing_title(path.read_bytes(), 0, "Floor Plan")
+
+
+def test_original_source_wall_review_reports_evidence_without_commercial_authority(
+    tmp_path,
+):
+    from tools.run_original_footprint_first import run
+
+    source = _plan(tmp_path, walls=True)
+    expected = hashlib.sha256(source.read_bytes()).hexdigest()
+    result, report, overlay = run(
+        source, 0, tmp_path / "native_outer_review",
+        expected_sha256=expected,
+    )
+    receipt = result["source_native_outer_wall_review"]
+    assert receipt["status"] in ("ABSTAINED", "CANDIDATE")
+    assert type(receipt["source_wall_band_count"]) is int
+    assert type(receipt["connected_native_wall_components"]) is int
+    assert receipt["source_endpoint_near_miss_count"] >= 0
+    assert len(receipt["near_miss_witnesses_sample"]) <= 8
+    assert receipt["physical_wall_authenticated"] is False
+    assert receipt["measurement_authorized"] is False
+    assert receipt["commercial_publishable"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
+
+
+def test_missing_native_outer_review_abstains_without_blocking_honest_diagnostic(
+    tmp_path, monkeypatch,
+):
+    import tools.run_original_footprint_first as runner
+
+    source = _plan(tmp_path, walls=True)
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("native review unavailable")
+
+    monkeypatch.setattr(runner, "attempt_source_native_outer_wall_first",
+                        unavailable)
+    result, report, overlay = runner.run(
+        source, 0, tmp_path / "native_outer_abstained",
+        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    receipt = result["source_native_outer_wall_review"]
+    assert receipt["status"] == "ABSTAINED"
+    assert receipt["reason"] == "original_native_outer_source_review_unavailable"
+    assert receipt["near_miss_witnesses_sample"] == []
+    assert receipt["commercial_publishable"] is False
+    assert result["topology"]["room_quantity_authorized"] is False
+    assert result["commercial_quantity_rows"] == 0
+    assert report.exists() and overlay.exists()
