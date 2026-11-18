@@ -168,6 +168,18 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 "free_space_max_enclosed_area_pt2": (
                     ring.free_space_max_enclosed_area_pt2 if ring else 0.0
                 ),
+                "ring_area_tier_lt_100_count": (
+                    ring.ring_area_tier_lt_100_count if ring else 0
+                ),
+                "ring_area_tier_100_to_1000_count": (
+                    ring.ring_area_tier_100_to_1000_count if ring else 0
+                ),
+                "ring_area_tier_ge_1000_count": (
+                    ring.ring_area_tier_ge_1000_count if ring else 0
+                ),
+                "drafting_pocket_sliver_count": (
+                    ring.drafting_pocket_sliver_count if ring else 0
+                ),
                 "commercial_publishable": False,
                 "room_quantity_authorized": False,
             },
@@ -231,6 +243,12 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                         "overlap_fraction": edge.unique_owner_overlap_fraction,
                         "uncovered_start_pt": edge.unique_owner_uncovered_start_pt,
                         "uncovered_end_pt": edge.unique_owner_uncovered_end_pt,
+                        "competing_incomplete_chain_path_count": len(
+                            edge.competing_incomplete_chain_path_indices
+                        ),
+                        "competing_incomplete_chain_coverage_fraction": (
+                            edge.competing_incomplete_chain_coverage_fraction
+                        ),
                     }
                     for edge in unique_edges
                 ],
