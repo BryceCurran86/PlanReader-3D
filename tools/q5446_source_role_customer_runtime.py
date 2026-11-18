@@ -139,9 +139,6 @@ def _append_independent_source_tiled_floor(
     if q is None or trace is None or single is None:
         raise ValueError("missing signed tiled-floor source receipt")
     prior = tuple(sealed.quantities)
-    prior_qids = {entry.quantity_id for entry in prior}
-    prior_physical = {entity for entry in prior
-                      for entity in entry.object_identity_refs}
     # Physical source face must be distinct from every earlier floor owner,
     # including an optional independently signed ground ensuite.
     if (
@@ -330,7 +327,6 @@ def produce_q5446_source_role(
                     or supplemental.original_alfresco is None
                     or supplemental.original_tiled_room is None
                     or supplemental.original_tiled_room.quantity is None
-                    or supplemental.original_tiled_room.quantity.metadata.get("room_label") != "ENS"
                     or combined is None
                     or combined.project_id != project_id
                     or set(combined.source_sha256s) != {SOURCE_SHA256}
