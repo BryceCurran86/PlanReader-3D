@@ -71,6 +71,8 @@ class _OCR:
     low_confidence = False
     mismatch_at_288 = False
     extra_match = False
+    low_confidence_at_288 = False
+    conflict_position_at_360 = False
 
     def is_available(self):
         return True
@@ -78,11 +80,11 @@ class _OCR:
     def extract_lines(self, image, dpi=150):
         from pb_portable_raster_ocr_authority import OCRLine
         token = "BED" if self.mismatch_at_288 and dpi == 288 else self.token
-        conf = .7 if self.low_confidence else .99
+        conf = .7 if self.low_confidence else (.88 if self.low_confidence_at_288 and dpi == 288 else .99)
         witness = OCRLine(
             text=token, confidence=conf,
             bbox_px=(100, 80, 160, 132),
-            bbox_pt=(25, 22, 40, 34),
+            bbox_pt=(55, 22, 70, 34) if self.conflict_position_at_360 and dpi == 360 else (25, 22, 40, 34),
         )
         if self.extra_match:
             return (witness, witness)
@@ -111,7 +113,7 @@ def test_closed_original_source_tiled_face_is_recovered_but_not_commercial(ocr):
         assert result.room_label == "ENS"
         assert len(result.wall_support_source_path_ids) >= 4
         assert len(result.hatch_support_source_path_ids) >= 20
-        assert result.raster_ocr_render_dpis == (216, 288)
+        assert result.raster_ocr_render_dpis == (216, 288, 360)
         assert result.physical_source_verified
         assert result.commercial_permission is False
     finally:
@@ -173,3 +175,106 @@ def test_open_ring_and_crossing_source_ink_abstain():
         (115, 75), (50, 50),
     ])
     assert a._candidate_ring(crossed) is None
+
+
+def test_two_source_local_confident_renders_recover_an_ambiguous_middle_view(ocr):
+    ocr.low_confidence_at_288 = True
+    page = _Page(_fixture())
+    try:
+        result = a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        )
+        assert result is not None
+        assert result.raster_ocr_render_dpis == (216, 360)
+        assert result.commercial_permission is False
+    finally:
+        page.close()
+
+
+def test_conflicting_raster_position_abstains_even_when_two_others_match(ocr):
+    ocr.conflict_position_at_360 = True
+    page = _Page(_fixture())
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_confident_different_room_label_blocks_majority_promotion(ocr):
+    ocr.mismatch_at_288 = True
+    page = _Page(_fixture())
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_native_source_float_tolerances_do_not_reject_exact_closed_face():
+    """Original Q5446 p2 1982 had rounded bounds 0.000018pt too tall."""
+    # These numbers are a synthetic float-representation example, not a
+    # benchmark target or a source PDF copy. Ring geometry remains unmodified.
+    points = [(50, 60.00002), (110, 60.00002), (110, 75),
+              (112, 75), (112, 80), (110, 80), (110, 120.0),
+              (50, 120.0), (50, 60.00002)]
+    source_ring = _path(points)
+    candidate = a._candidate_ring(source_ring)
+    assert candidate is not None
+    polygon, box = candidate
+    assert polygon.is_valid and polygon.is_simple
+    assert box == (50.0, 60.0, 110.0, 120.0)
+    float_artifact_pt = (box[3] - box[1]) - (
+        polygon.bounds[3] - polygon.bounds[1]
+    )
+    assert 0 < float_artifact_pt <= a.SOURCE_PDF_FLOAT_EPS_PT
+    assert a.SOURCE_PDF_FLOAT_EPS_PT < a.SOURCE_SNAP_PT / 10000
+    # A ring candidate is only ink geometry: still cannot publish a floor.
+    page = _Page([source_ring])
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_native_line_quantization_keeps_signed_floor_extents_stable(ocr):
+    """Preserve accepted CAD line grouping without snapping a physical wall."""
+    drawings = _fixture()
+    source_ring = drawings[0]
+    # Reconstruct all endpoints preserving the native path's closed topology.
+    points = [(50.0 if p.x == 50 else
+               110.000021 if p.x == 110 else float(p.x),
+               50.000017 if p.y == 50 else float(p.y))
+              for _, p, _ in source_ring["items"]]
+    points.append(points[0])
+    drawings[0] = _path(points)
+    page = _Page(drawings)
+    try:
+        face = a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        )
+        assert face is not None
+        raw_width = face.source_bbox_pts[2] - face.source_bbox_pts[0]
+        raw_height = face.source_bbox_pts[3] - face.source_bbox_pts[1]
+        assert face.finished_width_pts == round(raw_width, 5)
+        assert face.finished_depth_pts == round(raw_height, 5)
+        assert face.source_bbox_pts[3] - face.source_bbox_pts[1] <= (
+            drawings[0]["rect"].height + a.SOURCE_PDF_FLOAT_EPS_PT
+        )
+        assert face.physical_source_verified
+        assert face.commercial_permission is False
+    finally:
+        page.close()
+
+
+def test_numeric_epsilon_never_allows_a_real_source_ring_overshoot():
+    """A larger source geometry mismatch stays rejected, not repaired."""
+    # This gap is only 0.0004pt, still >4x native float numeric tolerance.
+    points = [(50, 60.0004), (110, 60.0004), (110, 75),
+              (112, 75), (112, 80), (110, 80), (110, 120.0),
+              (50, 120.0), (50, 60.0004)]
+    assert a._candidate_ring(_path(points)) is None
