@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from pb_combine_source_closed_runs import load_verified_sealed_run
+from pb_source_closed_run_export import combine_source_closed_runs
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_gpt1_q5446_alfresco_original_customer import (
     OriginalQ5446AlfrescoCustomerResult,
@@ -31,6 +32,12 @@ from pb_gptmax_q5446_finish_support_shadow import SOURCE_IDS
 from pb_gptmax_q5446_original_family_customer_append import (
     Q5446TwoFamilyCustomerResult,
     issue_original_q5446_alfresco_plus_ensuite_customer,
+)
+from pb_gptmax_q5446_original_tiled_floor_customer import (
+    OriginalQ5446TiledFloorCustomerResult,
+    issue_original_q5446_ground_laundry_tiled_floor,
+    issue_original_q5446_first_ensuite_tiled_floor,
+    issue_original_q5446_ground_ensuite_tiled_floor,
 )
 
 
@@ -102,6 +109,82 @@ def _summary(output_dir: Path, data: dict[str, Any]) -> None:
         output_dir / "production_summary.json",
         json.dumps(data, sort_keys=True, indent=2) + "\n",
     )
+
+
+def _append_independent_source_tiled_floor(
+    *, original_plan: Path, companions: tuple[Path, Path], workspace_id: int,
+    project_id: str, sealed: object, customer_rows: tuple[dict[str, Any], ...],
+    issuer: object,
+) -> tuple[object, tuple[dict[str, Any], ...], bool]:
+    """Retain independent source-positive floor; abstentions cannot erase siblings.
+
+    Never substitute frozen truths or guessed rooms. Source-verified original
+    issuers own metric/room/finish authority; this layer only validates and
+    atomically appends their *already sealed* commercial rows.
+    """
+    candidate = issuer(original_plan, *companions, workspace_id=workspace_id)
+    if type(candidate) is not OriginalQ5446TiledFloorCustomerResult:
+        raise TypeError("individual source tiled-floor issuer contract unavailable")
+    if candidate.status == "ABSTAIN":
+        if (candidate.quantity is not None or candidate.sealed_run is not None
+                or candidate.customer_rows):
+            raise ValueError("abstained tiled room carries commercial evidence")
+        return sealed, customer_rows, False
+    if candidate.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW":
+        raise ValueError("source tiled-floor issuer has unsupported status")
+    q, trace, single = candidate.quantity, candidate.trace, candidate.sealed_run
+    if q is None or trace is None or single is None:
+        raise ValueError("missing signed tiled-floor source receipt")
+    prior = tuple(sealed.quantities)
+    prior_qids = {entry.quantity_id for entry in prior}
+    prior_physical = {entity for entry in prior
+                      for entity in entry.object_identity_refs}
+    # Physical source face must be distinct from every earlier floor owner,
+    # including an optional independently signed ground ensuite.
+    if (
+        q.family != "floor_finish_area" or q.abstained or q.status != "firm"
+        or q.metadata.get("source_sha256") != SOURCE_SHA256
+        or q.metadata.get("commercial_projection_allowed") is not True
+        or q.metadata.get("tiled_floor_finish_authorized") is not True
+        or q.metadata.get("net_internal_finished_face_authorized") is not True
+        or trace.workspace_id != workspace_id
+        or trace.project_id != project_id
+        or trace.document_id != Q5446_DOCUMENT_ID
+        or trace.source_sha256 != SOURCE_SHA256
+        or trace.revision_id != trace.current_revision_id
+        or tuple(trace.canonical_entity_ids) != tuple(q.input_entity_ids)
+        or not q.input_entity_ids
+        or q.quantity_id in prior_qids
+        or bool(set(q.input_entity_ids) & prior_physical)
+        or single.project_id != project_id
+        or set(single.source_sha256s) != {SOURCE_SHA256}
+        or len(single.quantities) != 1
+        or single.quantities[0].quantity_id != q.quantity_id
+        or single.quantities[0].family != q.family
+        or single.quantities[0].status != "firm"
+        or single.quantities[0].abstained
+        or single.quantities[0].value != q.value
+        or single.quantities[0].object_identity_refs != tuple(q.input_entity_ids)
+        or not single.quantities[0].lineage_ok
+        or len(candidate.customer_rows) != 1
+    ):
+        raise ValueError("individual tiled-floor signed source ownership invalid")
+    verified = verify_sealed_customer_output(single, candidate.customer_rows)
+    if (verified.customer_row_count != 1
+            or set(verified.verified_quantity_ids) != {q.quantity_id}):
+        raise ValueError("individual tiled-floor customer identity mismatch")
+    joined = combine_source_closed_runs((sealed, single), project_id=project_id)
+    rows = (*customer_rows, *candidate.customer_rows)
+    confirmed = verify_sealed_customer_output(joined, rows)
+    if (confirmed.customer_row_count != len(rows)
+            or set(confirmed.verified_quantity_ids)
+            != {entry.quantity_id for entry in joined.quantities}
+            or any(not any(new.to_dict() == old.to_dict()
+                           for new in joined.quantities)
+                   for old in prior)
+            or rows[:len(customer_rows)] != customer_rows):
+        raise ValueError("individual tiled-floor append changes prior signed customer")
+    return joined, rows, True
 
 
 def produce_q5446_source_role(
@@ -237,6 +320,24 @@ def produce_q5446_source_role(
                 family_counts = {"floor_area": 1, "floor_finish_area": 1}
             elif supplemental.status != "ABSTAIN":
                 raise ValueError("supplemental family status unsupported")
+
+            # Preserve independently signed siblings if ground ENS abstains.
+            # No source label alone can create a customer row.
+            for issuer in (
+                issue_original_q5446_ground_laundry_tiled_floor,
+                issue_original_q5446_first_ensuite_tiled_floor,
+                # Independent signed face only; OCR/physical authority may ABSTAIN.
+                issue_original_q5446_ground_ensuite_tiled_floor,
+            ):
+                sealed, customer_rows, appended = _append_independent_source_tiled_floor(
+                    original_plan=pdf_path, companions=companion_roles,
+                    workspace_id=workspace_id, project_id=project_id,
+                    sealed=sealed, customer_rows=customer_rows, issuer=issuer,
+                )
+                if appended:
+                    family_counts["floor_finish_area"] = (
+                        family_counts.get("floor_finish_area", 0) + 1
+                    )
 
         # Everything below is an authenticated, ordinary canonical role
         # output consumed by the *existing* exact-bijection aggregate reader.
