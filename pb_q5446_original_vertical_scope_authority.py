@@ -33,6 +33,9 @@ class Q5446VerticalScopeReview:
     other_wet_rooms_full_height_tile_scope: bool = False
     roof_space_r25_glasswool_garage_ceiling_excluded: bool = False
     reflective_wall_foil_between_garage_and_house_included: bool = False
+    standard_nonmaster_shower_recess_wall_tile_scope: bool = False
+    standard_laundry_above_tub_wall_tile_scope: bool = False
+    standard_wet_room_floor_and_skirting_tiles_scope: bool = False
     physical_wall_height_authorized: bool = False
     finished_ceiling_height_authorized: bool = False
     installed_opening_height_authorized: bool = False
@@ -53,6 +56,9 @@ class Q5446VerticalScopeReview:
             "other_wet_rooms_full_height_tile_scope": False,
             "roof_space_r25_glasswool_garage_ceiling_excluded": self.roof_space_r25_glasswool_garage_ceiling_excluded,
             "reflective_wall_foil_between_garage_and_house_included": self.reflective_wall_foil_between_garage_and_house_included,
+            "standard_nonmaster_shower_recess_wall_tile_scope": self.standard_nonmaster_shower_recess_wall_tile_scope,
+            "standard_laundry_above_tub_wall_tile_scope": self.standard_laundry_above_tub_wall_tile_scope,
+            "standard_wet_room_floor_and_skirting_tiles_scope": self.standard_wet_room_floor_and_skirting_tiles_scope,
             "physical_wall_height_authorized": False,
             "finished_ceiling_height_authorized": False,
             "installed_opening_height_authorized": False,
@@ -120,6 +126,15 @@ def correlate_authenticated_q5446_vertical_scope(
         r"reflective foil to external walls and wall between garage and house",
         inc,
     ))
+    # Wet-surface scope differs from vertical ceiling scope. Standard
+    # bathroom/ensuite wall tiles are limited to SHOWER recesses; laundry
+    # has wall tiles ABOVE TUB only. Both have floor + skirting separately.
+    # The signed full-height promotion is specifically MASTER ensuite.
+    standard_shower_wall = "ceramic wall tiles to shower recess" in inc
+    standard_laundry_wall = "ceramic wall tiles above laundry tub" in inc
+    standard_floor_and_skirts = (
+        inc.count("floor tiles and skirting tiles throughout") >= 2
+    )
     master = bool(re.search(
         r"provide full height ceramic wall tiling\s+"
         r"\(as per standard range and specification\)\s+"
@@ -143,6 +158,9 @@ def correlate_authenticated_q5446_vertical_scope(
         other_wet_rooms_full_height_tile_scope=False,
         roof_space_r25_glasswool_garage_ceiling_excluded=garage_roof_batts_excluded,
         reflective_wall_foil_between_garage_and_house_included=garage_shared_wall_foil_included,
+        standard_nonmaster_shower_recess_wall_tile_scope=standard_shower_wall,
+        standard_laundry_above_tub_wall_tile_scope=standard_laundry_wall,
+        standard_wet_room_floor_and_skirting_tiles_scope=standard_floor_and_skirts,
     )
 
 
