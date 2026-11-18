@@ -13,7 +13,11 @@ INC = (
     "INSULATION: Bradford R2.5 Glasswool batts to ceiling of roof space "
     "(excludes garage ceiling space). Reflective foil to external walls and "
     "wall between garage and house. CEILINGS: 2440mm nominal internal "
-    "ceiling height, measured overall to frame plates."
+    "ceiling height, measured overall to frame plates. "
+    "BATHROOM & ENSUITE: Ceramic wall tiles to shower recess, with floor "
+    "tiles and skirting tiles throughout. "
+    "LAUNDRY: Ceramic wall tiles above laundry tub, with floor tiles "
+    "and skirting tiles throughout."
 )
 P4 = (
     "Promotion S 43 - 14 Provide full height ceramic wall tiling "
@@ -58,6 +62,9 @@ def test_door_and_master_ensuite_scope_are_not_broadcast():
     assert q.installed_opening_height_authorized is False
     assert q.master_ensuite_full_height_wall_tile_scope is True
     assert q.other_wet_rooms_full_height_tile_scope is False
+    assert q.standard_nonmaster_shower_recess_wall_tile_scope is True
+    assert q.standard_laundry_above_tub_wall_tile_scope is True
+    assert q.standard_wet_room_floor_and_skirting_tiles_scope is True
     assert q.roof_space_r25_glasswool_garage_ceiling_excluded is True
     assert q.reflective_wall_foil_between_garage_and_house_included is True
     assert q.commercial_quantity_authorized is False
@@ -133,6 +140,9 @@ def test_private_original_three_document_height_scope_positive():
     assert q.master_ensuite_full_height_wall_tile_scope is True
     assert q.roof_space_r25_glasswool_garage_ceiling_excluded is True
     assert q.reflective_wall_foil_between_garage_and_house_included is True
+    assert q.standard_nonmaster_shower_recess_wall_tile_scope is True
+    assert q.standard_laundry_above_tub_wall_tile_scope is True
+    assert q.standard_wet_room_floor_and_skirting_tiles_scope is True
     assert q.commercial_quantity_authorized is False
 
 
@@ -167,3 +177,29 @@ def test_missing_insulation_statements_never_infer_garage_batts_scope():
     assert q.roof_space_r25_glasswool_garage_ceiling_excluded is False
     assert q.reflective_wall_foil_between_garage_and_house_included is False
     assert q.commercial_quantity_authorized is False
+
+
+def test_standard_wet_room_wall_tile_scope_does_not_claim_full_height_elsewhere():
+    q = _derive()
+    assert q.master_ensuite_full_height_wall_tile_scope is True
+    assert q.standard_nonmaster_shower_recess_wall_tile_scope is True
+    assert q.standard_laundry_above_tub_wall_tile_scope is True
+    assert q.other_wet_rooms_full_height_tile_scope is False
+    assert q.physical_wall_height_authorized is False
+    assert q.commercial_quantity_authorized is False
+
+
+def test_unspecified_shower_and_laundry_tiles_do_not_get_inferred():
+    q = _derive(inc=INC.replace(
+        "Ceramic wall tiles to shower recess, with floor "
+        "tiles and skirting tiles throughout. ",
+        "",
+    ).replace(
+        "Ceramic wall tiles above laundry tub, with floor tiles "
+        "and skirting tiles throughout.",
+        "",
+    ))
+    assert q.standard_nonmaster_shower_recess_wall_tile_scope is False
+    assert q.standard_laundry_above_tub_wall_tile_scope is False
+    assert q.standard_wet_room_floor_and_skirting_tiles_scope is False
+    assert q.other_wet_rooms_full_height_tile_scope is False
