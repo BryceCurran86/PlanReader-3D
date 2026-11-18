@@ -34,7 +34,7 @@ class NativeTiledRoomFace:
     finished_depth_pts: float
     wall_support_source_path_ids: tuple[int, ...]
     hatch_support_source_path_ids: tuple[int, ...]
-    raster_ocr_render_dpis: tuple[int, int]
+    raster_ocr_render_dpis: tuple[int, ...]
     physical_source_verified: bool = True
     commercial_permission: bool = False
 
@@ -222,26 +222,49 @@ def _tiled_hatch_ids(drawings, box):
 
 
 def _source_ocr_label(page: fitz.Page, polygon, bbox, room_label: str, ocr):
-    observed = []
-    for dpi in (216, 288):
+    """Return only independently agreeing original raster label witnesses.
+
+    The original Q5446 ground ENS is confidently ENS on 216/360 dpi but
+    slightly below threshold at 288. One uncertain view may abstain without
+    erasing two independent strong reads; conflicting room labels or locations
+    always ABSTAIN, even if two other views support the requested name.
+    """
+    observed: list[tuple[int, float, float]] = []
+    room_words = frozenset({
+        "ENS", "BATH", "LDRY", "LAUNDRY", "WC", "POWDER", "BED",
+        "BEDROOM", "LIVING", "FAMILY", "MEALS", "KITCHEN",
+        "WIR", "GARAGE", "GUEST", "OFFICE", "ENTRY", "MPR",
+    })
+    for dpi in (216, 288, 360):
         clip = fitz.Rect(*bbox) + (-2.0, -2.0, 2.0, 2.0)
         pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
                               clip=clip, alpha=False)
         image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
         matches = []
         for line in ocr.extract_lines(image, dpi=dpi):
-            if _norm_room_label(line.text) != room_label:
-                continue
             if line.confidence is None or line.confidence < .90:
                 continue
             cx = clip.x0 + (line.bbox_pt[0] + line.bbox_pt[2]) / 2
             cy = clip.y0 + (line.bbox_pt[1] + line.bbox_pt[3]) / 2
-            if polygon.contains(Point(cx, cy)):
+            if not polygon.contains(Point(cx, cy)):
+                continue
+            text = _norm_room_label(line.text)
+            if text != room_label and text in room_words:
+                # A confident different room name must never be outvoted.
+                # Fixture labels and door dimensions are not room identities.
+                return None
+            if text == room_label:
                 matches.append((cx, cy))
-        if len(matches) != 1:
-            return False
-        observed.append(matches[0])
-    return math.dist(observed[0], observed[1]) <= SOURCE_SNAP_PT
+        if len(matches) > 1:
+            return None
+        if matches:
+            observed.append((dpi, *matches[0]))
+    if len(observed) < 2 or any(
+        math.dist(a[1:], b[1:]) > SOURCE_SNAP_PT
+        for i, a in enumerate(observed) for b in observed[i + 1:]
+    ):
+        return None
+    return tuple(dpi for dpi, _, _ in observed)
 
 
 def find_unique_native_tiled_room_face(
@@ -276,7 +299,8 @@ def find_unique_native_tiled_room_face(
         hatch_ids = _tiled_hatch_ids(drawings, box)
         if not hatch_ids:
             continue
-        if not _source_ocr_label(page, polygon, polygon.bounds, label, ocr):
+        accepted_dpis = _source_ocr_label(page, polygon, polygon.bounds, label, ocr)
+        if accepted_dpis is None:
             continue
         matches.append(NativeTiledRoomFace(
             page_number=page_number, source_boundary_path_id=path_id,
@@ -285,6 +309,6 @@ def find_unique_native_tiled_room_face(
             finished_depth_pts=round(box[3] - box[1], 5),
             wall_support_source_path_ids=supports,
             hatch_support_source_path_ids=hatch_ids,
-            raster_ocr_render_dpis=(216, 288),
+            raster_ocr_render_dpis=accepted_dpis,
         ))
     return matches[0] if len(matches) == 1 else None
