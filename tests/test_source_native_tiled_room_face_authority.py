@@ -71,6 +71,8 @@ class _OCR:
     low_confidence = False
     mismatch_at_288 = False
     extra_match = False
+    low_confidence_at_288 = False
+    conflict_position_at_360 = False
 
     def is_available(self):
         return True
@@ -78,11 +80,11 @@ class _OCR:
     def extract_lines(self, image, dpi=150):
         from pb_portable_raster_ocr_authority import OCRLine
         token = "BED" if self.mismatch_at_288 and dpi == 288 else self.token
-        conf = .7 if self.low_confidence else .99
+        conf = .7 if self.low_confidence else (.88 if self.low_confidence_at_288 and dpi == 288 else .99)
         witness = OCRLine(
             text=token, confidence=conf,
             bbox_px=(100, 80, 160, 132),
-            bbox_pt=(25, 22, 40, 34),
+            bbox_pt=(55, 22, 70, 34) if self.conflict_position_at_360 and dpi == 360 else (25, 22, 40, 34),
         )
         if self.extra_match:
             return (witness, witness)
@@ -111,7 +113,7 @@ def test_closed_original_source_tiled_face_is_recovered_but_not_commercial(ocr):
         assert result.room_label == "ENS"
         assert len(result.wall_support_source_path_ids) >= 4
         assert len(result.hatch_support_source_path_ids) >= 20
-        assert result.raster_ocr_render_dpis == (216, 288)
+        assert result.raster_ocr_render_dpis == (216, 288, 360)
         assert result.physical_source_verified
         assert result.commercial_permission is False
     finally:
@@ -173,3 +175,39 @@ def test_open_ring_and_crossing_source_ink_abstain():
         (115, 75), (50, 50),
     ])
     assert a._candidate_ring(crossed) is None
+
+
+def test_two_source_local_confident_renders_recover_an_ambiguous_middle_view(ocr):
+    ocr.low_confidence_at_288 = True
+    page = _Page(_fixture())
+    try:
+        result = a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        )
+        assert result is not None
+        assert result.raster_ocr_render_dpis == (216, 360)
+        assert result.commercial_permission is False
+    finally:
+        page.close()
+
+
+def test_conflicting_raster_position_abstains_even_when_two_others_match(ocr):
+    ocr.conflict_position_at_360 = True
+    page = _Page(_fixture())
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_confident_different_room_label_blocks_majority_promotion(ocr):
+    ocr.mismatch_at_288 = True
+    page = _Page(_fixture())
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=1, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
