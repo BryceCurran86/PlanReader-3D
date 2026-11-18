@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.symlink_test_support import symlink_or_skip
 from tools.report_gpt3_four_project_evidence import (
     _assert_four_project_publication_inputs_stable as assert_unchanged,
     _stable_original_digest as witness,
@@ -39,7 +40,7 @@ def test_original_absent_path_that_appears_invalidates_publication(tmp_path: Pat
     else:
         existing = tmp_path / "elsewhere"
         existing.write_bytes(b"foreign")
-        missing.symlink_to(existing)
+        symlink_or_skip(missing, existing)
     with pytest.raises(ValueError, match="four-project input changed"):
         assert_unchanged(snapshot)
 
@@ -59,7 +60,7 @@ def test_existing_signed_input_replaced_or_modified_fails(tmp_path: Path, replac
     elif replacement == "symlink":
         other = tmp_path / "other-signed.json"
         other.write_bytes(b"certified-signed-run")
-        signed.symlink_to(other)
+        symlink_or_skip(signed, other)
     with pytest.raises(ValueError, match="four-project input changed"):
         assert_unchanged(snapshot)
 
@@ -150,7 +151,7 @@ def test_snapshot_rejects_uninspectable_original_or_signed_path(
 def test_dangling_symlink_is_not_a_missing_input(tmp_path: Path):
     from tools import report_gpt3_four_project_evidence as report
     missing = tmp_path / "original.pdf"
-    missing.symlink_to(tmp_path / "never-existed.pdf")
+    symlink_or_skip(missing, tmp_path / "never-existed.pdf")
     with pytest.raises(ValueError, match="four-project input changed"):
         assert_unchanged(((missing, None),))
     assert report._publication_input_path_kind(missing) == "symlink"
@@ -171,7 +172,7 @@ def test_same_bytes_different_inode_cannot_revalidate_signed_customer_or_origina
             assert_unchanged(receipt)
 
 
-def test_same_byte_source_replacement_after_exclusive_link_rolls_back_report(
+def test_same_byte_source_replacement_after_publish_rolls_back_report(
     tmp_path: Path, monkeypatch,
 ):
     """Exercise the real create-only publication callback, not only its helper."""
@@ -181,18 +182,18 @@ def test_same_byte_source_replacement_after_exclusive_link_rolls_back_report(
     original.write_bytes(b"source-neutral-signed-bytes")
     output = tmp_path / "four-project-report.json"
     receipt = ((original, witness(original)),)
-    actual_link = publish.os.link
+    actual_publish = publish.publish_staged_file
     swapped = False
 
-    def substitute_after_link(staged, destination):
+    def substitute_after_publish(staged, destination):
         nonlocal swapped
-        actual_link(staged, destination)
+        actual_publish(staged, destination)
         replacement = tmp_path / "same-byte-replacement.json"
         replacement.write_bytes(original.read_bytes())
         replacement.replace(original)
         swapped = True
 
-    monkeypatch.setattr(publish.os, "link", substitute_after_link)
+    monkeypatch.setattr(publish, "publish_staged_file", substitute_after_publish)
     with pytest.raises(ValueError, match="four-project input changed"):
         publish.write_new_diagnostic(
             output, '{"publication_status":"UNPUBLISHED"}\n',
