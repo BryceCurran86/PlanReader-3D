@@ -1,4 +1,4 @@
-"""Focused tests for Cursor-07..10 shadow modules."""
+"""Focused tests for Cursor-07..10 shadow modules (#4537)."""
 from __future__ import annotations
 
 from pb_source_finished_interior_face_recovery_shadow import (
