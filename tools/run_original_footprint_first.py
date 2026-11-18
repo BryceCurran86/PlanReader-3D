@@ -206,6 +206,12 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
     original_bytes = pdf.read_bytes()
     sha = hashlib.sha256(original_bytes).hexdigest()
     sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
+    # Page identity is mandatory even when the optional title pin is absent.
+    # Reject Python negative indices, bools, fractions and out-of-range sheets
+    # before source-native tracing can select an unintended drawing.
+    with fitz.open(stream=original_bytes, filetype="pdf") as source_pages:
+        if type(page_index) is not int or not 0 <= page_index < len(source_pages):
+            raise ValueError("original_footprint_original_page_index_invalid")
     title_verified = _verify_original_drawing_title(
         original_bytes, page_index, expected_drawing_title,
     )
