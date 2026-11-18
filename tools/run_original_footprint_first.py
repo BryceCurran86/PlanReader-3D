@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pb_gpt1_acacia_source_packet import (
+    inspect_acacia_original_bytes,
+)
+from pb_gpt1_acacia_cross_sheet_review import (
+    ROOM_KEY, SCHEDULE_CODES, review_acacia_finishes,
+    review_acacia_legend_room,
+)
 from pb_external_footprint_first_trace import (  # noqa: E402
     bound_native_drawings_to_footprint,
     refine_external_footprint_against_wall_ink,
@@ -95,6 +102,44 @@ def _draw_source_overlay(page, original, trace, scope, ring):
             shape.commit()
     # No heading overlay over the actual building; legend left in JSON.
     return candidate_count
+
+
+def _acacia_source_scope_review(packet, outer_review):
+    """Original Acacia legend/schedule exceptions, with no commercial authority.
+
+    A sheet key, GFA note or 16 schedule prototypes never substitute for a
+    physical room polygon, finished face, hosted installed door or window.
+    """
+    room_reviews = [
+        review_acacia_legend_room(packet, key)
+        for key in sorted(ROOM_KEY)
+    ]
+    finish_status, finish_reason = review_acacia_finishes(packet)
+    return {
+        "source_scope_status": "ORIGINAL_ACACIA_SOURCE_REVIEW_ONLY",
+        "original_source_roles_verified": packet.original_byte_roles_verified,
+        "indoor_candidate_key_ids": [
+            r.legend_id for r in room_reviews if r.scope == "interior_candidate"
+        ],
+        "outdoor_or_service_excluded_key_ids": [
+            r.legend_id for r in room_reviews
+            if r.status == "EXCLUDED_FROM_ENCLOSED_FINISH"
+        ],
+        "scheduled_prototype_codes_not_installed_count": list(SCHEDULE_CODES),
+        "source_exterior_first_failing_gate": (
+            "outside_original_wall_ink_not_physically_accepted"
+            if not outer_review.get("physical_wall_authenticated", False)
+            else "finished_inside_face_and_opening_host_not_verified"
+        ),
+        "material_finish_status": finish_status,
+        "material_finish_reason": finish_reason,
+        "printed_gfa_note_is_not_a_measured_finished_area": True,
+        "installed_opening_instances_count_verified": False,
+        "physical_room_face_authorized": False,
+        "floor_wall_ceiling_finish_authorized": False,
+        "commercial_quantity_rows": 0,
+        "official_frozen120_score_change": 0,
+    }
 
 
 def _original_source_native_outer_wall_review(drawings, words, page_index):
@@ -200,10 +245,23 @@ def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
 
 def run(pdf: Path, page_index: int, out_dir: Path, *,
         expected_sha256: str | None = None,
-        expected_drawing_title: str | None = None):
+        expected_drawing_title: str | None = None,
+        acacia_region: str | None = None):
     import fitz
 
     original_bytes = pdf.read_bytes()
+    acacia_package = None
+    if acacia_region is not None:
+        # In Acacia-specific replay, prevent p1 site/cover, foreign regional
+        # source and wrong section/setout/schedule variants from reaching
+        # geometry. Generic projects retain their existing input contract.
+        acacia_package = inspect_acacia_original_bytes(
+            original_bytes, expected_region=acacia_region,
+        )
+        if not acacia_package.original_byte_roles_verified:
+            raise ValueError("original_footprint_acacia_role_packet_unverified")
+        if page_index != 1:
+            raise ValueError("original_footprint_acacia_floor_page_required")
     sha = hashlib.sha256(original_bytes).hexdigest()
     sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
     # Reject invalid original sheet identities before source-native geometry tracing.
@@ -241,6 +299,14 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "source_sha256": sha,
             "source_sha_pin_verified": sha_pin_verified,
             "source_page_title_verified": title_verified,
+            "acacia_four_role_original_source_review": (
+                acacia_package.to_dict() if acacia_package else None
+            ),
+            "acacia_room_opening_and_finish_source_review": (
+                _acacia_source_scope_review(
+                    acacia_package, source_native_outer_review,
+                ) if acacia_package else None
+            ),
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
@@ -484,11 +550,15 @@ if __name__ == "__main__":
                         help="Exact SHA256 of the intended original drawing")
     parser.add_argument("--expected-drawing-title",
                         help="Require drawing-title field of the intended page")
+    parser.add_argument("--acacia-region",
+                        choices=("Sydney", "Melbourne", "Brisbane"),
+                        help="Require four exact original Acacia source pages on floor p2")
     arguments = parser.parse_args()
     result, js, png = run(
         arguments.pdf, arguments.page, arguments.out_dir,
         expected_sha256=arguments.expected_sha256,
         expected_drawing_title=arguments.expected_drawing_title,
+        acacia_region=arguments.acacia_region,
     )
     print(json.dumps({
         "source_sha_pin_verified": result["source_sha_pin_verified"],
