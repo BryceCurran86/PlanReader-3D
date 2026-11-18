@@ -310,8 +310,12 @@ def find_unique_native_tiled_room_face(
         matches.append(NativeTiledRoomFace(
             page_number=page_number, source_boundary_path_id=path_id,
             room_label=label, source_bbox_pts=box,
-            finished_width_pts=round(box[2] - box[0], 5),
-            finished_depth_pts=round(box[3] - box[1], 5),
+            # Keep original native PDF floating-point dimensions until the
+            # issuer performs the ONE final area rounding. Intermediate
+            # 5-decimal source-space rounding double-rounds real source faces,
+            # changing sealed quantities by 0.000001 m2 on Q5446 ground ENS.
+            finished_width_pts=box[2] - box[0],
+            finished_depth_pts=box[3] - box[1],
             wall_support_source_path_ids=supports,
             hatch_support_source_path_ids=hatch_ids,
             raster_ocr_render_dpis=accepted_dpis,
