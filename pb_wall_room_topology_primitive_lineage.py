@@ -29,7 +29,9 @@ SNAP_COLLAPSE_REASON = "both_endpoints_snapped_to_same_node"
 _CONTAINMENT_TOL_PT = 1e-5
 
 _ATTRIBUTE_FIELDS = ("width", "stroke", "fill", "layer", "dashes", "clip")
-_OWNERSHIP_FIELDS = ("document_id", "page_id", "viewport_id")
+_OWNERSHIP_FIELDS = (
+    "document_id", "revision_id", "source_sha256", "page_id", "viewport_id",
+)
 _PATH_INDEX_FIELDS = ("path_index", "item_index", "edge_index")
 _PAGE_COORD_FIELDS = ("x1", "y1", "x2", "y2")
 
