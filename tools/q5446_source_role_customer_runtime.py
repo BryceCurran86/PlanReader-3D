@@ -117,7 +117,7 @@ def _summary(output_dir: Path, data: dict[str, Any]) -> None:
 def _append_independent_source_tiled_floor(
     *, original_plan: Path, companions: tuple[Path, Path], workspace_id: int,
     project_id: str, sealed: object, customer_rows: tuple[dict[str, Any], ...],
-    issuer: object,
+    issuer: object, allowed_repeated_ensuite_quantity_id: str | None = None,
 ) -> tuple[object, tuple[dict[str, Any], ...], bool]:
     """Retain independent source-positive floor; abstentions cannot erase siblings.
 
@@ -157,8 +157,6 @@ def _append_independent_source_tiled_floor(
         or trace.revision_id != trace.current_revision_id
         or tuple(trace.canonical_entity_ids) != tuple(q.input_entity_ids)
         or not q.input_entity_ids
-        or q.quantity_id in prior_qids
-        or bool(set(q.input_entity_ids) & prior_physical)
         or single.project_id != project_id
         or set(single.source_sha256s) != {SOURCE_SHA256}
         or len(single.quantities) != 1
@@ -176,6 +174,33 @@ def _append_independent_source_tiled_floor(
     if (verified.customer_row_count != 1
             or set(verified.verified_quantity_ids) != {q.quantity_id}):
         raise ValueError("individual tiled-floor customer identity mismatch")
+    # The two-family source issuer may already have sealed the same ground
+    # ENS, which the independent ground-ENS issuer then legitimately finds.
+    # Re-adding a byte-identical sealed body would double-count its physical
+    # source face and previously caused ALL customer rows to be thrown away.
+    # Only this one explicitly proven reissuance is safe to skip. Duplicate
+    # laundry/upper ENS, changed IDs, changed values, conflicting floor faces
+    # and forged customer rows still veto the full transaction.
+    duplicate_ids = tuple(row for row in prior if row.quantity_id == q.quantity_id)
+    duplicate_owners = tuple(
+        row for row in prior if set(row.object_identity_refs) & set(q.input_entity_ids)
+    )
+    if duplicate_ids or duplicate_owners:
+        if not (
+            issuer is issue_original_q5446_ground_ensuite_tiled_floor
+            and allowed_repeated_ensuite_quantity_id is not None
+            and q.quantity_id == allowed_repeated_ensuite_quantity_id
+            and q.metadata.get("room_label") == "ENS"
+            and len(duplicate_ids) == len(duplicate_owners) == 1
+            and duplicate_ids[0].quantity_id == duplicate_owners[0].quantity_id
+            and duplicate_ids[0].to_dict() == single.quantities[0].to_dict()
+            and candidate.customer_rows[0] in customer_rows
+        ):
+            raise ValueError("conflicting_reissued_source_tiled_floor")
+        # This is a verified source replay, NOT a new physical floor or
+        # customer row. Keep prior sealed/customer bytes completely unchanged.
+        return sealed, customer_rows, False
+
     joined = combine_source_closed_runs((sealed, single), project_id=project_id)
     rows = (*customer_rows, *candidate.customer_rows)
     confirmed = verify_sealed_customer_output(joined, rows)
@@ -278,6 +303,7 @@ def produce_q5446_source_role(
         # second architectural scale or a completed six-role source universe.
         customer_rows = tuple(receipt.customer_rows)
         family_counts = {"floor_area": 1}
+        already_issued_ground_ensuite_quantity_id: str | None = None
         companion_roles = _authenticated_companion_roles(pdf_path)
         if companion_roles is not None:
             # Add a SHA-verified ORIGINAL source-only vertical-scope receipt.
@@ -303,6 +329,8 @@ def produce_q5446_source_role(
                     supplemental.source_role_coverage_verified is not False
                     or supplemental.original_alfresco is None
                     or supplemental.original_tiled_room is None
+                    or supplemental.original_tiled_room.quantity is None
+                    or supplemental.original_tiled_room.quantity.metadata.get("room_label") != "ENS"
                     or combined is None
                     or combined.project_id != project_id
                     or set(combined.source_sha256s) != {SOURCE_SHA256}
@@ -334,6 +362,9 @@ def produce_q5446_source_role(
                 sealed = combined
                 customer_rows = tuple(supplemental.customer_rows)
                 family_counts = {"floor_area": 1, "floor_finish_area": 1}
+                already_issued_ground_ensuite_quantity_id = (
+                    supplemental.original_tiled_room.quantity.quantity_id
+                )
             elif supplemental.status != "ABSTAIN":
                 raise ValueError("supplemental family status unsupported")
 
@@ -351,6 +382,9 @@ def produce_q5446_source_role(
                     original_plan=pdf_path, companions=companion_roles,
                     workspace_id=workspace_id, project_id=project_id,
                     sealed=sealed, customer_rows=customer_rows, issuer=issuer,
+                    allowed_repeated_ensuite_quantity_id=(
+                        already_issued_ground_ensuite_quantity_id
+                    ),
                 )
                 if appended:
                     family_counts["floor_finish_area"] = (
