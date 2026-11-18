@@ -225,8 +225,12 @@ def test_native_source_float_tolerances_do_not_reject_exact_closed_face():
     assert candidate is not None
     polygon, box = candidate
     assert polygon.is_valid and polygon.is_simple
-    assert box == (50.0, 60.00002, 110.0, 120.0)
-    assert box[3] - box[1] <= polygon.bounds[3] - polygon.bounds[1]
+    assert box == (50.0, 60.0, 110.0, 120.0)
+    float_artifact_pt = (box[3] - box[1]) - (
+        polygon.bounds[3] - polygon.bounds[1]
+    )
+    assert 0 < float_artifact_pt <= a.SOURCE_PDF_FLOAT_EPS_PT
+    assert a.SOURCE_PDF_FLOAT_EPS_PT < a.SOURCE_SNAP_PT / 10000
     # A ring candidate is only ink geometry: still cannot publish a floor.
     page = _Page([source_ring])
     try:
@@ -237,8 +241,8 @@ def test_native_source_float_tolerances_do_not_reject_exact_closed_face():
         page.close()
 
 
-def test_original_native_dimension_precision_survives_until_metric_rounding(ocr):
-    """CAD float noise is not a reason to round source-space dimensions twice."""
+def test_native_line_quantization_keeps_signed_floor_extents_stable(ocr):
+    """Preserve accepted CAD line grouping without snapping a physical wall."""
     drawings = _fixture()
     source_ring = drawings[0]
     # Reconstruct all endpoints preserving the native path's closed topology.
@@ -256,11 +260,21 @@ def test_original_native_dimension_precision_survives_until_metric_rounding(ocr)
         assert face is not None
         raw_width = face.source_bbox_pts[2] - face.source_bbox_pts[0]
         raw_height = face.source_bbox_pts[3] - face.source_bbox_pts[1]
-        assert face.finished_width_pts == raw_width
-        assert face.finished_depth_pts == raw_height
-        assert face.finished_width_pts != round(raw_width, 5)
-        assert face.finished_depth_pts != round(raw_height, 5)
+        assert face.finished_width_pts == round(raw_width, 5)
+        assert face.finished_depth_pts == round(raw_height, 5)
+        assert face.source_bbox_pts[3] - face.source_bbox_pts[1] <= (
+            drawings[0]["rect"].height + a.SOURCE_PDF_FLOAT_EPS_PT
+        )
         assert face.physical_source_verified
         assert face.commercial_permission is False
     finally:
         page.close()
+
+
+def test_numeric_epsilon_never_allows_a_real_source_ring_overshoot():
+    """A larger source geometry mismatch stays rejected, not repaired."""
+    # This gap is only 0.0004pt, still >4x native float numeric tolerance.
+    points = [(50, 60.0004), (110, 60.0004), (110, 75),
+              (112, 75), (112, 80), (110, 80), (110, 120.0),
+              (50, 120.0), (50, 60.0004)]
+    assert a._candidate_ring(_path(points)) is None
