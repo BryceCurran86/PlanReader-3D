@@ -3,6 +3,7 @@
 These are candidate room names, never physical boundaries or customer areas.
 """
 from math import nan
+from types import SimpleNamespace
 
 from pb_new_numbered_space_key import parse_numbered_key, _unpack_line
 from pb_portable_raster_ocr_authority import OCRLine
@@ -88,11 +89,11 @@ def test_nonsequential_inline_numbers_do_not_become_key():
 
 
 def test_nan_confidence_ocr_line_rejected():
-    assert _unpack_line(line("ROOM", 3, 18, confidence=nan)) is None
+    assert _unpack_line(SimpleNamespace(text="ROOM", confidence=nan, bbox_pt=(3, 18, 15, 26))) is None
 
 
 def test_out_of_bounds_confidence_rejected():
-    assert _unpack_line(line("ROOM", 3, 18, confidence=2.0)) is None
+    assert _unpack_line(SimpleNamespace(text="ROOM", confidence=2.0, bbox_pt=(3, 18, 15, 26))) is None
 
 
 def test_malformed_ocr_bbox_rejected_without_crash():
