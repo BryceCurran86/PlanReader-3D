@@ -1319,12 +1319,43 @@ class GenericPlanReaderExtractor:
                 missing = tuple(
                     t.reason for t in first_traces if t.status != "CANDIDATE"
                 )
+                inside_face_stages: list[dict] = []
+                try:
+                    from pb_external_footprint_inside_face_runtime import (
+                        run_inside_face_footprint_runtime_stage,
+                    )
+
+                    for plan_page in first_plan_pages:
+                        page = doc[plan_page]
+                        rect = page.rect
+                        inside_face_stages.append(
+                            run_inside_face_footprint_runtime_stage(
+                                tuple(page.get_drawings()),
+                                page_bounds_pdf_pts=(
+                                    float(rect.x0), float(rect.y0),
+                                    float(rect.x1), float(rect.y1),
+                                ),
+                                source_words=tuple(page.get_text("words")),
+                                page_index=plan_page,
+                            )
+                        )
+                except Exception as inside_exc:
+                    inside_face_stages = [{
+                        "status": "ABSTAINED",
+                        "reason": (
+                            "inside_face_runtime_exception:"
+                            f"{type(inside_exc).__name__}"
+                        ),
+                        "measurement_authorized": False,
+                        "commercial_publishable": False,
+                    }]
                 self.external_footprint_trace_live = {
                     "status": "candidate" if not missing else "abstained",
                     "reason_codes": list(missing) if missing else [
                         "external_footprint_source_ink_candidate_not_physical_authority"
                     ],
                     "traces": [t.to_dict() for t in first_traces],
+                    "inside_face_footprint_stages": inside_face_stages,
                 }
             except Exception as exc:
                 self.external_footprint_trace_live = {

@@ -21,6 +21,9 @@ from pb_external_footprint_first_trace import (  # noqa: E402
     refine_external_footprint_against_wall_ink,
     trace_external_footprint_first,
 )
+from pb_external_footprint_inside_face_runtime import (  # noqa: E402
+    run_inside_face_footprint_runtime_stage,
+)
 from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
     _source_wall_ink_candidate_drawings,
     build_layered_wall_doorway_room_rings,
@@ -249,11 +252,23 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
+                "inside_face_dominant_wall_start_and_left_turn_walk",
                 "preserve_original_native_path_scope",
                 "dark_wall_and_doorway_ring_topology",
                 "physical_wall_metric_and_customer_UNAUTHORIZED",
             ],
             "exterior": outer.to_dict(),
+            "inside_face_footprint_stage": run_inside_face_footprint_runtime_stage(
+                drawings,
+                page_bounds_pdf_pts=(
+                    float(source[page_index].rect.x0),
+                    float(source[page_index].rect.y0),
+                    float(source[page_index].rect.x1),
+                    float(source[page_index].rect.y1),
+                ),
+                source_words=tuple(source[page_index].get_text("words")),
+                page_index=page_index,
+            ),
             "source_native_outer_wall_review": source_native_outer_review,
             "unsupported_rectangular_detour": dict(detour_receipt),
             "bounded_source": {
