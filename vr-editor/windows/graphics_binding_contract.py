@@ -21,7 +21,7 @@ def validate(report):
         errors.append("graphics_api must be D3D11")
     if report.get("openxr_graphics_extension") != "XR_KHR_D3D11_enable":
         errors.append("XR_KHR_D3D11_enable is required")
-    if report.get("feature_level") not in _FEATURES:
+    if not isinstance(report.get("feature_level"), str) or report["feature_level"] not in _FEATURES:
         errors.append("feature_level must be a supported D3D feature level")
     runtime = report.get("runtime_adapter_luid")
     device = report.get("device_adapter_luid")
