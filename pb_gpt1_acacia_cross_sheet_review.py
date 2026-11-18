@@ -182,23 +182,30 @@ def reconcile_acacia_schedule_hosts(
             )
         floor_count = packet.sheets[0].source_page_path_count
         schedule_count = packet.sheets[3].source_page_path_count
+        floor_paths = r.floor_host_native_path_ids
+        schedule_paths = r.schedule_native_path_ids
         if (
             r.original_source_sha256 != packet.source_sha256
             or r.floor_page_index != 1 or r.schedule_page_index != 9
-            or any(n >= floor_count for n in r.floor_host_native_path_ids)
-            or any(n >= schedule_count for n in r.schedule_native_path_ids)
-            or not r.floor_host_native_path_ids
-            or not r.schedule_native_path_ids
-            or any(type(x) is not int or x < 0 for x in (
-                *r.floor_host_native_path_ids, *r.schedule_native_path_ids,
-            ))
-            or len(set(r.floor_host_native_path_ids))
-               != len(r.floor_host_native_path_ids)
-            or len(set(r.schedule_native_path_ids))
-               != len(r.schedule_native_path_ids)
+            or type(floor_count) is not int or floor_count <= 0
+            or type(schedule_count) is not int or schedule_count <= 0
+            # A missing/mutable list of source paths is not an immutable
+            # source witness. Check types BEFORE iterating or making a set
+            # so malformed receipts fail closed rather than raise.
+            or type(floor_paths) is not tuple or not floor_paths
+            or type(schedule_paths) is not tuple or not schedule_paths
+            or any(type(n) is not int or not 0 <= n < floor_count
+                   for n in floor_paths)
+            or any(type(n) is not int or not 0 <= n < schedule_count
+                   for n in schedule_paths)
+            or len(set(floor_paths)) != len(floor_paths)
+            or len(set(schedule_paths)) != len(schedule_paths)
+            or type(r.original_host_ink_authenticated) is not bool
             or not r.original_host_ink_authenticated
-            or not r.physical_aperture_identity
-            or not r.assembly_identity
+            or type(r.physical_aperture_identity) is not str
+            or not r.physical_aperture_identity.strip()
+            or type(r.assembly_identity) is not str
+            or not r.assembly_identity.strip()
         ):
             return AcaciaScheduleHostReview(
                 "ABSTAINED", ("unproved_floor_or_schedule_source_host",),
