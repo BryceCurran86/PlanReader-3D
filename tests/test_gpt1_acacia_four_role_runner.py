@@ -113,3 +113,28 @@ def test_source_exterior_witness_still_needs_inside_finished_face():
     )
     assert scope["physical_room_face_authorized"] is False
     assert scope["commercial_quantity_rows"] == 0
+
+
+@pytest.mark.parametrize("untrusted_outer", [
+    None,
+    1,
+    "true",
+    {},
+    {"physical_wall_authenticated": "True"},
+    {"physical_wall_authenticated": "false"},
+    {"physical_wall_authenticated": 1},
+    {"physical_wall_authenticated": []},
+    {"physical_wall_authenticated": True, "status": "ABSTAINED"},
+])
+def test_acacia_outer_source_review_never_promotes_truthy_or_abstained_ink(
+    untrusted_outer,
+):
+    from tests.test_gpt1_acacia_cross_sheet_review import _package
+
+    scope = runner._acacia_source_scope_review(_package(), untrusted_outer)
+    assert scope["source_exterior_first_failing_gate"] == (
+        "outside_original_wall_ink_not_physically_accepted"
+    )
+    assert scope["physical_room_face_authorized"] is False
+    assert scope["commercial_quantity_rows"] == 0
+    assert scope["official_frozen120_score_change"] == 0
