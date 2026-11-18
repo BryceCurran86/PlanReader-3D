@@ -78,3 +78,38 @@ def test_authenticated_private_acacia_packet_is_diagnostic_only():
     assert receipt.to_dict()["customer_quantities_authorized"] is False
     assert receipt.to_dict()["physical_outer_wall_verified"] is False
     assert receipt.to_dict()["installed_door_window_hosts_verified"] is False
+
+
+def test_original_acacia_trace_receipt_excludes_courts_and_stays_review_only():
+    from tests.test_gpt1_acacia_cross_sheet_review import _package
+
+    scope = runner._acacia_source_scope_review(
+        _package(),
+        {
+            "status": "ABSTAINED",
+            "reason": "source_exterior_perimeter_not_unique_and_closed",
+            "physical_wall_authenticated": False,
+        },
+    )
+    assert scope["indoor_candidate_key_ids"] == list(range(2, 11))
+    assert scope["outdoor_or_service_excluded_key_ids"] == [1, 11, 12, 13, 14, 15]
+    assert scope["source_exterior_first_failing_gate"] == (
+        "outside_original_wall_ink_not_physically_accepted"
+    )
+    assert len(scope["scheduled_prototype_codes_not_installed_count"]) == 16
+    assert scope["installed_opening_instances_count_verified"] is False
+    assert scope["floor_wall_ceiling_finish_authorized"] is False
+    assert scope["commercial_quantity_rows"] == 0
+    assert scope["official_frozen120_score_change"] == 0
+
+
+def test_source_exterior_witness_still_needs_inside_finished_face():
+    from tests.test_gpt1_acacia_cross_sheet_review import _package
+
+    accepted_walker_ink = {"physical_wall_authenticated": True}
+    scope = runner._acacia_source_scope_review(_package(), accepted_walker_ink)
+    assert scope["source_exterior_first_failing_gate"] == (
+        "finished_inside_face_and_opening_host_not_verified"
+    )
+    assert scope["physical_room_face_authorized"] is False
+    assert scope["commercial_quantity_rows"] == 0
