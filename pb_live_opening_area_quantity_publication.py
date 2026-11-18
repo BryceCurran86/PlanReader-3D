@@ -20,6 +20,7 @@ from pb_live_physical_opening_void_composition import (
     LivePhysicalOpeningVoidComposition,
 )
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
+from pb_physical_opening_authority import RASTER_CORNER_FRAMED_OPENING_LEG
 
 
 LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION = "1.0.0"
@@ -51,6 +52,10 @@ def _opening_quantity(
 ) -> QuantityEvidence | None:
     if type(opening) is not LiveCanonicalOpeningObject:
         raise TypeError("opening must be LiveCanonicalOpeningObject")
+    # A diagnostic corner leg can carry an owned label and a source-space
+    # frame. Its installed assembly still needs measurement authority.
+    if opening.structural_pattern == RASTER_CORNER_FRAMED_OPENING_LEG:
+        return None
 
     canonical_id = str(opening.canonical_opening_id or "").strip()
     physical_id = str(opening.physical_opening_id or "").strip()
