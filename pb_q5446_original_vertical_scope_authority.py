@@ -27,6 +27,8 @@ class Q5446VerticalScopeReview:
     promoted_ground_dwelling_and_garage_height_mm: int | None = None
     first_floor_nominal_reference_height_mm: int | None = None
     promoted_hinged_sliding_alfresco_door_height_mm: int | None = None
+    promoted_ground_flush_panel_hinged_door_height_mm: int | None = None
+    promoted_ground_flush_panel_maximum_width_mm: int | None = None
     master_ensuite_full_height_wall_tile_scope: bool = False
     other_wet_rooms_full_height_tile_scope: bool = False
     physical_wall_height_authorized: bool = False
@@ -43,6 +45,8 @@ class Q5446VerticalScopeReview:
             "promoted_ground_dwelling_and_garage_height_mm": self.promoted_ground_dwelling_and_garage_height_mm,
             "first_floor_nominal_reference_height_mm": self.first_floor_nominal_reference_height_mm,
             "promoted_hinged_sliding_alfresco_door_height_mm": self.promoted_hinged_sliding_alfresco_door_height_mm,
+            "promoted_ground_flush_panel_hinged_door_height_mm": self.promoted_ground_flush_panel_hinged_door_height_mm,
+            "promoted_ground_flush_panel_maximum_width_mm": self.promoted_ground_flush_panel_maximum_width_mm,
             "master_ensuite_full_height_wall_tile_scope": self.master_ensuite_full_height_wall_tile_scope,
             "other_wet_rooms_full_height_tile_scope": False,
             "physical_wall_height_authorized": False,
@@ -93,6 +97,14 @@ def correlate_authenticated_q5446_vertical_scope(
         r"provide\s+2400\s*mm high standard hinged, sliding, alfresco "
         r"door\(s\) in lieu of standard", p5,
     ))
+    # A distinct signed 2340mm *ground-level flush panel* promotion
+    # coexists with the 2400mm hinged/sliding/alfresco promotion. Neither
+    # number is allowed to override the other's named opening family.
+    ground_flush_panel = bool(re.search(
+        r"provide\s+2340\s*mm high x up to 820\s*mm wide flush panel hinged "
+        r"doors to ground floor of dwelling in lieu of standard\s+"
+        r"2040\s*mm high flush panel hinged doors", p5,
+    ))
     master = bool(re.search(
         r"provide full height ceramic wall tiling\s+"
         r"\(as per standard range and specification\)\s+"
@@ -106,7 +118,14 @@ def correlate_authenticated_q5446_vertical_scope(
             "door_and_wet_tile_scope_require_installed_physical_hosts",
         ),
         (plan_sha256, inclusions_sha256, sales_sha256),
-        2440, 2740, 2440, 2400 if door else None, master, False,
+        standard_frame_plate_nominal_height_mm=2440,
+        promoted_ground_dwelling_and_garage_height_mm=2740,
+        first_floor_nominal_reference_height_mm=2440,
+        promoted_hinged_sliding_alfresco_door_height_mm=2400 if door else None,
+        promoted_ground_flush_panel_hinged_door_height_mm=2340 if ground_flush_panel else None,
+        promoted_ground_flush_panel_maximum_width_mm=820 if ground_flush_panel else None,
+        master_ensuite_full_height_wall_tile_scope=master,
+        other_wet_rooms_full_height_tile_scope=False,
     )
 
 
