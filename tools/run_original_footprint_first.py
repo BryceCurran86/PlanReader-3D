@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pb_gpt1_acacia_source_packet import (
+    inspect_acacia_original_bytes,
+)
 from pb_external_footprint_first_trace import (  # noqa: E402
     bound_native_drawings_to_footprint,
     refine_external_footprint_against_wall_ink,
@@ -200,10 +203,23 @@ def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
 
 def run(pdf: Path, page_index: int, out_dir: Path, *,
         expected_sha256: str | None = None,
-        expected_drawing_title: str | None = None):
+        expected_drawing_title: str | None = None,
+        acacia_region: str | None = None):
     import fitz
 
     original_bytes = pdf.read_bytes()
+    acacia_package = None
+    if acacia_region is not None:
+        # In Acacia-specific replay, prevent p1 site/cover, foreign regional
+        # source and wrong section/setout/schedule variants from reaching
+        # geometry. Generic projects retain their existing input contract.
+        acacia_package = inspect_acacia_original_bytes(
+            original_bytes, expected_region=acacia_region,
+        )
+        if not acacia_package.original_byte_roles_verified:
+            raise ValueError("original_footprint_acacia_role_packet_unverified")
+        if page_index != 1:
+            raise ValueError("original_footprint_acacia_floor_page_required")
     sha = hashlib.sha256(original_bytes).hexdigest()
     sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
     # Reject invalid original sheet identities before source-native geometry tracing.
@@ -241,6 +257,9 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "source_sha256": sha,
             "source_sha_pin_verified": sha_pin_verified,
             "source_page_title_verified": title_verified,
+            "acacia_four_role_original_source_review": (
+                acacia_package.to_dict() if acacia_package else None
+            ),
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
@@ -484,11 +503,15 @@ if __name__ == "__main__":
                         help="Exact SHA256 of the intended original drawing")
     parser.add_argument("--expected-drawing-title",
                         help="Require drawing-title field of the intended page")
+    parser.add_argument("--acacia-region",
+                        choices=("Sydney", "Melbourne", "Brisbane"),
+                        help="Require four exact original Acacia source pages on floor p2")
     arguments = parser.parse_args()
     result, js, png = run(
         arguments.pdf, arguments.page, arguments.out_dir,
         expected_sha256=arguments.expected_sha256,
         expected_drawing_title=arguments.expected_drawing_title,
+        acacia_region=arguments.acacia_region,
     )
     print(json.dumps({
         "source_sha_pin_verified": result["source_sha_pin_verified"],
