@@ -189,3 +189,58 @@ def test_missing_design_options_spec_never_assigns_paint_tile_or_ceiling_finish(
     status, reason = review_acacia_finishes(_package())
     assert status == "ABSTAINED"
     assert reason == "acacia_house_design_options_material_specification_missing"
+
+
+@pytest.mark.parametrize("kind", ("figured_setout", "section_height"))
+@pytest.mark.parametrize("tamper", [
+    {"floor_wall_face_native_path_ids": (6917,)},  # floor p2 exclusive bound
+    {"floor_wall_face_native_path_ids": (4000, 4000)},  # duplicate source mark
+    {"floor_wall_face_native_path_ids": (True,)},  # bool is not an index
+    {"floor_wall_face_native_path_ids": ("4000",)},
+    {"floor_wall_face_native_path_ids": [4000]},  # mutable/untyped witness
+    {"reference_figure_native_path_ids": (5000,)},  # p8/p9 exclusive bound
+    {"reference_figure_native_path_ids": (100, 100)},
+    {"reference_figure_native_path_ids": (True,)},
+    {"reference_figure_native_path_ids": ("100",)},
+    {"reference_figure_native_path_ids": [100]},
+    {"source_role_and_physical_host_independently_verified": "yes"},
+    {"source_role_and_physical_host_independently_verified": 1},
+])
+def test_cross_sheet_native_path_identity_must_be_bounded_and_typed(kind, tamper):
+    result = review_acacia_dimension_or_height(
+        _package(), replace(_dim(kind), **tamper)
+    )
+    assert result == (
+        "ABSTAINED", "original_cross_page_physical_host_or_figure_unverified"
+    )
+
+
+@pytest.mark.parametrize("kind", ("figured_setout", "section_height"))
+@pytest.mark.parametrize("page_index", (1, 7, 8, 9))
+@pytest.mark.parametrize("invalid_count", (0, True, -1, "5000"))
+def test_untrusted_original_native_path_census_cannot_admit_dimension(
+    kind, page_index, invalid_count,
+):
+    packet = _package()
+    bad_sheets = tuple(
+        replace(s, source_page_path_count=invalid_count)
+        if s.page_index == page_index else s for s in packet.sheets
+    )
+    assert review_acacia_dimension_or_height(
+        replace(packet, sheets=bad_sheets), _dim(kind)
+    )[0] == "ABSTAINED"
+
+
+@pytest.mark.parametrize("kind", ("figured_setout", "section_height"))
+def test_cross_sheet_last_valid_native_index_is_still_review_only(kind):
+    packet = _package()
+    source_page = 8 if kind == "figured_setout" else 7
+    sheet_counts = {s.page_index: s.source_page_path_count for s in packet.sheets}
+    witness = replace(
+        _dim(kind),
+        floor_wall_face_native_path_ids=(sheet_counts[1] - 1,),
+        reference_figure_native_path_ids=(sheet_counts[source_page] - 1,),
+    )
+    status, reason = review_acacia_dimension_or_height(packet, witness)
+    assert status == "SOURCE_FIGURE_AND_PHYSICAL_HOST_REVIEW_ONLY"
+    assert "no_finished_face_or_customer_metric_authority" in reason
