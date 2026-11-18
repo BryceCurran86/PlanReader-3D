@@ -111,3 +111,20 @@ def test_inline_false_date_or_dimension_not_a_room_key():
         line("11/2026", 3, 48, 70),
     ], (), **SCOPE)
     assert result.status == "ABSTAINED"
+
+
+def test_numbered_room_suffix_and_ampersand_are_retained():
+    crop = [
+        line("1", 3, 18, 5), line("BEDROOM", 20, 18, 49),
+        line("2", 72, 18, 5),
+        line("2", 3, 33, 5), line("FOOD", 20, 33, 29),
+        line("SERVICE", 52, 33, 47), line("&", 102, 33, 7),
+        line("POS", 112, 33, 24),
+        line("3", 3, 48, 5), line("OFFICE", 20, 48, 42),
+    ]
+    result = parse_numbered_key(crop, (), **SCOPE)
+    assert result.status == "CANDIDATE"
+    assert [item.name for item in result.entries] == [
+        "BEDROOM 2", "FOOD SERVICE & POS", "OFFICE",
+    ]
+    assert all(not item.physical_room_authenticated for item in result.entries)
