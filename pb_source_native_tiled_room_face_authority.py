@@ -22,6 +22,9 @@ from pb_portable_raster_ocr_authority import RapidOCRBackend
 
 SOURCE_PRIMITIVE_CAP = 20_000
 SOURCE_SNAP_PT = 2.5
+# PDF-native coordinate float32 jitter is not a physical wall/junction snap.
+# This tolerance is 25,000 times smaller than SOURCE_SNAP_PT.
+SOURCE_PDF_FLOAT_EPS_PT = 0.0001
 
 
 @dataclass(frozen=True)
@@ -121,18 +124,18 @@ def _candidate_ring(path: dict[str, Any]):
     ), key=lambda z: z[1] - z[0], reverse=True)
     matching = sorted({round(item[2], 3) for item in equal_longest})
     if len(matching) == 2 and matching[1] - matching[0] >= 0.7 * h:
-        # Rounded coordinates group identical native-line levels, but must
-        # never set *measured* bounds. On real Q5446 p2 path 1982, rounding
-        # 447.2400207..508.4400024 to .001 increases its height by 0.000018pt,
-        # falsely exceeding the unrounded source polygon and ABSTAINING.
-        top, bottom = (min(row[2] for row in equal_longest),
-                       max(row[2] for row in equal_longest))
+        # Preserve the existing source-CAD grouping/quantity precision.
+        # The rounded boundary may exceed the raw float32 polygon by <0.0001pt,
+        # far below the physical snap threshold. Validate that difference
+        # numerically rather than rejecting a genuinely native closed face.
+        top, bottom = matching
     elif verticals and verticals[0][1] - verticals[0][0] >= 0.7 * h:
         top, bottom = verticals[0][:2]
     else:
         return None
     box = (longest[0], top, longest[1], bottom)
-    if not 0 < box[2] - box[0] <= w or not 0 < box[3] - box[1] <= h:
+    if (not 0 < box[2] - box[0] <= w
+            or not 0 < box[3] - box[1] <= h + SOURCE_PDF_FLOAT_EPS_PT):
         return None
     return polygon, box
 
@@ -310,12 +313,10 @@ def find_unique_native_tiled_room_face(
         matches.append(NativeTiledRoomFace(
             page_number=page_number, source_boundary_path_id=path_id,
             room_label=label, source_bbox_pts=box,
-            # Keep original native PDF floating-point dimensions until the
-            # issuer performs the ONE final area rounding. Intermediate
-            # 5-decimal source-space rounding double-rounds real source faces,
-            # changing sealed quantities by 0.000001 m2 on Q5446 ground ENS.
-            finished_width_pts=box[2] - box[0],
-            finished_depth_pts=box[3] - box[1],
+            # Preserve accepted original-source quantity precision across
+            # source-native float jitter, not a new metric or scale authority.
+            finished_width_pts=round(box[2] - box[0], 5),
+            finished_depth_pts=round(box[3] - box[1], 5),
             wall_support_source_path_ids=supports,
             hatch_support_source_path_ids=hatch_ids,
             raster_ocr_render_dpis=accepted_dpis,
