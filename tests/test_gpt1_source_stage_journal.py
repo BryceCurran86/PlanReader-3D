@@ -416,3 +416,57 @@ def test_sampled_original_classmethod_keeps_descriptor_and_exact_class_binding(
             if row["stage"] == "PhysicalOpeningAuthority._visible_all_structural_candidates"] == [
         "entered", "completed", "entered", "completed"
     ]
+
+
+def test_returned_original_producer_records_single_final_sha_rechecked_marker(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"self-contained-synthetic-original-PDF-identity")
+    original_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    output = tmp_path / "output"
+    journal_path = tmp_path / "journal.jsonl"
+    calls = []
+
+    def producer(**kwargs):
+        calls.append(kwargs["pdf_path"])
+        return {"source_sha256": original_sha, "status": "no_sealable_quantities"}
+
+    monkeypatch.setattr(diag, "generate_project_handoff", producer)
+    monkeypatch.setattr("sys.argv", [
+        "stage-profile", "--pdf", str(source),
+        "--expected-sha256", original_sha, "--project-id", "source-project",
+        "--output-dir", str(output), "--journal", str(journal_path),
+    ])
+    assert diag.main() == 1  # Not a sealed customer run or accuracy score.
+    assert calls == [source]
+    events = _events(journal_path)
+    assert events[0]["event"] == "sha_verified"
+    assert events[-1]["event"] == "producer_returned"
+    assert events[-1]["stage"] == "source_handoff"
+    assert events[-1]["call_id"] == 0
+    assert sum(event["event"] == "producer_returned" for event in events) == 1
+
+
+def test_tampered_original_does_not_emit_terminal_producer_receipt(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "exact_source.pdf"
+    source.write_bytes(b"test-source-original-bytes")
+    sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    journal = tmp_path / "tampered.jsonl"
+
+    def tamper(**_kwargs):
+        source.write_bytes(b"tampered-after-producer")
+        return {"source_sha256": sha, "status": "sealed"}
+
+    monkeypatch.setattr(diag, "generate_project_handoff", tamper)
+    monkeypatch.setattr("sys.argv", [
+        "stage-profile", "--pdf", str(source), "--expected-sha256", sha,
+        "--project-id", "original-review", "--output-dir", str(tmp_path / "out"),
+        "--journal", str(journal),
+    ])
+    with pytest.raises(RuntimeError, match="source identity changed"):
+        diag.main()
+    assert not any(event["event"] == "producer_returned"
+                   for event in _events(journal))

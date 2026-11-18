@@ -21,6 +21,7 @@ def summarize(paths: list[Path]) -> dict:
         samples = defaultdict(lambda: {"calls": 0, "cumulative_ms": 0.0})
         lines = 0
         source_sha_verified = False
+        producer_returned = False
         with path.open(encoding="utf-8") as source:
             for line_no, line in enumerate(source, 1):
                 if not line.strip():
@@ -31,6 +32,8 @@ def summarize(paths: list[Path]) -> dict:
                 stage, event, call_id = record.get("stage"), record.get("event"), record.get("call_id")
                 if type(stage) is not str or not stage or type(call_id) is not int or type(event) is not str:
                     raise ValueError(f"invalid stage journal row: {path}:{line_no}")
+                if producer_returned:
+                    raise ValueError(f"events after original producer terminal receipt: {path}:{line_no}")
                 if type(record.get("peak_rss_kb")) is int:
                     peak_rss_kb = max(peak_rss_kb, record["peak_rss_kb"])
                 key = (stage, call_id)
@@ -42,6 +45,11 @@ def summarize(paths: list[Path]) -> dict:
                     if stage != "source_input" or call_id != 0 or source_sha_verified:
                         raise ValueError(f"invalid or duplicate source event: {path}:{line_no}")
                     source_sha_verified = True
+                elif event == "producer_returned":
+                    if (stage != "source_handoff" or call_id != 0
+                            or not source_sha_verified or entered):
+                        raise ValueError(f"invalid original producer terminal receipt: {path}:{line_no}")
+                    producer_returned = True
                 elif event == "failed" and key not in entered and "observation_calls" in record:
                     stages[stage]["failed_calls"] += 1
                 elif event in ("completed", "failed"):
@@ -66,10 +74,13 @@ def summarize(paths: list[Path]) -> dict:
         rows = [{"stage": name, **{k: round(v, 3) if k == "inclusive_ms" else v for k, v in values.items()}} for name, values in stages.items()]
         rows.sort(key=lambda x: (-x["inclusive_ms"], x["stage"]))
         reports.append({"journal": str(path), "rows_read": lines, "peak_rss_kb": peak_rss_kb,
-                        "stage_totals_inclusive_nested": True, "source_sha_verified": source_sha_verified, "stages": rows,
+                        "stage_totals_inclusive_nested": True, "source_sha_verified": source_sha_verified,
+                        "original_producer_returned_after_source_recheck": producer_returned,
+                        "stages": rows,
                         "unfinished_stage_calls": [{"stage": k[0], "call_id": k[1]} for k in sorted(entered)],
                         "sampled_hotpaths": dict(sorted(samples.items())),
-                        "complete": source_sha_verified and bool(rows) and not bool(entered) and not any(v["failed_calls"] for v in stages.values())})
+                        "complete": source_sha_verified and producer_returned and not bool(entered)
+                        and not any(v["failed_calls"] for v in stages.values())})
     return {"diagnostic_only": True, "reports": reports,
             "notice": "Inclusive stage totals may overlap for nested calls; do not sum them as whole-run time. A complete journal is not proof of a complete signed benchmark."}
 
