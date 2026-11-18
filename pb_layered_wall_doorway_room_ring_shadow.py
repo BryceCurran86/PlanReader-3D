@@ -66,6 +66,12 @@ _DARK_FILL_THICK_MAX = 14.0
 # PDF-point candidate heuristic only. Not a physical wall identity or scale rule.
 _WALL_END_SUPPORT_SPAN = 80.0
 _WALL_END_CLOSER_SPAN = 20.0
+# Thin CAD exterior faces (often dashed ~3.5 pt gaps) merge into topology bands.
+# Never a wall-body join snap or measurement authority.
+_CAD_DASH_GAP_PT = 4.0
+_MERGED_FACE_MIN_SPAN = 40.0
+_MERGED_FACE_WIDTH_MIN = 0.2
+_MERGED_FACE_WIDTH_MAX = 6.0
 
 _ARC_CIRCULARITY = 0.002  # relative; a cubic Bezier quarter circle deviates by about 0.0003
 
@@ -406,6 +412,12 @@ class LayeredRoomRingResult:
     # interruption. No hosts, closures, lengths, room quantities or FIRM.
     unresolved_gap_witnesses: tuple[Mapping[str, Any], ...] = ()
     unresolved_gap_witness_count: int = 0
+    # Topology-only free-space planarization audit. Never room quantity authority.
+    free_space_part_count: int = 0
+    free_space_exterior_touching_count: int = 0
+    free_space_enclosed_part_count: int = 0
+    free_space_max_enclosed_area_pt2: float = 0.0
+    merged_collinear_dark_face_strip_count: int = 0
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any]]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -810,9 +822,9 @@ def _collect_source_heavy_stroke_strips(
         width = row.get("width", 0)
         if type(width) is bool or type(width) not in (int, float):
             continue
-        if not math.isfinite(width) or not (1.2 <= float(width) <= 6.0):
+        width_f = float(width)
+        if not math.isfinite(width_f) or width_f > 6.0 or width_f < 0.45:
             continue
-        half = float(width) / 2.0
         for item in row.get("items") or ():
             if not item or item[0] != "l" or len(item) < 3:
                 continue
@@ -820,12 +832,21 @@ def _collect_source_heavy_stroke_strips(
             if not all(math.isfinite(v) for v in (ax, ay, bx, by)):
                 continue
             if abs(ay - by) < 0.08 and abs(ax - bx) >= 12.0:
+                span = abs(ax - bx)
                 x0, x1 = sorted((ax, bx))
                 mid_y = (ay + by) / 2.0
+                # Medium-width (0.45–1.2) only for long structural faces.
+                if width_f < 1.2 and span < _WALL_END_SUPPORT_SPAN:
+                    continue
+                half = max(width_f, _STROKE_PAIR_THICK_MIN) / 2.0
                 y0, y1 = mid_y - half, mid_y + half
             elif abs(ax - bx) < 0.08 and abs(ay - by) >= 12.0:
+                span = abs(ay - by)
                 y0, y1 = sorted((ay, by))
                 mid_x = (ax + bx) / 2.0
+                if width_f < 1.2 and span < _WALL_END_SUPPORT_SPAN:
+                    continue
+                half = max(width_f, _STROKE_PAIR_THICK_MIN) / 2.0
                 x0, x1 = mid_x - half, mid_x + half
             else:
                 continue
@@ -835,6 +856,118 @@ def _collect_source_heavy_stroke_strips(
             seen.add(key)
             found.append(_Strip(index, x0, y0, x1, y1, box(x0, y0, x1, y1)))
     return found
+
+
+def _dark_face_stroke_rgb(color: Any) -> bool:
+    """Dark CAD stroke paint for merged-face topology only (not mid-gray guides)."""
+    if not isinstance(color, (tuple, list)) or len(color) != 3:
+        return False
+    if any(type(v) is bool or type(v) not in (int, float) for v in color):
+        return False
+    values = tuple(float(v) for v in color)
+    return all(math.isfinite(v) and 0.0 <= v <= 0.4 for v in values)
+
+
+def _collect_merged_collinear_dark_face_strips(
+    drawings: Sequence[Mapping[str, Any] | None],
+) -> list[_Strip]:
+    """Merge collinear thin/dashed dark CAD faces into topology-only wall bands.
+
+    Some exterior walls are drawn as one dashed or thin dark face (Acacia west
+    ~0.5 pt dashes with ~3.5 pt gaps) rather than a fill or a 1.2 pt heavy stroke.
+    Collinear dashes along one face become one candidate band after CAD-dash gap
+    merge. A single short drafting mark is not a wall. This never authenticates
+    a physical wall, closes a doorway, or issues area.
+    """
+    raw: list[tuple[int, bool, float, float, float, float]] = []
+    for index, row in enumerate(drawings):
+        if row is None or row.get("fill") is not None:
+            continue
+        if not _dark_face_stroke_rgb(row.get("color")):
+            continue
+        if not _visible_source_stroke_paint(row):
+            continue
+        width = row.get("width", 0)
+        if type(width) is bool or type(width) not in (int, float):
+            continue
+        width_f = float(width)
+        if not math.isfinite(width_f):
+            continue
+        if not (_MERGED_FACE_WIDTH_MIN <= width_f <= _MERGED_FACE_WIDTH_MAX):
+            continue
+        for item in row.get("items") or ():
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
+            if not all(math.isfinite(v) for v in (ax, ay, bx, by)):
+                continue
+            if _close(ay, by, 1e-3) and abs(bx - ax) > NOISE_PT:
+                lo, hi = sorted((ax, bx))
+                raw.append((index, True, (ay + by) / 2.0, lo, hi, width_f))
+            elif _close(ax, bx, 1e-3) and abs(by - ay) > NOISE_PT:
+                lo, hi = sorted((ay, by))
+                raw.append((index, False, (ax + bx) / 2.0, lo, hi, width_f))
+    found: list[_Strip] = []
+    seen: set[tuple[float, float, float, float]] = set()
+    for horiz in (True, False):
+        members = [item for item in raw if item[1] is horiz]
+        members.sort(key=lambda item: (item[2], item[3], item[4]))
+        buckets: list[list[tuple[int, bool, float, float, float, float]]] = []
+        for stroke in members:
+            if buckets and abs(stroke[2] - buckets[-1][0][2]) <= NOISE_PT:
+                buckets[-1].append(stroke)
+            else:
+                buckets.append([stroke])
+        for bucket in buckets:
+            ordered = sorted(bucket, key=lambda item: (item[3], item[4]))
+            run = [ordered[0]]
+            lo, hi = ordered[0][3], ordered[0][4]
+            for stroke in ordered[1:]:
+                if stroke[3] <= hi + _CAD_DASH_GAP_PT:
+                    run.append(stroke)
+                    hi = max(hi, stroke[4])
+                    continue
+                _emit_merged_face_strip(found, seen, run, lo, hi, horiz)
+                run = [stroke]
+                lo, hi = stroke[3], stroke[4]
+            _emit_merged_face_strip(found, seen, run, lo, hi, horiz)
+    return found
+
+
+def _emit_merged_face_strip(
+    found: list[_Strip],
+    seen: set[tuple[float, float, float, float]],
+    run: Sequence[tuple[int, bool, float, float, float, float]],
+    lo: float,
+    hi: float,
+    horiz: bool,
+) -> None:
+    span = hi - lo
+    if span < _MERGED_FACE_MIN_SPAN:
+        return
+    ids = tuple(sorted({item[0] for item in run}))
+    # Require ≥2 original path indices so a lone wall-end closer stroke cannot
+    # mint a face band and bypass wall_end_stroke_closures. Dashed exterior
+    # faces (Acacia west) naturally supply many collinear dash paths.
+    if len(ids) < 2:
+        return
+    perp = sum(item[2] for item in run) / len(run)
+    width = max(item[5] for item in run)
+    half = max(width, _STROKE_PAIR_THICK_MIN) / 2.0
+    if horiz:
+        x0, x1, y0, y1 = lo, hi, perp - half, perp + half
+    else:
+        x0, x1, y0, y1 = perp - half, perp + half, lo, hi
+    key = (round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+    if key in seen:
+        return
+    seen.add(key)
+    found.append(
+        _Strip(
+            ids[0], x0, y0, x1, y1, box(x0, y0, x1, y1),
+            path_indices=ids,
+        )
+    )
 
 
 def _collect_stroke_pair_strips(
@@ -2006,8 +2139,9 @@ def build_layered_wall_doorway_room_rings(
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
     ``source_heavy_stroke_wall_bands`` (default False) admits one opaque 1.2–6 pt
-    black axis-aligned stroke as a topology-only wall band. It is not a pair,
-    not a raster hull, and not a billed wall.
+    black axis-aligned stroke as a topology-only wall band, and also a long
+    (≥80 pt) medium-width (0.45–1.2) black face. It is not a pair, not a raster
+    hull, and not a billed wall.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
@@ -2043,15 +2177,18 @@ def build_layered_wall_doorway_room_rings(
                 (), (), 0, 0, 0, 0, 0, 0,
             )
     strips, other_fills = _collect_strips(drawings)
+    merged_face_strips: list[_Strip] = []
     if dark_painted_wall_source:
         # Owner: black paired-line walls, dark filled wall strips and true
         # named wall ink are the structural wall hypothesis sources.
         # Unqualified green aisle/equipment/cold-room graphics are excluded
         # before this stage, with original path indices still intact.
+        merged_face_strips = _collect_merged_collinear_dark_face_strips(drawings)
         strips = (
             strips
             + _collect_dark_painted_source_wall_strips(drawings)
             + _collect_stroke_pair_strips(drawings)
+            + merged_face_strips
         )
         if wall_end_stroke_closures:
             strips = strips + _collect_wall_end_closing_strips(drawings, strips)
@@ -2250,9 +2387,14 @@ def build_layered_wall_doorway_room_rings(
     thicknesses = sorted(min(s.x1 - s.x0, s.y1 - s.y0) for s in strips)
     median_thickness = thicknesses[len(thicknesses) // 2]
     sliver_count = 0
+    free_space_part_count = 0
+    free_space_exterior_touching_count = 0
+    free_space_enclosed_part_count = 0
+    free_space_max_enclosed_area_pt2 = 0.0
     for part in _polygon_parts(free):
         if part.area <= NOISE_PT * NOISE_PT:
             continue
+        free_space_part_count += 1
         # A free region narrower than the page's own median wall thickness is a drafting gap
         # between wall pieces, not a room.
         if part.buffer(-median_thickness / 2.0, join_style=2).is_empty:
@@ -2261,7 +2403,12 @@ def build_layered_wall_doorway_room_rings(
         reasons: list[str] = []
         touches_domain = part.boundary.intersects(domain.boundary.buffer(NOISE_PT))
         if touches_domain:
+            free_space_exterior_touching_count += 1
             continue  # the exterior region: not a room
+        free_space_enclosed_part_count += 1
+        free_space_max_enclosed_area_pt2 = max(
+            free_space_max_enclosed_area_pt2, float(part.area),
+        )
         # Only a collinear interruption whose BOTH ends sit on this ring's
         # outer face may invalidate it. Aligned walls outside the room, or
         # disconnected partitions inside it, are not openings in THIS perimeter.
@@ -2332,6 +2479,11 @@ def build_layered_wall_doorway_room_rings(
         source_owned_doorway_chords=sourced_doorway_chords,
         unresolved_gap_witnesses=gap_witnesses,
         unresolved_gap_witness_count=gap_witness_count,
+        free_space_part_count=free_space_part_count,
+        free_space_exterior_touching_count=free_space_exterior_touching_count,
+        free_space_enclosed_part_count=free_space_enclosed_part_count,
+        free_space_max_enclosed_area_pt2=round(free_space_max_enclosed_area_pt2, 4),
+        merged_collinear_dark_face_strip_count=len(merged_face_strips),
     )
 
 
