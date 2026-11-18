@@ -121,7 +121,12 @@ def _candidate_ring(path: dict[str, Any]):
     ), key=lambda z: z[1] - z[0], reverse=True)
     matching = sorted({round(item[2], 3) for item in equal_longest})
     if len(matching) == 2 and matching[1] - matching[0] >= 0.7 * h:
-        top, bottom = matching
+        # Rounded coordinates group identical native-line levels, but must
+        # never set *measured* bounds. On real Q5446 p2 path 1982, rounding
+        # 447.2400207..508.4400024 to .001 increases its height by 0.000018pt,
+        # falsely exceeding the unrounded source polygon and ABSTAINING.
+        top, bottom = (min(row[2] for row in equal_longest),
+                       max(row[2] for row in equal_longest))
     elif verticals and verticals[0][1] - verticals[0][0] >= 0.7 * h:
         top, bottom = verticals[0][:2]
     else:
