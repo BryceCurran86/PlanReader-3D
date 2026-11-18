@@ -1,0 +1,30 @@
+name: Private Sandbox OCR Dependencies
+on:
+  push:
+    branches: [benchmarks/source-archive-for-private-original-run-20261118]
+    paths: [.github/workflows/private-sandbox-ocr-wheelhouse.yml]
+permissions:
+  contents: read
+jobs:
+  source-neutral-ocr-wheels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Download public wheels only, no private documents
+        run: |
+          python -m pip download --only-binary=:all: --dest wheelhouse rapidocr onnxruntime
+          python - <<'PY'
+          from pathlib import Path
+          paths = sorted(Path("wheelhouse").glob("*.whl"))
+          assert paths, "OCR dependency archive empty"
+          print("wheel count", len(paths))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-neutral-ocr-py313-linux-wheels
+          path: wheelhouse/
+          retention-days: 1
+          if-no-files-found: error
