@@ -184,3 +184,60 @@ def test_spoofed_duplicate_or_unverified_sibling_cannot_publish(
     assert result["status"] == "no_sealable_quantities"
     assert result["benchmark_score_granted"] is False
     assert not (output / (project + ".json")).exists()
+
+
+def test_source_verified_ground_ensuite_is_fourth_independent_customer_row(
+    tmp_path, monkeypatch,
+):
+    plan, sha, project, prior, laundry, first_ens = _setup_producer(
+        tmp_path, monkeypatch,
+    )
+    original_ground = _independent_result(
+        prior, project, sha, "synthetic-ground-ens",
+        "verified-ground-ensuite-face",
+    )
+    monkeypatch.setattr(
+        runtime, "issue_original_q5446_ground_ensuite_tiled_floor",
+        lambda *_a, **_kw: original_ground,
+    )
+    result, output = _produce(tmp_path, plan, project)
+    assert result["status"] == "sealed"
+    assert result["family_counts"] == {
+        "floor_area": 1, "floor_finish_area": 3,
+    }
+    assert result["verified_customer_row_count"] == 4
+    assert result["benchmark_score_granted"] is False
+    signed = load_verified_sealed_run(output / (project + ".json"))
+    rows = json.loads((output / "verified_customer_rows.json").read_text())
+    assert set(signed.source_sha256s) == {sha}
+    assert len({x.quantity_id for x in signed.quantities}) == 4
+    assert len(set(
+        physical_id for q in signed.quantities
+        for physical_id in q.object_identity_refs
+    )) == 4
+    assert {q.quantity_id for q in signed.quantities} == {
+        q.quantity_id for q in (
+            prior.sealed_run.quantities[0],
+            laundry.sealed_run.quantities[0],
+            first_ens.sealed_run.quantities[0],
+            original_ground.sealed_run.quantities[0],
+        )
+    }
+    assert rows[0] == prior.customer_rows[0]
+    assert verify_sealed_customer_output(signed, rows).customer_row_count == 4
+
+
+def test_duplicate_ground_ensuite_physical_owner_cannot_republish(
+    tmp_path, monkeypatch,
+):
+    plan, _sha, project, _prior, laundry, _first = _setup_producer(
+        tmp_path, monkeypatch,
+    )
+    monkeypatch.setattr(
+        runtime, "issue_original_q5446_ground_ensuite_tiled_floor",
+        lambda *_a, **_kw: laundry,
+    )
+    result, output = _produce(tmp_path, plan, project)
+    assert result["status"] == "no_sealable_quantities"
+    assert result["benchmark_score_granted"] is False
+    assert not (output / (project + ".json")).exists()
