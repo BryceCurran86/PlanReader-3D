@@ -442,11 +442,21 @@ def classify_floor(
         reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
     if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
-    if correspondence["wall_bounded_on_both_sheets"] is not True:
+    # A partial or caller-forged wall receipt must ABSTAIN, never raise or
+    # fall through into a source-correspondence CANDIDATE.
+    if (
+        not isinstance(correspondence, Mapping)
+        or correspondence.get("wall_bounded_on_both_sheets") is not True
+    ):
         reasons.append(BOX_NOT_WALL_BOUNDED)
-    elif correspondence["wall_evidence_identical_on_both_sheets"] is not True:
+    elif correspondence.get("wall_evidence_identical_on_both_sheets") is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
-    if other_labelled_boxes_overlapping:
+    # A malformed explicit overlap count is not proof of zero rivals.
+    # bool is deliberately excluded despite being a subclass of int.
+    if (
+        type(other_labelled_boxes_overlapping) is not int
+        or other_labelled_boxes_overlapping != 0
+    ):
         reasons.append(OVERLAPPING_MEASURED_BOXES)
     # Source-face / physical-room / canonical-floor identifiers are a
     # one-to-one claim for this shadow correspondence. Repeating an identity
@@ -887,14 +897,21 @@ class SourceCrossViewFloorCorrespondenceProducer:
                         "registered_region": mark.get("registered_region"),
                     })
 
+            # Keep the independently measured overlap flag and the caller's
+            # explicit count typed. An omitted optional count defaults to 0,
+            # but every measured box is still checked by the geometric sweep.
+            # A supplied bool, non-integer or negative count must abstain.
+            raw_overlap_count = item.get("other_labelled_boxes_overlapping", 0)
+            if type(raw_overlap_count) is int and raw_overlap_count >= 0:
+                overlap_count = raw_overlap_count + int(overlap_flags[box_index])
+            else:
+                overlap_count = raw_overlap_count
+
             classified = classify_floor(
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=(
-                    bool(item.get("other_labelled_boxes_overlapping", 0))
-                    or overlap_flags[box_index]
-                ),
+                other_labelled_boxes_overlapping=overlap_count,
                 material_code=selector.material_code,
                 identity_missing=identity_missing,
                 identity_ambiguous=identity_ambiguous,

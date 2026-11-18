@@ -67,6 +67,7 @@ _PATH = re.compile(r"/api/editor/workspaces/([^/]+)/manifest\Z")
 def make_editor_readonly_wsgi_app(
     authenticate_session: Authenticate,
     load_authorized_workspace: LoadWorkspace,
+    load_created_working_walls: Callable | None = None,
 ):
     """Construct a GET-only scene service using injected REAL auth & database.
 
@@ -130,6 +131,14 @@ def make_editor_readonly_wsgi_app(
                 canonical_object_ids=workspace.canonical_object_ids,
                 source_witnesses=workspace.source_witnesses,
             )
+            if load_created_working_walls is not None:
+                # Opt-in host integration; the callback must read the
+                # authenticated wall ledger AND the current model revision
+                # in one consistent database snapshot. Never accept browser
+                # wall JSON as a source witness.
+                from pb_vr_wall_create_revision_store import attach_created_walls_to_scene
+                created = load_created_working_walls(principal, workspace)
+                scene = attach_created_walls_to_scene(scene, created)
         except Exception:
             # Do not leak source SHA, private paths, object IDs, DB errors, or
             # stack traces to clients. Server observability is the caller's job.
