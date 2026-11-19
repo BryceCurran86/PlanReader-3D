@@ -84,6 +84,7 @@ def _admitted(packet: AcaciaOriginalPackage) -> bool:
         and packet.original_byte_roles_verified is True
         and type(packet.source_pages) is int and packet.source_pages == 10
         and len(packet.sheets) == 4
+        and all(type(s.page_index) is int for s in packet.sheets)
         and tuple((s.page_index, s.drawing_title, s.scale)
                   for s in packet.sheets) == ACACIA_REQUIRED_ROLES
         # A right title and scale on the wrong original numbered sheet
