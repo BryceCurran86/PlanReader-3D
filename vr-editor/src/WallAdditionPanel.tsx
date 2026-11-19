@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SceneManifest } from "./types";
+import { newPlacementId, openingFits } from "./buildPlacement";
+import type { PlacedWall, WallVisual } from "./buildPlacement";
 import {
   freshWallBatch,currentWallBatch,wallBatchSourceKey,addOrReplaceWallStudy,removeWallStudy,
   undoWallBatch,redoWallBatch,summarizeWallBatch,compareWallBatches,exportWallBatchReview,
@@ -8,20 +10,35 @@ import {
   makeWallAdditionCommand,validateAdditionSketch,verifyWallAssemblyPreview,verifyWallConstructionImpact,verifySavedNewWallRevision,
 } from "./wallAdditionProtocol";
 import type {
-  WallAdditionOpening,WallAdditionSketch,WallAssemblyPreview,WallConstructionImpactPreview,WallAdditionCommand,SavedNewWallRevision,
+  WallAdditionOpening,WallAssemblyPreview,WallConstructionImpactPreview,WallAdditionCommand,SavedNewWallRevision,
 } from "./wallAdditionProtocol";
+
+type OpeningFields = {
+  id: string;
+  kind: "door" | "passage";
+  offset: string;
+  width: string;
+  height: string;
+};
+const EMPTY_COORDS = { x1: "", z1: "", x2: "", z2: "", height: "" };
 
 type Props={
   scene:SceneManifest;
   authenticated:boolean;
-  onSketch:(sketch:WallAdditionSketch|null)=>void;
-  onBatchSketches:(sketches:WallAdditionSketch[])=>void;
+  onSketch:(sketch:WallVisual|null)=>void;
+  onBatchSketches:(sketches:WallVisual[])=>void;
+  reviewDraft:PlacedWall|null;
+  reviewRequest:number;
+  onSaved:(proposalId:string)=>void;
+  onExactDraft:(previous:PlacedWall,wall:PlacedWall)=>void;
 };
-export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}:Props){
+export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches,reviewDraft,reviewRequest,onSaved,onExactDraft}:Props){
   const [profile,setProfile]=useState("");
   const [level,setLevel]=useState("");
-  const [coords,setCoords]=useState({x1:"",z1:"",x2:"",z2:"",height:""});
-  const [door,setDoor]=useState({enabled:false,offset:"",width:"",height:""});
+  const [coords,setCoords]=useState(EMPTY_COORDS);
+  const [openingFields,setOpeningFields]=useState<OpeningFields[]>([]);
+  const imported=useRef<string|null>(null);
+  const appliedDimensions=useRef<{wall:PlacedWall;request:number}|null>(null);
   const [result,setResult]=useState<WallAssemblyPreview|null>(null);
   const [impact,setImpact]=useState<WallConstructionImpactPreview|null>(null);
   const [autoReprice,setAutoReprice]=useState(false);
@@ -44,7 +61,7 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     scopeKey:activeBatch.sourceKey,
     proposalId:command.proposalId,levelId:command.levelId,
     start:[...command.startPt] as [number,number],
-    end:[...command.endPt] as [number,number],heightM:command.heightM,
+    end:[...command.endPt] as [number,number],heightM:command.heightM,openings:command.openings,
   }));
   const [error,setError]=useState<string|null>(null);
   const [working,setWorking]=useState(false);
@@ -57,9 +74,9 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   activeScope.current=sceneIdentity;
   useEffect(()=>{
     controller.current?.abort();saveController.current?.abort();
-    proposal.current=null;saveToken.current=null;
-    setProfile("");setLevel("");setCoords({x1:"",z1:"",x2:"",z2:"",height:""});
-    setDoor({enabled:false,offset:"",width:"",height:""});
+    proposal.current=null;saveToken.current=null;imported.current=null;appliedDimensions.current=null;
+    setProfile("");setLevel("");setCoords(EMPTY_COORDS);
+    setOpeningFields([]);
     setResult(null);setImpact(null);setLastCommand(null);
     setSavedWall(null);setSavingWall(false);setError(null);setWorking(false);
     setAutoReprice(false);
@@ -81,18 +98,49 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
     setResult(null);setImpact(null);setLastCommand(null);
     setSavedWall(null);saveToken.current=null;setError(null);onSketch(null);
   }
+  useEffect(()=>{
+    if (savingWall) return;
+    if (!reviewDraft || reviewDraft.scopeKey !== sceneIdentity) {
+      if (imported.current) {
+        imported.current = null;
+        proposal.current = null;
+        setLevel(""); setCoords(EMPTY_COORDS); setOpeningFields([]);
+        stale();
+      }
+      return;
+    }
+    const applied=appliedDimensions.current;
+    if(applied?.wall===reviewDraft && applied.request===reviewRequest){
+      appliedDimensions.current=null;
+      return;
+    }
+    stale();
+    imported.current = reviewDraft.proposalId;
+    proposal.current = reviewDraft.proposalId;
+    setLevel(reviewDraft.levelId);
+    setCoords({
+      x1: String(reviewDraft.start[0]), z1: String(reviewDraft.start[1]),
+      x2: String(reviewDraft.end[0]), z2: String(reviewDraft.end[1]), height: String(reviewDraft.heightM),
+    });
+    setOpeningFields(reviewDraft.openings.map(opening => ({
+      id: opening.openingId, kind: opening.openingKind === "door" ? "door" : "passage",
+      offset: String(opening.offsetM), width: String(opening.widthM), height: String(opening.heightM),
+    })));
+  },[reviewDraft,reviewRequest,sceneIdentity,authenticated,savingWall]);
+
   // Automatic replanning never adds a wall to the persistent review batch.
   useEffect(()=>{
-    if(!autoReprice||!authenticated||!level||
+    if(!autoReprice||!authenticated||!level||savingWall||
        !/^[A-Za-z0-9_.:-]{1,128}$/.test(profile)||
        Object.values(coords).some(v=>!v.trim())||
-       (door.enabled&&[door.offset,door.width,door.height].some(v=>!v.trim())))
+       openingFields.some(o=>[o.offset,o.width,o.height].some(v=>!v.trim())))
       return;
     const timer=window.setTimeout(()=>{void addWallStudy(false);},700);
     return ()=>window.clearTimeout(timer);
-  },[autoReprice,authenticated,sceneIdentity,level,profile,coords,door]);
+  },[autoReprice,authenticated,sceneIdentity,level,profile,coords,openingFields,savingWall]);
 
   async function addWallStudy(addToBatch=true){
+    if(savingWall)return;
     stale();
     if(!authenticated){
       setError("Authenticate the original PlanReader workspace to request a trusted assembly scope.");
@@ -105,8 +153,9 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
       setError("Authenticated wall study requires the application CSRF token.");
       return;
     }
+    const abort=new AbortController();
     try{
-      if(!proposal.current)proposal.current=`wall-${crypto.randomUUID()}`;
+      if(!proposal.current)proposal.current=newPlacementId("wall");
       const sketch=validateAdditionSketch(scene,{
         proposalId:proposal.current,levelId:level,
         start:[Number(coords.x1),Number(coords.z1)],
@@ -115,16 +164,16 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
       });
       if(Object.values(coords).some(v=>!v.trim()))
         throw new Error("Enter all coordinates and a wall height in metres");
-      const openings:WallAdditionOpening[]=door.enabled?[{
-        openingId:`door-${sketch.proposalId}`,
-        offsetM:Number(door.offset),widthM:Number(door.width),
-        heightM:Number(door.height),sillHeightM:0,openingKind:"door",
-      }]:[];
-      if(door.enabled&&(!door.offset.trim()||!door.width.trim()||!door.height.trim()))
-        throw new Error("Explicitly enter the door offset, width and height");
+      if(openingFields.some(o=>[o.offset,o.width,o.height].some(v=>!v.trim())))
+        throw new Error("Enter an offset, width and height for each opening.");
+      const openings:WallAdditionOpening[]=openingFields.map(o=>({
+        openingId:o.id,offsetM:Number(o.offset),widthM:Number(o.width),heightM:Number(o.height),
+        sillHeightM:0,openingKind:o.kind,
+      }));
+      if(openings.some(opening=>!openingFits(sketch,opening)))
+        throw new Error("Check that each door or frame fits within the wall.");
       const command=makeWallAdditionCommand(scene,sketch,profile,openings);
-      onSketch(sketch);
-      const abort=new AbortController();
+      onSketch({...sketch,openings});
       controller.current=abort;
       setWorking(true);
       const response=await fetch(
@@ -144,7 +193,15 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
       }
       const verified=verifyWallAssemblyPreview(body,scene,command);
       const verifiedImpact=verifyWallConstructionImpact(body,verified);
-      if(!abort.signal.aborted){
+      if(!abort.signal.aborted && activeScope.current===sceneIdentity){
+        if(addToBatch && reviewDraft?.proposalId===sketch.proposalId){
+          const wall={...sketch,openings};
+          const dimensions=(draft:PlacedWall)=>[draft.levelId,draft.start,draft.end,draft.heightM,draft.openings];
+          if(JSON.stringify(dimensions(wall))!==JSON.stringify(dimensions(reviewDraft))){
+            appliedDimensions.current={wall,request:reviewRequest};
+            onExactDraft(reviewDraft,wall);
+          }
+        }
         if(addToBatch)setBatch(previous=>addOrReplaceWallStudy(
           scene,currentWallBatch(scene,previous),command,verified,
         ));
@@ -157,12 +214,12 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         setError(null);
       }
     }catch(e){
-      if(!controller.current?.signal.aborted){
+      if(!abort.signal.aborted && activeScope.current===sceneIdentity){
         setResult(null);setImpact(null);setLastCommand(null);
         setError(e instanceof Error?e.message:"Wall study unavailable");
       }
     }finally{
-      if(!controller.current?.signal.aborted){
+      if(controller.current===abort){
         controller.current=null;setWorking(false);
       }
     }
@@ -199,6 +256,10 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
         setSavedWall(saved);setLastCommand(null);
         setResult(null);setImpact(null);
         setAutoReprice(false);
+        imported.current=null;
+        proposal.current=null;
+        setLevel("");setCoords(EMPTY_COORDS);setOpeningFields([]);
+        onSaved(lastCommand.proposalId);
         setBatch(freshWallBatch(scene));
         onBatchSketches([]);
         onSketch(null);
@@ -223,55 +284,68 @@ export function WallAdditionPanel({scene,authenticated,onSketch,onBatchSketches}
   }
   const label=(name:string,text:string,value:string,onChange:(s:string)=>void)=>
     <label className="added-wall-field">{name}
-      <input inputMode="decimal" type="number" step="0.05" value={value}
+      <input inputMode="decimal" type="number" step="any" value={value} disabled={savingWall}
         placeholder={text} onChange={e=>{onChange(e.target.value);stale();}} />
     </label>;
   return <div className="wall-addition-panel" aria-label="New wall and dependent trades">
-    <span className="eyebrow">ADD WALL · ALL ASSOCIATED WORK</span>
-    <p className="muted">Position a proposed wall and request a project-defined
-      framing, bracing, plasterboard, skirting and electrical/plumbing scope.
-      All quantities are REVIEW ONLY. A wall or service is not yet saved
-      into the source plan.</p>
-    <label htmlFor="new-wall-level">Wall level</label>
-    <select id="new-wall-level" value={level}
-      onChange={e=>{setLevel(e.target.value);stale();}}>
-      <option value="">Choose a documented level</option>
-      {levelOptions.map(v=><option key={v} value={v}>{v}</option>)}
-    </select>
+    <h2>Review a new wall</h2>
+    <p className="muted">{reviewDraft
+      ? "Check the draft dimensions and enter the project assembly profile to calculate the work."
+      : "Use the scene’s Wall tool, then choose the draft to review. You can also enter coordinates below."}</p>
     <label htmlFor="new-wall-profile">Project wall assembly profile ID</label>
-    <input id="new-wall-profile" type="text" value={profile}
+    <input id="new-wall-profile" type="text" value={profile} disabled={savingWall}
       maxLength={128} placeholder="Registered profile, e.g. W01"
       onChange={e=>{setProfile(e.target.value);stale();}} />
-    <div className="added-wall-grid">
-      {label("Start X (m)","X1",coords.x1,v=>setCoords(c=>({...c,x1:v})))}
-      {label("Start Z (m)","Z1",coords.z1,v=>setCoords(c=>({...c,z1:v})))}
-      {label("End X (m)","X2",coords.x2,v=>setCoords(c=>({...c,x2:v})))}
-      {label("End Z (m)","Z2",coords.z2,v=>setCoords(c=>({...c,z2:v})))}
-      {label("Wall height (m)","Height",coords.height,
-        v=>setCoords(c=>({...c,height:v})))}
-    </div>
+    <details className="wall-dimensions">
+      <summary>Exact dimensions and openings</summary>
+      <label htmlFor="new-wall-level">Wall level</label>
+      <select id="new-wall-level" value={level} disabled={savingWall}
+        onChange={e=>{setLevel(e.target.value);stale();}}>
+        <option value="">Choose a documented level</option>
+        {levelOptions.map(v=><option key={v} value={v}>{v}</option>)}
+      </select>
+      <div className="added-wall-grid">
+        {label("Start X (m)","X1",coords.x1,v=>setCoords(c=>({...c,x1:v})))}
+        {label("Start Z (m)","Z1",coords.z1,v=>setCoords(c=>({...c,z1:v})))}
+        {label("End X (m)","X2",coords.x2,v=>setCoords(c=>({...c,x2:v})))}
+        {label("End Z (m)","Z2",coords.z2,v=>setCoords(c=>({...c,z2:v})))}
+        {label("Wall height (m)","Height",coords.height,v=>setCoords(c=>({...c,height:v})))}
+      </div>
+      {openingFields.map((opening,index)=>{
+        const name=opening.kind==="door"?"Door":"Frame";
+        const change=(key:"offset"|"width"|"height",value:string)=>setOpeningFields(fields=>
+          fields.map(item=>item.id===opening.id?{...item,[key]:value}:item));
+        return <fieldset key={opening.id}>
+          <legend>{name} {index+1}</legend>
+          <div className="added-wall-grid">
+            {label("Offset (m)","From wall start",opening.offset,v=>change("offset",v))}
+            {label("Width (m)","Opening width",opening.width,v=>change("width",v))}
+            {label("Height (m)","Opening height",opening.height,v=>change("height",v))}
+          </div>
+          <button type="button" disabled={savingWall} onClick={()=>{
+            setOpeningFields(fields=>fields.filter(item=>item.id!==opening.id));
+            stale();
+          }}>Remove {name.toLowerCase()} {index+1}</button>
+        </fieldset>;
+      })}
+      <div className="live-cost-actions">
+        {(["door","passage"] as const).map(kind=><button key={kind} type="button"
+          disabled={savingWall||openingFields.length>=100} onClick={()=>{
+            const id=newPlacementId("opening");
+            setOpeningFields(fields=>[...fields,{id,kind,offset:"",width:"",height:""}]);
+            stale();
+          }}>Add {kind==="door"?"door":"frame"}</button>)}
+      </div>
+    </details>
     <label className="added-wall-checkbox">
-      <input type="checkbox" checked={door.enabled}
-        onChange={e=>{setDoor(c=>({...c,enabled:e.target.checked}));stale();}} />
-      Include a user-positioned doorway
-    </label>
-    {door.enabled&&<div className="added-wall-grid">
-      {label("Door offset (m)","From wall start",door.offset,
-        v=>setDoor(c=>({...c,offset:v})))}
-      {label("Door width (m)","Documented width",door.width,
-        v=>setDoor(c=>({...c,width:v})))}
-      {label("Door height (m)","Documented height",door.height,
-        v=>setDoor(c=>({...c,height:v})))}
-    </div>}
-    <label className="added-wall-checkbox">
-      <input type="checkbox" checked={autoReprice} disabled={!authenticated}
+      <input type="checkbox" checked={autoReprice} disabled={!authenticated||savingWall}
         onChange={e=>{stale();setAutoReprice(e.target.checked);}} />
       Live preview construction costs and related pages after wall changes (700 ms pause)
     </label>
-    <button type="button" disabled={working||!authenticated}
+    <button type="button" disabled={working||savingWall||!authenticated}
       onClick={()=>void addWallStudy(true)}>
       {working?"Checking all dependent trades…":
-       "Add wall to review and calculate associated work"}
+       "Calculate wall and opening costs"}
     </button>
     {error&&<p role="alert" className="error">{error}</p>}
     {!authenticated&&<p className="muted">Source-authenticated workspace and
