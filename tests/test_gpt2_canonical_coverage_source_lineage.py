@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
 from tests.test_live_ceiling_area_quantity_publication import _ceiling, _result
@@ -48,7 +49,10 @@ def test_explicit_foreign_ceiling_lineage_is_not_credited_as_quantified(field, w
     summaries, gaps = _summaries((ceiling,), (changed,))
     assert gaps == {"ceiling": ["quantity_source_lineage_conflict"]}
     assert len(summaries) == 1
-    assert summaries[0].object_records[0].quantity_ids == ()
+    assert summaries[0].object_records[0].quantity_ids == (changed.quantity_id,)
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    stages = report["family_reports"]["ceiling"]["stage_counts"]
+    assert stages["QUANTIFIED"] == stages["PUBLISHED"] == 0
     assert changed.to_dict() == prior
 
 
@@ -64,7 +68,10 @@ def test_explicit_foreign_floor_lineage_is_not_credited_as_quantified(field, wro
     altered = replace(q, metadata={**q.metadata, field: wrong})
     summaries, gaps = _summaries(claim.canonical_floors, (altered,))
     assert gaps == {"floor": ["quantity_source_lineage_conflict"]}
-    assert summaries[0].object_records[0].quantity_ids == ()
+    assert summaries[0].object_records[0].quantity_ids == (altered.quantity_id,)
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    stages = report["family_reports"]["floor_slab"]["stage_counts"]
+    assert stages["QUANTIFIED"] == stages["PUBLISHED"] == 0
 
 
 def test_foreign_quantity_cannot_poison_independent_valid_surface():
@@ -86,8 +93,11 @@ def test_foreign_quantity_cannot_poison_independent_valid_surface():
         for summary in summaries
         for rec in summary.object_records
     }
-    assert ids_by_object[first.canonical_ceiling_id] == ()
+    assert ids_by_object[first.canonical_ceiling_id] == (stale_q.quantity_id,)
     assert ids_by_object[second.canonical_ceiling_id] == (second_q.quantity_id,)
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    assert report["family_reports"]["ceiling"]["stage_counts"]["QUANTIFIED"] == 1
+    assert report["family_reports"]["ceiling"]["stage_counts"]["PUBLISHED"] == 0
 
 
 def test_uppercase_same_source_hash_is_same_original_source():
