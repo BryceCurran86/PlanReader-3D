@@ -69,6 +69,19 @@ def test_forged_region_or_fake_source_packet_cannot_bind_physical_instances():
     assert review_acacia_finishes(bad)[0] == "ABSTAINED"
 
 
+
+@pytest.mark.parametrize("bad_index", [True, 1.0, "1"])
+def test_original_sheet_role_page_index_requires_exact_integer(bad_index):
+    packet = _package()
+    sheets = tuple(
+        replace(sheet, page_index=bad_index) if sheet.page_index == 1 else sheet
+        for sheet in packet.sheets
+    )
+    forged = replace(packet, sheets=sheets)
+    assert review_acacia_legend_room(forged, 3).status == "ABSTAINED"
+    assert reconcile_acacia_schedule_hosts(forged, (_receipt(),)).status == "ABSTAINED"
+    assert review_acacia_finishes(forged)[0] == "ABSTAINED"
+
 def _receipt(code="W2", *, host="opening-1", assembly="assembly-1",
              floor_path=400, schedule_path=500, verified=True):
     return AcaciaOpeningWitness(
