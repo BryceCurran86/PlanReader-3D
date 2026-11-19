@@ -340,3 +340,40 @@ def test_truthy_original_byte_roles_flag_does_not_authenticate_acacia():
     poisoned = replace(_package(), original_byte_roles_verified="yes")
     assert review_acacia_legend_room(poisoned, 3).status == "ABSTAINED"
     assert review_acacia_finishes(poisoned)[0] == "ABSTAINED"
+
+
+def test_two_aperture_ids_cannot_reuse_identical_floor_native_witness():
+    # Distinct string identities cannot multiply the same installed source
+    # observation into two commercial openings. No source dimensions guessed.
+    r = reconcile_acacia_schedule_hosts(
+        _package(),
+        (_receipt("W2", host="opening-a", assembly="frame-a", floor_path=400),
+         _receipt("W3", host="opening-b", assembly="frame-b",
+                  floor_path=400, schedule_path=501)),
+    )
+    assert r.status == "ABSTAINED"
+    assert r.reasons == ("native_host_witness_reused_for_distinct_apertures",)
+    assert not r.customer_row_authorized
+
+
+def test_distinct_floor_native_hosts_remain_review_only():
+    r = reconcile_acacia_schedule_hosts(
+        _package(),
+        (_receipt("W2", host="opening-a", assembly="frame-a", floor_path=400),
+         _receipt("W3", host="opening-b", assembly="frame-b",
+                  floor_path=401, schedule_path=501)),
+    )
+    assert r.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert not r.installed_opening_quantity_authorized
+
+
+def test_unbounded_or_oversized_opening_receipts_fail_closed():
+    # Never consume unlimited foreign iterables into memory.
+    def source():
+        for index in range(300):
+            yield _receipt("W2", host=f"opening-{index}",
+                           assembly=f"frame-{index}", floor_path=index)
+    r = reconcile_acacia_schedule_hosts(_package(), source())
+    assert r.status == "ABSTAINED"
+    assert r.reasons == ("schedule_host_receipts_over_limit",)
+    assert not r.customer_row_authorized
