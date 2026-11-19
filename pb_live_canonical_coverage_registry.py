@@ -74,6 +74,48 @@ def _physical_identity_resolved(obj: object) -> bool:
     return True
 
 
+def _quantity_explicit_lineage_conflict(
+    quantity: QuantityEvidence,
+    canonical_lineage: tuple[str, str, str, str],
+) -> bool:
+    """Never credit an explicitly foreign quantity to a same-named live object.
+
+    Some older legitimate source quantities omit optional source metadata;
+    absence is not positive proof and is handled by the existing quantity
+    authority. Contradictory original document/revision/SHA is a hard negative.
+    Cross-sheet semantic snapshot IDs can differ; compare the snapshot only for
+    a final canonical *surface reissue*, whose producer binds that physical
+    snapshot directly, never for an upstream material/schedule occurrence.
+    """
+    metadata = quantity.metadata
+    if not isinstance(metadata, Mapping):
+        return False
+    document_id, revision_id, source_sha, snapshot_id = canonical_lineage
+    for field, expected in (
+        ("document_id", document_id),
+        ("revision_id", revision_id),
+        ("source_sha256", source_sha),
+    ):
+        if field not in metadata or metadata[field] is None:
+            continue
+        actual = metadata[field]
+        if type(actual) is not str or not actual or actual != actual.strip():
+            return True
+        if field == "source_sha256":
+            if actual.lower() != expected.lower():
+                return True
+        elif actual != expected:
+            return True
+    if (
+        quantity.family in {"floor_area", "ceiling_lining"}
+        and "snapshot_id" in metadata and metadata["snapshot_id"] is not None
+    ):
+        actual = metadata["snapshot_id"]
+        if type(actual) is not str or actual != snapshot_id:
+            return True
+    return False
+
+
 def _metadata(obj: object, category: str, canonical_id: str, quantities: Sequence[QuantityEvidence]) -> dict:
     evidence_ids = getattr(obj, "evidence_ids", getattr(obj, "source_evidence_ids", ()))
     pages = getattr(obj, "page_ids", ()) or (
@@ -177,7 +219,18 @@ def collect_live_canonical_coverage(
         )
         # A dependency is retained even if another input entity was not admitted:
         # the registry reports that defect, rather than inventing the other ID.
-        linked = tuple(q for q in quantities if set(q.input_entity_ids).intersection(admitted))
+        linked_rows: list[QuantityEvidence] = []
+        for quantity in quantities:
+            if not set(quantity.input_entity_ids).intersection(admitted):
+                continue
+            if _quantity_explicit_lineage_conflict(quantity, lineage):
+                # A stale source-positive quantity never becomes a measured
+                # area for a new canonical revision merely by sharing an ID.
+                # Preserve the original quantity untouched for source review.
+                gaps[category].add("quantity_source_lineage_conflict")
+                continue
+            linked_rows.append(quantity)
+        linked = tuple(linked_rows)
         quantity_ids = {q.quantity_id for q in linked}
         rows = tuple(row for row in (output_rows or ()) if row.quantity_id in quantity_ids)
         quantity_snapshot = QuantityEvidenceUniverseSnapshotV1(
