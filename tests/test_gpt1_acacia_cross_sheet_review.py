@@ -377,3 +377,28 @@ def test_unbounded_or_oversized_opening_receipts_fail_closed():
     assert r.status == "ABSTAINED"
     assert r.reasons == ("schedule_host_receipts_over_limit",)
     assert not r.customer_row_authorized
+
+
+@pytest.mark.parametrize("poison", [True, 1.0, "1"])
+def test_opening_floor_page_index_requires_real_integer_not_coercion(poison):
+    result = reconcile_acacia_schedule_hosts(
+        _package(), (replace(_receipt("W2"), floor_page_index=poison),)
+    )
+    assert result.status == "ABSTAINED"
+    assert result.customer_row_authorized is False
+
+
+@pytest.mark.parametrize("poison", [True, 1.0, "1"])
+def test_cross_sheet_floor_page_index_requires_real_integer(poison):
+    result = review_acacia_dimension_or_height(
+        _package(), replace(_dim(), floor_page_index=poison)
+    )
+    assert result[0] == "ABSTAINED"
+
+
+@pytest.mark.parametrize("poison", [8.0, "8"])
+def test_cross_sheet_reference_page_index_requires_real_integer(poison):
+    result = review_acacia_dimension_or_height(
+        _package(), replace(_dim(), reference_page_index=poison)
+    )
+    assert result[0] == "ABSTAINED"
