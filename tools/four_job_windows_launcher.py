@@ -219,6 +219,12 @@ def run_logged(
         while True:
             try:
                 rc = proc.wait(timeout=poll_s)
+                # A process that exits before the first polling deadline has
+                # no observed memory evidence. Never call that a guarded pass.
+                if ((max_private_mb is not None and usage["peak_private_kb"] <= 0)
+                        or (min_free_commit_mb is not None
+                            and usage["min_system_free_commit_kb"] is None)):
+                    return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                 return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", usage
             except subprocess.TimeoutExpired:
                 elapsed = time.monotonic() - started
