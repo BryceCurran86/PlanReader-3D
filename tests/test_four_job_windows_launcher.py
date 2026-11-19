@@ -380,3 +380,17 @@ def test_owner_partial_source_modes_are_explicit_and_default_remains_unmodified(
     assert selected.source_plan_page_index == 6
     with pytest.raises(SystemExit):
         parser.parse_args(["--family-group", "unverified"])
+
+
+@pytest.mark.parametrize("sample,limits", [
+    ((0, 0, 1000000), {"max_private_mb": 100}),
+    ((1000, 1000, None), {"min_free_commit_mb": 100}),
+    ((1000, 0, 1000000), {"max_private_mb": 100, "min_free_commit_mb": 100}),
+])
+def test_partial_memory_sample_cannot_bypass_its_configured_guard(tmp_path, monkeypatch, sample, limits):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: sample)
+    rc, status, _ = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path, tmp_path / "partial_sample.log", timeout_s=20, poll_s=0.1, **limits,
+    )
+    assert rc is None and status == "MEMORY_SAMPLING_UNAVAILABLE"
