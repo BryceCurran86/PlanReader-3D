@@ -106,8 +106,12 @@ def _quantity_explicit_lineage_conflict(
                 return True
         elif actual != expected:
             return True
+    canonical_surface_reissue = (
+        (quantity.family == "floor_area" and bool(metadata.get("canonical_floor_id")))
+        or (quantity.family == "ceiling_lining" and bool(metadata.get("canonical_ceiling_id")))
+    )
     if (
-        quantity.family in {"floor_area", "ceiling_lining"}
+        canonical_surface_reissue
         and "snapshot_id" in metadata and metadata["snapshot_id"] is not None
     ):
         actual = metadata["snapshot_id"]
