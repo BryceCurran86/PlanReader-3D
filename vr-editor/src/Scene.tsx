@@ -479,9 +479,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       lastController = index;
       aimController(controllers[index]);
       const { buildState, buildLevel, onBuildAction } = build.current;
-      const target = buildOverlay.menuHit(raycaster, buildState, buildLevel);
-      if (target) {
-        if (target.action) onBuildAction(target.action);
+      const menuChoice = buildOverlay.menuHit(raycaster, buildState, buildLevel);
+      if (menuChoice) {
+        if (menuChoice.action) onBuildAction(menuChoice.action);
         return;
       }
       if (buildState.tool) {
