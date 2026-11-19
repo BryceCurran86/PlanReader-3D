@@ -229,11 +229,11 @@ def run_logged(
                     if free_kb is not None:
                         previous = usage["min_system_free_commit_kb"]
                         usage["min_system_free_commit_kb"] = free_kb if previous is None else min(previous, free_kb)
-                    # A failed sampler returns (0, 0, None). With hard memory
-                    # limits enabled, accepting that sentinel silently disables
-                    # both protections. Fail closed instead of claiming safety.
-                    if ((max_private_mb is not None or min_free_commit_mb is not None)
-                            and ws_kb == 0 and private_kb == 0 and free_kb is None):
+                    # Fail closed when a configured guard lacks its required metric.
+                    # A zero private-memory reading is not evidence of safety;
+                    # free commit may be unavailable even when RSS was sampled.
+                    if ((max_private_mb is not None and private_kb <= 0)
+                            or (min_free_commit_mb is not None and free_kb is None)):
                         kill_tree(proc)
                         return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                     if max_private_mb is not None and private_kb // 1024 > max_private_mb:
