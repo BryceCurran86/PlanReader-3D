@@ -194,6 +194,8 @@ def reconcile_acacia_schedule_hosts(
         schedule_paths = r.schedule_native_path_ids
         if (
             r.original_source_sha256 != packet.source_sha256
+            or type(r.floor_page_index) is not int
+            or type(r.schedule_page_index) is not int
             or r.floor_page_index != 1 or r.schedule_page_index != 9
             or type(floor_count) is not int or floor_count <= 0
             or type(schedule_count) is not int or schedule_count <= 0
