@@ -162,3 +162,52 @@
 .wall-dimensions fieldset { margin: 9px 0; border: 1px solid #42606d; border-radius: 6px; }
 .wall-addition-panel h2 { margin: 0; font-size: 16px; }
 .is-building canvas { cursor: crosshair; }
+
+
+.catalogue-section { background: #142630; }
+.catalogue-panel { display: grid; gap: 10px; color: #e6f3f5; font-size: 13px; }
+.catalogue-panel h2 { margin: 0; font-size: 18px; letter-spacing: -.015em; }
+.catalogue-panel p { margin: 0; color: #bed2d8; line-height: 1.45; }
+.catalogue-fields { display: grid; gap: 8px; }
+.catalogue-fields label { display: grid; gap: 4px; color: #c0d7da; }
+.catalogue-fields :is(input, select) {
+  margin: 0;
+  width: 100%;
+  height: 36px;
+  padding: 6px 9px;
+  border: 1px solid #4c6772;
+  border-radius: 6px;
+  color: #eff9fa;
+  background: #203842;
+  font: inherit;
+}
+.catalogue-panel button {
+  padding: 7px 9px;
+  background: #233e49;
+  border: 1px solid #486773;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.catalogue-panel button:disabled { opacity: .45; cursor: default; }
+.catalogue-panel :is(button, input, select, summary):focus-visible { outline: 2px solid #9ae8db; outline-offset: 2px; }
+.catalogue-results, .catalogue-schedule ul { margin: 0; padding: 0; list-style: none; }
+.catalogue-results { display: grid; gap: 5px; max-height: min(39vh, 380px); overflow: auto; padding: 2px; }
+.catalogue-results button { display: flex; width: 100%; align-items: center; text-align: left; gap: 8px; }
+.catalogue-results button[aria-pressed="true"], .build-tools button[aria-expanded="true"] {
+  background: #7be1cf;
+  border-color: #9eeadf;
+  color: #14292b;
+}
+.catalogue-swatch { width: 26px; height: 26px; flex: 0 0 26px; border: 1px solid #ffffff55; border-radius: 4px; }
+.catalogue-results strong { display: block; font-size: 12px; }
+.catalogue-results small { display: block; font-size: 11px; opacity: .83; margin-top: 2px; }
+.catalogue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.catalogue-instructions, .catalogue-schedule { padding: 9px; border: 1px solid #3f5b67; border-radius: 6px; }
+.catalogue-instructions p, .catalogue-schedule p { margin: 5px 0 8px; }
+.catalogue-schedule summary { cursor: pointer; font-weight: 700; }
+.catalogue-schedule li { display: flex; gap: 7px; justify-content: space-between; align-items: center; padding: 5px 0; }
+.catalogue-schedule li span { min-width: 0; }
+.catalogue-schedule ul { margin-top: 5px; margin-bottom: 7px; max-height: 200px; overflow: auto; }
+.catalogue-schedule details { margin-bottom: 7px; }
