@@ -143,7 +143,11 @@ def test_ceiling_runtime_rejects_forged_or_partial_publisher_handoff(monkeypatch
     elif defect == "wrong_document":
         metadata["document_id"] = "foreign"
     else:
-        changes["abstained"] = True
+        changes.update({
+            "abstained": True,
+            "value": None,
+            "blocking_reasons": ("source_measurement_abstained",),
+        })
     if metadata != good.metadata:
         changes["metadata"] = metadata
     counterfeit = replace(good, **changes)
