@@ -206,7 +206,8 @@ def reconcile_acacia_schedule_hosts(
         schedule_paths = r.schedule_native_path_ids
         if (
             r.original_source_sha256 != packet.source_sha256
-            or r.floor_page_index != 1 or r.schedule_page_index != 9
+            or type(r.floor_page_index) is not int or r.floor_page_index != 1
+            or type(r.schedule_page_index) is not int or r.schedule_page_index != 9
             or type(floor_count) is not int or floor_count <= 0
             or type(schedule_count) is not int or schedule_count <= 0
             # A missing/mutable list of source paths is not an immutable
@@ -307,7 +308,8 @@ def review_acacia_dimension_or_height(
     floor_paths = witness.floor_wall_face_native_path_ids
     reference_paths = witness.reference_figure_native_path_ids
     if (witness.source_sha256 != packet.source_sha256
-            or witness.floor_page_index != 1
+            or type(witness.floor_page_index) is not int or witness.floor_page_index != 1
+            or type(witness.reference_page_index) is not int
             or witness.reference_page_index != required_page
             or type(floor_paths) is not tuple or not floor_paths
             or type(reference_paths) is not tuple or not reference_paths
