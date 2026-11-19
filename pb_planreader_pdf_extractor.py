@@ -1356,6 +1356,11 @@ class GenericPlanReaderExtractor:
                     ],
                     "traces": [t.to_dict() for t in first_traces],
                     "inside_face_footprint_stages": inside_face_stages,
+                    "fabricated_wall_box_closure_4443": [
+                        stage.get("fabricated_wall_box_closure_4443")
+                        for stage in inside_face_stages
+                        if isinstance(stage, dict)
+                    ],
                 }
             except Exception as exc:
                 self.external_footprint_trace_live = {

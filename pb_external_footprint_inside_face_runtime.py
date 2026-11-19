@@ -20,6 +20,9 @@ from pb_source_external_footprint_inside_face_start_shadow import (
     build_external_footprint_inside_face_bundle,
     classify_wall_ink_band,
 )
+from pb_source_fabricated_wall_box_closure_runtime import (
+    run_fabricated_wall_box_closure_from_footprint_trace,
+)
 from pb_source_footprint_geometry_hardening_runtime import (
     run_footprint_geometry_hardening_stage,
 )
@@ -258,6 +261,21 @@ def run_inside_face_footprint_runtime_stage(
             },
         ),
     )
+    fabricated_box = (
+        run_fabricated_wall_box_closure_from_footprint_trace(
+            footprint_polygon_pdf_pts=bundle.walk.vertices_pdf_pts,
+            drawings=drawings,
+            source_words=source_words,
+        )
+        if bundle.walk.vertices_pdf_pts
+        else {
+            "status": "ABSTAINED",
+            "reason": "no_clockwise_walk_polygon_for_4443",
+            "measurement_authorized": False,
+            "commercial_publishable": False,
+            "owner_issue": 4443,
+        }
+    )
 
     return {
         "status": bundle.start.status if bundle.walk.status == "CANDIDATE" else (
@@ -277,6 +295,7 @@ def run_inside_face_footprint_runtime_stage(
         "wall_stub_junction_geometry": stub_junction,
         "footprint_geometry_hardening": hardening,
         "room_trace_acceptance": acceptance,
+        "fabricated_wall_box_closure_4443": fabricated_box,
         "segment_count": len(segments),
         "tasks_covered": [f"{i:02d}" for i in range(1, 32)],
         "measurement_authorized": False,
