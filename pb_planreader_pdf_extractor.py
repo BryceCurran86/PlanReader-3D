@@ -1337,6 +1337,7 @@ class GenericPlanReaderExtractor:
                                 ),
                                 source_words=tuple(page.get_text("words")),
                                 page_index=plan_page,
+                                source_sha256=footprint_source_sha,
                             )
                         )
                 except Exception as inside_exc:
@@ -1358,6 +1359,11 @@ class GenericPlanReaderExtractor:
                     "inside_face_footprint_stages": inside_face_stages,
                     "fabricated_wall_box_closure_4443": [
                         stage.get("fabricated_wall_box_closure_4443")
+                        for stage in inside_face_stages
+                        if isinstance(stage, dict)
+                    ],
+                    "interior_face_open_plan_07_10": [
+                        stage.get("interior_face_open_plan_07_10")
                         for stage in inside_face_stages
                         if isinstance(stage, dict)
                     ],
