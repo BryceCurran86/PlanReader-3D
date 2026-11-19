@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  CATALOGUE_GROUPS, ITEM_CATALOGUE, catalogueGroupLabel, getCatalogueItem, searchCatalogue,
+  CATALOGUE_GROUPS, ITEM_CATALOGUE, catalogueGroupLabel, getCatalogueItem, itemCanRotate, searchCatalogue,
 } from "./itemCatalogue";
 import type { CatalogueGroup, CatalogueItem } from "./itemCatalogue";
 import { itemGuide, itemSchedule, itemScheduleCsv } from "./itemPlacement";
@@ -85,7 +85,7 @@ export function ItemCataloguePanel({
       <strong>{active.label}</strong>
       <p>{itemGuide(active)} Click to place.</p>
       <div className="catalogue-actions">
-        {active.visual.kind === "fixture" && <button type="button" onClick={onRotate}>
+        {itemCanRotate(active) && <button type="button" onClick={onRotate}>
           Rotate · {turn * 90}°
         </button>}
         <button type="button" onClick={onCancel}>Done placing</button>

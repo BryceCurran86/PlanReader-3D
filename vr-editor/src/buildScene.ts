@@ -25,7 +25,6 @@ function openingOutline(wall: WallVisual, opening: WallAdditionOpening) {
 export function displayWallDraft(wall: WallVisual) {
   const group = new THREE.Group();
   const faces: number[] = [];
-  const leaves: number[] = [];
   function panel(points: THREE.Vector3[], vertices: number[]) {
     for (const index of [0, 1, 2, 0, 2, 3]) vertices.push(...points[index].toArray());
   }
@@ -34,7 +33,7 @@ export function displayWallDraft(wall: WallVisual) {
     panel([atOffset(wall, from, bottom), atOffset(wall, from, top),
       atOffset(wall, to, top), atOffset(wall, to, bottom)], faces);
   }
-  function addMesh(vertices: number[], color: number, opacity: number, wallFace = false) {
+  function addMesh(vertices: number[], color: number, opacity: number, wallFace = false, doorId?: string) {
     if (!vertices.length) return;
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
@@ -43,6 +42,7 @@ export function displayWallDraft(wall: WallVisual) {
       color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false,
     }));
     mesh.userData.catalogueWallFace = wallFace;
+    if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
     group.add(mesh);
   }
   const openings = (wall.openings ?? []).filter(opening => openingFits(wall, opening))
@@ -57,11 +57,14 @@ export function displayWallDraft(wall: WallVisual) {
     const points = openingOutline(wall, opening);
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
       new THREE.LineBasicMaterial({ color: 0xf5d9ad })));
-    if (opening.openingKind === "door") panel(points, leaves);
+    if (opening.openingKind === "door") {
+      const leaf: number[] = [];
+      panel(points, leaf);
+      addMesh(leaf, 0xe9bb75, 0.55, false, opening.openingId);
+    }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xa589e4, 0.48, true);
-  addMesh(leaves, 0xe9bb75, 0.55);
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
     atOffset(wall, 0, 0.018), atOffset(wall, planLength(wall.start, wall.end), 0.018),

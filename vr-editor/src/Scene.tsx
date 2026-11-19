@@ -303,7 +303,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (geometry?.kind === "wallFace") {
           item.userData.originalHeight = geometry.heightM;
           if (row.objectType === "wall") sourceItemHosts.push(catalogueWallHost(
-            row.objectId, item, geometry.start, geometry.end,
+            row.objectId, item, geometry.start, geometry.end, geometry.heightM,
           ));
         }
       }
@@ -445,7 +445,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
-      const target = itemView.target(raycaster, item);
+      const { hit: target } = itemView.candidate(raycaster, item, itemControls.current.turn);
       if (target) itemControls.current.onPlace(item.id, target);
     }
     const select = (id: string | null) => callback.current(id);
@@ -797,20 +797,22 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (active >= 0) aimController(controllers[active]);
         const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
         const ready = active >= 0 && !hover && !itemBrowser.open;
-        const itemTarget = ready && item ? itemView.target(raycaster, item) : null;
+        const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const buildTarget = ready && !item ? aim() : null;
-        itemView.aim(itemTarget);
+        itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (!itemBrowser.open) layout.note = itemTarget ? "Pull the trigger to place." : buildTarget?.hint ?? prompt;
+        if (!itemBrowser.open) layout.note = itemPick?.hit ? "Pull the trigger to place." :
+          itemPick?.reason ?? buildTarget?.hint ?? prompt;
         buildOverlay.drawMenu(layout, hover?.index ?? -1);
       } else {
         const canAim = !!(buildState.tool || item) && hoveringCanvas && !startPointer;
         if (canAim) raycaster.setFromCamera(mouse, camera);
-        const itemTarget = canAim && item ? itemView.target(raycaster, item) : null;
+        const itemPick = canAim && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const buildTarget = canAim && !item ? aim() : null;
-        itemView.aim(itemTarget);
+        itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
-        setBuildHint(item ? (itemTarget ? "Click to place " + item.label + "." : itemGuide(item)) : buildTarget?.hint ?? "");
+        setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
+          itemPick?.reason ?? itemGuide(item)) : buildTarget?.hint ?? "");
       }
       // Aiming at source-backed floor is visible only in immersive VR.
       // Never display this marker over an invented presentation floor.

@@ -1,6 +1,6 @@
 import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
 import type { BuildAction, BuildState } from "./buildPlacement.ts";
-import { CATALOGUE_GROUPS, ITEM_CATALOGUE } from "./itemCatalogue.ts";
+import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem } from "./itemCatalogue.ts";
 
 export type ItemAction =
@@ -54,6 +54,10 @@ export function buildMenuLayout(
     }
     add("‹ Page", 20, 343, 138, 55, browse({ kind: "page", step: -1 }), { disabled: page === 0 });
     add("Page ›", 169, 343, 138, 55, browse({ kind: "page", step: 1 }), { disabled: page >= maxPage(category) });
+    if (maxPage(category) > 9) {
+      add("‹‹ 5 pages", 319, 343, 143, 55, browse({ kind: "page", step: -5 }), { disabled: page === 0 });
+      add("5 pages ››", 474, 343, 143, 55, browse({ kind: "page", step: 5 }), { disabled: page >= maxPage(category) });
+    }
     add("Undo item", 648, 343, 160, 55, items({ kind: "undo" }), { disabled: !itemUndo });
     add("Back", 819, 343, 141, 55, browse({ kind: "toggle" }));
     return { buttons, title: "Materials & fixtures", width: WIDTH, height: 457,
@@ -70,7 +74,7 @@ export function buildMenuLayout(
     { label: "Done", target: item ? items({ kind: "done" }) : { area: "build", action: { kind: "done" } },
       disabled: !item && !build.tool },
   );
-  if (item?.visual.kind === "fixture") actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
+  if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
   const stride = (WIDTH - 40) / actions.length;
   for (const [index, entry] of actions.entries()) {
     add(entry.label, 20 + stride * index, 67, stride - 9, 70, entry.target,

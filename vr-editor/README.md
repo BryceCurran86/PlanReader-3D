@@ -367,6 +367,12 @@ Open **Items** beside the building tools. Search by product type, colour, size o
 
 The built-in synthetic scene has two sample rooms for trying floor coverings and lighting. Catalogue geometry and finishes are editable visual choices. The schedule counts placements for review. Project estimating and pricing use the authenticated construction scope.
 
+### Timber and exterior choices
+
+Place timber boards, battens and mouldings on a wall face. Pick the centre of the piece and use **Rotate** to turn it. Posts stand on a floor or deck surface. Front door assemblies fit openings made with **Door**. Wider styles show the smallest draft opening they can fit. Door finish choices colour the leaf while preserving its glazing.
+
+Pick an exterior substrate and a finish on the same wall side to see the finish and record both choices in the draft schedule. Decking and paving apply to floor surfaces. Soffit and eaves options apply to ceiling surfaces.
+
 ## Adding a wall must add its associated trades
 
 The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`
