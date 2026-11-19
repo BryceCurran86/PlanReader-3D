@@ -357,3 +357,19 @@ def test_cross_sheet_page_receipt_requires_exact_integer_type(kind, field, bad_v
     assert (status, reason) == (
         "ABSTAINED", "original_cross_page_physical_host_or_figure_unverified"
     )
+
+
+@pytest.mark.parametrize("field,bad_value", [
+    ("floor_page_index", True),
+    ("floor_page_index", 1.0),
+    ("floor_page_index", "1"),
+    ("schedule_page_index", 9.0),
+    ("schedule_page_index", "9"),
+])
+def test_installed_opening_page_receipt_requires_exact_integer_type(field, bad_value):
+    witness = replace(_receipt("W2"), **{field: bad_value})
+    result = reconcile_acacia_schedule_hosts(_package(), (witness,))
+    assert result.status == "ABSTAINED"
+    assert result.reasons == ("unproved_floor_or_schedule_source_host",)
+    assert result.installed_opening_quantity_authorized is False
+    assert result.customer_row_authorized is False
