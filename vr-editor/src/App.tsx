@@ -8,7 +8,12 @@ import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
-import { EMPTY_BUILD, STARTING_SIZES, updateBuild } from "./buildPlacement";
+import { ItemCataloguePanel } from "./ItemCataloguePanel";
+import { getCatalogueItem } from "./itemCatalogue";
+import { currentItemPlacements, emptyItemDraft, placeItem, removeItem, undoItem } from "./itemPlacement";
+import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
+import type { ItemAction } from "./catalogueMenu";
+import { EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
@@ -29,6 +34,9 @@ import type { CameraView, FocusTarget, InspectionSettings, ReviewFilter } from "
 // Three.js/WebXR is optional. Keep the initial evidence inspector lightweight.
 const SceneView = lazy(() => import("./Scene").then(m => ({ default: m.SceneView })));
 
+type CatalogueSession = { scene: SceneManifest; itemId: string | null; turn: number; draft: ItemDraft };
+const NO_ITEMS: readonly PlacedItem[] = [];
+
 export function App() {
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,6 +47,9 @@ export function App() {
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
+  const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
+  const [catalogueOpen, setCatalogueOpen] = useState(false);
+  const [catalogueSession, setCatalogueSession] = useState<CatalogueSession | null>(null);
   const [wallReview, setWallReview] = useState<{ scene: SceneManifest; proposalId: string; request: number } | null>(null);
   const wallReviewPanel = useRef<HTMLDivElement>(null);
   const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
@@ -186,6 +197,7 @@ export function App() {
         })),
       };
       setManifest(syntheticPreview);
+      setDemoScene(syntheticPreview);
       setDraftState(freshDrafts(syntheticPreview));
       setWallMoveState(freshWallMoves(syntheticPreview)); setMoveMode("inspect"); setMoveError(null);
       setTeleportMode(false); setTeleportMessage(null);
@@ -204,8 +216,38 @@ export function App() {
   const buildLevel = level === "all" ? (levels.length === 1 ? levels[0] : null) :
     levels.includes(level) ? level : null;
   const buildState = placed && placed.scene === manifest ? placed.build : EMPTY_BUILD;
+  const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
+  const activeItem = getCatalogueItem(catalogue?.itemId ?? null);
+  const isDemo = manifest !== null && manifest === demoScene;
+  function changeCatalogue(update: (previous: CatalogueSession) => CatalogueSession) {
+    if (!manifest) return;
+    setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
+      scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
+    }));
+  }
+  function onItemAction(action: ItemAction) {
+    if (action.kind === "choose") {
+      onBuildAction({ kind: "done" });
+      setCatalogueOpen(true);
+      changeCatalogue(current => ({ ...current, itemId: action.itemId, turn: 0 }));
+    } else if (action.kind === "undo") {
+      changeCatalogue(current => ({ ...current, draft: undoItem(current.draft) }));
+    } else if (action.kind === "rotate") {
+      changeCatalogue(current => ({ ...current, turn: (current.turn + 1) % 4 }));
+    } else {
+      setBuildHint("");
+      changeCatalogue(current => ({ ...current, itemId: null }));
+    }
+  }
+  function placeSelectedItem(itemId: string, hit: ItemHit) {
+    const id = newPlacementId("item");
+    changeCatalogue(current => current.itemId === itemId ? { ...current,
+      draft: placeItem(current.draft, scopeKey(current.scene), id, itemId, hit, current.turn),
+    } : current);
+  }
   function onBuildAction(action: BuildAction) {
     if (!manifest) return;
+    if (action.kind === "tool" && activeItem) onItemAction({ kind: "done" });
     setBuildHint("");
     const source = scopeKey(manifest);
     setPlaced(previous => ({
@@ -261,6 +303,12 @@ export function App() {
   const activeBatchSketches = useMemo(() => visible ? addedWallBatchSketches.filter(
     sketch => sketch.scopeKey === scopeKey(visible),
   ) : [], [visible, addedWallBatchSketches]);
+  const placedItems = useMemo(() => {
+    if (!manifest || !catalogue) return NO_ITEMS;
+    const drafts = [...activeBatchSketches, ...buildState.walls];
+    if (activeAddedWallSketch) drafts.push(activeAddedWallSketch);
+    return currentItemPlacements(catalogue.draft.items, manifest, drafts, isDemo);
+  }, [manifest, catalogue?.draft.items, activeBatchSketches, buildState.walls, activeAddedWallSketch, isDemo]);
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
   // Keyboard undo/redo works only outside editable fields and cannot change the source.
   useEffect(() => {
@@ -318,7 +366,11 @@ export function App() {
         <section className="viewer-panel" aria-label="Building scene">
           {visible && <BuildTools state={buildState} sizes={buildSizes} levels={levels}
             levelId={buildLevel} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
-            onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall} />}
+            onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall}
+            catalogueOpen={catalogueOpen} onCatalogueToggle={() => {
+              if (catalogueOpen && activeItem) onItemAction({ kind: "done" });
+              setCatalogueOpen(open => !open);
+            }} />}
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
@@ -328,6 +380,9 @@ export function App() {
                 addedWallSketches={activeBatchSketches}
                 buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint}
+                catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
+                  canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
+                  onAction: onItemAction, onPlace: placeSelectedItem }}
                 teleportMode={teleportMode} onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
@@ -358,6 +413,15 @@ export function App() {
         </section>
 
         <aside className="inspector" aria-label="Evidence inspector">
+          {manifest && catalogueOpen && <div className="section-block catalogue-section">
+            <ItemCataloguePanel active={activeItem} items={placedItems}
+              canUndo={!!catalogue?.draft.history.length} turn={catalogue?.turn ?? 0}
+              onChoose={itemId => onItemAction({ kind: "choose", itemId })}
+              onCancel={() => onItemAction({ kind: "done" })}
+              onRotate={() => onItemAction({ kind: "rotate" })}
+              onUndo={() => onItemAction({ kind: "undo" })}
+              onRemove={id => changeCatalogue(current => ({ ...current, draft: removeItem(current.draft, id) }))} />
+          </div>}
           <div className="section-block" aria-label="PS VR2 on PC setup">
             <PcVr2SetupPanel session={pcVrSession} />
           </div>

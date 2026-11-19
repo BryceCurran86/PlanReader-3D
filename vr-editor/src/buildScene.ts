@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import {
-  activeStart, aimOpening, BUILD_TOOLS, buildGuide, MAX_DRAFT_WALLS, nearWall,
+  activeStart, aimOpening, buildGuide, MAX_DRAFT_WALLS, nearWall,
   openingFits, planLength, projectOnWall, snappedPoint, validWallLength,
 } from "./buildPlacement.ts";
-import type { BuildAction, BuildHit, BuildSizes, BuildState, PlanPoint, PlacedWall, WallVisual } from "./buildPlacement.ts";
+import type { BuildHit, BuildSizes, BuildState, PlanPoint, PlacedWall, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import type { MenuLayout } from "./catalogueMenu";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -33,13 +34,16 @@ export function displayWallDraft(wall: WallVisual) {
     panel([atOffset(wall, from, bottom), atOffset(wall, from, top),
       atOffset(wall, to, top), atOffset(wall, to, bottom)], faces);
   }
-  function addMesh(vertices: number[], color: number, opacity: number) {
+  function addMesh(vertices: number[], color: number, opacity: number, wallFace = false) {
     if (!vertices.length) return;
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
-    group.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
       color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false,
-    })));
+    }));
+    mesh.userData.catalogueWallFace = wallFace;
+    group.add(mesh);
   }
   const openings = (wall.openings ?? []).filter(opening => openingFits(wall, opening))
     .sort((a, b) => a.offsetM - b.offsetM);
@@ -56,7 +60,7 @@ export function displayWallDraft(wall: WallVisual) {
     if (opening.openingKind === "door") panel(points, leaves);
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
-  addMesh(faces, 0xa589e4, 0.48);
+  addMesh(faces, 0xa589e4, 0.48, true);
   addMesh(leaves, 0xe9bb75, 0.55);
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
@@ -127,27 +131,14 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   };
 }
 
-const MENU_WIDTH = 840, MENU_HEIGHT = 240;
-const MENU_ACTIONS = [
-  ...BUILD_TOOLS.map(({ id, label }) => ({ label, action: { kind: "tool", tool: id } as const })),
-  { label: "Undo", action: { kind: "undo" } as const },
-  { label: "Done", action: { kind: "done" } as const },
-];
-
-function enabled(action: BuildAction, state: BuildState, levelId: string | null) {
-  if (action.kind === "tool") return !!levelId;
-  if (action.kind === "undo") return !!state.history.length || !!activeStart(state, levelId);
-  return !!state.tool;
-}
-
 export function createBuildOverlay(scene: THREE.Scene) {
   const canvas = document.createElement("canvas");
-  canvas.width = MENU_WIDTH;
-  canvas.height = MENU_HEIGHT;
+  canvas.width = 980;
+  canvas.height = 228;
   const context = canvas.getContext("2d");
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.243),
+  const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, depthTest: false, depthWrite: false }));
   menu.renderOrder = 20;
   menu.visible = false;
@@ -186,40 +177,60 @@ export function createBuildOverlay(scene: THREE.Scene) {
     menu.updateMatrixWorld();
     menu.visible = true;
   }
-  function menuHit(raycaster: THREE.Raycaster, state: BuildState, levelId: string | null) {
+  function sizeMenu(layout: MenuLayout) {
+    const width = layout.width / 1030, height = layout.height / 1030;
+    if (menu.scale.x !== width || menu.scale.y !== height) {
+      menu.scale.set(width, height, 1);
+      menu.updateMatrixWorld();
+    }
+  }
+  function menuHit(raycaster: THREE.Raycaster, layout: MenuLayout) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
-    const x = uv.x * MENU_WIDTH, y = (1 - uv.y) * MENU_HEIGHT;
-    const index = Math.floor((x - 20) / 160);
-    const button = x >= 20 && y >= 67 && y <= 142 && (x - 20) % 160 <= 147
-      ? MENU_ACTIONS[index] : undefined;
-    const action = button && enabled(button.action, state, levelId) ? button.action : null;
-    return { action, index: action ? index : -1 };
+    const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
+    const index = layout.buttons.findIndex(button => !button.disabled &&
+      x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
+    return { action: layout.buttons[index]?.action ?? null, index };
   }
-  function drawMenu(state: BuildState, levelId: string | null, hint: string, hover: number) {
-    const key = JSON.stringify([state.tool, levelId, !!state.history.length, !!activeStart(state, levelId), hint, hover]);
+  function drawMenu(layout: MenuLayout, hover: number) {
+    const key = JSON.stringify([layout, hover]);
     if (!context || drawn === key) return;
     drawn = key;
+    if (canvas.width !== layout.width || canvas.height !== layout.height) {
+      canvas.width = layout.width;
+      canvas.height = layout.height;
+    }
     context.fillStyle = "#13242c";
-    context.fillRect(0, 0, MENU_WIDTH, MENU_HEIGHT);
-    context.font = "bold 32px sans-serif";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    context.fillText("Build tools", 20, 44);
-    for (const [index, button] of MENU_ACTIONS.entries()) {
-      const disabled = !enabled(button.action, state, levelId);
-      const selected = button.action.kind === "tool" && button.action.tool === state.tool;
-      const x = 20 + index * 160;
-      context.fillStyle = index === hover || selected ? "#69dbca" : "#2a4651";
-      context.fillRect(x, 67, 147, 75);
-      context.fillStyle = index === hover || selected ? "#102421" : disabled ? "#a1aeb4" : "#fff";
-      context.font = "bold 30px sans-serif";
+    context.fillText(layout.title, 20, 45, layout.width - 40);
+    if (layout.subtitle) {
+      context.fillStyle = "#ceeceb";
+      context.font = "bold 27px sans-serif";
       context.textAlign = "center";
-      context.fillText(button.label, x + 73.5, 115);
+      context.fillText(layout.subtitle, layout.width / 2, 105, 560);
+      context.textAlign = "left";
+    }
+    for (const [index, button] of layout.buttons.entries()) {
+      const highlight = index === hover || button.active;
+      context.fillStyle = highlight ? "#69dbca" : "#2a4651";
+      context.fillRect(button.x, button.y, button.w, button.h);
+      const middle = button.y + button.h / 2;
+      if (button.swatch !== undefined) {
+        context.fillStyle = "#" + button.swatch.toString(16).padStart(6, "0");
+        context.fillRect(button.x + 12, middle - 13, 25, 26);
+      }
+      context.fillStyle = highlight ? "#102421" : button.disabled ? "#a1aeb4" : "#fff";
+      context.font = "bold 25px sans-serif";
+      context.textAlign = "center";
+      const inset = button.swatch === undefined ? 0 : 38;
+      context.fillText(button.label, button.x + (button.w + inset) * 0.5, middle + 9, button.w - 18 - inset);
       context.textAlign = "left";
     }
     context.fillStyle = "#edf9fc";
-    context.font = "28px sans-serif";
-    context.fillText(hint, 20, 199, 800);
+    context.font = "27px sans-serif";
+    context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
     texture.needsUpdate = true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
@@ -237,7 +248,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, menuHit, drawMenu, showAim,
+  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim,
     hideMenu: () => { menu.visible = false; },
     dispose: () => texture.dispose() };
 }

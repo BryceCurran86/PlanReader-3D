@@ -12,10 +12,12 @@ type Props = {
   onTopView: () => void;
   onReview: (proposalId: string) => void;
   hint: string;
+  catalogueOpen: boolean;
+  onCatalogueToggle: () => void;
 };
 
 export function BuildTools({
-  state, sizes, levels, levelId, onLevel, onAction, onSizes, onTopView, onReview, hint,
+  state, sizes, levels, levelId, onLevel, onAction, onSizes, onTopView, onReview, hint, catalogueOpen, onCatalogueToggle,
 }: Props) {
   const walls = state.walls.filter(wall => !levelId || wall.levelId === levelId);
   function sizeInput(key: keyof BuildSizes, label: string) {
@@ -36,6 +38,8 @@ export function BuildTools({
       {BUILD_TOOLS.map(({ id, label }) => <button key={id} type="button" className="build-tool"
         disabled={!levelId} aria-pressed={state.tool === id}
         onClick={() => onAction({ kind: "tool", tool: id })}>{label}</button>)}
+      <button type="button" className="build-tool" aria-expanded={catalogueOpen}
+        aria-controls="item-catalogue" onClick={onCatalogueToggle}>Items</button>
       <button type="button" disabled={!state.history.length && !activeStart(state, levelId)}
         onClick={() => onAction({ kind: "undo" })}>Undo</button>
       <button type="button" disabled={!state.tool} onClick={() => onAction({ kind: "done" })}>Done</button>

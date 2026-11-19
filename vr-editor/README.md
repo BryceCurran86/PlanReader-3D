@@ -356,6 +356,17 @@ Movement is **local only**: translations do not persist, change original PDF geo
 
 **Placement sizes** lets you set the starting height and opening dimensions on desktop. Sketches use the editor’s level plan and remain local until you use the authenticated wall review and save flow. Doors and frames attach to newly drafted walls. The frame geometry shows an indicative opening for review.
 
+## Materials and fixtures catalogue
+
+Open **Items** beside the building tools. Search by product type, colour, size or profile, or pick a category. Select an option and aim at the indicated surface. In an immersive WebXR session, open **Items** on the floating build menu, choose a category and item, then use either trigger to place it.
+
+- Plasterboard and paint apply to wall faces or ceilings. Floor coverings and wall coverings follow the surface you select.
+- Skirting follows a wall base and leaves gaps at floor-level openings in drafted walls. Architraves fit the doors and frames created with the build tools.
+- Place wall tapware, switches and sockets on wall faces. For benchtop mixers and basins, place a vanity or base cabinet first and aim at its worktop.
+- **Draft item schedule** lists placements by selection and offers a CSV download. Undo and removal work on the current draft.
+
+The built-in synthetic scene has two sample rooms for trying floor coverings and lighting. Catalogue geometry and finishes are editable visual choices. The schedule counts placements for review. Project estimating and pricing use the authenticated construction scope.
+
 ## Adding a wall must add its associated trades
 
 The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`
