@@ -7,7 +7,9 @@ import { ReviewWorkbench } from "./ReviewWorkbench";
 import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
-import type { WallAdditionSketch } from "./wallAdditionProtocol";
+import { BuildTools } from "./BuildTools";
+import { EMPTY_BUILD, STARTING_SIZES, updateBuild } from "./buildPlacement";
+import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -32,8 +34,13 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Source-scoped, bounded, local-only visual proposals. No persistence or pricing.
   const [draftState, setDraftState] = useState<DraftHistory | null>(null);
-  const [addedWallSketch, setAddedWallSketch] = useState<WallAdditionSketch | null>(null);
-  const [addedWallBatchSketches, setAddedWallBatchSketches] = useState<WallAdditionSketch[]>([]);
+  const [addedWallSketch, setAddedWallSketch] = useState<WallVisual | null>(null);
+  const [addedWallBatchSketches, setAddedWallBatchSketches] = useState<WallVisual[]>([]);
+  const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
+  const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
+  const [buildHint, setBuildHint] = useState("");
+  const [wallReview, setWallReview] = useState<{ scene: SceneManifest; proposalId: string; request: number } | null>(null);
+  const wallReviewPanel = useRef<HTMLDivElement>(null);
   const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
   const [moveMode, setMoveMode] = useState<MoveMode>("inspect");
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -194,6 +201,32 @@ export function App() {
   const levels = useMemo(() => [...new Set(
     (manifest?.objects ?? []).map(o => o.levelId).filter((id): id is string => !!id)
   )].sort(), [manifest]);
+  const buildLevel = level === "all" ? (levels.length === 1 ? levels[0] : null) :
+    levels.includes(level) ? level : null;
+  const buildState = placed && placed.scene === manifest ? placed.build : EMPTY_BUILD;
+  function onBuildAction(action: BuildAction) {
+    if (!manifest) return;
+    setBuildHint("");
+    const source = scopeKey(manifest);
+    setPlaced(previous => ({
+      scene: manifest,
+      build: updateBuild(previous?.scene === manifest ? previous.build : EMPTY_BUILD,
+        action, source, buildLevel, buildSizes),
+    }));
+  }
+  function changeLevel(id: string) {
+    onBuildAction({ kind: "done" });
+    setLevel(id || "all");
+    setSelectedId(null);
+  }
+  function reviewWall(proposalId: string) {
+    if (!manifest) return;
+    onBuildAction({ kind: "done" });
+    setWallReview(previous => ({ scene: manifest, proposalId, request: (previous?.request ?? 0) + 1 }));
+    requestAnimationFrame(() => wallReviewPanel.current?.scrollIntoView({ block: "nearest" }));
+  }
+  const reviewDraft = wallReview && wallReview.scene === manifest
+    ? buildState.walls.find(wall => wall.proposalId === wallReview.proposalId) ?? null : null;
   // Preserve Three.js / WebXR renderer identity across selection and cosmetic
   // toggles. Only actual object-filter changes reconstruct the scene.
   const isolateId = inspection.isolateSelected ? selectedId : null;
@@ -225,6 +258,9 @@ export function App() {
     : undefined;
   const activeAddedWallSketch = visible && addedWallSketch?.scopeKey === scopeKey(visible)
     ? addedWallSketch : null;
+  const activeBatchSketches = useMemo(() => visible ? addedWallBatchSketches.filter(
+    sketch => sketch.scopeKey === scopeKey(visible),
+  ) : [], [visible, addedWallBatchSketches]);
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
   // Keyboard undo/redo works only outside editable fields and cannot change the source.
   useEffect(() => {
@@ -280,15 +316,18 @@ export function App() {
 
       <main className="workspace-layout">
         <section className="viewer-panel" aria-label="Building scene">
+          {visible && <BuildTools state={buildState} sizes={buildSizes} levels={levels}
+            levelId={buildLevel} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
+            onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall} />}
           {visible ? (
             <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
               <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
                 captureSerial={captureSerial} onCapture={setCaptureStatus}
                 moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch}
-                addedWallSketches={visible ? addedWallBatchSketches.filter(
-                  sketch=>sketch.scopeKey===scopeKey(visible),
-                ) : []}
+                addedWallSketches={activeBatchSketches}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint}
                 teleportMode={teleportMode} onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
@@ -313,8 +352,8 @@ export function App() {
             </div>
           )}
           <div className="viewer-footer">
-            <span>Desktop: drag to orbit · scroll to zoom · click to inspect</span>
-            <span>VR: SteamVR / OpenXR · L2/R2 selects · grip cycles visual finishes</span>
+            <span>Drag to orbit, scroll to zoom, click to select or place.</span>
+            <span>In VR, point at a build tool and pull the trigger.</span>
           </div>
         </section>
 
@@ -347,7 +386,7 @@ export function App() {
             <div className="section-block">
               <label htmlFor="level-filter" className="eyebrow">LEVEL FILTER</label>
               <select id="level-filter" value={level}
-                onChange={e => { setLevel(e.target.value); setSelectedId(null); }}>
+                onChange={e => changeLevel(e.target.value)}>
                 <option value="all">All source levels</option>
                 {levels.map(id => <option value={id} key={id}>{id}</option>)}
               </select>
@@ -463,10 +502,13 @@ export function App() {
             </div>
           )}
           {manifest && (
-            <div className="section-block" aria-label="New wall construction work">
+            <div className="section-block" ref={wallReviewPanel} aria-label="New wall construction work">
               <WallAdditionPanel
                 scene={manifest} authenticated={authenticatedSource}
                 onSketch={setAddedWallSketch}
+                reviewDraft={reviewDraft} reviewRequest={wallReview?.request ?? 0}
+                onSaved={proposalId => onBuildAction({ kind: "saved", proposalId })}
+                onExactDraft={(previous, wall) => onBuildAction({ kind: "adjust", previous, wall })}
                 onBatchSketches={setAddedWallBatchSketches} />
             </div>
           )}

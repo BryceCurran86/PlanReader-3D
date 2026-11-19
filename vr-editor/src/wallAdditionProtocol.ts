@@ -4,6 +4,7 @@
  */
 import type { SceneManifest } from "./types.ts";
 import { scopeKey } from "./reviewDraft.ts";
+import { validWallLength } from "./buildPlacement.ts";
 
 export interface WallAdditionSketch {
   scopeKey:string;
@@ -91,7 +92,7 @@ export function validateAdditionSketch(
   }
   const distance=Math.hypot(
     input.end[0]-input.start[0],input.end[1]-input.start[1]);
-  if(distance<0.05||distance>200)throw new Error("New wall must measure 50mm–200m");
+  if(!validWallLength(distance))throw new Error("New wall must measure 50mm–200m");
   return {...input,scopeKey:scopeKey(manifest)};
 }
 export function makeWallAdditionCommand(

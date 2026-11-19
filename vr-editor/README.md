@@ -347,13 +347,16 @@ Choose **Move** in the Wall Position Editing inspector, use either Sense trigger
 
 Movement is **local only**: translations do not persist, change original PDF geometry, approve hosted openings, recalculate billable quantities or price materials. Cross-wall collisions at the same level are blocked, but this does not prove complete topology. A production `MOVE_WALL` transaction and real PS VR2 headset acceptance test are separate gates.
 
-## Adding a wall must add its associated trades
+## Place walls, doors and open frames
 
-The authenticated VR Editor now includes a **new-wall construction scope**
-panel. Enter source-level endpoints, height, a real project **assembly profile
-ID** (framing/lining/skirting/bracing schedule owned by the server), and any
-user-positioned door opening. The browser can preview a translucent purple
-*new wall proposal*, not an approved physical wall.
+1. Choose a source level if the project has several levels. On desktop, **Top view** makes it easier to place points on the plan.
+2. Choose **Wall**, then click its start and end. In the headset, use the floating build menu and pull either controller trigger to place each point. The length updates as you aim.
+3. Choose **Door** or **Frame**, aim at a draft wall and click or pull the trigger. **Frame** leaves an open passage. Use **Undo** to remove the last placement and **Done** to return to inspection.
+4. On desktop, open **Review drafts** and select a wall. Check **Exact dimensions and openings**, enter a registered assembly profile ID, and select **Calculate wall and opening costs** in an authenticated workspace.
+
+**Placement sizes** lets you set the starting height and opening dimensions on desktop. Sketches use the editor’s level plan and remain local until you use the authenticated wall review and save flow. Doors and frames attach to newly drafted walls. The frame geometry shows an indicative opening for review.
+
+## Adding a wall must add its associated trades
 
 The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`
 endpoint calls `pb_vr_wall_assembly_dependencies.py`, using only

@@ -11,7 +11,9 @@ import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
-import type { WallAdditionSketch } from "./wallAdditionProtocol";
+import { activeStart, buildGuide, newPlacementId, validWallLength } from "./buildPlacement";
+import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
+import { aimBuild, createBuildOverlay, displayWallDraft } from "./buildScene";
 import { evaluateSourceFloorTeleport,describeTeleportReason } from "./verifiedTeleport";
 import { scopeKey } from "./reviewDraft";
 import { safeWallMoves } from "./wallMoveStudy";
@@ -33,8 +35,13 @@ type Props = {
   quality: RenderQuality;
   detail: SurfaceDetail;
   moveMode: MoveMode;
-  addedWallSketch: WallAdditionSketch | null;
-  addedWallSketches: WallAdditionSketch[];
+  addedWallSketch: WallVisual | null;
+  addedWallSketches: WallVisual[];
+  buildState: BuildState;
+  buildLevel: string | null;
+  buildSizes: BuildSizes;
+  onBuildAction: (action: BuildAction) => void;
+  onBuildHint: (hint: string) => void;
   teleportMode: boolean;
   onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
@@ -149,7 +156,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, teleportMode, onTeleportMessage }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, teleportMode, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
@@ -162,6 +169,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
   addedWallsRef.current = addedWallSketches;
+  const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint });
+  build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint };
   const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
@@ -210,7 +219,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     setRenderError(null);
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute(
-      "aria-label", "Read-only building scene. Use Escape to clear selection."
+      "aria-label", "Building scene. Use Escape to leave build mode or clear selection."
     );
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
       maxRenderPixelRatio(visualSettings.current.quality, false)));
@@ -274,51 +283,51 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const buildOverlay = createBuildOverlay(scene);
+    const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
+    let lastBuildWalls = build.current.buildState.walls;
+    let lastBuildLevel = build.current.buildLevel;
+    let lastReviewSketch: WallVisual | null | undefined;
+    let lastReviewWalls: WallVisual[] | undefined;
     function refreshWallAddition() {
-      const requested = [...addedWallsRef.current];
-      if(addedWallRef.current) requested.push(addedWallRef.current);
-      // Latest active edit proposal wins over its previous verified batch ghost.
-      const byId=new Map<string,WallAdditionSketch>();
-      for(const request of requested){
-        if(request.scopeKey!==scopeKey(manifest)||
-           !Number.isFinite(request.heightM)||request.heightM<=0||
-           request.heightM>20||
-           !request.start.every(Number.isFinite)||
-           !request.end.every(Number.isFinite))continue;
-        const length=Math.hypot(
-          request.start[0]-request.end[0],request.start[1]-request.end[1],
-        );
-        if(length<.05||length>200)continue;
-        byId.set(request.proposalId,request);
+      const { buildState, buildLevel } = build.current;
+      if (lastBuildWalls === buildState.walls && lastBuildLevel === buildLevel &&
+          lastReviewSketch === addedWallRef.current && lastReviewWalls === addedWallsRef.current) return;
+      lastBuildWalls = buildState.walls;
+      lastBuildLevel = buildLevel;
+      lastReviewSketch = addedWallRef.current;
+      lastReviewWalls = addedWallsRef.current;
+      const requested = [...lastReviewWalls, ...buildState.walls.filter(
+        wall => !buildLevel || wall.levelId === buildLevel,
+      )];
+      if (lastReviewSketch) requested.push(lastReviewSketch);
+      const byId = new Map<string, WallVisual>();
+      for (const wall of requested) {
+        const length = Math.hypot(wall.start[0] - wall.end[0], wall.start[1] - wall.end[1]);
+        if (wall.scopeKey !== sceneScope || !validWallLength(length) ||
+          !Number.isFinite(wall.heightM) || wall.heightM <= 0 || wall.heightM > 20) continue;
+        byId.set(wall.proposalId, wall);
       }
-      const active=[...byId.values()].slice(0,26);
-      const state=JSON.stringify(active);
-      if(lastAddedWall===state)return;
-      lastAddedWall=state;
-      for(const child of [...wallAdditionLayer.children]){
+      const active = [...byId.values()];
+      const signature = JSON.stringify(active);
+      if (lastAddedWall === signature) return;
+      lastAddedWall = signature;
+      for (const child of [...wallAdditionLayer.children]) {
         wallAdditionLayer.remove(child);
-        if(child instanceof THREE.Mesh){
-          child.geometry.dispose();
-          const materials=Array.isArray(child.material)?child.material:[child.material];
-          materials.forEach(material=>material.dispose());
-        }
+        child.traverse(item => {
+          if (item instanceof THREE.Mesh || item instanceof THREE.Line) {
+            item.geometry.dispose();
+            const materials = Array.isArray(item.material) ? item.material : [item.material];
+            materials.forEach(material => material.dispose());
+          }
+        });
       }
-      for(const request of active){
-        const a=request.start,b=request.end,h=request.heightM;
-        const geometry=new THREE.BufferGeometry();
-        geometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array([
-          a[0],0,a[1],b[0],0,b[1],b[0],h,b[1],
-          a[0],0,a[1],b[0],h,b[1],a[0],h,a[1],
-        ]),3));
-        geometry.computeVertexNormals();
-        const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
-          color:0x9472d9,side:THREE.DoubleSide,transparent:true,
-          opacity:0.35,depthWrite:false,roughness:.85,metalness:0,
-        }));
-        mesh.userData.reviewOnlyWallProposal=true;
-        mesh.userData.proposalId=request.proposalId;
-        wallAdditionLayer.add(mesh);
+      for (const wall of active) {
+        const group = displayWallDraft(wall);
+        group.userData.reviewOnlyWallProposal = true;
+        group.userData.proposalId = wall.proposalId;
+        wallAdditionLayer.add(group);
       }
     }
 
@@ -368,6 +377,21 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const raycaster = new THREE.Raycaster();
     raycaster.params.Line = { threshold: 0.2 };
     const mouse = new THREE.Vector2();
+    let hoveringCanvas = false;
+    let lastController = -1;
+    let lastBuildHint = "";
+    function setBuildHint(hint: string) {
+      if (lastBuildHint === hint) return;
+      lastBuildHint = hint;
+      build.current.onBuildHint(hint);
+    }
+    function aim() {
+      const { buildState, buildLevel, buildSizes } = build.current;
+      return aimBuild(buildState, buildLevel, buildSizes, raycaster.ray);
+    }
+    function place(hit: BuildHit) {
+      build.current.onBuildAction({ kind: "place", hit, id: newPlacementId(hit.kind) });
+    }
     const select = (id: string | null) => callback.current(id);
     function pick() {
       const hits = raycaster.intersectObjects(pickables, false);
@@ -377,40 +401,56 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     let startPointer: { id: number; x: number; y: number } | null = null;
     function pointerDown(e: PointerEvent) {
-      if (renderer.xr.isPresenting) return;
+      if (renderer.xr.isPresenting || e.button !== 0 || !e.isPrimary) return;
       startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    }
+    function trackPointer(e: PointerEvent) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      mouse.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1);
+      hoveringCanvas = Math.abs(mouse.x) <= 1 && Math.abs(mouse.y) <= 1;
+      return hoveringCanvas;
+    }
+    function leaveCanvas() { hoveringCanvas = false; }
+    function cancelPointer() {
+      startPointer = null;
+      leaveCanvas();
     }
     function pointerUp(e: PointerEvent) {
       const start = startPointer;
       startPointer = null;
       if (renderer.xr.isPresenting || !start || start.id !== e.pointerId) return;
-      // Orbiting the camera must not silently select a different wall.
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      mouse.set(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
-      );
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6 || !trackPointer(e)) return;
       raycaster.setFromCamera(mouse, camera);
+      if (build.current.buildState.tool) {
+        const target = aim();
+        if (target.hit) place(target.hit);
+        return;
+      }
       pick();
     }
     function keyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") select(null);
+      if (e.key !== "Escape") return;
+      if (build.current.buildState.tool) build.current.onBuildAction({ kind: "done" });
+      else select(null);
     }
     renderer.domElement.addEventListener("pointerdown", pointerDown);
     renderer.domElement.addEventListener("pointerup", pointerUp);
+    renderer.domElement.addEventListener("pointermove", trackPointer);
+    renderer.domElement.addEventListener("pointerleave", leaveCanvas);
+    renderer.domElement.addEventListener("pointercancel", cancelPointer);
     renderer.domElement.addEventListener("keydown", keyDown);
 
     // Controller selection uses exactly the same pickables and canonical
     // object IDs as desktop. No headset state changes any building geometry.
     const tempMatrix = new THREE.Matrix4();
     const controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
-    function xrPick(controller: THREE.Group) {
+    function aimController(controller: THREE.Group) {
+      controller.updateWorldMatrix(true, false);
       tempMatrix.identity().extractRotation(controller.matrixWorld);
       raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
       raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-      pick();
     }
     // This marker is never a source object: only a validated raycast hit
     // from the authenticated existing floor may authorise teleportation.
@@ -424,10 +464,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     scene.add(teleportMarker);
 
     function candidateTeleport(index:number) {
-      const controller=controllers[index];
-      tempMatrix.identity().extractRotation(controller.matrixWorld);
-      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-      raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMatrix);
+      aimController(controllers[index]);
       const hit=raycaster.intersectObjects(verifiedFloorMeshes,false)[0];
       if (!hit) return {accepted:false as const,reason:"no_verified_source_floor" as const};
       const id=hit.object.userData.surfaceId as string|undefined;
@@ -438,9 +475,22 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         [head.x,head.y,head.z],
       );
     }
-    const trigger=(index:number)=>{ // Headset trigger still selects unless explicitly in teleport mode.
+    const trigger=(index:number)=>{
+      lastController = index;
+      aimController(controllers[index]);
+      const { buildState, buildLevel, onBuildAction } = build.current;
+      const target = buildOverlay.menuHit(raycaster, buildState, buildLevel);
+      if (target) {
+        if (target.action) onBuildAction(target.action);
+        return;
+      }
+      if (buildState.tool) {
+        const placement = aim();
+        if (placement.hit) place(placement.hit);
+        return;
+      }
       if(!teleportSettings.current.teleportMode){
-        xrPick(controllers[index]);return;
+        pick();return;
       }
       if(!renderer.xr.isPresenting){
         teleportSettings.current.onTeleportMessage("Start a VR session before teleporting.");
@@ -490,7 +540,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       sessionReportCallback.current({presenting, controllers: controllerInfos});
     };
     function applyFinishSqueeze() {
-      if (teleportSettings.current.teleportMode) return;
+      if (build.current.buildState.tool || teleportSettings.current.teleportMode) return;
       const id = picked.current;
       if (id && sourceById.has(id)) cycleCallback.current(id);
     }
@@ -499,7 +549,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     let activeGrip: { index:number; objectId:string; from:THREE.Vector3 } | null = null;
     const nativeGripSeen = [false,false], fallbackGripDown = [false,false];
     const beginGrip = (index:number) => {
-      if (moveSettings.current.moveMode !== "move" || activeGrip) return;
+      if (build.current.buildState.tool || moveSettings.current.moveMode !== "move" || activeGrip) return;
       const id = picked.current;
       const row = sourceById.get(id ?? "");
       if (!id || !row || row.objectType !== "wall" ||
@@ -511,7 +561,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       const held=activeGrip;
       if (!held || held.index !== index) return;
       activeGrip=null;
-      if (moveSettings.current.moveMode !== "move") return;
+      if (build.current.buildState.tool || moveSettings.current.moveMode !== "move") return;
       const p=controllers[index].getWorldPosition(new THREE.Vector3());
       const dx=p.x-held.from.x,dz=p.z-held.from.z;
       if (Number.isFinite(dx)&&Number.isFinite(dz))
@@ -556,6 +606,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
+      lastController = -1;
       squeezeTracker.clear();
       nativeGripSeen.fill(false);
       fallbackGripDown.fill(false);
@@ -563,6 +614,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       report(true);
     };
     const onSessionEnd = () => {
+      buildOverlay.hideMenu();
       inputSources[0] = null;
       inputSources[1] = null;
       squeezeTracker.clear();
@@ -628,7 +680,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
       // Fallback xr-standard grips when SteamVR omits native squeeze events.
       // Native grip events always take precedence. Neither path changes source.
-      if (moveSettings.current.moveMode !== "move") activeGrip=null;
+      const { buildState, buildLevel } = build.current;
+      if (buildState.tool || moveSettings.current.moveMode !== "move") activeGrip=null;
       if (renderer.xr.isPresenting) {
         for (let index=0;index<inputSources.length;index++) {
           const pressed=standardSqueezePressed(inputSources[index]);
@@ -659,10 +712,32 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           obj.position.set(dx,0,dz);
       }
       refreshWallAddition();
+      const origin = activeStart(buildState, buildLevel);
+      if (renderer.xr.isPresenting) {
+        buildOverlay.positionMenu(renderer.xr.getCamera());
+        const isPointer = (source: PcVrInputSource | null | undefined) => source?.targetRayMode === "tracked-pointer";
+        const favoured = isPointer(inputSources[lastController]) ? lastController :
+          inputSources.findIndex(source => isPointer(source) && source?.handedness === "right");
+        const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
+        if (active >= 0) aimController(controllers[active]);
+        const hover = active >= 0 ? buildOverlay.menuHit(raycaster, buildState, buildLevel) : null;
+        const target = active >= 0 && !hover ? aim() : null;
+        buildOverlay.showAim(target, origin);
+        buildOverlay.drawMenu(buildState, buildLevel, target?.hint ?? buildGuide(buildState, buildLevel),
+          hover?.index ?? -1);
+      } else {
+        let target = null;
+        if (buildState.tool && hoveringCanvas && !startPointer) {
+          raycaster.setFromCamera(mouse, camera);
+          target = aim();
+        }
+        buildOverlay.showAim(target, origin);
+        setBuildHint(target?.hint ?? "");
+      }
       // Aiming at source-backed floor is visible only in immersive VR.
       // Never display this marker over an invented presentation floor.
       teleportMarker.visible=false;
-      if(renderer.xr.isPresenting && teleportSettings.current.teleportMode) {
+      if(renderer.xr.isPresenting && !buildState.tool && teleportSettings.current.teleportMode) {
         for(let index=0;index<controllers.length;index++) {
           const source=inputSources[index];
           if(!source || source.targetRayMode!=="tracked-pointer")continue;
@@ -850,6 +925,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
+      renderer.domElement.removeEventListener("pointermove", trackPointer);
+      renderer.domElement.removeEventListener("pointerleave", leaveCanvas);
+      renderer.domElement.removeEventListener("pointercancel", cancelPointer);
       renderer.domElement.removeEventListener("keydown", keyDown);
       renderer.xr.removeEventListener("sessionstart", onSessionStart);
       renderer.xr.removeEventListener("sessionend", onSessionEnd);
@@ -881,6 +959,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         }
       });
       roughTile.dispose();
+      buildOverlay.dispose();
       presentationFloor.geometry.dispose();
       presentationFloor.material.dispose();
       sunlight.shadow.dispose();
@@ -890,8 +969,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     };
   }, [manifest]);
 
-  return <div className="scene-canvas" ref={host}
-    aria-label="Read-only 3D building scene; click or point to select an object">
+  return <div className={"scene-canvas" + (buildState.tool ? " is-building" : "")} ref={host}
+    aria-label="3D building scene">
     {renderError && <div className="scene-loading" role="alert">{renderError}</div>}
   </div>;
 }
