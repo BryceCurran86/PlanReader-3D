@@ -137,6 +137,26 @@ def test_missing_memory_sample_without_guard_does_not_invent_memory_limit(tmp_pa
     )
     assert rc == 0 and status == "COMPLETED"
 
+@pytest.mark.parametrize("limits", [
+    {"max_private_mb": 100},
+    {"min_free_commit_mb": 100},
+    {"max_private_mb": 100, "min_free_commit_mb": 100},
+])
+def test_fast_exit_without_any_memory_sample_cannot_pass_guard(tmp_path, monkeypatch, limits):
+    calls = []
+    def forbidden_sample(_pid):
+        calls.append(_pid)
+        return (0, 0, None)
+    monkeypatch.setattr(launcher, "sample_memory_kb", forbidden_sample)
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "pass"], tmp_path, tmp_path / "fast_exit.log",
+        timeout_s=10, poll_s=5, **limits,
+    )
+    assert (rc, status) == (None, "MEMORY_SAMPLING_UNAVAILABLE")
+    assert calls == []
+    assert usage["peak_private_kb"] == 0
+
+
 def test_memory_limit_stops_a_process_that_commits_too_much(tmp_path):
     code = ("b = bytearray(400 * 1024 * 1024); "
             "[b.__setitem__(i, 1) for i in range(0, len(b), 4096)]; "
