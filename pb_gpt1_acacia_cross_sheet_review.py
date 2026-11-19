@@ -288,6 +288,8 @@ def review_acacia_dimension_or_height(
     floor_paths = witness.floor_wall_face_native_path_ids
     reference_paths = witness.reference_figure_native_path_ids
     if (witness.source_sha256 != packet.source_sha256
+            or type(witness.floor_page_index) is not int
+            or type(witness.reference_page_index) is not int
             or witness.floor_page_index != 1
             or witness.reference_page_index != required_page
             or type(floor_paths) is not tuple or not floor_paths
