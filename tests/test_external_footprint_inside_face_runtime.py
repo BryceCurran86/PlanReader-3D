@@ -71,4 +71,6 @@ def test_runtime_extracts_segments_and_emits_fail_closed_receipt():
     assert "inside_face_start" in receipt
     assert "clockwise_walk" in receipt
     assert "dual_dwelling" in receipt
+    assert "interior_face_open_plan_07_10" in receipt
+    assert receipt["interior_face_open_plan_07_10"]["commercial_publishable"] is False
     assert receipt["segment_count"] == 5

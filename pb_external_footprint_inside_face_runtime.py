@@ -26,6 +26,9 @@ from pb_source_fabricated_wall_box_closure_runtime import (
 from pb_source_footprint_geometry_hardening_runtime import (
     run_footprint_geometry_hardening_stage,
 )
+from pb_source_interior_face_open_plan_runtime import (
+    run_interior_face_open_plan_runtime_stage,
+)
 from pb_source_room_trace_acceptance_runtime import (
     run_room_trace_acceptance_stage,
 )
@@ -147,6 +150,7 @@ def run_inside_face_footprint_runtime_stage(
     page_bounds_pdf_pts: tuple[float, float, float, float],
     source_words: Sequence[Any] = (),
     page_index: int = -1,
+    source_sha256: str = "",
 ) -> dict[str, object]:
     """Executable stage for original-app footprint/topology review receipts."""
     segments = exterior_wall_segments_from_drawings(
@@ -276,6 +280,13 @@ def run_inside_face_footprint_runtime_stage(
             "owner_issue": 4443,
         }
     )
+    interior_open_plan = run_interior_face_open_plan_runtime_stage(
+        drawings,
+        source_words=source_words,
+        page_index=page_index,
+        source_sha256=source_sha256,
+        room_candidate_count=0,
+    )
 
     return {
         "status": bundle.start.status if bundle.walk.status == "CANDIDATE" else (
@@ -296,8 +307,11 @@ def run_inside_face_footprint_runtime_stage(
         "footprint_geometry_hardening": hardening,
         "room_trace_acceptance": acceptance,
         "fabricated_wall_box_closure_4443": fabricated_box,
+        "interior_face_open_plan_07_10": interior_open_plan,
         "segment_count": len(segments),
-        "tasks_covered": [f"{i:02d}" for i in range(1, 32)],
+        "tasks_covered": [f"{i:02d}" for i in range(1, 32)] + [
+            "Cursor-07", "Cursor-08", "Cursor-09", "Cursor-10",
+        ],
         "measurement_authorized": False,
         "commercial_publishable": False,
         "official_frozen120_score_change": 0,
