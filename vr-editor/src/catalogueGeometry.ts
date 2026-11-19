@@ -4,14 +4,15 @@ import type { ItemTarget, ItemVisual, Pattern, TrimProfile } from "./itemCatalog
 type FinishSpec = Extract<ItemVisual, { kind: "surface" }>;
 type TrimSpec = Extract<ItemVisual, { kind: "trim" }>;
 
-function makePattern(pattern: Exclude<Pattern, "solid">) {
+export function makePattern(pattern: Exclude<Pattern, "solid">, variation = 0) {
+  if (typeof document === "undefined") return null;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 128;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.fillStyle = "#f9f9f9";
   ctx.fillRect(0, 0, 128, 128);
-  let seed = 7;
+  let seed = 7 + variation * 29;
   const random = () => {
     seed = (1664525 * seed + 1013904223) >>> 0;
     return seed / 0x100000000;
@@ -54,6 +55,46 @@ function makePattern(pattern: Exclude<Pattern, "solid">) {
     ctx.fillStyle = shade;
     ctx.fillRect(0, 0, 128, 128);
   }
+  if (pattern === "masonry") {
+    ctx.fillStyle = "#ada79c";
+    ctx.fillRect(0, 0, 128, 3);
+    ctx.fillRect(0, 64, 128, 3);
+    ctx.fillRect(0, 2, 3, 64);
+    ctx.fillRect(64, 65, 3, 63);
+    for (let index = 0; index < 100; index++) {
+      ctx.fillStyle = index % 3 ? "#a4907844" : "#fcf7ea71";
+      ctx.fillRect(random() * 128, random() * 128, 1 + random() * 4, 1 + random() * 2);
+    }
+  }
+  if (pattern === "lap" || pattern === "seam" || pattern === "corrugation") {
+    const gradient = pattern === "lap" ? ctx.createLinearGradient(0, 0, 0, 128)
+      : ctx.createLinearGradient(0, 0, 128, 0);
+    if (pattern === "corrugation") {
+      for (let step = 0; step <= 12; step++) {
+        const shade = Math.round(218 - 33 * Math.cos(step * Math.PI / 6));
+        gradient.addColorStop(step / 12, "rgb(" + shade + ", " + shade + ", " + shade + ")");
+      }
+    } else {
+      gradient.addColorStop(0, "#86827a");
+      gradient.addColorStop(0.023, "#b2aaa0");
+      gradient.addColorStop(0.06, "#f5f1e6");
+      gradient.addColorStop(0.3, "#faf8f2");
+      gradient.addColorStop(0.96, "#e0ded6");
+      gradient.addColorStop(1, "#928c82");
+    }
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+  }
+  if (pattern === "sheet") {
+    ctx.fillStyle = "#9f9990";
+    ctx.fillRect(0, 0, 2, 128);
+    ctx.fillRect(0, 0, 128, 2);
+    ctx.fillStyle = "#77757070";
+    for (let offset = 16; offset < 128; offset += 32) {
+      ctx.fillRect(6, offset, 1.2, 1.2);
+      ctx.fillRect(121, offset, 1.2, 1.2);
+    }
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -67,7 +108,8 @@ export function finishMesh(
   const geometry = host.geometry.clone();
   const verts = geometry.getAttribute("position");
   const nx = normal.x, nz = normal.z;
-  const [repeatX, repeatY] = spec.repeatM ?? [0.12, 0.12];
+  const [repeatX, scaleY] = spec.repeatM ?? [0.12, 0.12];
+  const repeatY = spec.pattern === "masonry" ? scaleY * 2 : scaleY;
   const uv = new Float32Array(verts.count * 2);
   const vertical = target === "wall" || target === "opening";
   for (let index = 0; index < verts.count; index++) {

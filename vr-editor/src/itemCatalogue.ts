@@ -1,12 +1,17 @@
+import { EXTERIOR_CATALOGUE } from "./exteriorCatalogue.ts";
+
 export const CATALOGUE_GROUPS = [
   ["paint", "Paint"], ["boards", "Plasterboard"], ["skirting", "Skirting"],
   ["architraves", "Architraves"], ["floors", "Floor coverings"], ["walls", "Wall coverings"],
   ["tapware", "Tapware"], ["electrical", "Electrical points"], ["lights", "Lighting"],
   ["bathroom", "Bathroom fixtures"], ["cabinets", "Cabinetry"], ["doors", "Door finishes"],
+  ["timber", "Timber profiles"], ["entry", "Front doors"], ["substrates", "Exterior substrates"],
+  ["facades", "Exterior wall finishes"], ["decking", "Decking and paving"], ["soffits", "Soffits and eaves"],
 ] as const;
 export type CatalogueGroup = typeof CATALOGUE_GROUPS[number][0];
 export type ItemTarget = "wall" | "floor" | "ceiling" | "opening" | "worktop";
-export type Pattern = "solid" | "grain" | "plank" | "tile" | "woven" | "fleck" | "rib";
+export type Pattern = "solid" | "grain" | "plank" | "tile" | "woven" | "fleck" | "rib" |
+  "masonry" | "lap" | "seam" | "sheet" | "corrugation";
 export type TrimProfile = "square" | "pencil" | "bullnose" | "splay" | "step" | "ogee" | "colonial" | "lamb";
 export type FixtureShape =
   | "mixer" | "gooseneck" | "square-spout" | "wall-spout" | "outdoor-tap" | "shower"
@@ -19,7 +24,15 @@ type SurfaceVisual = { kind: "surface"; slot: "finish" | "lining"; pattern: Patt
 type TrimVisual = { kind: "trim"; profile: TrimProfile; widthM: number; depthM: number; color: number };
 type FixtureVisual = { kind: "fixture"; shape: FixtureShape; widthM: number; heightM: number; depthM: number;
   color: number; count: number; metalness: number };
-export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual;
+export type TimberProfile = "square" | "eased" | "bullnose" | "chamfer" | "rebate" |
+  "shiplap" | "v-joint" | "bevelback" | "half-round";
+export type TimberVisual = { kind: "timber"; profile: TimberProfile; mount: "face" | "post";
+  widthM: number; depthM: number; lengthM: number; color: number; grain: number };
+export type EntryStyle = "flush" | "shaker" | "craftsman" | "vertical-lite" | "strip-lite" |
+  "full-lite" | "batten" | "arched-lite" | "double" | "sidelight" | "pivot";
+export type EntryVisual = { kind: "entry"; style: EntryStyle; minWidthM: number; minHeightM: number;
+  color: number; grain: number | null };
+export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual | TimberVisual | EntryVisual;
 export type CatalogueItem = {
   id: string;
   group: CatalogueGroup;
@@ -231,7 +244,11 @@ export const ITEM_CATALOGUE: readonly CatalogueItem[] = [
     ["Walnut", 0x705240], ["Graphite", 0x4e5154]], "cabinet kitchen vanity joinery benchtop worktop"),
   ...doorFinishes.map(([label, color, pattern]) => surface("doors", label, ["opening"], color,
     pattern, 0.55, [0.22, 1.3], "finish", "door leaf opening door finish")),
+  ...EXTERIOR_CATALOGUE,
 ];
+
+export const itemCanRotate = (item: CatalogueItem) =>
+  item.visual.kind === "fixture" || item.visual.kind === "timber";
 
 const byId = new Map(ITEM_CATALOGUE.map(item => [item.id, item]));
 export const getCatalogueItem = (id: string | null) => id === null ? undefined : byId.get(id);

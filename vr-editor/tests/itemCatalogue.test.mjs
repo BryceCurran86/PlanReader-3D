@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, searchCatalogue } from "../src/itemCatalogue.ts";
 import { currentItemPlacements, emptyItemDraft, itemSchedule, itemScheduleCsv, placeItem, removeItem,
-  undoItem, worktopId } from "../src/itemPlacement.ts";
+  undoItem, worktopId, openingHostId } from "../src/itemPlacement.ts";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "../src/catalogueMenu.ts";
 import { EMPTY_BUILD } from "../src/buildPlacement.ts";
 
@@ -17,7 +17,7 @@ const item = (draft, label, hit, id) => placeItem(draft, "plan-revision", id, ex
 const start = () => emptyItemDraft("plan-revision");
 
 test("catalogue covers each category with stable distinctive options and searchable profiles", () => {
-  assert.ok(ITEM_CATALOGUE.length >= 500);
+  assert.ok(ITEM_CATALOGUE.length >= 1000);
   assert.equal(new Set(ITEM_CATALOGUE.map(entry => entry.id)).size, ITEM_CATALOGUE.length);
   for (const [group] of CATALOGUE_GROUPS) assert.ok(searchCatalogue("", group).length);
   assert.match(exact("moisture plasterboard 13").label, /13 mm/);
@@ -69,4 +69,35 @@ test("every group is reachable through the headset catalogue and choosing a card
     assert.equal(state.page, 0);
   }
   assert.equal(state.category, 0);
+});
+
+test("the exterior selection retains its substrate and finish as separate choices on the same face", () => {
+  const lined = item(start(), "fibre cement exterior sheet 9 grey", wall, "substrate");
+  const clad = item(lined, "standing seam metal zinc", wall, "cladding");
+  const painted = item(clad, "smooth exterior render limestone", wall, "render");
+  assert.deepEqual(clad.items.map(placement => placement.id), ["substrate", "cladding"]);
+  assert.deepEqual(painted.items.map(placement => placement.id), ["substrate", "render"]);
+  assert.equal(exact("smooth timber decking 140 jarrah").targets[0], "floor");
+  assert.equal(exact("fibre cement eaves lining charcoal").targets[0], "ceiling");
+  assert.equal(exact("Square timber post 90 1800 Radiata Pine").visual.mount, "post");
+  assert.equal(exact("Shiplap board Merbau").visual.profile, "shiplap");
+});
+
+test("front doors require a large enough door opening and retain one assembly through finish edits", () => {
+  const id = openingHostId("w", "door");
+  const hit = { ...wall, target: "opening", hostId: id, opening: { widthM: 1.5, heightM: 2.1, door: true } };
+  assert.strictEqual(item(start(), "double-leaf entry Blackbutt", hit, "double").items.length, 1);
+  assert.strictEqual(item(start(), "double-leaf entry", { ...hit, opening: { ...hit.opening, widthM: 0.9 } },
+    "too-wide").items.length, 0);
+  assert.strictEqual(item(start(), "double-leaf entry", { ...hit, opening: { ...hit.opening, door: false } },
+    "wrong-kind").items.length, 0);
+  const first = item(start(), "double-leaf entry Blackbutt", hit, "first");
+  const second = item(first, "glazed sidelight spotted gum", { ...hit, side: -1 }, "second");
+  const withFinish = item(second, "painted door leaf sage", hit, "finish");
+  assert.deepEqual(withFinish.items.map(placement => placement.id), ["second", "finish"]);
+  const sketch = { scopeKey: "plan-revision", proposalId: "w", levelId: "ground", start: [0, 0], end: [4, 0],
+    heightM: 2.4, openings: [{ openingId: "door", openingKind: "door", sillHeightM: 0,
+      offsetM: 1, widthM: 0.9, heightM: 2.1 }] };
+  assert.deepEqual(currentItemPlacements(withFinish.items, { objects: [] }, [sketch], false).map(entry => entry.id),
+    ["finish"]);
 });

@@ -1,16 +1,22 @@
 import { catalogueGroupLabel, getCatalogueItem } from "./itemCatalogue.ts";
-import type { CatalogueItem, ItemTarget } from "./itemCatalogue.ts";
+import type { CatalogueItem, ItemTarget, TimberVisual } from "./itemCatalogue.ts";
 import { openingFits, planLength, validWallLength } from "./buildPlacement.ts";
 import type { WallVisual } from "./buildPlacement.ts";
 import type { SceneManifest } from "./types.ts";
 
 export type Vector = [number, number, number];
+export type OpeningSize = { widthM: number; heightM: number; door: boolean };
+export type WallSection = {
+  start: [number, number]; end: [number, number]; heightM: number;
+  apertures: { from: number; to: number; bottom: number; top: number }[];
+};
 export type ItemHit = {
   hostId: string;
   target: ItemTarget;
   point: Vector;
   normal: Vector;
   side: 1 | -1;
+  opening?: OpeningSize;
 };
 export type PlacedItem = ItemHit & { id: string; itemId: string; turn: number };
 export type ItemDraft = { sourceKey: string; items: PlacedItem[]; history: PlacedItem[][] };
@@ -29,7 +35,43 @@ export function makesWorktop(item: CatalogueItem) {
     && item.visual.heightM < 1.3;
 }
 
+export function openingFitMessage(item: CatalogueItem, opening: OpeningSize | undefined) {
+  if (item.visual.kind !== "entry" && item.group !== "doors") return null;
+  if (!opening?.door) return "Choose an opening placed with the Door tool.";
+  if (item.visual.kind !== "entry") return null;
+  const { minWidthM, minHeightM } = item.visual;
+  if (!Number.isFinite(opening.widthM) || !Number.isFinite(opening.heightM) ||
+      opening.widthM + 0.000001 < minWidthM || opening.heightM + 0.000001 < minHeightM) {
+    return "This entry style needs at least " + Math.round(minWidthM * 1000) + " × " +
+      Math.round(minHeightM * 1000) + " mm.";
+  }
+  return null;
+}
+
+export function timberFitsWall(spec: TimberVisual, point: Vector, turn: number, wall?: WallSection) {
+  if (spec.mount === "post") return true;
+  if (!wall) return false;
+  const length = planLength(wall.start, wall.end);
+  if (length < 0.000001) return false;
+  const dx = (wall.end[0] - wall.start[0]) / length, dz = (wall.end[1] - wall.start[1]) / length;
+  const x = point[0] - wall.start[0], z = point[2] - wall.start[1];
+  const centre = x * dx + z * dz;
+  const across = Math.abs(x * dz - z * dx);
+  const vertical = turn % 2 === 0;
+  const halfRun = (vertical ? spec.widthM : spec.lengthM) / 2;
+  const halfHeight = (vertical ? spec.lengthM : spec.widthM) / 2;
+  const left = centre - halfRun, right = centre + halfRun;
+  const bottom = point[1] - halfHeight, top = point[1] + halfHeight;
+  const margin = 0.000001;
+  return across < 0.001 && left >= -margin && right <= length + margin &&
+    bottom >= -margin && top <= wall.heightM + margin &&
+    !wall.apertures.some(hole => left < hole.to - margin && right > hole.from + margin &&
+      bottom < hole.top - margin && top > hole.bottom + margin);
+}
+
 export function itemGuide(item: CatalogueItem) {
+  if (item.visual.kind === "entry") return "Aim at an opening placed with the Door tool.";
+  if (item.visual.kind === "timber" && item.visual.mount === "face") return "Aim at the centre of the timber on a wall face.";
   const target = item.targets;
   if (target.includes("wall") && target.includes("ceiling")) return "Aim at a wall or ceiling.";
   switch (target[0]) {
@@ -43,7 +85,8 @@ export function itemGuide(item: CatalogueItem) {
 
 function surfaceSlot(placement: PlacedItem, item: CatalogueItem) {
   const visual = item.visual;
-  if (visual.kind === "fixture") return null;
+  if (visual.kind === "fixture" || visual.kind === "timber") return null;
+  if (visual.kind === "entry") return JSON.stringify([placement.hostId, "entry"]);
   const side = placement.target === "wall" || placement.target === "opening" ? placement.side : 1;
   return JSON.stringify([placement.hostId, side, visual.kind === "trim" ? "trim" : visual.slot]);
 }
@@ -62,6 +105,7 @@ export function placeItem(
       !hit.hostId || !id || (hit.side !== 1 && hit.side !== -1) || !vertices.every(Number.isFinite) || magnitude < 0.99 || magnitude > 1.01 ||
       !Number.isInteger(turn) || turn < 0 || turn > 3 ||
       draft.items.some(entry => entry.id === id)) return draft;
+  if (hit.target === "opening" && openingFitMessage(item, hit.opening)) return draft;
   if (hit.target === "worktop" && !draft.items.some(entry => {
     const parent = getCatalogueItem(entry.itemId);
     return worktopId(entry.id) === hit.hostId && parent && makesWorktop(parent);
@@ -99,10 +143,16 @@ export function currentItemPlacements(
   items: readonly PlacedItem[], manifest: SceneManifest, walls: WallVisual[], demo: boolean,
 ) {
   const hosts = new Set<string>();
+  const openingSizes = new Map<string, OpeningSize>();
+  const wallSections = new Map<string, WallSection>();
   for (const row of manifest.objects) {
     const shape = row.geometry;
     if (row.objectType === "wall" && shape?.kind === "wallFace" && shape.heightM > 0 &&
-        planLength(shape.start, shape.end) > 0.000001) hosts.add(makeItemHostId("wall", row.objectId));
+        planLength(shape.start, shape.end) > 0.000001) {
+      const id = makeItemHostId("wall", row.objectId);
+      hosts.add(id);
+      wallSections.set(id, { start: shape.start, end: shape.end, heightM: shape.heightM, apertures: [] });
+    }
   }
   for (const surface of manifest.sourceSurfaces ?? []) {
     if (surface.kind === "floor" || surface.kind === "ceiling") hosts.add(makeItemHostId(surface.kind, surface.surfaceId));
@@ -114,21 +164,34 @@ export function currentItemPlacements(
   const distinct = new Map(walls.map(wall => [wall.proposalId, wall]));
   for (const wall of distinct.values()) {
     if (!validWallLength(planLength(wall.start, wall.end)) || wall.heightM <= 0) continue;
-    hosts.add(makeItemHostId("draft-wall", wall.proposalId));
+    const wallId = makeItemHostId("draft-wall", wall.proposalId);
+    const apertures: WallSection["apertures"] = [];
+    hosts.add(wallId);
+    wallSections.set(wallId, { start: wall.start, end: wall.end, heightM: wall.heightM, apertures });
     const sorted = (wall.openings ?? []).filter(opening => openingFits(wall, opening))
       .sort((a, b) => a.offsetM - b.offsetM);
     let end = 0;
     for (const opening of sorted) {
       if (opening.offsetM < end - 0.000001) continue;
       end = opening.offsetM + opening.widthM;
-      if (opening.openingKind !== "window") hosts.add(openingHostId(wall.proposalId, opening.openingId));
+      apertures.push({ from: opening.offsetM, to: end, bottom: opening.sillHeightM,
+        top: opening.sillHeightM + opening.heightM });
+      if (opening.openingKind !== "window") {
+        const id = openingHostId(wall.proposalId, opening.openingId);
+        hosts.add(id);
+        openingSizes.set(id, { widthM: opening.widthM, heightM: opening.heightM,
+          door: opening.openingKind === "door" });
+      }
     }
   }
   return items.filter(entry => {
     if (!hosts.has(entry.hostId)) return false;
     const item = getCatalogueItem(entry.itemId);
-    if (item && makesWorktop(item)) hosts.add(worktopId(entry.id));
-    return !!item;
+    if (!item || (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return false;
+    if (item.visual.kind === "timber" && !timberFitsWall(item.visual, entry.point, entry.turn, wallSections.get(entry.hostId)))
+      return false;
+    if (makesWorktop(item)) hosts.add(worktopId(entry.id));
+    return true;
   });
 }
 

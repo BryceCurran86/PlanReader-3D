@@ -2,14 +2,17 @@ import * as THREE from "three";
 import { openingFits, planLength } from "./buildPlacement.ts";
 import type { PlanPoint, WallVisual } from "./buildPlacement.ts";
 import { getCatalogueItem } from "./itemCatalogue.ts";
-import type { CatalogueItem, ItemTarget } from "./itemCatalogue.ts";
-import { makeItemHostId, openingHostId, worktopId } from "./itemPlacement.ts";
-import type { ItemHit, PlacedItem, Vector } from "./itemPlacement.ts";
+import type { CatalogueItem, ItemTarget, ItemVisual } from "./itemCatalogue.ts";
+import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, worktopId } from "./itemPlacement.ts";
+import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
 import { createCatalogueFixture } from "./catalogueFixtures.ts";
 import { finishMesh, trimRun } from "./catalogueGeometry.ts";
+import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
 
-type WallRun = { start: PlanPoint; end: PlanPoint; gaps: [number, number][] };
-type Opening = { start: PlanPoint; end: PlanPoint; bottom: number; top: number; leaf: boolean };
+type WallRun = WallSection & { gaps: [number, number][] };
+type Opening = { start: PlanPoint; end: PlanPoint; bottom: number; top: number; size: OpeningSize;
+  reviewLeaf?: THREE.Mesh };
+type OpeningFinish = Extract<ItemVisual, { kind: "surface" }>;
 export type CatalogueHost = {
   id: string;
   target: ItemTarget;
@@ -18,8 +21,8 @@ export type CatalogueHost = {
   opening?: Opening;
 };
 
-export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint): CatalogueHost {
-  return { id: makeItemHostId("wall", id), target: "wall", mesh, run: { start, end, gaps: [] } };
+export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint, heightM: number): CatalogueHost {
+  return { id: makeItemHostId("wall", id), target: "wall", mesh, run: { start, end, heightM, gaps: [], apertures: [] } };
 }
 
 function xy(point: PlanPoint, y = 0) {
@@ -30,6 +33,10 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
   const hosts: CatalogueHost[] = [];
   const face = group.children.find(child => child.userData.catalogueWallFace);
   const floorGaps: [number, number][] = [];
+  const apertures: WallSection["apertures"] = [];
+  const leaves = new Map(group.children.flatMap(child => child instanceof THREE.Mesh &&
+    typeof child.userData.catalogueDoorLeaf === "string"
+    ? [[child.userData.catalogueDoorLeaf as string, child] as const] : []));
   const start = xy(wall.start), end = xy(wall.end);
   const tangent = end.clone().sub(start).normalize();
   const openings = (wall.openings ?? []).filter(opening => openingFits(wall, opening))
@@ -38,15 +45,17 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
   for (const opening of openings) {
     if (opening.offsetM < lastEnd - 0.000001) continue;
     lastEnd = opening.offsetM + opening.widthM;
-    if (opening.sillHeightM < 0.001) floorGaps.push([opening.offsetM, lastEnd]);
+    const bottom = opening.sillHeightM, top = bottom + opening.heightM;
+    apertures.push({ from: opening.offsetM, to: lastEnd, bottom, top });
+    if (bottom < 0.001) floorGaps.push([opening.offsetM, lastEnd]);
     if (opening.openingKind === "window") continue;
     const a = start.clone().addScaledVector(tangent, opening.offsetM);
     const b = start.clone().addScaledVector(tangent, lastEnd);
-    const floor = opening.sillHeightM, top = floor + opening.heightM;
-    const outline: Opening = { start: [a.x, a.z], end: [b.x, b.z], bottom: floor,
-      top, leaf: opening.openingKind === "door" };
-    const points = [xy(outline.start, floor), xy(outline.end, floor), xy(outline.end, top),
-      xy(outline.start, floor), xy(outline.end, top), xy(outline.start, top)];
+    const outline: Opening = { start: [a.x, a.z], end: [b.x, b.z], bottom, top,
+      size: { widthM: opening.widthM, heightM: opening.heightM, door: opening.openingKind === "door" },
+      reviewLeaf: leaves.get(opening.openingId) };
+    const points = [xy(outline.start, bottom), xy(outline.end, bottom), xy(outline.end, top),
+      xy(outline.start, bottom), xy(outline.end, top), xy(outline.start, top)];
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, visible: false }));
@@ -55,7 +64,7 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
   }
   if (face instanceof THREE.Mesh) {
     hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face,
-      run: { start: wall.start, end: wall.end, gaps: floorGaps } });
+      run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
 }
@@ -133,6 +142,7 @@ function surfaceKey(entry: PlacedItem) {
 
 export function createCatalogueScene(scene: THREE.Scene) {
   const mounts: THREE.Object3D[] = [];
+  const coveredLeaves = new Map<THREE.Mesh, boolean>();
   const hosts = new Map<THREE.Object3D, CatalogueHost>();
   let meshes: THREE.Object3D[] = [];
   let sourceKey: readonly CatalogueHost[] | null = null;
@@ -146,6 +156,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
   const front = new THREE.Vector3(0, 0, 1);
 
   function clear() {
+    for (const [leaf, visible] of coveredLeaves) leaf.visible = visible;
+    coveredLeaves.clear();
     for (const root of mounts) root.removeFromParent();
     for (const root of mounts) dispose(root);
     mounts.length = 0;
@@ -170,19 +182,56 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const visual = getCatalogueItem(placement.itemId)?.visual;
       return visual?.kind === "surface" && visual.slot === "finish";
     }).map(surfaceKey));
+    const designedDoors = new Set<string>();
+    const doorFinishes = new Map<string, OpeningFinish>();
+    for (const placement of items) {
+      const item = getCatalogueItem(placement.itemId);
+      const opening = byId.get(placement.hostId)?.opening;
+      if (!item || !opening || openingFitMessage(item, opening.size)) continue;
+      if (item.visual.kind === "entry") designedDoors.add(placement.hostId);
+      if (item.group === "doors" && item.visual.kind === "surface") doorFinishes.set(surfaceKey(placement), item.visual);
+    }
     for (const placement of items) {
       const item = getCatalogueItem(placement.itemId);
       const host = byId.get(placement.hostId);
       if (!item || !host || host.target !== placement.target) continue;
       const normal = new THREE.Vector3(...placement.normal);
+      const point = new THREE.Vector3(...placement.point);
       const { visual } = item;
+      if (host.target === "opening" && openingFitMessage(item, host.opening?.size)) continue;
       let node: THREE.Object3D;
       if (visual.kind === "surface") {
-        if (item.group === "doors" && !host.opening?.leaf) continue;
+        if (item.group === "doors" && designedDoors.has(host.id)) continue;
         if (visual.slot === "lining" && visibleFinishes.has(surfaceKey(placement))) continue;
         node = finishMesh(host.mesh, visual, host.target, normal, placement.side);
       } else if (visual.kind === "trim") {
         node = trimMount(host, item, normal);
+      } else if (visual.kind === "entry") {
+        const opening = host.opening;
+        if (!opening) continue;
+        const { widthM, heightM } = opening.size;
+        const entryFront = xy(opening.end).sub(xy(opening.start)).normalize()
+          .cross(up).multiplyScalar(placement.side);
+        const assembly = createEntryAssembly(visual, widthM, heightM,
+          doorFinishes.get(surfaceKey(placement)),
+          doorFinishes.get(surfaceKey({ ...placement, side: placement.side === 1 ? -1 : 1 })));
+        assembly.position.copy(xy(opening.start, opening.bottom).lerp(xy(opening.end, opening.bottom), 0.5));
+        assembly.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+          up.clone().cross(entryFront), up, entryFront,
+        ));
+        if (opening.reviewLeaf) {
+          coveredLeaves.set(opening.reviewLeaf, opening.reviewLeaf.visible);
+          opening.reviewLeaf.visible = false;
+        }
+        node = assembly;
+      } else if (visual.kind === "timber") {
+        if (!timberFitsWall(visual, placement.point, placement.turn, host.run)) continue;
+        const section = createTimberSection(visual);
+        const axis = visual.mount === "post" ? up : front;
+        section.quaternion.setFromUnitVectors(axis, normal);
+        section.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(axis, placement.turn * Math.PI / 2));
+        section.position.copy(point).addScaledVector(normal, 0.001);
+        node = section;
       } else {
         const { group, worktop } = createCatalogueFixture(visual, host.target);
         group.position.set(...placement.point).addScaledVector(normal, 0.001);
@@ -199,22 +248,29 @@ export function createCatalogueScene(scene: THREE.Scene) {
     meshes = [...hosts.keys()];
   }
 
-  function target(raycaster: THREE.Raycaster, item: CatalogueItem): ItemHit | null {
+  function candidate(raycaster: THREE.Raycaster, item: CatalogueItem, turn = 0): { hit: ItemHit | null; reason?: string } {
     for (const hit of raycaster.intersectObjects(meshes, false)) {
       const host = hosts.get(hit.object);
       if (!host || !hit.face) continue;
       // The hidden target inside a rough opening does not intercept ordinary finishes or fixtures.
       if (host.target === "opening" && !item.targets.includes("opening")) continue;
-      if (!item.targets.includes(host.target) || (item.group === "doors" && !host.opening?.leaf)) return null;
+      if (!item.targets.includes(host.target)) return { hit: null };
+      if (host.target === "opening") {
+        const reason = openingFitMessage(item, host.opening?.size);
+        if (reason) return { hit: null, reason };
+      }
       const local = host.mesh.worldToLocal(hit.point.clone());
+      if (item.visual.kind === "timber" && !timberFitsWall(item.visual, local.toArray() as Vector, turn, host.run)) {
+        return { hit: null, reason: "Move the timber clear of the wall edge or opening, or rotate it." };
+      }
       const normal = hit.face.normal.clone().normalize();
       const worldNormal = normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(host.mesh.matrixWorld));
       const side = worldNormal.dot(raycaster.ray.direction) > 0 ? -1 : 1;
-      if (host.target === "worktop" && (normal.y < 0.9 || side < 0)) return null;
-      return { hostId: host.id, target: host.target, point: local.toArray() as Vector,
-        normal: normal.multiplyScalar(side).toArray() as Vector, side };
+      if (host.target === "worktop" && (normal.y < 0.9 || side < 0)) return { hit: null };
+      return { hit: { hostId: host.id, target: host.target, point: local.toArray() as Vector,
+        normal: normal.multiplyScalar(side).toArray() as Vector, side, opening: host.opening?.size } };
     }
-    return null;
+    return { hit: null };
   }
 
   function aim(hit: ItemHit | null) {
@@ -228,5 +284,5 @@ export function createCatalogueScene(scene: THREE.Scene) {
     marker.visible = true;
   }
 
-  return { sync, clear, target, aim };
+  return { sync, clear, candidate, aim };
 }
