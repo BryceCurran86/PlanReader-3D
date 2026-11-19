@@ -228,11 +228,12 @@ def collect_live_canonical_coverage(
             if not set(quantity.input_entity_ids).intersection(admitted):
                 continue
             if _quantity_explicit_lineage_conflict(quantity, lineage):
-                # A stale source-positive quantity never becomes a measured
-                # area for a new canonical revision merely by sharing an ID.
-                # Preserve the original quantity untouched for source review.
+                # Retain the dependency as a *rejected diagnostic*. The
+                # existing registry _qe_lineage_conflicts marks mismatched
+                # source metadata defective, so QUANTIFIED / PUBLISHED stay
+                # zero. Removing the dependency would erase the audit trail
+                # and break downstream review of the original source claim.
                 gaps[category].add("quantity_source_lineage_conflict")
-                continue
             linked_rows.append(quantity)
         linked = tuple(linked_rows)
         quantity_ids = {q.quantity_id for q in linked}
