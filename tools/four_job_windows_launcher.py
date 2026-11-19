@@ -199,7 +199,8 @@ def run_logged(
 ) -> tuple[int | None, str, dict]:
     """Run ``args`` under hard limits. Returns (exit code, status, usage).
 
-    Status is COMPLETED, PROCESS_FAILED, TIMEOUT, MEMORY_LIMIT (the process tree's private memory exceeded
+    Status is COMPLETED, PROCESS_FAILED, TIMEOUT, MEMORY_SAMPLING_UNAVAILABLE,
+    MEMORY_LIMIT (the process tree's private memory exceeded
     ``max_private_mb``) or SYSTEM_MEMORY_GUARD (the machine's free commit fell below ``min_free_commit_mb``,
     which would start failing other programs). The last two are recorded as negative evidence, not hidden.
     ``usage`` holds the sampled peaks in KB.
@@ -228,6 +229,13 @@ def run_logged(
                     if free_kb is not None:
                         previous = usage["min_system_free_commit_kb"]
                         usage["min_system_free_commit_kb"] = free_kb if previous is None else min(previous, free_kb)
+                    # A failed sampler returns (0, 0, None). With hard memory
+                    # limits enabled, accepting that sentinel silently disables
+                    # both protections. Fail closed instead of claiming safety.
+                    if ((max_private_mb is not None or min_free_commit_mb is not None)
+                            and ws_kb == 0 and private_kb == 0 and free_kb is None):
+                        kill_tree(proc)
+                        return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                     if max_private_mb is not None and private_kb // 1024 > max_private_mb:
                         kill_tree(proc)
                         return None, "MEMORY_LIMIT", usage
