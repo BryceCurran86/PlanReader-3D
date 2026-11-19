@@ -340,3 +340,20 @@ def test_truthy_original_byte_roles_flag_does_not_authenticate_acacia():
     poisoned = replace(_package(), original_byte_roles_verified="yes")
     assert review_acacia_legend_room(poisoned, 3).status == "ABSTAINED"
     assert review_acacia_finishes(poisoned)[0] == "ABSTAINED"
+
+
+@pytest.mark.parametrize("kind", ("figured_setout", "section_height"))
+@pytest.mark.parametrize("field,bad_value", [
+    ("floor_page_index", True),
+    ("floor_page_index", 1.0),
+    ("floor_page_index", "1"),
+    ("reference_page_index", True),
+    ("reference_page_index", 8.0),
+    ("reference_page_index", "8"),
+])
+def test_cross_sheet_page_receipt_requires_exact_integer_type(kind, field, bad_value):
+    witness = replace(_dim(kind), **{field: bad_value})
+    status, reason = review_acacia_dimension_or_height(_package(), witness)
+    assert (status, reason) == (
+        "ABSTAINED", "original_cross_page_physical_host_or_figure_unverified"
+    )
