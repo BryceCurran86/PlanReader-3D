@@ -3746,7 +3746,9 @@ def enrich_cross_sheet_floor_with_documented_area(
             or floor_face_counts[floor.source_room_face_record_id] != 1
             or floor_id_counts[floor.canonical_floor_id] != 1
             or floor.metric_area_m2 is not None
-            or floor.metric_area_quantity_id is not None):
+            or floor.metric_area_quantity_id is not None
+            or floor.geometry_complete is not True
+            or floor.physical_floor_surface_identity_resolved is not True):
             enriched.append(floor)
             continue
         ev = area_rec.area_evidence
@@ -3760,6 +3762,11 @@ def enrich_cross_sheet_floor_with_documented_area(
             or not math.isfinite(float(raw_area))
             or float(raw_area) <= 0
             or ev.document_id != floor.document_id
+            or ev.page_id != area_rec.source_dimension_page_id
+            or type(area_rec.physical_room_id) is not str
+            or not area_rec.physical_room_id.strip()
+            or type(floor.source_sha256) is not str
+            or re.fullmatch(r"[0-9a-fA-F]{64}", floor.source_sha256) is None
             or metadata.get("room_revision_id") != floor.revision_id
             or metadata.get("room_snapshot_id") != floor.snapshot_id
             or metadata.get("source_sha256") != floor.source_sha256
@@ -3874,6 +3881,7 @@ def resolve_registered_cross_sheet_floor_correspondences(
             or ev.metadata.get("source_sha256") != floor.source_sha256
             or ev.metadata.get("source_room_face_record_id") != record.source_room_face_record_id
             or ev.metadata.get("physical_room_id") != record.physical_room_id
+            or ev.page_id != area.source_dimension_page_id
             or ev.metadata.get("source_dimension_page_id") != area.source_dimension_page_id):
             continue
         payload = by_revision.get(floor.revision_id)
@@ -3891,6 +3899,8 @@ def resolve_registered_cross_sheet_floor_correspondences(
                    or not math.isfinite(float(w.covered_interval_iou))
                    or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
             or not doors
+            or set(record.side_kinds) != {"x0", "x1", "y0", "y1"}
+            or any(record.side_kinds.get(d.wall_side) != "door" for d in doors)
             or type(getattr(area, "room_label", None)) is not str
             or not area.room_label.strip()
             or any(d.status is not EvidenceResolutionStatus.CORROBORATED
