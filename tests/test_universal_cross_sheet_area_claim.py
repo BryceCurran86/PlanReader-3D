@@ -135,12 +135,13 @@ from pb_source_cross_view_floor_correspondence_shadow import (
 _CASE = count(1)
 
 
-def _issued_source_correspondence(job="unseen-retail"):
+def _issued_source_correspondence(job="unseen-retail", *, room_label="LAB", schedule_room="LAB"):
     suffix = next(_CASE)
     data = ("original construction source " + str(suffix)).encode()
     sha = hashlib.sha256(data).hexdigest()
     f = replace(_floor(job), source_sha256=sha, snapshot_id=f"snapshot:{job}:{suffix}")
     a = _area(f)
+    a.room_label = room_label
     wall_eq = tuple(
         CrossSheetWallEquivalenceRecord(
             support_page_id="12", target_page_id="6", side_name=side,
@@ -150,7 +151,7 @@ def _issued_source_correspondence(job="unseen-retail"):
     )
     door = DoorwayTransitionEvidence(
         door_callout="D1", page_id="6", wall_side="y0",
-        schedule_page_id="15", door_width_mm=900., scheduled_room_name="LAB",
+        schedule_page_id="15", door_width_mm=900., scheduled_room_name=schedule_room,
     )
     rec = SourceCrossViewFloorCorrespondenceRecord(
         record_id=f"receipt:{job}:{suffix}",
@@ -232,3 +233,10 @@ def test_two_competing_issued_receipts_cannot_choose_a_winner():
     )
     assert _resolve(source, areas, floors, rec, other) == ()
     assert _resolve(source, areas, floors, other, rec) == ()
+
+
+def test_generic_cross_sheet_must_match_source_room_and_door_schedule():
+    source, areas, floors, rec = _issued_source_correspondence(
+        "new-project-2027", room_label="STORAGE", schedule_room="OFFICE",
+    )
+    assert _resolve(source, areas, floors, rec) == ()
