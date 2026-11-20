@@ -747,6 +747,27 @@ def _generate_project_handoff_locked(
         "spaces": len(tuple(getattr(claim, "canonical_spaces", ()) or ())),
     }
 
+    # Source-only observation of real canonical opening gates: 180 drawing
+    # candidates must not be mistaken for 180 quantities. This diagnostic
+    # never issues a quantity, modifies a seal, or grants a benchmark point.
+    # Failure to audit is explicitly recorded but never promotes an opening
+    # or changes the existing original customer quantity execution.
+    try:
+        from pb_original_opening_area_gate_diagnostics import (
+            audit_original_opening_area_gates,
+        )
+        summary["opening_area_issuer_audit"] = audit_original_opening_area_gates(
+            getattr(claim, "canonical_openings", ()) or (),
+            getattr(claim, "opening_quantity_evidence", ()) or (),
+        )
+    except (TypeError, ValueError, RuntimeError, AttributeError) as audit_error:
+        summary["opening_area_issuer_audit"] = {
+            "status": "DIAGNOSTIC_ABSTAINED",
+            "diagnostic_error_type": type(audit_error).__name__,
+            "measurement_authorized": False,
+            "official_benchmark_scored": False,
+        }
+
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
     if clean_family_group in {"all", "surfaces", "floor_area"}:
