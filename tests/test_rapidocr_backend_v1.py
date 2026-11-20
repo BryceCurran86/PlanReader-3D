@@ -74,6 +74,7 @@ def _install_fake_rapidocr(
     mod_rapidocr.RapidOCR = FakeRapidOCR
     mod_rapidocr.__version__ = "test-1.0.0"
     mod_onnxruntime = types.ModuleType("onnxruntime")
+    mod_onnxruntime.disable_telemetry_events = lambda: None
 
     monkeypatch.setitem(sys.modules, "rapidocr", mod_rapidocr)
     monkeypatch.setitem(sys.modules, "onnxruntime", mod_onnxruntime)
@@ -174,27 +175,31 @@ def test_inference_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
         backend.extract_lines(Image.new("RGB", (50, 50), "white"))
 
 
-def test_engine_cached_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
-    construction_calls = {"count": 0}
+def test_engine_disables_runtime_telemetry_before_cached_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_steps: list[str] = []
 
     class TrackingRapidOCR:
         def __init__(self):
-            construction_calls["count"] += 1
+            startup_steps.append("open model sessions")
 
         def __call__(self, array):
             return _FakeResult(["W-1"], [[[0, 0], [10, 0], [10, 10], [0, 10]]], [0.9])
 
     mod = types.ModuleType("rapidocr")
     mod.RapidOCR = TrackingRapidOCR
+    mod_onnxruntime = types.ModuleType("onnxruntime")
+    mod_onnxruntime.disable_telemetry_events = lambda: startup_steps.append("disable telemetry")
     monkeypatch.setitem(sys.modules, "rapidocr", mod)
-    monkeypatch.setitem(sys.modules, "onnxruntime", types.ModuleType("onnxruntime"))
+    monkeypatch.setitem(sys.modules, "onnxruntime", mod_onnxruntime)
 
     backend = RapidOCRBackend()
     img = Image.new("RGB", (50, 50), "white")
     backend.extract_lines(img)
     backend.extract_lines(img)
     backend.extract_lines(img)
-    assert construction_calls["count"] == 1
+    assert startup_steps == ["disable telemetry", "open model sessions"]
 
 
 def test_never_publishes_corroborated(monkeypatch: pytest.MonkeyPatch) -> None:
