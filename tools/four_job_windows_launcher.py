@@ -55,6 +55,10 @@ PRIMARY_PDF = {
     "au_qld_q5446_armstrong32_harlequin": "Q5446_Standard_Plans_V1_20220320.pdf",
 }
 REPO_URL = "https://github.com/BryceCurran86/PlanReader-3D.git"
+# SHA-256 of the sorted [project, filename, size, SHA-256] rows from the
+# unchanged Full Plan V2 source manifests. The kit inventory cannot supply
+# the authority used to verify its own source files.
+_FROZEN_SOURCE_ROSTER_SHA256 = "6229de79e33200a723da9ec30593aead904f96ae41b8f82274a2fb6641dfde83"
 
 
 def note(message: str) -> None:
@@ -253,22 +257,48 @@ def ocr_install_command(python: Path) -> list[str]:
 
 def verify_originals(kit: Path, report_dir: Path) -> bool:
     manifest = json.loads((kit / "LOCAL_SOURCE_INVENTORY.json").read_text(encoding="utf-8-sig"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Unsafe source inventory")
     entries = manifest.get("docs")
     if (manifest.get("benchmark_id") != "full_plan_takeoff_reconciliation_v2"
             or not isinstance(entries, list) or len(entries) != 10):
         raise ValueError("Expected exactly the ten original Full Plan V2 sources")
-    statuses = []
+    roster = []
     for item in entries:
-        project, filename = item["project_id"], item["manifest_name"]
-        if project not in PROJECTS or not filename.lower().endswith(".pdf") or Path(filename).name != filename:
+        if not isinstance(item, dict):
             raise ValueError("Unsafe source inventory entry")
+        project, filename = item.get("project_id"), item.get("manifest_name")
+        size, digest = item.get("expected_size_bytes"), item.get("original_sha256")
+        if (
+            project not in PROJECTS
+            or type(filename) is not str
+            or not filename.lower().endswith(".pdf")
+            or any(separator in filename for separator in ("/", "\\", ":"))
+            or type(size) is not int
+            or size <= 0
+            or type(digest) is not str
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError("Unsafe source inventory entry")
+        roster.append((project, filename, size, digest))
+    roster_bytes = json.dumps(sorted(roster), separators=(",", ":")).encode("utf-8")
+    if hashlib.sha256(roster_bytes).hexdigest() != _FROZEN_SOURCE_ROSTER_SHA256:
+        raise ValueError("Source inventory differs from the frozen original source roster")
+
+    statuses = []
+    for project, filename, size, digest in roster:
         path = kit / "sources" / project / filename
         if not path.is_file() or path.is_symlink():
             status = "MISSING"
+        elif path.stat().st_size != size:
+            status = "MISMATCH"
         else:
-            payload = path.read_bytes()
-            status = ("VERIFIED" if len(payload) == item["expected_size_bytes"]
-                      and hashlib.sha256(payload).hexdigest() == item["original_sha256"] else "MISMATCH")
+            with path.open("rb") as source:
+                checksum = hashlib.sha256()
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    checksum.update(chunk)
+            status = "VERIFIED" if checksum.hexdigest() == digest else "MISMATCH"
         statuses.append({"project_id": project, "file_name": filename, "status": status})
         note(f"  {project}: {filename}: {status}")
     output_report(report_dir / "SOURCE_SHA_VERIFICATION.json", {
@@ -460,7 +490,12 @@ def main() -> int:
     note("No source PDFs or project outputs will be uploaded or pushed to GitHub.\n")
 
     note("Step 1: verifying all 10 original file hashes")
-    if not verify_originals(kit, session):
+    try:
+        verified = verify_originals(kit, session)
+    except (OSError, ValueError) as exc:
+        note(f"ERROR: Original source inventory verification failed ({type(exc).__name__}).")
+        return 2
+    if not verified:
         note("ERROR: Original SHA verification failed. No extraction will start.")
         return 2
     note("10/10 SHA-256 sources verified.\n")
