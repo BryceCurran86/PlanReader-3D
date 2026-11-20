@@ -71,3 +71,18 @@ def test_multiple_source_wall_strokes_keep_unique_native_path_owners():
     assert len(rows)==2
     assert {row.path_index for row in rows}=={0,1}
     assert all(row.native_path_indices() for row in rows)
+
+
+def test_project_neutral_physical_wall_layers_support_unseen_cad_exports():
+    for layer in ("A-WALL", "WALL-EXTERNAL", "walls_structural", "WallPartition",
+                  "building.wall.internal", "Enclosure_WallExternal"):
+        strips = _collect_source_heavy_stroke_strips((_stroke(layer=layer),))
+        assert len(strips) == 1, layer
+        assert strips[0].native_path_indices() == (0,)
+
+
+def test_source_wall_named_annotations_and_finishes_do_not_promote_thin_strokes():
+    for layer in ("A-WALL-HATCH", "A-WALL-TILE", "WallFinish", "wallpaper",
+                  "WALL-DIM", "WallInternal_Annotation", "Wall-Demolition",
+                  "WallExternal_Legend", "Floor_WallExternal", "A-WALL-PAINT"):
+        assert _collect_source_heavy_stroke_strips((_stroke(layer=layer),)) == [], layer

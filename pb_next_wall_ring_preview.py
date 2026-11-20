@@ -995,18 +995,45 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
     return _attach_caps(strips), other
 
 
+def _source_wall_stroke_layer_name(name: str) -> bool:
+    """Conservatively recognise a source-declared physical wall CAD layer.
+
+    This is only evidence for the *thin* native stroke lane, not a grant of
+    physical/commercial authority. Reject finish, annotation and demolition
+    layers, regardless of whether their names contain the word "wall".
+    """
+    if not isinstance(name, str) or not name.strip():
+        return False
+    import re
+    tokens = tuple(t for t in re.split(r"[^a-z0-9]+", name.lower()) if t)
+    if not tokens:
+        return False
+    has_wall_role = any(
+        token in {"wall", "walls"}
+        or (token.startswith("wall") and token[4:] in {
+            "internal", "external", "interior", "exterior",
+            "structural", "partition", "loadbearing",
+        })
+        for token in tokens
+    )
+    rejected = {"annotation", "annot", "dimension", "dim", "hatch",
+                "finish", "finishes", "tile", "tiling", "lining",
+                "cladding", "paint", "roof", "floor", "furniture",
+                "joinery", "demo", "demolition", "existing", "symbol",
+                "legend", "notes", "note"}
+    return has_wall_role and not bool(rejected.intersection(tokens))
+
+
 def _collect_source_heavy_stroke_strips(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
     """Opaque BLACK heavy native line paint as candidate wall bands.
 
-    Q5446-class vector drawings can paint real walls as ONE 1.92-pt source
-    stroke. 3Laurel uses many native 0.71-pt strokes on explicitly named
-    Enclosure_WallInternal / Enclosure_WallExternal layers: those are heavier
-    than its 0.37-0.43-pt annotation / floor paint but were lost behind
-    the generic 1.2-pt threshold. Require the original WALL layer for the
-    lower width class; never promote other thin art, hatch lines, page
-    hulls or any stroke to a commercial physical wall.
+    Some CAD exports paint real walls as heavy untyped strokes; others
+    use thin strokes on source-declared physical wall layers. Lower-width
+    recognition requires an explicit physical wall layer role, with finish,
+    hatch, legend and annotation names vetoed. Never grant a commercial
+    physical wall solely from a layer name.
     """
     result: list[_Strip] = []
     seen: set[tuple[int, float, float, float, float]] = set()
@@ -1020,15 +1047,9 @@ def _collect_source_heavy_stroke_strips(
             continue
         width = row.get("width", 0)
         native_layer = str(row.get("layer") or "")
-        # 3Laurel's genuine CAD wall-face strokes are 0.71 PDF pt, whereas
-        # floor finish and annotation lines are generally 0.37-0.43 PDF pt.
-        # The lower width is safe only in the actual SOURCE wall family.
-        # Keep the existing 1.2-pt gate for all untyped/other drawings.
-        min_width = (
-            0.65
-            if native_layer in ("Enclosure_WallInternal", "Enclosure_WallExternal")
-            else 1.2
-        )
+        # Retain conservative untyped heavy strokes; permit thin ones only
+        # when the current drawing's CAD layer explicitly names physical walls.
+        min_width = 0.65 if _source_wall_stroke_layer_name(native_layer) else 1.2
         if type(width) not in (int, float) or not math.isfinite(width) or not (min_width <= width <= 6.0):
             continue
         half = width / 2.

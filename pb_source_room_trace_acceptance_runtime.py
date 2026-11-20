@@ -8,6 +8,7 @@ Fail-closed; no FIRM/customer/frozen120 authority.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -340,15 +341,15 @@ def build_source_trace_regression_packet(
     before_polygon: Sequence[tuple[float, float]],
     after_polygon: Sequence[tuple[float, float]],
 ) -> dict[str, object]:
-    """#31 — scaffolding for 3Laurel/Lot16 before/after diffs (no gold use)."""
-    if project_key not in {"3Laurel", "Lot16"}:
+    """Project-neutral, SHA-bound before/after trace diagnostics (no gold use)."""
+    if not isinstance(project_key, str) or not project_key.strip():
         return {
             "status": "ABSTAINED",
-            "reason": "unsupported_regression_project_key",
+            "reason": "project_key_required",
             "measurement_authorized": False,
             "commercial_publishable": False,
         }
-    if len(source_sha256) != 64:
+    if not isinstance(source_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", source_sha256) is None:
         return {
             "status": "ABSTAINED",
             "reason": "source_sha_required",
