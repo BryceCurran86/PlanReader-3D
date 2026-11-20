@@ -97,6 +97,49 @@ def _first_observable_gate(opening: LiveCanonicalOpeningObject) -> str:
     return "remaining_canonical_issuer_veto"
 
 
+
+_INDEPENDENT_GATES = (
+    "source_opening_kind_unproved",
+    "source_physical_wall_host_unproved",
+    "source_wall_host_receipt_unproved",
+    "source_numeric_area_unproved",
+    "source_metric_basis_unproved",
+    "source_representative_observation_unproved",
+)
+
+
+def _independent_unproven_prerequisites(
+    opening: LiveCanonicalOpeningObject,
+) -> tuple[str, ...]:
+    """Separate missing prerequisites; one first veto may conceal five more.
+
+    These are *observations* about existing fields, not alternative
+    assertions of a door/window, host, metric or commercial permission.
+    A fully populated candidate may still fail the original publisher.
+    """
+    missing = []
+    if str(opening.opening_kind or "").strip().lower() not in {"door", "window"}:
+        missing.append("source_opening_kind_unproved")
+    if not _valid_identity(opening.host_wall_id):
+        missing.append("source_physical_wall_host_unproved")
+    if not (
+        _valid_identity(opening.host_binding_record_id)
+        or _valid_identity(opening.host_frame_record_id)
+    ):
+        missing.append("source_wall_host_receipt_unproved")
+    if not _positive_area(opening.area_m2):
+        missing.append("source_numeric_area_unproved")
+    if not _valid_identity(opening.area_basis):
+        missing.append("source_metric_basis_unproved")
+    if not (
+        _valid_identity(opening.representative_observation_id)
+        and opening.representative_observation_id in opening.source_observation_ids
+        and opening.representative_observation_id in opening.evidence_ids
+    ):
+        missing.append("source_representative_observation_unproved")
+    return tuple(missing)
+
+
 def audit_original_opening_area_gates(
     canonical_openings: Iterable[LiveCanonicalOpeningObject],
     published_quantities: Iterable[QuantityEvidence],
@@ -122,6 +165,10 @@ def audit_original_opening_area_gates(
     counts: Counter[str] = Counter()
     kind_counts: Counter[str] = Counter()
     basis_counts: Counter[str] = Counter()
+    independent_gates: Counter[str] = Counter()
+    independent_by_kind: dict[str, Counter[str]] = {
+        "door": Counter(), "window": Counter(), "unresolved": Counter(),
+    }
     first_gate_by_kind: dict[str, Counter[str]] = {
         "door": Counter(), "window": Counter(), "unresolved": Counter(),
     }
@@ -138,6 +185,9 @@ def audit_original_opening_area_gates(
         normalized_kind = str(opening.opening_kind or "").strip().lower()
         kind = normalized_kind if normalized_kind in ("door", "window") else "unresolved"
         kind_counts[kind] += 1
+        for unresolved_gate in _independent_unproven_prerequisites(opening):
+            independent_gates[unresolved_gate] += 1
+            independent_by_kind[kind][unresolved_gate] += 1
         basis = opening.area_basis if opening.area_basis in known_bases else "unrecognized_or_missing"
         basis_counts[basis] += 1
         canonical_id = opening.canonical_opening_id
@@ -176,6 +226,17 @@ def audit_original_opening_area_gates(
         },
         "source_metric_basis_counts": {
             kind: basis_counts[kind] for kind in sorted(basis_counts)
+        },
+        "independent_prerequisites_unproved": {
+            name: independent_gates[name] for name in _INDEPENDENT_GATES
+            if independent_gates[name]
+        },
+        "independent_prerequisites_by_kind": {
+            kind: {
+                name: independent_by_kind[kind][name] for name in _INDEPENDENT_GATES
+                if independent_by_kind[kind][name]
+            }
+            for kind in ("window", "door", "unresolved") if kind_counts[kind]
         },
         "first_gate_by_opening_kind": {
             kind: {
