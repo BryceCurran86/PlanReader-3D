@@ -66,6 +66,8 @@ def test_unknown_pdf_native_source_segments_and_all_finish_competitors(monkeypat
     assert result == "geometric_candidate_only"
     assert seen["selector"].material_code == "FX42"
     assert {m["code"] for m in seen["marks"]} == {"FX42", "FX91"}
+    assert next(m for m in seen["marks"] if m["code"] == "FX42")["registered_region"] is True
+    assert next(m for m in seen["marks"] if m["code"] == "FX91")["registered_region"] is False
     assert len(seen["support_segments"]) >= 4
     assert len(seen["target_segments"]) >= 4
     assert seen["trials"] == 4
