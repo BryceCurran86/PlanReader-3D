@@ -214,11 +214,6 @@ def quarantine_ordinary_hatched_floor_quantities(
                 or ("source_page_id" in meta and str(meta["source_page_id"]) != w.page_id)):
             output.append(quantity)
             continue
-        if (meta.get("specialty_finish_independent_source_authority") is True
-                and type(meta.get("specialty_finish_source_evidence_id")) is str
-                and meta["specialty_finish_source_evidence_id"].strip()):
-            output.append(quantity)
-            continue
         output.append(replace(
             quantity, value=None, status="abstained", abstained=True,
             blocking_reasons=tuple(dict.fromkeys((
@@ -227,6 +222,7 @@ def quarantine_ordinary_hatched_floor_quantities(
             ))),
             evidence_ids=tuple(dict.fromkeys((*quantity.evidence_ids, w.witness_id))),
             metadata={**dict(meta), "inclusion_status": "EXCLUSION",
+                      "commercial_projection_allowed": False,
                       "source_green_hatch_witness_id": w.witness_id},
         ))
     return tuple(output)
@@ -286,11 +282,6 @@ def quarantine_ordinary_hatched_ceiling_quantities(
         if metadata.get("source_sha256") not in (None, witness.source_sha256):
             output.append(q)
             continue
-        if (metadata.get("specialty_finish_independent_source_authority") is True
-                and type(metadata.get("specialty_finish_source_evidence_id")) is str
-                and metadata["specialty_finish_source_evidence_id"].strip()):
-            output.append(q)
-            continue
         output.append(replace(
             q, value=None, status="abstained", abstained=True,
             blocking_reasons=tuple(dict.fromkeys((
@@ -299,6 +290,7 @@ def quarantine_ordinary_hatched_ceiling_quantities(
             ))),
             evidence_ids=tuple(dict.fromkeys((*q.evidence_ids, witness.witness_id))),
             metadata={**dict(metadata), "inclusion_status": "EXCLUSION",
+                      "commercial_projection_allowed": False,
                       "source_green_hatch_witness_id": witness.witness_id},
         ))
     return tuple(output)
