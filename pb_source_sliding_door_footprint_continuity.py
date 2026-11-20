@@ -157,12 +157,25 @@ def detect_exterior_sliding_door_footprint_bridges(
         lx = (label_rect[0] + label_rect[2]) / 2
         ly = (label_rect[1] + label_rect[3]) / 2
         matches = []
+        # Existing source rule: gap <=450pt and printed label within 1pt
+        # of the aperture ends. Any more distant wall host is impossible;
+        # retain all exact native host/cap/track/source competitor proofs.
         for i, layer, a in walls:
+            h_first = lx - 451.0 <= a[2] <= lx + 1.0
+            v_first = ly - 451.0 <= a[3] <= ly + 1.0
+            if not (h_first or v_first):
+                continue
             for j, otherlayer, b in walls:
                 if i == j or (has_wall_layers and otherlayer != layer):
                     continue
+                h_possible = h_first and lx - 1.0 <= b[0] <= lx + 451.0
+                v_possible = v_first and ly - 1.0 <= b[1] <= ly + 451.0
+                if not (h_possible or v_possible):
+                    continue
                 for axis in ("h", "v"):
                     if axis == "h":
+                        if not h_possible:
+                            continue
                         if a[2] >= b[0]:
                             continue
                         gap = b[0] - a[2]
@@ -204,6 +217,8 @@ def detect_exterior_sliding_door_footprint_bridges(
                             and min(abs(label_rect[1] - bounds[3]), abs(label_rect[3] - bounds[1]), abs(ly - (bounds[1] + bounds[3]) / 2)) < 35
                         )
                     else:
+                        if not v_possible:
+                            continue
                         if a[3] >= b[1]:
                             continue
                         gap = b[1] - a[3]
