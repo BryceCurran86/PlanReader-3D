@@ -83,11 +83,12 @@ def validate_canonical_preview(
         raise WrongTraceRoute("canonical_trace_stage_lineage_invalid")
     if "external_wall_trace_status" not in summary or "external_wall_trace_reason" not in summary:
         raise WrongTraceRoute("source_native_outer_wall_authority_result_missing")
-    if not isinstance(summary.get("source_wall_path_ids"), (list, tuple)):
-        # Some native results use alternate source path ID keys; demand the known
-        # current preview field rather than inventing wall ownership.
-        if "source_wall_path_ids" not in summary and "external_wall_source_path_ids" not in summary:
-            raise WrongTraceRoute("native_wall_source_path_lineage_missing")
+    if not isinstance(summary.get("external_wall_native_source_paths"), list):
+        raise WrongTraceRoute("native_wall_source_path_lineage_missing")
+    if not isinstance(summary.get("external_wall_trace_status"), str) or not isinstance(
+        summary.get("external_wall_trace_reason"), str
+    ):
+        raise WrongTraceRoute("native_wall_result_reason_missing")
     return {
         "route_verified": True,
         "approved_entrypoint": "pb_new_source_trace_preview.source_native_trace_preview",
