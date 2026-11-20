@@ -725,6 +725,122 @@ class SourceCrossViewFloorCorrespondenceProducer:
     ) -> "SourceCrossViewFloorCorrespondenceProducer":
         return cls(source)
 
+    def evaluate_source_native(
+        self,
+        *,
+        selector: SourceCrossViewFloorCorrespondenceSelector,
+        original_pdf_bytes: bytes,
+        measured_boxes: Sequence[dict[str, Any]],
+        finish_codes: Sequence[str],
+        trials: int = 12,
+    ) -> SourceCrossViewFloorCorrespondenceResult:
+        """Extract real source-native cross-sheet CANDIDATES for any PDF.
+
+        This is an evidence-gathering producer, *not* an issuer. A geometric
+        match cannot mint a canonical physical room, wall face, door schedule
+        or customer quantity. All finish-code words including competitors
+        are retained, regardless of drawing name or the code's spelling.
+        """
+        def unavailable(reason: str) -> SourceCrossViewFloorCorrespondenceResult:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(reason,), records=(),
+            )
+        if type(selector) is not SourceCrossViewFloorCorrespondenceSelector:
+            raise TypeError("source-native selector required")
+        if type(original_pdf_bytes) is not bytes or not original_pdf_bytes:
+            return unavailable(SOURCE_REVISION_BYTES_UNAVAILABLE)
+        if hashlib.sha256(original_pdf_bytes).hexdigest() != selector.source_sha256.lower():
+            return unavailable(SOURCE_DIGEST_MISMATCH)
+        if (type(trials) is not int or not 1 <= trials <= 100
+            or type(finish_codes) not in (list, tuple)
+            or not finish_codes or len(finish_codes) > 200):
+            return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+        import re
+        valid_codes = set()
+        for code in finish_codes:
+            if (type(code) is not str or code != code.strip()
+                    or re.fullmatch(r"[A-Z][A-Z0-9_-]{1,15}", code) is None):
+                return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            valid_codes.add(code)
+        if selector.material_code not in valid_codes:
+            return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+        if (not selector.support_page_id.isdecimal()
+                or not selector.target_page_id.isdecimal()):
+            return unavailable(DIMENSION_WITNESS_UNAVAILABLE)
+        if (type(measured_boxes) not in (tuple, list)
+                or not measured_boxes or len(measured_boxes) > 20000):
+            return unavailable(DIMENSION_WITNESS_UNAVAILABLE)
+
+        from pb_layered_wall_doorway_room_ring_shadow import (
+            _source_wall_ink_candidate_drawings,
+        )
+        try:
+            pdf = fitz.open(stream=original_pdf_bytes, filetype="pdf")
+        except (fitz.FileDataError, RuntimeError, ValueError):
+            return unavailable(SOURCE_REVISION_BYTES_UNAVAILABLE)
+        with pdf:
+            page_a = int(selector.support_page_id) - 1
+            page_b = int(selector.target_page_id) - 1
+            if not (0 <= page_a < len(pdf) and 0 <= page_b < len(pdf)
+                    and page_a != page_b):
+                return unavailable(DIMENSION_WITNESS_UNAVAILABLE)
+            support = pdf[page_a]
+            target = pdf[page_b]
+            support_drawings = support.get_drawings()
+            target_drawings = target.get_drawings()
+            if max(len(support_drawings), len(target_drawings)) > 180000:
+                return unavailable(DIMENSION_WITNESS_UNAVAILABLE)
+            filtered_a, _, _ = _source_wall_ink_candidate_drawings(support_drawings)
+            filtered_b, _, _ = _source_wall_ink_candidate_drawings(target_drawings)
+            support_segments = _extract_segments_from_drawings(filtered_a)
+            target_segments = _extract_segments_from_drawings(filtered_b)
+            if max(len(support_segments), len(target_segments)) > 50000:
+                return unavailable(DIMENSION_WITNESS_UNAVAILABLE)
+
+            marks = []
+            for word in support.get_text("words"):
+                if len(word) < 5:
+                    continue
+                code = str(word[4]).strip().upper()
+                if code not in valid_codes:
+                    continue
+                bbox = tuple(float(v) for v in word[:4])
+                if not all(math.isfinite(v) for v in bbox):
+                    return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+                if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+                    return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+                # A visible source word can belong to a registered native
+                # source dimension box; that is still only CANDIDATE mark
+                # containment, NOT physical room/wall/door source authority.
+                # Rival and overlapping boxes cannot each own the same word.
+                potential_owners = []
+                for box in measured_boxes:
+                    rect = box.get("dimension_box_pdf_pts") if isinstance(box, Mapping) else None
+                    if (type(rect) in (tuple, list) and len(rect) == 4
+                            and all(type(v) in (int, float) and math.isfinite(float(v))
+                                    for v in rect)
+                            and bbox[0] >= rect[0] + 5
+                            and bbox[1] >= rect[1] + 5
+                            and bbox[2] <= rect[2] - 5
+                            and bbox[3] <= rect[3] - 5):
+                        potential_owners.append(box)
+                marks.append({
+                    "code": code, "x": (bbox[0] + bbox[2]) / 2,
+                    "y": (bbox[1] + bbox[3]) / 2,
+                    "registered_region": len(potential_owners) == 1,
+                })
+            if not marks:
+                return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            return self.evaluate_synthetic(
+                selector=selector,
+                support_segments=support_segments,
+                target_segments=target_segments,
+                measured_boxes=measured_boxes,
+                marks=marks,
+                trials=trials,
+            )
+
     def evaluate_synthetic(
         self,
         *,
