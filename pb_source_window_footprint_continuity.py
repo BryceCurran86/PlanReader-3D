@@ -13,7 +13,10 @@ from typing import Any
 
 from shapely.geometry import box
 
-_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*|\d{1,2})$", re.IGNORECASE)
+# A bare one/two digit number is a dimension, grid/room key or legend item
+# until an independent source legend proves a WINDOW code. The footprint
+# bridge detector alone may accept only explicit window-kind ink.
+_WINDOW_CODE = re.compile(r"^(?:asw|aw|window|win|fgw|sgw|w[- ]?\d+[a-z]*)$", re.IGNORECASE)
 _DOOR_CODE = re.compile(
     r"^(?:d[- ]?\d+[a-z]*|door|sgd|assd[- ]?\d*|asd[- ]?\d*|sd[- ]?\d*|stacker)$",
     re.IGNORECASE,
