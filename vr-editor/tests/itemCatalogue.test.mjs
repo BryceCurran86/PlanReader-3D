@@ -101,3 +101,16 @@ test("front doors require a large enough door opening and retain one assembly th
   assert.deepEqual(currentItemPlacements(withFinish.items, { objects: [] }, [sketch], false).map(entry => entry.id),
     ["finish"]);
 });
+
+test("roof coverings are counted as finishes on their own source-backed hosts", () => {
+  const roof = { target: "roof", hostId: "roof:cover", side: 1, point: [2, 3, 0], normal: [0, 1, 0] };
+  const selected = exact("standing seam metal roof copper");
+  assert.deepEqual(selected.targets, ["roof"]);
+  assert.equal(placeItem(start(), "plan-revision", "cover", selected.id, floor, 0).items.length, 0);
+  assert.equal(placeItem(start(), "plan-revision", "cover", selected.id, { ...roof, normal: [0, -1, 0] }, 0).items.length, 0);
+  const next = placeItem(start(), "plan-revision", "cover", selected.id, roof, 0);
+  assert.deepEqual(currentItemPlacements(next.items, { objects: [], sourceSurfaces: [
+    { kind: "roof", surfaceId: "cover" },
+  ] }, [], false), next.items);
+  assert.deepEqual(currentItemPlacements(next.items, { objects: [], sourceSurfaces: [] }, [], false), []);
+});

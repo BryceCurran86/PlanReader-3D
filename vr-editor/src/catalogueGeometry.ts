@@ -85,6 +85,20 @@ export function makePattern(pattern: Exclude<Pattern, "solid">, variation = 0) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 128, 128);
   }
+  if (pattern === "profiled-tile") {
+    const curve = ctx.createLinearGradient(0, 0, 128, 0);
+    curve.addColorStop(0, "#79716b");
+    curve.addColorStop(0.23, "#bcb5ae");
+    curve.addColorStop(0.53, "#f4f0ea");
+    curve.addColorStop(0.79, "#cec5bd");
+    curve.addColorStop(1, "#79716b");
+    ctx.fillStyle = curve;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = "#817872";
+    ctx.fillRect(0, 0, 128, 3);
+    ctx.fillStyle = "#a19890";
+    ctx.fillRect(0, 3, 128, 2);
+  }
   if (pattern === "sheet") {
     ctx.fillStyle = "#9f9990";
     ctx.fillRect(0, 0, 2, 128);
@@ -102,28 +116,65 @@ export function makePattern(pattern: Exclude<Pattern, "solid">, variation = 0) {
   return texture;
 }
 
+function roofFinishGeometry(source: THREE.BufferGeometry, repeatX: number, repeatY: number) {
+  const verts = source.getAttribute("position");
+  const index = source.getIndex();
+  const corners = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  const n = new THREE.Vector3(), edge = new THREE.Vector3(), along = new THREE.Vector3(), across = new THREE.Vector3();
+  const positions: number[] = [], uv: number[] = [];
+  const count = index?.count ?? verts.count;
+  for (let triangle = 0; triangle < count; triangle += 3) {
+    for (let corner = 0; corner < 3; corner++) {
+      const i = index ? index.getX(triangle + corner) : triangle + corner;
+      corners[corner].fromBufferAttribute(verts, i);
+    }
+    const [a, b, c] = corners;
+    n.subVectors(b, a).cross(edge.subVectors(c, a)).normalize();
+    if (Math.abs(n.y) <= 0.001) continue;
+    const reversed = n.y < 0;
+    if (reversed) n.negate();
+    // Project world up onto the roof plane to measure the pattern along the pitch.
+    along.set(0, 1, 0).addScaledVector(n, -n.y);
+    if (along.lengthSq() < 1e-12) along.set(0, 0, 1);
+    along.normalize();
+    across.crossVectors(n, along).normalize();
+    for (const p of reversed ? [a, c, b] : corners) {
+      positions.push(p.x, p.y, p.z);
+      uv.push(p.dot(across) / repeatX, p.dot(along) / repeatY);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 export function finishMesh(
   host: THREE.Mesh, spec: FinishSpec, target: ItemTarget, normal: THREE.Vector3, side: number,
 ) {
-  const geometry = host.geometry.clone();
-  const verts = geometry.getAttribute("position");
-  const nx = normal.x, nz = normal.z;
   const [repeatX, scaleY] = spec.repeatM ?? [0.12, 0.12];
   const repeatY = spec.pattern === "masonry" ? scaleY * 2 : scaleY;
-  const uv = new Float32Array(verts.count * 2);
+  const isRoof = target === "roof";
+  const geometry = isRoof ? roofFinishGeometry(host.geometry, repeatX, repeatY) : host.geometry.clone();
   const vertical = target === "wall" || target === "opening";
-  for (let index = 0; index < verts.count; index++) {
-    uv[index * 2] = (vertical ? verts.getX(index) * nz - verts.getZ(index) * nx : verts.getX(index)) / repeatX;
-    uv[index * 2 + 1] = (vertical ? verts.getY(index) : verts.getZ(index)) / repeatY;
+  if (!isRoof) {
+    const verts = geometry.getAttribute("position");
+    const uv = new Float32Array(verts.count * 2);
+    for (let index = 0; index < verts.count; index++) {
+      uv[index * 2] = (vertical ? verts.getX(index) * normal.z - verts.getZ(index) * normal.x : verts.getX(index)) / repeatX;
+      uv[index * 2 + 1] = (vertical ? verts.getY(index) : verts.getZ(index)) / repeatY;
+    }
+    geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   }
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
     color: spec.color, roughness: spec.roughness,
-    side: vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide) : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
+    side: isRoof ? THREE.FrontSide : vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide)
+      : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
     map: spec.pattern === "solid" ? null : makePattern(spec.pattern),
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -1,
   }));
-  mesh.position.copy(normal).multiplyScalar(0.0008);
+  if (!isRoof) mesh.position.copy(normal).multiplyScalar(0.0008);
   mesh.receiveShadow = true;
   return mesh;
 }

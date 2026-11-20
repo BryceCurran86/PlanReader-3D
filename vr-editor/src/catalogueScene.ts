@@ -252,8 +252,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
     for (const hit of raycaster.intersectObjects(meshes, false)) {
       const host = hosts.get(hit.object);
       if (!host || !hit.face) continue;
-      // The hidden target inside a rough opening does not intercept ordinary finishes or fixtures.
-      if (host.target === "opening" && !item.targets.includes("opening")) continue;
+      // Keep floor and interior placement available under roof finishes and behind opening targets.
+      if ((host.target === "opening" || host.target === "roof") && !item.targets.includes(host.target)) continue;
       if (!item.targets.includes(host.target)) return { hit: null };
       if (host.target === "opening") {
         const reason = openingFitMessage(item, host.opening?.size);
@@ -266,6 +266,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const normal = hit.face.normal.clone().normalize();
       const worldNormal = normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(host.mesh.matrixWorld));
       const side = worldNormal.dot(raycaster.ray.direction) > 0 ? -1 : 1;
+      if (host.target === "roof" && worldNormal.y * side <= 0.001) {
+        return { hit: null, reason: "Aim at the top of the roof face." };
+      }
       if (host.target === "worktop" && (normal.y < 0.9 || side < 0)) return { hit: null };
       return { hit: { hostId: host.id, target: host.target, point: local.toArray() as Vector,
         normal: normal.multiplyScalar(side).toArray() as Vector, side, opening: host.opening?.size } };

@@ -373,6 +373,8 @@ Place timber boards, battens and mouldings on a wall face. Pick the centre of th
 
 Pick an exterior substrate and a finish on the same wall side to see the finish and record both choices in the draft schedule. Decking and paving apply to floor surfaces. Soffit and eaves options apply to ceiling surfaces.
 
+**Roof finishes** include metal profiles, concrete and terracotta tiles, slate, shingles and roof membranes. Aim at the top of a source-backed roof face to preview a finish at the model's pitch. The draft schedule records the choice against that roof surface.
+
 ## Adding a wall must add its associated trades
 
 The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`

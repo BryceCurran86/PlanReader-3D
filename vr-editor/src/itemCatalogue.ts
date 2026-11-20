@@ -7,11 +7,12 @@ export const CATALOGUE_GROUPS = [
   ["bathroom", "Bathroom fixtures"], ["cabinets", "Cabinetry"], ["doors", "Door finishes"],
   ["timber", "Timber profiles"], ["entry", "Front doors"], ["substrates", "Exterior substrates"],
   ["facades", "Exterior wall finishes"], ["decking", "Decking and paving"], ["soffits", "Soffits and eaves"],
+  ["roofing", "Roof finishes"],
 ] as const;
 export type CatalogueGroup = typeof CATALOGUE_GROUPS[number][0];
-export type ItemTarget = "wall" | "floor" | "ceiling" | "opening" | "worktop";
+export type ItemTarget = "wall" | "floor" | "ceiling" | "roof" | "opening" | "worktop";
 export type Pattern = "solid" | "grain" | "plank" | "tile" | "woven" | "fleck" | "rib" |
-  "masonry" | "lap" | "seam" | "sheet" | "corrugation";
+  "masonry" | "lap" | "seam" | "sheet" | "corrugation" | "profiled-tile";
 export type TrimProfile = "square" | "pencil" | "bullnose" | "splay" | "step" | "ogee" | "colonial" | "lamb";
 export type FixtureShape =
   | "mixer" | "gooseneck" | "square-spout" | "wall-spout" | "outdoor-tap" | "shower"

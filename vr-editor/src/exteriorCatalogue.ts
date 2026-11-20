@@ -107,6 +107,55 @@ const soffits: Family[] = [
   ["Perforated soffit panel", "fleck", [0.075, 0.075], 0.76, [["White", 0xdedcd5], ["Slate", 0x6f7779], ["Natural zinc", 0xaeb5b7]]],
 ];
 
+const roofing: Family[] = [
+  ["Corrugated steel roof", "corrugation", [0.076, 1], 0.52, [
+    ["Natural zinc", 0xafb5b4], ["Surf grey", 0xb5b1a3], ["Sandstone", 0xb7a18a],
+    ["Dune", 0xa9a59a], ["Blue grey", 0x66747a], ["Charcoal", 0x494d50],
+    ["Forest green", 0x59685a], ["Slate grey", 0x73777b], ["Black", 0x35393c],
+  ]],
+  ["Trapezoidal rib steel roof", "rib", [0.21, 1], 0.49, [
+    ["Zinc", 0xabb3b2], ["Off white", 0xd7d5c9], ["Pale sand", 0xb4a592],
+    ["Slate", 0x747b7e], ["Basalt", 0x5b5e61], ["Charcoal", 0x46494c],
+  ]],
+  ["Standing-seam metal roof", "seam", [0.42, 1], 0.43, [
+    ["Zinc", 0x939c9f], ["Copper", 0xa66f5b], ["Weathered copper", 0x728f85],
+    ["Sand", 0xb6ab96], ["Blue grey", 0x727d87], ["Graphite", 0x4f5258], ["Black", 0x33363a],
+  ]],
+  ["Concealed-fix ribbed metal roof", "rib", [0.23, 1], 0.48, [
+    ["Glacier white", 0xdde0da], ["Zinc", 0xa5abaa], ["Pale olive", 0x9a9b88],
+    ["Ash", 0x9e9e98], ["Charcoal", 0x4c5053], ["Deep green", 0x515b4d],
+  ]],
+  ["Flat concrete roof tile", "masonry", [0.3, 0.32], 0.91, [
+    ["Mid grey", 0x8e8d87], ["Sandstone", 0xaa9a85], ["Mocha", 0x7e6d60],
+    ["Slate", 0x606367], ["Charcoal", 0x4d4e4f],
+  ]],
+  ["Low-profile concrete roof tile", "profiled-tile", [0.31, 0.31], 0.89, [
+    ["Clay", 0x997660], ["Earth", 0x80756a], ["Cocoa", 0x79655a],
+    ["Charcoal", 0x545758], ["Pewter", 0x878a8d],
+  ]],
+  ["Flat terracotta roof tile", "masonry", [0.27, 0.32], 0.78, [
+    ["Natural terracotta", 0xb47862], ["Rust red", 0x955e52], ["Baked clay", 0xb0836e], ["Smoke", 0x70605c],
+  ]],
+  ["Barrel terracotta roof tile", "profiled-tile", [0.24, 0.32], 0.74, [
+    ["Natural terracotta", 0xb7795c], ["Antique red", 0x996557], ["Sand", 0xb49b80], ["Pale ochre", 0xb78f6a],
+  ]],
+  ["Slate roof tile", "masonry", [0.28, 0.21], 0.86, [
+    ["Blue slate", 0x5d6874], ["Heather grey", 0x756e76], ["Green slate", 0x5d6d64], ["Black slate", 0x42474d],
+  ]],
+  ["Asphalt roof shingle", "masonry", [0.24, 0.145], 0.97, [
+    ["Weathered wood", 0x84796c], ["Estate grey", 0x777a7e], ["Brown blend", 0x776659], ["Charcoal", 0x4f5155],
+  ]],
+  ["Metal roof shingle", "masonry", [0.29, 0.19], 0.59, [
+    ["Weathered zinc", 0x889091], ["Copper", 0xa36f5e], ["Graphite", 0x55595d],
+  ]],
+  ["Single-ply roof membrane", "solid", [1, 1], 0.85, [
+    ["White", 0xe4e2db], ["Light grey", 0xb7b9b6], ["Charcoal", 0x535658],
+  ]],
+  ["Bituminous roof membrane", "fleck", [0.058, 0.058], 0.96, [
+    ["Mineral grey", 0x7e7b76], ["Bitumen black", 0x444447],
+  ]],
+];
+
 function surfaces(group: CatalogueGroup, families: Family[], target: ItemTarget,
   slot: "finish" | "lining", keywords: string): CatalogueItem[] {
   return families.flatMap(([family, pattern, repeatM, roughness, variants]) => variants.map(([finish, color]) => {
@@ -123,4 +172,5 @@ export const EXTERIOR_CATALOGUE: readonly CatalogueItem[] = [
   ...surfaces("facades", exterior, "wall", "finish", "facade exterior external cladding wall finish siding"),
   ...surfaces("decking", decking, "floor", "finish", "exterior deck decking floor outdoor terrace paver"),
   ...surfaces("soffits", soffits, "ceiling", "finish", "exterior soffit ceiling veranda eaves lining"),
+  ...surfaces("roofing", roofing, "roof", "finish", "roof roofing covering finish exterior"),
 ];
