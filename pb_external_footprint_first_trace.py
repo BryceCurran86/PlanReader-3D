@@ -71,6 +71,118 @@ def _competing_disjoint_envelopes(
     return False
 
 
+def _native_bold_outline_proven(page: object, points: Sequence[tuple[float, float]]) -> bool:
+    """Refuse a rectangular raster frame without its own dark, strong wall ink.
+
+    Site/roof lines can form a perfectly closed raster rectangle around several
+    disjoint rooms, courts and a carport. A largest-ink-contour test alone may
+    report that frame as a candidate *building* perimeter. This diagnostic
+    guard compares its long axis-aligned edges with the original source's
+    physically darker/thicker native linework; it does not manufacture edges,
+    patch an opening, infer a scale or authorize any measurement.
+
+    For non-rectilinear contours with fewer than four long axis-aligned edges,
+    keep the existing candidate semantics until a separate source verifier can
+    address their geometry. Missing, malformed or oversized native evidence
+    fails closed for an apparently rectangular candidate.
+    """
+    if len(points) < 4:
+        return False
+    # Existing complex/stepped source contours need their own wall-face
+    # verifier; do not suppress them using a rectangular-site-frame test.
+    if len(points) > 8:
+        return True
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    if not all(math.isfinite(v) for v in (*xs, *ys)):
+        return False
+    short_side = min(max(xs) - min(xs), max(ys) - min(ys))
+    min_edge = max(25.0, short_side * 0.18)
+    major_edges: list[tuple[str, float, float, float]] = []
+    for a, b in zip(points, (*points[1:], points[0])):
+        if abs(a[1] - b[1]) <= 2.5 and abs(a[0] - b[0]) >= min_edge:
+            major_edges.append(("h", (a[1] + b[1]) / 2, min(a[0], b[0]), max(a[0], b[0])))
+        elif abs(a[0] - b[0]) <= 2.5 and abs(a[1] - b[1]) >= min_edge:
+            major_edges.append(("v", (a[0] + b[0]) / 2, min(a[1], b[1]), max(a[1], b[1])))
+    if len(major_edges) < 4:
+        return True
+    try:
+        drawings = page.get_drawings()
+    except (ValueError, RuntimeError, OSError):
+        return False
+    if len(drawings) > 20_000:
+        return False
+    source_segments: list[tuple[str, float, float, float, float]] = []
+    for row in drawings:
+        if row.get("type") not in ("s", "fs"):
+            continue
+        color, width = row.get("color"), row.get("width")
+        if (
+            not isinstance(color, (list, tuple)) or len(color) != 3
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in color)
+            or max(color) > 0.3 or type(width) not in (int, float)
+            or not math.isfinite(width) or width <= 0
+        ):
+            continue
+        items = row.get("items", ())
+        if not isinstance(items, (list, tuple)) or len(items) > 512:
+            continue
+        for item in items:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            edges = []
+            if item[0] == "l" and len(item) >= 3:
+                edges.append((item[1], item[2]))
+            elif item[0] == "re":
+                rect = item[1]
+                try:
+                    corners = ((rect.x0, rect.y0), (rect.x1, rect.y0),
+                               (rect.x1, rect.y1), (rect.x0, rect.y1))
+                    edges.extend((corners[i], corners[(i + 1) % 4]) for i in range(4))
+                except (AttributeError, TypeError):
+                    continue
+            for p, q in edges:
+                try:
+                    x1, y1 = (float(p.x), float(p.y)) if hasattr(p, "x") else (float(p[0]), float(p[1]))
+                    x2, y2 = (float(q.x), float(q.y)) if hasattr(q, "x") else (float(q[0]), float(q[1]))
+                except (TypeError, ValueError, AttributeError, IndexError):
+                    continue
+                if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                    continue
+                if abs(y2 - y1) <= 0.2 and abs(x2 - x1) >= 20:
+                    source_segments.append(("h", (y1 + y2) / 2, min(x1, x2), max(x1, x2), float(width)))
+                elif abs(x2 - x1) <= 0.2 and abs(y2 - y1) >= 20:
+                    source_segments.append(("v", (x1 + x2) / 2, min(y1, y2), max(y1, y2), float(width)))
+                if len(source_segments) > 20_000:
+                    return False
+    if not source_segments:
+        return False
+    weights = sorted(segment[4] for segment in source_segments)
+    # Calibrate wall weight to this drawing, not an Acacia-only line width.
+    bold_cutoff = max(0.2, weights[(len(weights) * 65) // 100])
+    for orientation, at, start, end in major_edges:
+        spans = []
+        for direction, source_at, a, b, stroke_width in source_segments:
+            if direction != orientation or stroke_width + 1e-7 < bold_cutoff:
+                continue
+            if abs(source_at - at) > 2.5:
+                continue
+            overlap_start, overlap_end = max(start, a), min(end, b)
+            if overlap_end > overlap_start:
+                spans.append((overlap_start, overlap_end))
+        spans.sort()
+        covered = 0.0
+        last = start
+        for lo, hi in spans:
+            if hi > last:
+                covered += hi - max(last, lo)
+                last = hi
+        # A continuous painted wall needs some actual native wall-bearing
+        # support on *every* major edge. A black/dashed site frame does not.
+        if covered < (end - start) * 0.25:
+            return False
+    return True
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -177,6 +289,12 @@ def trace_external_footprint_first(
             )
             if len(set(points)) < 4 or not all(math.isfinite(q) for xy in points for q in xy):
                 results.append(_abstain(source_sha256, index, "external_footprint_invalid_polygon"))
+                continue
+            if not _native_bold_outline_proven(page, points):
+                results.append(_abstain(
+                    source_sha256, index,
+                    "external_footprint_unverified_native_wall_edges",
+                ))
                 continue
             bbox = tuple(round(float(v) / scale, 3) for v in (x, y, x + w, y + h))
             results.append(ExternalFootprintTrace(
