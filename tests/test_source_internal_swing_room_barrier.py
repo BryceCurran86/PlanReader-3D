@@ -92,3 +92,18 @@ def test_door_closure_is_not_an_external_wall_span():
     assert rec.measurement_authorized is False
     assert rec.physical_wall_authenticated is False
     assert detect_external(rows) == ()
+
+
+
+def test_internal_hinge_layer_support_is_not_project_specific():
+    from pb_source_internal_swing_room_barrier import _INTERNAL_WALL_LAYER
+    for layer in (
+        "Enclosure_WallInternal", "Wall_Internal", "InternalWall",
+        "building.wall.internal", "A-WALL-INTR",
+    ):
+        assert _INTERNAL_WALL_LAYER.search(layer), layer
+    for layer in (
+        "Annotation_FloorPlan", "Interior_Joinery", "Enclosure_WallExternal",
+        "building.wall.external", "DoorLegend", "Demolition",
+    ):
+        assert not _INTERNAL_WALL_LAYER.search(layer), layer

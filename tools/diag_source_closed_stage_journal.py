@@ -309,9 +309,14 @@ def main() -> int:
                 output_dir=args.output_dir,
                 family_group=args.family_group,
             )
-    if (summary.get("source_sha256") != source_sha
-            or hashlib.sha256(args.pdf.read_bytes()).hexdigest() != source_sha):
-        raise RuntimeError("original source identity changed during diagnostic run")
+        # A source hash and completed early stages do NOT prove that the
+        # original full producer returned; timeout reports are partial.
+        # An fsynced terminal receipt follows the real producer and a second
+        # SHA verification. It grants no sealed quantity or benchmark score.
+        if (summary.get("source_sha256") != source_sha
+                or hashlib.sha256(args.pdf.read_bytes()).hexdigest() != source_sha):
+            raise RuntimeError("original source identity changed during diagnostic run")
+        journal.emit(stage="source_handoff", event="producer_returned", call_id=0)
     print(json.dumps({
         "original_pdf_sha256": source_sha,
         "journal": str(args.journal),

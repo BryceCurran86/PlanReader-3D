@@ -4,6 +4,7 @@
  */
 import type { SceneManifest } from "./types.ts";
 import { scopeKey } from "./reviewDraft.ts";
+import { validWallLength } from "./buildPlacement.ts";
 
 export interface WallAdditionSketch {
   scopeKey:string;
@@ -91,7 +92,7 @@ export function validateAdditionSketch(
   }
   const distance=Math.hypot(
     input.end[0]-input.start[0],input.end[1]-input.start[1]);
-  if(distance<0.05||distance>200)throw new Error("New wall must measure 50mm–200m");
+  if(!validWallLength(distance))throw new Error("New wall must measure 50mm–200m");
   return {...input,scopeKey:scopeKey(manifest)};
 }
 export function makeWallAdditionCommand(
@@ -169,4 +170,127 @@ export function verifyWallAssemblyPreview(
     ids.add(q.line_id);
   }
   return raw as WallAssemblyPreview;
+}
+
+
+export interface WallConstructionImpactPreview {
+  accepted:true;
+  reviewOnly:true;
+  persisted:false;
+  wallCreated:false;
+  relatedPagesRevised:false;
+  commercialPublicationAllowed:false;
+  quoteReady:false;
+  proposalId:string;
+  revisionScopeKey:string;
+  currency:string|null;
+  rateBookRevision:string|null;
+  pricedSubtotalOnly:string;
+  pricedComplete:boolean;
+  relatedPagesVerified:boolean;
+  affectedPages:{pageIndex:number;sheetId:string;registrationEvidenceId:string}[];
+  unpricedLines:{lineId:string;reason:string}[];
+  constructionHolds:string[];
+  impactReceiptSha256:string;
+}
+
+/** Verify the linked provisional costing/related-sheet receipt before UI display. */
+export function verifyWallConstructionImpact(
+  raw:unknown, preview:WallAssemblyPreview,
+):WallConstructionImpactPreview | null {
+  const envelope=obj(raw);
+  if(envelope.impactPreview===undefined)return null; // older preview-only hosts
+  const impact=obj(envelope.impactPreview);
+  if(impact.accepted!==true||impact.reviewOnly!==true||
+     impact.persisted!==false||impact.wallCreated!==false||
+     impact.relatedPagesRevised!==false||impact.commercialPublicationAllowed!==false||
+     impact.quoteReady!==false||impact.proposalId!==preview.proposalId||
+     impact.revisionScopeKey!==preview.package.revision_scope_key||
+     typeof impact.pricedSubtotalOnly!=="string"||
+     !/^(0|[1-9][0-9]*)\.[0-9]{2}$/.test(impact.pricedSubtotalOnly)||
+     !["boolean"].includes(typeof impact.pricedComplete)||
+     typeof impact.relatedPagesVerified!=="boolean"||
+     typeof impact.impactReceiptSha256!=="string"||!HASH.test(impact.impactReceiptSha256)||
+     !Array.isArray(impact.affectedPages)||impact.affectedPages.length>1000||
+     !Array.isArray(impact.unpricedLines)||impact.unpricedLines.length>1000||
+     !Array.isArray(impact.constructionHolds)||impact.constructionHolds.length>1000||
+     !impact.constructionHolds.every(x=>typeof x==="string"&&x.length>0)||
+     !(impact.currency===null||typeof impact.currency==="string"&&/^[A-Z]{3}$/.test(impact.currency))||
+     !(impact.rateBookRevision===null||typeof impact.rateBookRevision==="string"&&impact.rateBookRevision.length<=128)){
+    throw new Error("Unverified added-wall pricing or drawing coordination receipt");
+  }
+  const pages=new Set<number>();
+  for(const item of impact.affectedPages){
+    const p=obj(item);
+    if(typeof p.pageIndex!=="number"||!Number.isSafeInteger(p.pageIndex)||p.pageIndex<0||
+       typeof p.sheetId!=="string"||!ID.test(p.sheetId)||
+       typeof p.registrationEvidenceId!=="string"||!ID.test(p.registrationEvidenceId)||
+       pages.has(Number(p.pageIndex)))
+      throw new Error("Duplicate or malformed registered drawing page");
+    pages.add(Number(p.pageIndex));
+  }
+  const known=new Set(preview.package.quantities.map(q=>q.line_id));
+  const unpriced=new Set<string>();
+  for(const item of impact.unpricedLines){
+    const m=obj(item);
+    if(typeof m.lineId!=="string"||!known.has(m.lineId)||
+       unpriced.has(m.lineId)||typeof m.reason!=="string"||!m.reason)
+      throw new Error("Malformed unpriced construction scope line");
+    unpriced.add(m.lineId);
+  }
+  if(impact.pricedComplete===true&&
+     (unpriced.size>0||!impact.currency||!impact.rateBookRevision)||
+     impact.relatedPagesVerified===true&&pages.size===0)
+    throw new Error("Unsupported complete construction preview claim");
+  return impact as unknown as WallConstructionImpactPreview;
+}
+
+
+export interface SavedNewWallRevision {
+  revisionId:string;
+  revisionNumber:number;
+  canonicalWallId:string;
+  modelRevision:number;
+  pdfSha256:string;
+  pagesRevised:{pageIndex:number;sheetId:string;pageKind:string;registrationEvidenceId:string;newWallVectorDrawn:true;approved:false}[];
+  persisted:true;
+  workingDesignOnly:true;
+  commercialPublicationAllowed:false;
+  idempotentReplay:boolean;
+  downloadPath:string;
+}
+export function verifySavedNewWallRevision(
+  raw:unknown, scene:SceneManifest, command:WallAdditionCommand,
+):SavedNewWallRevision{
+  const p=obj(raw);
+  if(typeof p.revisionId!=="string"||!/^[0-9a-f]{40}$/.test(p.revisionId)||
+     typeof p.revisionNumber!=="number"||!Number.isSafeInteger(p.revisionNumber)||
+     p.revisionNumber<1||
+     typeof p.canonicalWallId!=="string"||!/^vr-wall:[0-9a-f]{32}$/.test(p.canonicalWallId)||
+     p.modelRevision!==scene.scope.modelRevision+1||
+     typeof p.pdfSha256!=="string"||!HASH.test(p.pdfSha256)||
+     p.persisted!==true||p.workingDesignOnly!==true||
+     p.commercialPublicationAllowed!==false||
+     typeof p.idempotentReplay!=="boolean"||
+     !Array.isArray(p.pagesRevised)||p.pagesRevised.length<1||
+     p.pagesRevised.length>700||
+     p.downloadPath!==(
+       "/api/editor/workspaces/"+scene.scope.workspaceId+
+       "/walls/revisions/"+p.revisionId+"/pdf"
+     ))throw new Error("Wall creation save receipt invalid or source-stale");
+  const pages=new Set<number>();
+  for(const item of p.pagesRevised){
+    const page=obj(item);
+    if(typeof page.pageIndex!=="number"||!Number.isSafeInteger(page.pageIndex)||
+       page.pageIndex<0||pages.has(page.pageIndex)||
+       typeof page.sheetId!=="string"||!ID.test(page.sheetId)||
+       typeof page.pageKind!=="string"||!ID.test(page.pageKind)||
+       typeof page.registrationEvidenceId!=="string"||
+       !ID.test(page.registrationEvidenceId)||
+       page.newWallVectorDrawn!==true||page.approved!==false)
+      throw new Error("Saved wall revised-sheet manifest malformed");
+    pages.add(page.pageIndex);
+  }
+  if(!ID.test(command.proposalId))throw new Error("Unsaved proposal identity");
+  return raw as SavedNewWallRevision;
 }

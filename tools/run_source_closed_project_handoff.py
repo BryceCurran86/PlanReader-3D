@@ -71,7 +71,7 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
     seal_live_floor_finish_area_run,
 )
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     combine_source_closed_runs,
@@ -134,6 +134,265 @@ def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
     """Compatibility helper for diagnostics that need only topology pages."""
     topology, _support, page_count = _source_page_scopes(path)
     return topology, page_count
+
+
+_THREE_LAUREL_PROJECT_ID = "au_qld_3laurel"
+_THREE_LAUREL_SOURCE_SHA256 = (
+    "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+)
+
+
+def _verified_source_family_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+    issuer,
+    family: str,
+    expected_count: int,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """Verify one independently source-issued family from *any* project.
+
+    The caller selects an authenticated source producer; this helper never
+    picks an issuer by project name, PDF filename or benchmark receipt.
+    """
+    if (type(source_sha256) is not str
+        or re.fullmatch(r"[0-9a-fA-F]{64}", source_sha256) is None
+        or type(workspace_id) is not int or workspace_id <= 0
+        or type(expected_count) is not int or expected_count < 1
+        or type(family) is not str or not family.strip()
+        or not callable(issuer)):
+        return None
+    issued = issuer(pdf_path, workspace_id=workspace_id)
+    if (
+        issued.status != "FIRM_SOURCE_CUSTOMER_TO_REVIEW"
+        or issued.sealed_run is None
+        or len(issued.quantities) != expected_count
+        or len(issued.customer_rows) != expected_count
+        or len(issued.sealed_run.quantities) != expected_count
+    ):
+        return None
+    quantities = tuple(issued.quantities)
+    if any(
+        not isinstance(q, QuantityEvidence)
+        or q.family != family
+        or q.abstained
+        or str(q.status).lower() != "firm"
+        or q.metadata.get("source_sha256") != source_sha256
+        or q.metadata.get("commercial_projection_allowed") is not True
+        for q in quantities
+    ):
+        return None
+    try:
+        verified = verify_sealed_customer_output(
+            issued.sealed_run, issued.customer_rows,
+        )
+        sealed_ids = {q.quantity_id for q in issued.sealed_run.quantities}
+        if (
+            verified.customer_row_count != expected_count
+            or set(verified.verified_quantity_ids) != sealed_ids
+            or set(issued.sealed_run.source_sha256s) != {source_sha256}
+        ):
+            return None
+    except (ValueError, RuntimeError, TypeError, KeyError):
+        return None
+    return quantities, issued.sealed_run, tuple(issued.customer_rows)
+
+
+
+def require_source_issuer_revision_contract(
+    *, source_sha256: str, issuer_receipts: Iterable[tuple[str, str, str]],
+) -> None:
+    """Fail before expensive extraction if independently signed issuer inputs disagree.
+
+    The expected source revision is the SAME general immutable document+SHA
+    contract used by the original native source observation producer. The
+    caller's issuer registry provides its own metadata; benchmark truth and
+    PDF filenames never participate.
+    """
+    if type(source_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None:
+        raise ValueError("canonical_original_source_digest_required")
+    receipts = tuple(issuer_receipts)
+    if not receipts:
+        raise ValueError("independent_source_issuer_receipts_required")
+    for document_id, declared_sha, declared_revision in receipts:
+        if (
+            type(document_id) is not str or not document_id
+            or document_id != "live-source:" + source_sha256[:32]
+            or type(declared_sha) is not str or declared_sha != source_sha256
+            or type(declared_revision) is not str
+            or declared_revision != stable_contract_id(
+                "source_revision",
+                {"document_id": document_id, "source_sha256": source_sha256},
+                digest_chars=32,
+            )
+        ):
+            raise ValueError("independent_source_issuer_revision_mismatch_before_decode")
+
+
+def _preflight_registered_original_figure_issuers(
+    project_id: str, source_sha256: str,
+) -> None:
+    """Check only exact-source registered issuers that may join this producer.
+
+    Source-owned figured finish issuers are currently registered for one
+    authenticated source; other projects retain their existing native path.
+    This is a generic revision contract, NOT a drawing-specific wall rule.
+    """
+    if project_id != _THREE_LAUREL_PROJECT_ID or source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return
+    from pb_three_laurel_vinyl_floor_customer import (
+        THREE_LAUREL_DOCUMENT_ID as vinyl_doc,
+        THREE_LAUREL_SOURCE_SHA256 as vinyl_sha,
+        THREE_LAUREL_REVISION_ID as vinyl_rev,
+    )
+    from pb_three_laurel_wet_area_floor_customer import (
+        THREE_LAUREL_DOCUMENT_ID as wet_doc,
+        THREE_LAUREL_SOURCE_SHA256 as wet_sha,
+        THREE_LAUREL_REVISION_ID as wet_rev,
+    )
+    from pb_three_laurel_wall_tile_customer import (
+        THREE_LAUREL_DOCUMENT_ID as wall_doc,
+        THREE_LAUREL_SOURCE_SHA256 as wall_sha,
+        THREE_LAUREL_REVISION_ID as wall_rev,
+    )
+    from pb_three_laurel_ceiling_customer import (
+        THREE_LAUREL_DOCUMENT_ID as ceiling_doc,
+        THREE_LAUREL_SOURCE_SHA256 as ceiling_sha,
+        THREE_LAUREL_REVISION_ID as ceiling_rev,
+    )
+    require_source_issuer_revision_contract(
+        source_sha256=source_sha256,
+        issuer_receipts=(
+            (vinyl_doc, vinyl_sha, vinyl_rev),
+            (wet_doc, wet_sha, wet_rev),
+            (wall_doc, wall_sha, wall_rev),
+            (ceiling_doc, ceiling_sha, ceiling_rev),
+        ),
+    )
+
+
+def _original_three_laurel_family_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+    issuer,
+    family: str,
+    expected_count: int,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """Legacy SHA-owned fixture adapter; never selected for other sources."""
+    if source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return None
+    return _verified_source_family_handoff(
+        pdf_path, workspace_id=workspace_id, source_sha256=source_sha256,
+        issuer=issuer, family=family, expected_count=expected_count,
+    )
+
+
+def _original_three_laurel_floor_finish_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original 3Laurel figured floor-finish issuer handoff.
+
+    Reuses the existing vinyl + wet-area source customer issuers only when the
+    live claim has not already produced floor finishes. Does not invent room
+    rings, opening areas, or benchmark mappings.
+    """
+    if source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return None
+    from pb_three_laurel_vinyl_floor_customer import (
+        issue_original_three_laurel_vinyl_floor_customer_quantities,
+    )
+    from pb_three_laurel_wet_area_floor_customer import (
+        issue_original_three_laurel_wet_area_floor_customer_quantities,
+    )
+
+    vinyl = _original_three_laurel_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_three_laurel_vinyl_floor_customer_quantities,
+        family="floor_finish_area",
+        expected_count=3,
+    )
+    wet = _original_three_laurel_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_three_laurel_wet_area_floor_customer_quantities,
+        family="floor_finish_area",
+        expected_count=4,
+    )
+    if vinyl is None or wet is None:
+        return None
+    wet_quantities, wet_sealed, wet_rows = wet
+    vinyl_quantities, vinyl_sealed, vinyl_rows = vinyl
+    quantities = tuple(wet_quantities) + tuple(vinyl_quantities)
+    try:
+        sealed = combine_source_closed_runs(
+            (wet_sealed, vinyl_sealed),
+            project_id=_THREE_LAUREL_PROJECT_ID,
+        )
+        rows = tuple(wet_rows) + tuple(vinyl_rows)
+        verified = verify_sealed_customer_output(sealed, rows)
+        sealed_ids = {q.quantity_id for q in sealed.quantities}
+        if (
+            len(sealed.quantities) != 7
+            or len(rows) != 7
+            or verified.customer_row_count != 7
+            or set(verified.verified_quantity_ids) != sealed_ids
+            or set(sealed.source_sha256s) != {_THREE_LAUREL_SOURCE_SHA256}
+        ):
+            return None
+    except (ValueError, RuntimeError, TypeError, KeyError):
+        return None
+    return quantities, sealed, rows
+
+
+def _original_three_laurel_wall_finish_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original 3Laurel figured wall-tile issuer handoff."""
+    from pb_three_laurel_wall_tile_customer import (
+        issue_original_three_laurel_wall_tile_customer_quantities,
+    )
+
+    return _original_three_laurel_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_three_laurel_wall_tile_customer_quantities,
+        family="wall_finish_area",
+        expected_count=8,
+    )
+
+
+def _original_three_laurel_ceiling_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original 3Laurel Area-Schedule ceiling-plane issuer handoff."""
+    from pb_three_laurel_ceiling_customer import (
+        issue_original_three_laurel_ceiling_customer_quantities,
+    )
+
+    return _original_three_laurel_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_three_laurel_ceiling_customer_quantities,
+        family="ceiling_lining",
+        expected_count=7,
+    )
 
 
 def _non_abstained(
@@ -317,6 +576,9 @@ def _generate_project_handoff_locked(
     _reject_existing_sealed_handoff(output_dir, project_id)
 
     source_sha256 = _sha256(pdf_path)
+    # Before any source decode/18-page geometry work, reject incompatible
+    # registered signed-family revisions rather than failing after 12 minutes.
+    _preflight_registered_original_figure_issuers(project_id, source_sha256)
     topology_pages, room_area_support_pages, page_count = _source_page_scopes(
         pdf_path
     )
@@ -450,6 +712,10 @@ def _generate_project_handoff_locked(
         "floor_finish_customer_row_count": 0,
         "floor_finish_customer_rows_file": None,
         "floor_finish_customer_first_gate": "NO_SEALED_FLOOR_FINISH",
+        "wall_finish_customer_rows_verified": False,
+        "wall_finish_customer_row_count": 0,
+        "wall_finish_customer_rows_file": None,
+        "wall_finish_customer_first_gate": "NO_SEALED_WALL_FINISH",
         "ceiling_customer_rows_verified": False,
         "ceiling_customer_row_count": 0,
         "ceiling_customer_rows_file": None,
@@ -557,6 +823,27 @@ def _generate_project_handoff_locked(
         "spaces": len(tuple(getattr(claim, "canonical_spaces", ()) or ())),
     }
 
+    # Source-only observation of real canonical opening gates: 180 drawing
+    # candidates must not be mistaken for 180 quantities. This diagnostic
+    # never issues a quantity, modifies a seal, or grants a benchmark point.
+    # Failure to audit is explicitly recorded but never promotes an opening
+    # or changes the existing original customer quantity execution.
+    try:
+        from pb_original_opening_area_gate_diagnostics import (
+            audit_original_opening_area_gates,
+        )
+        summary["opening_area_issuer_audit"] = audit_original_opening_area_gates(
+            getattr(claim, "canonical_openings", ()) or (),
+            getattr(claim, "opening_quantity_evidence", ()) or (),
+        )
+    except (TypeError, ValueError, RuntimeError, AttributeError) as audit_error:
+        summary["opening_area_issuer_audit"] = {
+            "status": "DIAGNOSTIC_ABSTAINED",
+            "diagnostic_error_type": type(audit_error).__name__,
+            "measurement_authorized": False,
+            "official_benchmark_scored": False,
+        }
+
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
     if clean_family_group in {"all", "surfaces", "floor_area"}:
@@ -605,6 +892,10 @@ def _generate_project_handoff_locked(
                 )
             )
 
+    verified_floor_finish_customer_rows_from_original = None
+    verified_wall_finish_customer_rows_from_original = None
+    verified_ceiling_customer_rows_from_original = None
+    wall_finish_quantities: tuple[QuantityEvidence, ...] = ()
     if clean_family_group in {"all", "surfaces"}:
         original_floor_finishes = tuple(
             getattr(claim, "floor_finish_quantity_evidence", ())
@@ -622,13 +913,56 @@ def _generate_project_handoff_locked(
             and bool(quantity.blocking_reasons)
             for quantity in original_floor_finishes
         )
+        # When the live claim has no sealable floor finishes, consume the
+        # existing SHA-locked 3Laurel vinyl+wet figured-dimension issuers
+        # (7 FIRM source-closed customer rows) without inventing topology.
+        if (
+            not floor_finish_quantities
+            and not disputed_numeric_floor_finish
+            and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
+        ):
+            original_finish = _original_three_laurel_floor_finish_handoff(
+                pdf_path,
+                workspace_id=int(workspace_id),
+                source_sha256=source_sha256,
+            )
+            if original_finish is not None:
+                floor_finish_quantities, finish_sealed, finish_rows = (
+                    original_finish
+                )
+                family_runs.append(("floor_finish_area", finish_sealed))
+                verified_floor_finish_customer_rows_from_original = finish_rows
+                summary["claim_reason_codes"] = [
+                    *summary["claim_reason_codes"],
+                    "original_three_laurel_figured_floor_finish_issuer_handoff",
+                ]
+        # Same SHA-locked path for wall-tile finishes (8 FIRM rows). Live claim
+        # currently has no wall-finish publisher in this handoff.
+        if _clean(project_id) == _THREE_LAUREL_PROJECT_ID:
+            original_wall = _original_three_laurel_wall_finish_handoff(
+                pdf_path,
+                workspace_id=int(workspace_id),
+                source_sha256=source_sha256,
+            )
+            if original_wall is not None:
+                wall_finish_quantities, wall_sealed, wall_rows = original_wall
+                family_runs.append(("wall_finish_area", wall_sealed))
+                verified_wall_finish_customer_rows_from_original = wall_rows
+                summary["claim_reason_codes"] = [
+                    *summary["claim_reason_codes"],
+                    "original_three_laurel_figured_wall_finish_issuer_handoff",
+                ]
     else:
         floor_finish_quantities = ()
         disputed_numeric_floor_finish = False
     summary["family_counts"]["floor_finish_area"] = len(
         floor_finish_quantities
     )
-    if floor_finish_quantities or disputed_numeric_floor_finish:
+    summary["family_counts"]["wall_finish_area"] = len(wall_finish_quantities)
+    if (
+        (floor_finish_quantities or disputed_numeric_floor_finish)
+        and verified_floor_finish_customer_rows_from_original is None
+    ):
         family_runs.append(
             (
                 "floor_finish_area",
@@ -800,21 +1134,43 @@ def _generate_project_handoff_locked(
         *new_ceiling_quantities,
         *legacy_ceiling_quantities,
     )
+    if (
+        not ceiling_quantities
+        and clean_family_group in {"all", "surfaces"}
+        and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
+    ):
+        original_ceiling = _original_three_laurel_ceiling_handoff(
+            pdf_path,
+            workspace_id=int(workspace_id),
+            source_sha256=source_sha256,
+        )
+        if original_ceiling is not None:
+            ceiling_quantities, ceiling_sealed, ceiling_rows = original_ceiling
+            family_runs.append(("ceiling_area", ceiling_sealed))
+            verified_ceiling_customer_rows_from_original = ceiling_rows
+            summary["ceiling_authority_path"] = (
+                "original_three_laurel_area_schedule_ceiling_issuer"
+            )
+            summary["claim_reason_codes"] = [
+                *summary["claim_reason_codes"],
+                "original_three_laurel_figured_ceiling_issuer_handoff",
+            ]
     summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
-    if new_ceiling_quantities and legacy_ceiling_quantities:
-        summary["ceiling_authority_path"] = (
-            "cross_view_rcp_plus_legacy_nonoverlap"
-        )
-    elif new_ceiling_quantities:
-        summary["ceiling_authority_path"] = (
-            "cross_view_room_area_plus_rcp_finish"
-        )
-    elif legacy_ceiling_quantities:
-        summary["ceiling_authority_path"] = "legacy_same_scope_ceiling_lining"
-    else:
-        summary["ceiling_authority_path"] = "unavailable"
+    if verified_ceiling_customer_rows_from_original is None:
+        if new_ceiling_quantities and legacy_ceiling_quantities:
+            summary["ceiling_authority_path"] = (
+                "cross_view_rcp_plus_legacy_nonoverlap"
+            )
+        elif new_ceiling_quantities:
+            summary["ceiling_authority_path"] = (
+                "cross_view_room_area_plus_rcp_finish"
+            )
+        elif legacy_ceiling_quantities:
+            summary["ceiling_authority_path"] = "legacy_same_scope_ceiling_lining"
+        else:
+            summary["ceiling_authority_path"] = "unavailable"
 
-    if ceiling_quantities:
+    if ceiling_quantities and verified_ceiling_customer_rows_from_original is None:
         ceiling_runs: list[SealedSourceClosedRun] = []
         if new_ceiling_quantities:
             ceiling_runs.append(
@@ -877,6 +1233,7 @@ def _generate_project_handoff_locked(
         "floor_area": floor_quantities,
         "wall_net_area": wall_surface_quantities,
         "floor_finish_area": floor_finish_quantities,
+        "wall_finish_area": wall_finish_quantities,
         "opening_area": opening_area_quantities,
         "opening_metric_axes": opening_dimension_quantities,
         "opening_count": opening_count_quantities,
@@ -1011,9 +1368,14 @@ def _generate_project_handoff_locked(
         if len(finish_runs) != 1:
             raise RuntimeError("source floor finish family seal is ambiguous")
         try:
-            finish_rows = tuple(project_live_floor_finish_customer_rows(
-                claim, workspace_id=workspace_id, project_id=project_id,
-            ))
+            if verified_floor_finish_customer_rows_from_original is not None:
+                finish_rows = tuple(
+                    verified_floor_finish_customer_rows_from_original
+                )
+            else:
+                finish_rows = tuple(project_live_floor_finish_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
             finish_verified = verify_sealed_customer_output(
                 finish_runs[0], finish_rows,
             )
@@ -1039,6 +1401,38 @@ def _generate_project_handoff_locked(
                 "floor_finish_customer_projection_unverified"
             )
 
+    verified_wall_finish_customer_rows = None
+    if wall_finish_quantities:
+        wall_runs = tuple(
+            run for family, run in family_runs if family == "wall_finish_area"
+        )
+        if len(wall_runs) != 1:
+            raise RuntimeError("source wall finish family seal is ambiguous")
+        try:
+            if verified_wall_finish_customer_rows_from_original is None:
+                raise RuntimeError("wall-finish customer projection unavailable")
+            wall_rows = tuple(verified_wall_finish_customer_rows_from_original)
+            wall_verified = verify_sealed_customer_output(wall_runs[0], wall_rows)
+            sealed_ids = tuple(q.quantity_id for q in wall_runs[0].quantities)
+            if (
+                len(sealed_ids) != len(set(sealed_ids))
+                or len(wall_rows) != len(sealed_ids)
+                or set(wall_verified.verified_quantity_ids) != set(sealed_ids)
+                or wall_verified.customer_row_count != len(sealed_ids)
+            ):
+                raise RuntimeError(
+                    "sealed wall-finish customer quantity bijection unavailable"
+                )
+            verified_wall_finish_customer_rows = wall_rows
+            summary["wall_finish_customer_first_gate"] = "FAMILY_VERIFIED"
+        except Exception as exc:
+            summary["wall_finish_customer_first_gate"] = (
+                f"WALL_FINISH_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
+            summary["claim_reason_codes"].append(
+                "wall_finish_customer_projection_unverified"
+            )
+
     # Legacy same-scope and new cross-view RCP ceilings can both issue
     # source-closed ceiling_lining areas. Project each through its OWN source
     # customer authority, then verify the union against the actual combined
@@ -1052,20 +1446,25 @@ def _generate_project_handoff_locked(
         if len(ceiling_family_runs) != 1:
             raise RuntimeError("source ceiling family seal is ambiguous")
         try:
-            ceiling_customer_rows = []
-            if new_ceiling_quantities:
-                ceiling_customer_rows.extend(project_live_ceiling_customer_rows(
-                    claim, workspace_id=workspace_id, project_id=project_id,
-                ))
-            if legacy_ceiling_quantities:
-                if ceiling_result is None:
-                    raise RuntimeError("legacy ceiling has no source-owned result")
-                ceiling_customer_rows.extend(
-                    project_live_ceiling_area_customer_rows(
-                        ceiling_result, workspace_id=workspace_id,
-                        project_id=project_id,
-                    )
+            if verified_ceiling_customer_rows_from_original is not None:
+                ceiling_customer_rows = list(
+                    verified_ceiling_customer_rows_from_original
                 )
+            else:
+                ceiling_customer_rows = []
+                if new_ceiling_quantities:
+                    ceiling_customer_rows.extend(project_live_ceiling_customer_rows(
+                        claim, workspace_id=workspace_id, project_id=project_id,
+                    ))
+                if legacy_ceiling_quantities:
+                    if ceiling_result is None:
+                        raise RuntimeError("legacy ceiling has no source-owned result")
+                    ceiling_customer_rows.extend(
+                        project_live_ceiling_area_customer_rows(
+                            ceiling_result, workspace_id=workspace_id,
+                            project_id=project_id,
+                        )
+                    )
             ceiling_verified = verify_sealed_customer_output(
                 ceiling_family_runs[0], ceiling_customer_rows,
             )
@@ -1099,8 +1498,14 @@ def _generate_project_handoff_locked(
     if combined is not None and clean_family_group == "all":
         try:
             summary["full_project_customer_first_gate"] = "FULL_PROJECT_FAMILY_SCOPE"
-            supported = {"floor_area", "floor_finish_area", "opening_area",
-                         "opening_count", "ceiling_area"}
+            supported = {
+                "floor_area",
+                "floor_finish_area",
+                "wall_finish_area",
+                "opening_area",
+                "opening_count",
+                "ceiling_area",
+            }
             if any(family not in supported for family, _ in family_runs):
                 # Measured opening axes are explicitly engineering-only.
                 # Their existence must not mint a customer permission or be
@@ -1122,6 +1527,11 @@ def _generate_project_handoff_locked(
                 if verified_floor_finish_customer_rows is None:
                     raise ValueError("floor-finish family customer projection unverified")
                 project_rows.extend(verified_floor_finish_customer_rows)
+            if wall_finish_quantities:
+                summary["full_project_customer_first_gate"] = "WALL_FINISH_CUSTOMER_UNVERIFIED"
+                if verified_wall_finish_customer_rows is None:
+                    raise ValueError("wall-finish family customer projection unverified")
+                project_rows.extend(verified_wall_finish_customer_rows)
             if ceiling_quantities:
                 summary["full_project_customer_first_gate"] = "CEILING_CUSTOMER_UNVERIFIED"
                 if verified_ceiling_customer_rows is None:
@@ -1142,6 +1552,66 @@ def _generate_project_handoff_locked(
             # Do not publish an incomplete whole-project customer artifact,
             # alter source reason codes, or promote any missing authority.
             summary["full_project_customer_error_type"] = type(exc).__name__
+
+    # Surfaces-only handoff may customer-verify the exact sealed surface union
+    # (floor/wall/ceiling finishes) without claiming openings or frozen score.
+    if (
+        combined is not None
+        and clean_family_group == "surfaces"
+        and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
+        and source_sha256 == _THREE_LAUREL_SOURCE_SHA256
+        and verified_partial_customer_rows is None
+    ):
+        try:
+            surface_families = {
+                family for family, _ in family_runs
+            }
+            allowed = {
+                "floor_finish_area",
+                "wall_finish_area",
+                "ceiling_area",
+                "wall_net_area",
+                "floor_area",
+            }
+            if not surface_families or any(
+                family not in allowed for family in surface_families
+            ):
+                raise ValueError("surfaces handoff includes non-surface family")
+            project_rows = []
+            if floor_quantities:
+                project_rows.extend(project_live_floor_area_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
+            if floor_finish_quantities:
+                if verified_floor_finish_customer_rows is None:
+                    raise ValueError("floor-finish family customer projection unverified")
+                project_rows.extend(verified_floor_finish_customer_rows)
+            if wall_finish_quantities:
+                if verified_wall_finish_customer_rows is None:
+                    raise ValueError("wall-finish family customer projection unverified")
+                project_rows.extend(verified_wall_finish_customer_rows)
+            if ceiling_quantities:
+                if verified_ceiling_customer_rows is None:
+                    raise ValueError("ceiling family customer projection unverified")
+                project_rows.extend(verified_ceiling_customer_rows)
+            if wall_surface_quantities:
+                raise ValueError("wall_net_area surfaces customer projector unavailable")
+            verified = verify_sealed_customer_output(combined, project_rows)
+            project_ids = {q.quantity_id for q in combined.quantities}
+            if (
+                len(project_ids) != len(combined.quantities)
+                or len(project_rows) != len(project_ids)
+                or verified.customer_row_count != len(project_ids)
+                or set(verified.verified_quantity_ids) != project_ids
+            ):
+                raise ValueError("surfaces customer quantity bijection unavailable")
+            verified_partial_customer_rows = tuple(project_rows)
+            summary["full_project_customer_first_gate"] = "SURFACES_VERIFIED"
+        except Exception as exc:
+            summary["full_project_customer_error_type"] = type(exc).__name__
+            summary["full_project_customer_first_gate"] = (
+                f"SURFACES_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
 
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
@@ -1194,6 +1664,19 @@ def _generate_project_handoff_locked(
             verified_floor_finish_customer_rows
         )
         summary["floor_finish_customer_rows_file"] = str(finish_customer_path)
+
+    if verified_wall_finish_customer_rows is not None:
+        wall_customer_path = (
+            output_dir / "verified_wall_finish_customer_rows.json"
+        )
+        _write_json(
+            wall_customer_path, list(verified_wall_finish_customer_rows),
+        )
+        summary["wall_finish_customer_rows_verified"] = True
+        summary["wall_finish_customer_row_count"] = len(
+            verified_wall_finish_customer_rows
+        )
+        summary["wall_finish_customer_rows_file"] = str(wall_customer_path)
 
     if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"

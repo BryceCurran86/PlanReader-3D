@@ -45,7 +45,7 @@ def _unpublished(**_):
 
 
 @pytest.mark.parametrize("changed", ["pdf", "customer", "missing_original_appears"])
-def test_source_customer_change_during_final_report_link_cannot_publish(
+def test_source_customer_change_during_final_report_write_cannot_publish(
     tmp_path, monkeypatch, changed,
 ):
     inputs, output, args = _cli(tmp_path)
@@ -60,19 +60,19 @@ def test_source_customer_change_during_final_report_link_cannot_publish(
         altered = customer
     else:
         altered = pdf
-    real_link = os.link
-    linked = []
+    publish = writer.publish_staged_file
+    published = []
 
     def mutate_during_publication(staged, destination):
-        real_link(staged, destination)
-        linked.append(str(destination))
+        publish(staged, destination)
+        published.append(destination)
         altered.write_bytes(b"an external writer changed this original input")
 
     monkeypatch.setattr(suite, "build_four_project_evidence_ledger", _unpublished)
-    monkeypatch.setattr(writer.os, "link", mutate_during_publication)
+    monkeypatch.setattr(writer, "publish_staged_file", mutate_during_publication)
     with pytest.raises(ValueError, match="input changed during report publication"):
         suite.main(args)
-    assert len(linked) == 1
+    assert published == [output]
     assert not output.exists()
     assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
 
@@ -86,15 +86,15 @@ def test_external_writer_replacement_is_never_deleted_after_failed_publish(
     initial.write_bytes(b"genuine-starting-original-byte-evidence")
     external = tmp_path / "independent-new-receipt.json"
     external.write_text('{"other_writer":true}', encoding="utf-8")
-    real_link = os.link
+    publish = writer.publish_staged_file
 
     def replace_report_then_change_original(staged, destination):
-        real_link(staged, destination)
+        publish(staged, destination)
         os.replace(external, destination)
         initial.write_bytes(b"original changed during scoring publication")
 
     monkeypatch.setattr(suite, "build_four_project_evidence_ledger", _unpublished)
-    monkeypatch.setattr(writer.os, "link", replace_report_then_change_original)
+    monkeypatch.setattr(writer, "publish_staged_file", replace_report_then_change_original)
     with pytest.raises(ValueError, match="input changed during report publication"):
         suite.main(args)
     assert json.loads(output.read_text(encoding="utf-8")) == {

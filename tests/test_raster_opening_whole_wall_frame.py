@@ -190,6 +190,35 @@ def test_corner_leg_with_only_one_flank_cannot_mint_whole_wall_frame() -> None:
     assert result is None
 
 
+@pytest.mark.parametrize(
+    "field",
+    ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "decision_scope_id"),
+)
+def test_corner_leg_requires_the_exact_live_wall_scope(field: str) -> None:
+    scope = _scope((_record("wall:host"),))
+    setattr(scope, field, "different-source-scope")
+
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_CORNER_FRAMED_OPENING_LEG),
+        geometry=GEOMETRY,
+    )
+
+    assert result is None
+
+
+def test_corner_leg_rejects_conflicting_records_for_the_same_wall() -> None:
+    records = (_record("wall:host"), _record("wall:host", offset=0.25))
+
+    result = _producer(_scope(records))._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_CORNER_FRAMED_OPENING_LEG),
+        geometry=GEOMETRY,
+    )
+
+    assert result is None
+
+
 def test_non_raster_opening_cannot_use_whole_wall_frame_shortcut() -> None:
     records = (_record("wall:host"),)
     result = _producer(_scope(records))._raster_whole_wall_frame(

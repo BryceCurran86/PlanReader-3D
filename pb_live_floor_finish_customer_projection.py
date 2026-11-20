@@ -138,6 +138,15 @@ def project_live_floor_finish_customer_rows(
                 "duplicate_original_floor_finish_quantity_id"
             )
         original_quantity_ids.add(source_id)
+        # A producer's explicit commercial veto cannot be upgraded by a
+        # customer presentation adapter. Absence is not new authority: the
+        # source-closed issuer must still supply independent positive proof.
+        original_meta = original.metadata if isinstance(original.metadata, Mapping) else {}
+        if (not original.abstained and original.value is not None
+                and original_meta.get("commercial_projection_allowed") is False):
+            raise SourceClosedRunConflictError(
+                "floor_finish_original_commercial_scope_denied"
+            )
         # A numeric original quantity retaining unresolved producer blockers
         # must never disappear from customer output via the later selection
         # filter. The real source-closed sealer still receives this member;
@@ -146,6 +155,22 @@ def project_live_floor_finish_customer_rows(
         if not original.abstained and original.value is not None and original.blocking_reasons:
             raise SourceClosedRunConflictError(
                 "numeric floor-finish source quantity retains unresolved blockers"
+            )
+        # Never silently promote a source-owned exclusion or ambiguous
+        # inclusion witness to an ordinary customer floor finish. Retain the
+        # complete original source family and fail closed until the upstream
+        # physical-room exclusion/special-finish authority resolves it.
+        metadata = original.metadata if isinstance(original.metadata, Mapping) else {}
+        source_inclusion = metadata.get("inclusion_status")
+        if (
+            not original.abstained
+            and original.value is not None
+            and source_inclusion is not None
+            and (type(source_inclusion) is not str
+                 or source_inclusion.strip().upper() != "INCLUSION")
+        ):
+            raise SourceClosedRunConflictError(
+                "floor_finish_source_inclusion_scope_unresolved"
             )
 
     quantities = tuple(
@@ -193,6 +218,32 @@ def project_live_floor_finish_customer_rows(
             if isinstance(quantity.metadata, Mapping)
             else {}
         )
+        # Source-owned selectors must agree with the exact original physical
+        # floor used for the customer location. No job/page/room exceptions.
+        source_owner_fields = (
+            ("source_sha256", floor.source_sha256, True),
+            ("revision_id", floor.revision_id, False),
+            ("document_id", floor.document_id, False),
+            ("snapshot_id", floor.snapshot_id, False),
+            ("canonical_floor_id", floor.canonical_floor_id, False),
+            ("physical_floor_surface_id", floor.physical_floor_surface_id, False),
+            ("source_room_face_record_id", floor.source_room_face_record_id, False),
+        )
+        for name, actual, case_insensitive in source_owner_fields:
+            if name not in metadata:
+                continue
+            claimed = metadata[name]
+            if (type(claimed) is not str or not claimed
+                    or claimed != claimed.strip()
+                    or ((claimed.lower() != str(actual).lower()) if case_insensitive
+                        else claimed != actual)):
+                raise SourceClosedRunConflictError(
+                    "floor_finish_original_physical_owner_mismatch"
+                )
+        if quantity.unit not in ("m2", "m²"):
+            raise SourceClosedRunConflictError(
+                "floor_finish_customer_unit_not_area"
+            )
         metadata.update(
             {
                 "section": "Internal",

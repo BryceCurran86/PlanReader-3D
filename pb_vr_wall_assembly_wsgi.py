@@ -17,6 +17,9 @@ from urllib.parse import unquote
 
 from pb_vr_editor_readonly_wsgi import EditorPrincipal, AuthorizedSceneWorkspace
 from pb_vr_editor_command_wsgi import _reject_non_json_constant, _unique_object_pairs
+from pb_vr_wall_change_impact import (
+    ProposedWallRateBook, ProposedRelatedPageCensus, preview_proposed_wall_impact,
+)
 from pb_vr_wall_assembly_dependencies import (
     NewWallDesign, ProposedOpening, WallAssemblySpecification,
     KnownServiceRoute, calculate_new_wall_construction_package,
@@ -98,6 +101,8 @@ def make_wall_addition_scope_wsgi_app(
     verify_csrf: Callable,
     load_project_assembly_profile: Callable,
     load_verified_service_routes: Callable,
+    load_proposed_wall_rate_book: Callable | None = None,
+    load_related_page_census: Callable | None = None,
 ):
     """Build a deployment-controlled endpoint. No anonymous/demo fallback."""
     callbacks=(
@@ -180,7 +185,25 @@ def make_wall_addition_scope_wsgi_app(
             pkg=calculate_new_wall_construction_package(
                 wall,assembly,known_service_routes=routes,
             )
+            # Opt-in server-only providers. Without them the preview still
+            # works, but pricing and drawing coordination are explicit HOLDs.
+            book = (load_proposed_wall_rate_book(
+                principal, workspace, profile_id
+            ) if load_proposed_wall_rate_book is not None else None)
+            census = (load_related_page_census(
+                principal, workspace, wall
+            ) if load_related_page_census is not None else None)
+            if book is not None and type(book) is not ProposedWallRateBook:
+                raise ValueError("untrusted_proposed_wall_ratebook")
+            if census is not None and type(census) is not ProposedRelatedPageCensus:
+                raise ValueError("untrusted_related_page_census")
+            impact = preview_proposed_wall_impact(
+                pkg, tenant_id=principal.tenant_id,
+                workspace_id=wid, source_sha256=workspace.scope.source_sha256,
+                assembly_profile_id=profile_id, rate_book=book, page_census=census,
+            )
             return reply("200 OK",{
+                "impactPreview": impact,
                 "accepted":True,
                 "reviewOnly":True,
                 "persisted":False,

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import hashlib
 import math
 import random
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
@@ -442,11 +443,21 @@ def classify_floor(
         reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
     if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
-    if correspondence["wall_bounded_on_both_sheets"] is not True:
+    # A partial or caller-forged wall receipt must ABSTAIN, never raise or
+    # fall through into a source-correspondence CANDIDATE.
+    if (
+        not isinstance(correspondence, Mapping)
+        or correspondence.get("wall_bounded_on_both_sheets") is not True
+    ):
         reasons.append(BOX_NOT_WALL_BOUNDED)
-    elif correspondence["wall_evidence_identical_on_both_sheets"] is not True:
+    elif correspondence.get("wall_evidence_identical_on_both_sheets") is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
-    if other_labelled_boxes_overlapping:
+    # A malformed explicit overlap count is not proof of zero rivals.
+    # bool is deliberately excluded despite being a subclass of int.
+    if (
+        type(other_labelled_boxes_overlapping) is not int
+        or other_labelled_boxes_overlapping != 0
+    ):
         reasons.append(OVERLAPPING_MEASURED_BOXES)
     # Source-face / physical-room / canonical-floor identifiers are a
     # one-to-one claim for this shadow correspondence. Repeating an identity
@@ -887,14 +898,21 @@ class SourceCrossViewFloorCorrespondenceProducer:
                         "registered_region": mark.get("registered_region"),
                     })
 
+            # Keep the independently measured overlap flag and the caller's
+            # explicit count typed. An omitted optional count defaults to 0,
+            # but every measured box is still checked by the geometric sweep.
+            # A supplied bool, non-integer or negative count must abstain.
+            raw_overlap_count = item.get("other_labelled_boxes_overlapping", 0)
+            if type(raw_overlap_count) is int and raw_overlap_count >= 0:
+                overlap_count = raw_overlap_count + int(overlap_flags[box_index])
+            else:
+                overlap_count = raw_overlap_count
+
             classified = classify_floor(
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=(
-                    bool(item.get("other_labelled_boxes_overlapping", 0))
-                    or overlap_flags[box_index]
-                ),
+                other_labelled_boxes_overlapping=overlap_count,
                 material_code=selector.material_code,
                 identity_missing=identity_missing,
                 identity_ambiguous=identity_ambiguous,
@@ -3688,7 +3706,14 @@ def enrich_cross_sheet_floor_with_documented_area(
     floors: Any,
     room_areas: Any,
 ) -> Any:
-    """Attach producer-issued CrossViewRoomAreaResult documented area to canonical floor surfaces."""
+    """Attach only unique and exact-source documented areas to canonical floors.
+
+    Duplicate physical-face owners, reused evidence IDs, stale revisions and
+    invalid measurements are quarantined, not selected by iteration order.
+    No project names, room labels, drawing pages or customer quantities decide
+    whether a measurement belongs to a canonical floor.
+    """
+    from collections import Counter
     from dataclasses import replace
     from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceComposition
 
@@ -3697,17 +3722,62 @@ def enrich_cross_sheet_floor_with_documented_area(
     if not room_areas or getattr(room_areas, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
         return floors
 
-    by_face = {
+    source_records = tuple(getattr(room_areas, "records", ()) or ())
+    face_counts = Counter(getattr(rec, "source_room_face_record_id", None) for rec in source_records)
+    evidence_counts = Counter(getattr(getattr(rec, "area_evidence", None), "evidence_id", None)
+                              for rec in source_records)
+    floor_face_counts = Counter(getattr(floor, "source_room_face_record_id", None)
+                                for floor in floors.floors)
+    floor_id_counts = Counter(getattr(floor, "canonical_floor_id", None)
+                              for floor in floors.floors)
+    unique_areas = {
         rec.source_room_face_record_id: rec
-        for rec in getattr(room_areas, "records", ())
+        for rec in source_records
+        if (type(getattr(rec, "source_room_face_record_id", None)) is str
+            and bool(rec.source_room_face_record_id.strip())
+            and face_counts[rec.source_room_face_record_id] == 1
+            and type(getattr(getattr(rec, "area_evidence", None), "evidence_id", None)) is str
+            and evidence_counts[rec.area_evidence.evidence_id] == 1)
     }
+
     enriched = []
     for floor in floors.floors:
-        area_rec = by_face.get(floor.source_room_face_record_id)
-        if area_rec is None or area_rec.area_evidence is None:
+        area_rec = unique_areas.get(floor.source_room_face_record_id)
+        if (area_rec is None
+            or floor_face_counts[floor.source_room_face_record_id] != 1
+            or floor_id_counts[floor.canonical_floor_id] != 1
+            or floor.metric_area_m2 is not None
+            or floor.metric_area_quantity_id is not None
+            or floor.geometry_complete is not True
+            or floor.physical_floor_surface_identity_resolved is not True):
             enriched.append(floor)
             continue
         ev = area_rec.area_evidence
+        metadata = ev.metadata if isinstance(ev.metadata, Mapping) else {}
+        raw_area = ev.normalized_value
+        if (
+            ev.status is not EvidenceResolutionStatus.CORROBORATED
+            or ev.kind != "explicit_room_area"
+            or ev.unit not in ("m2", "m²")
+            or type(raw_area) not in (float, int)
+            or not math.isfinite(float(raw_area))
+            or float(raw_area) <= 0
+            or ev.document_id != floor.document_id
+            or type(area_rec.source_dimension_page_id) is not str
+            or not area_rec.source_dimension_page_id.strip()
+            or type(area_rec.physical_room_id) is not str
+            or not area_rec.physical_room_id.strip()
+            or type(floor.source_sha256) is not str
+            or re.fullmatch(r"[0-9a-fA-F]{64}", floor.source_sha256) is None
+            or metadata.get("room_revision_id") != floor.revision_id
+            or metadata.get("room_snapshot_id") != floor.snapshot_id
+            or metadata.get("source_sha256") != floor.source_sha256
+            or metadata.get("source_room_face_record_id") != floor.source_room_face_record_id
+            or metadata.get("physical_room_id") != area_rec.physical_room_id
+            or metadata.get("source_dimension_page_id") != area_rec.source_dimension_page_id
+        ):
+            enriched.append(floor)
+            continue
         qty_id = stable_contract_id(
             "floor_area_quantity",
             {
@@ -3716,15 +3786,13 @@ def enrich_cross_sheet_floor_with_documented_area(
             },
             digest_chars=20,
         )
-        enriched.append(
-            replace(
-                floor,
-                evidence_ids=tuple(dict.fromkeys((*floor.evidence_ids, ev.evidence_id))),
-                metric_area_m2=float(ev.normalized_value),
-                metric_area_quantity_id=qty_id,
-                metric_area_authority="documented_dimension",
-            )
-        )
+        enriched.append(replace(
+            floor,
+            evidence_ids=tuple(dict.fromkeys((*floor.evidence_ids, ev.evidence_id))),
+            metric_area_m2=float(raw_area),
+            metric_area_quantity_id=qty_id,
+            metric_area_authority="documented_dimension",
+        ))
     return LiveCanonicalFloorSurfaceComposition(
         status=floors.status,
         reason_codes=floors.reason_codes,
@@ -3732,14 +3800,148 @@ def enrich_cross_sheet_floor_with_documented_area(
         source_pages=floors.source_pages,
     )
 
+def resolve_registered_cross_sheet_floor_correspondences(
+    *,
+    source: Any,
+    cross_view_area: Any,
+    canonical_floors: Any,
+    issued_records: Sequence[SourceCrossViewFloorCorrespondenceRecord],
+) -> tuple[SourceCrossViewFloorCorrespondenceRecord, ...]:
+    """Consume exact-source producer-issued physical correspondence, never mint it.
+
+    Registry identity, revision bytes, physical wall/doorway authority and
+    unambiguous room ownership must agree. Works for arbitrary source projects,
+    pages, finishes and room labels; no geometric likeness grants authority.
+    """
+    from collections import Counter
+
+    if not isinstance(issued_records, (tuple, list)) or not issued_records:
+        return ()
+    if (not cross_view_area or not getattr(cross_view_area, "records", None)
+        or not canonical_floors or not getattr(canonical_floors, "floors", None)):
+        return ()
+    if any(type(rec) is not SourceCrossViewFloorCorrespondenceRecord
+           for rec in issued_records):
+        return ()
+    store = getattr(source, "_store", None) or getattr(getattr(source, "_producer", None), "_store", None)
+    by_revision = getattr(store, "source_bytes_by_revision", None)
+    if not isinstance(by_revision, Mapping):
+        return ()
+
+    floors = tuple(canonical_floors.floors)
+    areas = tuple(cross_view_area.records)
+    floor_ids = Counter(getattr(f, "canonical_floor_id", None) for f in floors)
+    floor_faces = Counter(getattr(f, "source_room_face_record_id", None) for f in floors)
+    area_faces = Counter(getattr(a, "source_room_face_record_id", None) for a in areas)
+    area_evidence_ids = Counter(getattr(getattr(a, "area_evidence", None), "evidence_id", None)
+                                for a in areas)
+    candidate_floor_ids = Counter(r.canonical_floor_id for r in issued_records)
+    candidate_faces = Counter(r.source_room_face_record_id for r in issued_records)
+    candidate_record_ids = Counter(r.record_id for r in issued_records)
+    accepted = []
+    for record in issued_records:
+        if (candidate_floor_ids[record.canonical_floor_id] != 1
+            or candidate_faces[record.source_room_face_record_id] != 1
+            or candidate_record_ids[record.record_id] != 1
+            or record.status is not EvidenceResolutionStatus.CORROBORATED
+            or record.commercial_projection_allowed is not True
+            or record.takeoff_eligible is not True
+            or record.authority_blockers
+            or record.wall_bounded_on_both_sheets is not True
+            or record.wall_evidence_identical_on_both_sheets is not True
+            or get_authenticated_floor_correspondence(record.snapshot_id, record.record_id) is not record):
+            continue
+        matching_floors = [f for f in floors if f.canonical_floor_id == record.canonical_floor_id
+                           and f.source_room_face_record_id == record.source_room_face_record_id]
+        matching_areas = [a for a in areas if a.source_room_face_record_id == record.source_room_face_record_id
+                          and a.physical_room_id == record.physical_room_id]
+        if (len(matching_floors) != 1 or len(matching_areas) != 1
+            or floor_ids[record.canonical_floor_id] != 1
+            or floor_faces[record.source_room_face_record_id] != 1
+            or area_faces[record.source_room_face_record_id] != 1):
+            continue
+        floor, area = matching_floors[0], matching_areas[0]
+        ev = getattr(area, "area_evidence", None)
+        if (ev is None or area_evidence_ids[getattr(ev, "evidence_id", None)] != 1
+            or ev.status is not EvidenceResolutionStatus.CORROBORATED
+            or ev.kind != "explicit_room_area"
+            or ev.unit not in ("m2", "m²")
+            or type(ev.normalized_value) not in (int, float)
+            or not math.isfinite(float(ev.normalized_value))
+            or float(ev.normalized_value) <= 0
+            or not isinstance(ev.metadata, Mapping)):
+            continue
+        if (record.document_id != floor.document_id
+            or record.revision_id != floor.revision_id
+            or record.source_sha256 != floor.source_sha256
+            or record.snapshot_id != floor.snapshot_id
+            or record.target_page_id != floor.page_id
+            or record.support_page_id != area.source_dimension_page_id
+            or ev.document_id != floor.document_id
+            or ev.metadata.get("room_revision_id") != floor.revision_id
+            or ev.metadata.get("room_snapshot_id") != floor.snapshot_id
+            or ev.metadata.get("source_sha256") != floor.source_sha256
+            or ev.metadata.get("source_room_face_record_id") != record.source_room_face_record_id
+            or ev.metadata.get("physical_room_id") != record.physical_room_id
+            or type(area.source_dimension_page_id) is not str
+            or not area.source_dimension_page_id.strip()
+            or ev.metadata.get("source_dimension_page_id") != area.source_dimension_page_id):
+            continue
+        payload = by_revision.get(floor.revision_id)
+        if (type(payload) is not bytes
+            or hashlib.sha256(payload).hexdigest() != floor.source_sha256):
+            continue
+        walls = record.cross_sheet_wall_equivalences
+        doors = record.doorway_transitions
+        if (len(walls) != 4
+            or {w.side_name for w in walls} != {"x0", "x1", "y0", "y1"}
+            or any(w.status is not EvidenceResolutionStatus.CORROBORATED
+                   or w.support_page_id != record.support_page_id
+                   or w.target_page_id != record.target_page_id
+                   or type(w.covered_interval_iou) not in (int, float)
+                   or not math.isfinite(float(w.covered_interval_iou))
+                   or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
+            or not doors
+            or set(record.side_kinds) != {"x0", "x1", "y0", "y1"}
+            # The existing source wall producer uses "with_openings" for a
+            # real threshold. Independent source-door producers may use "door".
+            # Never make a door on a "full" or "not_wall" side appear valid.
+            or any(record.side_kinds.get(d.wall_side) not in
+                   {"with_openings", "door"} for d in doors)
+            or type(getattr(area, "room_label", None)) is not str
+            or not area.room_label.strip()
+            or any(d.status is not EvidenceResolutionStatus.CORROBORATED
+                   or d.threshold_aligned_with_internal_face is not True
+                   or d.page_id != floor.page_id
+                   or type(d.scheduled_room_name) is not str
+                   or d.scheduled_room_name.strip().casefold() != area.room_label.strip().casefold()
+                   or type(d.door_width_mm) not in (int, float)
+                   or not math.isfinite(float(d.door_width_mm))
+                   or float(d.door_width_mm) <= 0
+                   or type(d.door_callout) is not str or not d.door_callout.strip()
+                   or type(d.schedule_page_id) is not str or not d.schedule_page_id.strip()
+                   for d in doors)
+            or dict(record.finish_codes_in_box) != {record.material_code: 1}):
+            continue
+        accepted.append(record)
+    return tuple(sorted(accepted, key=lambda r: (r.canonical_floor_id, r.record_id)))
+
 
 def resolve_cross_sheet_floor_correspondence_for_claim(
     *,
     source: Any,
     cross_view_area: Any,
     canonical_floors: Any,
+    issued_records: Optional[Sequence[SourceCrossViewFloorCorrespondenceRecord]] = None,
 ) -> tuple[SourceCrossViewFloorCorrespondenceRecord, ...]:
-    """Resolve cross-sheet floor correspondence for live physical claim if authenticated."""
+    """Resolve source-authenticated physical correspondence or legacy reference."""
+    if issued_records is not None:
+        return resolve_registered_cross_sheet_floor_correspondences(
+            source=source,
+            cross_view_area=cross_view_area,
+            canonical_floors=canonical_floors,
+            issued_records=issued_records,
+        )
     if not cross_view_area or not getattr(cross_view_area, "records", None):
         return ()
     if not canonical_floors or not getattr(canonical_floors, "floors", None):

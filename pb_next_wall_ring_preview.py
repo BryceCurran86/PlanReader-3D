@@ -995,18 +995,45 @@ def _collect_strips(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[_Strip]
     return _attach_caps(strips), other
 
 
+def _source_wall_stroke_layer_name(name: str) -> bool:
+    """Conservatively recognise a source-declared physical wall CAD layer.
+
+    This is only evidence for the *thin* native stroke lane, not a grant of
+    physical/commercial authority. Reject finish, annotation and demolition
+    layers, regardless of whether their names contain the word "wall".
+    """
+    if not isinstance(name, str) or not name.strip():
+        return False
+    import re
+    tokens = tuple(t for t in re.split(r"[^a-z0-9]+", name.lower()) if t)
+    if not tokens:
+        return False
+    has_wall_role = any(
+        token in {"wall", "walls"}
+        or (token.startswith("wall") and token[4:] in {
+            "internal", "external", "interior", "exterior",
+            "structural", "partition", "loadbearing",
+        })
+        for token in tokens
+    )
+    rejected = {"annotation", "annot", "dimension", "dim", "hatch",
+                "finish", "finishes", "tile", "tiling", "lining",
+                "cladding", "paint", "roof", "floor", "furniture",
+                "joinery", "demo", "demolition", "existing", "symbol",
+                "legend", "notes", "note"}
+    return has_wall_role and not bool(rejected.intersection(tokens))
+
+
 def _collect_source_heavy_stroke_strips(
     drawings: Sequence[Mapping[str, Any] | None],
 ) -> list[_Strip]:
     """Opaque BLACK heavy native line paint as candidate wall bands.
 
-    Q5446-class vector drawings can paint real walls as ONE 1.92-pt source
-    stroke. 3Laurel uses many native 0.71-pt strokes on explicitly named
-    Enclosure_WallInternal / Enclosure_WallExternal layers: those are heavier
-    than its 0.37-0.43-pt annotation / floor paint but were lost behind
-    the generic 1.2-pt threshold. Require the original WALL layer for the
-    lower width class; never promote other thin art, hatch lines, page
-    hulls or any stroke to a commercial physical wall.
+    Some CAD exports paint real walls as heavy untyped strokes; others
+    use thin strokes on source-declared physical wall layers. Lower-width
+    recognition requires an explicit physical wall layer role, with finish,
+    hatch, legend and annotation names vetoed. Never grant a commercial
+    physical wall solely from a layer name.
     """
     result: list[_Strip] = []
     seen: set[tuple[int, float, float, float, float]] = set()
@@ -1020,15 +1047,9 @@ def _collect_source_heavy_stroke_strips(
             continue
         width = row.get("width", 0)
         native_layer = str(row.get("layer") or "")
-        # 3Laurel's genuine CAD wall-face strokes are 0.71 PDF pt, whereas
-        # floor finish and annotation lines are generally 0.37-0.43 PDF pt.
-        # The lower width is safe only in the actual SOURCE wall family.
-        # Keep the existing 1.2-pt gate for all untyped/other drawings.
-        min_width = (
-            0.65
-            if native_layer in ("Enclosure_WallInternal", "Enclosure_WallExternal")
-            else 1.2
-        )
+        # Retain conservative untyped heavy strokes; permit thin ones only
+        # when the current drawing's CAD layer explicitly names physical walls.
+        min_width = 0.65 if _source_wall_stroke_layer_name(native_layer) else 1.2
         if type(width) not in (int, float) or not math.isfinite(width) or not (min_width <= width <= 6.0):
             continue
         half = width / 2.
@@ -2201,6 +2222,8 @@ def build_layered_wall_doorway_room_rings(
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
     panel_lift_label_closure: bool = False,
+    source_native_cs_jamb_closure: bool = False,
+    source_native_internal_swing_closure: bool = False,
     source_words: Sequence[Mapping[str, Any]] = (),
     stroke_pair_wall_faces: bool = False,
     wall_end_stroke_closures: bool = False,
@@ -2220,6 +2243,12 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(panel_lift_label_closure) is not bool:
         raise ValueError("panel_lift_label_closure must be an explicit boolean")
+    if type(source_native_cs_jamb_closure) is not bool or (
+        source_native_cs_jamb_closure and not sliding_leaf_frame_closure
+    ):
+        raise ValueError("source_native_cs_jamb_closure requires sliding_leaf_frame_closure")
+    if type(source_native_internal_swing_closure) is not bool:
+        raise ValueError("source_native_internal_swing_closure must be an explicit boolean")
     if type(stroke_pair_wall_faces) is not bool:
         raise ValueError("stroke_pair_wall_faces must be an explicit boolean")
     if type(wall_end_stroke_closures) is not bool:
@@ -2240,6 +2269,8 @@ def build_layered_wall_doorway_room_rings(
                         page_index=page_index,
                         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
                         panel_lift_label_closure=panel_lift_label_closure,
+                        source_native_cs_jamb_closure=source_native_cs_jamb_closure,
+                        source_native_internal_swing_closure=source_native_internal_swing_closure,
                         source_words=source_words,
                         stroke_pair_wall_faces=True,
                         wall_end_stroke_closures=wall_end_stroke_closures,
@@ -2317,6 +2348,53 @@ def build_layered_wall_doorway_room_rings(
         gaps = gaps + _frame_anchored_gaps(indexed, union, gaps)
         prior_gap_count = len(gaps)
         gaps = gaps + _cs_face_interruption_gaps(indexed, gaps, source_words)
+    native_cs_by_gap = {}
+    native_cs_duplicate_gaps = set()
+    if source_native_cs_jamb_closure and source_words:
+        from pb_source_native_cavity_slider_jamb_shadow import match_source_native_cavity_sliders
+        for receipt in match_source_native_cavity_sliders(
+            indexed, source_words, page_index=page_index,
+        ):
+            exact = [
+                i for i, old in enumerate(gaps)
+                if old.horizontal == receipt.horizontal
+                and abs(old.lo - receipt.clear_interval_pdf_pts[0]) <= .45
+                and abs(old.hi - receipt.clear_interval_pdf_pts[1]) <= .45
+                and min(old.band[1], receipt.band_pdf_pts[1])
+                    - max(old.band[0], receipt.band_pdf_pts[0])
+                    >= .65 * (receipt.band_pdf_pts[1] - receipt.band_pdf_pts[0])
+            ]
+            if exact:
+                selected = exact[0]
+                native_cs_duplicate_gaps.update(exact[1:])
+            else:
+                selected = len(gaps)
+                gaps.append(_Gap(
+                    receipt.horizontal, receipt.band_pdf_pts,
+                    *receipt.clear_interval_pdf_pts,
+                    (receipt.host_path_ids[0],), (receipt.host_path_ids[1],), True,
+                ))
+            # Two independently hosted CS receipts must not silently overwrite
+            # the same gap; conflicting source identities fail closed.
+            prior = native_cs_by_gap.get(selected)
+            if prior is not None and prior is not receipt:
+                prior_ids = (
+                    prior.cs_word_index,
+                    prior.leaf_path_id,
+                    prior.host_path_ids,
+                    prior.jamb_path_ids,
+                )
+                next_ids = (
+                    receipt.cs_word_index,
+                    receipt.leaf_path_id,
+                    receipt.host_path_ids,
+                    receipt.jamb_path_ids,
+                )
+                if prior_ids != next_ids:
+                    native_cs_duplicate_gaps.add(selected)
+                    native_cs_by_gap.pop(selected, None)
+                    continue
+            native_cs_by_gap[selected] = receipt
     # PR #4300 only admits opaque source-black anonymous door arcs/leaf
     # strokes, never all furniture or coloured drawing ink as swing proof.
     swing_rows = (
@@ -2326,6 +2404,39 @@ def build_layered_wall_doorway_room_rings(
     arcs, _rejected_arcs = _swing_arcs(
         swing_rows, all_ink=stroke_pair_wall_faces,
     )
+    native_swing_by_gap = {}
+    if source_native_internal_swing_closure and source_words:
+        from pb_source_internal_swing_room_barrier import (
+            detect_source_internal_swing_room_barriers,
+        )
+        for receipt in detect_source_internal_swing_room_barriers(
+            indexed, source_words, page_index=page_index,
+        ):
+            horizontal = receipt.axis == "h"
+            if horizontal:
+                band = (receipt.bounds_pdf_pts[1], receipt.bounds_pdf_pts[3])
+                lo, hi = receipt.bounds_pdf_pts[0], receipt.bounds_pdf_pts[2]
+            else:
+                band = (receipt.bounds_pdf_pts[0], receipt.bounds_pdf_pts[2])
+                lo, hi = receipt.bounds_pdf_pts[1], receipt.bounds_pdf_pts[3]
+            exact = [
+                i for i, gap in enumerate(gaps)
+                if gap.horizontal == horizontal
+                and abs(gap.lo - lo) <= .75 and abs(gap.hi - hi) <= .75
+                and min(gap.band[1], band[1]) - max(gap.band[0], band[0])
+                    >= .6 * (band[1] - band[0])
+            ]
+            if len(exact) > 1:
+                continue
+            if exact:
+                selected = exact[0]
+            else:
+                selected = len(gaps)
+                gaps.append(_Gap(
+                    horizontal, band, lo, hi,
+                    (receipt.first_host_path_id,), (receipt.second_host_path_id,), True,
+                ))
+            native_swing_by_gap[selected] = receipt
     swing_by_gap, unplaced, ambiguous = _place_swings(arcs, gaps)
 
     closures: list[LayeredDoorwayClosure] = []
@@ -2358,6 +2469,8 @@ def build_layered_wall_doorway_room_rings(
             and all(cs_leaf_uses[index] == 1 for index in evidence[0])
         }
     for gap_index, gap in enumerate(gaps):
+        if gap_index in native_cs_duplicate_gaps:
+            continue  # the same original door aperture is not two closures
         swing = swing_by_gap.get(gap_index)
         stroke = None if swing is not None else _stroke_closed(
             indexed, gap, all_ink=stroke_pair_wall_faces,
@@ -2370,6 +2483,66 @@ def build_layered_wall_doorway_room_rings(
             _panel_lift_word_evidence(gap, source_words)
             if panel_lift_label_closure else None
         )
+        original_swing = native_swing_by_gap.get(gap_index)
+        if original_swing is not None:
+            if panel_words is not None or gap_index in native_cs_by_gap:
+                unresolved.append(gap)
+                continue
+            native = tuple(sorted({
+                original_swing.swing_arc_path_id,
+                original_swing.first_host_path_id,
+                original_swing.second_host_path_id,
+                *original_swing.jamb_cap_path_ids,
+            }))
+            cid = stable_contract_id(
+                "layered_doorway_closure", {
+                    "source_sha256": source_sha256, "page_index": page_index,
+                    "kind": KIND_SWING, "horizontal": gap.horizontal,
+                    "band": [round(v, 3) for v in gap.band],
+                    "gap": [round(gap.lo, 3), round(gap.hi, 3)],
+                    "native": list(native),
+                }, digest_chars=24,
+            )
+            closures.append(LayeredDoorwayClosure(
+                cid, KIND_SWING, gap.horizontal, gap.band, (gap.lo, gap.hi),
+                native,
+                (original_swing.first_host_path_id, original_swing.second_host_path_id),
+            ))
+            closure_rects.append((cid, gap.rect()))
+            continue
+        original_cs = native_cs_by_gap.get(gap_index)
+        if original_cs is not None:
+            if swing is not None or panel_words is not None:
+                unresolved.append(gap)
+                continue
+            native = tuple(sorted({
+                *original_cs.host_path_ids, *original_cs.jamb_path_ids,
+                original_cs.leaf_path_id,
+            }))
+            word_ref = str(
+                source_words[original_cs.cs_word_index].get("source_ref") or ""
+            )
+            if not word_ref:
+                unresolved.append(gap)
+                continue
+            cid = stable_contract_id(
+                "layered_doorway_closure", {
+                    "source_sha256": source_sha256, "page_index": page_index,
+                    "kind": KIND_CAVITY_SLIDER, "horizontal": gap.horizontal,
+                    "band": [round(v, 3) for v in gap.band],
+                    "gap": [round(gap.lo, 3), round(gap.hi, 3)],
+                    "native": list(native), "native_word_refs": [word_ref],
+                }, digest_chars=24,
+            )
+            closures.append(LayeredDoorwayClosure(
+                cid, KIND_CAVITY_SLIDER, gap.horizontal, gap.band,
+                (gap.lo, gap.hi), native, original_cs.host_path_ids,
+                native_word_refs=(word_ref,),
+            ))
+            closure_rects.append((cid, gap.rect()))
+            continue
+        if source_native_cs_jamb_closure:
+            cavity = None  # a merely printed CS is never a room barrier
         owners = sum(
             1
             for item in (swing, stroke, sliding, cavity, panel_words)

@@ -21,12 +21,21 @@ from pb_external_footprint_first_trace import (  # noqa: E402
     refine_external_footprint_against_wall_ink,
     trace_external_footprint_first,
 )
+from pb_external_footprint_inside_face_runtime import (  # noqa: E402
+    run_inside_face_footprint_runtime_stage,
+)
 from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
     _source_wall_ink_candidate_drawings,
     build_layered_wall_doorway_room_rings,
 )
+from pb_new_exterior_wall_preflight import attempt_source_native_outer_wall_first
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     own_exterior_contour_native_paths,
+)
+from pb_source_native_exterior_perimeter_graph_shadow import (  # noqa: E402
+    build_source_native_exterior_perimeter_graph,
+    export_exterior_face_evidence_packet,
+    select_outermost_vertical_face_edge_index,
 )
 from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
     build_source_native_wall_body_junction_graph,
@@ -96,16 +105,130 @@ def _draw_source_overlay(page, original, trace, scope, ring):
     return candidate_count
 
 
-def run(pdf: Path, page_index: int, out_dir: Path):
+def _original_source_native_outer_wall_review(drawings, words, page_index):
+    """Read-only original-native evidence; never upgrade raster to a wall.
+
+    Use the existing outside-facing walker and wall/opening graph. Missing
+    ownership or a nearby source stroke may guide review, but cannot grant
+    an invented seam, snapped corner, measurement or customer publication.
+    """
+    try:
+        proof = attempt_source_native_outer_wall_first(
+            drawings, source_words=words, source_page_index=page_index,
+        )
+        graph = proof.graph
+        misses = tuple(graph.endpoint_near_misses)
+        return {
+            "status": proof.status,
+            "reason": proof.reason,
+            "source_wall_band_count": proof.source_wall_band_count,
+            "connected_native_wall_components": graph.component_count,
+            "source_endpoint_near_miss_count": len(misses),
+            "near_miss_witnesses_sample": [
+                {
+                    "tip_pdf_pts": list(w.tip_pdf_pts),
+                    "nearby_native_path_ids": list(w.nearby_native_path_ids),
+                    "separation_pdf_pts": w.separation_pdf_pts,
+                    "physical_join_authenticated": False,
+                }
+                for w in misses[:8]
+            ],
+            "physical_wall_authenticated": False,
+            "measurement_authorized": False,
+            "commercial_publishable": False,
+        }
+    except (RuntimeError, ValueError, TypeError, OverflowError, IndexError):
+        return {
+            "status": "ABSTAINED",
+            "reason": "original_native_outer_source_review_unavailable",
+            "source_wall_band_count": 0,
+            "connected_native_wall_components": 0,
+            "source_endpoint_near_miss_count": 0,
+            "near_miss_witnesses_sample": [],
+            "physical_wall_authenticated": False,
+            "measurement_authorized": False,
+            "commercial_publishable": False,
+        }
+
+
+def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | None) -> bool:
+    """Fail before any geometry or output if the regional original is wrong.
+
+    A Brisbane acceptance run must not silently use the similar Sydney or
+    Melbourne Acacia PDF. No PDF bytes, source paths, or quantities are changed.
+    """
+    if expected_sha256 is None:
+        return False
+    if (type(expected_sha256) is not str or len(expected_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in expected_sha256)):
+        raise ValueError("original_footprint_expected_sha256_invalid")
+    if actual_sha != expected_sha256:
+        raise ValueError("original_footprint_source_sha256_mismatch")
+    return True
+
+
+def _verify_original_drawing_title(source_bytes: bytes, page_index: int,
+                                   expected_title: str | None) -> bool:
+    """Optional page-identity gate: never mistake site/roof for floor plan."""
+    if expected_title is None:
+        return False
+    if (type(expected_title) is not str or not expected_title.strip()
+            or len(expected_title) > 100):
+        raise ValueError("original_footprint_expected_page_title_invalid")
+    import fitz
+
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        if type(page_index) is not int or not 0 <= page_index < len(document):
+            raise ValueError("original_footprint_original_page_index_invalid")
+        # Source title blocks may wrap a single drawing title across PDF
+        # lines (Acacia p10: "Window" / "and Door Schedule"). Whitespace
+        # layout is not part of the drawing's semantic title identity.
+        import re
+
+        source_title_text = " ".join(document[page_index].get_text().split())
+        normalized_expected_title = " ".join(expected_title.split())
+        # A cover sheet's drawing INDEX can mention "Floor Plan" without
+        # itself being that sheet (original 3Laurel A0.1 versus A0.3).
+        # Require one explicit title-block field, not arbitrary page text.
+        # Title/metadata may wrap across multiple PDF text lines.
+        titles = re.findall(
+            r"\bDrawing\s+(?:title|name)\s*:\s*(.*?)\s*"
+            r"(?=\bScale\s*:|\bPaper\s+size\s*:|"
+            r"\bDrawing\s+number\s*:|\bDate\s+issued\s*:|"
+            r"\bProject\s+stage\s*:|$)",
+            source_title_text,
+            flags=re.IGNORECASE,
+        )
+        if (len(titles) != 1
+                or " ".join(titles[0].split()).casefold()
+                != normalized_expected_title.casefold()):
+            raise ValueError("original_footprint_original_page_title_mismatch")
+    return True
+
+
+def run(pdf: Path, page_index: int, out_dir: Path, *,
+        expected_sha256: str | None = None,
+        expected_drawing_title: str | None = None):
     import fitz
 
     original_bytes = pdf.read_bytes()
     sha = hashlib.sha256(original_bytes).hexdigest()
+    sha_pin_verified = _enforce_original_source_sha_pin(sha, expected_sha256)
+    # Reject invalid original sheet identities before source-native geometry tracing.
+    with fitz.open(stream=original_bytes, filetype="pdf") as source_pages:
+        if type(page_index) is not int or not 0 <= page_index < len(source_pages):
+            raise ValueError("original_footprint_original_page_index_invalid")
+    title_verified = _verify_original_drawing_title(
+        original_bytes, page_index, expected_drawing_title,
+    )
     (outer,) = trace_external_footprint_first(
         original_bytes, source_sha256=sha, page_indices=(page_index,),
     )
     with fitz.open(stream=original_bytes, filetype="pdf") as source:
         drawings = tuple(source[page_index].get_drawings())
+        source_native_outer_review = _original_source_native_outer_wall_review(
+            drawings, source[page_index].get_text("words"), page_index,
+        )
         outer, detour_receipt = refine_external_footprint_against_wall_ink(
             outer, drawings,
         )
@@ -124,14 +247,29 @@ def run(pdf: Path, page_index: int, out_dir: Path):
             )
         result = {
             "source_sha256": sha,
+            "source_sha_pin_verified": sha_pin_verified,
+            "source_page_title_verified": title_verified,
             "page_index_0based": page_index,
             "stage_order": [
                 "source_hashed_exterior_ink_contour",
+                "inside_face_dominant_wall_start_and_left_turn_walk",
                 "preserve_original_native_path_scope",
                 "dark_wall_and_doorway_ring_topology",
                 "physical_wall_metric_and_customer_UNAUTHORIZED",
             ],
             "exterior": outer.to_dict(),
+            "inside_face_footprint_stage": run_inside_face_footprint_runtime_stage(
+                drawings,
+                page_bounds_pdf_pts=(
+                    float(source[page_index].rect.x0),
+                    float(source[page_index].rect.y0),
+                    float(source[page_index].rect.x1),
+                    float(source[page_index].rect.y1),
+                ),
+                source_words=tuple(source[page_index].get_text("words")),
+                page_index=page_index,
+            ),
+            "source_native_outer_wall_review": source_native_outer_review,
             "unsupported_rectangular_detour": dict(detour_receipt),
             "bounded_source": {
                 "status": scope.status,
@@ -149,8 +287,9 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 ],
                 "candidate_room_rings": len(ring.rings) if ring else 0,
                 "temporary_doorway_closures": len(ring.closures) if ring else 0,
-                "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else 0,
-                "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else 0,
+                "gap_review_performed": ring is not None,
+                "unresolved_collinear_gap_count": ring.unresolved_gap_count if ring else None,
+                "source_gap_witness_count": ring.unresolved_gap_witness_count if ring else None,
                 "source_gap_witnesses_sample": [
                     dict(w) for w in ring.unresolved_gap_witnesses
                 ] if ring else [],
@@ -167,6 +306,18 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                 ),
                 "free_space_max_enclosed_area_pt2": (
                     ring.free_space_max_enclosed_area_pt2 if ring else 0.0
+                ),
+                "ring_area_tier_lt_100_count": (
+                    ring.ring_area_tier_lt_100_count if ring else 0
+                ),
+                "ring_area_tier_100_to_1000_count": (
+                    ring.ring_area_tier_100_to_1000_count if ring else 0
+                ),
+                "ring_area_tier_ge_1000_count": (
+                    ring.ring_area_tier_ge_1000_count if ring else 0
+                ),
+                "drafting_pocket_sliver_count": (
+                    ring.drafting_pocket_sliver_count if ring else 0
                 ),
                 "commercial_publishable": False,
                 "room_quantity_authorized": False,
@@ -231,12 +382,51 @@ def run(pdf: Path, page_index: int, out_dir: Path):
                         "overlap_fraction": edge.unique_owner_overlap_fraction,
                         "uncovered_start_pt": edge.unique_owner_uncovered_start_pt,
                         "uncovered_end_pt": edge.unique_owner_uncovered_end_pt,
+                        "competing_incomplete_chain_path_count": len(
+                            edge.competing_incomplete_chain_path_indices
+                        ),
+                        "competing_incomplete_chain_coverage_fraction": (
+                            edge.competing_incomplete_chain_coverage_fraction
+                        ),
                     }
                     for edge in unique_edges
                 ],
                 "physical_wall_authenticated": False,
                 "commercial_publishable": False,
             }
+            perimeter = build_source_native_exterior_perimeter_graph(
+                scope.drawings,
+                outer,
+                closures=() if ring is None else ring.closures,
+            )
+            east_face_index = select_outermost_vertical_face_edge_index(
+                perimeter.edges, prefer_max_x=True,
+            )
+            result["exterior_perimeter_graph"] = {
+                **{
+                    k: v
+                    for k, v in perimeter.to_dict().items()
+                    if k
+                    in {
+                        "owned_edge_count",
+                        "contact_corner_count",
+                        "near_miss_corner_count",
+                        "representation_contact_unauthenticated_count",
+                        "unwitnessed_corner_count",
+                        "closed_candidate",
+                        "corners",
+                    }
+                },
+                "physical_wall_authenticated": False,
+                "commercial_publishable": False,
+            }
+            result["outermost_vertical_face_handoff"] = (
+                None
+                if east_face_index is None
+                else export_exterior_face_evidence_packet(
+                    perimeter, edge_index=east_face_index,
+                )
+            )
             graph = build_source_native_wall_body_junction_graph(
                 drawings,
                 page_index=page_index,
@@ -343,9 +533,19 @@ if __name__ == "__main__":
     parser.add_argument("--page", type=int, required=True,
                         help="0-based page index")
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--expected-sha256",
+                        help="Exact SHA256 of the intended original drawing")
+    parser.add_argument("--expected-drawing-title",
+                        help="Require drawing-title field of the intended page")
     arguments = parser.parse_args()
-    result, js, png = run(arguments.pdf, arguments.page, arguments.out_dir)
+    result, js, png = run(
+        arguments.pdf, arguments.page, arguments.out_dir,
+        expected_sha256=arguments.expected_sha256,
+        expected_drawing_title=arguments.expected_drawing_title,
+    )
     print(json.dumps({
+        "source_sha_pin_verified": result["source_sha_pin_verified"],
+        "source_page_title_verified": result["source_page_title_verified"],
         "exterior_status": result["exterior"]["status"],
         "source_native_ink_primitives": result["bounded_source"]["candidate_wall_native_primitives"],
         "room_topology_status": result["topology"]["status"],

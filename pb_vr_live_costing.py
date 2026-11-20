@@ -19,6 +19,8 @@ from typing import Any, Mapping, Sequence
 from pb_builder_edition_architecture import CanonicalCompanyRate
 from pb_cross_trade_geometry_reuse import normalise_trade_unit, require_evidence_ids
 from pb_editable_3d_quantity_recalculation import RecalculationTarget
+from pb_takeoff_output_authority import TakeoffOutputRow
+from pb_vr_editor_scene_manifest import VerifiedSourceWitness
 from pb_vr_editor_readonly_wsgi import AuthorizedSceneWorkspace, EditorPrincipal
 
 _CENT = Decimal("0.01")
@@ -310,4 +312,102 @@ def price_live_correction_preview(
             "delta": {k: _str(_money(after_sum[k] - before_sum[k])) for k in keys},
         },
         "costPreviewReceiptSha256": receipt,
+    }
+
+
+@dataclass(frozen=True)
+class CatalogueRateBinding:
+    """Company rate explicitly attached to a catalogue selection and verified takeoff row."""
+    catalogue_item_id: str
+    quantity_id: str
+    canonical_object_id: str
+    rate_book_revision: str
+    rate: CanonicalCompanyRate
+    evidence_ids: tuple[str, ...]
+
+    def __post_init__(self):
+        if not all(isinstance(value, str) and 0 < len(value) <= 180 for value in (
+            self.catalogue_item_id, self.quantity_id, self.canonical_object_id,
+            self.rate_book_revision,
+        )):
+            raise ValueError("catalogue_rate_identity_required")
+        if type(self.rate) is not CanonicalCompanyRate:
+            raise TypeError("rate_requires_canonical_company_rate")
+        evidence = require_evidence_ids(self.evidence_ids, "catalogue_binding_evidence")
+        if not evidence:
+            raise ValueError("catalogue_rate_binding_provenance_missing")
+        object.__setattr__(self, "evidence_ids", evidence)
+
+
+_SELECTION_FIELDS = frozenset({
+    "requestId", "workspaceId", "projectId", "documentId", "revisionId",
+    "sourceSha256", "snapshotId", "modelRevision", "objectId", "objectRevision",
+    "canonicalObjectId", "quantityId", "catalogueItemId",
+})
+
+
+def resolve_catalogue_quantity(selection, *, principal, workspace, ledger, rows):
+    """Find one current firm takeoff row from an authenticated ledger."""
+    scope = workspace.scope
+    if (principal.tenant_id != workspace.tenant_id or
+        scope.workspace_id not in principal.allowed_preview_workspace_ids):
+        raise ValueError("catalogue_cost_access_denied")
+    if set(selection) != _SELECTION_FIELDS or not all(
+        isinstance(selection[field], str) and 0 < len(selection[field]) <= 180
+        for field in _SELECTION_FIELDS - {"modelRevision"}
+    ):
+        raise ValueError("catalogue_cost_request_schema")
+    if (selection["workspaceId"] != scope.workspace_id or selection["projectId"] != scope.project_id or
+        selection["documentId"] != scope.document_id or selection["revisionId"] != scope.revision_id or
+        selection["sourceSha256"] != scope.source_sha256.lower() or selection["snapshotId"] != scope.snapshot_id or
+        type(selection["modelRevision"]) is not int or selection["modelRevision"] != scope.model_revision):
+        raise ValueError("catalogue_cost_source_scope_changed")
+    object_id = selection["objectId"]
+    obj = ledger.get_object(object_id)
+    owner = next((entry for entry in workspace.objects if entry.object_id == object_id), None)
+    witness = workspace.source_witnesses.get(object_id)
+    if (obj is None or owner is None or obj.revision_hash != selection["objectRevision"] or
+        obj.revision_hash != owner.revision_hash or
+        selection["canonicalObjectId"] != workspace.canonical_object_ids.get(object_id) or
+        not isinstance(witness, VerifiedSourceWitness) or not witness.matches(scope, obj) or
+        not witness.matches(scope, owner)):
+        raise ValueError("catalogue_cost_owner_unverified")
+    quantity_id = selection["quantityId"]
+    if quantity_id not in obj.dependent_quantity_ids or quantity_id not in owner.dependent_quantity_ids:
+        raise ValueError("verified_quantity_not_linked")
+    if len(rows) > 2000:
+        raise ValueError("catalogue_quantity_safety_cap")
+    matches = [row for row in rows if isinstance(row, TakeoffOutputRow) and row.quantity_id == quantity_id]
+    if len(matches) != 1:
+        raise ValueError("verified_quantity_missing_or_ambiguous")
+    row = matches[0]
+    if (row.geometry_ref != object_id or row.revision_hash != obj.revision_hash or
+        row.source_page != witness.source_page or row.source_sheet != witness.source_sheet or
+        row.authority_status != "firm" or row.is_publishable is not True or row.blocking_reasons):
+        raise ValueError("quantity_not_verified_for_current_source")
+    return row
+
+
+def price_catalogue_selection(selection, *, row, workspace, book, binding):
+    """Exact-cent preview using the existing company costing formula."""
+    scope = workspace.scope
+    if (type(book) is not LiveCostBook or type(binding) is not CatalogueRateBinding or
+        book.workspace_id != scope.workspace_id or book.tenant_id != workspace.tenant_id or
+        book.snapshot_id != scope.snapshot_id or book.source_sha256.lower() != scope.source_sha256.lower() or
+        binding.catalogue_item_id != selection["catalogueItemId"] or
+        binding.quantity_id != row.quantity_id or binding.canonical_object_id != selection["canonicalObjectId"] or
+        binding.rate_book_revision != book.revision or binding.rate.currency != book.currency or
+        binding.rate.unit != normalise_trade_unit(row.unit)):
+        raise ValueError("catalogue_rate_missing_or_mismatched")
+    quantity = _decimal(row.value, "catalogue_quantity", _MAX_QTY)
+    if quantity <= 0:
+        raise ValueError("catalogue_quantity_must_be_positive")
+    total = _components(quantity, binding.rate, book)
+    return {
+        **selection, "accepted": True, "previewOnly": True, "commercialPublicationAllowed": False,
+        "quantity": _str(quantity), "unit": binding.rate.unit,
+        "currency": book.currency, "priceExTax": _str(total["sellExTax"]),
+        "priceIncTax": _str(total["sellIncTax"]), "rateKey": binding.rate.rate_key,
+        "rateBookRevision": book.revision, "rateEvidenceIds": list(binding.rate.evidence_ids),
+        "bindingEvidenceIds": list(binding.evidence_ids),
     }

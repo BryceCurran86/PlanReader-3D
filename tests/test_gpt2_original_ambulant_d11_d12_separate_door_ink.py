@@ -116,8 +116,11 @@ def test_original_maryborough_ambulant_labels_and_d11_d12_on_separate_entrances(
         source_corridor_axis_y_pdf_pts=1383.2,
     )
     assert result["status"]=="two_distinct_original_cubicle_door_source_candidates_only"
-    assert result["original_corridor_ink_endpoints_pdf_pts"]==[
-        (510.48,1383.2),(535.92,1383.2)]
+    # The source producer deliberately issues an immutable tuple of exact native
+    # endpoints. Keep the same points and ordering; never coerce production
+    # geometry into a mutable list just to satisfy this protected test.
+    assert result["original_corridor_ink_endpoints_pdf_pts"]==(
+        (510.48,1383.2),(535.92,1383.2))
     left,right=result["all_original_distinct_room_door_candidates"]
     assert left["original_room_word_address"]==(7,26,0,0)
     assert right["original_room_word_address"]==(7,39,0,0)

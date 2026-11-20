@@ -52,7 +52,13 @@ ORIGINAL_SHA256 = (
 
 THREE_LAUREL_PROJECT_ID = "au_qld_3laurel"
 THREE_LAUREL_DOCUMENT_ID = f"live-source:{ORIGINAL_SHA256[:32]}"
-THREE_LAUREL_REVISION_ID = f"3laurel_sha_{ORIGINAL_SHA256[:20]}"
+# Share the same immutable revision ID as the canonical source observation
+# producer. This is source-wide, not a special per-drawing override.
+THREE_LAUREL_REVISION_ID = stable_contract_id(
+    "source_revision",
+    {"document_id": THREE_LAUREL_DOCUMENT_ID, "source_sha256": ORIGINAL_SHA256},
+    digest_chars=32,
+)
 THREE_LAUREL_SOURCE_SHA256 = ORIGINAL_SHA256
 
 THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE = (

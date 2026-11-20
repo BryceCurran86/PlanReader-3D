@@ -1,0 +1,26 @@
+name: VR native preview acceptance
+on:
+  pull_request:
+    paths:
+      - 'vr-native/manifest-bridge/preview_acceptance.py'
+      - 'tests/test_vr_native_preview_acceptance.py'
+      - '.github/workflows/vr-native-preview-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Native preview acceptance negative tests
+        run: python -m unittest discover -s tests -p 'test_vr_native_preview_acceptance.py' -v

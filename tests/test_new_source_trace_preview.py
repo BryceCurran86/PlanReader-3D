@@ -920,3 +920,27 @@ def test_neutral_dark_baseline_rejects_reindexed_or_replaced_source_paths():
         _collect_monotonic_source_stroke_pairs((),(stroke,))
     with pytest.raises(ValueError,match="original_path_replaced"):
         _collect_monotonic_source_stroke_pairs((inert,),(stroke,))
+
+def test_canonical_trace_cannot_implicitly_promote_native_door_closures():
+    """Future API-default changes may not turn 3Laurel native door witnesses into rooms."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "pb_new_source_trace_preview.py").read_text(encoding="utf-8")
+    syntax = ast.parse(text)
+    desired = {"source_native_cs_jamb_closure": False,
+               "source_native_internal_swing_closure": False}
+    matched = [
+        call for call in ast.walk(syntax)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "build_layered_wall_doorway_room_rings"
+    ]
+    assert matched
+    for call in matched:
+        options = {
+            item.arg: item.value.value for item in call.keywords
+            if item.arg in desired and isinstance(item.value, ast.Constant)
+        }
+        assert options == desired
