@@ -33,6 +33,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 import fitz
 
+from pb_page_frame_shadow import revision_id_for
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import (
@@ -52,7 +53,11 @@ ORIGINAL_SHA256 = (
 
 THREE_LAUREL_PROJECT_ID = "au_qld_3laurel"
 THREE_LAUREL_DOCUMENT_ID = f"live-source:{ORIGINAL_SHA256[:32]}"
-THREE_LAUREL_REVISION_ID = f"3laurel_sha_{ORIGINAL_SHA256[:20]}"
+# Share the same immutable revision ID as the canonical source observation
+# producer. This is source-wide, not a special per-drawing override.
+THREE_LAUREL_REVISION_ID = revision_id_for(
+    THREE_LAUREL_DOCUMENT_ID, ORIGINAL_SHA256,
+)
 THREE_LAUREL_SOURCE_SHA256 = ORIGINAL_SHA256
 
 THREE_LAUREL_QUANTITY_AUTHORITY_UNAVAILABLE = (
