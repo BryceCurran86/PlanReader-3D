@@ -13,6 +13,9 @@ from pb_live_floor_finish_area_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_source_customer_inclusion_scope import (
+    require_uncontested_source_inclusion, require_uncontested_source_commercial_scope,
+)
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -138,6 +141,8 @@ def project_live_floor_finish_customer_rows(
                 "duplicate_original_floor_finish_quantity_id"
             )
         original_quantity_ids.add(source_id)
+        require_uncontested_source_inclusion(original)
+        require_uncontested_source_commercial_scope(original)
         # A producer's explicit commercial veto cannot be upgraded by a
         # customer presentation adapter. Absence is not new authority: the
         # source-closed issuer must still supply independent positive proof.
