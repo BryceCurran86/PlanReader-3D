@@ -151,3 +151,16 @@ def test_untrusted_or_foreign_partition_legend_does_not_suppress_plan_callouts()
     assert not _is_source_legend_example(height, material, (
         w("LEGEND", "foreign", block=10, box=(0, 0, 12, 36), partition="foreign"),
     ))
+
+
+def test_legend_source_word_handles_rotated_and_composite_headings_without_page_rules():
+    for head in ("CEILING LEGEND", "LEGEND:", "SYMBOL LEGEND"):
+        heading = w(head, "heading", block=10, box=(0, 0, 36, 12))
+        material = w("IP", "material", block=11, box=(12, 30, 32, 42))
+        height = w("2400", "height", block=11, line=1, box=(12, 44, 32, 56))
+        assert _is_source_legend_example(height, material, (heading, material, height))
+    assert not _is_source_legend_example(
+        w("2400", "height", block=11, line=1, box=(12, 44, 32, 56)),
+        w("IP", "material", block=11, box=(12, 30, 32, 42)),
+        (w("LEGENDARY", "not-a-heading", block=10, box=(0, 0, 36, 12)),),
+    )
