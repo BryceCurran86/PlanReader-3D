@@ -3942,6 +3942,40 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
             canonical_floors=canonical_floors,
             issued_records=issued_records,
         )
+    # Prefer ANY original producer-issued physical cross-sheet correspondence
+    # already registered for the exact current canonical source snapshot.
+    # This is a general live handoff, not a new authority generator. A
+    # rejected registered receipt must not fall back to a weaker project-
+    # specific witness just because its geometry or quantity is convenient.
+    unique_floor_snapshots = {
+        floor.snapshot_id
+        for floor in getattr(canonical_floors, "floors", ())
+        if type(getattr(floor, "snapshot_id", None)) is str
+        and type(getattr(floor, "canonical_floor_id", None)) is str
+    }
+    current_floor_ids = {
+        floor.canonical_floor_id for floor in getattr(canonical_floors, "floors", ())
+    }
+    seen_ids: set[int] = set()
+    registered: list[SourceCrossViewFloorCorrespondenceRecord] = []
+    for (scope, _record_id), rec in tuple(_REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.items()):
+        if (
+            scope not in unique_floor_snapshots
+            or type(rec) is not SourceCrossViewFloorCorrespondenceRecord
+            or rec.snapshot_id != scope
+            or rec.canonical_floor_id not in current_floor_ids
+            or id(rec) in seen_ids
+        ):
+            continue
+        seen_ids.add(id(rec))
+        registered.append(rec)
+    if registered:
+        return resolve_registered_cross_sheet_floor_correspondences(
+            source=source,
+            cross_view_area=cross_view_area,
+            canonical_floors=canonical_floors,
+            issued_records=tuple(registered),
+        )
     if not cross_view_area or not getattr(cross_view_area, "records", None):
         return ()
     if not canonical_floors or not getattr(canonical_floors, "floors", None):

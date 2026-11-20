@@ -298,3 +298,35 @@ def test_full_continuous_wall_cannot_pass_as_doorway_source_side():
         ((invalid.snapshot_id, invalid.record_id),), invalid,
     )
     assert _resolve(source, areas, floors, invalid) == ()
+
+
+def test_live_resolver_autodiscovers_source_registered_correspondence_for_unseen_job():
+    source, area, floors, receipt = _issued_source_correspondence(
+        "completely-new-building-2027",
+    )
+    assert resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=area, canonical_floors=floors,
+    ) == (receipt,)
+
+
+def test_live_resolver_rejects_registered_receipt_after_original_pdf_bytes_change():
+    source, area, floors, receipt = _issued_source_correspondence(
+        "independent-building-2027",
+    )
+    source._store.source_bytes_by_revision[receipt.revision_id] = b"wrong-original-source"
+    assert resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=area, canonical_floors=floors,
+    ) == ()
+
+
+def test_unknown_job_without_independently_registered_correspondence_abstains():
+    floor = _floor("unseen-2028")
+    area = _area(floor)
+    source = SimpleNamespace(
+        _store=SimpleNamespace(source_bytes_by_revision={floor.revision_id: b"unrelated"}),
+    )
+    assert resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source,
+        cross_view_area=SimpleNamespace(records=(area,)),
+        canonical_floors=SimpleNamespace(floors=(floor,)),
+    ) == ()
