@@ -73,8 +73,14 @@ def test_hatched_floor_ordinary_finish_abstains_but_independent_specialty_surviv
         **original.metadata, "specialty_finish_independent_source_authority":True,
         "specialty_finish_source_evidence_id":"original_schedule_specialty_finish",
     })
-    (preserved,) = quarantine_ordinary_hatched_floor_quantities((specialty,), (witness,))
-    assert preserved is specialty
+    (blocked_hint,) = quarantine_ordinary_hatched_floor_quantities((specialty,), (witness,))
+    assert blocked_hint.abstained
+    assert blocked_hint.metadata["commercial_projection_allowed"] is False
+    # Independently issued specialty trade quantities use a distinct family.
+    specialty_issuer = replace(specialty, family="specialty_epoxy_floor_area")
+    assert quarantine_ordinary_hatched_floor_quantities(
+        (specialty_issuer,), (witness,),
+    ) == (specialty_issuer,)
 
 
 def test_source_belongs_to_own_room_and_cannot_quarantine_a_different_room():
@@ -143,9 +149,15 @@ def test_source_owned_green_hatch_excludes_only_matching_ceiling_and_keeps_speci
         "specialty_finish_independent_source_authority": True,
         "specialty_finish_source_evidence_id": "source-schedule-specialty",
     })
-    assert quarantine_ordinary_hatched_ceiling_quantities(
+    (blocked_hint,) = quarantine_ordinary_hatched_ceiling_quantities(
         (specialty,), (ceiling,), (floor,), (witness,)
-    ) == (specialty,)
+    )
+    assert blocked_hint.abstained
+    assert blocked_hint.metadata["commercial_projection_allowed"] is False
+    dedicated = replace(specialty, family="specialty_insulated_ceiling_panel_area")
+    assert quarantine_ordinary_hatched_ceiling_quantities(
+        (dedicated,), (ceiling,), (floor,), (witness,)
+    ) == (dedicated,)
 
 
 def test_source_hatch_cannot_exclude_self_crossing_polygon():
