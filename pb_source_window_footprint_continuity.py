@@ -438,12 +438,24 @@ def detect_exterior_window_footprint_bridges(
         lx = (label_bounds[0] + label_bounds[2]) / 2
         ly = (label_bounds[1] + label_bounds[3]) / 2
         cand_list = []
+        # Source rules require gap <=160pt with <=2pt label margin at
+        # each end. Remote wall pairs cannot pass these necessary bounds.
+        # Preserve every exact native host, mark, label and competitor
+        # verification below; this is not a guessed wall join or new gap.
         for i, layer_i, first in walls:
+            h_first = lx - 162.0 <= first[2] <= lx + 2.0
+            v_first = ly - 162.0 <= first[3] <= ly + 2.0
+            if not (h_first or v_first):
+                continue
             for j, layer_j, second in walls:
                 if i == j or (has_wall_layers and layer_i != layer_j):
                     continue
+                h_possible = h_first and lx - 2.0 <= second[0] <= lx + 162.0
+                v_possible = v_first and ly - 2.0 <= second[1] <= ly + 162.0
+                if not (h_possible or v_possible):
+                    continue
                 # Horizontal opening
-                if first[2] < second[0]:
+                if h_possible and first[2] < second[0]:
                     gap = second[0] - first[2]
                     thick1, thick2 = first[3] - first[1], second[3] - second[1]
                     first_is_vert = thick1 > 1.8 * (first[2] - first[0]) and thick1 >= 10.0
@@ -495,7 +507,7 @@ def detect_exterior_window_footprint_bridges(
                                     marker_ids = tuple(sorted(dict.fromkeys(fl[0] for fl in flines)))[:4]
                                     cand_list.append((i, j, bounds, label_raw, marker_ids, "h"))
                 # Vertical opening
-                if first[3] < second[1]:
+                if v_possible and first[3] < second[1]:
                     gap = second[1] - first[3]
                     thick1, thick2 = first[2] - first[0], second[2] - second[0]
                     first_is_horiz = thick1 > 1.8 * (first[3] - first[1]) and thick1 >= 10.0
