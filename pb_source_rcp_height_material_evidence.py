@@ -132,7 +132,7 @@ def _is_source_legend_example(height: Any, material: Any, words: Sequence[Any]) 
             not heading.trusted
             or heading.page_id != material.page_id
             or heading.source_partition_id != material.source_partition_id
-            or heading.text.strip().upper() != "LEGEND"
+            or re.search(r"(?:^|\W)LEGEND(?:$|\W)", heading.text.strip().upper()) is None
         ):
             continue
         hx0, hy0, hx1, hy1 = heading.bbox
