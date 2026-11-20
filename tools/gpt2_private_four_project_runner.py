@@ -164,16 +164,20 @@ def run_verified_private_handoff(
         or family_group not in ("core", "floor_area")
     ):
         raise PrivateSourceGateError("invalid_partial_plan_scope")
+    # Authenticate the checked-out code BEFORE reading any private source.
+    # An untrusted PR may never gain source access by supplying its own SHA.
+    _verify_exact_checkout(expected_head_sha)
     roster = verify_private_original_roster(source_root)
     source = roster["architectural_inputs"][project_id]
     private_root = source.parent.resolve(strict=True)
-    # Outputs must never overwrite source PDFs, frozen truth or original code.
-    output_absolute = output_dir.absolute()
+    # Resolve ancestor symlinks too; a direct is_symlink() misses an aliased
+    # parent that could redirect new outputs over source PDFs or frozen truth.
+    output_absolute = output_dir.resolve(strict=False)
+    repo_root = _REPO.resolve(strict=True)
     if output_absolute == private_root or private_root in output_absolute.parents:
         raise PrivateSourceGateError("output_inside_private_original_source_root")
-    if output_absolute == _REPO or _REPO in output_absolute.parents:
+    if output_absolute == repo_root or repo_root in output_absolute.parents:
         raise PrivateSourceGateError("output_inside_public_checkout")
-    _verify_exact_checkout(expected_head_sha)
     from tools.run_source_closed_project_handoff import generate_project_handoff
     result = generate_project_handoff(
         pdf_path=source,
