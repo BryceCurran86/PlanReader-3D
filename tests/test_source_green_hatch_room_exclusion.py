@@ -103,3 +103,46 @@ def test_owner_uploaded_original_hatch_proof_if_provisioned():
     )
     (witness,) = collect_native_green_hatch_exclusions(data, (floor,))
     assert len(witness.native_path_ids) >= 10
+
+
+def test_source_owned_green_hatch_excludes_only_matching_ceiling_and_keeps_specialty():
+    from pb_source_green_hatch_room_exclusion import (
+        quarantine_ordinary_hatched_ceiling_quantities,
+    )
+    from tests.test_live_ceiling_lining_source_closed_export import _quantity as ceiling_quantity
+
+    data = _pdf()
+    floor = _floor(data)
+    floor.room_entity_id = "independent-physical-room"
+    floor.document_id = "unknown-document"
+    floor.revision_id = "unknown-revision"
+    (witness,) = collect_native_green_hatch_exclusions(data, (floor,))
+    ceiling = SimpleNamespace(
+        canonical_ceiling_id="canonical-ceiling-unknown",
+        room_entity_id=floor.room_entity_id,
+        source_sha256=witness.source_sha256,
+        document_id=floor.document_id, revision_id=floor.revision_id,
+        geometry_complete=True,
+    )
+    original = replace(
+        ceiling_quantity(), input_entity_ids=(ceiling.canonical_ceiling_id,),
+        metadata={"source_sha256": witness.source_sha256},
+    )
+    (excluded,) = quarantine_ordinary_hatched_ceiling_quantities(
+        (original,), (ceiling,), (floor,), (witness,),
+    )
+    assert excluded.abstained and excluded.value is None
+    assert excluded.metadata["inclusion_status"] == "EXCLUSION"
+    assert witness.witness_id in excluded.evidence_ids
+    foreign = SimpleNamespace(**{**vars(ceiling), "room_entity_id": "other-room"})
+    assert quarantine_ordinary_hatched_ceiling_quantities(
+        (original,), (foreign,), (floor,), (witness,)
+    ) == (original,)
+    specialty = replace(original, metadata={
+        **original.metadata,
+        "specialty_finish_independent_source_authority": True,
+        "specialty_finish_source_evidence_id": "source-schedule-specialty",
+    })
+    assert quarantine_ordinary_hatched_ceiling_quantities(
+        (specialty,), (ceiling,), (floor,), (witness,)
+    ) == (specialty,)
