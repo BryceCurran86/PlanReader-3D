@@ -1429,6 +1429,16 @@ class GenericPlanReaderExtractor:
         self.declared_floor_area_claims = []
         self.coverage_registry_summaries_live = ()
         self.coverage_family_gaps_live = {}
+        # Diagnostic-only canonical metric retention. This does not authorise
+        # a customer quantity or alter the original benchmark.
+        self.canonical_surface_quantity_coverage_live = {
+            family: {
+                "status": "source_not_evaluated",
+                "quantity_ids": [],
+                "customer_rows_verified_here": False,
+            }
+            for family in ("floor_area", "ceiling_area")
+        }
         _coverage_objects: list[Any] = []
         _coverage_quantities: list[Any] = []
         self.hosted_opening_shadow = {
@@ -3994,6 +4004,28 @@ class GenericPlanReaderExtractor:
                 _coverage_quantities.extend(
                     getattr(physical_wall_result, "floor_finish_quantity_evidence", ())
                 )
+                # Preserve source-publisher FIRM area dependencies independently
+                # of room-finish and customer trade authority.
+                try:
+                    from pb_live_canonical_surface_quantity_retention import (
+                        live_floor_area_coverage_quantities,
+                    )
+                    _firm_floors = live_floor_area_coverage_quantities(physical_wall_result)
+                    _coverage_quantities.extend(_firm_floors)
+                    self.canonical_surface_quantity_coverage_live["floor_area"] = {
+                        "status": "source_bound_firm" if _firm_floors else "source_firm_unavailable",
+                        "quantity_ids": [q.quantity_id for q in _firm_floors],
+                        "customer_rows_verified_here": False,
+                    }
+                except Exception as _floor_retention_exc:
+                    self.canonical_surface_quantity_coverage_live["floor_area"] = {
+                        "status": "source_retention_conflict",
+                        "reason_codes": [
+                            f"floor_area_retention_error:{type(_floor_retention_exc).__name__}"
+                        ],
+                        "quantity_ids": [],
+                        "customer_rows_verified_here": False,
+                    }
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
@@ -4478,6 +4510,28 @@ class GenericPlanReaderExtractor:
             _coverage_quantities.extend(
                 getattr(ceiling_result, "quantity_evidence", ())
             )
+            # Provisional source text alone is never a billable metric ceiling.
+            # The original FIRM publisher reissues verified canonical areas.
+            try:
+                from pb_live_canonical_surface_quantity_retention import (
+                    live_ceiling_area_coverage_quantities,
+                )
+                _firm_ceilings = live_ceiling_area_coverage_quantities(ceiling_result)
+                _coverage_quantities.extend(_firm_ceilings)
+                self.canonical_surface_quantity_coverage_live["ceiling_area"] = {
+                    "status": "source_bound_firm" if _firm_ceilings else "source_firm_unavailable",
+                    "quantity_ids": [q.quantity_id for q in _firm_ceilings],
+                    "customer_rows_verified_here": False,
+                }
+            except Exception as _ceiling_retention_exc:
+                self.canonical_surface_quantity_coverage_live["ceiling_area"] = {
+                    "status": "source_retention_conflict",
+                    "reason_codes": [
+                        f"ceiling_area_retention_error:{type(_ceiling_retention_exc).__name__}"
+                    ],
+                    "quantity_ids": [],
+                    "customer_rows_verified_here": False,
+                }
 
             for claim in ceiling_result.claims:
                 claim_ceiling_objects = [
