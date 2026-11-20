@@ -24,7 +24,7 @@ export type ItemHit = {
   anchor?: { kind: "wall"; offsetM: number } | { kind: "ceiling"; xFraction: number; zFraction: number };
 };
 export type PlacedItem = ItemHit & { id: string; itemId: string; turn: number };
-export type ItemDraft = { sourceKey: string; items: PlacedItem[]; history: PlacedItem[][] };
+export type ItemDraft = { sourceKey: string; items: PlacedItem[]; history: PlacedItem[][]; future?: PlacedItem[][] };
 export const emptyItemDraft = (sourceKey: string): ItemDraft => ({ sourceKey, items: [], history: [] });
 
 export const makeItemHostId = (target: string, id: string) => target + ":" + id;
@@ -114,7 +114,7 @@ function surfaceSlot(placement: PlacedItem, item: CatalogueItem) {
 }
 
 function checkpoint(draft: ItemDraft, items: PlacedItem[]) {
-  return { ...draft, items, history: [...draft.history, draft.items].slice(-32) };
+  return { ...draft, items, history: [...draft.history, draft.items].slice(-32), future: [] };
 }
 
 export function placeItem(
@@ -160,7 +160,13 @@ export function removeItem(draft: ItemDraft, id: string) {
 
 export function undoItem(draft: ItemDraft) {
   const items = draft.history.at(-1);
-  return items ? { ...draft, items, history: draft.history.slice(0, -1) } : draft;
+  return items ? { ...draft, items, history: draft.history.slice(0, -1),
+    future: [...(draft.future ?? []), draft.items].slice(-32) } : draft;
+}
+
+export function redoItem(draft: ItemDraft) {
+  const items = draft.future?.at(-1);
+  return items ? { ...checkpoint(draft, items), future: draft.future!.slice(0, -1) } : draft;
 }
 
 export function currentItemPlacements(

@@ -8,19 +8,21 @@ import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
-import { ConstructionView } from "./ConstructionView";
+import { ConstructionView, StandardsPanel } from "./ConstructionView";
+import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
+import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
 import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint } from "./footprintResize";
-import type { FootprintBounds, FootprintProjection } from "./footprintResize";
+import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
 import { isRoughIn, showConstructionItem } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
-import { getCatalogueItem } from "./itemCatalogue";
-import { currentItemPlacements, emptyItemDraft, placeItem, removeItem, undoItem } from "./itemPlacement";
+import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
+import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, redoItem, removeItem, undoItem } from "./itemPlacement";
 import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
-import { EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
+import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
@@ -54,15 +56,19 @@ export function App() {
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
+  const [toolMessage, setToolMessage] = useState("");
+  const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
-  const [catalogueOpen, setCatalogueOpen] = useState(false);
+  const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
+  const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
   const [resize, setResize] = useState<{
-    scene: SceneManifest; enabled: boolean; projection: FootprintProjection | null; hint: string;
-  } | null>(null);
+    scene: SceneManifest; enabled: boolean; hint: string;
+  } & ResizeHistory | null>(null);
   const [catalogueSession, setCatalogueSession] = useState<CatalogueSession | null>(null);
   const [wallReview, setWallReview] = useState<{ scene: SceneManifest; proposalId: string; request: number } | null>(null);
-  const wallReviewPanel = useRef<HTMLDivElement>(null);
+  const wallReviewPanel = useRef<HTMLDetailsElement>(null);
+  const planFile = useRef<HTMLInputElement>(null);
   const [wallMoveState, setWallMoveState] = useState<WallMoveHistory | null>(null);
   const [moveMode, setMoveMode] = useState<MoveMode>("inspect");
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -83,8 +89,12 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
-  const pendingWorkspaceRequest = useRef<AbortController | null>(null);
-  const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
+  const pendingLoad = useRef<AbortController | null>(null);
+  const handleSelect = useCallback((id: string | null) => {
+    setSelectedId(id);
+    setClipboardMessage(null);
+    if (!id) setInspection(current => current.isolateSelected ? { ...current, isolateSelected: false } : current);
+  }, []);
   const inspect = (patch: Partial<InspectionSettings>) =>
     setInspection(current => ({ ...current, ...patch }));
   const requestCamera = (mode: CameraView, focus: FocusTarget = "scene") =>
@@ -106,6 +116,7 @@ export function App() {
   }
   const handleCycleStudy = useCallback((objectId: string) => {
     if (!manifest) return;
+    setLastEdit("source");
     const row = manifest.objects.find(o => o.objectId === objectId) ?? null;
     setDraftState(current => {
       const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
@@ -117,6 +128,7 @@ export function App() {
 
   const handleMoveDelta = useCallback((id: string, dx: number, dz: number) => {
     if (!manifest || moveMode !== "move") return;
+    setLastEdit("wall-move");
     setWallMoveState(current => {
       const state = current?.scopeKey === scopeKey(manifest) ? current : freshWallMoves(manifest);
       const old = safeWallMoves(state, manifest).find(m => m.objectId === id);
@@ -127,97 +139,96 @@ export function App() {
     });
   }, [manifest, moveMode]);
 
-  // A production backend must authenticate this same-origin endpoint and
-  // build the scope from the session, never from user-supplied model JSON.
+  const startLoad = useCallback(() => {
+    pendingLoad.current?.abort();
+    const request = new AbortController();
+    pendingLoad.current = request;
+    setError(null);
+    setBusy(true);
+    return request;
+  }, []);
+
+  const finishLoad = useCallback((request: AbortController, result: SceneManifest | Error,
+    origin: "workspace" | "local" | "demo",
+  ) => {
+    if (pendingLoad.current !== request || request.signal.aborted) return;
+    pendingLoad.current = null;
+    setBusy(false);
+    if (result instanceof Error) {
+      setError(result.message);
+      return;
+    }
+    setManifest(result);
+    setAuthenticatedSource(origin === "workspace");
+    setDemoScene(origin === "demo" ? result : null);
+    setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
+    setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
+    setTeleportMode(false); setTeleportMessage(null);
+    setPlaced(null); setCatalogueSession(null); setResize(null);
+    setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
+    setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
+    setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all");
+    setStage("finished"); setPanel("plan"); setLastEdit("source");
+    setBuildHint(""); setToolMessage("");
+    setCameraRequest(current => ({ mode: "isometric", focus: "scene", serial: current.serial + 1 }));
+  }, []);
+
   useEffect(() => {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
-    if (!workspace) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    pendingWorkspaceRequest.current = controller;
-    setBusy(true);
-    fetch(`/api/editor/workspaces/${encodeURIComponent(workspace)}/manifest`, {
-      credentials: "include", headers: { Accept: "application/json" },
-      cache: "no-store", signal: controller.signal,
-    }).then(async response => {
-      if (!response.ok) throw new Error(`Workspace API returned ${response.status}`);
-      const data: unknown = await response.json();
-      if (!isSceneManifest(data)) throw new Error("Invalid or untrusted scene manifest");
-      if (data.scope.workspaceId !== workspace) throw new Error("Workspace identity mismatch");
-      if (!cancelled && !controller.signal.aborted) {
-        setManifest(data); setAuthenticatedSource(true); setError(null);
-        setDraftState(freshDrafts(data)); setReviewNotes(freshReviewNotes(data));
-        setWallMoveState(freshWallMoves(data)); setMoveMode("inspect"); setMoveError(null);
-        setTeleportMode(false); setTeleportMessage(null);
-        setSelectedId(null);
-        setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet("");
+    if (!workspace) return () => pendingLoad.current?.abort();
+    const request = startLoad();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/editor/workspaces/${encodeURIComponent(workspace)}/manifest`, {
+          credentials: "include", headers: { Accept: "application/json" },
+          cache: "no-store", signal: request.signal,
+        });
+        if (!response.ok) {
+          throw new Error(response.status === 401 || response.status === 403
+            ? "Sign in to PlanReader to open this workspace, or open a local scene."
+            : `Could not open the workspace (HTTP ${response.status}).`);
+        }
+        const data: unknown = await response.json();
+        if (!isSceneManifest(data) || data.scope.workspaceId !== workspace)
+          throw new Error("The workspace returned an invalid scene or different workspace ID.");
+        finishLoad(request, data, "workspace");
+      } catch (error) {
+        finishLoad(request, error instanceof Error ? error : new Error("Workspace failed to load."), "workspace");
       }
-    }).catch(e => {
-      if (!cancelled && !controller.signal.aborted)
-        setError(e instanceof Error ? e.message : "Workspace failed to load");
-    }).finally(() => {
-      if (!cancelled && !controller.signal.aborted) setBusy(false);
-    });
-    return () => { cancelled = true; controller.abort(); };
-  }, []);
+    })();
+    return () => { pendingLoad.current?.abort(); };
+  }, [startLoad, finishLoad]);
 
   async function importManifest(file: File | undefined) {
     if (!file) return;
-    // An in-flight authenticated fetch must not overwrite a user's explicitly
-    // selected local review file after its response eventually arrives.
-    pendingWorkspaceRequest.current?.abort();
-    setBusy(false);
-    setError(null);
-    if (file.size > 25 * 1024 * 1024) {
-      setError("The scene manifest exceeds the 25 MB local preview limit");
-      return;
-    }
+    const request = startLoad();
     try {
+      if (file.size > 25 * 1024 * 1024) throw new Error("Choose a scene JSON file under 25 MB.");
       const data: unknown = JSON.parse(await file.text());
-      if (!isSceneManifest(data)) throw new Error("Manifest failed source/scope validation");
-      // Local files are user-supplied previews, NOT server-attested evidence.
-      // Never render their claimed "verified" status as trusted green/FIRM.
-      const localPreview: SceneManifest = downgradeLocalManifest(data);
-      setManifest(localPreview);
-      setDraftState(freshDrafts(localPreview));
-      setWallMoveState(freshWallMoves(localPreview)); setMoveMode("inspect"); setMoveError(null);
-      setTeleportMode(false); setTeleportMessage(null);
-      setReviewNotes(freshReviewNotes(localPreview));
-      setAuthenticatedSource(false);
-      setSelectedId(null);
-      setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid JSON scene manifest");
+      if (!isSceneManifest(data)) throw new Error("Choose a valid PlanReader scene JSON file.");
+      finishLoad(request, downgradeLocalManifest(data), "local");
+    } catch (error) {
+      const message = error instanceof SyntaxError ? "This file is not valid JSON." :
+        error instanceof Error ? error.message : "Could not open this scene file.";
+      finishLoad(request, new Error(message), "local");
     }
   }
 
   async function openSyntheticDemo() {
-    pendingWorkspaceRequest.current?.abort();
-    setBusy(false);
-    setError(null);
+    const request = startLoad();
     try {
-      const response = await fetch("/synthetic-review-scene.json", { cache: "no-store" });
-      if (!response.ok) throw new Error("Synthetic demo fixture unavailable");
-      const result: unknown = await response.json();
-      if (!isSceneManifest(result)) throw new Error("Synthetic manifest invalid");
-      const syntheticPreview: SceneManifest = {
-        ...result,
-        objects: result.objects.map(o => ({
-          ...o, renderState: "review" as const,
-          unresolvedIssues: [...new Set([...o.unresolvedIssues, "synthetic_fixture_only"])],
-        })),
-      };
-      setManifest(syntheticPreview);
-      setDemoScene(syntheticPreview);
-      setDraftState(freshDrafts(syntheticPreview));
-      setWallMoveState(freshWallMoves(syntheticPreview)); setMoveMode("inspect"); setMoveError(null);
-      setTeleportMode(false); setTeleportMessage(null);
-      setReviewNotes(freshReviewNotes(syntheticPreview));
-      setAuthenticatedSource(false);
-      setSelectedId(null);
-      setLevel("all"); setSourceSheet(""); setInspection({ ...DEFAULT_INSPECTION });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Synthetic demo unavailable");
+      const response = await fetch(new URL("synthetic-review-scene.json", window.location.href), {
+        cache: "no-store", signal: request.signal,
+      });
+      if (!response.ok) throw new Error("The example scene could not be opened.");
+      const data: unknown = await response.json();
+      if (!isSceneManifest(data)) throw new Error("The example scene could not be read.");
+      finishLoad(request, { ...data, objects: data.objects.map(object => ({
+        ...object, renderState: "review",
+        unresolvedIssues: [...new Set([...object.unresolvedIssues, "synthetic_fixture_only"])],
+      })) }, "demo");
+    } catch (error) {
+      finishLoad(request, error instanceof Error ? error : new Error("The example scene is unavailable."), "demo");
     }
   }
 
@@ -236,6 +247,10 @@ export function App() {
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
+  const mode = activeControl({ resize: resizeEnabled, place: !!activeItem, draw: !!buildState.tool,
+    wallMove: moveMode === "move", teleport: teleportMode && sourceCommandsEnabled });
+  const undoTarget = historyTarget(mode, lastEdit, !!projection);
+  const canMoveSource = !projection && !resizeEnabled;
 
   function changeCatalogue(update: (previous: CatalogueSession) => CatalogueSession) {
     if (!manifest) return;
@@ -243,116 +258,167 @@ export function App() {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
   }
+  function applyBuild(action: BuildAction) {
+    if (!manifest) return;
+    setPlaced(previous => {
+      const current = previous?.scene === manifest ? previous.build : EMPTY_BUILD;
+      const build = updateBuild(current, action, scopeKey(manifest), buildLevel, buildSizes);
+      return build === current ? previous : { scene: manifest, build };
+    });
+  }
+
+  function enterMode(next: ControlMode) {
+    if (next !== "draw" && buildState.tool) applyBuild({ kind: "done" });
+    if (next !== "place" && activeItem)
+      changeCatalogue(current => ({ ...current, itemId: null }));
+    if (next !== "resize" && resizeEnabled)
+      setResize(current => current?.scene === manifest ? { ...current, enabled: false, drag: null } : current);
+    if (next !== "wall-move" && moveMode === "move") setMoveMode("inspect");
+    if (next !== "teleport" && teleportMode) setTeleportMode(false);
+    setBuildHint(""); setToolMessage(""); setMoveError(null); setTeleportMessage(null);
+  }
+
+  function cancelTool() {
+    if (mode === "inspect") handleSelect(null);
+    else enterMode("inspect");
+  }
+
+  function openPanel(next: typeof panel) {
+    if (next !== "items" && mode === "place") enterMode("inspect");
+    setPanel(next);
+  }
+
   function onItemAction(action: ItemAction) {
     if (action.kind === "choose") {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
+      enterMode("place");
       if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
-      if (resizeEnabled) setResize(previous => previous ? { ...previous, enabled: false } : null);
-      onBuildAction({ kind: "done" });
-      setCatalogueOpen(true);
-      changeCatalogue(current => ({ ...current, itemId: action.itemId, turn: 0 }));
-    } else if (action.kind === "undo") {
-      changeCatalogue(current => ({ ...current, draft: undoItem(current.draft) }));
+      setPanel("items");
+      setLastEdit("place");
+      changeCatalogue(current => ({ ...current, itemId: item.id, turn: 0 }));
+    } else if (action.kind === "undo" || action.kind === "redo") {
+      setLastEdit("place");
+      changeCatalogue(current => ({ ...current, draft: action.kind === "undo" ? undoItem(current.draft) : redoItem(current.draft) }));
     } else if (action.kind === "rotate") {
-      changeCatalogue(current => ({ ...current, turn: (current.turn + 1) % 4 }));
-    } else {
-      setBuildHint("");
-      changeCatalogue(current => ({ ...current, itemId: null }));
-    }
+      if (activeItem && itemCanRotate(activeItem))
+        changeCatalogue(current => ({ ...current, turn: (current.turn + 1) % 4 }));
+    } else if (mode === "place") enterMode("inspect");
   }
+
   function placeSelectedItem(itemId: string, hit: ItemHit) {
-    if (resizeEnabled) return;
+    if (mode !== "place" || activeItem?.id !== itemId) return;
     if (projection) {
       const wall = hit.anchor?.kind === "wall" ? [...buildState.walls, ...activeBatchSketches,
         ...(activeAddedWallSketch ? [activeAddedWallSketch] : [])].find(row => "draft-wall:" + row.proposalId === hit.hostId) : undefined;
       hit = originalPlacement(hit, projection, wall);
     }
     const id = newPlacementId("item");
+    const draft = catalogue && placeItem(catalogue.draft, scopeKey(catalogue.scene), id, itemId, hit, catalogue.turn);
+    if (catalogue && draft === catalogue.draft) {
+      setToolMessage(catalogue.draft.items.length >= 300 ? "This draft already has 300 placements." : "Choose a new location or a different item.");
+      return;
+    }
+    setToolMessage("");
+    setLastEdit("place");
     changeCatalogue(current => current.itemId === itemId ? { ...current,
       draft: placeItem(current.draft, scopeKey(current.scene), id, itemId, hit, current.turn),
     } : current);
   }
+
   function onBuildAction(action: BuildAction) {
-    if (!manifest || ((projection || resizeEnabled) && action.kind !== "done")) return;
+    if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
     if (action.kind === "tool") {
-      if (activeItem) onItemAction({ kind: "done" });
+      if (!buildLevel) return;
+      if (buildState.tool === action.tool) {
+        enterMode("inspect");
+        return;
+      }
+      enterMode("draw");
       if (action.tool === "ceiling" && stage !== "finished") setStage("finished");
       else if (stage === "slab") setStage("framing");
+    } else {
+      setBuildHint(""); setToolMessage("");
     }
-    setBuildHint("");
-    const source = scopeKey(manifest);
-    setPlaced(previous => ({
-      scene: manifest,
-      build: updateBuild(previous?.scene === manifest ? previous.build : EMPTY_BUILD,
-        action, source, buildLevel, buildSizes),
-    }));
+    if (action.kind !== "done") setLastEdit("draw");
+    applyBuild(action);
   }
+
   function toggleFootprint() {
     if (!manifest || !baseFootprint) return;
     if (resizeEnabled) {
-      setResize(previous => previous ? { ...previous, enabled: false } : null);
+      enterMode("inspect");
       return;
     }
-    onBuildAction({ kind: "done" });
-    if (activeItem) onItemAction({ kind: "done" });
-    setTeleportMode(false);
+    enterMode("resize");
     requestCamera("plan");
-    setResize({ scene: manifest, projection, enabled: true, hint: "" });
+    setLastEdit("resize");
+    setResize(current => ({ ...(current?.scene === manifest ? current : EMPTY_RESIZE_HISTORY),
+      scene: manifest, enabled: true, hint: "", drag: null }));
   }
-  function resizeFootprint(bounds: FootprintBounds | null) {
+
+  function resizeFootprint(bounds: FootprintBounds | null, drag?: symbol) {
     if (!manifest || !baseFootprint || !resizeEnabled) return;
     if (bounds && activeFootprint && sameFootprint(bounds, activeFootprint)) return;
     const walls = [...buildState.walls, ...activeBatchSketches, ...(activeAddedWallSketch ? [activeAddedWallSketch] : [])];
     const next = bounds ? previewFootprint(manifest, baseFootprint, bounds, walls, buildState.ceilings) :
       { projection: null, error: "Keep the corners separated and enter a positive width and depth." };
     const hint = next.error ?? "";
-    setResize(previous => previous?.scene !== manifest ? previous : {
-      ...previous, hint, projection: hint ? previous.projection : next.projection,
+    setResize(previous => {
+      if (previous?.scene !== manifest || !previous.enabled) return previous;
+      const current = hint ? previous : recordResize(previous, next.projection, drag);
+      return current.hint === hint ? current : { ...current, hint };
     });
   }
+
   function resetFootprint() {
-    setResize(previous => previous?.scene === manifest ? { ...previous, projection: null, hint: "" } : previous);
+    setLastEdit("resize");
+    setResize(previous => previous?.scene === manifest ? { ...recordResize(previous, null), hint: "" } : previous);
   }
+
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
-    if (activeItem && !showConstructionItem(next, activeItem)) onItemAction({kind: "done"});
-    if (next === "slab") onBuildAction({kind: "done"});
+    if ((activeItem && !showConstructionItem(next, activeItem)) || next === "slab" ||
+        buildState.tool === "ceiling" && next !== "finished") enterMode("inspect");
     setStage(next);
   }
+
   function changeLevel(id: string) {
-    onBuildAction({ kind: "done" });
+    if (id === level) return;
+    enterMode("inspect");
     setLevel(id || "all");
-    setSelectedId(null);
+    handleSelect(null);
+    requestCamera(cameraRequest.mode);
   }
+
   function reviewWall(proposalId: string) {
     if (!manifest) return;
-    onBuildAction({ kind: "done" });
+    enterMode("inspect");
+    setPanel("review");
     setWallReview(previous => ({ scene: manifest, proposalId, request: (previous?.request ?? 0) + 1 }));
-    requestAnimationFrame(() => wallReviewPanel.current?.scrollIntoView({ block: "nearest" }));
+    requestAnimationFrame(() => {
+      if (!wallReviewPanel.current) return;
+      wallReviewPanel.current.open = true;
+      wallReviewPanel.current.scrollIntoView({ block: "nearest" });
+    });
   }
   const reviewDraft = wallReview && wallReview.scene === manifest
     ? buildState.walls.find(wall => wall.proposalId === wallReview.proposalId) ?? null : null;
-  // Preserve Three.js / WebXR renderer identity across selection and cosmetic
-  // toggles. Only actual object-filter changes reconstruct the scene.
-  const isolateId = inspection.isolateSelected ? selectedId : null;
-  const visible = useMemo<SceneManifest | null>(() => manifest ? {
-    ...manifest,
-    objects: filterEvidence(manifest, level, isolateId, {
-      ...DEFAULT_INSPECTION,
-      reviewFilter: inspection.reviewFilter,
-      search: inspection.search,
-      isolateSelected: inspection.isolateSelected,
-    }).filter(row => !sourceSheet || row.source.sheet === sourceSheet),
-  } : null, [manifest, level, isolateId, inspection.isolateSelected,
-    inspection.reviewFilter, inspection.search, sourceSheet]);
-  const allForLevel = useMemo(() => manifest ? filterEvidence(manifest, level, null,
-    {...inspection, isolateSelected:false})
-    .filter(o=>!sourceSheet || o.source.sheet===sourceSheet) : [],
-    [manifest, level, sourceSheet, inspection]);
+  const allForLevel = useMemo(() => manifest ? filterEvidence(manifest, level, null, {
+    ...DEFAULT_INSPECTION, reviewFilter: inspection.reviewFilter, search: inspection.search,
+  }).filter(object => !sourceSheet || object.source.sheet === sourceSheet) : [],
+  [manifest, level, inspection.reviewFilter, inspection.search, sourceSheet]);
+  const selected = allForLevel.find(object => object.objectId === selectedId) ?? null;
+  const isolateId = inspection.isolateSelected ? selected?.objectId : null;
+  const visible = useMemo(() => manifest ? {
+    ...manifest, objects: isolateId ? allForLevel.filter(object => object.objectId === isolateId) : allForLevel,
+  } : null, [manifest, allForLevel, isolateId]);
+  const visibleIds = useMemo(() => new Set(visible?.objects.map(object => object.objectId)), [visible]);
   const summaries = summarizeEvidence(visible?.objects ?? []);
   const sheets = sourceSheets(manifest?.objects ?? []);
-  const selected = visible?.objects.find(o => o.objectId === selectedId) ?? null;
+  useEffect(() => {
+    if (selectedId && !selected) handleSelect(null);
+  }, [selectedId, selected, handleSelect]);
   const activeNotes = manifest && reviewNotes?.scopeKey === scopeKey(manifest)
     ? reviewNotes : manifest ? freshReviewNotes(manifest) : null;
   const activeDraftState = manifest && draftState?.scopeKey === scopeKey(manifest)
@@ -374,422 +440,391 @@ export function App() {
     return currentItemPlacements(catalogue.draft.items, manifest, drafts, isDemo, buildState.ceilings);
   }, [manifest, catalogue?.draft.items, activeBatchSketches, buildState.walls, buildState.ceilings, activeAddedWallSketch, isDemo]);
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
-  // Keyboard undo/redo works only outside editable fields and cannot change the source.
-  useEffect(() => {
-    function keyDown(event: KeyboardEvent) {
-      const target = event.target;
-      if (target instanceof HTMLElement && (target.isContentEditable ||
-          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
-      if (!manifest) return;
-      if (moveMode === "move" && selectedId && !event.ctrlKey && !event.metaKey) {
-        const step = event.shiftKey ? 0.5 : 0.05;
-        const offset = event.key === "ArrowUp" ? [0,-step] :
-          event.key === "ArrowDown" ? [0,step] :
-          event.key === "ArrowLeft" ? [-step,0] :
-          event.key === "ArrowRight" ? [step,0] : null;
-        if (offset) {
-          event.preventDefault();
-          handleMoveDelta(selectedId, offset[0], offset[1]);
-          return;
-        }
-      }
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+  const movements = undoTarget === "wall-move" ? activeWallMoves :
+    undoTarget === "source" ? activeDraftState : null;
+  const canUndo = undoTarget === "draw" ? !projection && (!!buildState.history.length || !!activeStart(buildState, buildLevel)) :
+    undoTarget === "place" ? !!catalogue?.draft.history.length :
+    undoTarget === "resize" ? !!scopedResize?.past.length : !!movements?.past.length;
+  const canRedo = undoTarget === "draw" ? !projection && !!buildState.future?.length :
+    undoTarget === "place" ? !!catalogue?.draft.future?.length :
+    undoTarget === "resize" ? !!scopedResize?.future.length : !!movements?.future.length;
+
+  function stepHistory(action: HistoryAction) {
+    if (!manifest || (action === "undo" ? !canUndo : !canRedo)) return;
+    setToolMessage("");
+    if (undoTarget === "draw") return onBuildAction({ kind: action });
+    if (undoTarget === "place") return onItemAction({ kind: action });
+    if (undoTarget === "resize") {
+      setResize(current => current?.scene === manifest ? { ...stepResize(current, action), hint: "" } : current);
+    } else if (undoTarget === "wall-move") {
+      setWallMoveState(current => current?.scopeKey === scopeKey(manifest) ?
+        (action === "undo" ? undoWallMove(current) : redoWallMove(current)) : current);
+      setMoveError(null);
+    } else {
+      setDraftState(current => current?.scopeKey === scopeKey(manifest) ?
+        (action === "undo" ? undoDraft(current) : redoDraft(current)) : current);
+    }
+  }
+
+  const controlKeys = useRef<((event: KeyboardEvent) => void) | null>(null);
+  controlKeys.current = event => {
+    const target = event.target;
+    if (!manifest || event.defaultPrevented ||
+        (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)))) return;
+    if (event.key === "Escape") {
       event.preventDefault();
-      if (moveMode === "move") {
-        setWallMoveState(current => {
-          const state = current?.scopeKey === scopeKey(manifest) ? current : freshWallMoves(manifest);
-          return event.shiftKey ? redoWallMove(state) : undoWallMove(state);
-        });
-        setMoveError(null);
-      } else {
-        setDraftState(current => {
-          const state = current?.scopeKey === scopeKey(manifest) ? current : freshDrafts(manifest);
-          return event.shiftKey ? redoDraft(state) : undoDraft(state);
-        });
+      cancelTool();
+      return;
+    }
+    if (mode === "wall-move" && selected?.objectType === "wall" && selected.geometry &&
+        !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const step = event.shiftKey ? 0.5 : 0.05;
+      const offset = event.key === "ArrowUp" ? [0, -step] : event.key === "ArrowDown" ? [0, step] :
+        event.key === "ArrowLeft" ? [-step, 0] : event.key === "ArrowRight" ? [step, 0] : null;
+      if (offset) {
+        event.preventDefault();
+        handleMoveDelta(selected.objectId, offset[0], offset[1]);
+        return;
       }
     }
+    const action = historyShortcut(event);
+    if (action) {
+      event.preventDefault();
+      stepHistory(action);
+    }
+  };
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => controlKeys.current?.(event);
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);
-  }, [manifest, moveMode, selectedId, handleMoveDelta]);
+  }, []);
 
-  return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <span className="eyebrow">PLANREADER / BUILDING EVIDENCE</span>
-          <h1>3D + VR Review</h1>
-          <p>One building model. Source-owned identities. No unapproved quantities.</p>
-        </div>
-        <div className="header-state">
-          <span className="state-dot" />
-          <span>READ-ONLY EVIDENCE SCENE</span>
-        </div>
-      </header>
+  const canTeleport = sourceCommandsEnabled && !!manifest?.sourceSurfaces?.some(
+    surface => surface.kind === "floor" && visibleIds.has(surface.objectId),
+  );
+  function toggleTeleport(enabled: boolean) {
+    enterMode(enabled ? "teleport" : "inspect");
+    setTeleportMode(enabled && canTeleport);
+  }
+  function reportHeadset(session: PcVrSessionReport) {
+    if (pcVrSession.presenting && !session.presenting && teleportMode) toggleTeleport(false);
+    setPcVrSession(session);
+  }
 
-      <main className="workspace-layout">
-        <section className="viewer-panel" aria-label="Building scene">
-          {visible && <ConstructionView stage={stage} onStage={onStage} />}
-          {visible && activeFootprint && <>
-            <button type="button" className="footprint-action" aria-expanded={resizeEnabled}
-              onClick={toggleFootprint}>{projection ? "Edit draft footprint" : "Resize footprint"}</button>
-            {resizeEnabled && <FootprintTools box={activeFootprint} changed={!!projection}
-              hint={scopedResize?.hint ?? ""} onApply={resizeFootprint} onReset={resetFootprint} onDone={toggleFootprint} />}
-            {projection && <p className="footprint-action" role="status">
-              Draft footprint · {footprintWidth(activeFootprint).toFixed(2)} × {footprintDepth(activeFootprint).toFixed(2)} m.
-              Reset to resume source-plan editing, costing and floor teleport.
-            </p>}
-          </>}
-          {visible && <BuildTools state={buildState} sizes={buildSizes} levels={levels}
-            levelId={buildLevel} layoutEnabled={!projection && !resizeEnabled} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
-            onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall}
-            catalogueOpen={catalogueOpen} onCatalogueToggle={() => {
-              if (catalogueOpen && activeItem) onItemAction({ kind: "done" });
-              setCatalogueOpen(open => !open);
-            }} />}
-          {visible ? (
-            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D renderer…</div>}>
-              <SceneView manifest={visible} selectedId={selectedId} onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy} mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection} cameraRequest={cameraRequest}
-                captureSerial={captureSerial} onCapture={setCaptureStatus}
-                moveMode={moveMode} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
-                addedWallSketch={activeAddedWallSketch}
-                addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes}
-                stage={stage} onStage={onStage}
+  useEffect(() => {
+    if (!canTeleport && teleportMode) setTeleportMode(false);
+  }, [canTeleport, teleportMode]);
+
+  const unresolved = allForLevel.some(object => object.unresolvedIssues.length > 0);
+  const canMoveSelected = !!selected?.geometry && selected.objectType === "wall";
+  const historyLabel = { draw: "draft geometry", place: "item placement", resize: "footprint resize",
+    "wall-move": "wall position", source: "source study" }[undoTarget];
+  const hint = toolMessage || (mode === "resize" ? "Drag a corner or enter a size." :
+    mode === "place" && activeItem ? buildHint || itemGuide(activeItem) :
+    mode === "draw" ? buildHint || buildGuide(buildState, buildLevel) :
+    mode === "wall-move" ? "Select a source wall. Use the arrow keys or hold the headset grip to move it." :
+    mode === "teleport" ? "In VR, point the trigger at a verified floor." :
+    !buildLevel && levels.length > 1 ? "Choose a level to draw. Drag to orbit." :
+    "Drag to orbit. Choose a tool to draw or place items.");
+  const planKind = isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
+  const cameraOptions: readonly [CameraView, string][] = [
+    ["isometric", "3D"], ["plan", "Plan"], ["north", "Front"], ["east", "Side"],
+  ];
+  const panels = manifest ? [["plan", "Plan"], ["items", "Items"], ["review", "Review"], ["settings", "Settings"]] as const :
+    [["plan", "Plan"], ["settings", "Settings"]] as const;
+
+  return <div className="app-shell">
+    <header className="app-header">
+      <h1>PlanReader 3D &amp; VR</h1>
+      <div className="project-actions">
+        {manifest && <span className="header-state">{planKind}</span>}
+        <button type="button" onClick={() => planFile.current?.click()}>Open scene</button>
+        <input ref={planFile} type="file" accept="application/json,.json" hidden
+          onChange={event => { void importManifest(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
+      </div>
+    </header>
+    {busy && <p className="load-message" role="status">Opening scene…</p>}
+    {error && <p className="load-message error" role="alert">{error}</p>}
+
+    <main className="workspace-layout">
+      <section className="viewer-panel" aria-label="Building scene">
+        {manifest ? <>
+          <div className="view-toolbar" aria-label="Scene views">
+            <ConstructionView stage={stage} onStage={onStage} />
+            {levels.length > 1 && <label>Level
+              <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
+                <option value="all">All levels</option>
+                {levels.map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+            </label>}
+            <div className="tool-group" role="group" aria-label="Camera view">
+              {cameraOptions.map(([orientation, label]) => <button key={orientation} type="button"
+                aria-pressed={cameraRequest.mode === orientation && cameraRequest.focus === "scene"}
+                onClick={() => requestCamera(orientation)}>{label}</button>)}
+              <button type="button" disabled={!selected} onClick={() => requestCamera(cameraRequest.mode, "selected")}>
+                Focus selection
+              </button>
+            </div>
+            {activeFootprint && <button type="button" aria-expanded={resizeEnabled} onClick={toggleFootprint}>
+              {projection ? "Edit footprint draft" : "Resize footprint"}
+            </button>}
+          </div>
+
+          {activeFootprint && resizeEnabled && <FootprintTools box={activeFootprint} changed={!!projection}
+            hint={scopedResize?.hint ?? ""} onApply={resizeFootprint} onReset={resetFootprint} onDone={toggleFootprint} />}
+          {projection && activeFootprint && <p className="draft-notice" role="status">
+            Footprint draft · {footprintWidth(activeFootprint).toFixed(2)} × {footprintDepth(activeFootprint).toFixed(2)} m
+            {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
+          </p>}
+
+          <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
+            layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
+            onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
+            undoLabel={historyLabel} canUndo={canUndo} canRedo={canRedo}
+            onUndo={() => stepHistory("undo")} onRedo={() => stepHistory("redo")} onDone={cancelTool}
+            onCatalogueToggle={() => openPanel(catalogueOpen ? "review" : "items")} />
+          {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
+
+          <div className="viewport">
+            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+              <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
+                selectedId={selected?.objectId ?? null}
+                onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
+                mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
+                mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
+                moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
+                addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
-                onBuildAction={onBuildAction} onBuildHint={setBuildHint}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onToolMessage={setToolMessage}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
-                teleportMode={teleportMode && !projection && !resizeEnabled} onTeleportMessage={setTeleportMessage}
-                onPcVrSessionReport={setPcVrSession} />
+                teleportMode={mode === "teleport" && canTeleport} onTeleportMessage={setTeleportMessage}
+                onPcVrSessionReport={reportHeadset} />
             </Suspense>
-          ) : (
-            <div className="viewer-empty">
-              <div className="outline-icon">⌁</div>
-              <h2>No source-bound workspace loaded</h2>
-              <p>Open an authenticated workspace or import a local scene manifest generated by the PlanReader Python backend.</p>
-              <p>Local files stay in your browser and are not submitted to any server.</p>
-              <button className="demo-button" type="button" onClick={() => void openSyntheticDemo()}>
-                Open synthetic 3D / VR example
-              </button>
-              <p>This demonstration contains no real construction source or measured quantities.</p>
-            </div>
-          )}
-          {visible && (
-            <div className="review-image-toolbar">
-              <button type="button" disabled={!!projection} onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}> 
-                Export watermarked review PNG
-              </button>
-              {captureStatus && <span role="status">{captureStatus}</span>}
-            </div>
-          )}
-          <div className="viewer-footer">
-            <span>Drag in a build tool to draw or edit. With tools off, drag to orbit.</span>
-            <span>In VR, use View or hold the trigger to drag a draft.</span>
           </div>
+          <div className="viewer-footer">
+            <span>Alt + drag to orbit with a tool active · Esc to finish · Ctrl/⌘ + Z to undo</span>
+            <span>VR · trigger to select or place, hold to drag</span>
+          </div>
+        </> : <div className="viewer-empty">
+          <h2>Open a scene to start</h2>
+          <p>Choose a PlanReader scene JSON file or try the example plan.</p>
+          <div className="empty-actions">
+            <button type="button" onClick={() => planFile.current?.click()}>Open scene JSON</button>
+            <button type="button" className="demo-button" onClick={() => void openSyntheticDemo()}>Open example</button>
+          </div>
+        </div>}
+      </section>
+
+      <aside className="inspector" aria-label="Plan tools">
+        <div className="inspector-nav" role="group" aria-label="Plan tools sections">
+          {panels.map(([id, title]) => <button key={id} type="button" aria-pressed={panel === id}
+            aria-controls={"panel-" + id} onClick={() => openPanel(id)}>{title}</button>)}
+        </div>
+
+        <section id="panel-plan" hidden={panel !== "plan"} aria-label="Plan and revisions">
+          <div className="section-block">
+            <h2>{manifest ? planKind : "Scene files"}</h2>
+            {manifest ? <div className="scope-info">
+              <div><span>Project</span><strong>{manifest.scope.projectId}</strong></div>
+              <div><span>Revision</span><strong>{manifest.scope.revisionId}</strong></div>
+              <div><span>Snapshot</span><strong>{manifest.scope.snapshotId}</strong></div>
+              <div><span>Objects</span><strong>{manifest.objects.length}</strong></div>
+              <div><span>Needs review</span><strong>{reviewCount}</strong></div>
+              {authenticatedSource && <div><span>Source SHA</span><code title={manifest.scope.sourceSha256}>{manifest.scope.sourceSha256.slice(0, 14)}…</code></div>}
+            </div> : <p className="muted">Open a workspace from PlanReader or inspect a scene saved as JSON.</p>}
+            {manifest && !isDemo && <button type="button" onClick={() => void openSyntheticDemo()}>Open example</button>}
+          </div>
+          {manifest && <div className="section-block">
+            <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}
+              workspace={manifest} authenticated={sourceCommandsEnabled} />
+          </div>}
         </section>
 
-        <aside className="inspector" aria-label="Evidence inspector">
-          {manifest && catalogueOpen && <div className="section-block catalogue-section">
-            <CataloguePricingPanel scene={manifest} items={placedItems} authenticated={sourceCommandsEnabled} />
-            <ItemCataloguePanel active={activeItem} items={placedItems}
+        {manifest && <section id="panel-items" hidden={!catalogueOpen} aria-label="Items">
+          <div className="section-block catalogue-section">
+            <ItemCataloguePanel key={manifest.scope.snapshotId} active={activeItem} items={placedItems}
               canUndo={!!catalogue?.draft.history.length} turn={catalogue?.turn ?? 0}
               onChoose={itemId => onItemAction({ kind: "choose", itemId })}
               onCancel={() => onItemAction({ kind: "done" })}
               onRotate={() => onItemAction({ kind: "rotate" })}
               onUndo={() => onItemAction({ kind: "undo" })}
-              onRemove={id => changeCatalogue(current => ({ ...current, draft: removeItem(current.draft, id) }))} />
-          </div>}
-          <div className="section-block" aria-label="PS VR2 on PC setup">
-            <PcVr2SetupPanel session={pcVrSession} />
+              onRemove={id => { setLastEdit("place"); changeCatalogue(current => ({ ...current, draft: removeItem(current.draft, id) })); }} />
           </div>
           <div className="section-block">
-            <span className="eyebrow">WORKSPACE</span>
-            <label className="file-upload">
-              <span>Import scene manifest (local preview)</span>
-              <input type="file" accept="application/json,.json"
-                onChange={e => { void importManifest(e.currentTarget.files?.[0]); e.currentTarget.value = ""; }} />
-            </label>
-            {busy && <p className="muted">Loading authenticated workspace…</p>}
-            {error && <p role="alert" className="error">{error}</p>}
-            {manifest && (
-              <div className="scope-info">
-                <div><span>Project</span><strong>{manifest.scope.projectId}</strong></div>
-                <div><span>Revision</span><strong>{manifest.scope.revisionId}</strong></div>
-                <div><span>Snapshot</span><strong>{manifest.scope.snapshotId}</strong></div>
-                <div><span>Objects</span><strong>{manifest.objects.length}</strong></div>
-                <div><span>Needs review</span><strong>{reviewCount}</strong></div>
-                <div><span>Source SHA</span><code title={manifest.scope.sourceSha256}>{manifest.scope.sourceSha256.slice(0, 14)}…</code></div>
-              </div>
-            )}
+            <CataloguePricingPanel scene={manifest} items={placedItems} authenticated={sourceCommandsEnabled} />
           </div>
+        </section>}
 
-          {manifest && (
-            <div className="section-block">
-              <label htmlFor="level-filter" className="eyebrow">LEVEL FILTER</label>
-              <select id="level-filter" value={level}
-                onChange={e => changeLevel(e.target.value)}>
-                <option value="all">All source levels</option>
-                {levels.map(id => <option value={id} key={id}>{id}</option>)}
-              </select>
-            </div>
-          )}
-
-          {manifest && (
-            <div className="section-block" aria-label="VR evidence navigation">
-              <span className="eyebrow">CAMERA & SOURCE NAVIGATION</span>
-              <p className="muted">Presentation controls only. Changing views, filters or isolation never edits the building model.</p>
-              <div className="review-control-grid">
-                <button type="button" onClick={() => requestCamera("isometric")}>Fit / 3D</button>
-                <button type="button" onClick={() => requestCamera("plan")}>Top view</button>
-                <button type="button" onClick={() => requestCamera("north")}>Front view</button>
-                <button type="button" onClick={() => requestCamera("east")}>Side view</button>
-                <button type="button" disabled={!selectedId}
-                  onClick={() => requestCamera(cameraRequest.mode, "selected")}>Focus selected</button>
-                <button type="button" onClick={() => requestCamera("isometric", "scene")}>Reset camera</button>
-              </div>
-              <label htmlFor="review-search">SEARCH SOURCE OBJECTS</label>
-              <input id="review-search" type="search" value={inspection.search}
-                maxLength={128} placeholder="Wall ID, canonical ID, sheet or source path"
-                onChange={e => inspect({search:e.target.value})} />
-              <label htmlFor="review-status">EVIDENCE STATUS</label>
-              <select id="review-status" value={inspection.reviewFilter}
-                onChange={e => inspect({reviewFilter:e.target.value as ReviewFilter})}>
-                <option value="all">All source objects</option>
-                <option value="verified">Verified only</option>
-                <option value="review">Unresolved / review only</option>
-                <option value="source-lines">Unknown-height source lines</option>
-              </select>
-              <label htmlFor="review-sheet">SOURCE DRAWING SHEET</label>
-              <select id="review-sheet" value={sourceSheet} onChange={e => {setSourceSheet(e.target.value);setSelectedId(null);}}>
-                <option value="">All sheets</option>
-                {sheets.map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
-              </select>
-              <div className="review-control-grid">
-                <button type="button" onClick={() => setSelectedId(nextReview(allForLevel, selectedId, -1))}
-                  disabled={!allForLevel.length}>Previous unresolved</button>
-                <button type="button" onClick={() => setSelectedId(nextReview(allForLevel, selectedId, 1))}
-                  disabled={!allForLevel.length}>Next unresolved</button>
-                <button type="button" disabled={!selectedId}
-                  onClick={() => inspect({isolateSelected:!inspection.isolateSelected})}>
-                  {inspection.isolateSelected ? "Show all visible" : "Isolate selected"}
-                </button>
-                <button type="button" onClick={() => {
-                  setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all"); setSelectedId(null);
-                  requestCamera("isometric");
-                }}>Reset inspection</button>
-              </div>
-              <div className="review-control-toggles">
-                <label><input type="checkbox" checked={inspection.showGrid}
-                  onChange={e=>inspect({showGrid:e.target.checked})}/> Grid</label>
-                <label><input type="checkbox" checked={inspection.showShadows}
-                  onChange={e=>inspect({showShadows:e.target.checked})}/> Shadows</label>
-                <label><input type="checkbox" checked={inspection.showLabels}
-                  onChange={e=>inspect({showLabels:e.target.checked})}/> Selected label</label>
-                <label><input type="checkbox" checked={inspection.showGhosts}
-                  onChange={e=>inspect({showGhosts:e.target.checked})}/> Ghost heights</label>
-                <label><input type="checkbox" checked={inspection.showDimensions}
-                  onChange={e=>inspect({showDimensions:e.target.checked})}/> Source dimensions</label>
-              </div>
-              <p className="muted">
-                Visible {summaries.total} · verified {summaries.verified} · review {summaries.review}
-                · wall faces {summaries.faces} · source lines {summaries.lines}
-                · without display geometry {summaries.withoutDisplayGeometry}
-                · source-backed dimension labels {sourceDimensionCount(visible?.objects??[])}.
-              </p>
-            </div>
-          )}
-
-          {manifest && activeWallMoves && (
-            <div className="section-block vr-move-panel" aria-label="Interactive VR wall positioning study">
-              <span className="eyebrow">WALL POSITION EDITING · REVIEW ONLY</span>
-              <p className="muted">The original endpoints and source geometry remain unchanged.
-                Proposed positions snap to 50mm. Same-level wall intersections block release.
-                Hosted doors, openings, quantities and drawing revisions remain unapproved.</p>
-              <label htmlFor="vr-move-mode">Controller interaction mode</label>
-              <select id="vr-move-mode" value={moveMode}
-                onChange={e => {setMoveMode(e.target.value as MoveMode);if(e.target.value==="move")setTeleportMode(false);setMoveError(null);}}>
-                <option value="inspect">Inspect / grip cycles visual finish</option>
-                <option value="move">Move / grip drags selected wall</option>
-              </select>
-              {moveMode === "move" && <>
-                <p className="muted">PS VR2: trigger selects wall, hold Sense grip to drag,
-                  release to snap. Desktop: arrows nudge 50mm, Shift + arrows 500mm.
-                  Ctrl/Cmd+Z undo; Shift+Ctrl/Cmd+Z redo.</p>
-                <div className="review-control-grid">
-                  <button type="button" disabled={!selectedId}
-                    onClick={()=>selectedId&&handleMoveDelta(selectedId,0,-.05)}>↑ Forward</button>
-                  <button type="button" disabled={!selectedId}
-                    onClick={()=>selectedId&&handleMoveDelta(selectedId,0,.05)}>↓ Back</button>
-                  <button type="button" disabled={!selectedId}
-                    onClick={()=>selectedId&&handleMoveDelta(selectedId,-.05,0)}>← Left</button>
-                  <button type="button" disabled={!selectedId}
-                    onClick={()=>selectedId&&handleMoveDelta(selectedId,.05,0)}>→ Right</button>
-                  <button type="button" disabled={!activeWallMoves.past.length}
-                    onClick={()=>{setWallMoveState(undoWallMove(activeWallMoves));setMoveError(null);}}>Undo</button>
-                  <button type="button" disabled={!activeWallMoves.future.length}
-                    onClick={()=>{setWallMoveState(redoWallMove(activeWallMoves));setMoveError(null);}}>Redo</button>
-                  <button type="button" disabled={!activeWallMoves.moves.length}
-                    onClick={()=>{setWallMoveState(resetWallMoves(activeWallMoves));setMoveError(null);}}>Reset all</button>
-                </div>
-                <p className="muted">Selected offset: {currentMove
-                  ? `${currentMove.dx.toFixed(2)}m X / ${currentMove.dz.toFixed(2)}m Z`
-                  : "source position"}.
-                  Proposed wall count: {safeWallMoves(activeWallMoves,manifest).length}</p>
-                {moveError&&<p className="error" role="alert">{moveError}</p>}
-                <p className="muted">This is a reversible, non-commercial wall-position
-                  study. MOVE_WALL persistence, cross-page redraw and trade approvals
-                  must be connected before these changes may be saved or priced.</p>
-              </>}
-            </div>
-          )}
-          {manifest && (
-            <div className="section-block" ref={wallReviewPanel} aria-label="New wall construction work">
-              <WallAdditionPanel
-                scene={manifest} authenticated={sourceCommandsEnabled}
-                onSketch={setAddedWallSketch}
-                reviewDraft={reviewDraft} reviewRequest={wallReview?.request ?? 0}
-                onSaved={proposalId => onBuildAction({ kind: "saved", proposalId })}
-                onExactDraft={(previous, wall) => onBuildAction({ kind: "adjust", previous, wall })}
-                onBatchSketches={setAddedWallBatchSketches} />
-            </div>
-          )}
-          {manifest && (
-            <div className="section-block vr-teleport-panel" aria-label="PS VR2 comfort locomotion">
-              <span className="eyebrow">PS VR2 · VERIFIED FLOOR TELEPORT</span>
-              <p className="muted">Move through the building without smooth-motion
-                sickness: switch to teleport mode and aim either Sense trigger
-                at a verified ground-floor surface. Landing points must stay
-                inside its source triangulation, at least 12cm from external
-                boundaries, and within 7m of the current headset position.</p>
-              <label className="vr-teleport-toggle">
-                <input type="checkbox" checked={teleportMode}
-                  disabled={!sourceCommandsEnabled || !manifest.sourceSurfaces?.some(s=>s.kind==="floor")}
-                  onChange={e=>{
-                    setTeleportMode(e.target.checked);
-                    if(e.target.checked)setMoveMode("inspect");
-                    setTeleportMessage(null);
-                  }}/>
-                Use trigger for source-verified floor teleport
+        {manifest && visible && <section id="panel-review" hidden={panel !== "review"} aria-label="Source and draft review">
+          <div className="section-block">
+            <h2>Review source objects</h2>
+            <label htmlFor="review-search">Find an object</label>
+            <input id="review-search" type="search" value={inspection.search} maxLength={128}
+              placeholder="Object ID, drawing or source reference" onChange={event => inspect({ search: event.currentTarget.value })} />
+            <div className="review-fields">
+              <label htmlFor="review-status">Evidence status
+                <select id="review-status" value={inspection.reviewFilter}
+                  onChange={event => inspect({ reviewFilter: event.currentTarget.value as ReviewFilter })}>
+                  <option value="all">All objects</option><option value="verified">Verified only</option>
+                  <option value="review">Needs review</option><option value="source-lines">Unknown-height walls</option>
+                </select>
               </label>
-              {!manifest.sourceSurfaces?.some(s=>s.kind==="floor") &&
-                <p className="muted">No authenticated, source-derived floor mesh
-                  is available, so teleport is disabled rather than permitting
-                  movement onto a guessed or decorative floor.</p>}
-              {!authenticatedSource && <p className="muted">Local JSON and
-                synthetic scenes are review-only and cannot authorise
-                teleport destinations.</p>}
-              <p className="muted">Teleport does not move you physically.
-                Your PS VR2/SteamVR guardian boundaries remain in force.
-                No stair/floor-level jumps or hardware-specific
-                thumbstick mappings are assumed.</p>
-              {teleportMessage && <p role="status" className="muted">{teleportMessage}</p>}
+              <label htmlFor="review-sheet">Drawing sheet
+                <select id="review-sheet" value={sourceSheet} onChange={event => setSourceSheet(event.currentTarget.value)}>
+                  <option value="">All sheets</option>{sheets.map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
+                </select>
+              </label>
             </div>
-          )}
-          <div className="section-block" aria-label="3D presentation settings">
-            <span className="eyebrow">REALISM / RENDERING</span>
-            <p className="muted">Lighting and shadow choices change presentation only — not the plan, geometry, material specifications or quantity authority.</p>
-            <label htmlFor="lighting-mood" className="eyebrow">LIGHTING ENVIRONMENT</label>
-            <select id="lighting-mood" value={lightingMood}
-              onChange={e => setLightingMood(e.target.value as LightingMood)}>
-              {(Object.entries(VISUAL_PRESETS) as [LightingMood, typeof VISUAL_PRESETS.daylight][])
-                .map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
-            </select>
-            <label htmlFor="render-quality" className="eyebrow">RENDER QUALITY</label>
-            <select id="render-quality" value={renderQuality}
-              onChange={e => setRenderQuality(e.target.value as RenderQuality)}>
-              <option value="balanced">Balanced — responsive desktop / VR</option>
-              <option value="high">High fidelity — sharper desktop shadows</option>
-            </select>
-            <label htmlFor="surface-detail" className="eyebrow">WALL SURFACE DETAIL</label>
-            <select id="surface-detail" value={surfaceDetail}
-              onChange={e => setSurfaceDetail(e.target.value as SurfaceDetail)}>
-              <option value="smooth">Smooth — evidence-neutral wall appearance</option>
-              <option value="subtle">Subtle micro-roughness — illustrative only</option>
-            </select>
-            <p className="muted">Micro-surface texture is a rendering effect, not a specified product, plaster finish, paint system, or billable material. Only source-verified existing faces receive detail.</p>
-            <p className="muted">Lighting is illustrative. Unknown-height walls remain lines; no unsourced doors, windows, floors or ceilings are manufactured.</p>
-          </div>
-
-          <div className="section-block detail">
-            <span className="eyebrow">OBJECT INSPECTOR</span>
-            {visible && visible.objects.length > 0 && (
-              <select aria-label="Select building object" value={selectedId ?? ""}
-                onChange={e => setSelectedId(e.target.value || null)}>
-                <option value="">Select an object…</option>
-                {visible.objects.map(o =>
-                  <option value={o.objectId} key={o.objectId}>{o.objectId} · {o.objectType}</option>)}
+            <div className="review-control-grid">
+              <button type="button" disabled={!unresolved} onClick={() => handleSelect(nextReview(allForLevel, selectedId, -1))}>Previous issue</button>
+              <button type="button" disabled={!unresolved} onClick={() => handleSelect(nextReview(allForLevel, selectedId, 1))}>Next issue</button>
+              <button type="button" disabled={!selected} aria-pressed={!!isolateId}
+                onClick={() => inspect({ isolateSelected: !isolateId })}>{isolateId ? "Clear isolation" : "Isolate selection"}</button>
+              <button type="button" onClick={() => {
+                inspect({ reviewFilter: "all", search: "", isolateSelected: false });
+                setSourceSheet(""); handleSelect(null);
+              }}>Clear filters</button>
+            </div>
+            <p className="muted">{summaries.total} shown · {summaries.verified} verified · {summaries.review} for review</p>
+            {allForLevel.length > 0 && <label htmlFor="review-object">Selected object
+              <select id="review-object" value={selected?.objectId ?? ""} onChange={event => handleSelect(event.currentTarget.value || null)}>
+                <option value="">Select an object</option>
+                {allForLevel.map(object => <option key={object.objectId} value={object.objectId}>{object.objectId} · {object.objectType}</option>)}
               </select>
-            )}
-            {selected ? (
-              <>
-                <h2>{selected.objectId}</h2>
-                <p><span className={selected.renderState === "verified" ? "pill verified" : "pill review"}>
-                  {selected.renderState === "verified" ? "Verified geometry" : "Requires review"}
-                </span></p>
-                <dl>
-                  <dt>Physical / canonical ID</dt><dd>{selected.canonicalObjectId ?? "Unresolved"}</dd>
-                  <dt>Object revision</dt><dd>{selected.objectRevision || "Missing"}</dd>
-                  <dt>Type</dt><dd>{selected.objectType}</dd>
-                  <dt>Level</dt><dd>{selected.levelId ?? "Unresolved"}</dd>
-                  <dt>Source drawing</dt><dd>{selected.source.sheet ?? "Missing"} / p. {selected.source.page ?? "?"}</dd>
-                  <dt>Source primitive</dt><dd>{selected.source.originalGeometryRef ?? "Unresolved"}</dd>
-                  {Object.entries(selected.dimensions).map(([key, value]) =>
-                    <div key={key} className="dlrow"><dt>{key}</dt><dd>{value.toFixed(3)}</dd></div>)}
-                </dl>
-                {selected.unresolvedIssues.length > 0 &&
-                  <div className="issues"><strong>Unresolved evidence</strong>
-                    <ul>{selected.unresolvedIssues.map(issue => <li key={issue}>{issue.replace(/_/g, " ")}</li>)}</ul>
-                  </div>}
-                <button className="review-source-copy" type="button"
-                  onClick={() => void copySelectedRef()}>Copy source reference</button>
-                {clipboardMessage && <p role="status" className="muted">{clipboardMessage}</p>}
-                <div className="quantity-links">
-                  Quantity references: {selected.quantityLinks.length
-                    ? selected.quantityLinks.join(", ") : "None source-linked"}
-                </div>
-                {visible && activeDraftState && <ReviewWorkbench
-                  key={visible.scope.snapshotId}
-                  scene={manifest!} selected={selected} selectedLevel={level}
-                  state={activeDraftState} onChange={setDraftState} />}
-                <CommandPreview
-                  key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
-                  workspace={visible!}
-                  object={selected}
-                  authenticated={sourceCommandsEnabled}
-                  suggestion={activeDraftState && manifest
-                    ? draftHeightSuggestion(selected, activeDraftState, manifest) : null}
-                />
-              </>
-            ) : <p className="muted">Select a wall face or source line to inspect its identity, dimensions and unresolved evidence.</p>}
+            </label>}
+            {!allForLevel.length && <p>No objects match the current filters.</p>}
           </div>
 
-          {manifest && activeNotes && (
-            <div className="section-block" aria-label="Review findings">
-              <ReviewNotesPanel scene={manifest} selectedId={selectedId}
-                state={activeNotes} onChange={setReviewNotes}
-                onSelect={id => {
-                  setInspection({...DEFAULT_INSPECTION});
-                  setLevel("all"); setSourceSheet(""); setSelectedId(id);
-                  setCameraRequest(current=>({
-                    mode:current.mode, focus:"selected", serial:current.serial+1,
-                  }));
-                }} />
-            </div>
-          )}
-          {manifest && (
-            <div className="section-block" aria-label="Document revisions">
-              <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}
-                workspace={manifest} authenticated={sourceCommandsEnabled} />
-            </div>
-          )}
-          <div className="section-block caution">
-            <strong>Commercial safety</strong>
-            <p>This scene is for inspection only. Meshes do not establish wall thickness, scale, area or billable quantities. Corrections, approval and pricing remain in the existing authenticated PlanReader workflow.</p>
+          {selected && <div className="section-block detail">
+            <h2>{selected.objectId}</h2>
+            <p><span className={selected.renderState === "verified" ? "pill verified" : "pill review"}>
+              {selected.renderState === "verified" ? "Verified geometry" : "Requires review"}
+            </span></p>
+            <details>
+              <summary>Source details</summary>
+              <dl>
+                <dt>Canonical ID</dt><dd>{selected.canonicalObjectId ?? "Unresolved"}</dd>
+                <dt>Object revision</dt><dd>{selected.objectRevision || "Missing"}</dd>
+                <dt>Type</dt><dd>{selected.objectType}</dd><dt>Level</dt><dd>{selected.levelId ?? "Unresolved"}</dd>
+                <dt>Source drawing</dt><dd>{selected.source.sheet ?? "Missing"} / p. {selected.source.page ?? "?"}</dd>
+                <dt>Source primitive</dt><dd>{selected.source.originalGeometryRef ?? "Unresolved"}</dd>
+                {Object.entries(selected.dimensions).map(([key, value]) =>
+                  <div key={key} className="dlrow"><dt>{key}</dt><dd>{value.toFixed(3)}</dd></div>)}
+              </dl>
+              <button className="review-source-copy" type="button" onClick={() => void copySelectedRef()}>Copy source reference</button>
+              {clipboardMessage && <p role="status" className="muted">{clipboardMessage}</p>}
+              <p className="quantity-links">Quantity references · {selected.quantityLinks.join(", ") || "None"}</p>
+            </details>
+            {selected.unresolvedIssues.length > 0 && <div className="issues">
+              <strong>Unresolved evidence</strong>
+              <ul>{selected.unresolvedIssues.map(issue => <li key={issue}>{issue.replace(/_/g, " ")}</li>)}</ul>
+            </div>}
+            <details>
+              <summary>Source studies and verified edits</summary>
+              {activeDraftState && <ReviewWorkbench key={manifest.scope.snapshotId} scene={manifest} selected={selected}
+                selectedLevel={level} state={activeDraftState} onChange={state => { setLastEdit("source"); setDraftState(state); }} />}
+              <CommandPreview key={`${visible.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
+                workspace={visible} object={selected} authenticated={sourceCommandsEnabled}
+                suggestion={activeDraftState ? draftHeightSuggestion(selected, activeDraftState, manifest) : null} />
+            </details>
+          </div>}
+
+          <details className="section-block" ref={wallReviewPanel}>
+            <summary>Wall construction drafts</summary>
+            <WallAdditionPanel scene={manifest} authenticated={sourceCommandsEnabled}
+              onSketch={setAddedWallSketch} reviewDraft={reviewDraft} reviewRequest={wallReview?.request ?? 0}
+              onSaved={proposalId => onBuildAction({ kind: "saved", proposalId })}
+              onExactDraft={(previous, wall) => onBuildAction({ kind: "adjust", previous, wall })}
+              onBatchSketches={setAddedWallBatchSketches} />
+          </details>
+
+          {activeWallMoves && <details className="section-block vr-move-panel">
+            <summary>Source wall position study</summary>
+            <p className="muted">Drag a selected source wall with the headset grip, or nudge it with the arrow keys.</p>
+            <label><input type="checkbox" checked={moveMode === "move"} disabled={!canMoveSource}
+              onChange={event => {
+                if (event.currentTarget.checked) {
+                  enterMode("wall-move"); setMoveMode("move"); setLastEdit("wall-move");
+                } else enterMode("inspect");
+              }} /> Move source walls in a draft</label>
+            {moveMode === "move" && <>
+              <div className="review-control-grid">
+                {([["Forward", 0, -.05], ["Back", 0, .05], ["Left", -.05, 0], ["Right", .05, 0]] as const).map(([label, x, z]) =>
+                  <button type="button" key={label} disabled={!canMoveSelected}
+                    onClick={() => selected && handleMoveDelta(selected.objectId, x, z)}>{label}</button>)}
+                <button type="button" disabled={!activeWallMoves.moves.length}
+                  onClick={() => { setWallMoveState(resetWallMoves(activeWallMoves)); setMoveError(null); setLastEdit("wall-move"); }}>
+                  Reset wall positions
+                </button>
+              </div>
+              {currentMove && <p className="muted">Offset · {currentMove.dx.toFixed(2)} m X / {currentMove.dz.toFixed(2)} m Z</p>}
+              {moveError && <p className="error" role="alert">{moveError}</p>}
+            </>}
+          </details>}
+          {activeNotes && <details className="section-block">
+            <summary>Review notes</summary>
+            <ReviewNotesPanel scene={manifest} selectedId={selected?.objectId ?? null}
+              state={activeNotes} onChange={setReviewNotes}
+              onSelect={id => {
+                enterMode("inspect"); setInspection({ ...DEFAULT_INSPECTION });
+                setLevel("all"); setSourceSheet(""); handleSelect(id);
+                requestCamera(cameraRequest.mode, "selected");
+              }} />
+          </details>}
+          <div className="section-block">
+            <button type="button" disabled={!!projection || pcVrSession.presenting}
+              onClick={() => { setCaptureStatus(null); setCaptureSerial(value => value + 1); }}>Export review image</button>
+            {captureStatus && <p role="status" className="muted">{captureStatus}</p>}
           </div>
-        </aside>
-      </main>
-    </div>
-  );
+        </section>}
+
+        <section id="panel-settings" hidden={panel !== "settings"} aria-label="Display and headset settings">
+          <details className="section-block" open>
+            <summary>Headset setup</summary>
+            <PcVr2SetupPanel session={pcVrSession} />
+            {manifest && <div className="vr-teleport-panel">
+              <label className="vr-teleport-toggle">
+                <input type="checkbox" checked={mode === "teleport" && canTeleport} disabled={!canTeleport}
+                  onChange={event => toggleTeleport(event.currentTarget.checked)} />
+                Teleport to verified floors in VR
+              </label>
+              {!canTeleport && <p className="muted">Open an authenticated plan and show a verified floor to use teleport.</p>}
+              {teleportMessage && <p role="status" className="muted">{teleportMessage}</p>}
+            </div>}
+          </details>
+          <div className="section-block">
+            <h2>Display</h2>
+            <label htmlFor="lighting-mood">Lighting
+              <select id="lighting-mood" value={lightingMood} onChange={event => setLightingMood(event.currentTarget.value as LightingMood)}>
+                {Object.entries(VISUAL_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
+              </select>
+            </label>
+            <label htmlFor="render-quality">Render quality
+              <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
+                <option value="balanced">Balanced</option><option value="high">High fidelity</option>
+              </select>
+            </label>
+            <label htmlFor="surface-detail">Wall surface detail
+              <select id="surface-detail" value={surfaceDetail} onChange={event => setSurfaceDetail(event.currentTarget.value as SurfaceDetail)}>
+                <option value="smooth">Smooth</option><option value="subtle">Subtle texture</option>
+              </select>
+            </label>
+            <div className="review-control-toggles">
+              {([["showGrid", "Grid"], ["showShadows", "Shadows"], ["showLabels", "Selected label"],
+                ["showGhosts", "Ghost heights"], ["showDimensions", "Source dimensions"]] as const)
+                .map(([key, label]) => <label key={key}><input type="checkbox" checked={inspection[key]}
+                  onChange={event => inspect({ [key]: event.currentTarget.checked })} /> {label}</label>)}
+            </div>
+            {manifest && <p className="muted">{sourceDimensionCount(visible?.objects ?? [])} source dimension labels available.</p>}
+          </div>
+          <div className="section-block"><StandardsPanel /></div>
+        </section>
+      </aside>
+    </main>
+  </div>;
 }

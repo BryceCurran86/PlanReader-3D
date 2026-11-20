@@ -349,9 +349,9 @@ Movement is **local only**: translations do not persist, change original PDF geo
 
 ## Place walls, doors and open frames
 
-1. Choose a source level if the project has several levels. On desktop, **Top view** makes it easier to place points on the plan.
+1. Choose a source level if the project has several levels. On desktop, **Plan** makes it easier to place points on the plan.
 2. Choose **Wall**, then click its start and end. In the headset, use the floating build menu and pull either controller trigger to place each point. The length updates as you aim.
-3. Choose **Door** or **Frame**, aim at a draft wall and click or pull the trigger. **Frame** leaves an open passage. Use **Undo** to remove the last placement and **Done** to return to inspection.
+3. Choose **Door** or **Open frame**, aim at a draft wall and click or pull the trigger. **Open frame** leaves an open passage. Use **Undo** to remove the last placement and **Done** to return to inspection.
 4. On desktop, open **Review drafts** and select a wall. Check **Exact dimensions and openings**, enter a registered assembly profile ID, and select **Calculate wall and opening costs** in an authenticated workspace.
 
 **Placement sizes** lets you set the starting height and opening dimensions on desktop. Sketches use the editor’s level plan and remain local until you use the authenticated wall review and save flow. Doors and frames attach to newly drafted walls. The frame geometry shows an indicative opening for review.
@@ -493,7 +493,7 @@ Test via `cd vr-editor && npm ci && npm test && npm run build`.
 
 Use **View** in the desktop toolbar or headset panel to switch between **Concrete slab**, **Framing**, **Rough-in**, **Lock-up** and **Finished**. The slab view exposes source floor surfaces for review. The framing and rough-in views expose wall extents and draft openings. Verify concrete thickness, framing members and bracing on the relevant structural drawings.
 
-On desktop, choose **Wall** or **Ceiling** and drag in the scene. Two clicks also work. Use **Move** to reposition a draft and **Stretch** to pull a wall end or ceiling corner. Stretch keeps door and frame openings within their host. Drag **Door** or **Frame** onto a draft wall to place an opening, or arm the tool and click. **Top view** exposes the outline for editing. In VR, use the trigger to place an opening or hold it while pointing to reposition a draft. **Undo** steps back through draft geometry changes.
+On desktop, choose **Wall** or **Ceiling** and drag in the scene. Two clicks also work. Use **Move** to reposition a draft and **Stretch** to pull a wall end or ceiling corner. Stretch keeps door and frame openings within their host. Drag **Door** or **Open frame** onto a draft wall to place an opening, or arm the tool and click. **Plan** exposes the outline for editing. In VR, use the trigger to place an opening or hold it while pointing to reposition a draft. **Undo** steps back through draft geometry changes.
 
 Drag a catalogue choice into the desktop scene or arm it and aim in VR. Plumbing, electrical and A/C rough-ins are draft coordination points. Air-conditioning choices include wall split, floor console, ducted, cassette, outdoor and VRF variants, plus grilles, refrigerant or condensate points and controllers. The relevant contractor confirms the design and routing.
 
@@ -518,3 +518,11 @@ Finishes, fixtures, and wall-mounted flyovers follow their hosts. Site pools, pl
 Drag **Window** onto a draft wall or click a draft wall after arming the tool. Set the window width, height and sill in **Placement sizes**. Choose a window style and a curtain or blind from **Items** and aim at the opening. Sliding door styles use draft door openings. Stairs and interior balustrading mount on floor surfaces. Choose the outside face of a wall to align a patio flyover. Pools, pool-barrier panels and landscaping use the draft site ground plane.
 
 These assemblies provide design layouts. The Australian standards panel links the corresponding references for stairs, barriers, glazing, patio structures and pools. Confirm each design, site level, structural detail and regulatory sign-off for the project.
+
+### Editor controls
+
+Use **Open scene** for a saved scene file or **Open example** to try the editor. The toolbar groups the construction view, level, camera and drawing tools. The sidebar has **Plan**, **Items**, **Review** and **Settings**. Find headset setup, verified-floor teleport and display settings under **Settings**.
+
+Choose a tool and use **Done** or **Esc** to finish it. **Alt + drag** orbits on desktop with a tool active. **Undo** and **Redo** use the active edit or the most recent edit when inspecting. The shortcuts are **Ctrl/Command + Z** and **Ctrl/Command + Shift + Z**. A footprint drag counts as one edit. Text fields retain normal text editing shortcuts.
+
+In VR, open **Items** to choose a category. The headset toolbar can cycle levels and uses the same editing history as the desktop. Source filters and levels keep the current 3D viewer mounted.
