@@ -38,3 +38,45 @@ def unique_customer_ceiling_owners(ceilings):
             raise SourceClosedRunConflictError("duplicate_canonical_ceiling_customer_owner")
         result[key] = ceiling
     return result
+
+
+def require_uncontested_source_commercial_scope(quantity: QuantityEvidence) -> None:
+    """An explicit source commercial-denial/unknown cannot become a customer YES.
+
+    Missing optional metadata gives no authority: the existing original
+    source-closed sealer must still independently grant commercial publishing.
+    """
+    if quantity.abstained or quantity.value is None:
+        return
+    meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    if "commercial_projection_allowed" in meta and meta["commercial_projection_allowed"] is not True:
+        raise SourceClosedRunConflictError("customer_source_commercial_scope_denied")
+
+
+def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: object) -> None:
+    """Match every source-declared canonical ceiling owner field to its physical object."""
+    if quantity.abstained or quantity.value is None:
+        return
+    if len(quantity.input_entity_ids) != 1 or quantity.input_entity_ids[0] != getattr(ceiling, "canonical_ceiling_id", None):
+        raise SourceClosedRunConflictError("source_ceiling_physical_owner_mismatch")
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    expected = (
+        ("document_id", getattr(ceiling, "document_id", None)),
+        ("revision_id", getattr(ceiling, "revision_id", None)),
+        ("snapshot_id", getattr(ceiling, "snapshot_id", None)),
+        ("source_sha256", getattr(ceiling, "source_sha256", None)),
+        ("canonical_ceiling_id", getattr(ceiling, "canonical_ceiling_id", None)),
+        ("physical_room_id", getattr(ceiling, "room_entity_id", None)),
+        ("canonical_room_id", getattr(ceiling, "room_entity_id", None)),
+    )
+    for key, value in expected:
+        if key not in metadata:
+            continue
+        claimed = metadata[key]
+        if (type(claimed) is not str or not claimed or claimed != claimed.strip()
+                or type(value) is not str or not value
+                or (claimed.lower() != value.lower() if key == "source_sha256"
+                    else claimed != value)):
+            raise SourceClosedRunConflictError("source_ceiling_physical_owner_mismatch")
+    if quantity.unit not in ("m2", "m²"):
+        raise SourceClosedRunConflictError("source_ceiling_customer_unit_not_area")
