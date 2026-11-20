@@ -146,3 +146,11 @@ def test_source_owned_green_hatch_excludes_only_matching_ceiling_and_keeps_speci
     assert quarantine_ordinary_hatched_ceiling_quantities(
         (specialty,), (ceiling,), (floor,), (witness,)
     ) == (specialty,)
+
+
+def test_source_hatch_cannot_exclude_self_crossing_polygon():
+    data = _pdf()
+    bowtie = ((30., 30.), (170., 170.), (30., 170.), (170., 30.))
+    assert collect_native_green_hatch_exclusions(
+        data, (_floor(data, polygon_pdf_pts=bowtie),),
+    ) == ()
