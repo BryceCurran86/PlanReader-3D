@@ -47,6 +47,9 @@ jobs:
       - name: Enforce original source-native tracing route
         run: python scripts/check_canonical_trace_route.py
 
+      - name: Fast-fail on wrong tracing route and missing-source behaviour
+        run: python -m pytest -q tests/test_canonical_trace_route_guard.py tests/test_verified_private_sources.py
+
       # Source-only PRs must not publish original customer PDFs. Run before
       # dependency installation, independent of benchmark separation checks.
       - name: Reject newly committed private original-source files (PR)
