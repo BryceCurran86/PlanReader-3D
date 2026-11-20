@@ -27,7 +27,7 @@ def _summary():
         "stage_order": ("attempt_source_native_exterior_wall_trace_first", "trace_source_native_internal_wall_candidates"),
         "external_wall_trace_status": "CANDIDATE",
         "external_wall_trace_reason": "source_closed_painted_wall_ring_needs_exterior_role_authentication",
-        "source_wall_path_ids": [10, 11],
+        "external_wall_native_source_paths": [10, 11],
     }
 
 
@@ -51,7 +51,7 @@ def test_valid_original_preview_remains_noncommercial():
     ({"quantity_authorized": True}, "preview_must_not"),
     ({"commercial_publishable": True}, "preview_must_not"),
     ({"stage_order": ["inside_face_dominant_wall_start_and_left_turn_walk"]}, "canonical_trace_stage"),
-    ({"external_wall_trace_reason": None}, None),
+    ({"external_wall_trace_reason": None}, "native_wall_result_reason_missing"),
 ])
 def test_wrong_route_or_authority_is_not_benchmark_proof(change, reason):
     summary = _summary()
@@ -85,6 +85,6 @@ def test_unavailable_or_wrong_checkout_fails_before_importing_trace(tmp_path):
 
 def test_source_sha_and_producer_must_both_match():
     bad = copy.deepcopy(_summary())
-    bad.pop("source_wall_path_ids")
+    bad.pop("external_wall_native_source_paths")
     with pytest.raises(WrongTraceRoute, match="native_wall_source_path_lineage_missing"):
         validate_canonical_preview(bad, expected_source_sha256=SHA, expected_page_index=2)
