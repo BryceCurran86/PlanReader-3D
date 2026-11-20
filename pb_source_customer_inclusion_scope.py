@@ -49,6 +49,17 @@ def require_uncontested_source_commercial_scope(quantity: QuantityEvidence) -> N
     if quantity.abstained or quantity.value is None:
         return
     meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    # A provisional original observation is explicitly noncommercial. The
+    # source publisher may independently reissue a FIRM quantity after full
+    # physical/source proof; the customer adapter verifies that new seal.
+    # The intermediate source-only FIRM reissue is also intentionally
+    # quantity_handoff_only and commercially false until the sealed customer
+    # quantity/row bijection is authenticated. Never conflate source stage
+    # with a final original commercial denial.
+    if str(quantity.status).strip().casefold() != "firm":
+        return
+    if meta.get("quantity_handoff_only") is True:
+        return
     if "commercial_projection_allowed" in meta and meta["commercial_projection_allowed"] is not True:
         raise SourceClosedRunConflictError("customer_source_commercial_scope_denied")
 
