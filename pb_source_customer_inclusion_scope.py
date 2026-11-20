@@ -22,3 +22,16 @@ def require_uncontested_source_inclusion(quantity: QuantityEvidence) -> None:
         type(scope) is not str or scope.strip().upper() != "INCLUSION"
     ):
         raise SourceClosedRunConflictError("customer_source_inclusion_scope_unresolved")
+
+
+def unique_customer_ceiling_owners(ceilings):
+    """Reject duplicate canonical ceiling identities before customer location mapping."""
+    result = {}
+    for ceiling in ceilings:
+        key = getattr(ceiling, "canonical_ceiling_id", None)
+        if type(key) is not str or not key or key != key.strip():
+            continue
+        if key in result:
+            raise SourceClosedRunConflictError("duplicate_canonical_ceiling_customer_owner")
+        result[key] = ceiling
+    return result
