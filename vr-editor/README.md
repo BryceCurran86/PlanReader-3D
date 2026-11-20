@@ -506,3 +506,15 @@ The **Australian standards** panel provides stage references and the evidence re
 In **Items → Live material pricing**, select a placement on an authenticated source object and choose its linked takeoff quantity. The price preview uses the current FIRM, publishable row and a company rate bound to the chosen item and that quantity.
 
 The host mounts the existing live-costing WSGI app and supplies its optional **load_catalogue_rate(principal, workspace, item_id, row)** provider. Return a **CatalogueRateBinding** with the selected item, takeoff row, canonical object, current company rate-book revision and rate provenance. The endpoint is **POST /api/editor/workspaces/{workspace}/costing/catalogue**. All identity fields are checked against the current source, workspace, ledger and rate book before previewing. Drafts and missing or unverified rate bindings appear without a price.
+
+### Resize a footprint
+
+Choose **Resize footprint** or use **Footprint** in the headset menu. Drag a corner in the plan view or enter a width and depth in millimetres. Corner drags retain the opposite corner. The draft moves the model's existing floor, wall, ceiling and roof geometry in plan. Heights stay the same, so changed roof spans can change roof pitch. Draft door and window sizes stay the same and follow their hosts. An edit that makes adjacent openings overlap or no longer fit is held at the last valid size.
+
+Finishes, fixtures, and wall-mounted flyovers follow their hosts. Site pools, planting and other independent site items keep their positions and sizes. Use **Done** to inspect the resized draft or place materials. **Reset footprint** restores the original geometry for source commands and source-based pricing.
+
+### Stairs, window styles and outdoor design choices
+
+Drag **Window** onto a draft wall or click a draft wall after arming the tool. Set the window width, height and sill in **Placement sizes**. Choose a window style and a curtain or blind from **Items** and aim at the opening. Sliding door styles use draft door openings. Stairs and interior balustrading mount on floor surfaces. Choose the outside face of a wall to align a patio flyover. Pools, pool-barrier panels and landscaping use the draft site ground plane.
+
+These assemblies provide design layouts. The Australian standards panel links the corresponding references for stairs, barriers, glazing, patio structures and pools. Confirm each design, site level, structural detail and regulatory sign-off for the project.

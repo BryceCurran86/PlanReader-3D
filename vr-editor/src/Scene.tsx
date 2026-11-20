@@ -19,7 +19,10 @@ import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, showConstructionItem, showConstructionSurface } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
-import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts } from "./catalogueScene";
+import { createFootprintGizmo, footprintGeometry, projectSourceHost, renderFootprintGeometry } from "./footprintScene";
+import { footprintCorner, projectCeiling, projectPlacement, projectWall, resizeFromCorner } from "./footprintResize";
+import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./footprintResize";
+import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
 import type { ItemAction, MenuAction } from "./catalogueMenu";
@@ -54,6 +57,15 @@ type Props = {
   buildSizes: BuildSizes;
   stage: ConstructionStage;
   onStage: (stage: ConstructionStage) => void;
+  footprint: {
+    box: FootprintBounds | null;
+    projection: FootprintProjection | null;
+    enabled: boolean;
+    hint: string;
+    onToggle: () => void;
+    onResize: (box: FootprintBounds | null) => void;
+    onReset: () => void;
+  };
   onBuildAction: (action: BuildAction) => void;
   onBuildHint: (hint: string) => void;
   catalogue: {
@@ -179,7 +191,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
@@ -196,6 +208,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint };
   const construction = useRef({ stage, onStage });
   construction.current = { stage, onStage };
+  const resize = useRef(footprint);
+  resize.current = footprint;
   const itemControls = useRef(catalogue);
   itemControls.current = catalogue;
   const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
@@ -276,18 +290,26 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
 
     const itemView = createCatalogueScene(scene);
     const sourceItemHosts = itemControls.current.demo ? demoCatalogueHosts(scene) : [];
+    sourceItemHosts.push(draftSiteHost(scene));
+    let renderHosts = sourceItemHosts;
+    const gizmo = createFootprintGizmo(scene);
     let draftItemHosts: CatalogueHost[] = [];
     let itemBrowser = EMPTY_ITEM_BROWSER;
     let stageMenuOpen = false;
-    const toolsBusy = () => !!build.current.buildState.tool || !!itemControls.current.active || itemBrowser.open || stageMenuOpen;
+    const toolsBusy = () => !!build.current.buildState.tool || !!itemControls.current.active || itemBrowser.open || stageMenuOpen || resize.current.enabled;
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
       return buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint,
-        construction.current.stage, stageMenuOpen);
+        construction.current.stage, stageMenuOpen, {
+          available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
+        });
     }
     function menuAction(choice: MenuAction) {
-      if (choice.area === "view") {
+      if (choice.area === "footprint") {
+        if (choice.reset) resize.current.onReset();
+        else resize.current.onToggle();
+      } else if (choice.area === "view") {
         if (choice.stage) {
           construction.current.onStage(choice.stage);
           stageMenuOpen = false;
@@ -339,6 +361,18 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         (mesh.material as THREE.MeshStandardMaterial).color.getHex();
       mesh.userData.originalOpacity = 1;
     }
+    const sourceGeometry = footprintGeometry([...new Set([
+      ...pickables, ...sourceItemHosts.filter(host => host.target !== "site").map(host => host.mesh),
+    ])]);
+    let appliedProjection: FootprintProjection | null = null;
+    function updateSourceLayout() {
+      const next = resize.current.projection;
+      if (next === appliedProjection) return;
+      appliedProjection = next;
+      itemView.clear();
+      renderFootprintGeometry(sourceGeometry, next);
+      renderHosts = next ? sourceItemHosts.map(host => projectSourceHost(host, next)) : sourceItemHosts;
+    }
     // Source-independent wall proposals stay in a clearly tinted review layer.
     // Never insert them into pickables, original source witness, or quantity DTO.
     const wallAdditionLayer = new THREE.Group();
@@ -350,12 +384,15 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     let lastBuildWalls = build.current.buildState.walls;
     let lastBuildCeilings = build.current.buildState.ceilings;
     let lastBuildLevel = build.current.buildLevel;
+    let lastDraftProjection: FootprintProjection | null = null;
     let lastReviewSketch: WallVisual | null | undefined;
     let lastReviewWalls: WallVisual[] | undefined;
     function refreshWallAddition() {
       const { buildState, buildLevel } = build.current;
       if (lastBuildWalls === buildState.walls && lastBuildCeilings === buildState.ceilings &&
-          lastBuildLevel === buildLevel && lastReviewSketch === addedWallRef.current && lastReviewWalls === addedWallsRef.current) return;
+          lastBuildLevel === buildLevel && lastDraftProjection === appliedProjection &&
+          lastReviewSketch === addedWallRef.current && lastReviewWalls === addedWallsRef.current) return;
+      lastDraftProjection = appliedProjection;
       lastBuildWalls = buildState.walls;
       lastBuildCeilings = buildState.ceilings;
       lastBuildLevel = buildLevel;
@@ -372,8 +409,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           !Number.isFinite(wall.heightM) || wall.heightM <= 0 || wall.heightM > 20) continue;
         byId.set(wall.proposalId, wall);
       }
-      const active = [...byId.values()];
-      const ceilings = buildState.ceilings.filter(ceiling => !buildLevel || ceiling.levelId === buildLevel);
+      const active = [...byId.values()].map(wall => appliedProjection ? projectWall(wall, appliedProjection) : wall);
+      const ceilings = buildState.ceilings.filter(ceiling => !buildLevel || ceiling.levelId === buildLevel)
+        .map(ceiling => appliedProjection ? projectCeiling(ceiling, appliedProjection) : ceiling);
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
       lastAddedWall = signature;
@@ -465,9 +503,19 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     function place(hit: BuildHit) {
       build.current.onBuildAction({ kind: "place", hit, id: newPlacementId(hit.kind) });
     }
+    let itemsAtSource: readonly PlacedItem[] | null = null;
+    let itemProjection: FootprintProjection | null = null;
+    let renderItems: readonly PlacedItem[] = [];
     function syncItems() {
+      updateSourceLayout();
       refreshWallAddition();
-      itemView.sync(sourceItemHosts, draftItemHosts, itemControls.current.items, construction.current.stage);
+      const items = itemControls.current.items;
+      if (itemsAtSource !== items || itemProjection !== appliedProjection) {
+        itemsAtSource = items;
+        itemProjection = appliedProjection;
+        renderItems = appliedProjection ? items.map(item => projectPlacement(item, appliedProjection!)) : items;
+      }
+      itemView.sync(renderHosts, draftItemHosts, renderItems, construction.current.stage);
     }
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
@@ -483,10 +531,32 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       select(typeof hit?.object.userData.objectId === "string"
         ? hit.object.userData.objectId : null);
     }
-    let startPointer: { id: number; x: number; y: number; gesture: DraftGesture | null } | null = null;
+    const resizePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.06);
+    type ResizeDrag = { box: FootprintBounds; corner: FootprintCorner; at: THREE.Vector3; last?: string };
+    function startResize() {
+      if (!resize.current.enabled || !resize.current.box) return null;
+      gizmo.show(resize.current.box);
+      const corner = gizmo.pick(raycaster);
+      const at = raycaster.ray.intersectPlane(resizePlane, new THREE.Vector3());
+      return corner && at ? { box: resize.current.box, corner, at } : null;
+    }
+    function resizeDrag(drag: ResizeDrag) {
+      if (!resize.current.enabled) return;
+      const at = raycaster.ray.intersectPlane(resizePlane, new THREE.Vector3());
+      if (!at) return;
+      const [x, z] = footprintCorner(drag.box, drag.corner);
+      const next = resizeFromCorner(drag.box, drag.corner, [x + at.x - drag.at.x, z + at.z - drag.at.z]);
+      const key = JSON.stringify(next);
+      if (drag.last === key) return;
+      drag.last = key;
+      resize.current.onResize(next);
+    }
+    let startPointer: { id: number; x: number; y: number;
+      gesture: DraftGesture | null; resize: ResizeDrag | null } | null = null;
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
-      return !itemControls.current.active && beginDraftGesture(buildState, buildLevel, raycaster.ray) || null;
+      if (resize.current.enabled || resize.current.projection || itemControls.current.active) return null;
+      return beginDraftGesture(buildState, buildLevel, raycaster.ray);
     }
     function previewDrag(gesture: DraftGesture) {
       const { buildState, buildLevel, buildSizes } = build.current;
@@ -506,9 +576,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     function pointerDown(e: PointerEvent) {
       if (renderer.xr.isPresenting || e.button !== 0 || !e.isPrimary || !trackPointer(e)) return;
       raycaster.setFromCamera(mouse, camera);
-      const gesture = draftGesture();
-      startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture };
-      if (gesture) {
+      const resizing = startResize();
+      const gesture = resizing ? null : draftGesture();
+      startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture, resize: resizing };
+      if (gesture || resizing) {
         controls.enabled = false;
         renderer.domElement.setPointerCapture(e.pointerId);
       }
@@ -523,7 +594,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     function leaveCanvas() { hoveringCanvas = false; }
     function cancelPointer() {
-      if (startPointer?.gesture) controls.enabled = true;
+      if (startPointer?.gesture || startPointer?.resize) controls.enabled = true;
       startPointer = null;
       leaveCanvas();
     }
@@ -531,9 +602,13 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       const start = startPointer;
       startPointer = null;
       if (!start || start.id !== e.pointerId) return;
-      if (start.gesture) controls.enabled = true;
+      if (start.gesture || start.resize) controls.enabled = true;
       if (renderer.xr.isPresenting || !trackPointer(e)) return;
       raycaster.setFromCamera(mouse, camera);
+      if (start.resize) {
+        resizeDrag(start.resize);
+        return;
+      }
       if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) {
         if (start.gesture) completeDrag(start.gesture);
         return;
@@ -552,7 +627,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     function keyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (itemControls.current.active) itemControls.current.onAction({ kind: "done" });
+      if (resize.current.enabled) resize.current.onToggle();
+      else if (itemControls.current.active) itemControls.current.onAction({ kind: "done" });
       else if (build.current.buildState.tool) build.current.onBuildAction({ kind: "done" });
       else select(null);
     }
@@ -564,10 +640,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       }
     }
     function dropItem(event: DragEvent) {
-      if (!trackPointer(event)) return;
+      if (!trackPointer(event) || resize.current.enabled) return;
       const opening = event.dataTransfer?.getData(OPENING_DRAG_TYPE);
       raycaster.setFromCamera(mouse, camera);
-      if (opening === "door" || opening === "frame") {
+      if (opening === "door" || opening === "frame" || opening === "window") {
         if (build.current.buildState.tool !== opening) return;
         event.preventDefault();
         const target = aim();
@@ -624,19 +700,28 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       );
     }
     const xrGestures: (DraftGesture | null)[] = [null, null];
+    const xrResize: (ResizeDrag | null)[] = [null, null];
     function beginXrGesture(index: number) {
       aimController(controllers[index]);
       const layout = menuLayout("");
       buildOverlay.sizeMenu(layout);
-      if (!itemBrowser.open && !stageMenuOpen && !buildOverlay.menuHit(raycaster, layout))
-        xrGestures[index] = draftGesture();
+      if (itemBrowser.open || stageMenuOpen || buildOverlay.menuHit(raycaster, layout)) return;
+      xrResize[index] = startResize();
+      if (!xrResize[index]) xrGestures[index] = draftGesture();
     }
     const selectStart0 = () => beginXrGesture(0), selectStart1 = () => beginXrGesture(1);
-    const selectEnd0 = () => { xrGestures[0] = null; }, selectEnd1 = () => { xrGestures[1] = null; };
+    const selectEnd = (index: number) => { xrGestures[index] = null; xrResize[index] = null; };
+    const selectEnd0 = () => selectEnd(0), selectEnd1 = () => selectEnd(1);
     const trigger=(index:number)=>{
       lastController = index;
       aimController(controllers[index]);
       const { buildState } = build.current;
+      const resizing = xrResize[index];
+      if (resizing) {
+        xrResize[index] = null;
+        resizeDrag(resizing);
+        return;
+      }
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture)) return;
@@ -647,7 +732,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (menuChoice.action) menuAction(menuChoice.action);
         return;
       }
-      if (itemBrowser.open || stageMenuOpen) return;
+      if (itemBrowser.open || stageMenuOpen || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -787,6 +872,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       itemBrowser = EMPTY_ITEM_BROWSER;
       stageMenuOpen = false;
       xrGestures.fill(null);
+      xrResize.fill(null);
       inputSources[0] = null;
       inputSources[1] = null;
       squeezeTracker.clear();
@@ -885,9 +971,14 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const dx=(move?.dx??0)+(held?dragX:0);
         const dz=(move?.dz??0)+(held?dragZ:0);
         if (Number.isFinite(dx)&&Number.isFinite(dz))
-          obj.position.set(dx,0,dz);
+          obj.position.set(dx * (resize.current.projection?.scaleX ?? 1), 0, dz * (resize.current.projection?.scaleZ ?? 1));
       }
       syncItems();
+      gizmo.show(resize.current.enabled ? resize.current.box : null);
+      if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
+        raycaster.setFromCamera(mouse, camera);
+        resizeDrag(startPointer.resize);
+      }
       const currentStage = construction.current.stage;
       const framing = currentStage === "framing" || currentStage === "rough-in";
       for (const obj of pickables) {
@@ -912,7 +1003,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       }
       const origin = activeStart(buildState, buildLevel);
       const item = itemControls.current.active;
-      const prompt = item ? itemGuide(item) : buildGuide(buildState, buildLevel);
+      const prompt = resize.current.enabled ? resize.current.hint || "Point at a footprint corner and hold the trigger to drag." :
+        item ? itemGuide(item) : buildGuide(buildState, buildLevel);
       if (renderer.xr.isPresenting) {
         buildOverlay.positionMenu(renderer.xr.getCamera());
         const layout = menuLayout(prompt);
@@ -923,9 +1015,14 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
+        const heldResize = xrResize.findIndex(drag => drag !== null);
+        if (heldResize >= 0) {
+          aimController(controllers[heldResize]);
+          resizeDrag(xrResize[heldResize]!);
+        }
         const held = xrGestures.findIndex(gesture => gesture !== null);
         if (held >= 0) aimController(controllers[held]);
-        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen;
+        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 ? xrGestures[held] : null;
         const buildTarget = drag ? previewDrag(drag)?.aim ?? null : ready && !item ? aim() : null;
@@ -1069,7 +1166,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       }
       const labelVisible = picked.current && pickables.some(object => object.userData.objectId === picked.current &&
         showConstructionSurface(currentStage, object.userData.surfaceKind));
-      const labelKey = labelVisible && activeInspection.showLabels
+      const labelKey = labelVisible && activeInspection.showLabels && !appliedProjection
         ? `${picked.current}|${activeInspection.showDimensions}` : null;
       if (labelKey !== lastLabelId) {
         if (selectedLabel) {

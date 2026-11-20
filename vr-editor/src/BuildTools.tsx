@@ -7,6 +7,7 @@ type Props = {
   sizes: BuildSizes;
   levels: string[];
   levelId: string | null;
+  layoutEnabled: boolean;
   onLevel: (id: string) => void;
   onAction: (action: BuildAction) => void;
   onSizes: (sizes: BuildSizes) => void;
@@ -18,12 +19,12 @@ type Props = {
 };
 
 export function BuildTools({
-  state, sizes, levels, levelId, onLevel, onAction, onSizes, onTopView, onReview, hint, catalogueOpen, onCatalogueToggle,
+  state, sizes, levels, levelId, layoutEnabled, onLevel, onAction, onSizes, onTopView, onReview, hint, catalogueOpen, onCatalogueToggle,
 }: Props) {
   const walls = state.walls.filter(wall => !levelId || wall.levelId === levelId);
   function sizeInput(key: keyof BuildSizes, label: string) {
     return <label>{label}
-      <input type="number" min={50} max={key === "widthM" ? 200000 : 20000} step={1}
+      <input type="number" min={key === "windowSillM" ? 0 : 50} max={key.endsWith("idthM") ? 200000 : 20000} step={1}
         defaultValue={Math.round((sizes[key] ?? sizes.wallHeightM) * 1000)} onBlur={event => {
           const input = event.currentTarget;
           if (!input.value || !input.validity.valid) {
@@ -37,9 +38,9 @@ export function BuildTools({
   return <section className="build-tools" aria-label="Build tools">
     <div className="build-actions">
       {BUILD_TOOLS.map(({ id, label }) => <button key={id} type="button" className="build-tool"
-        disabled={!levelId} aria-pressed={state.tool === id} draggable={!!levelId && (id === "door" || id === "frame")}
+        disabled={!levelId || !layoutEnabled} aria-pressed={state.tool === id} draggable={layoutEnabled && !!levelId && (id === "door" || id === "frame" || id === "window")}
         onDragStart={event => {
-          if (id !== "door" && id !== "frame") return;
+          if (id !== "door" && id !== "frame" && id !== "window") return;
           event.dataTransfer.setData(OPENING_DRAG_TYPE, id);
           event.dataTransfer.effectAllowed = "copy";
           onAction({ kind: "tool", tool: id });
@@ -47,9 +48,9 @@ export function BuildTools({
         onClick={() => onAction({ kind: "tool", tool: id })}>{label}</button>)}
       <button type="button" className="build-tool" aria-expanded={catalogueOpen}
         aria-controls="item-catalogue" onClick={onCatalogueToggle}>Items</button>
-      <button type="button" disabled={!state.history.length && !activeStart(state, levelId)}
+      <button type="button" disabled={!layoutEnabled || !state.history.length && !activeStart(state, levelId)}
         onClick={() => onAction({ kind: "undo" })}>Undo</button>
-      <button type="button" disabled={!state.tool} onClick={() => onAction({ kind: "done" })}>Done</button>
+      <button type="button" disabled={!layoutEnabled || !state.tool} onClick={() => onAction({ kind: "done" })}>Done</button>
       <button type="button" onClick={onTopView}>Top view</button>
     </div>
     {levels.length > 1 && <label className="build-level">Build on level
@@ -68,6 +69,9 @@ export function BuildTools({
           {sizeInput("ceilingHeightM", "Ceiling height (mm)")}
           {sizeInput("widthM", "Door / frame width (mm)")}
           {sizeInput("heightM", "Door / frame height (mm)")}
+          {sizeInput("windowWidthM", "Window width (mm)")}
+          {sizeInput("windowHeightM", "Window height (mm)")}
+          {sizeInput("windowSillM", "Window sill (mm)")}
         </div>
         <p>Set sizes for new drafts. Drag or pick two points to place a wall or ceiling. Use Move and Stretch on a draft to adjust it.</p>
       </details>

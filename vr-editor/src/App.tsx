@@ -9,6 +9,9 @@ import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
 import { ConstructionView } from "./ConstructionView";
+import { FootprintTools } from "./FootprintTools";
+import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint } from "./footprintResize";
+import type { FootprintBounds, FootprintProjection } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
 import { isRoughIn, showConstructionItem } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
@@ -54,6 +57,9 @@ export function App() {
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
   const [catalogueOpen, setCatalogueOpen] = useState(false);
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [resize, setResize] = useState<{
+    scene: SceneManifest; enabled: boolean; projection: FootprintProjection | null; hint: string;
+  } | null>(null);
   const [catalogueSession, setCatalogueSession] = useState<CatalogueSession | null>(null);
   const [wallReview, setWallReview] = useState<{ scene: SceneManifest; proposalId: string; request: number } | null>(null);
   const wallReviewPanel = useRef<HTMLDivElement>(null);
@@ -224,6 +230,13 @@ export function App() {
   const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
   const activeItem = getCatalogueItem(catalogue?.itemId ?? null);
   const isDemo = manifest !== null && manifest === demoScene;
+  const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
+  const scopedResize = resize?.scene === manifest ? resize : null;
+  const projection = scopedResize?.projection ?? null;
+  const resizeEnabled = scopedResize?.enabled ?? false;
+  const activeFootprint = projection?.draft ?? baseFootprint;
+  const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
+
   function changeCatalogue(update: (previous: CatalogueSession) => CatalogueSession) {
     if (!manifest) return;
     setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
@@ -235,6 +248,7 @@ export function App() {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
       if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
+      if (resizeEnabled) setResize(previous => previous ? { ...previous, enabled: false } : null);
       onBuildAction({ kind: "done" });
       setCatalogueOpen(true);
       changeCatalogue(current => ({ ...current, itemId: action.itemId, turn: 0 }));
@@ -248,13 +262,19 @@ export function App() {
     }
   }
   function placeSelectedItem(itemId: string, hit: ItemHit) {
+    if (resizeEnabled) return;
+    if (projection) {
+      const wall = hit.anchor?.kind === "wall" ? [...buildState.walls, ...activeBatchSketches,
+        ...(activeAddedWallSketch ? [activeAddedWallSketch] : [])].find(row => "draft-wall:" + row.proposalId === hit.hostId) : undefined;
+      hit = originalPlacement(hit, projection, wall);
+    }
     const id = newPlacementId("item");
     changeCatalogue(current => current.itemId === itemId ? { ...current,
       draft: placeItem(current.draft, scopeKey(current.scene), id, itemId, hit, current.turn),
     } : current);
   }
   function onBuildAction(action: BuildAction) {
-    if (!manifest) return;
+    if (!manifest || ((projection || resizeEnabled) && action.kind !== "done")) return;
     if (action.kind === "tool") {
       if (activeItem) onItemAction({ kind: "done" });
       if (action.tool === "ceiling" && stage !== "finished") setStage("finished");
@@ -267,6 +287,32 @@ export function App() {
       build: updateBuild(previous?.scene === manifest ? previous.build : EMPTY_BUILD,
         action, source, buildLevel, buildSizes),
     }));
+  }
+  function toggleFootprint() {
+    if (!manifest || !baseFootprint) return;
+    if (resizeEnabled) {
+      setResize(previous => previous ? { ...previous, enabled: false } : null);
+      return;
+    }
+    onBuildAction({ kind: "done" });
+    if (activeItem) onItemAction({ kind: "done" });
+    setTeleportMode(false);
+    requestCamera("plan");
+    setResize({ scene: manifest, projection, enabled: true, hint: "" });
+  }
+  function resizeFootprint(bounds: FootprintBounds | null) {
+    if (!manifest || !baseFootprint || !resizeEnabled) return;
+    if (bounds && activeFootprint && sameFootprint(bounds, activeFootprint)) return;
+    const walls = [...buildState.walls, ...activeBatchSketches, ...(activeAddedWallSketch ? [activeAddedWallSketch] : [])];
+    const next = bounds ? previewFootprint(manifest, baseFootprint, bounds, walls, buildState.ceilings) :
+      { projection: null, error: "Keep the corners separated and enter a positive width and depth." };
+    const hint = next.error ?? "";
+    setResize(previous => previous?.scene !== manifest ? previous : {
+      ...previous, hint, projection: hint ? previous.projection : next.projection,
+    });
+  }
+  function resetFootprint() {
+    setResize(previous => previous?.scene === manifest ? { ...previous, projection: null, hint: "" } : previous);
   }
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
@@ -383,8 +429,18 @@ export function App() {
       <main className="workspace-layout">
         <section className="viewer-panel" aria-label="Building scene">
           {visible && <ConstructionView stage={stage} onStage={onStage} />}
+          {visible && activeFootprint && <>
+            <button type="button" className="footprint-action" aria-expanded={resizeEnabled}
+              onClick={toggleFootprint}>{projection ? "Edit draft footprint" : "Resize footprint"}</button>
+            {resizeEnabled && <FootprintTools box={activeFootprint} changed={!!projection}
+              hint={scopedResize?.hint ?? ""} onApply={resizeFootprint} onReset={resetFootprint} onDone={toggleFootprint} />}
+            {projection && <p className="footprint-action" role="status">
+              Draft footprint · {footprintWidth(activeFootprint).toFixed(2)} × {footprintDepth(activeFootprint).toFixed(2)} m.
+              Reset to resume source-plan editing, costing and floor teleport.
+            </p>}
+          </>}
           {visible && <BuildTools state={buildState} sizes={buildSizes} levels={levels}
-            levelId={buildLevel} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
+            levelId={buildLevel} layoutEnabled={!projection && !resizeEnabled} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
             onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall}
             catalogueOpen={catalogueOpen} onCatalogueToggle={() => {
               if (catalogueOpen && activeItem) onItemAction({ kind: "done" });
@@ -399,11 +455,13 @@ export function App() {
                 addedWallSketches={activeBatchSketches}
                 buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes}
                 stage={stage} onStage={onStage}
+                footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
+                  onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
-                teleportMode={teleportMode} onTeleportMessage={setTeleportMessage}
+                teleportMode={teleportMode && !projection && !resizeEnabled} onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={setPcVrSession} />
             </Suspense>
           ) : (
@@ -420,7 +478,7 @@ export function App() {
           )}
           {visible && (
             <div className="review-image-toolbar">
-              <button type="button" onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}>
+              <button type="button" disabled={!!projection} onClick={()=>{setCaptureStatus(null);setCaptureSerial(v=>v+1);}}> 
                 Export watermarked review PNG
               </button>
               {captureStatus && <span role="status">{captureStatus}</span>}
@@ -434,7 +492,7 @@ export function App() {
 
         <aside className="inspector" aria-label="Evidence inspector">
           {manifest && catalogueOpen && <div className="section-block catalogue-section">
-            <CataloguePricingPanel scene={manifest} items={placedItems} authenticated={authenticatedSource} />
+            <CataloguePricingPanel scene={manifest} items={placedItems} authenticated={sourceCommandsEnabled} />
             <ItemCataloguePanel active={activeItem} items={placedItems}
               canUndo={!!catalogue?.draft.history.length} turn={catalogue?.turn ?? 0}
               onChoose={itemId => onItemAction({ kind: "choose", itemId })}
@@ -589,7 +647,7 @@ export function App() {
           {manifest && (
             <div className="section-block" ref={wallReviewPanel} aria-label="New wall construction work">
               <WallAdditionPanel
-                scene={manifest} authenticated={authenticatedSource}
+                scene={manifest} authenticated={sourceCommandsEnabled}
                 onSketch={setAddedWallSketch}
                 reviewDraft={reviewDraft} reviewRequest={wallReview?.request ?? 0}
                 onSaved={proposalId => onBuildAction({ kind: "saved", proposalId })}
@@ -607,7 +665,7 @@ export function App() {
                 boundaries, and within 7m of the current headset position.</p>
               <label className="vr-teleport-toggle">
                 <input type="checkbox" checked={teleportMode}
-                  disabled={!authenticatedSource || !manifest.sourceSurfaces?.some(s=>s.kind==="floor")}
+                  disabled={!sourceCommandsEnabled || !manifest.sourceSurfaces?.some(s=>s.kind==="floor")}
                   onChange={e=>{
                     setTeleportMode(e.target.checked);
                     if(e.target.checked)setMoveMode("inspect");
@@ -699,7 +757,7 @@ export function App() {
                   key={`${visible!.scope.snapshotId}:${selected.objectId}:${selected.objectRevision}`}
                   workspace={visible!}
                   object={selected}
-                  authenticated={authenticatedSource}
+                  authenticated={sourceCommandsEnabled}
                   suggestion={activeDraftState && manifest
                     ? draftHeightSuggestion(selected, activeDraftState, manifest) : null}
                 />
@@ -723,7 +781,7 @@ export function App() {
           {manifest && (
             <div className="section-block" aria-label="Document revisions">
               <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}
-                workspace={manifest} authenticated={authenticatedSource} />
+                workspace={manifest} authenticated={sourceCommandsEnabled} />
             </div>
           )}
           <div className="section-block caution">
