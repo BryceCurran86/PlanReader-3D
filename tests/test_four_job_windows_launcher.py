@@ -12,7 +12,7 @@ import pytest
 from tools import four_job_windows_launcher as launcher
 
 
-def _kit(root: Path, *, damage: str | None = None) -> Path:
+def _kit(root: Path, monkeypatch, *, damage: str | None = None) -> Path:
     docs = []
     for index, project in enumerate(launcher.PROJECTS):
         name = f"doc{index}.pdf"
@@ -34,6 +34,12 @@ def _kit(root: Path, *, damage: str | None = None) -> Path:
                      "original_sha256": hashlib.sha256(payload).hexdigest()})
     (root / "LOCAL_SOURCE_INVENTORY.json").write_text(json.dumps({
         "benchmark_id": "full_plan_takeoff_reconciliation_v2", "docs": docs}), encoding="utf-8")
+    roster = sorted(
+        (row["project_id"], row["manifest_name"], row["expected_size_bytes"], row["original_sha256"])
+        for row in docs
+    )
+    encoded = json.dumps(roster, separators=(",", ":")).encode("utf-8")
+    monkeypatch.setattr(launcher, "_FROZEN_SOURCE_ROSTER_SHA256", hashlib.sha256(encoded).hexdigest())
     if damage == "missing":
         (root / "sources" / docs[0]["project_id"] / docs[0]["manifest_name"]).unlink()
     elif damage == "changed":
@@ -44,8 +50,8 @@ def _kit(root: Path, *, damage: str | None = None) -> Path:
     return root
 
 
-def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     report = tmp_path / "report"
     assert launcher.verify_originals(kit, report) is True
     written = json.loads((report / "SOURCE_SHA_VERIFICATION.json").read_text(encoding="utf-8"))
@@ -53,13 +59,13 @@ def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path):
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed"])
-def test_verify_originals_rejects_missing_or_same_size_modified_bytes(tmp_path, damage):
-    kit = _kit(tmp_path / "kit", damage=damage)
+def test_verify_originals_rejects_missing_or_same_size_modified_bytes(tmp_path, monkeypatch, damage):
+    kit = _kit(tmp_path / "kit", monkeypatch, damage=damage)
     assert launcher.verify_originals(kit, tmp_path / "report") is False
 
 
-def test_verify_originals_requires_exactly_ten_documents(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_requires_exactly_ten_documents(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     inventory = json.loads((kit / "LOCAL_SOURCE_INVENTORY.json").read_text(encoding="utf-8"))
     inventory["docs"] = inventory["docs"][:9]
     (kit / "LOCAL_SOURCE_INVENTORY.json").write_text(json.dumps(inventory), encoding="utf-8")
@@ -67,11 +73,31 @@ def test_verify_originals_requires_exactly_ten_documents(tmp_path):
         launcher.verify_originals(kit, tmp_path / "report")
 
 
-def test_verify_originals_accepts_inventory_with_utf8_bom(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_accepts_inventory_with_utf8_bom(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     path = kit / "LOCAL_SOURCE_INVENTORY.json"
     path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
     assert launcher.verify_originals(kit, tmp_path / "report") is True
+
+
+@pytest.mark.parametrize("change", ["replace_pdf_and_claimed_sha", "duplicate_document"])
+def test_inventory_cannot_authorize_replacement_or_repeated_originals(tmp_path, monkeypatch, change):
+    kit = _kit(tmp_path / "kit", monkeypatch)
+    path = kit / "LOCAL_SOURCE_INVENTORY.json"
+    inventory = json.loads(path.read_text(encoding="utf-8"))
+    first = inventory["docs"][0]
+    if change == "replace_pdf_and_claimed_sha":
+        replacement = b"%PDF replacement"
+        (kit / "sources" / first["project_id"] / first["manifest_name"]).write_bytes(replacement)
+        first["expected_size_bytes"] = len(replacement)
+        first["original_sha256"] = hashlib.sha256(replacement).hexdigest()
+    else:
+        inventory["docs"][1] = first
+    path.write_text(json.dumps(inventory), encoding="utf-8")
+    report = tmp_path / "report"
+    with pytest.raises(ValueError, match="frozen original source roster"):
+        launcher.verify_originals(kit, report)
+    assert not report.exists()
 
 
 def test_output_report_creates_nested_parent(tmp_path):
@@ -174,7 +200,7 @@ def test_stale_checkout_is_not_reused_when_the_requested_ref_cannot_be_fetched(t
 
 
 def test_main_does_not_start_preflight_after_a_failed_snapshot_fetch(tmp_path, monkeypatch):
-    kit = _kit(tmp_path / "kit")
+    kit = _kit(tmp_path / "kit", monkeypatch)
     home = tmp_path / "home"
     repo = home / "Documents" / "PlanReader_Private_V2_Run" / "repo_readonly_snapshot"
     (repo / ".git").mkdir(parents=True)
