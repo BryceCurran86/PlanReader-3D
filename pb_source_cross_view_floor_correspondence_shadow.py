@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import hashlib
 import math
 import random
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
