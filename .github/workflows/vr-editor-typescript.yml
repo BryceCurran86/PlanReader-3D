@@ -29,4 +29,6 @@ jobs:
       - name: Build strict TypeScript and renderer
         working-directory: vr-editor
         run: npm run build
-
+      - name: Exercise desktop controls in headless Chrome
+        working-directory: vr-editor
+        run: node tests/editor-controls.browser.mjs

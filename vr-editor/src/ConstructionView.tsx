@@ -4,20 +4,15 @@ import type { ConstructionStage } from "./constructionStages";
 import { CONSTRUCTION_REFERENCES, NCC_ADOPTION, NCC_REFERENCES } from "./constructionStandards";
 
 export function ConstructionView({ stage, onStage }: { stage: ConstructionStage; onStage: (stage: ConstructionStage) => void }) {
-  return <div className="construction-view">
-    <details>
-      <summary>View · {stageDetails(stage).label}</summary>
-      <div className="construction-stage-actions" aria-label="Construction stage">
-        {CONSTRUCTION_STAGES.map(option => <button key={option.id} type="button"
-          aria-pressed={stage === option.id} onClick={() => onStage(option.id)}>{option.label}</button>)}
-      </div>
-      <p>{stageDetails(stage).description}</p>
-    </details>
-    <StandardsPanel />
-  </div>;
+  return <label className="stage-select">View
+    <select value={stage} onChange={event => onStage(event.currentTarget.value as ConstructionStage)}
+      title={stageDetails(stage).description}>
+      {CONSTRUCTION_STAGES.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+    </select>
+  </label>;
 }
 
-function StandardsPanel() {
+export function StandardsPanel() {
   const [region, setRegion] = useState("");
   const [classification, setClassification] = useState("");
   return <details className="construction-standards">

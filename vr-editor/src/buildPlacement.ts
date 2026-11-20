@@ -28,6 +28,7 @@ export type BuildState = DraftGeometry & {
   tool: BuildTool | null;
   start: StartPoint | null;
   history: DraftGeometry[];
+  future?: DraftGeometry[];
 };
 export const EMPTY_BUILD: BuildState = { tool: null, start: null, walls: [], ceilings: [], history: [] };
 export type BuildHit =
@@ -35,7 +36,7 @@ export type BuildHit =
   | { kind: "opening"; levelId: string; proposalId: string; point: PlanPoint };
 export type BuildAction =
   | { kind: "tool"; tool: BuildTool }
-  | { kind: "done" | "undo" }
+  | { kind: "done" | "undo" | "redo" }
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
   | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
@@ -165,7 +166,7 @@ function sameShape(a: CeilingDraft, b: CeilingDraft) {
 
 function checkpoint(state: BuildState, geometry: DraftGeometry): BuildState {
   return { ...state, ...geometry, start: null,
-    history: [...state.history, { walls: state.walls, ceilings: state.ceilings }].slice(-50) };
+    history: [...state.history, { walls: state.walls, ceilings: state.ceilings }].slice(-50), future: [] };
 }
 
 export function updateBuild(
@@ -177,7 +178,14 @@ export function updateBuild(
   if (action.kind === "undo") {
     if (activeStart(state, levelId)) return { ...state, start: null };
     const previous = state.history.at(-1);
-    return previous ? { ...state, ...previous, history: state.history.slice(0, -1) } : state;
+    const current = { walls: state.walls, ceilings: state.ceilings };
+    return previous ? { ...state, ...previous, history: state.history.slice(0, -1),
+      future: [...(state.future ?? []), current].slice(-50) } : state;
+  }
+  if (action.kind === "redo") {
+    const next = state.future?.at(-1);
+    if (!next) return state;
+    return { ...checkpoint(state, next), future: state.future!.slice(0, -1) };
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
@@ -199,7 +207,8 @@ export function updateBuild(
   if (action.kind === "saved") {
     const keep = (wall: PlacedWall) => wall.proposalId !== action.proposalId;
     return { ...state, walls: state.walls.filter(keep), start: null,
-      history: state.history.map(snapshot => ({ ...snapshot, walls: snapshot.walls.filter(keep) })) };
+      history: state.history.map(snapshot => ({ ...snapshot, walls: snapshot.walls.filter(keep) })),
+      future: state.future?.map(snapshot => ({ ...snapshot, walls: snapshot.walls.filter(keep) })) };
   }
   if (!levelId || !state.tool) return state;
   const tool = state.tool;

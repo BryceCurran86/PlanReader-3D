@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
-  CATALOGUE_GROUPS, ITEM_CATALOGUE, catalogueGroupLabel, getCatalogueItem, itemCanRotate, searchCatalogue,
+  CATALOGUE_GROUPS, catalogueGroupLabel, getCatalogueItem, itemCanRotate, searchCatalogue,
 } from "./itemCatalogue";
 import type { CatalogueGroup, CatalogueItem } from "./itemCatalogue";
 import { itemGuide, itemSchedule, itemScheduleCsv } from "./itemPlacement";
@@ -26,15 +26,14 @@ export function ItemCataloguePanel({
   const [group, setGroup] = useState<CatalogueGroup | "">("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
+  const results = useRef<HTMLUListElement>(null);
+  function changePage(index: number) {
+    setPage(index);
+    results.current?.scrollTo({ top: 0 });
+  }
   const matches = useMemo(() => searchCatalogue(query, group || undefined), [query, group]);
-  const featured = !group && !query.trim() && page === 0;
-  const options = featured
-    ? CATALOGUE_GROUPS.flatMap(([category]) => {
-      const item = matches.find(entry => entry.group === category);
-      return item ? [item] : [];
-    })
-    : matches.slice((!group && !query.trim() ? page - 1 : page) * PAGE_SIZE,
-      (!group && !query.trim() ? page : page + 1) * PAGE_SIZE);
+  const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+  const options = matches.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const rows = useMemo(() => itemSchedule(items), [items]);
   function downloadSchedule() {
     const file = new Blob(["\uFEFF", itemScheduleCsv(rows)], { type: "text/csv;charset=utf-8" });
@@ -50,22 +49,22 @@ export function ItemCataloguePanel({
     <h2>Materials &amp; fixtures</h2>
     <div className="catalogue-fields">
       <label>Find an item
-        <input type="search" value={query} placeholder="Try sage, ogee or power point"
-          onChange={event => { setQuery(event.currentTarget.value); setPage(0); }} />
+        <input type="search" value={query} placeholder="Try sliding door, slate or power point"
+          onChange={event => { setQuery(event.currentTarget.value); changePage(0); }} />
       </label>
       <label>Category
         <select value={group} onChange={event => {
           setGroup(event.currentTarget.value as CatalogueGroup | "");
-          setPage(0);
+          changePage(0);
         }}>
           <option value="">All categories</option>
-          {CATALOGUE_GROUPS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {[...CATALOGUE_GROUPS].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
       </label>
     </div>
-    <p className="catalogue-count">{featured ? ITEM_CATALOGUE.length + " options across the catalogue" :
-      matches.length + " matching " + (matches.length === 1 ? "item" : "items")}</p>
-    <ul className="catalogue-results">
+    <p className="catalogue-count" role="status">{matches.length} matching {matches.length === 1 ? "item" : "items"}</p>
+    {!matches.length && <p>Try another search or choose All categories.</p>}
+    <ul className="catalogue-results" ref={results}>
       {options.map(item => <li key={item.id}>
         <button type="button" draggable aria-pressed={active?.id === item.id} onClick={() => onChoose(item.id)}
           onDragStart={event => {
@@ -79,14 +78,11 @@ export function ItemCataloguePanel({
         </button>
       </li>)}
     </ul>
-    <div className="catalogue-actions">
-      {featured ? <button type="button" onClick={() => setPage(1)}>Browse all items</button> : <>
-        <button type="button" disabled={page === 0}
-          onClick={() => setPage(n => n - 1)}>Previous</button>
-        <button type="button" disabled={(group || query.trim() ? page + 1 : page) * PAGE_SIZE >= matches.length}
-          onClick={() => setPage(n => n + 1)}>Next</button>
-      </>}
-    </div>
+    {pages > 1 && <div className="catalogue-actions catalogue-pagination" aria-label="Catalogue pages">
+      <button type="button" disabled={page === 0} onClick={() => changePage(page - 1)}>Previous</button>
+      <span>Page {page + 1} of {pages}</span>
+      <button type="button" disabled={page >= pages - 1} onClick={() => changePage(page + 1)}>Next</button>
+    </div>}
     {active && <section className="catalogue-instructions">
       <strong>{active.label}</strong>
       <p>{itemGuide(active)} Click to place or drag an item onto the scene.</p>
