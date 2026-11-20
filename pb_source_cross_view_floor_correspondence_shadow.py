@@ -3763,7 +3763,8 @@ def enrich_cross_sheet_floor_with_documented_area(
             or not math.isfinite(float(raw_area))
             or float(raw_area) <= 0
             or ev.document_id != floor.document_id
-            or ev.page_id != area_rec.source_dimension_page_id
+            or type(area_rec.source_dimension_page_id) is not str
+            or not area_rec.source_dimension_page_id.strip()
             or type(area_rec.physical_room_id) is not str
             or not area_rec.physical_room_id.strip()
             or type(floor.source_sha256) is not str
@@ -3882,7 +3883,8 @@ def resolve_registered_cross_sheet_floor_correspondences(
             or ev.metadata.get("source_sha256") != floor.source_sha256
             or ev.metadata.get("source_room_face_record_id") != record.source_room_face_record_id
             or ev.metadata.get("physical_room_id") != record.physical_room_id
-            or ev.page_id != area.source_dimension_page_id
+            or type(area.source_dimension_page_id) is not str
+            or not area.source_dimension_page_id.strip()
             or ev.metadata.get("source_dimension_page_id") != area.source_dimension_page_id):
             continue
         payload = by_revision.get(floor.revision_id)
