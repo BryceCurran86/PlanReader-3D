@@ -41,11 +41,39 @@ def _inside(x: float, y: float, points: Sequence[tuple[float, float]]) -> bool:
     return inside
 
 
+def _source_polygon_is_simple(points: Sequence[tuple[float, float]]) -> bool:
+    """A fabricated self-crossing or zero-area region cannot own an exclusion."""
+    polygon = tuple(points[:-1] if len(points) > 3 and points[0] == points[-1]
+                    else points)
+    n = len(polygon)
+    if n < 3 or len(set(polygon)) != n:
+        return False
+    twice_area = sum(
+        polygon[i][0] * polygon[(i+1) % n][1]
+        - polygon[(i+1) % n][0] * polygon[i][1]
+        for i in range(n)
+    )
+    if abs(twice_area) < 1.e-6:
+        return False
+    def orient(a, b, c):
+        return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+    for i in range(n):
+        a, b = polygon[i], polygon[(i+1) % n]
+        for j in range(i+2, n):
+            if i == 0 and j == n-1:
+                continue
+            c, d = polygon[j], polygon[(j+1) % n]
+            if orient(a,b,c)*orient(a,b,d) < 0 and orient(c,d,a)*orient(c,d,b) < 0:
+                return False
+    return True
+
+
 def _diagonals(page: fitz.Page) -> list[tuple[float, float, float, int, int]]:
     strokes = []
     for idx, row in enumerate(page.get_drawings()):
-        if not (_owner_excluded_green_ink(row.get("color"))
-                or _owner_excluded_green_ink(row.get("fill"))):
+        # Only actual green LINE paint can author a crossed region.
+        # Green fill with unrelated dark outlines is not hatch evidence.
+        if not _owner_excluded_green_ink(row.get("color")):
             continue
         for item in row.get("items", ()):
             if len(item) < 3 or item[0] != "l":
@@ -104,7 +132,7 @@ def collect_native_green_hatch_exclusions(
                 )
             except (TypeError, ValueError):
                 valid = False
-            if valid:
+            if valid and _source_polygon_is_simple(tuple(polygon)):
                 by_page.setdefault(int(page_id) - 1, []).append(floor)
         for index, floors in by_page.items():
             strokes = _diagonals(pdf[index])
