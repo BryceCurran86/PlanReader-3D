@@ -1377,6 +1377,47 @@ class GenericPlanReaderExtractor:
                     "traces": [],
                 }
 
+            # AG-01..AG-04: Door symbol legend reader (Antigravity lane).
+            # Runs for every floor-plan page; results are TOPOLOGY_ONLY and
+            # never issue physical openings or customer quantities.
+            door_legend_stages: list[dict] = []
+            try:
+                from pb_ag_door_symbol_legend_reader import (
+                    run_door_legend_read_stage,
+                )
+
+                for plan_page in first_plan_pages:
+                    page = doc[plan_page]
+                    rect = page.rect
+                    door_legend_stages.append(
+                        run_door_legend_read_stage(
+                            tuple(page.get_drawings()),
+                            source_words=tuple(page.get_text("words")),
+                            page_bounds_pdf_pts=(
+                                float(rect.x0), float(rect.y0),
+                                float(rect.x1), float(rect.y1),
+                            ),
+                            page_index=plan_page,
+                        )
+                    )
+            except Exception as door_exc:
+                door_legend_stages = [{
+                    "status": "ABSTAINED",
+                    "reason": (
+                        "door_legend_reader_exception:"
+                        f"{type(door_exc).__name__}"
+                    ),
+                    "measurement_authorized": False,
+                    "classification_is_not_physical_opening_authority": True,
+                }]
+            self.door_legend_read_live = {
+                "status": "candidate" if door_legend_stages else "abstained",
+                "pages": door_legend_stages,
+                "physical_openings_authenticated": False,
+                "measurement_authorized": False,
+                "classification_is_not_physical_opening_authority": True,
+            }
+
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.
         self._ocr_text_by_page = {}
