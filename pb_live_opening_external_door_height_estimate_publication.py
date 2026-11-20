@@ -7,6 +7,7 @@ grant a frozen120 score.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 import math
 import re
@@ -27,13 +28,19 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_wall_role_authority import WallRoleClassification
 
 _NON_PERSONNEL_DOOR_RE = re.compile(
-    r"\b(?:garage|overhead|roller|joinery|panel\s*lift)\b",
+    r"\b(?:garage|overhead|roller|joinery|panel\s*lift|sectional|shutter|tilt.a.door)\b",
     re.IGNORECASE,
 )
 
 
 def _positive_mm(value: object) -> bool:
-    return type(value) in (int, float) and math.isfinite(value) and value > 0.0
+    if type(value) not in (int, float):
+        return False
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return False
+    return math.isfinite(number) and number > 0.0
 
 
 def _clean(value: object) -> str:
@@ -58,6 +65,7 @@ def _blocked_non_personnel_door(opening: LiveCanonicalOpeningObject) -> bool:
         for part in (
             str(opening.schedule_row_description or ""),
             str(opening.type_mark or ""),
+            str(opening.profile_kind or ""),
         )
         if part
     )
@@ -66,27 +74,44 @@ def _blocked_non_personnel_door(opening: LiveCanonicalOpeningObject) -> bool:
 
 def _external_wall_role_record_ids(
     whole_wall_role_composition: LiveWholeWallRoleComposition,
-) -> Mapping[str, str]:
-    mapping: dict[str, str] = {}
-    conflicts: set[str] = set()
+) -> tuple[Mapping[tuple[str, str], str], frozenset[tuple[str, str]]]:
+    """Index source-verified external roles by their actual sheet and wall.
+
+    A conflicting, duplicated or unresolved role for the same physical wall
+    poisons that wall, even if another trace claims EXTERNAL. No source record
+    may authenticate two distinct wall identities on the same sheet.
+    """
+    mapping: dict[tuple[str, str], str] = {}
+    blocked: set[tuple[str, str]] = set()
     for trace in whole_wall_role_composition.traces:
-        wall_id = _clean(trace.physical_wall_id)
+        wall_id, page_id = _clean(trace.physical_wall_id), _clean(trace.page_id)
+        if not wall_id or not page_id:
+            continue
+        key = (page_id, wall_id)
         record_id = _clean(trace.record_id)
-        if (
-            not wall_id
-            or not record_id
-            or trace.role is not WallRoleClassification.EXTERNAL
-            or trace.status is not EvidenceResolutionStatus.CORROBORATED
-        ):
+        positive = (
+            bool(record_id)
+            and trace.role is WallRoleClassification.EXTERNAL
+            and trace.status is EvidenceResolutionStatus.CORROBORATED
+        )
+        if key in blocked:
             continue
-        existing = mapping.get(wall_id)
-        if existing is not None and existing != record_id:
-            conflicts.add(wall_id)
+        if not positive or key in mapping:
+            blocked.add(key)
+            mapping.pop(key, None)
             continue
-        mapping[wall_id] = record_id
-    for wall_id in conflicts:
-        mapping.pop(wall_id, None)
-    return mapping
+        mapping[key] = record_id
+
+    # The producer must uniquely bind every role receipt to one source wall.
+    owners: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for key, record_id in mapping.items():
+        owners.setdefault((key[0], record_id), []).append(key)
+    for shared in owners.values():
+        if len(shared) > 1:
+            for key in shared:
+                blocked.add(key)
+                mapping.pop(key, None)
+    return mapping, frozenset(blocked)
 
 
 def _schedule_height_kwargs(opening: LiveCanonicalOpeningObject) -> dict[str, object]:
@@ -98,7 +123,7 @@ def _schedule_height_kwargs(opening: LiveCanonicalOpeningObject) -> dict[str, ob
         return {}
     owned = _positive_mm(height) and bool(evidence_id)
     return {
-        "schedule_height_mm": height if type(height) in (int, float) else None,
+        "schedule_height_mm": height if _positive_mm(height) else None,
         "schedule_height_evidence_id": evidence_id or None,
         "schedule_owned_to_opening": owned,
     }
@@ -113,36 +138,58 @@ def _estimate_area_m2(width_mm: float) -> float:
 def _apply_one(
     opening: LiveCanonicalOpeningObject,
     *,
-    external_wall_role_record_ids: Mapping[str, str],
+    external_wall_role_record_ids: Mapping[tuple[str, str], str],
+    blocked_wall_role_keys: frozenset[tuple[str, str]],
 ) -> LiveCanonicalOpeningObject:
     if type(opening) is not LiveCanonicalOpeningObject:
         raise TypeError("opening must be LiveCanonicalOpeningObject")
     if opening.area_m2 is not None or opening.area_basis:
         return opening
-    if opening.owner_approved_second_axis_record_id:
+    if (opening.owner_approved_second_axis_record_id
+            or opening.owner_approved_width_mm is not None
+            or opening.owner_approved_height_mm is not None
+            or opening.external_wall_role_record_id):
+        return opening
+    if opening.geometry_complete and opening.height_m is None:
+        return opening
+    if not (_clean(opening.host_binding_record_id)
+            or _clean(opening.host_frame_record_id)):
         return opening
     if str(opening.opening_kind or "").strip().lower() != "door":
         return opening
-    if opening.height_m is not None:
+    if opening.height_m is not None or opening.height_record_id:
         return opening
     if _blocked_non_personnel_door(opening):
         return opening
+    page_id = _clean(opening.page_id)
     host_wall_id = _clean(opening.host_wall_id)
     framed_wall_id = _clean(opening.wall_local_frame_id)
-    matched_role_ids = tuple(
-        dict.fromkeys(
-            role_id
-            for key in (host_wall_id, framed_wall_id)
-            if key
-            for role_id in (_clean(external_wall_role_record_ids.get(key)),)
-            if role_id
-        )
+    keys = tuple(
+        (page_id, value)
+        for value in dict.fromkeys((host_wall_id, framed_wall_id))
+        if value
     )
+    if not page_id or any(key in blocked_wall_role_keys for key in keys):
+        return opening
+    matched_role_ids = {
+        _clean(external_wall_role_record_ids.get(key))
+        for key in keys
+        if _clean(external_wall_role_record_ids.get(key))
+    }
     if len(matched_role_ids) != 1:
         return opening
-    role_record_id = matched_role_ids[0]
+    role_record_id = next(iter(matched_role_ids))
     width_mm = opening.figured_single_axis_mm
     if not _positive_mm(width_mm):
+        return opening
+    # An independently printed schedule width that contradicts the plan's
+    # single-figure width cannot be hidden by the assumed height.
+    if (opening.schedule_declared_width_mm is not None
+            and (not _positive_mm(opening.schedule_declared_width_mm)
+                 or not math.isclose(
+                     float(opening.schedule_declared_width_mm),
+                     float(width_mm), rel_tol=0.0, abs_tol=1e-6,
+                 ))):
         return opening
     if opening.width_m is not None:
         if not _positive_mm(opening.width_m):
@@ -200,14 +247,33 @@ def apply_live_external_door_height_estimates(
             "whole_wall_role_composition must be LiveWholeWallRoleComposition"
         )
 
-    external_ids = _external_wall_role_record_ids(whole_wall_role_composition)
+    if whole_wall_role_composition.revision_id != composition.revision_id:
+        return composition
+    external_ids, blocked_keys = _external_wall_role_record_ids(
+        whole_wall_role_composition
+    )
     if not external_ids:
         return composition
 
+    # A duplicated canonical or physical opening would otherwise be counted
+    # twice when the same provisional area is projected into customer rows.
+    canonical_counts = Counter(
+        opening.canonical_opening_id for opening in composition.canonical_openings
+    )
+    physical_counts = Counter(
+        opening.physical_opening_id for opening in composition.canonical_openings
+    )
     updated = tuple(
-        _apply_one(
+        opening if (
+            not _clean(opening.canonical_opening_id)
+            or not _clean(opening.physical_opening_id)
+            or canonical_counts[opening.canonical_opening_id] != 1
+            or physical_counts[opening.physical_opening_id] != 1
+            or opening.revision_id != composition.revision_id
+        ) else _apply_one(
             opening,
             external_wall_role_record_ids=external_ids,
+            blocked_wall_role_keys=blocked_keys,
         )
         for opening in composition.canonical_openings
     )
