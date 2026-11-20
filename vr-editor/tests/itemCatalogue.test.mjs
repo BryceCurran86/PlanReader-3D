@@ -114,3 +114,31 @@ test("roof coverings are counted as finishes on their own source-backed hosts", 
   ] }, [], false), next.items);
   assert.deepEqual(currentItemPlacements(next.items, { objects: [], sourceSurfaces: [] }, [], false), []);
 });
+
+
+test("restored roof finishes require the original roof host, upward normal and compatible item", () => {
+  const roof = { target: "roof", hostId: "roof:cover", side: 1,
+    point: [2, 3, 0], normal: [0, 1, 0] };
+  const covering = exact("standing seam metal roof copper");
+  const cabinet = exact("vanity 600 polar");
+  const tiled = exact("porcelain tile graphite");
+  const goodRoof = placeItem(start(), "plan-revision", "roof-good", covering.id, roof, 0).items[0];
+  const goodFloor = placeItem(start(), "plan-revision", "floor-good", cabinet.id, floor, 0).items[0];
+  const restored = [
+    goodRoof,
+    { ...goodRoof, id: "floor-item-on-roof", itemId: cabinet.id },
+    { ...goodRoof, id: "roof-item-on-floor", hostId: floor.hostId },
+    { ...goodRoof, id: "floor-target-on-roof", target: "floor", itemId: tiled.id },
+    { ...goodRoof, id: "roof-underside", normal: [0, -1, 0] },
+    { ...goodRoof, id: "roof-bad-normal", normal: [0, Number.NaN, 0] },
+    goodFloor,
+  ];
+  const manifest = { objects: [], sourceSurfaces: [
+    { kind: "roof", surfaceId: "cover" }, { kind: "floor", surfaceId: "floor1" },
+  ] };
+  assert.deepEqual(currentItemPlacements(restored, manifest, [], false).map(entry => entry.id),
+    ["roof-good", "floor-good"]);
+  assert.deepEqual(currentItemPlacements(restored, { objects: [], sourceSurfaces: [
+    { kind: "floor", surfaceId: "floor1" },
+  ] }, [], false).map(entry => entry.id), ["floor-good"]);
+});
