@@ -74,6 +74,46 @@ def _physical_identity_resolved(obj: object) -> bool:
     return True
 
 
+def _quantity_explicit_lineage_conflict(
+    quantity: QuantityEvidence,
+    canonical_lineage: tuple[str, str, str, str],
+) -> bool:
+    """Reject stale or foreign original quantities without erasing audit dependencies.
+
+    Cross-sheet semantic snapshots may legitimately differ from canonical
+    physical snapshots; compare that field only on final canonical surface
+    reissues, never on upstream finish schedule observations.
+    """
+    metadata = quantity.metadata
+    if not isinstance(metadata, Mapping):
+        return False
+    document_id, revision_id, source_sha, snapshot_id = canonical_lineage
+    for field, expected in (
+        ("document_id", document_id),
+        ("revision_id", revision_id),
+        ("source_sha256", source_sha),
+    ):
+        if field not in metadata or metadata[field] is None:
+            continue
+        actual = metadata[field]
+        if type(actual) is not str or not actual or actual != actual.strip():
+            return True
+        if field == "source_sha256":
+            if actual.lower() != expected.lower():
+                return True
+        elif actual != expected:
+            return True
+    is_final_surface = (
+        (quantity.family == "floor_area" and bool(metadata.get("canonical_floor_id")))
+        or (quantity.family == "ceiling_lining" and bool(metadata.get("canonical_ceiling_id")))
+    )
+    if is_final_surface and "snapshot_id" in metadata and metadata["snapshot_id"] is not None:
+        value = metadata["snapshot_id"]
+        if type(value) is not str or value != snapshot_id:
+            return True
+    return False
+
+
 def _metadata(obj: object, category: str, canonical_id: str, quantities: Sequence[QuantityEvidence]) -> dict:
     evidence_ids = getattr(obj, "evidence_ids", getattr(obj, "source_evidence_ids", ()))
     pages = getattr(obj, "page_ids", ()) or (
@@ -199,7 +239,17 @@ def collect_live_canonical_coverage(
             input_ids = set(q.input_entity_ids)
             return (not input_ids.intersection(ambiguous_aliases)
                     and bool(input_ids.intersection(aliases)))
-        linked = tuple(q for q in quantities if admitted_quantity(q))
+        linked_rows: list[QuantityEvidence] = []
+        for quantity in quantities:
+            if not admitted_quantity(quantity):
+                continue
+            if _quantity_explicit_lineage_conflict(quantity, lineage):
+                # Original record remains in the census and is marked
+                # defective by the registry's independently enforced source
+                # lineage check, never promoted by a matching value or ID.
+                gaps[category].add("quantity_source_lineage_conflict")
+            linked_rows.append(quantity)
+        linked = tuple(linked_rows)
         quantity_ids = {q.quantity_id for q in linked}
         rows = tuple(row for row in (output_rows or ()) if row.quantity_id in quantity_ids)
         quantity_snapshot = QuantityEvidenceUniverseSnapshotV1(
