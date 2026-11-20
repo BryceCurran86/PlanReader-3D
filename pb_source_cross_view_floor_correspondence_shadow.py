@@ -3903,7 +3903,11 @@ def resolve_registered_cross_sheet_floor_correspondences(
                    or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
             or not doors
             or set(record.side_kinds) != {"x0", "x1", "y0", "y1"}
-            or any(record.side_kinds.get(d.wall_side) != "door" for d in doors)
+            # The existing source wall producer uses "with_openings" for a
+            # real threshold. Independent source-door producers may use "door".
+            # Never make a door on a "full" or "not_wall" side appear valid.
+            or any(record.side_kinds.get(d.wall_side) not in
+                   {"with_openings", "door"} for d in doors)
             or type(getattr(area, "room_label", None)) is not str
             or not area.room_label.strip()
             or any(d.status is not EvidenceResolutionStatus.CORROBORATED
