@@ -240,3 +240,36 @@ def test_generic_cross_sheet_must_match_source_room_and_door_schedule():
         "new-project-2027", room_label="STORAGE", schedule_room="OFFICE",
     )
     assert _resolve(source, areas, floors, rec) == ()
+
+
+@pytest.mark.parametrize("replace_kwargs", (
+    {"geometry_complete": False},
+    {"physical_floor_surface_identity_resolved": False},
+    {"source_sha256": "not-an-original-digest"},
+))
+def test_cross_sheet_area_requires_real_physical_floor_and_source(replace_kwargs):
+    f = _floor()
+    incomplete = replace(f, **replace_kwargs)
+    assert _apply([incomplete], [_area(incomplete)]) == (incomplete,)
+
+
+def test_cross_sheet_area_needs_source_owned_physical_room_and_support_page():
+    f = _floor()
+    area = _area(f)
+    area.physical_room_id = ""
+    assert _apply([f], [area]) == (f,)
+    area = _area(f)
+    area.source_dimension_page_id = ""
+    assert _apply([f], [area]) == (f,)
+
+
+def test_producer_registered_door_must_belong_to_source_declared_door_wall():
+    source, areas, floors, rec = _issued_source_correspondence("any-building")
+    bad = replace(
+        rec, record_id=rec.record_id + ":door-side-swapped",
+        side_kinds={"x0": "wall", "x1": "wall", "y0": "wall", "y1": "door"},
+    )
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((bad.snapshot_id, bad.record_id),), bad,
+    )
+    assert _resolve(source, areas, floors, bad) == ()
