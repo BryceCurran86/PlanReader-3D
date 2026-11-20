@@ -10,6 +10,7 @@ import pytest
 
 from pb_source_rcp_height_material_evidence import (
     _paired,
+    _is_source_legend_example,
     collect_original_rcp_height_material_evidence,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -92,6 +93,12 @@ def test_genuine_maryborough_rcp_source_text_cross_engine_if_provisioned():
     }
     assert result.source_sha256 == MARYBOROUGH_SHA
     assert len({r.record_id for r in result.candidate_records}) == 18
+    assert len(result.legend_candidate_records) == 1
+    assert result.legend_candidate_records[0].material_code == "WPB"
+    assert result.legend_candidate_records[0].height_mm == 2700
+    assert not set(r.record_id for r in result.legend_candidate_records) & set(
+        r.record_id for r in result.candidate_records
+    )
     assert all(
         r.source_sha256 == MARYBOROUGH_SHA
         and r.snapshot_id == published.snapshot.snapshot_id
@@ -120,3 +127,27 @@ def test_genuine_maryborough_rcp_source_text_cross_engine_if_provisioned():
     assert [r.record_id for r in repeated.candidate_records] == [
         r.record_id for r in result.candidate_records
     ]
+
+
+def test_legend_sample_quarantine_is_project_and_position_independent():
+    for dx, dy in ((0, 0), (400, 800), (-100, 600)):
+        heading = w("LEGEND", "heading", block=10, line=0,
+                    box=(dx, dy, dx + 12, dy + 36))
+        material = w("WPB", "material", block=11, line=0,
+                     box=(dx + 30, dy + 10, dx + 42, dy + 30))
+        height = w("2700", "height", block=11, line=1,
+                   box=(dx + 44, dy + 10, dx + 56, dy + 30))
+        assert _is_source_legend_example(height, material, (heading, material, height))
+        assert not _is_source_legend_example(height, material,
+                    (w("LEGEND", "far", box=(dx + 600, dy + 600, dx + 612, dy + 636)), material, height))
+
+
+def test_untrusted_or_foreign_partition_legend_does_not_suppress_plan_callouts():
+    material = w("WPB", "material", block=11, box=(30, 10, 42, 30))
+    height = w("2700", "height", block=11, line=1, box=(44, 10, 56, 30))
+    assert not _is_source_legend_example(height, material, (
+        w("LEGEND", "untrusted", block=10, box=(0, 0, 12, 36), trusted=False),
+    ))
+    assert not _is_source_legend_example(height, material, (
+        w("LEGEND", "foreign", block=10, box=(0, 0, 12, 36), partition="foreign"),
+    ))
