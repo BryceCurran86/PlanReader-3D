@@ -43,6 +43,21 @@ def _fake_sources(tmp_path, monkeypatch):
     return project, root, docs
 
 
+def _generic_scope(project, source):
+    pages = list(range(1, source["page_count"] + 1))
+    return {
+        "project_id": project, "source_sha256": source["sha256"],
+        "page_count": source["page_count"], "family_group": "all",
+        "complete_project_handoff": True, "source_positive_partial_page": None,
+        "execution_pages": pages, "semantic_execution_pages": pages,
+    }
+
+
+def _generic_scope_for_command(project, docs, command):
+    filename = Path(command[command.index("--pdf") + 1]).name
+    return _generic_scope(project, next(source for source in docs if source["name"] == filename))
+
+
 def test_both_original_roles_are_byte_page_and_digest_authenticated(tmp_path, monkeypatch):
     project, root, docs = _fake_sources(tmp_path, monkeypatch)
     roster = module.original_roster(project, root)
@@ -79,6 +94,7 @@ def test_one_primary_seal_never_claims_complete_two_source_role_package(tmp_path
         if len(called) == 1:
             (dest / (project + ".json")).write_text("{}", encoding="utf-8")
             (dest / "production_summary.json").write_text(json.dumps({
+                **_generic_scope_for_command(project, docs, command),
                 "status": "sealed", "combined_run_file": str(dest / (project + ".json")),
             }), encoding="utf-8")
         else:
@@ -115,6 +131,7 @@ def test_two_independently_authenticated_role_seals_can_compose_without_score(tm
         file = dest / (project + ".json")
         file.write_text("{}", encoding="utf-8")
         (dest / "production_summary.json").write_text(json.dumps({
+            **_generic_scope_for_command(project, docs, command),
             "status": "sealed", "combined_run_file": str(file),
         }), encoding="utf-8")
         return 0, "COMPLETED", {}
@@ -155,6 +172,7 @@ def test_cross_role_producer_envelope_conflicts_are_quarantined(tmp_path, monkey
         file = dest / (project + ".json")
         file.write_text("{}", encoding="utf-8")
         (dest / "production_summary.json").write_text(json.dumps({
+            **_generic_scope_for_command(project, docs, command),
             "status": "sealed", "combined_run_file": str(file),
         }), encoding="utf-8")
         return 0, "COMPLETED", {}
@@ -180,6 +198,7 @@ def test_secondary_receipt_invalidity_is_explicit_not_a_forged_success(tmp_path,
         file = dest / (project + ".json")
         file.write_text("{}", encoding="utf-8")
         (dest / "production_summary.json").write_text(json.dumps({
+            **_generic_scope_for_command(project, docs, command),
             "status": "sealed", "combined_run_file": str(file),
         }), encoding="utf-8")
         return 0, "COMPLETED", {}
@@ -536,13 +555,9 @@ def _synthetic_role_seal(project, sha, *, abstained=False):
 
 
 def _empty_generic_summary(project, source, root):
-    pages = list(range(1, source["page_count"] + 1))
     return {
-        "status": "no_sealable_quantities", "project_id": project,
-        "source_path": str(root / source["name"]), "source_sha256": source["sha256"],
-        "page_count": source["page_count"], "family_group": "all",
-        "complete_project_handoff": True, "source_positive_partial_page": None,
-        "execution_pages": pages, "semantic_execution_pages": pages,
+        **_generic_scope(project, source),
+        "status": "no_sealable_quantities", "source_path": str(root / source["name"]),
         "family_counts": {name: 0 for name in module._ALL_GROUP_FAMILY_COUNTS},
         "family_run_ids": {}, "family_run_files": {},
         "combined_run_file": None, "combined_run_id": None, "combined_quantity_count": 0,
@@ -552,7 +567,10 @@ def _empty_generic_summary(project, source, root):
     }
 
 
-def _role_runner(project, docs, root, *, primary="genuine", secondary=lambda summary: summary):
+def _role_runner(
+    project, docs, root, *, primary="genuine",
+    primary_scope=lambda summary: summary, secondary=lambda summary: summary,
+):
     names = [source["name"] for source in docs]
 
     def run(command, repo, logfile, **kwargs):
@@ -564,8 +582,11 @@ def _role_runner(project, docs, root, *, primary="genuine", secondary=lambda sum
             file, customer = dest / (project + ".json"), dest / "verified_customer_rows.json"
             file.write_text(sealed.to_json(), encoding="utf-8")
             customer.write_text(json.dumps(rows, sort_keys=True), encoding="utf-8")
-            summary = {"status": "sealed", "combined_run_file": str(file),
-                       "customer_rows_verified": True, "customer_rows_file": str(customer)}
+            summary.update({
+                "status": "sealed", "combined_run_file": str(file),
+                "customer_rows_verified": True, "customer_rows_file": str(customer),
+            })
+            summary = primary_scope(summary)
         elif index == 1:
             summary = secondary(summary)
         (dest / "production_summary.json").write_text(json.dumps(summary), encoding="utf-8")
@@ -640,6 +661,40 @@ def test_abstention_receipts_are_off_by_default(tmp_path, monkeypatch):
     assert "source_role_abstention_count" not in result
     assert not _receipt_path(out, 2).exists()
     assert not (out / "ALL_SOURCE_ROLES.sealed.json").exists()
+
+
+@pytest.mark.parametrize("scope_updates", (
+    pytest.param({"family_group": "core"}, id="partial-family"),
+    pytest.param({"complete_project_handoff": False}, id="incomplete-handoff"),
+    pytest.param({"source_positive_partial_page": 1}, id="page-override"),
+    pytest.param({"execution_pages": []}, id="missing-geometry-page"),
+    pytest.param({"semantic_execution_pages": []}, id="missing-semantic-page"),
+    pytest.param({"execution_pages": [True]}, id="boolean-page"),
+    pytest.param({"page_count": True}, id="boolean-page-count"),
+    pytest.param({"source_sha256": "0" * 64}, id="foreign-original"),
+    pytest.param({"project_id": "other-project"}, id="foreign-project"),
+))
+def test_sealed_non_full_scope_cannot_close_a_source_role(tmp_path, monkeypatch, scope_updates):
+    project, root, docs = _fake_sources(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "run_logged", _role_runner(
+        project, docs, root,
+        primary_scope=lambda summary: {**summary, **scope_updates},
+    ))
+    out = tmp_path / "mismatched-scope-output"
+
+    result = module.produce_all_source_roles(
+        project_id=project, source_dir=root, output_dir=out,
+        record_native_source_input_coverage=True, source_role_abstention_receipts=True,
+    )
+
+    primary = result["roles"][0]
+    assert primary["production_status"] == "sealed"
+    assert primary["first_failure"] == "generic_role_source_scope_unverified"
+    assert primary["sealed"] is False and primary["customer_bijection_verified"] is False
+    assert result["status"] == "SOURCE_ROLES_INCOMPLETE"
+    assert not result["source_role_coverage_verified"]
+    assert not (out / "ALL_SOURCE_ROLES.sealed.json").exists()
+    assert not (out / "ALL_SOURCE_ROLES.customer_rows.json").exists()
 
 
 @pytest.mark.parametrize("native,family", ((False, "all"), (True, "core"), (True, "surfaces"), (True, "floor_area")))
