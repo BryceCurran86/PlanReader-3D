@@ -22,13 +22,14 @@ def test_authenticated_original_internal_swing_and_cs_callouts_have_distinct_cou
     assert len(paths) == 11030
     hosted = detect_source_internal_swing_room_barriers(paths, words, page_index=2)
     review = inspect_source_internal_door_completeness(paths, words, page_index=2)
-    assert review.swing_symbol_count == 7
-    assert review.hosted_swing_count == 7
+    assert review.swing_symbol_count == 8
+    assert review.hosted_swing_count == 8
     assert review.unhosted_swing_symbol_count == 0
     assert review.cavity_slider_callout_count == 6
-    assert review.cavity_slider_geometry_authenticated_count == 0
-    assert len(hosted) == 7
-    assert len({r.swing_arc_path_id for r in hosted}) == 7
+    assert review.cavity_slider_geometry_authenticated_count == 6
+    assert len(hosted) == 8
+    assert len({r.swing_arc_path_id for r in hosted}) == 8
+    assert 3092 in {r.swing_arc_path_id for r in hosted}
     assert set((2195, 2337, 2591, 2629)).issubset(
         {r.swing_arc_path_id for r in hosted}
     )
@@ -40,5 +41,7 @@ def test_authenticated_original_internal_swing_and_cs_callouts_have_distinct_cou
     assert not review.measurement_authorized
     assert all(not r.physical_wall_authenticated and not r.measurement_authorized
                for r in hosted)
-    assert all(m.status == "NEEDS_JAMB_WITNESS" for m in review.marks
+    assert all(m.status == "HOSTED_TOPOLOGY_ONLY" for m in review.marks
                if m.kind == "native_cavity_slider_callout")
+    assert all(len(m.host_wall_native_path_ids) == 2 and len(m.jamb_native_path_ids) >= 2
+               for m in review.marks if m.kind == "native_cavity_slider_callout")
