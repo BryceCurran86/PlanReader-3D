@@ -167,6 +167,14 @@ def project_live_ceiling_area_customer_rows(
                 f"{source_id}"
             )
 
+    # Reject duplicate physical ceiling owners BEFORE the existing source
+    # quantity publisher, while preserving the legitimate empty-inventory
+    # behavior for source records without any ceiling quantity to publish.
+    # This never supplies a new physical or commercial ceiling identity.
+    ceilings = (
+        unique_customer_ceiling_owners(result.canonical_ceilings)
+        if result.quantity_evidence else {}
+    )
     original = tuple(
         quantity
         for quantity in publish_live_ceiling_area_quantities(result)
@@ -180,7 +188,6 @@ def project_live_ceiling_area_customer_rows(
     if not original:
         return ()
 
-    ceilings = unique_customer_ceiling_owners(result.canonical_ceilings)
     projected_quantities: list[QuantityEvidence] = []
     authorities: dict[str, CommercialMeasurementAuthority] = {}
     for quantity in original:
