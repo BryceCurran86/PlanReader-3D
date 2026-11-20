@@ -146,6 +146,7 @@ def collect_live_canonical_coverage(
         common = dict(source_document_id=document_id, revision_id=revision_id,
                       source_sha256=sha256, snapshot_id=snapshot_id, registry_run_id=run_id)
         admitted: dict[str, object] = {}
+        canonical_owners: dict[str, str] = {}
         reasons: set[str] = set()
         for obj in group:
             physical_id = str(getattr(obj, physical_field) or "").strip()
@@ -154,8 +155,10 @@ def collect_live_canonical_coverage(
                 reasons.add("producer_physical_identity_unresolved")
                 continue
             if physical_id in admitted:
-                # Do not choose one of two competing canonical representations.
                 raise ValueError(f"duplicate producer physical identity: {physical_id}")
+            if canonical_id in canonical_owners:
+                raise ValueError("duplicate producer canonical identity")
+            canonical_owners[canonical_id] = physical_id
             admitted[physical_id] = obj
         status = ENUMERATION_COMPLETE
         if reasons:
@@ -175,9 +178,28 @@ def collect_live_canonical_coverage(
             admitted_object_ids=tuple(sorted(admitted)), enumeration_status=status,
             reason_codes=tuple(sorted(reasons)),
         )
-        # A dependency is retained even if another input entity was not admitted:
-        # the registry reports that defect, rather than inventing the other ID.
-        linked = tuple(q for q in quantities if set(q.input_entity_ids).intersection(admitted))
+        # Physical and canonical aliases are source-owned by the same typed
+        # admitted object. Any collision is a review gap, never an invented
+        # quantity link or last-writer-wins physical owner.
+        aliases: dict[str, str] = {physical_id: physical_id for physical_id in admitted}
+        ambiguous_aliases: set[str] = set()
+        for canonical_id, physical_id in canonical_owners.items():
+            prior = aliases.get(canonical_id)
+            if prior is not None and prior != physical_id:
+                ambiguous_aliases.add(canonical_id)
+            else:
+                aliases[canonical_id] = physical_id
+        for ambiguous in ambiguous_aliases:
+            aliases.pop(ambiguous, None)
+        if ambiguous_aliases:
+            reasons.add("ambiguous_canonical_physical_quantity_owner")
+            gaps[category].add("ambiguous_canonical_physical_quantity_owner")
+
+        def admitted_quantity(q: QuantityEvidence) -> bool:
+            input_ids = set(q.input_entity_ids)
+            return (not input_ids.intersection(ambiguous_aliases)
+                    and bool(input_ids.intersection(aliases)))
+        linked = tuple(q for q in quantities if admitted_quantity(q))
         quantity_ids = {q.quantity_id for q in linked}
         rows = tuple(row for row in (output_rows or ()) if row.quantity_id in quantity_ids)
         quantity_snapshot = QuantityEvidenceUniverseSnapshotV1(
@@ -194,9 +216,15 @@ def collect_live_canonical_coverage(
             takeoff_output_row_universe_snapshots=row_snapshots,
             quantity_evidence_by_universe={quantity_key: linked},
             takeoff_rows_by_universe={row_key: rows} if output_rows is not None else None,
+            source_owned_object_aliases_by_id={
+                alias: owner for alias, owner in aliases.items() if alias != owner
+            },
             object_metadata_by_id={physical_id: _metadata(
                 obj, category, str(getattr(obj, canonical_field)),
-                tuple(q for q in linked if physical_id in q.input_entity_ids),
+                tuple(q for q in linked if any(
+                    aliases.get(original_id) == physical_id
+                    for original_id in q.input_entity_ids
+                )),
             )
                                    for physical_id, obj in admitted.items()},
         ))
