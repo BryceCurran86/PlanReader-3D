@@ -1434,6 +1434,8 @@ def _generate_project_handoff_locked(
     if (
         combined is not None
         and clean_family_group == "surfaces"
+        and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
+        and source_sha256 == _THREE_LAUREL_SOURCE_SHA256
         and verified_partial_customer_rows is None
     ):
         try:
