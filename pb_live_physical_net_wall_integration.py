@@ -1266,7 +1266,8 @@ def _collect_live_physical_net_wall_claim(
     # finish becomes ABSTAINED before any customer projector can reissue it.
     # Special finishes require independent original source/schedule authority.
     green_hatch_witnesses = ()
-    if include_surface_finishes and floor_finish_quantity_evidence and canonical_floors.floors:
+    if (include_surface_finishes and canonical_floors.floors and
+            (floor_finish_quantity_evidence or ceiling_lining_quantity_evidence)):
         from pb_source_green_hatch_room_exclusion import (
             collect_native_green_hatch_exclusions,
             quarantine_ordinary_hatched_floor_quantities,
@@ -1279,9 +1280,26 @@ def _collect_live_physical_net_wall_claim(
                 tuple(floor_finish_quantity_evidence), green_hatch_witnesses,
             )
         )
+        if ceiling_lining_quantity_evidence and canonical_ceiling_objects and green_hatch_witnesses:
+            from pb_source_green_hatch_room_exclusion import (
+                quarantine_ordinary_hatched_ceiling_quantities,
+            )
+            ceiling_lining_quantity_evidence = list(
+                quarantine_ordinary_hatched_ceiling_quantities(
+                    tuple(ceiling_lining_quantity_evidence),
+                    tuple(canonical_ceiling_objects), canonical_floors.floors,
+                    green_hatch_witnesses,
+                )
+            )
 
     surface_pipeline_diagnostics = {
         "source_green_hatched_physical_rooms_count": len(green_hatch_witnesses),
+        "ordinary_hatched_ceiling_excluded_quantity_ids": tuple(
+            q.quantity_id for q in ceiling_lining_quantity_evidence
+            if q.abstained and
+            "source_green_hatched_physical_room_ordinary_ceiling_excluded"
+            in q.blocking_reasons
+        ),
         "ordinary_hatched_floor_excluded_quantity_ids": tuple(
             q.quantity_id for q in floor_finish_quantity_evidence
             if q.abstained and
