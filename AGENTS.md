@@ -1,5 +1,30 @@
 # PlanReader-3D agent contract
 
+## Owner mandatory canonical trace-route safeguard — 20 November 2026 (highest priority)
+
+**Never infer a regression or accuracy score from a diagnostic substage.** For a request to
+run or evaluate PlanReader's actual external footprint/room tracing, first read the current
+original-app UI route and execute `pb_new_source_trace_preview.source_native_trace_preview`
+(the source-native wall/doorway/room producer, including
+`attempt_source_native_outer_wall_first`). Use the exact-head CLI
+`tools/run_canonical_source_native_preview.py` for private original-PDF preview runs.
+It refuses an unverified PDF SHA, unpinned checkout, wrong producer, old raster-envelope
+fallback or customer/metric promotion. A CANDIDATE is only unverified topology, not FIRM.
+
+`pb_external_footprint_first_trace.trace_external_footprint_first`,
+`pb_external_footprint_inside_face_runtime.run_inside_face_footprint_runtime_stage`,
+and `tools/run_original_footprint_first.py` are SUPPLEMENTARY diagnostics, not the
+single official source-native app preview and never the frozen120 score.
+When a diagnostic result contradicts previous source-positive evidence, run the SAME
+canonical producer at known-good and current exact commits on the SAME pinned PDF
+before claiming a regression. Report the producer, exact Git HEAD, original PDF SHA,
+page, source-native path IDs, outside/party-wall authority, and run class separately.
+If current full checkout/private sources are inaccessible, report BLOCKED; do not
+replace a missing run with an alternative algorithm. For official scores use the
+unchanged original source-closed project/customer replay plus protected frozen120 scorer,
+not a preview. See `docs/engineering/CANONICAL_TRACE_ROUTE_CONTRACT_20261120.md`.
+
+
 
 ## Owner one-app production consolidation directive (12 November 2026)
 
