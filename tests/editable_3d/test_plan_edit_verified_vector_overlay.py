@@ -152,6 +152,7 @@ def test_atomic_saved_revision_records_source_verified_vector_coverage():
     saved=save_plan_edit_revision(
         db,principal=user,workspace=ws,workspace_db_id=1,ledger=ledger,
         command=cmd,original_pdf_bytes=original,page_coverage=coverage,
+        unified_head_verifier=lambda _p, _w, db: db.in_transaction,
     )
     assert saved["sourceVerifiedVectorOverlayComplete"] is True
     assert all(p["vectorGeometryOverlayDrawn"] for p in saved["pagesRevised"])

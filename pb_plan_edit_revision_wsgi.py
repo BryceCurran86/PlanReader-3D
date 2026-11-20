@@ -54,6 +54,7 @@ def make_plan_edit_revision_wsgi_app(
     load_original_pdf_bytes: Callable,
     resolve_verified_related_pages: Callable,
     resolve_workspace_database_id: Callable,
+    verify_unified_document_head: Callable,
 ):
     """Caller connects the existing session, DB, originals and cross-sheet truth.
 
@@ -65,10 +66,10 @@ def make_plan_edit_revision_wsgi_app(
         authenticate_session, load_authorized_workspace,
         load_authorized_ledger, verify_csrf, get_revision_db_connection,
         load_original_pdf_bytes, resolve_verified_related_pages,
-        resolve_workspace_database_id,
+        resolve_workspace_database_id, verify_unified_document_head,
     )
     if not all(callable(x) for x in callbacks):
-        raise ValueError("plan_revision_requires_all_eight_real_providers")
+        raise ValueError("plan_revision_requires_all_nine_real_providers")
 
     existing = make_editor_preview_wsgi_app(
         authenticate_session, load_authorized_workspace,
@@ -184,6 +185,7 @@ def make_plan_edit_revision_wsgi_app(
                 workspace_db_id=workspace_db_id, ledger=ledger,
                 command=command, original_pdf_bytes=original_bytes,
                 page_coverage=coverage, existing_rows=existing_rows,
+                unified_head_verifier=verify_unified_document_head,
             )
             saved["downloadPath"] = (
                 "/api/editor/workspaces/" + quote(workspace_id, safe="") +
