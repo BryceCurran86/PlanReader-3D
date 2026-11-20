@@ -86,12 +86,17 @@ def test_genuine_maryborough_rcp_source_text_cross_engine_if_provisioned():
         revision_id=published.revision.revision_id,
         page_id="9",
     )
-    assert len(result.candidate_records) == 18
+    assert len(result.candidate_records) == 19
     assert {(r.height_mm, r.material_code) for r in result.candidate_records} >= {
         (2400, "GRID"), (3000, "FPB")
     }
     assert result.source_sha256 == MARYBOROUGH_SHA
-    assert len({r.record_id for r in result.candidate_records}) == 18
+    assert len({r.record_id for r in result.candidate_records}) == 19
+    # Original RCP page 9 contains an additional genuine FPB 3000 callout.
+    assert len([r for r in result.candidate_records if r.block_no == 131
+                and r.material_code == "FPB" and r.height_mm == 3000
+                and 620 <= r.material_bbox_pdf_pts[0] <= 621
+                and 633 <= r.height_bbox_pdf_pts[0] <= 634]) == 1
     assert all(
         r.source_sha256 == MARYBOROUGH_SHA
         and r.snapshot_id == published.snapshot.snapshot_id
@@ -105,7 +110,7 @@ def test_genuine_maryborough_rcp_source_text_cross_engine_if_provisioned():
     assert not result.physical_ceiling_zone_authenticated
     assert not result.wall_finish_height_authenticated
     assert not result.benchmark_credit
-    # All 18 are source-word observations only; no unverified zone or customer quantity.
+    # All 19 are source-word observations only; no unverified zone or customer quantity.
     assert result.reason_codes == ()
     bogus = collect_original_rcp_height_material_evidence(
         source=producer, revision_id=published.revision.revision_id + "-wrong",
