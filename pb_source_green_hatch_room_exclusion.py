@@ -202,3 +202,75 @@ def quarantine_ordinary_hatched_floor_quantities(
                       "source_green_hatch_witness_id": w.witness_id},
         ))
     return tuple(output)
+
+
+def quarantine_ordinary_hatched_ceiling_quantities(
+    quantities: Sequence[QuantityEvidence],
+    ceilings: Sequence[object],
+    floors: Sequence[object],
+    witnesses: Sequence[SourceGreenHatchRoomWitness],
+) -> tuple[QuantityEvidence, ...]:
+    """Exclude ordinary ceilings only through exact original physical room identity.
+
+    The source-floor page and RCP page may differ. Same room label alone never
+    grants ownership; original document/revision/SHA and canonical room bind.
+    Independently source-authorized specialty ceilings remain separate.
+    """
+    floor_by_id = {getattr(f, "canonical_floor_id", None): f for f in floors}
+    room_counts = Counter(getattr(f, "room_entity_id", None) for f in floors)
+    ceiling_counts = Counter(getattr(c, "canonical_ceiling_id", None) for c in ceilings)
+    ceilings_by_id = {getattr(c, "canonical_ceiling_id", None): c for c in ceilings}
+    rooms = {}
+    for witness in witnesses:
+        if type(witness) is not SourceGreenHatchRoomWitness:
+            raise TypeError("untyped_source_hatch_witness")
+        floor = floor_by_id.get(witness.canonical_floor_id)
+        if (floor is None
+                or getattr(floor, "source_sha256", None) != witness.source_sha256
+                or getattr(floor, "physical_floor_surface_id", None) != witness.physical_floor_surface_id
+                or getattr(floor, "geometry_complete", None) is not True):
+            continue
+        room = getattr(floor, "room_entity_id", None)
+        if type(room) is str and room and room_counts[room] == 1:
+            rooms[room] = (floor, witness)
+    output = []
+    for q in quantities:
+        if (type(q) is not QuantityEvidence or q.family != "ceiling_lining"
+                or q.abstained or len(q.input_entity_ids) != 1):
+            output.append(q)
+            continue
+        ceiling_id = q.input_entity_ids[0]
+        ceiling = ceilings_by_id.get(ceiling_id)
+        if ceiling is None or ceiling_counts[ceiling_id] != 1:
+            output.append(q)
+            continue
+        match = rooms.get(getattr(ceiling, "room_entity_id", None))
+        if match is None or getattr(ceiling, "geometry_complete", None) is not True:
+            output.append(q)
+            continue
+        floor, witness = match
+        if (ceiling.source_sha256 != witness.source_sha256
+                or ceiling.document_id != floor.document_id
+                or ceiling.revision_id != floor.revision_id):
+            output.append(q)
+            continue
+        metadata = q.metadata if isinstance(q.metadata, Mapping) else {}
+        if metadata.get("source_sha256") not in (None, witness.source_sha256):
+            output.append(q)
+            continue
+        if (metadata.get("specialty_finish_independent_source_authority") is True
+                and type(metadata.get("specialty_finish_source_evidence_id")) is str
+                and metadata["specialty_finish_source_evidence_id"].strip()):
+            output.append(q)
+            continue
+        output.append(replace(
+            q, value=None, status="abstained", abstained=True,
+            blocking_reasons=tuple(dict.fromkeys((
+                *q.blocking_reasons,
+                "source_green_hatched_physical_room_ordinary_ceiling_excluded",
+            ))),
+            evidence_ids=tuple(dict.fromkeys((*q.evidence_ids, witness.witness_id))),
+            metadata={**dict(metadata), "inclusion_status": "EXCLUSION",
+                      "source_green_hatch_witness_id": witness.witness_id},
+        ))
+    return tuple(output)
