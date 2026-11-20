@@ -3705,7 +3705,14 @@ def enrich_cross_sheet_floor_with_documented_area(
     floors: Any,
     room_areas: Any,
 ) -> Any:
-    """Attach producer-issued CrossViewRoomAreaResult documented area to canonical floor surfaces."""
+    """Attach only unique and exact-source documented areas to canonical floors.
+
+    Duplicate physical-face owners, reused evidence IDs, stale revisions and
+    invalid measurements are quarantined, not selected by iteration order.
+    No project names, room labels, drawing pages or customer quantities decide
+    whether a measurement belongs to a canonical floor.
+    """
+    from collections import Counter
     from dataclasses import replace
     from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceComposition
 
@@ -3714,17 +3721,54 @@ def enrich_cross_sheet_floor_with_documented_area(
     if not room_areas or getattr(room_areas, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
         return floors
 
-    by_face = {
+    source_records = tuple(getattr(room_areas, "records", ()) or ())
+    face_counts = Counter(getattr(rec, "source_room_face_record_id", None) for rec in source_records)
+    evidence_counts = Counter(getattr(getattr(rec, "area_evidence", None), "evidence_id", None)
+                              for rec in source_records)
+    floor_face_counts = Counter(getattr(floor, "source_room_face_record_id", None)
+                                for floor in floors.floors)
+    floor_id_counts = Counter(getattr(floor, "canonical_floor_id", None)
+                              for floor in floors.floors)
+    unique_areas = {
         rec.source_room_face_record_id: rec
-        for rec in getattr(room_areas, "records", ())
+        for rec in source_records
+        if (type(getattr(rec, "source_room_face_record_id", None)) is str
+            and bool(rec.source_room_face_record_id.strip())
+            and face_counts[rec.source_room_face_record_id] == 1
+            and type(getattr(getattr(rec, "area_evidence", None), "evidence_id", None)) is str
+            and evidence_counts[rec.area_evidence.evidence_id] == 1)
     }
+
     enriched = []
     for floor in floors.floors:
-        area_rec = by_face.get(floor.source_room_face_record_id)
-        if area_rec is None or area_rec.area_evidence is None:
+        area_rec = unique_areas.get(floor.source_room_face_record_id)
+        if (area_rec is None
+            or floor_face_counts[floor.source_room_face_record_id] != 1
+            or floor_id_counts[floor.canonical_floor_id] != 1
+            or floor.metric_area_m2 is not None
+            or floor.metric_area_quantity_id is not None):
             enriched.append(floor)
             continue
         ev = area_rec.area_evidence
+        metadata = ev.metadata if isinstance(ev.metadata, Mapping) else {}
+        raw_area = ev.normalized_value
+        if (
+            ev.status is not EvidenceResolutionStatus.CORROBORATED
+            or ev.kind != "explicit_room_area"
+            or ev.unit not in ("m2", "m²")
+            or type(raw_area) not in (float, int)
+            or not math.isfinite(float(raw_area))
+            or float(raw_area) <= 0
+            or ev.document_id != floor.document_id
+            or metadata.get("room_revision_id") != floor.revision_id
+            or metadata.get("room_snapshot_id") != floor.snapshot_id
+            or metadata.get("source_sha256") != floor.source_sha256
+            or metadata.get("source_room_face_record_id") != floor.source_room_face_record_id
+            or metadata.get("physical_room_id") != area_rec.physical_room_id
+            or metadata.get("source_dimension_page_id") != area_rec.source_dimension_page_id
+        ):
+            enriched.append(floor)
+            continue
         qty_id = stable_contract_id(
             "floor_area_quantity",
             {
@@ -3733,22 +3777,19 @@ def enrich_cross_sheet_floor_with_documented_area(
             },
             digest_chars=20,
         )
-        enriched.append(
-            replace(
-                floor,
-                evidence_ids=tuple(dict.fromkeys((*floor.evidence_ids, ev.evidence_id))),
-                metric_area_m2=float(ev.normalized_value),
-                metric_area_quantity_id=qty_id,
-                metric_area_authority="documented_dimension",
-            )
-        )
+        enriched.append(replace(
+            floor,
+            evidence_ids=tuple(dict.fromkeys((*floor.evidence_ids, ev.evidence_id))),
+            metric_area_m2=float(raw_area),
+            metric_area_quantity_id=qty_id,
+            metric_area_authority="documented_dimension",
+        ))
     return LiveCanonicalFloorSurfaceComposition(
         status=floors.status,
         reason_codes=floors.reason_codes,
         floors=tuple(enriched),
         source_pages=floors.source_pages,
     )
-
 
 def resolve_cross_sheet_floor_correspondence_for_claim(
     *,
