@@ -244,6 +244,8 @@ def source_native_trace_preview(
             page_index=page_index,
             sliding_leaf_frame_closure=True,
             panel_lift_label_closure=True,
+            source_native_cs_jamb_closure=False,
+            source_native_internal_swing_closure=False,
             source_words=tuple(
                 {
                     "text": str(w[4]),
