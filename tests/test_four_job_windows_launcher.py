@@ -136,6 +136,53 @@ def test_sample_memory_sums_the_process_tree_and_never_raises():
     assert len(launcher.sample_memory_kb(999_999_999)) == 3  # unknown pid: measured as nothing, no exception
 
 
+
+@pytest.mark.parametrize("limits", [
+    {"max_private_mb": 100},
+    {"min_free_commit_mb": 100},
+    {"max_private_mb": 100, "min_free_commit_mb": 100},
+])
+def test_missing_memory_sample_fails_closed_when_guard_enabled(tmp_path, monkeypatch, limits):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: (0, 0, None))
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path, tmp_path / "sample_unavailable.log",
+        timeout_s=20, poll_s=0.1, **limits,
+    )
+    assert rc is None and status == "MEMORY_SAMPLING_UNAVAILABLE"
+    assert usage["peak_private_kb"] == 0
+    assert usage["min_system_free_commit_kb"] is None
+
+
+def test_missing_memory_sample_without_guard_does_not_invent_memory_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: (0, 0, None))
+    rc, status, _usage = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(0.5)"],
+        tmp_path, tmp_path / "no_guard.log",
+        timeout_s=10, poll_s=0.1, track_memory=True,
+    )
+    assert rc == 0 and status == "COMPLETED"
+
+@pytest.mark.parametrize("limits", [
+    {"max_private_mb": 100},
+    {"min_free_commit_mb": 100},
+    {"max_private_mb": 100, "min_free_commit_mb": 100},
+])
+def test_fast_exit_without_any_memory_sample_cannot_pass_guard(tmp_path, monkeypatch, limits):
+    calls = []
+    def forbidden_sample(_pid):
+        calls.append(_pid)
+        return (0, 0, None)
+    monkeypatch.setattr(launcher, "sample_memory_kb", forbidden_sample)
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "pass"], tmp_path, tmp_path / "fast_exit.log",
+        timeout_s=10, poll_s=5, **limits,
+    )
+    assert (rc, status) == (None, "MEMORY_SAMPLING_UNAVAILABLE")
+    assert calls == []
+    assert usage["peak_private_kb"] == 0
+
+
 def test_memory_limit_stops_a_process_that_commits_too_much(tmp_path):
     code = ("b = bytearray(400 * 1024 * 1024); "
             "[b.__setitem__(i, 1) for i in range(0, len(b), 4096)]; "
@@ -246,7 +293,14 @@ def test_pinned_commit_mismatch_does_not_return_a_different_head(tmp_path, monke
     assert written["status"] == "PINNED_COMMIT_MISMATCH"
 
 
-def test_successful_refresh_returns_the_checked_out_head(tmp_path, monkeypatch):
+@pytest.mark.parametrize("status_code, status_out, expected", [
+    (0, "", "CHECKED_OUT"),
+    (0, " M planreader.py\n", "CHECKOUT_HAS_TRACKED_CHANGES"),
+    (1, "", "CHECKOUT_STATE_UNVERIFIED"),
+])
+def test_refresh_rejects_changed_or_unverified_tracked_files(
+    tmp_path, monkeypatch, status_code, status_out, expected,
+):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     session = tmp_path / "session"
@@ -262,13 +316,16 @@ def test_successful_refresh_returns_the_checked_out_head(tmp_path, monkeypatch):
             return _GitResult(0)
         if args[:2] == ["rev-parse", "HEAD"]:
             return _GitResult(0, out=head + "\n")
+        if args[0] == "status":
+            return _GitResult(status_code, out=status_out)
         raise AssertionError(args)
 
     monkeypatch.setattr(launcher, "git", fake_git)
-    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") == head
+    accepted = head if expected == "CHECKED_OUT" else None
+    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") == accepted
     assert ["checkout", "--detach", "FETCH_HEAD"] in calls
     written = json.loads((session / "SNAPSHOT_REFRESH.json").read_text(encoding="utf-8"))
-    assert written["status"] == "CHECKED_OUT" and written["repo_head_used"] == head
+    assert written["status"] == expected and written["repo_head_used"] == accepted
 
 
 def test_handoff_bootstrap_keeps_an_apostrophe_in_a_windows_path_as_data():
@@ -379,3 +436,17 @@ def test_owner_partial_source_modes_are_explicit_and_default_remains_unmodified(
     assert selected.source_plan_page_index == 6
     with pytest.raises(SystemExit):
         parser.parse_args(["--family-group", "unverified"])
+
+
+@pytest.mark.parametrize("sample,limits", [
+    ((0, 0, 1000000), {"max_private_mb": 100}),
+    ((1000, 1000, None), {"min_free_commit_mb": 100}),
+    ((1000, 0, 1000000), {"max_private_mb": 100, "min_free_commit_mb": 100}),
+])
+def test_partial_memory_sample_cannot_bypass_its_configured_guard(tmp_path, monkeypatch, sample, limits):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: sample)
+    rc, status, _ = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path, tmp_path / "partial_sample.log", timeout_s=20, poll_s=0.1, **limits,
+    )
+    assert rc is None and status == "MEMORY_SAMPLING_UNAVAILABLE"

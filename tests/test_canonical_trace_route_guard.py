@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.check_canonical_trace_route import verify_route_contract
+from tools import run_canonical_source_native_preview as preview
 from tools.run_canonical_source_native_preview import (
     EXPECTED_PRODUCER, WrongTraceRoute, validate_canonical_preview, run_preview,
 )
@@ -88,3 +92,41 @@ def test_source_sha_and_producer_must_both_match():
     bad.pop("external_wall_native_source_paths")
     with pytest.raises(WrongTraceRoute, match="native_wall_source_path_lineage_missing"):
         validate_canonical_preview(bad, expected_source_sha256=SHA, expected_page_index=2)
+
+
+def test_exact_git_commit_with_locally_edited_code_is_rejected(tmp_path, monkeypatch):
+    def git_result(args, **kwargs):
+        if args[1] == "rev-parse":
+            return subprocess.CompletedProcess(args, 0, stdout="b" * 40 + "\n")
+        assert args[1:] == ["status", "--porcelain=v1", "--untracked-files=no"]
+        return subprocess.CompletedProcess(args, 0, stdout=" M edited_source.py\n")
+
+    monkeypatch.setattr(preview.subprocess, "run", git_result)
+    with pytest.raises(WrongTraceRoute, match="tracked_checkout_modified"):
+        preview._git_head(tmp_path)
+
+
+@pytest.mark.parametrize("changed", ["checkout", "pdf"])
+def test_code_or_pdf_change_during_preview_cannot_write_a_receipt(tmp_path, monkeypatch, changed):
+    pdf = tmp_path / "original.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n")
+    source = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    original_head, other_head = "b" * 40, "c" * 40
+    heads = iter((original_head, other_head if changed == "checkout" else original_head))
+    monkeypatch.setattr(preview, "_git_head", lambda _repo: next(heads))
+
+    def stub_preview(path, page_index):
+        if changed == "pdf":
+            path.write_bytes(b"%PDF-1.7 changed\n")
+        return {**_summary(), "source_sha256": source, "page_index": page_index}, preview.PNG_SIGNATURE
+
+    monkeypatch.setitem(
+        sys.modules, "pb_new_source_trace_preview",
+        SimpleNamespace(source_native_trace_preview=stub_preview),
+    )
+    reason = "checkout_changed" if changed == "checkout" else "original_private_pdf_changed"
+    output = tmp_path / "private"
+    with pytest.raises(WrongTraceRoute, match=reason):
+        run_preview(pdf, page_index=0, expected_source_sha256=source,
+                    expected_head_sha=original_head, out_dir=output, repo_root=tmp_path)
+    assert not output.exists()

@@ -49,8 +49,14 @@ def _git_head(repo_root: Path) -> str:
             ["git", "rev-parse", "--verify", "HEAD"], cwd=repo_root,
             capture_output=True, text=True, check=True, timeout=10,
         )
+        state = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=no"], cwd=repo_root,
+            capture_output=True, text=True, check=True, timeout=10,
+        )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise WrongTraceRoute("full_current_repository_checkout_required") from exc
+    if state.stdout.strip():
+        raise WrongTraceRoute("tracked_checkout_modified_stop_before_source_receipt")
     return _expected_hash(result.stdout.strip(), 40, "checkout_head")
 
 
@@ -133,6 +139,10 @@ def run_preview(
     )
     if not isinstance(image_bytes, bytes) or not image_bytes.startswith(PNG_SIGNATURE):
         raise WrongTraceRoute("original_source_native_preview_png_missing")
+    if _git_head(repo_root) != required_head:
+        raise WrongTraceRoute("checkout_changed_during_source_run")
+    if pdf.is_symlink() or _sha256(pdf) != source_sha:
+        raise WrongTraceRoute("original_private_pdf_changed_during_source_run")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "canonical_source_native_preview.png").write_bytes(image_bytes)
     receipt["exact_head_sha"] = required_head
