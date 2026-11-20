@@ -31,6 +31,7 @@ source-closed project, not a signed quantity and not an official score.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -40,6 +41,7 @@ import subprocess
 import sys
 import time
 import venv
+from ctypes import wintypes
 from pathlib import Path
 
 PROJECTS = (
@@ -122,29 +124,136 @@ def _children_by_parent() -> dict[int, list[int]]:
     return children
 
 
+def _windows_worker_pids(pid: int) -> tuple[int, ...]:
+    """Read the owned worker's descendant IDs from one native process snapshot."""
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD), ("usage", wintypes.DWORD), ("pid", wintypes.DWORD),
+            ("heap_id", ctypes.c_size_t), ("module_id", wintypes.DWORD),
+            ("thread_count", wintypes.DWORD), ("parent_pid", wintypes.DWORD),
+            ("base_priority", wintypes.LONG), ("flags", wintypes.DWORD),
+            ("executable_name", wintypes.WCHAR * 260),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateToolhelp32Snapshot
+    create.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    create.restype = wintypes.HANDLE
+    first, next_entry = kernel.Process32FirstW, kernel.Process32NextW
+    first.argtypes = next_entry.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry))
+    first.restype = next_entry.restype = wintypes.BOOL
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    snapshot = create(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if snapshot == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    children: dict[int, list[int]] = {}
+    root_alive = False
+    try:
+        entry = ProcessEntry()
+        entry.size = ctypes.sizeof(entry)
+        if not first(snapshot, ctypes.byref(entry)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        while True:
+            if entry.pid == pid:
+                root_alive = True
+            children.setdefault(entry.parent_pid, []).append(entry.pid)
+            if not next_entry(snapshot, ctypes.byref(entry)):
+                if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                    raise ctypes.WinError(ctypes.get_last_error())
+                break
+    finally:
+        close(snapshot)
+    if not root_alive:
+        return ()
+    pending = [pid]
+    owned: dict[int, None] = {}
+    while pending:
+        current = pending.pop()
+        if current not in owned:
+            owned[current] = None
+            pending.extend(children.get(current, ()))
+    return tuple(owned)
+
+
+def _sample_windows_memory_kb(pid: int) -> tuple[int, int, int | None]:
+    """Sample worker private commit and system commit with the local Windows API."""
+    class ProcessMemory(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD), ("page_faults", wintypes.DWORD),
+            *[(name, ctypes.c_size_t) for name in (
+                "peak_working_set", "working_set", "peak_paged_pool", "paged_pool",
+                "peak_nonpaged_pool", "nonpaged_pool", "pagefile", "peak_pagefile",
+                "private_bytes",
+            )],
+        ]
+
+    class SystemMemory(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD),
+            *[(name, ctypes.c_size_t) for name in (
+                "commit_total", "commit_limit", "commit_peak", "physical_total",
+                "physical_available", "system_cache", "kernel_total", "kernel_paged",
+                "kernel_nonpaged", "page_size",
+            )],
+            ("handle_count", wintypes.DWORD), ("process_count", wintypes.DWORD),
+            ("thread_count", wintypes.DWORD),
+        ]
+
+    owned = _windows_worker_pids(pid)
+    if not owned:
+        return 0, 0, None
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    open_process = kernel.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    process_memory = psapi.GetProcessMemoryInfo
+    process_memory.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessMemory), wintypes.DWORD)
+    process_memory.restype = wintypes.BOOL
+
+    working_set = private = 0
+    for worker in owned:
+        handle = open_process(0x1000, False, worker)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            if ctypes.get_last_error() == 87 and worker != pid:  # exited since enumeration
+                continue
+            return 0, 0, None
+        try:
+            memory = ProcessMemory()
+            memory.size = ctypes.sizeof(memory)
+            if not process_memory(handle, ctypes.byref(memory), memory.size):
+                return 0, 0, None
+            working_set += memory.working_set
+            private += memory.private_bytes
+        finally:
+            close(handle)
+
+    system_memory = psapi.GetPerformanceInfo
+    system_memory.argtypes = (ctypes.POINTER(SystemMemory), wintypes.DWORD)
+    system_memory.restype = wintypes.BOOL
+    system = SystemMemory()
+    system.size = ctypes.sizeof(system)
+    free_kb = None
+    if system_memory(ctypes.byref(system), system.size):
+        free_kb = max(0, system.commit_limit - system.commit_total) * system.page_size // 1024
+    return working_set // 1024, private // 1024, free_kb
+
+
 def sample_memory_kb(pid: int) -> tuple[int, int, int | None]:
     """(working set KB, private KB, system free commit KB or None) for ``pid`` and all its descendants.
 
     A Windows virtual environment's ``python.exe`` is only a launcher that starts the real interpreter as a
     child, so sampling ``pid`` alone reads the launcher (a few MB). The whole process tree is summed.
-    Failure to sample returns zeros, never an exception: a missing measurement must not stop a run.
+    Failure to sample returns an explicit missing reading for the caller's memory policy.
     """
     try:
         if os.name == "nt":
-            script = (
-                "$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize,PrivatePageCount;"
-                f"$ids = [System.Collections.Generic.HashSet[int]]::new(); [void]$ids.Add({int(pid)});"
-                "do { $n = $ids.Count; foreach ($p in $all) { if ($ids.Contains([int]$p.ParentProcessId)) "
-                "{ [void]$ids.Add([int]$p.ProcessId) } } } while ($ids.Count -ne $n);"
-                "$ws = 0; $pv = 0; foreach ($p in $all) { if ($ids.Contains([int]$p.ProcessId)) "
-                "{ $ws += [int64]$p.WorkingSetSize; $pv += [int64]$p.PrivatePageCount } };"
-                "$free = (Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory;"
-                '"$ws $pv $free"'
-            )
-            result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                                    capture_output=True, text=True, check=False, timeout=60)
-            ws, private, free_kb = result.stdout.split()[:3]
-            return int(ws) // 1024, int(private) // 1024, int(free_kb)
+            return _sample_windows_memory_kb(pid)
         procfs_pid = _procfs_pid_for_namespace_pid(pid)
         if procfs_pid is None:
             return 0, 0, None
@@ -181,8 +290,26 @@ def kill_tree(proc: subprocess.Popen) -> None:
     Never signal the caller's group or an externally supplied ungrouped pid.
     """
     if os.name == "nt":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                       capture_output=True, check=False)
+        if proc.poll() is not None:
+            return
+        # A single worker can be stopped via the owned Popen handle. For an
+        # actual tree, require taskkill to confirm descendant termination.
+        try:
+            owned = _windows_worker_pids(proc.pid)
+            if owned == (proc.pid,):
+                proc.kill()
+            elif proc.poll() is None and subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                capture_output=True, check=False, timeout=10,
+            ).returncode:
+                raise RuntimeError("Windows could not confirm termination of the source worker tree")
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=10)
+            raise
+        proc.wait(timeout=10)
+        return
     else:
         try:
             group_id = os.getpgid(proc.pid)
@@ -203,7 +330,8 @@ def run_logged(
 ) -> tuple[int | None, str, dict]:
     """Run ``args`` under hard limits. Returns (exit code, status, usage).
 
-    Status is COMPLETED, PROCESS_FAILED, TIMEOUT, MEMORY_LIMIT (the process tree's private memory exceeded
+    Status is COMPLETED, PROCESS_FAILED, TIMEOUT, MEMORY_SAMPLING_UNAVAILABLE,
+    MEMORY_LIMIT (the process tree's private memory exceeded
     ``max_private_mb``) or SYSTEM_MEMORY_GUARD (the machine's free commit fell below ``min_free_commit_mb``,
     which would start failing other programs). The last two are recorded as negative evidence, not hidden.
     ``usage`` holds the sampled peaks in KB.
@@ -222,6 +350,12 @@ def run_logged(
         while True:
             try:
                 rc = proc.wait(timeout=poll_s)
+                # A process that exits before the first polling deadline has
+                # no observed memory evidence. Never call that a guarded pass.
+                if ((max_private_mb is not None and usage["peak_private_kb"] <= 0)
+                        or (min_free_commit_mb is not None
+                            and usage["min_system_free_commit_kb"] is None)):
+                    return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                 return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", usage
             except subprocess.TimeoutExpired:
                 elapsed = time.monotonic() - started
@@ -232,6 +366,13 @@ def run_logged(
                     if free_kb is not None:
                         previous = usage["min_system_free_commit_kb"]
                         usage["min_system_free_commit_kb"] = free_kb if previous is None else min(previous, free_kb)
+                    # Fail closed when a configured guard lacks its required metric.
+                    # A zero private-memory reading is not evidence of safety;
+                    # free commit may be unavailable even when RSS was sampled.
+                    if ((max_private_mb is not None and private_kb <= 0)
+                            or (min_free_commit_mb is not None and free_kb is None)):
+                        kill_tree(proc)
+                        return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                     if max_private_mb is not None and private_kb // 1024 > max_private_mb:
                         kill_tree(proc)
                         return None, "MEMORY_LIMIT", usage
@@ -376,6 +517,13 @@ def refresh_snapshot(repo: Path, runs: Path, session: Path, ref: str) -> str | N
     if _full_commit(ref) and head.lower() != ref.lower():
         note(f"Checked out {head}, which is not the requested commit {ref}. No extraction will start.")
         refresh_failure(session, ref, "PINNED_COMMIT_MISMATCH")
+        return None
+    state = git(["status", "--porcelain=v1", "--untracked-files=no"], repo)
+    if state.returncode != 0 or state.stdout.strip():
+        note("The tracked checkout could not be verified as clean. No extraction will start.")
+        refresh_failure(
+            session, ref, "CHECKOUT_STATE_UNVERIFIED" if state.returncode else "CHECKOUT_HAS_TRACKED_CHANGES",
+        )
         return None
     output_report(session / "SNAPSHOT_REFRESH.json", {
         "requested_ref": ref,
@@ -572,7 +720,10 @@ def main() -> int:
         "source_preflight": "VERIFIED",
         "family_group": opts.family_group,
         "source_plan_page_index": opts.source_plan_page_index,
-        "source_scope_complete": (
+        # This diagnostic passes one primary PDF per project even when it runs
+        # every project and all quantity families. Companion roles do not run.
+        "source_scope_complete": False,
+        "requested_full_diagnostic_scope": (
             opts.family_group == "all" and opts.source_plan_page_index is None
             and len(projects) == len(PROJECTS)
         ),
