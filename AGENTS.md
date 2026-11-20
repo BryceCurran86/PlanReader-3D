@@ -1,5 +1,13 @@
 # PlanReader-3D agent contract
 
+## Mandatory private-source reuse — no repeat upload requests (20 November 2026)
+
+The owner has already supplied and verified the complete 18-original-PDF PlanReader source archive, retained in the user's **private ChatGPT Library**. Before requesting any source file, agents MUST check currently attached files, prior conversation uploads and the Library (files.list/files.search), and materialize the existing private archive to the authorized execution environment if not automatically mounted. Do NOT ask the owner to upload an original already present.
+
+Use `python tools/run_verified_planreader_sources.py --check-only` to discover the already-mounted archive and verify 18/18 PDFs, byte counts and SHA-256; then use `python tools/run_verified_planreader_sources.py` (or --project 3Laurel/Lot16/Maryborough/Q5446/Acacia) to run only the actual original source-native preview. This launcher calls the approved exact-head native runner, NEVER the supplementary raster/inside-face diagnostic; no private inputs go to public GitHub.
+
+An inaccessible checkout is a **code execution blocker**, not proof the owner failed to supply drawings. If the full app checkout is inaccessible, state that and continue other tasks; do not repeatedly ask for uploads or PC access instead of looking in Library. A passed source integrity preflight is NOT a completed native preview or official frozen120 score.
+
 ## Owner mandatory canonical trace-route safeguard — 20 November 2026 (highest priority)
 
 **Never infer a regression or accuracy score from a diagnostic substage.** For a request to

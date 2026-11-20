@@ -62,3 +62,16 @@ The existing required CI job runs `scripts/check_canonical_trace_route.py`
 and the public regression suite includes `tests/test_canonical_trace_route_guard.py`.
 These block unexpected app/runner route substitution and wrong-producer receipts.
 Public CI alone cannot certify protected drawing accuracy.
+## Reuse the owner's already-uploaded private sources
+
+The private 18-file ZIP and SHA-256 manifest already exist in the owner's ChatGPT Library. First look in conversation attachments and Library; materialize if not mounted. **Do not ask for another upload of the originals.**
+
+Use the all-in-one source preflight and real source-native preview:
+
+    python tools/run_verified_planreader_sources.py --check-only
+    python tools/run_verified_planreader_sources.py --project 3Laurel
+
+Without --project, the launcher covers the five source projects (official four plus held-out Acacia) and configured original plan pages. It discovers the mounted full 18-file archive, rejects incomplete or tampered files, pins the current exact Git HEAD, invokes only the already-approved canonical source-native preview, and writes private per-project PNG/JSON plus a summary.
+
+The optional PLANREADER_PRIVATE_SOURCE_BUNDLE environment variable selects the materialized private archive. Never add private PDF bytes, contract data, or source images to public CI or GitHub. If the source preflight passes but the full checkout is absent, report **original code checkout unavailable**, not missing owner drawings. Preflight is not a completed app run and preview is not frozen120 scoring.
+

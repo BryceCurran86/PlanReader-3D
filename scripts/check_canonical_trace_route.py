@@ -53,6 +53,15 @@ def verify_route_contract(root: Path = ROOT) -> None:
     if "source_native_trace_preview" not in _calls(execute):
         raise AssertionError("CANONICAL_TRACE_ROUTE_BLOCKED: approved preview runner does not execute native preview")
 
+    # Cached source reuse must not downgrade to a raster/inside-face diagnostic.
+    cache = _parse(root, "tools/run_verified_planreader_sources.py")
+    cached_run = _function(cache, "run")
+    cache_calls = _calls(cached_run)
+    if not {"resolve_private_sources", "_git_head", "run_preview"} <= cache_calls:
+        raise AssertionError("CANONICAL_TRACE_ROUTE_BLOCKED: cached owner source launcher rerouted")
+    if {"trace_external_footprint_first", "run_inside_face_footprint_runtime_stage"} & cache_calls:
+        raise AssertionError("CANONICAL_TRACE_ROUTE_BLOCKED: diagnostic substituted for native preview")
+
 
 if __name__ == "__main__":
     verify_route_contract()
