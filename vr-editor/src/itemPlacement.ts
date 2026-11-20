@@ -144,7 +144,7 @@ export function undoItem(draft: ItemDraft) {
 export function currentItemPlacements(
   items: readonly PlacedItem[], manifest: SceneManifest, walls: WallVisual[], demo: boolean,
 ) {
-  const hosts = new Set<string>();
+  const hosts = new Map<string, ItemTarget>();
   const openingSizes = new Map<string, OpeningSize>();
   const wallSections = new Map<string, WallSection>();
   for (const row of manifest.objects) {
@@ -152,23 +152,23 @@ export function currentItemPlacements(
     if (row.objectType === "wall" && shape?.kind === "wallFace" && shape.heightM > 0 &&
         planLength(shape.start, shape.end) > 0.000001) {
       const id = makeItemHostId("wall", row.objectId);
-      hosts.add(id);
+      hosts.set(id, "wall");
       wallSections.set(id, { start: shape.start, end: shape.end, heightM: shape.heightM, apertures: [] });
     }
   }
   for (const surface of manifest.sourceSurfaces ?? []) {
-    hosts.add(makeItemHostId(surface.kind, surface.surfaceId));
+    hosts.set(makeItemHostId(surface.kind, surface.surfaceId), surface.kind);
   }
   if (demo) for (const room of ["west", "east"]) {
-    hosts.add(makeItemHostId("floor", "demo-" + room));
-    hosts.add(makeItemHostId("ceiling", "demo-" + room));
+    hosts.set(makeItemHostId("floor", "demo-" + room), "floor");
+    hosts.set(makeItemHostId("ceiling", "demo-" + room), "ceiling");
   }
   const distinct = new Map(walls.map(wall => [wall.proposalId, wall]));
   for (const wall of distinct.values()) {
     if (!validWallLength(planLength(wall.start, wall.end)) || wall.heightM <= 0) continue;
     const wallId = makeItemHostId("draft-wall", wall.proposalId);
     const apertures: WallSection["apertures"] = [];
-    hosts.add(wallId);
+    hosts.set(wallId, "wall");
     wallSections.set(wallId, { start: wall.start, end: wall.end, heightM: wall.heightM, apertures });
     const sorted = (wall.openings ?? []).filter(opening => openingFits(wall, opening))
       .sort((a, b) => a.offsetM - b.offsetM);
@@ -180,19 +180,23 @@ export function currentItemPlacements(
         top: opening.sillHeightM + opening.heightM });
       if (opening.openingKind !== "window") {
         const id = openingHostId(wall.proposalId, opening.openingId);
-        hosts.add(id);
+        hosts.set(id, "opening");
         openingSizes.set(id, { widthM: opening.widthM, heightM: opening.heightM,
           door: opening.openingKind === "door" });
       }
     }
   }
   return items.filter(entry => {
-    if (!hosts.has(entry.hostId)) return false;
+    // Saved drafts cannot bypass surface compatibility or source-host binding.
+    if (hosts.get(entry.hostId) !== entry.target) return false;
     const item = getCatalogueItem(entry.itemId);
-    if (!item || (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return false;
+    if (!item || !item.targets.includes(entry.target) ||
+        (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return false;
+    if (entry.target === "roof" && (!Array.isArray(entry.normal) || entry.normal.length !== 3 ||
+        !entry.normal.every(Number.isFinite) || entry.normal[1] <= 0.001)) return false;
     if (item.visual.kind === "timber" && !timberFitsWall(item.visual, entry.point, entry.turn, wallSections.get(entry.hostId)))
       return false;
-    if (makesWorktop(item)) hosts.add(worktopId(entry.id));
+    if (makesWorktop(item)) hosts.set(worktopId(entry.id), "worktop");
     return true;
   });
 }
