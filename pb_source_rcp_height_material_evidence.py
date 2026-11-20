@@ -51,6 +51,7 @@ class SourceRcpHeightMaterialResult:
     revision_id: str
     snapshot_id: str
     candidate_records: tuple[SourceRcpHeightMaterialCandidate, ...] = ()
+    legend_candidate_records: tuple[SourceRcpHeightMaterialCandidate, ...] = ()
     reason_codes: tuple[str, ...] = ()
     physical_ceiling_zone_authenticated: bool = False
     wall_finish_height_authenticated: bool = False
@@ -116,6 +117,36 @@ def _paired(words: Sequence[Any], viewport: tuple[float, float, float, float] | 
     )
 
 
+def _is_source_legend_example(height: Any, material: Any, words: Sequence[Any]) -> bool:
+    """Quarantine a sample adjacent to a source-trusted legend heading.
+
+    Only source-matched words from the same page and partition may oppose the
+    callout. Scale the proximity by the heading's own native glyph extent,
+    not a page position, a drawing identity, or an expected candidate count.
+    This is conservative negative evidence; it never authenticates a ceiling.
+    """
+    mx, my = _centre(material)
+    bx0, by0, bx1, by1 = material.bbox
+    for heading in words:
+        if (
+            not heading.trusted
+            or heading.page_id != material.page_id
+            or heading.source_partition_id != material.source_partition_id
+            or heading.text.strip().upper() != "LEGEND"
+        ):
+            continue
+        hx0, hy0, hx1, hy1 = heading.bbox
+        if not all(math.isfinite(v) for v in (*heading.bbox, *material.bbox)):
+            continue
+        size = max(hx1 - hx0, hy1 - hy0, bx1 - bx0, by1 - by0)
+        if size <= 0:
+            continue
+        hx, hy = _centre(heading)
+        if math.hypot(mx - hx, my - hy) <= 2.0 * size:
+            return True
+    return False
+
+
 def collect_original_rcp_height_material_evidence(
     *,
     source: SourceVisibilityProducer,
@@ -162,6 +193,7 @@ def collect_original_rcp_height_material_evidence(
     if len(set(original_ids)) != len(original_ids):
         return SourceRcpHeightMaterialResult(**empty, reason_codes=(SOURCE_RCP_HEIGHT_TEXT_UNTRUSTED,))
     candidate_records = []
+    legend_candidate_records = []
     for height, material, value in _paired(words, viewport_bbox_pdf_pts):
         payload = dict(
             document_id=revision.document_id,
@@ -174,14 +206,26 @@ def collect_original_rcp_height_material_evidence(
             height_observation_id=height.observation_id,
             material_bbox_pdf_pts=material.bbox, height_bbox_pdf_pts=height.bbox,
         )
-        candidate_records.append(SourceRcpHeightMaterialCandidate(
+        record = SourceRcpHeightMaterialCandidate(
             record_id=stable_contract_id("original_rcp_height_candidate", payload, digest_chars=32),
             **payload,
-        ))
-    candidate_records.sort(key=lambda c: (c.page_id, c.block_no, c.height_line_no, c.height_observation_id))
+        )
+        if _is_source_legend_example(height, material, words):
+            legend_candidate_records.append(record)
+        else:
+            candidate_records.append(record)
+    key = lambda c: (c.page_id, c.block_no, c.height_line_no, c.height_observation_id)
+    candidate_records.sort(key=key)
+    legend_candidate_records.sort(key=key)
     if not candidate_records:
-        return SourceRcpHeightMaterialResult(**empty, reason_codes=(SOURCE_RCP_HEIGHT_UNAVAILABLE,))
-    return SourceRcpHeightMaterialResult(**empty, candidate_records=tuple(candidate_records))
+        return SourceRcpHeightMaterialResult(
+            **empty, legend_candidate_records=tuple(legend_candidate_records),
+            reason_codes=(SOURCE_RCP_HEIGHT_UNAVAILABLE,),
+        )
+    return SourceRcpHeightMaterialResult(
+        **empty, candidate_records=tuple(candidate_records),
+        legend_candidate_records=tuple(legend_candidate_records),
+    )
 
 
 @dataclass(frozen=True)
