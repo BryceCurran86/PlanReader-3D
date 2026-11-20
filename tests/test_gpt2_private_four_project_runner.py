@@ -133,9 +133,9 @@ def test_missing_exact_head_cannot_run_real_measurement(tmp_path, monkeypatch):
     real = gate.verify_private_original_roster
     monkeypatch.setattr(gate, "verify_private_original_roster", lambda root=None: real(root, manifest_root=manifests))
     out = tmp_path / "production"
-    with pytest.raises(gate.PrivateSourceGateError, match="checkout_head_cannot_be_authenticated"):
+    with pytest.raises(gate.PrivateSourceGateError, match="expected_checkout_sha_invalid"):
         gate.run_verified_private_handoff(
-            project_id=gate.PROJECTS[0], expected_head_sha="b" * 40,
+            project_id=gate.PROJECTS[0], expected_head_sha="not-a-commit",
             source_root=roots, output_dir=out,
         )
     assert not out.exists()
@@ -245,9 +245,9 @@ def test_checkout_authenticated_before_any_private_source_read(tmp_path, monkeyp
         calls.append("PRIVATE_READ_ATTEMPTED")
         raise AssertionError("untrusted code attempted a private source read")
     monkeypatch.setattr(gate, "verify_private_original_roster", private_roster_must_not_be_opened)
-    with pytest.raises(gate.PrivateSourceGateError, match="checkout_head_cannot_be_authenticated"):
+    with pytest.raises(gate.PrivateSourceGateError, match="expected_checkout_sha_invalid"):
         gate.run_verified_private_handoff(
-            project_id=gate.PROJECTS[0], expected_head_sha="a" * 40,
+            project_id=gate.PROJECTS[0], expected_head_sha="not-a-commit",
             source_root=roots, output_dir=tmp_path / "external_results",
         )
     assert calls == []
