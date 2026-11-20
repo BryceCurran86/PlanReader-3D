@@ -22,7 +22,9 @@ from pb_live_ceiling_area_source_closed_export import (
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import QuantityEvidence
-from pb_source_customer_inclusion_scope import require_uncontested_source_inclusion
+from pb_source_customer_inclusion_scope import (
+    require_uncontested_source_inclusion, unique_customer_ceiling_owners,
+)
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -165,6 +167,7 @@ def project_live_ceiling_area_customer_rows(
                 f"{source_id}"
             )
 
+    ceilings = unique_customer_ceiling_owners(result.canonical_ceilings)
     original = tuple(
         quantity
         for quantity in publish_live_ceiling_area_quantities(result)
@@ -178,11 +181,6 @@ def project_live_ceiling_area_customer_rows(
     if not original:
         return ()
 
-    ceilings = {
-        _clean(ceiling.canonical_ceiling_id): ceiling
-        for ceiling in result.canonical_ceilings
-        if _clean(ceiling.canonical_ceiling_id)
-    }
     projected_quantities: list[QuantityEvidence] = []
     authorities: dict[str, CommercialMeasurementAuthority] = {}
     for quantity in original:
