@@ -1,4 +1,6 @@
 import { EXTERIOR_CATALOGUE } from "./exteriorCatalogue.ts";
+import { ROOF_COMPONENTS } from "./roofComponents.ts";
+import { ROUGH_IN_CATALOGUE } from "./roughInCatalogue.ts";
 
 export const CATALOGUE_GROUPS = [
   ["paint", "Paint"], ["boards", "Plasterboard"], ["skirting", "Skirting"],
@@ -7,7 +9,9 @@ export const CATALOGUE_GROUPS = [
   ["bathroom", "Bathroom fixtures"], ["cabinets", "Cabinetry"], ["doors", "Door finishes"],
   ["timber", "Timber profiles"], ["entry", "Front doors"], ["substrates", "Exterior substrates"],
   ["facades", "Exterior wall finishes"], ["decking", "Decking and paving"], ["soffits", "Soffits and eaves"],
-  ["roofing", "Roof finishes"],
+  ["roofing", "Roof finishes"], ["roof-components", "Roof components"],
+  ["plumbing-rough-in", "Plumbing rough-in"], ["electrical-rough-in", "Electrical rough-in"],
+  ["air-conditioning", "Air conditioning"],
 ] as const;
 export type CatalogueGroup = typeof CATALOGUE_GROUPS[number][0];
 export type ItemTarget = "wall" | "floor" | "ceiling" | "roof" | "opening" | "worktop";
@@ -18,7 +22,7 @@ export type FixtureShape =
   | "mixer" | "gooseneck" | "square-spout" | "wall-spout" | "outdoor-tap" | "shower"
   | "socket" | "switch" | "port" | "isolator" | "alarm"
   | "downlight" | "batten" | "pendant" | "sconce" | "fan"
-  | "basin" | "toilet" | "bath" | "vanity" | "cabinet" | "bench" | "rail";
+  | "basin" | "toilet" | "bath" | "vanity" | "cabinet" | "bench" | "rail" | "service-box";
 
 type SurfaceVisual = { kind: "surface"; slot: "finish" | "lining"; pattern: Pattern;
   color: number; roughness: number; repeatM?: readonly [number, number] };
@@ -33,7 +37,9 @@ export type EntryStyle = "flush" | "shaker" | "craftsman" | "vertical-lite" | "s
   "full-lite" | "batten" | "arched-lite" | "double" | "sidelight" | "pivot";
 export type EntryVisual = { kind: "entry"; style: EntryStyle; minWidthM: number; minHeightM: number;
   color: number; grain: number | null };
-export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual | TimberVisual | EntryVisual;
+export type RoofComponentVisual = { kind: "roof-component"; component: "gutter" | "fascia" | "flashing";
+  profile: "quad" | "half-round" | "square" | "eaves" | "barge" | "apron" | "ridge" | "valley"; color: number };
+export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual | TimberVisual | EntryVisual | RoofComponentVisual;
 export type CatalogueItem = {
   id: string;
   group: CatalogueGroup;
@@ -245,7 +251,7 @@ export const ITEM_CATALOGUE: readonly CatalogueItem[] = [
     ["Walnut", 0x705240], ["Graphite", 0x4e5154]], "cabinet kitchen vanity joinery benchtop worktop"),
   ...doorFinishes.map(([label, color, pattern]) => surface("doors", label, ["opening"], color,
     pattern, 0.55, [0.22, 1.3], "finish", "door leaf opening door finish")),
-  ...EXTERIOR_CATALOGUE,
+  ...EXTERIOR_CATALOGUE, ...ROOF_COMPONENTS, ...ROUGH_IN_CATALOGUE,
 ];
 
 export const itemCanRotate = (item: CatalogueItem) =>

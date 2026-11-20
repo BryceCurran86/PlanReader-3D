@@ -488,3 +488,21 @@ summaries, not FIRM takeoffs. Headset output requires actual WebXR support and
 PS VR2 hardware testing; green TypeScript/Node CI is not headset proof.
 
 Test via `cd vr-editor && npm ci && npm test && npm run build`.
+
+### Construction views and draft editing
+
+Use **View** in the desktop toolbar or headset panel to switch between **Concrete slab**, **Framing**, **Rough-in**, **Lock-up** and **Finished**. The slab view exposes source floor surfaces for review. The framing and rough-in views expose wall extents and draft openings. Verify concrete thickness, framing members and bracing on the relevant structural drawings.
+
+On desktop, choose **Wall** or **Ceiling** and drag in the scene. Two clicks also work. Use **Move** to reposition a draft and **Stretch** to pull a wall end or ceiling corner. Stretch keeps door and frame openings within their host. Drag **Door** or **Frame** onto a draft wall to place an opening, or arm the tool and click. **Top view** exposes the outline for editing. In VR, use the trigger to place an opening or hold it while pointing to reposition a draft. **Undo** steps back through draft geometry changes.
+
+Drag a catalogue choice into the desktop scene or arm it and aim in VR. Plumbing, electrical and A/C rough-ins are draft coordination points. Air-conditioning choices include wall split, floor console, ducted, cassette, outdoor and VRF variants, plus grilles, refrigerant or condensate points and controllers. The relevant contractor confirms the design and routing.
+
+**Roof components** snap to matching source roof edges. Aim at a recognised eave for gutters or eaves fascia, a verge for barge trim, and a matching junction for ridge or valley flashings. Profile dimensions illustrate the selected shape. Confirm roof details, drainage design and product specifications from project evidence.
+
+The **Australian standards** panel provides stage references and the evidence required for review. Use the project’s jurisdiction, building class and approval date to confirm the applicable NCC edition, local variations and referenced documents.
+
+### Live material price previews
+
+In **Items → Live material pricing**, select a placement on an authenticated source object and choose its linked takeoff quantity. The price preview uses the current FIRM, publishable row and a company rate bound to the chosen item and that quantity.
+
+The host mounts the existing live-costing WSGI app and supplies its optional **load_catalogue_rate(principal, workspace, item_id, row)** provider. Return a **CatalogueRateBinding** with the selected item, takeoff row, canonical object, current company rate-book revision and rate provenance. The endpoint is **POST /api/editor/workspaces/{workspace}/costing/catalogue**. All identity fields are checked against the current source, workspace, ledger and rate book before previewing. Drafts and missing or unverified rate bindings appear without a price.

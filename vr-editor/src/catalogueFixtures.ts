@@ -53,6 +53,13 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   }
 
   switch (shape) {
+    case "service-box":
+      box(w, h, d, 0, h / 2, d / 2);
+      for (let line = -1; line <= 1; line++) {
+        box(w * 0.74, h * 0.05, d * 0.04,
+          0, h / 2 + h * 0.18 * line, d, detail);
+      }
+      break;
     case "mixer":
       if (target === "wall") {
         disk(w / 2, 0.012, 0, 0, 0.008);

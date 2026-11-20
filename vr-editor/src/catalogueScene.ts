@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import { nearestRoofEdge } from "./roofComponents.ts";
+import type { RoofEdge } from "./roofComponents.ts";
+import { roofComponentMesh } from "./roofComponentGeometry.ts";
+import { showConstructionItem } from "./constructionStages.ts";
+import type { ConstructionStage } from "./constructionStages.ts";
+import type { CeilingDraft } from "./buildPlacement.ts";
 import { openingFits, planLength } from "./buildPlacement.ts";
 import type { PlanPoint, WallVisual } from "./buildPlacement.ts";
 import { getCatalogueItem } from "./itemCatalogue.ts";
@@ -19,6 +25,8 @@ export type CatalogueHost = {
   mesh: THREE.Mesh;
   run?: WallRun;
   opening?: Opening;
+  roofEdges?: RoofEdge[];
+  ceilingDraft?: CeilingDraft;
 };
 
 export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint, heightM: number): CatalogueHost {
@@ -148,6 +156,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
   let sourceKey: readonly CatalogueHost[] | null = null;
   let draftKey: readonly CatalogueHost[] | null = null;
   let itemKey: readonly PlacedItem[] | null = null;
+  let stageKey: ConstructionStage = "finished";
   const marker = new THREE.Mesh(new THREE.RingGeometry(0.036, 0.047, 22),
     new THREE.MeshBasicMaterial({ color: 0x78ffe1, side: THREE.DoubleSide, depthWrite: false }));
   marker.visible = false;
@@ -166,12 +175,18 @@ export function createCatalogueScene(scene: THREE.Scene) {
     sourceKey = draftKey = itemKey = null;
   }
 
-  function sync(source: readonly CatalogueHost[], drafts: readonly CatalogueHost[], items: readonly PlacedItem[]) {
-    if (sourceKey === source && draftKey === drafts && itemKey === items) return;
+  function sync(source: readonly CatalogueHost[], drafts: readonly CatalogueHost[], items: readonly PlacedItem[],
+    stage: ConstructionStage = "finished") {
+    if (sourceKey === source && draftKey === drafts && itemKey === items && stageKey === stage) return;
     clear();
     sourceKey = source;
     draftKey = drafts;
     itemKey = items;
+    stageKey = stage;
+    items = items.filter(placement => {
+      const item = getCatalogueItem(placement.itemId);
+      return !!item && showConstructionItem(stage, item);
+    });
     const byId = new Map<string, CatalogueHost>();
     function addHost(host: CatalogueHost) {
       hosts.set(host.mesh, host);
@@ -200,7 +215,11 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const { visual } = item;
       if (host.target === "opening" && openingFitMessage(item, host.opening?.size)) continue;
       let node: THREE.Object3D;
-      if (visual.kind === "surface") {
+      if (visual.kind === "roof-component") {
+        const edge = host.roofEdges?.find(row => row.key === placement.roofEdgeKey);
+        if (!edge) continue;
+        node = roofComponentMesh(edge, visual);
+      } else if (visual.kind === "surface") {
         if (item.group === "doors" && designedDoors.has(host.id)) continue;
         if (visual.slot === "lining" && visibleFinishes.has(surfaceKey(placement))) continue;
         node = finishMesh(host.mesh, visual, host.target, normal, placement.side);
@@ -270,8 +289,27 @@ export function createCatalogueScene(scene: THREE.Scene) {
         return { hit: null, reason: "Aim at the top of the roof face." };
       }
       if (host.target === "worktop" && (normal.y < 0.9 || side < 0)) return { hit: null };
-      return { hit: { hostId: host.id, target: host.target, point: local.toArray() as Vector,
-        normal: normal.multiplyScalar(side).toArray() as Vector, side, opening: host.opening?.size } };
+      const point = local.toArray() as Vector;
+      const edge = item.visual.kind === "roof-component"
+        ? nearestRoofEdge(host.roofEdges ?? [], item.visual, point) : undefined;
+      if (item.visual.kind === "roof-component" && !edge) return { hit: null, reason: "Aim closer to a matching roof edge." };
+      const hitValue: ItemHit = { hostId: host.id, target: host.target, point,
+        normal: normal.multiplyScalar(side).toArray() as Vector, side, opening: host.opening?.size,
+        roofEdgeKey: edge?.key };
+      if (host.id.startsWith("draft-wall:") && host.run && !host.opening) {
+        const { start, end } = host.run;
+        const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+        const along = ((point[0] - start[0]) * (end[0] - start[0]) +
+          (point[2] - start[1]) * (end[1] - start[1])) / length;
+        hitValue.anchor = { kind: "wall", offsetM: Math.max(0, Math.min(length, along)) };
+      }
+      if (host.ceilingDraft) {
+        const { start, end } = host.ceilingDraft;
+        hitValue.anchor = { kind: "ceiling",
+          xFraction: THREE.MathUtils.clamp((point[0] - Math.min(start[0], end[0])) / Math.abs(end[0] - start[0]), 0, 1),
+          zFraction: THREE.MathUtils.clamp((point[2] - Math.min(start[1], end[1])) / Math.abs(end[1] - start[1]), 0, 1) };
+      }
+      return { hit: hitValue };
     }
     return { hit: null };
   }
