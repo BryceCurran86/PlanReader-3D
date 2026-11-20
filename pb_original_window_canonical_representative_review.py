@@ -92,6 +92,12 @@ def compare_figured_window_source_to_canonical_representatives(
             or w.frozen_benchmark_scored is not False
             or type(w.receipt_id) is not str or not w.receipt_id
             or w.receipt_id in seen_receipts
+            or type(w.native_host_path_ids) is not tuple
+            or len(w.native_host_path_ids)!=2
+            or not all(type(v) is int and v>=0 for v in w.native_host_path_ids)
+            or type(w.native_window_marker_path_ids) is not tuple
+            or len(w.native_window_marker_path_ids)!=2
+            or not all(type(v) is int and v>=0 for v in w.native_window_marker_path_ids)
         ):
             raise ValueError("source_figured_window_witness_untrusted")
         seen_receipts.add(w.receipt_id)
