@@ -350,13 +350,7 @@ def run_logged(
         while True:
             try:
                 rc = proc.wait(timeout=poll_s)
-                # A process that exits before the first polling deadline has
-                # no observed memory evidence. Never call that a guarded pass.
-                if ((max_private_mb is not None and usage["peak_private_kb"] <= 0)
-                        or (min_free_commit_mb is not None
-                            and usage["min_system_free_commit_kb"] is None)):
-                    return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
-                return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", usage
+                break
             except subprocess.TimeoutExpired:
                 elapsed = time.monotonic() - started
                 if measure:
@@ -366,13 +360,15 @@ def run_logged(
                     if free_kb is not None:
                         previous = usage["min_system_free_commit_kb"]
                         usage["min_system_free_commit_kb"] = free_kb if previous is None else min(previous, free_kb)
-                    # Fail closed when a configured guard lacks its required metric.
-                    # A zero private-memory reading is not evidence of safety;
-                    # free commit may be unavailable even when RSS was sampled.
+                    rc = None
+                    # The worker can exit between the wait timeout and the sample.
+                    # A live worker still requires each configured measurement.
                     if ((max_private_mb is not None and private_kb <= 0)
                             or (min_free_commit_mb is not None and free_kb is None)):
-                        kill_tree(proc)
-                        return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
+                        rc = proc.poll()
+                        if rc is None:
+                            kill_tree(proc)
+                            return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
                     if max_private_mb is not None and private_kb // 1024 > max_private_mb:
                         kill_tree(proc)
                         return None, "MEMORY_LIMIT", usage
@@ -380,12 +376,19 @@ def run_logged(
                             and free_kb // 1024 < min_free_commit_mb):
                         kill_tree(proc)
                         return None, "SYSTEM_MEMORY_GUARD", usage
+                    if rc is not None:
+                        break
                 if elapsed >= timeout_s:
                     kill_tree(proc)
                     return None, "TIMEOUT", usage
                 if int(elapsed) % 300 < max(poll_s, 1):
                     note(f"  ... running {int(elapsed // 60)} min, peak private {usage['peak_private_kb'] // 1024} MB "
                          f"(log: {log.name})")
+        # Both exit paths require recorded values for the configured guards.
+        if ((max_private_mb is not None and usage["peak_private_kb"] <= 0)
+                or (min_free_commit_mb is not None and usage["min_system_free_commit_kb"] is None)):
+            return None, "MEMORY_SAMPLING_UNAVAILABLE", usage
+        return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", usage
 
 
 OCR_EXTRAS = ("rapidocr", "onnxruntime")
