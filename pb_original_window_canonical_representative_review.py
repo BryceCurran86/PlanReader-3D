@@ -68,7 +68,10 @@ def compare_figured_window_source_to_canonical_representatives(
         or figured.frozen_benchmark_scored is not False
     ):
         raise ValueError("source_window_figure_review_untrusted")
-    original_bridges=tuple(bridges)
+    # A single native bridge is a valid one-item source input. A parenthesized
+    # bridge is not a Python tuple; normalize it without granting authority.
+    # Every bridge still passes the exact page/host/marker and duplicate checks.
+    original_bridges=(bridges,) if type(bridges) is WindowFootprintBridge else tuple(bridges)
     by_source_paths={}
     for b in original_bridges:
         if type(b) is not WindowFootprintBridge or b.page_index!=figured.page_index:
