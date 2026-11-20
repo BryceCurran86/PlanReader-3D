@@ -87,7 +87,7 @@ def _filled(r, white):
 
 
 def _line(r):
-    if not isinstance(r, Mapping) or r.get("layer") != _WALL or r.get("type") != "s":
+    if not _internal_wall_layer(r) or r.get("type") != "s":
         return None
     if r.get("fill") is not None:
         return None
