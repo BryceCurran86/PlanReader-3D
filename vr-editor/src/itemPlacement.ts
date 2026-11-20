@@ -78,6 +78,7 @@ export function itemGuide(item: CatalogueItem) {
     case "wall": return "Aim at a wall face.";
     case "floor": return "Aim at a floor.";
     case "ceiling": return "Aim at the underside of a ceiling.";
+    case "roof": return "Aim at the top of a source-backed roof face.";
     case "opening": return "Aim at a door or frame you drafted.";
     case "worktop": return "Aim at a worktop. You can place a vanity or base cabinet first.";
   }
@@ -110,6 +111,7 @@ export function placeItem(
     const parent = getCatalogueItem(entry.itemId);
     return worktopId(entry.id) === hit.hostId && parent && makesWorktop(parent);
   })) return draft;
+  if (hit.target === "roof" && hit.normal[1] <= 0.001) return draft;
   const entry = { ...hit, id, itemId, turn };
   const slot = surfaceSlot(entry, item);
   let items = draft.items;
@@ -155,7 +157,7 @@ export function currentItemPlacements(
     }
   }
   for (const surface of manifest.sourceSurfaces ?? []) {
-    if (surface.kind === "floor" || surface.kind === "ceiling") hosts.add(makeItemHostId(surface.kind, surface.surfaceId));
+    hosts.add(makeItemHostId(surface.kind, surface.surfaceId));
   }
   if (demo) for (const room of ["west", "east"]) {
     hosts.add(makeItemHostId("floor", "demo-" + room));

@@ -313,7 +313,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     for (const surface of manifest.sourceSurfaces ?? []) {
       const mesh = displaySourceSurface(surface);
       if(surface.kind==="floor")verifiedFloorMeshes.push(mesh);
-      if ((surface.kind === "floor" || surface.kind === "ceiling") && sourceById.has(surface.objectId)) {
+      if (sourceById.has(surface.objectId)) {
         sourceItemHosts.push({ id: makeItemHostId(surface.kind, surface.surfaceId), target: surface.kind, mesh });
       }
       physical.add(mesh);

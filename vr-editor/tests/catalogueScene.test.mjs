@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Box3, Raycaster, Scene, Vector3 } from "three";
+import { Box3, BufferGeometry, DoubleSide, Float32BufferAttribute, Mesh, MeshBasicMaterial, Raycaster, Scene, Vector3 } from "three";
 import { displayWallDraft } from "../src/buildScene.ts";
 import { createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts } from "../src/catalogueScene.ts";
 import { searchCatalogue } from "../src/itemCatalogue.ts";
@@ -142,4 +142,45 @@ test("a glazed entry leaves the glass visible while the selected face finish col
   const slab = assembly.children.find(child => child.name === "Entry door leaf");
   assert.ok(glass.material.transparent && glass.material.opacity < 1);
   assert.equal(slab.material[1].color.getHex(), finish.visual.color);
+});
+
+test("roof finishes follow the pitch and accept hits on the top of the roof", () => {
+  const scene = new Scene();
+  const catalogue = createCatalogueScene(scene);
+  const geometry = new BufferGeometry();
+  const points = [
+    0, 2, 0, 0, 4, 2, 2, 4, 2,
+    0, 2, 0, 2, 2, 0, 2, 4, 2,
+    4, 2, 0, 4, 3, 0, 4, 2, 1,
+  ];
+  geometry.setAttribute("position", new Float32BufferAttribute(points, 3));
+  const mesh = new Mesh(geometry, new MeshBasicMaterial({ side: DoubleSide }));
+  scene.add(mesh);
+  const roof = { id: "roof:pitched", target: "roof", mesh };
+  const floor = demoCatalogueHosts(scene).filter(entry => entry.target === "floor");
+  const hosts = [roof, ...floor];
+  scene.updateMatrixWorld(true);
+  catalogue.sync(hosts, [], []);
+
+  const selected = choice("corrugated steel roof charcoal");
+  const fromAbove = ray([1.5, 6, 0.2], [0, -1, 0]);
+  const { hit } = catalogue.candidate(fromAbove, selected);
+  assert.equal(hit.hostId, "roof:pitched");
+  assert.ok(hit.normal[1] > 0);
+  assert.equal(catalogue.candidate(ray([1.5, 1, 0.2], [0, 1, 0]), selected).hit, null);
+  assert.equal(catalogue.candidate(fromAbove, choice("vanity 600 polar")).hit.hostId, "floor:demo-west");
+
+  catalogue.sync(hosts, [], assign(start(), "roof-covering", selected, hit).items);
+  assert.equal(mesh.children.length, 1);
+  const finish = mesh.children[0].geometry;
+  const position = finish.getAttribute("position");
+  const normal = finish.getAttribute("normal");
+  const uv = finish.getAttribute("uv");
+  assert.equal(position.count, 6);
+  assert.ok(Math.abs(uv.getY(1) - uv.getY(0) - Math.hypot(2, 2)) < 1e-5);
+  for (let i = 0; i < position.count; i++) assert.ok(normal.getY(i) > 0);
+  assert.deepEqual([...geometry.getAttribute("position").array], points);
+  assert.equal(geometry.getAttribute("uv"), undefined);
+  catalogue.sync(hosts, [], []);
+  assert.equal(mesh.children.length, 0);
 });
