@@ -81,6 +81,7 @@ def compare_figured_window_source_to_canonical_representatives(
         by_source_paths[key]=b
     source_witnesses=tuple(figured.unique_source_figured_window_bridges)
     seen_receipts=set()
+    seen_native_aperture_bridge_keys=set()
     figure_to_bridge={}
     for w in source_witnesses:
         if (
@@ -106,6 +107,9 @@ def compare_figured_window_source_to_canonical_representatives(
         b=by_source_paths.get(key)
         if b is None:
             raise ValueError("source_figured_window_has_no_exact_original_bridge")
+        if key in seen_native_aperture_bridge_keys:
+            raise ValueError("multiple_figured_source_windows_one_native_aperture")
+        seen_native_aperture_bridge_keys.add(key)
         figure_to_bridge[w.receipt_id]=b
     source_candidates=tuple(canonical_openings)
     seen_canonical=set()
