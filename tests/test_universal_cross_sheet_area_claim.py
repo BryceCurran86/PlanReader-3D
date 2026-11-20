@@ -120,3 +120,115 @@ def test_duplicate_physical_face_floor_owners_stay_unmeasured():
     f = _floor()
     rival = replace(f, canonical_floor_id="different-canonical")
     assert _apply([f, rival], [_area(f)]) == (f, rival)
+
+
+# Only real producer-registered physical correspondence can enter the
+# generic cross-sheet pathway; a synthetic rectangle does not mint authority.
+import hashlib
+from itertools import count
+from pb_source_cross_view_floor_correspondence_shadow import (
+    SourceCrossViewFloorCorrespondenceRecord, CrossSheetWallEquivalenceRecord,
+    DoorwayTransitionEvidence, _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT,
+    resolve_cross_sheet_floor_correspondence_for_claim,
+)
+
+_CASE = count(1)
+
+
+def _issued_source_correspondence(job="unseen-retail"):
+    suffix = next(_CASE)
+    data = ("original construction source " + str(suffix)).encode()
+    sha = hashlib.sha256(data).hexdigest()
+    f = replace(_floor(job), source_sha256=sha, snapshot_id=f"snapshot:{job}:{suffix}")
+    a = _area(f)
+    wall_eq = tuple(
+        CrossSheetWallEquivalenceRecord(
+            support_page_id="12", target_page_id="6", side_name=side,
+            support_face_coord=10.0, target_face_coord=10.0,
+            covered_interval_iou=1.0,
+        ) for side in ("x0", "x1", "y0", "y1")
+    )
+    door = DoorwayTransitionEvidence(
+        door_callout="D1", page_id="6", wall_side="y0",
+        schedule_page_id="15", door_width_mm=900., scheduled_room_name="LAB",
+    )
+    rec = SourceCrossViewFloorCorrespondenceRecord(
+        record_id=f"receipt:{job}:{suffix}",
+        canonical_floor_id=f.canonical_floor_id,
+        physical_room_id=a.physical_room_id,
+        source_room_face_record_id=f.source_room_face_record_id,
+        support_page_id="12", target_page_id="6",
+        support_dimension_box_pdf_pts=(0., 0., 10., 10.),
+        target_box_pdf_pts=(0., 0., 10., 10.),
+        registration_orientation="identity", registration_scale=1.,
+        registration_translation_pdf_pts=(0., 0.),
+        registration_support_pt=100., registration_runner_up_support_pt=1.,
+        registration_null_support_pt=0.,
+        wall_bounded_on_both_sheets=True,
+        wall_evidence_identical_on_both_sheets=True,
+        side_kinds={"x0": "wall", "x1": "wall", "y0": "door", "y1": "wall"},
+        finish_codes_in_box={"FT9": 1}, material_code="FT9",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(), authority_blockers=(),
+        commercial_projection_allowed=True, takeoff_eligible=True,
+        cross_sheet_wall_equivalences=wall_eq, doorway_transitions=(door,),
+        document_id=f.document_id, revision_id=f.revision_id,
+        source_sha256=sha, snapshot_id=f.snapshot_id,
+    )
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((f.snapshot_id, rec.record_id),), rec,
+    )
+    source = SimpleNamespace(
+        _store=SimpleNamespace(source_bytes_by_revision={f.revision_id: data}),
+    )
+    return source, SimpleNamespace(records=(a,)), SimpleNamespace(floors=(f,)), rec
+
+
+def _resolve(source, areas, floors, *receipts):
+    return resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=areas, canonical_floors=floors,
+        issued_records=receipts,
+    )
+
+
+@pytest.mark.parametrize("job", ["unknown-mall", "different-station", "new-villa"])
+def test_generic_registered_source_correspondence_accepts_any_project(job):
+    source, areas, floors, rec = _issued_source_correspondence(job)
+    assert _resolve(source, areas, floors, rec) == (rec,)
+
+
+def test_unregistered_copied_authority_cannot_enter_floor_finish():
+    source, areas, floors, rec = _issued_source_correspondence()
+    assert _resolve(source, areas, floors, replace(rec)) == ()
+    assert _resolve(source, areas, floors, replace(rec, record_id="invented")) == ()
+
+
+def test_source_correspondence_rejects_wrong_original_bytes_and_revision():
+    source, areas, floors, rec = _issued_source_correspondence()
+    source._store.source_bytes_by_revision[rec.revision_id] = b"foreign bytes"
+    assert _resolve(source, areas, floors, rec) == ()
+    del source._store.source_bytes_by_revision[rec.revision_id]
+    assert _resolve(source, areas, floors, rec) == ()
+
+
+@pytest.mark.parametrize("changed", [
+    {"takeoff_eligible": False}, {"commercial_projection_allowed": False},
+    {"wall_evidence_identical_on_both_sheets": False},
+    {"authority_blockers": ("unverified",)},
+    {"doorway_transitions": ()},
+    {"finish_codes_in_box": {"FT9": 2}},
+    {"target_page_id": "18"},
+])
+def test_producer_receipt_with_unresolved_authority_never_resolves(changed):
+    source, areas, floors, rec = _issued_source_correspondence()
+    assert _resolve(source, areas, floors, replace(rec, **changed)) == ()
+
+
+def test_two_competing_issued_receipts_cannot_choose_a_winner():
+    source, areas, floors, rec = _issued_source_correspondence()
+    other = replace(rec, record_id="another-issuer")
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((rec.snapshot_id, other.record_id),), other,
+    )
+    assert _resolve(source, areas, floors, rec, other) == ()
+    assert _resolve(source, areas, floors, other, rec) == ()
