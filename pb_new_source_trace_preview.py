@@ -45,6 +45,9 @@ from pb_next_wall_ring_preview import (
 )
 from pb_source_ocr_glyph_fastpath import get_source_words_with_glyph_fastpath
 from pb_source_internal_door_completeness_shadow import inspect_source_internal_door_completeness
+from pb_source_native_figured_window_bridge_review import (
+    inspect_original_window_figured_bridge_review,
+)
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -214,6 +217,27 @@ def source_native_trace_preview(
                 viewport_pdf_pts=viewport_pdf_pts,
             )
         _report("outer_boundary_evidence_ready", .38)
+        # The same original-native preview also exposes independently paired
+        # printed two-axis window figures ↔ native hosted aperture witnesses.
+        # This stage is deliberately non-authoritative and cannot alter wall,
+        # opening, room, source-seal or customer publication decisions.
+        source_figured_window_review = None
+        source_figured_window_reason = "raster_source_native_window_scope_unavailable"
+        if source_modality.route != "tiled_raster_underlay":
+            try:
+                if len(drawings) > 20000:
+                    source_figured_window_reason = "source_figured_window_review_over_path_limit"
+                else:
+                    source_figured_window_review = inspect_original_window_figured_bridge_review(
+                        source_bytes,
+                        page_index=page_index,
+                        expected_source_sha256=sha,
+                    )
+                    source_figured_window_reason = "source_window_figures_review_only"
+            except (TypeError, ValueError, RuntimeError, OSError, IndexError, AttributeError) as exc:
+                source_figured_window_reason = (
+                    "source_figured_window_review_unavailable:" + type(exc).__name__
+                )
         # Source-only inventory of internal swing and cavity-slider witnesses.
         # This never upgrades a callout to a physical opening or quantity.
         internal_door_review = (
@@ -533,6 +557,33 @@ def source_native_trace_preview(
             "external_source_path_ids_outside_rejected_loop_sample": list(
                 outer_wall.diagnostic_outside_source_path_sample
             ),
+            "source_figured_window_review_status": source_figured_window_reason,
+            "source_figured_window_unique_review_count": (
+                len(source_figured_window_review.unique_source_figured_window_bridges)
+                if source_figured_window_review is not None else 0
+            ),
+            "source_figured_window_ambiguous_count": (
+                source_figured_window_review.ambiguous_lines_or_bridges
+                if source_figured_window_review is not None else 0
+            ),
+            "source_figured_window_review_receipts": (
+                [
+                    {
+                        "receipt_id": witness.receipt_id,
+                        "source_host_native_path_ids": list(witness.native_host_path_ids),
+                        "source_marker_path_ids": list(witness.native_window_marker_path_ids),
+                        "figured_word_indices": list(witness.figured_word_indices),
+                        "unordered_figured_axes_mm": list(witness.unordered_figured_axes_mm),
+                        "provisional_product_m2": witness.provisional_product_m2,
+                        "physical_wall_authenticated": False,
+                        "measurement_authorized": False,
+                        "customer_quantity_authorized": False,
+                        "frozen_benchmark_scored": False,
+                    }
+                    for witness in source_figured_window_review.unique_source_figured_window_bridges
+                ] if source_figured_window_review is not None else []
+            ),
+            "source_figured_window_review_commercial_authority": False,
             "source_window_footprint_continuity_count": len(outer_wall.window_footprint_bridges),
             "source_garage_door_footprint_continuity_count": len(outer_wall.garage_door_footprint_bridges),
             "source_swing_door_footprint_continuity_count": len(outer_wall.swing_door_footprint_bridges),
