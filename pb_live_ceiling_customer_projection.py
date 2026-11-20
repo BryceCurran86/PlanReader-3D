@@ -12,7 +12,9 @@ from pb_live_ceiling_lining_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
-from pb_source_customer_inclusion_scope import require_uncontested_source_inclusion
+from pb_source_customer_inclusion_scope import (
+    require_uncontested_source_inclusion, unique_customer_ceiling_owners,
+)
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -108,16 +110,12 @@ def project_live_ceiling_customer_rows(
     if not quantities:
         return ()
 
+    ceilings = unique_customer_ceiling_owners(claim.canonical_ceilings)
     traces = build_live_ceiling_lining_source_traces(
         claim,
         workspace_id=workspace_id,
         project_id=project_id,
     )
-    ceilings = {
-        _clean(ceiling.canonical_ceiling_id): ceiling
-        for ceiling in claim.canonical_ceilings
-        if _clean(ceiling.canonical_ceiling_id)
-    }
     projected_quantities: list[QuantityEvidence] = []
     authorities: dict[str, CommercialMeasurementAuthority] = {}
     for quantity in quantities:
