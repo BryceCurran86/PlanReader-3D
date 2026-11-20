@@ -21,6 +21,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 ARCHIVE_MANIFEST = "PlanReader_private_source_manifest_18_of_18_20261120.json"
+# Independent owner inventory, hashed as canonical sorted [SHA-256, size]
+# pairs. The ZIP's own manifest locates members and cannot authorize bytes.
+_OWNER_ORIGINAL_ROSTER_SHA256 = "5cbb15a57170bd3f015f6386c5595c391938bdd9f6c410a1cc139d6db848665f"
+_ARCHITECTURAL_SOURCE_SHA256 = {
+    "3Laurel": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+    "Lot16": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+    "Maryborough": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+    "Q5446": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+    "Acacia": "435a6b610fea904f2b27dc330667d92a25919ada3368e5905e58ff92e047f37a",
+}
 PROJECT_PAGES = {
     "3Laurel": (2,),  # Rev3 page 3; zero based
     "Lot16": (2, 3),  # architectural floor plan source pages 3 and 4
@@ -62,9 +72,15 @@ def _validate_archive(path: Path) -> tuple[dict, dict[str, dict]]:
         raise PrivateSourceBlocked("owner_private_source_archive_not_found")
     try:
         with zipfile.ZipFile(path) as archive:
-            if len(set(archive.namelist())) != len(archive.namelist()):
+            names = archive.namelist()
+            if len({name.casefold() for name in names}) != len(names):
                 raise PrivateSourceBlocked("duplicate_archive_paths_rejected")
-            manifest = json.loads(archive.read(ARCHIVE_MANIFEST))
+            manifest_member = archive.getinfo(ARCHIVE_MANIFEST)
+            if manifest_member.file_size > 64 * 1024:
+                raise PrivateSourceBlocked("oversized_original_source_manifest")
+            manifest = json.loads(archive.read(manifest_member))
+            if not isinstance(manifest, dict):
+                raise PrivateSourceBlocked("invalid_original_source_inventory")
             entries = manifest.get("available_files")
             if (
                 manifest.get("expected_total") != 18
@@ -74,39 +90,55 @@ def _validate_archive(path: Path) -> tuple[dict, dict[str, dict]]:
             ):
                 raise PrivateSourceBlocked("incomplete_original_source_inventory")
             indexed: dict[str, dict] = {}
-            checked: set[tuple[str, str, str]] = set()
+            checked: set[str] = set()
+            roster: list[tuple[str, int]] = []
             for item in entries:
+                if not isinstance(item, dict):
+                    raise PrivateSourceBlocked("invalid_original_source_record")
                 name = item.get("relative_path")
                 namepath = PurePosixPath(str(name))
-                if (namepath.is_absolute() or ".." in namepath.parts
-                        or not str(name).startswith("documents/sources/")
+                if (type(name) is not str or name != namepath.as_posix()
+                        or "\\" in name or ":" in name or ".." in namepath.parts
+                        or not name.startswith("documents/sources/")
                         or namepath.suffix.lower() != ".pdf"):
                     raise PrivateSourceBlocked("unsafe_private_source_archive_path")
                 project, role = item.get("project"), item.get("role")
-                if project not in PROJECT_PAGES and project != "Q5446":
+                if type(project) is not str or project not in PROJECT_PAGES:
                     raise PrivateSourceBlocked("unknown_original_source_project")
-                if (project, role, name) in checked:
+                if type(role) is not str or not role.strip():
+                    raise PrivateSourceBlocked("invalid_original_source_role")
+                if name.casefold() in checked:
                     raise PrivateSourceBlocked("duplicate_source_record")
-                checked.add((project, role, name))
-                if not isinstance(item.get("bytes"), int) or item["bytes"] <= 0:
+                checked.add(name.casefold())
+                size = item.get("bytes")
+                if type(size) is not int or size <= 0:
                     raise PrivateSourceBlocked("invalid_original_file_size")
                 expected = item.get("sha256", "")
                 if not isinstance(expected, str) or not re.fullmatch("[a-f0-9]{64}", expected):
                     raise PrivateSourceBlocked("invalid_original_file_sha")
-                digest = hashlib.sha256()
-                length = 0
-                with archive.open(str(namepath)) as stream:
-                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                        digest.update(chunk)
-                        length += len(chunk)
-                if length != item["bytes"] or digest.hexdigest() != expected:
-                    raise PrivateSourceBlocked("original_file_hash_or_size_mismatch")
-                if project in PROJECT_PAGES and role == "architectural":
+                roster.append((expected, size))
+                if role == "architectural":
                     if project in indexed:
                         raise PrivateSourceBlocked("multiple_original_architectural_sources")
+                    if expected != _ARCHITECTURAL_SOURCE_SHA256[project]:
+                        raise PrivateSourceBlocked("wrong_original_architectural_source")
                     indexed[project] = item
             if set(indexed) != set(PROJECT_PAGES):
                 raise PrivateSourceBlocked("missing_original_architectural_project")
+            roster_bytes = json.dumps(sorted(roster), separators=(",", ":")).encode("utf-8")
+            if hashlib.sha256(roster_bytes).hexdigest() != _OWNER_ORIGINAL_ROSTER_SHA256:
+                raise PrivateSourceBlocked("original_source_roster_mismatch")
+
+            for item in entries:
+                member = archive.getinfo(item["relative_path"])
+                if member.file_size != item["bytes"]:
+                    raise PrivateSourceBlocked("original_file_hash_or_size_mismatch")
+                digest = hashlib.sha256()
+                with archive.open(member) as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                if digest.hexdigest() != item["sha256"]:
+                    raise PrivateSourceBlocked("original_file_hash_or_size_mismatch")
             return manifest, indexed
     except (OSError, zipfile.BadZipFile, KeyError, ValueError) as exc:
         if isinstance(exc, PrivateSourceBlocked):
