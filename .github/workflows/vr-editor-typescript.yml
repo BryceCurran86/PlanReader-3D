@@ -31,4 +31,6 @@ jobs:
         run: npm run build
       - name: Exercise desktop controls in headless Chrome
         working-directory: vr-editor
-        run: node tests/editor-controls.browser.mjs
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          node tests/editor-controls.browser.mjs
