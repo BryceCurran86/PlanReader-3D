@@ -273,3 +273,28 @@ def test_producer_registered_door_must_belong_to_source_declared_door_wall():
         ((bad.snapshot_id, bad.record_id),), bad,
     )
     assert _resolve(source, areas, floors, bad) == ()
+
+
+def test_real_source_wall_vocabulary_with_openings_can_host_a_verified_door():
+    source, areas, floors, original = _issued_source_correspondence("unseen-drawing")
+    native = replace(
+        original, record_id=original.record_id + ":native-wall-vocabulary",
+        side_kinds={"x0": "full", "x1": "full",
+                    "y0": "with_openings", "y1": "full"},
+    )
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((native.snapshot_id, native.record_id),), native,
+    )
+    assert _resolve(source, areas, floors, native) == (native,)
+
+
+def test_full_continuous_wall_cannot_pass_as_doorway_source_side():
+    source, areas, floors, original = _issued_source_correspondence("unseen-drawing")
+    invalid = replace(
+        original, record_id=original.record_id + ":full-wall-door-mismatch",
+        side_kinds={"x0": "full", "x1": "full", "y0": "full", "y1": "full"},
+    )
+    _REGISTERED_FLOOR_CORRESPONDENCES_BY_SNAPSHOT.register_issued(
+        ((invalid.snapshot_id, invalid.record_id),), invalid,
+    )
+    assert _resolve(source, areas, floors, invalid) == ()
