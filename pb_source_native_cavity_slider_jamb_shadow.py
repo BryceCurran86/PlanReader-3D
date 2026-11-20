@@ -12,7 +12,22 @@ import math
 import re
 from typing import Any
 
-_WALL = "Enclosure_WallInternal"
+# Architectural CAD exporters use several internal-wall layer conventions.
+# Do not accept generic annotations, furniture, external walls or text.
+_INTERNAL_WALL_LAYERS = re.compile(
+    r"^(?:Enclosure[_ .-]*WallInternal|Wall[_ .-]*Internal|"
+    r"Internal[_ .-]*Wall|building[._ -]+wall[._ -]+internal|"
+    r"A-WALL-INTR)$",
+    re.I,
+)
+
+
+def _internal_wall_layer(row):
+    return (
+        isinstance(row, Mapping)
+        and isinstance(row.get("layer"), str)
+        and bool(_INTERNAL_WALL_LAYERS.fullmatch(row["layer"]))
+    )
 _WIDTH = re.compile(r"^(?:6\d\d|7\d\d|8\d\d|9\d\d|1,?[0-4]\d\d)$")
 
 
@@ -58,7 +73,7 @@ def _box(r):
 
 
 def _filled(r, white):
-    if not isinstance(r, Mapping) or r.get("layer") != _WALL or r.get("type") != "f":
+    if not isinstance(r, Mapping) or not _internal_wall_layer(r) or r.get("type") != "f":
         return False
     c = r.get("fill")
     return (
