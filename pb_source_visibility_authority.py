@@ -1320,13 +1320,32 @@ class SourceVisibilityProducer:
         selected = frozenset(str(i) for i in support_observation_ids)
         if not selected or selector.observation_id not in selected:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-        records = {}
-        visibility = self.authority()
-        for observation_id in sorted(selected):
-            result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
-            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
-                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            records[observation_id] = result.observation
+        # The W4 source-page transaction authenticates all visible receipts
+        # on entry and reauthenticates the complete original source on exit.
+        # Reuse those already-proven rows inside that transaction instead of
+        # resolving each identical support receipt for every door candidate.
+        # All standalone or nonmatching calls retain scalar authentication.
+        batch = self._native_dimension_proof_batch
+        batch_rows = None
+        if batch is not None and batch['published'] is published:
+            by_id = batch.get('paint_observation_rows_by_id')
+            if by_id is None:
+                by_id = {i: r for i, r in batch['rows']}
+                batch['paint_observation_rows_by_id'] = by_id
+            if (selector.observation_id in by_id
+                    and str(by_id[selector.observation_id].page_id) == batch['page_id']
+                    and selected.issubset(by_id)):
+                batch_rows = {i: by_id[i] for i in sorted(selected)}
+        if batch_rows is not None:
+            records = batch_rows
+        else:
+            records = {}
+            visibility = self.authority()
+            for observation_id in sorted(selected):
+                result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
+                if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                records[observation_id] = result.observation
         if any(r.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT for r in records.values()):
             return ()
         page_ids = {r.page_id for r in records.values()}
