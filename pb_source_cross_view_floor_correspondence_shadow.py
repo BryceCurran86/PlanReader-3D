@@ -810,10 +810,25 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
                 if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
                     return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+                # A visible source word can belong to a registered native
+                # source dimension box; that is still only CANDIDATE mark
+                # containment, NOT physical room/wall/door source authority.
+                # Rival and overlapping boxes cannot each own the same word.
+                potential_owners = []
+                for box in measured_boxes:
+                    rect = box.get("dimension_box_pdf_pts") if isinstance(box, Mapping) else None
+                    if (type(rect) in (tuple, list) and len(rect) == 4
+                            and all(type(v) in (int, float) and math.isfinite(float(v))
+                                    for v in rect)
+                            and bbox[0] >= rect[0] + 5
+                            and bbox[1] >= rect[1] + 5
+                            and bbox[2] <= rect[2] - 5
+                            and bbox[3] <= rect[3] - 5):
+                        potential_owners.append(box)
                 marks.append({
                     "code": code, "x": (bbox[0] + bbox[2]) / 2,
                     "y": (bbox[1] + bbox[3]) / 2,
-                    "registered_region": None,
+                    "registered_region": len(potential_owners) == 1,
                 })
             if not marks:
                 return unavailable(SOURCE_FINISH_MARK_IDENTITY_INVALID)
