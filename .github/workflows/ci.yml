@@ -42,6 +42,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Blocks a regression to the wrong trace producer before any benchmark/PR review.
+      # This runs in the existing required CI on every PR and main push.
+      - name: Enforce original source-native tracing route
+        run: python scripts/check_canonical_trace_route.py
+
       # Source-only PRs must not publish original customer PDFs. Run before
       # dependency installation, independent of benchmark separation checks.
       - name: Reject newly committed private original-source files (PR)
