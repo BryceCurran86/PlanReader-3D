@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -199,6 +200,54 @@ def test_system_memory_guard_stops_when_the_machine_has_no_headroom(tmp_path):
         [sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, tmp_path / "g.log",
         timeout_s=60, poll_s=0.5, min_free_commit_mb=10 ** 9)
     assert (rc, status) == (None, "SYSTEM_MEMORY_GUARD")
+
+
+@pytest.mark.parametrize("measurements,exit_code,expected", (
+    (((2048, 2048, 4096), (0, 0, None)), 0, (0, "COMPLETED")),
+    (((2048, 2048, 4096), (0, 0, None)), 7, (7, "PROCESS_FAILED")),
+    (((0, 0, None),), 0, (None, "MEMORY_SAMPLING_UNAVAILABLE")),
+    (((2048, 2048, 4096), (0, 0, None)), None, (None, "MEMORY_SAMPLING_UNAVAILABLE")),
+    (((2048, 2048, 4096), (0, 0, 512)), 0, (None, "SYSTEM_MEMORY_GUARD")),
+))
+def test_exit_during_sampling_uses_verified_memory_history(tmp_path, monkeypatch, measurements, exit_code, expected):
+    class Worker:
+        pid = 123
+        returncode = None
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("worker", timeout)
+
+        def poll(self):
+            return self.returncode
+
+    worker = Worker()
+    remaining = iter(measurements)
+    observed = []
+    killed = []
+
+    def sample(pid):
+        assert pid == worker.pid
+        measurement = next(remaining)
+        observed.append(measurement)
+        if len(observed) == len(measurements):
+            worker.returncode = exit_code
+        return measurement
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *args, **kwargs: worker)
+    monkeypatch.setattr(launcher, "sample_memory_kb", sample)
+    monkeypatch.setattr(launcher, "kill_tree", killed.append)
+
+    rc, status, usage = launcher.run_logged(
+        ["worker"], tmp_path, tmp_path / "terminal-sample.log",
+        poll_s=0.3, max_private_mb=4, min_free_commit_mb=1,
+    )
+
+    assert (rc, status) == expected
+    assert usage["peak_private_kb"] == max(sample[1] for sample in measurements)
+    if exit_code is None:
+        assert killed == [worker]
+    elif rc is not None:
+        assert not killed
 
 
 def test_a_process_under_its_limits_still_completes_and_reports_peaks(tmp_path):
