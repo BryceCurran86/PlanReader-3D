@@ -6539,7 +6539,120 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
             "Live stages show original wall candidates, openings and "
             "candidate rooms; they do not produce commercial takeoffs."
         )
+        # Existing four source-authenticated 3Laurel finish issuers can
+        # deliver 22 sealed review rows independently of the provisional
+        # traced region polygons. Explicit opt-in; no inferred new area.
+        from pb_three_laurel_22_finish_combined_customer import (
+            SOURCE_SHA as _laurel_original_sha,
+        )
+        if (
+            native_trace.get("digest")==_laurel_original_sha
+            and doc_path and doc_path.is_file()
+            and not (
+                stored_sha and stored_sha!=native_trace.get("digest")
+            )
+        ):
+            with st.expander(
+                "3Laurel — verified floor, wall-tile and ceiling review",
+                expanded=False,
+            ):
+                st.caption(
+                    "22 independently figured original-source finish rows "
+                    "(3 vinyl floors, 4 wet floors, 8 wall-tile areas, "
+                    "7 ceiling planes). Not areas inferred from unsealed "
+                    "room outlines; customer approval is still required."
+                )
+                review_key=f"3laurel_signed_finish_review_{page['document_id']}"
+                if st.button(
+                    "Verify original and prepare 22 customer review rows",
+                    key=f"3laurel_22_customer_{page['document_id']}",
+                ):
+                    from pb_three_laurel_22_finish_combined_customer import (
+                        issue_original_three_laurel_22_finish_customer_rows,
+                    )
+                    with st.spinner("Verifying four original source seals..."):
+                        issued=issue_original_three_laurel_22_finish_customer_rows(
+                            doc_path, workspace_id=int(workspace["id"]),
+                        )
+                    if issued.status=="FIRM_SOURCE_CUSTOMER_TO_REVIEW":
+                        st.session_state[review_key]={
+                            "sha":native_trace["digest"],
+                            "customer_rows":issued.customer_rows,
+                            "family_counts":issued.family_counts,
+                        }
+                    else:
+                        st.session_state.pop(review_key,None)
+                        st.warning(
+                            "Original source finish review blocked: "
+                            + ", ".join(issued.reason_codes)
+                        )
+                previous=st.session_state.get(review_key,{})
+                if previous.get("sha")==native_trace.get("digest"):
+                    signed_rows=previous.get("customer_rows") or ()
+                    if len(signed_rows)==22:
+                        review_df=pd.DataFrame([{
+                            "Element":r["element"],
+                            "Room":r["location"],
+                            "Finish":r["finish_system"],
+                            "Quantity":r["quantity"],
+                            "Unit":r["unit"],
+                            "Source page":r["source_page"],
+                            "Review status":r["quantity_status"],
+                        } for r in signed_rows])
+                        st.dataframe(
+                            review_df,use_container_width=True,hide_index=True,
+                        )
+                        st.download_button(
+                            "Export 22 signed source review rows (CSV)",
+                            data=review_df.to_csv(index=False).encode("utf-8"),
+                            file_name="3laurel_22_original_source_finish_review.csv",
+                            mime="text/csv",
+                            key=f"3laurel_22_export_{page['document_id']}",
+                        )
+                        st.caption(
+                            "Source-verified output for review; no implicit "
+                            "room-surface additions, wall deductions, benchmark "
+                            "score or final customer publication."
+                        )
         source_mode=(native_report.get("source_modality") or {}).get("route")
+        internal_doors=native_report.get("source_internal_door_completeness") or {}
+        door_marks=internal_doors.get("marks") or []
+        if door_marks:
+            hinged=int(internal_doors.get("hosted_swing_count") or 0)
+            cavity=int(
+                internal_doors.get("cavity_slider_geometry_authenticated_count") or 0
+            )
+            unhosted=int(internal_doors.get("unhosted_swing_symbol_count") or 0)
+            unknown_sliders=max(
+                0,int(internal_doors.get("cavity_slider_callout_count") or 0)-cavity,
+            )
+            st.caption(
+                f"Internal doorway source topology: {hinged} hosted hinged "
+                f"+ {cavity} source-jamb cavity sliders; "
+                f"{unhosted + unknown_sliders} unhosted symbol(s). "
+                "Door areas and frozen scoring are NOT authorised by this overlay."
+            )
+            with st.expander(
+                "Internal door source evidence — hinges, jambs, cavity sliders",
+                expanded=False,
+            ):
+                st.dataframe(pd.DataFrame([{
+                    "Type": mark.get("kind"),
+                    "Source status": mark.get("status"),
+                    "Width (mm)": mark.get("label_width_mm"),
+                    "Original path IDs": ", ".join(
+                        str(pid) for pid in mark.get("native_path_ids",())
+                    ),
+                    "Native wall hosts": ", ".join(
+                        str(pid) for pid in mark.get("host_wall_native_path_ids",())
+                    ),
+                    "Physical opening approved": False,
+                } for mark in door_marks]),hide_index=True,use_container_width=True)
+                st.warning(
+                    "Original wall and jamb witnesses prove provisional "
+                    "door topology, not a room-area measurement, frame height, "
+                    "wall deduction or customer-approved door quantity."
+                )
         if source_mode == "tiled_raster_underlay":
             raster_count=len(
                 (native_report.get("raster_source_trace") or {}).get(

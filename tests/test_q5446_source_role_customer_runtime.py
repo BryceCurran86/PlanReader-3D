@@ -254,8 +254,12 @@ def test_private_sha_original_single_role_optional(tmp_path):
         output_dir=role, workspace_id=14,
     )
     assert result["status"] == "sealed"
-    expected_families = (
-        2 if runtime._authenticated_companion_roles(source) is not None else 1
-    )
-    assert result["verified_customer_row_count"] == expected_families
+    expected_counts = {"floor_area": 1}
+    if runtime._authenticated_companion_roles(source) is not None:
+        expected_counts["floor_finish_area"] = 3
+    assert result["family_counts"] == expected_counts
+    sealed = load_verified_sealed_run(role / (Q5446_PROJECT_ID + ".json"))
+    rows = json.loads((role / "verified_customer_rows.json").read_text(encoding="utf-8"))
+    verified = verify_sealed_customer_output(sealed, rows)
+    assert verified.customer_row_count == result["verified_customer_row_count"] == sum(expected_counts.values())
     assert result["benchmark_score_granted"] is False

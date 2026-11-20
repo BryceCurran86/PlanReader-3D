@@ -12,7 +12,7 @@ import pytest
 from tools import four_job_windows_launcher as launcher
 
 
-def _kit(root: Path, *, damage: str | None = None) -> Path:
+def _kit(root: Path, monkeypatch, *, damage: str | None = None) -> Path:
     docs = []
     for index, project in enumerate(launcher.PROJECTS):
         name = f"doc{index}.pdf"
@@ -34,6 +34,12 @@ def _kit(root: Path, *, damage: str | None = None) -> Path:
                      "original_sha256": hashlib.sha256(payload).hexdigest()})
     (root / "LOCAL_SOURCE_INVENTORY.json").write_text(json.dumps({
         "benchmark_id": "full_plan_takeoff_reconciliation_v2", "docs": docs}), encoding="utf-8")
+    roster = sorted(
+        (row["project_id"], row["manifest_name"], row["expected_size_bytes"], row["original_sha256"])
+        for row in docs
+    )
+    encoded = json.dumps(roster, separators=(",", ":")).encode("utf-8")
+    monkeypatch.setattr(launcher, "_FROZEN_SOURCE_ROSTER_SHA256", hashlib.sha256(encoded).hexdigest())
     if damage == "missing":
         (root / "sources" / docs[0]["project_id"] / docs[0]["manifest_name"]).unlink()
     elif damage == "changed":
@@ -44,8 +50,8 @@ def _kit(root: Path, *, damage: str | None = None) -> Path:
     return root
 
 
-def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     report = tmp_path / "report"
     assert launcher.verify_originals(kit, report) is True
     written = json.loads((report / "SOURCE_SHA_VERIFICATION.json").read_text(encoding="utf-8"))
@@ -53,13 +59,13 @@ def test_verify_originals_accepts_exact_bytes_and_writes_a_report(tmp_path):
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed"])
-def test_verify_originals_rejects_missing_or_same_size_modified_bytes(tmp_path, damage):
-    kit = _kit(tmp_path / "kit", damage=damage)
+def test_verify_originals_rejects_missing_or_same_size_modified_bytes(tmp_path, monkeypatch, damage):
+    kit = _kit(tmp_path / "kit", monkeypatch, damage=damage)
     assert launcher.verify_originals(kit, tmp_path / "report") is False
 
 
-def test_verify_originals_requires_exactly_ten_documents(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_requires_exactly_ten_documents(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     inventory = json.loads((kit / "LOCAL_SOURCE_INVENTORY.json").read_text(encoding="utf-8"))
     inventory["docs"] = inventory["docs"][:9]
     (kit / "LOCAL_SOURCE_INVENTORY.json").write_text(json.dumps(inventory), encoding="utf-8")
@@ -67,11 +73,31 @@ def test_verify_originals_requires_exactly_ten_documents(tmp_path):
         launcher.verify_originals(kit, tmp_path / "report")
 
 
-def test_verify_originals_accepts_inventory_with_utf8_bom(tmp_path):
-    kit = _kit(tmp_path / "kit")
+def test_verify_originals_accepts_inventory_with_utf8_bom(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit", monkeypatch)
     path = kit / "LOCAL_SOURCE_INVENTORY.json"
     path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
     assert launcher.verify_originals(kit, tmp_path / "report") is True
+
+
+@pytest.mark.parametrize("change", ["replace_pdf_and_claimed_sha", "duplicate_document"])
+def test_inventory_cannot_authorize_replacement_or_repeated_originals(tmp_path, monkeypatch, change):
+    kit = _kit(tmp_path / "kit", monkeypatch)
+    path = kit / "LOCAL_SOURCE_INVENTORY.json"
+    inventory = json.loads(path.read_text(encoding="utf-8"))
+    first = inventory["docs"][0]
+    if change == "replace_pdf_and_claimed_sha":
+        replacement = b"%PDF replacement"
+        (kit / "sources" / first["project_id"] / first["manifest_name"]).write_bytes(replacement)
+        first["expected_size_bytes"] = len(replacement)
+        first["original_sha256"] = hashlib.sha256(replacement).hexdigest()
+    else:
+        inventory["docs"][1] = first
+    path.write_text(json.dumps(inventory), encoding="utf-8")
+    report = tmp_path / "report"
+    with pytest.raises(ValueError, match="frozen original source roster"):
+        launcher.verify_originals(kit, report)
+    assert not report.exists()
 
 
 def test_output_report_creates_nested_parent(tmp_path):
@@ -108,6 +134,53 @@ def test_sample_memory_sums_the_process_tree_and_never_raises():
     ws_kb, private_kb, _free = launcher.sample_memory_kb(os.getpid())
     assert ws_kb > 0 and private_kb > 0
     assert len(launcher.sample_memory_kb(999_999_999)) == 3  # unknown pid: measured as nothing, no exception
+
+
+
+@pytest.mark.parametrize("limits", [
+    {"max_private_mb": 100},
+    {"min_free_commit_mb": 100},
+    {"max_private_mb": 100, "min_free_commit_mb": 100},
+])
+def test_missing_memory_sample_fails_closed_when_guard_enabled(tmp_path, monkeypatch, limits):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: (0, 0, None))
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path, tmp_path / "sample_unavailable.log",
+        timeout_s=20, poll_s=0.1, **limits,
+    )
+    assert rc is None and status == "MEMORY_SAMPLING_UNAVAILABLE"
+    assert usage["peak_private_kb"] == 0
+    assert usage["min_system_free_commit_kb"] is None
+
+
+def test_missing_memory_sample_without_guard_does_not_invent_memory_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: (0, 0, None))
+    rc, status, _usage = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(0.5)"],
+        tmp_path, tmp_path / "no_guard.log",
+        timeout_s=10, poll_s=0.1, track_memory=True,
+    )
+    assert rc == 0 and status == "COMPLETED"
+
+@pytest.mark.parametrize("limits", [
+    {"max_private_mb": 100},
+    {"min_free_commit_mb": 100},
+    {"max_private_mb": 100, "min_free_commit_mb": 100},
+])
+def test_fast_exit_without_any_memory_sample_cannot_pass_guard(tmp_path, monkeypatch, limits):
+    calls = []
+    def forbidden_sample(_pid):
+        calls.append(_pid)
+        return (0, 0, None)
+    monkeypatch.setattr(launcher, "sample_memory_kb", forbidden_sample)
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "pass"], tmp_path, tmp_path / "fast_exit.log",
+        timeout_s=10, poll_s=5, **limits,
+    )
+    assert (rc, status) == (None, "MEMORY_SAMPLING_UNAVAILABLE")
+    assert calls == []
+    assert usage["peak_private_kb"] == 0
 
 
 def test_memory_limit_stops_a_process_that_commits_too_much(tmp_path):
@@ -174,7 +247,7 @@ def test_stale_checkout_is_not_reused_when_the_requested_ref_cannot_be_fetched(t
 
 
 def test_main_does_not_start_preflight_after_a_failed_snapshot_fetch(tmp_path, monkeypatch):
-    kit = _kit(tmp_path / "kit")
+    kit = _kit(tmp_path / "kit", monkeypatch)
     home = tmp_path / "home"
     repo = home / "Documents" / "PlanReader_Private_V2_Run" / "repo_readonly_snapshot"
     (repo / ".git").mkdir(parents=True)
@@ -220,7 +293,14 @@ def test_pinned_commit_mismatch_does_not_return_a_different_head(tmp_path, monke
     assert written["status"] == "PINNED_COMMIT_MISMATCH"
 
 
-def test_successful_refresh_returns_the_checked_out_head(tmp_path, monkeypatch):
+@pytest.mark.parametrize("status_code, status_out, expected", [
+    (0, "", "CHECKED_OUT"),
+    (0, " M planreader.py\n", "CHECKOUT_HAS_TRACKED_CHANGES"),
+    (1, "", "CHECKOUT_STATE_UNVERIFIED"),
+])
+def test_refresh_rejects_changed_or_unverified_tracked_files(
+    tmp_path, monkeypatch, status_code, status_out, expected,
+):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     session = tmp_path / "session"
@@ -236,13 +316,16 @@ def test_successful_refresh_returns_the_checked_out_head(tmp_path, monkeypatch):
             return _GitResult(0)
         if args[:2] == ["rev-parse", "HEAD"]:
             return _GitResult(0, out=head + "\n")
+        if args[0] == "status":
+            return _GitResult(status_code, out=status_out)
         raise AssertionError(args)
 
     monkeypatch.setattr(launcher, "git", fake_git)
-    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") == head
+    accepted = head if expected == "CHECKED_OUT" else None
+    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") == accepted
     assert ["checkout", "--detach", "FETCH_HEAD"] in calls
     written = json.loads((session / "SNAPSHOT_REFRESH.json").read_text(encoding="utf-8"))
-    assert written["status"] == "CHECKED_OUT" and written["repo_head_used"] == head
+    assert written["status"] == expected and written["repo_head_used"] == accepted
 
 
 def test_handoff_bootstrap_keeps_an_apostrophe_in_a_windows_path_as_data():
@@ -353,3 +436,17 @@ def test_owner_partial_source_modes_are_explicit_and_default_remains_unmodified(
     assert selected.source_plan_page_index == 6
     with pytest.raises(SystemExit):
         parser.parse_args(["--family-group", "unverified"])
+
+
+@pytest.mark.parametrize("sample,limits", [
+    ((0, 0, 1000000), {"max_private_mb": 100}),
+    ((1000, 1000, None), {"min_free_commit_mb": 100}),
+    ((1000, 0, 1000000), {"max_private_mb": 100, "min_free_commit_mb": 100}),
+])
+def test_partial_memory_sample_cannot_bypass_its_configured_guard(tmp_path, monkeypatch, sample, limits):
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda _pid: sample)
+    rc, status, _ = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path, tmp_path / "partial_sample.log", timeout_s=20, poll_s=0.1, **limits,
+    )
+    assert rc is None and status == "MEMORY_SAMPLING_UNAVAILABLE"

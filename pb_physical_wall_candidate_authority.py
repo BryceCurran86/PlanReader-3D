@@ -2194,6 +2194,9 @@ def _producer_wall_strip_relation_overrides(
     records: Sequence[PhysicalWallCandidateRecord],
     strips: Sequence[_ProvenFilledWallStrip],
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    if not strips:
+        return {}
+
     # Build source-primitive -> W4 owner membership once. Previously every
     # filled strip rescanned every wall and rebuilt each wall's primitive set.
     # This is an index over the exact existing source IDs, NOT a new wall
@@ -3111,6 +3114,10 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
     same snapped node, and one usable identity must own both. This is a
     source-loss audit, never permission to bridge a missing graph edge.
     """
+    collapsed = tuple(graph.get("snap_collapsed_fragments", ()))
+    if not collapsed:
+        return {}
+
     endpoints = defaultdict(list)
     owners = defaultdict(set)
     for candidate_id, identity in identities.items():
@@ -3129,7 +3136,6 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
                     endpoints[(point, parent)].append((str(edge["id"]), node, parents))
     inventory = defaultdict(list)
     surviving_ids = {str(edge["id"]) for edge in graph.get("edges", ())}
-    collapsed = tuple(graph.get("snap_collapsed_fragments", ()))
     id_counts = Counter(str(fragment.get("id") or "") for fragment in collapsed)
     for fragment in collapsed:
         fragment_id = str(fragment.get("id") or "")

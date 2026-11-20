@@ -22,6 +22,9 @@ from pb_live_ceiling_area_source_closed_export import (
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import QuantityEvidence
+from pb_source_customer_inclusion_scope import (
+    require_uncontested_source_inclusion, unique_customer_ceiling_owners,
+)
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
@@ -42,6 +45,7 @@ def _customer_quantity(
     room_entity_id: str,
     finish_descriptor: str,
 ) -> QuantityEvidence:
+    require_uncontested_source_inclusion(quantity)
     metadata = dict(quantity.metadata) if isinstance(quantity.metadata, Mapping) else {}
     metadata.update(
         {
@@ -148,6 +152,7 @@ def project_live_ceiling_area_customer_rows(
                 f"duplicate or invalid original ceiling source quantity id: {source_id}"
             )
         original_ids.add(source_id)
+        require_uncontested_source_inclusion(source)
         # A contradictory original FIRM numeric claim must never silently
         # disappear before whole-customer reconciliation. Ordinary provisional
         # shadows retain their existing nonpublishing behavior.
@@ -162,6 +167,14 @@ def project_live_ceiling_area_customer_rows(
                 f"{source_id}"
             )
 
+    # Reject duplicate physical ceiling owners BEFORE the existing source
+    # quantity publisher, while preserving the legitimate empty-inventory
+    # behavior for source records without any ceiling quantity to publish.
+    # This never supplies a new physical or commercial ceiling identity.
+    ceilings = (
+        unique_customer_ceiling_owners(result.canonical_ceilings)
+        if result.quantity_evidence else {}
+    )
     original = tuple(
         quantity
         for quantity in publish_live_ceiling_area_quantities(result)
@@ -175,11 +188,6 @@ def project_live_ceiling_area_customer_rows(
     if not original:
         return ()
 
-    ceilings = {
-        _clean(ceiling.canonical_ceiling_id): ceiling
-        for ceiling in result.canonical_ceilings
-        if _clean(ceiling.canonical_ceiling_id)
-    }
     projected_quantities: list[QuantityEvidence] = []
     authorities: dict[str, CommercialMeasurementAuthority] = {}
     for quantity in original:

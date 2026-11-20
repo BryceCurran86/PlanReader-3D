@@ -99,3 +99,27 @@ def test_duplicate_source_identifier_is_not_disclosed_in_customer_error():
         _project((first, first))
     assert "duplicate_original_floor_finish_quantity_id" in str(caught.value)
     assert secret not in str(caught.value)
+
+
+@pytest.mark.parametrize("source_scope", (
+    "EXCLUSION", "EXCLUDED", "ABSTAIN", "REVIEW", "", 123, True,
+))
+def test_source_exclusion_cannot_be_overwritten_as_customer_inclusion(source_scope):
+    original = _quantity()
+    scoped = replace(
+        original,
+        metadata={**dict(original.metadata), "inclusion_status": source_scope},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="floor_finish_source_inclusion_scope_unresolved"):
+        _project((scoped,))
+
+
+def test_explicit_source_inclusion_preserves_positive_customer_projection():
+    original = _quantity()
+    scoped = replace(
+        original, metadata={**dict(original.metadata), "inclusion_status": "INCLUSION"},
+    )
+    rows = _project((scoped,))
+    assert len(rows) == 1
+    assert rows[0]["quantity_id"] == original.quantity_id

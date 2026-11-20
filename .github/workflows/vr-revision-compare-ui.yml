@@ -1,0 +1,38 @@
+name: VR private working revision comparison UI
+on:
+  pull_request:
+    paths:
+      - 'vr-editor/src/PlanRevisionComparePanel.tsx'
+      - 'vr-editor/src/PlanRevisionHistory.tsx'
+      - 'vr-editor/src/planRevisionComparisonProtocol.ts'
+      - 'vr-editor/tests/planRevisionComparisonProtocol.test.mjs'
+      - '.github/workflows/vr-revision-compare-ui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'vr-editor/src/PlanRevisionComparePanel.tsx'
+      - 'vr-editor/src/PlanRevisionHistory.tsx'
+      - 'vr-editor/src/planRevisionComparisonProtocol.ts'
+      - 'vr-editor/tests/planRevisionComparisonProtocol.test.mjs'
+      - '.github/workflows/vr-revision-compare-ui.yml'
+permissions:
+  contents: read
+jobs:
+  comparison-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vr-editor/package-lock.json
+      - name: Install locked VR dependencies
+        working-directory: vr-editor
+        run: npm ci
+      - name: Validate comparison protocol and full editor tests
+        working-directory: vr-editor
+        run: npm test
+      - name: Type-check and bundle VR editor
+        working-directory: vr-editor
+        run: npm run build

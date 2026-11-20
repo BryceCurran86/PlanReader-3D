@@ -85,6 +85,28 @@ def edge(key, x1, x2, a, b, parents):
         "a":a, "b":b, LINEAGE_KEY: {"source_primitive_ids":list(parents)}}
 
 
+def test_no_filled_wall_strips_skip_source_membership_index():
+    class UnusedWall:
+        @property
+        def physical_identity(self):
+            pytest.fail("empty strip input must not inspect wall membership")
+
+    assert _producer_wall_strip_relation_overrides(records=(UnusedWall(),), strips=()) == {}
+
+
+def test_no_collapsed_fragments_skip_edge_and_owner_indexes():
+    class UnusedItems(dict):
+        def items(self):
+            pytest.fail("empty fragment input must not inspect wall membership")
+
+    class UnusedEdges:
+        def __iter__(self):
+            pytest.fail("empty fragment input must not inspect surviving edges")
+
+    graph = {"edges": UnusedEdges(), "snap_collapsed_fragments": ()}
+    assert _source_snap_collapsed_fragment_inventory(graph, UnusedItems()) == {}
+
+
 def test_authentic_strip_owner_lookup_preserves_legacy_random_source_owners():
     rng = random.Random(23091)
     strips = tuple(strip(i) for i in range(60))

@@ -71,13 +71,13 @@ def test_atomic_exclusive_publication_rolls_back_temp_after_competing_writer(
     target = tmp_path / "report.json"
     origin = tmp_path / "original.pdf"
     origin.write_bytes(b"secret")
-    real_link = pub.os.link
+    publish = pub.publish_staged_file
 
-    def competing_link(temp, dest):
+    def competing_publication(temp, dest):
         Path(dest).write_text("competing-writer")
-        return real_link(temp, dest)
+        return publish(temp, dest)
 
-    monkeypatch.setattr(pub.os, "link", competing_link)
+    monkeypatch.setattr(pub, "publish_staged_file", competing_publication)
     with pytest.raises(FileExistsError):
         pub.write_new_diagnostic(target, "our-new-report", protected_roots=(origin,))
     assert target.read_text() == "competing-writer"
@@ -114,18 +114,18 @@ def test_original_replay_cli_preflights_existing_destination_before_source_reade
     assert output.read_text() == '{"signed":"unchanged"}'
 
 
-def test_original_report_replaced_after_exclusive_link_cannot_claim_success(
+def test_original_report_replaced_after_exclusive_publication_cannot_claim_success(
     tmp_path, monkeypatch,
 ):
     output = tmp_path / "report.json"
     source = tmp_path / "original.pdf"
     source.write_bytes(b"%PDF-source-unchanged")
-    actual_link = pub.os.link
-    def replace_after_link(staged, destination):
-        actual_link(staged, destination)
+    publish = pub.publish_staged_file
+    def replace_after_publish(staged, destination):
+        publish(staged, destination)
         Path(destination).unlink()
         Path(destination).write_text("racing-writer-report", encoding="utf-8")
-    monkeypatch.setattr(pub.os, "link", replace_after_link)
+    monkeypatch.setattr(pub, "publish_staged_file", replace_after_publish)
     with pytest.raises(ValueError, match="output changed"):
         pub.write_new_diagnostic(output, '{"source":"verified"}\n',
                                  protected_roots=(source,))
@@ -140,12 +140,11 @@ def test_original_report_in_place_mutation_is_not_accepted_as_same_inode(
     output = tmp_path / "report.json"
     source = tmp_path / "original.pdf"
     source.write_bytes(b"%PDF-source-unchanged")
-    actual_link = pub.os.link
-    def tamper_after_link(staged, destination):
-        actual_link(staged, destination)
-        # Changes BOTH destination and staging via their shared inode.
+    publish = pub.publish_staged_file
+    def tamper_after_publish(staged, destination):
+        publish(staged, destination)
         Path(destination).write_text("mutated-but-still-same-inode", encoding="utf-8")
-    monkeypatch.setattr(pub.os, "link", tamper_after_link)
+    monkeypatch.setattr(pub, "publish_staged_file", tamper_after_publish)
     with pytest.raises(ValueError, match="output changed"):
         pub.write_new_diagnostic(output, '{"source":"verified"}\n',
                                  protected_roots=(source,))

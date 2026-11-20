@@ -24,6 +24,8 @@ def _field(record: Any, name: str) -> Any:
 _COMPATIBLE_TRADES = {
     "floor_area": frozenset({"flooring"}),
     "floor_finish_area": frozenset({"tiling", "flooring"}),
+    # Wall-tile finishes are source-owned tiling surfaces, not paint or cladding.
+    "wall_finish_area": frozenset({"tiling"}),
     "ceiling_area": frozenset({"ceilings"}),
     # Both current source producers issue the typed canonical ceiling_lining
     # family. An independently sealed/mapped original ceiling must not be
@@ -41,6 +43,7 @@ _COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number"})
 _SOURCE_FAMILY_UNITS = {
     "floor_area": _AREA_UNITS,
     "floor_finish_area": _AREA_UNITS,
+    "wall_finish_area": _AREA_UNITS,
     "ceiling_area": _AREA_UNITS,
     "ceiling_lining": _AREA_UNITS,
     "ceiling_finish_area": _AREA_UNITS,

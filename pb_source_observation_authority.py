@@ -50,6 +50,8 @@ _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
 _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES = 2
+_NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_ENTRIES = 3
+_NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_BYTES = 8 * 1024 * 1024
 _NATIVE_RENDER_METHODS = (fitz.Page.get_pixmap, fitz.Page.get_displaylist)
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
@@ -743,6 +745,7 @@ class SourceObservationProducer:
         ) = OrderedDict()
         self._native_image_scope_cache: "OrderedDict[tuple[str, str, str, int], tuple]" = OrderedDict()
         self._native_clip_display_lists: "OrderedDict[tuple[str, int], fitz.DisplayList]" = OrderedDict()
+        self._native_image_only_png_cache: "OrderedDict[tuple[str, int, float], bytes]" = OrderedDict()
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
@@ -825,6 +828,7 @@ class SourceObservationProducer:
             return cached[1]
         if cached is not None:
             self._native_clip_display_lists.clear()
+            self._native_image_only_png_cache.clear()
             try:
                 cached[1].close()
             except Exception:
@@ -1045,93 +1049,116 @@ class SourceObservationProducer:
             page = pdf.load_page(page_number - 1)
             native_frame = native_page_frame(page) if include_native_frame else None
             scale = dpi_value / 72.0
+            # Source SHA, revision, snapshot, unique native page parent and
+            # decoded-page coverage are rechecked above for every call. Only
+            # immutable PNG bytes are cached, never authorization receipts.
+            image_cache_ok = (
+                images_only and not pdf.is_dirty
+                and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
+                and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
+            )
+            image_cache_key = (source_sha256, page_number, dpi_value)
+            cached_image = (
+                self._native_image_only_png_cache.get(image_cache_key)
+                if image_cache_ok else None
+            )
             scratch = None
             render_page = page
-            if images_only:
-                scratch = fitz.open()
-                scratch.insert_pdf(
-                    pdf,
-                    from_page=page_number - 1,
-                    to_page=page_number - 1,
-                )
-                render_page = scratch.load_page(0)
-                render_page.add_redact_annot(render_page.rect, fill=False)
-                render_page.apply_redactions(
-                    images=fitz.PDF_REDACT_IMAGE_NONE,
-                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
-                    text=fitz.PDF_REDACT_TEXT_REMOVE,
-                )
-            if clip_rect is None:
-                pix = render_page.get_pixmap(
-                    matrix=fitz.Matrix(scale, scale),
-                    alpha=False,
-                    annots=False,
-                )
+            if cached_image is not None:
+                self._native_image_only_png_cache.move_to_end(image_cache_key)
+                png_bytes = cached_image
             else:
-                try:
-                    frame = native_page_frame(page)
-                except NativePageFrameUnresolved as exc:
-                    raise ValueError(
-                        f"{INVALID_RENDER_CLIP}: native page frame unresolved"
-                    ) from exc
-
-                if not (
-                    clip_rect[0] >= 0.0
-                    and clip_rect[1] >= 0.0
-                    and clip_rect[2] <= float(frame.native_width)
-                    and clip_rect[3] <= float(frame.native_height)
-                ):
-                    raise ValueError(
-                        f"{INVALID_RENDER_CLIP}: clip lies outside the native page frame"
+                if images_only:
+                    scratch = fitz.open()
+                    scratch.insert_pdf(
+                        pdf,
+                        from_page=page_number - 1,
+                        to_page=page_number - 1,
                     )
-
-                render_clip = fitz.Rect(*clip_rect)
-                if frame.rotation != 0:
-                    render_clip = render_clip * page.rotation_matrix
-
-                page_rect = page.rect
-                tolerance = 1e-6
-                if not (
-                    float(render_clip.x0) >= float(page_rect.x0) - tolerance
-                    and float(render_clip.y0) >= float(page_rect.y0) - tolerance
-                    and float(render_clip.x1) <= float(page_rect.x1) + tolerance
-                    and float(render_clip.y1) <= float(page_rect.y1) + tolerance
-                    and float(render_clip.x1) > float(render_clip.x0)
-                    and float(render_clip.y1) > float(render_clip.y0)
-                ):
-                    raise ValueError(
-                        f"{INVALID_RENDER_CLIP}: transformed clip lies outside the display page"
+                    render_page = scratch.load_page(0)
+                    render_page.add_redact_annot(render_page.rect, fill=False)
+                    render_page.apply_redactions(
+                        images=fitz.PDF_REDACT_IMAGE_NONE,
+                        graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+                        text=fitz.PDF_REDACT_TEXT_REMOVE,
                     )
-
-                # PyMuPDF's ordinary get_pixmap builds this same display list
-                # on every crop. Retain at most two immutable source pages;
-                # each DPI still renders its own exact validated clip. Custom
-                # renderer hooks and mutable pages keep the ordinary path.
-                if (
-                    not pdf.is_dirty
-                    and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
-                    and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
-                ):
-                    cache_key = (source_sha256, page_number)
-                    display_list = self._native_clip_display_lists.get(cache_key)
-                    if display_list is None:
-                        display_list = page.get_displaylist(annots=True)
-                        self._native_clip_display_lists[cache_key] = display_list
-                    self._native_clip_display_lists.move_to_end(cache_key)
-                    while len(self._native_clip_display_lists) > _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES:
-                        self._native_clip_display_lists.popitem(last=False)
-                    pix = display_list.get_pixmap(
+                if clip_rect is None:
+                    pix = render_page.get_pixmap(
                         matrix=fitz.Matrix(scale, scale),
-                        clip=render_clip,
                         alpha=False,
+                        annots=False,
                     )
                 else:
-                    pix = page.get_pixmap(
-                        matrix=fitz.Matrix(scale, scale),
-                        clip=render_clip,
-                        alpha=False,
-                    )
-            png_bytes = pix.tobytes("png")
+                    try:
+                        frame = native_page_frame(page)
+                    except NativePageFrameUnresolved as exc:
+                        raise ValueError(
+                            f"{INVALID_RENDER_CLIP}: native page frame unresolved"
+                        ) from exc
+
+                    if not (
+                        clip_rect[0] >= 0.0
+                        and clip_rect[1] >= 0.0
+                        and clip_rect[2] <= float(frame.native_width)
+                        and clip_rect[3] <= float(frame.native_height)
+                    ):
+                        raise ValueError(
+                            f"{INVALID_RENDER_CLIP}: clip lies outside the native page frame"
+                        )
+
+                    render_clip = fitz.Rect(*clip_rect)
+                    if frame.rotation != 0:
+                        render_clip = render_clip * page.rotation_matrix
+
+                    page_rect = page.rect
+                    tolerance = 1e-6
+                    if not (
+                        float(render_clip.x0) >= float(page_rect.x0) - tolerance
+                        and float(render_clip.y0) >= float(page_rect.y0) - tolerance
+                        and float(render_clip.x1) <= float(page_rect.x1) + tolerance
+                        and float(render_clip.y1) <= float(page_rect.y1) + tolerance
+                        and float(render_clip.x1) > float(render_clip.x0)
+                        and float(render_clip.y1) > float(render_clip.y0)
+                    ):
+                        raise ValueError(
+                            f"{INVALID_RENDER_CLIP}: transformed clip lies outside the display page"
+                        )
+
+                    # PyMuPDF's ordinary get_pixmap builds this same display list
+                    # on every crop. Retain at most two immutable source pages;
+                    # each DPI still renders its own exact validated clip. Custom
+                    # renderer hooks and mutable pages keep the ordinary path.
+                    if (
+                        not pdf.is_dirty
+                        and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
+                        and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
+                    ):
+                        cache_key = (source_sha256, page_number)
+                        display_list = self._native_clip_display_lists.get(cache_key)
+                        if display_list is None:
+                            display_list = page.get_displaylist(annots=True)
+                            self._native_clip_display_lists[cache_key] = display_list
+                        self._native_clip_display_lists.move_to_end(cache_key)
+                        while len(self._native_clip_display_lists) > _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES:
+                            self._native_clip_display_lists.popitem(last=False)
+                        pix = display_list.get_pixmap(
+                            matrix=fitz.Matrix(scale, scale),
+                            clip=render_clip,
+                            alpha=False,
+                        )
+                    else:
+                        pix = page.get_pixmap(
+                            matrix=fitz.Matrix(scale, scale),
+                            clip=render_clip,
+                            alpha=False,
+                        )
+                png_bytes = pix.tobytes("png")
+                if image_cache_ok and len(png_bytes) <= _NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_BYTES:
+                    cache = self._native_image_only_png_cache
+                    cache[image_cache_key] = png_bytes
+                    cache.move_to_end(image_cache_key)
+                    while len(cache) > _NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_ENTRIES:
+                        cache.popitem(last=False)
         finally:
             if "pix" in locals() and pix is not None:
                 del pix

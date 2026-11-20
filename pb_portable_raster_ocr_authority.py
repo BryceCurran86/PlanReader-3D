@@ -485,7 +485,11 @@ class RapidOCRBackend(RasterOCRBackend):
     @classmethod
     def _get_engine(cls) -> Any:
         if cls._engine_cache is None:
+            import onnxruntime
             from rapidocr import RapidOCR
+
+            # Set the runtime opt-out before RapidOCR opens its model sessions.
+            onnxruntime.disable_telemetry_events()
             cls._engine_cache = RapidOCR()
         return cls._engine_cache
 

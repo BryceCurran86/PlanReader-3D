@@ -252,10 +252,35 @@ def _no_quantity_runner(calls):
     return run
 
 
+def test_exclusive_role_receipt_retains_concurrent_publication(tmp_path, monkeypatch):
+    destination = tmp_path / "sealed.json"
+    operation = "rename" if module.os.name == "nt" else "link"
+    publish = getattr(module.os, operation)
+
+    def concurrent_publication(stage, target):
+        target.write_text("prior receipt", encoding="utf-8")
+        publish(stage, target)
+
+    monkeypatch.setattr(module.os, operation, concurrent_publication)
+    with pytest.raises(FileExistsError):
+        module._write_exclusive(destination, "new receipt")
+    assert destination.read_text(encoding="utf-8") == "prior receipt"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
 def test_native_input_audit_cannot_replace_missing_quantity_seals(tmp_path, monkeypatch):
     from tools.gpt3_native_source_execution_coverage import verify_native_source_execution_coverage
+    from tools import gpt3_native_source_execution_coverage as native
     project, root, docs = _fake_sources(tmp_path, monkeypatch)
     calls = []
+    decoded = []
+    build = native.build_native_source_execution_coverage
+
+    def count_decodes(**kwargs):
+        decoded.append(kwargs["expected_sha256"])
+        return build(**kwargs)
+
+    monkeypatch.setattr(native, "build_native_source_execution_coverage", count_decodes)
     monkeypatch.setattr(module, "run_logged", _no_quantity_runner(calls))
     out = tmp_path / "audited-output"
     result = module.produce_all_source_roles(
@@ -263,6 +288,7 @@ def test_native_input_audit_cannot_replace_missing_quantity_seals(tmp_path, monk
         record_native_source_input_coverage=True,
     )
     assert len(calls) == len(docs) == 2
+    assert decoded == [doc["sha256"] for doc in docs]
     assert result["native_source_input_coverage_verified"] is True
     assert result["source_role_coverage_verified"] is False
     assert result["customer_bijection_verified"] is False
@@ -753,10 +779,10 @@ def test_incomplete_or_foreign_native_coverage_cannot_issue_a_receipt(tmp_path, 
     from tools import gpt3_native_source_execution_coverage as native
     project, root, docs = _fake_sources(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "run_logged", _role_runner(project, docs, root))
-    verify = native.verify_native_source_execution_coverage
+    build = native.build_native_source_execution_coverage
 
-    def damaged(receipt, **kwargs):
-        actual = json.loads(json.dumps(verify(receipt, **kwargs)))
+    def damaged(**kwargs):
+        actual = json.loads(json.dumps(build(**kwargs)))
         if kwargs["expected_sha256"] == docs[1]["sha256"]:
             coverage = actual["coverage"]
             if damage == "partial":
@@ -772,7 +798,7 @@ def test_incomplete_or_foreign_native_coverage_cannot_issue_a_receipt(tmp_path, 
             else:
                 coverage["revision_id"] = " "
         return actual
-    monkeypatch.setattr(native, "verify_native_source_execution_coverage", damaged)
+    monkeypatch.setattr(native, "build_native_source_execution_coverage", damaged)
     out = tmp_path / "damaged-native-output"
     result = module.produce_all_source_roles(
         project_id=project, source_dir=root, output_dir=out,

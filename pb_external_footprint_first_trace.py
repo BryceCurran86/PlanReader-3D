@@ -71,6 +71,44 @@ def _competing_disjoint_envelopes(
     return False
 
 
+def _polygon_has_self_intersection(points: Sequence[tuple[float, float]]) -> bool:
+    """Reject crossed ink contours; adjacent edges may meet at endpoints.
+
+    The first-trace raster stage already caps polygons at 200 vertices.
+    This check is diagnostic-only and never fabricates wall geometry.
+    """
+    n = len(points)
+    if n < 4:
+        return False
+
+    def orientation(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    def on_segment(a, b, p):
+        return (min(a[0], b[0]) - 1e-8 <= p[0] <= max(a[0], b[0]) + 1e-8
+                and min(a[1], b[1]) - 1e-8 <= p[1] <= max(a[1], b[1]) + 1e-8)
+
+    for i in range(n):
+        a, b = points[i], points[(i + 1) % n]
+        if a == b:
+            return True
+        for j in range(i + 1, n):
+            if j == i + 1 or (i == 0 and j == n - 1):
+                continue
+            c, d = points[j], points[(j + 1) % n]
+            o1, o2 = orientation(a, b, c), orientation(a, b, d)
+            o3, o4 = orientation(c, d, a), orientation(c, d, b)
+            if ((o1 > 1e-8 and o2 < -1e-8 or o1 < -1e-8 and o2 > 1e-8)
+                and (o3 > 1e-8 and o4 < -1e-8 or o3 < -1e-8 and o4 > 1e-8)):
+                return True
+            if ((abs(o1) <= 1e-8 and on_segment(a, b, c))
+                or (abs(o2) <= 1e-8 and on_segment(a, b, d))
+                or (abs(o3) <= 1e-8 and on_segment(c, d, a))
+                or (abs(o4) <= 1e-8 and on_segment(c, d, b))):
+                return True
+    return False
+
+
 def trace_external_footprint_first(
     pdf_bytes: bytes,
     *,
@@ -177,6 +215,9 @@ def trace_external_footprint_first(
             )
             if len(set(points)) < 4 or not all(math.isfinite(q) for xy in points for q in xy):
                 results.append(_abstain(source_sha256, index, "external_footprint_invalid_polygon"))
+                continue
+            if _polygon_has_self_intersection(points):
+                results.append(_abstain(source_sha256, index, "external_footprint_self_intersecting_candidate"))
                 continue
             bbox = tuple(round(float(v) / scale, 3) for v in (x, y, x + w, y + h))
             results.append(ExternalFootprintTrace(

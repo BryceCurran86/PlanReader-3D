@@ -1319,12 +1319,54 @@ class GenericPlanReaderExtractor:
                 missing = tuple(
                     t.reason for t in first_traces if t.status != "CANDIDATE"
                 )
+                inside_face_stages: list[dict] = []
+                try:
+                    from pb_external_footprint_inside_face_runtime import (
+                        run_inside_face_footprint_runtime_stage,
+                    )
+
+                    for plan_page in first_plan_pages:
+                        page = doc[plan_page]
+                        rect = page.rect
+                        inside_face_stages.append(
+                            run_inside_face_footprint_runtime_stage(
+                                tuple(page.get_drawings()),
+                                page_bounds_pdf_pts=(
+                                    float(rect.x0), float(rect.y0),
+                                    float(rect.x1), float(rect.y1),
+                                ),
+                                source_words=tuple(page.get_text("words")),
+                                page_index=plan_page,
+                                source_sha256=footprint_source_sha,
+                            )
+                        )
+                except Exception as inside_exc:
+                    inside_face_stages = [{
+                        "status": "ABSTAINED",
+                        "reason": (
+                            "inside_face_runtime_exception:"
+                            f"{type(inside_exc).__name__}"
+                        ),
+                        "measurement_authorized": False,
+                        "commercial_publishable": False,
+                    }]
                 self.external_footprint_trace_live = {
                     "status": "candidate" if not missing else "abstained",
                     "reason_codes": list(missing) if missing else [
                         "external_footprint_source_ink_candidate_not_physical_authority"
                     ],
                     "traces": [t.to_dict() for t in first_traces],
+                    "inside_face_footprint_stages": inside_face_stages,
+                    "fabricated_wall_box_closure_4443": [
+                        stage.get("fabricated_wall_box_closure_4443")
+                        for stage in inside_face_stages
+                        if isinstance(stage, dict)
+                    ],
+                    "interior_face_open_plan_07_10": [
+                        stage.get("interior_face_open_plan_07_10")
+                        for stage in inside_face_stages
+                        if isinstance(stage, dict)
+                    ],
                 }
             except Exception as exc:
                 self.external_footprint_trace_live = {
@@ -1334,6 +1376,47 @@ class GenericPlanReaderExtractor:
                     ],
                     "traces": [],
                 }
+
+            # AG-01..AG-04: Door symbol legend reader (Antigravity lane).
+            # Runs for every floor-plan page; results are TOPOLOGY_ONLY and
+            # never issue physical openings or customer quantities.
+            door_legend_stages: list[dict] = []
+            try:
+                from pb_ag_door_symbol_legend_reader import (
+                    run_door_legend_read_stage,
+                )
+
+                for plan_page in first_plan_pages:
+                    page = doc[plan_page]
+                    rect = page.rect
+                    door_legend_stages.append(
+                        run_door_legend_read_stage(
+                            tuple(page.get_drawings()),
+                            source_words=tuple(page.get_text("words")),
+                            page_bounds_pdf_pts=(
+                                float(rect.x0), float(rect.y0),
+                                float(rect.x1), float(rect.y1),
+                            ),
+                            page_index=plan_page,
+                        )
+                    )
+            except Exception as door_exc:
+                door_legend_stages = [{
+                    "status": "ABSTAINED",
+                    "reason": (
+                        "door_legend_reader_exception:"
+                        f"{type(door_exc).__name__}"
+                    ),
+                    "measurement_authorized": False,
+                    "classification_is_not_physical_opening_authority": True,
+                }]
+            self.door_legend_read_live = {
+                "status": "candidate" if door_legend_stages else "abstained",
+                "pages": door_legend_stages,
+                "physical_openings_authenticated": False,
+                "measurement_authorized": False,
+                "classification_is_not_physical_opening_authority": True,
+            }
 
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.

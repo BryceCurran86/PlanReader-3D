@@ -347,13 +347,35 @@ Choose **Move** in the Wall Position Editing inspector, use either Sense trigger
 
 Movement is **local only**: translations do not persist, change original PDF geometry, approve hosted openings, recalculate billable quantities or price materials. Cross-wall collisions at the same level are blocked, but this does not prove complete topology. A production `MOVE_WALL` transaction and real PS VR2 headset acceptance test are separate gates.
 
-## Adding a wall must add its associated trades
+## Place walls, doors and open frames
 
-The authenticated VR Editor now includes a **new-wall construction scope**
-panel. Enter source-level endpoints, height, a real project **assembly profile
-ID** (framing/lining/skirting/bracing schedule owned by the server), and any
-user-positioned door opening. The browser can preview a translucent purple
-*new wall proposal*, not an approved physical wall.
+1. Choose a source level if the project has several levels. On desktop, **Plan** makes it easier to place points on the plan.
+2. Choose **Wall**, then click its start and end. In the headset, use the floating build menu and pull either controller trigger to place each point. The length updates as you aim.
+3. Choose **Door** or **Open frame**, aim at a draft wall and click or pull the trigger. **Open frame** leaves an open passage. Use **Undo** to remove the last placement and **Done** to return to inspection.
+4. On desktop, open **Review drafts** and select a wall. Check **Exact dimensions and openings**, enter a registered assembly profile ID, and select **Calculate wall and opening costs** in an authenticated workspace.
+
+**Placement sizes** lets you set the starting height and opening dimensions on desktop. Sketches use the editor’s level plan and remain local until you use the authenticated wall review and save flow. Doors and frames attach to newly drafted walls. The frame geometry shows an indicative opening for review.
+
+## Materials and fixtures catalogue
+
+Open **Items** beside the building tools. Search by product type, colour, size or profile, or pick a category. Select an option and aim at the indicated surface. In an immersive WebXR session, open **Items** on the floating build menu, choose a category and item, then use either trigger to place it.
+
+- Plasterboard and paint apply to wall faces or ceilings. Floor coverings and wall coverings follow the surface you select.
+- Skirting follows a wall base and leaves gaps at floor-level openings in drafted walls. Architraves fit the doors and frames created with the build tools.
+- Place wall tapware, switches and sockets on wall faces. For benchtop mixers and basins, place a vanity or base cabinet first and aim at its worktop.
+- **Draft item schedule** lists placements by selection and offers a CSV download. Undo and removal work on the current draft.
+
+The built-in synthetic scene has two sample rooms for trying floor coverings and lighting. Catalogue geometry and finishes are editable visual choices. The schedule counts placements for review. Project estimating and pricing use the authenticated construction scope.
+
+### Timber and exterior choices
+
+Place timber boards, battens and mouldings on a wall face. Pick the centre of the piece and use **Rotate** to turn it. Posts stand on a floor or deck surface. Front door assemblies fit openings made with **Door**. Wider styles show the smallest draft opening they can fit. Door finish choices colour the leaf while preserving its glazing.
+
+Pick an exterior substrate and a finish on the same wall side to see the finish and record both choices in the draft schedule. Decking and paving apply to floor surfaces. Soffit and eaves options apply to ceiling surfaces.
+
+**Roof finishes** include metal profiles, concrete and terracotta tiles, slate, shingles and roof membranes. Aim at the top of a source-backed roof face to preview a finish at the model's pitch. The draft schedule records the choice against that roof surface.
+
+## Adding a wall must add its associated trades
 
 The read-only `POST /api/editor/workspaces/{id}/walls/add/preview`
 endpoint calls `pb_vr_wall_assembly_dependencies.py`, using only
@@ -466,3 +488,41 @@ summaries, not FIRM takeoffs. Headset output requires actual WebXR support and
 PS VR2 hardware testing; green TypeScript/Node CI is not headset proof.
 
 Test via `cd vr-editor && npm ci && npm test && npm run build`.
+
+### Construction views and draft editing
+
+Use **View** in the desktop toolbar or headset panel to switch between **Concrete slab**, **Framing**, **Rough-in**, **Lock-up** and **Finished**. The slab view exposes source floor surfaces for review. The framing and rough-in views expose wall extents and draft openings. Verify concrete thickness, framing members and bracing on the relevant structural drawings.
+
+On desktop, choose **Wall** or **Ceiling** and drag in the scene. Two clicks also work. Use **Move** to reposition a draft and **Stretch** to pull a wall end or ceiling corner. Stretch keeps door and frame openings within their host. Drag **Door** or **Open frame** onto a draft wall to place an opening, or arm the tool and click. **Plan** exposes the outline for editing. In VR, use the trigger to place an opening or hold it while pointing to reposition a draft. **Undo** steps back through draft geometry changes.
+
+Drag a catalogue choice into the desktop scene or arm it and aim in VR. Plumbing, electrical and A/C rough-ins are draft coordination points. Air-conditioning choices include wall split, floor console, ducted, cassette, outdoor and VRF variants, plus grilles, refrigerant or condensate points and controllers. The relevant contractor confirms the design and routing.
+
+**Roof components** snap to matching source roof edges. Aim at a recognised eave for gutters or eaves fascia, a verge for barge trim, and a matching junction for ridge or valley flashings. Profile dimensions illustrate the selected shape. Confirm roof details, drainage design and product specifications from project evidence.
+
+The **Australian standards** panel provides stage references and the evidence required for review. Use the project’s jurisdiction, building class and approval date to confirm the applicable NCC edition, local variations and referenced documents.
+
+### Live material price previews
+
+In **Items → Live material pricing**, select a placement on an authenticated source object and choose its linked takeoff quantity. The price preview uses the current FIRM, publishable row and a company rate bound to the chosen item and that quantity.
+
+The host mounts the existing live-costing WSGI app and supplies its optional **load_catalogue_rate(principal, workspace, item_id, row)** provider. Return a **CatalogueRateBinding** with the selected item, takeoff row, canonical object, current company rate-book revision and rate provenance. The endpoint is **POST /api/editor/workspaces/{workspace}/costing/catalogue**. All identity fields are checked against the current source, workspace, ledger and rate book before previewing. Drafts and missing or unverified rate bindings appear without a price.
+
+### Resize a footprint
+
+Choose **Resize footprint** or use **Footprint** in the headset menu. Drag a corner in the plan view or enter a width and depth in millimetres. Corner drags retain the opposite corner. The draft moves the model's existing floor, wall, ceiling and roof geometry in plan. Heights stay the same, so changed roof spans can change roof pitch. Draft door and window sizes stay the same and follow their hosts. An edit that makes adjacent openings overlap or no longer fit is held at the last valid size.
+
+Finishes, fixtures, and wall-mounted flyovers follow their hosts. Site pools, planting and other independent site items keep their positions and sizes. Use **Done** to inspect the resized draft or place materials. **Reset footprint** restores the original geometry for source commands and source-based pricing.
+
+### Stairs, window styles and outdoor design choices
+
+Drag **Window** onto a draft wall or click a draft wall after arming the tool. Set the window width, height and sill in **Placement sizes**. Choose a window style and a curtain or blind from **Items** and aim at the opening. Sliding door styles use draft door openings. Stairs and interior balustrading mount on floor surfaces. Choose the outside face of a wall to align a patio flyover. Pools, pool-barrier panels and landscaping use the draft site ground plane.
+
+These assemblies provide design layouts. The Australian standards panel links the corresponding references for stairs, barriers, glazing, patio structures and pools. Confirm each design, site level, structural detail and regulatory sign-off for the project.
+
+### Editor controls
+
+Use **Open scene** for a saved scene file or **Open example** to try the editor. The toolbar groups the construction view, level, camera and drawing tools. The sidebar has **Plan**, **Items**, **Review** and **Settings**. Find headset setup, verified-floor teleport and display settings under **Settings**.
+
+Choose a tool and use **Done** or **Esc** to finish it. **Alt + drag** orbits on desktop with a tool active. **Undo** and **Redo** use the active edit or the most recent edit when inspecting. The shortcuts are **Ctrl/Command + Z** and **Ctrl/Command + Shift + Z**. A footprint drag counts as one edit. Text fields retain normal text editing shortcuts.
+
+In VR, open **Items** to choose a category. The headset toolbar can cycle levels and uses the same editing history as the desktop. Source filters and levels keep the current 3D viewer mounted.

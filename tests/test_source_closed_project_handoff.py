@@ -305,6 +305,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["family_counts"] == {
         "floor_area": 1,
         "floor_finish_area": 1,
+        "wall_finish_area": 0,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 1,
@@ -879,6 +880,7 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     assert summary["family_counts"] == {
         "floor_area": 0,
         "floor_finish_area": 0,
+        "wall_finish_area": 0,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 0,
@@ -1356,3 +1358,75 @@ def test_other_project_combined_seal_prevents_mixed_project_output(tmp_path, mon
     assert not (output / "source_attempt_preflight.json").exists()
     assert not (output / "production_summary.json").exists()
     assert not (output / ".source_closed_handoff.lock").exists()
+
+def test_original_three_laurel_surface_helpers_reject_wrong_sha_without_pdf(tmp_path):
+    """exact-source-safety must not require the private original PDF."""
+    from tools.run_source_closed_project_handoff import (
+        _THREE_LAUREL_SOURCE_SHA256,
+        _original_three_laurel_ceiling_handoff,
+        _original_three_laurel_floor_finish_handoff,
+        _original_three_laurel_wall_finish_handoff,
+    )
+
+    missing = tmp_path / "missing.pdf"
+    assert _THREE_LAUREL_SOURCE_SHA256
+    assert (
+        _original_three_laurel_floor_finish_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
+    )
+    assert (
+        _original_three_laurel_wall_finish_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
+    )
+    assert (
+        _original_three_laurel_ceiling_handoff(
+            missing, workspace_id=1, source_sha256="0" * 64,
+        )
+        is None
+    )
+
+
+
+def test_source_family_customer_verifier_is_project_neutral_and_fail_closed(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import tools.run_source_closed_project_handoff as handoff
+    from pb_migration_contracts import QuantityEvidence
+
+    arbitrary_sha = "cab125aafed01234" * 4
+    quantity = QuantityEvidence(
+        quantity_id="new_project_floor_01", family="floor_finish_area",
+        semantic_key="floor_finish_area:room-unknown", value=12.5, unit="m2",
+        input_entity_ids=("source-room-01",), authority="source_dimension",
+        status="firm", confidence=1.0,
+        metadata={"source_sha256": arbitrary_sha,
+                  "commercial_projection_allowed": True},
+    )
+    issued_run = SimpleNamespace(
+        quantities=(SimpleNamespace(quantity_id=quantity.quantity_id),),
+        source_sha256s=(arbitrary_sha,),
+    )
+    issued = SimpleNamespace(
+        status="FIRM_SOURCE_CUSTOMER_TO_REVIEW", sealed_run=issued_run,
+        quantities=(quantity,), customer_rows=({"quantity_id": quantity.quantity_id},),
+    )
+    monkeypatch.setattr(
+        handoff, "verify_sealed_customer_output",
+        lambda *_: SimpleNamespace(customer_row_count=1,
+                                   verified_quantity_ids=(quantity.quantity_id,)),
+    )
+    def emit_any_source(pdf_path, *, workspace_id):
+        assert workspace_id == 2
+        return issued
+    args = dict(pdf_path=tmp_path / "new_job.pdf", workspace_id=2,
+                source_sha256=arbitrary_sha, issuer=emit_any_source,
+                family="floor_finish_area", expected_count=1)
+    assert handoff._verified_source_family_handoff(**args)[0] == (quantity,)
+    assert handoff._verified_source_family_handoff(**{**args, "source_sha256": "0" * 64}) is None
+    assert handoff._verified_source_family_handoff(**{**args, "source_sha256": "z" * 64}) is None
+    assert handoff._verified_source_family_handoff(**{**args, "family": "wall_finish_area"}) is None
+    assert handoff._verified_source_family_handoff(**{**args, "expected_count": 2}) is None
+    assert handoff._verified_source_family_handoff(**{**args, "workspace_id": 0}) is None
