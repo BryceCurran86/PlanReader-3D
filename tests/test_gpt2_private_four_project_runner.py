@@ -184,6 +184,7 @@ def test_private_root_can_never_be_production_output(tmp_path, monkeypatch):
     roots, manifests, names = roster(tmp_path)
     real = gate.verify_private_original_roster
     monkeypatch.setattr(gate, "verify_private_original_roster", lambda root=None: real(root, manifest_root=manifests))
+    monkeypatch.setattr(gate, "_verify_exact_checkout", lambda expected_head_sha: None)
     with pytest.raises(gate.PrivateSourceGateError, match="output_inside_private_original_source_root"):
         gate.run_verified_private_handoff(
             project_id=gate.PROJECTS[0], expected_head_sha="a" * 40,
@@ -217,3 +218,36 @@ def test_wrong_project_fails_without_touching_files(tmp_path):
             output_dir=out,
         )
     assert not out.exists()
+
+
+def test_aliased_output_parent_cannot_write_into_private_root(tmp_path, monkeypatch):
+    roots, manifests, names = roster(tmp_path)
+    alias = tmp_path / "output_alias"
+    try:
+        alias.symlink_to(roots, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink unavailable")
+    real = gate.verify_private_original_roster
+    monkeypatch.setattr(gate, "verify_private_original_roster", lambda root=None: real(root, manifest_root=manifests))
+    monkeypatch.setattr(gate, "_verify_exact_checkout", lambda expected_head_sha: None)
+    with pytest.raises(gate.PrivateSourceGateError, match="output_inside_private_original_source_root"):
+        gate.run_verified_private_handoff(
+            project_id=gate.PROJECTS[0], expected_head_sha="a" * 40,
+            source_root=roots, output_dir=alias / "nested_results",
+        )
+    assert not (roots / "nested_results").exists()
+
+
+def test_checkout_authenticated_before_any_private_source_read(tmp_path, monkeypatch):
+    roots, manifests, names = roster(tmp_path)
+    calls = []
+    def private_roster_must_not_be_opened(root=None):
+        calls.append("PRIVATE_READ_ATTEMPTED")
+        raise AssertionError("untrusted code attempted a private source read")
+    monkeypatch.setattr(gate, "verify_private_original_roster", private_roster_must_not_be_opened)
+    with pytest.raises(gate.PrivateSourceGateError, match="checkout_head_cannot_be_authenticated"):
+        gate.run_verified_private_handoff(
+            project_id=gate.PROJECTS[0], expected_head_sha="a" * 40,
+            source_root=roots, output_dir=tmp_path / "external_results",
+        )
+    assert calls == []
