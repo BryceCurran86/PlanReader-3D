@@ -22,9 +22,11 @@ from pb_vr_editor_command_wsgi import (
     _reject_non_json_constant, _unique_object_pairs, make_editor_preview_wsgi_app,
 )
 from pb_vr_editor_readonly_wsgi import AuthorizedSceneWorkspace, EditorPrincipal
-from pb_vr_live_costing import LiveCostBook, price_live_correction_preview
+from pb_vr_live_costing import (
+    LiveCostBook, price_catalogue_selection, price_live_correction_preview, resolve_catalogue_quantity,
+)
 
-_PATH = re.compile(r"/api/editor/workspaces/([^/]+)/costing/preview\Z")
+_PATH = re.compile(r"/api/editor/workspaces/([^/]+)/costing/(preview|catalogue)\Z")
 _MAX_REQUEST_BYTES = 32 * 1024
 _HEADERS = [
     ("Content-Type", "application/json; charset=utf-8"),
@@ -45,6 +47,7 @@ def make_vr_live_costing_wsgi_app(
     load_authorized_ledger: Callable,
     verify_csrf: Callable,
     load_authorized_cost_book: Callable,
+    *, load_catalogue_rate: Callable | None = None,
 ):
     """All five required providers are owned by the production application.
 
@@ -55,6 +58,8 @@ def make_vr_live_costing_wsgi_app(
         load_authorized_ledger, verify_csrf, load_authorized_cost_book,
     )):
         raise ValueError("live_costing_requires_five_authenticated_providers")
+    if load_catalogue_rate is not None and not callable(load_catalogue_rate):
+        raise TypeError("catalogue_rate_provider_invalid")
     legacy = make_editor_preview_wsgi_app(
         authenticate_session, load_authorized_workspace,
         load_authorized_ledger, verify_csrf,
@@ -142,6 +147,20 @@ def make_vr_live_costing_wsgi_app(
             ledger, rows = load_authorized_ledger(principal, workspace)
             if not isinstance(ledger, Editable3DCorrectionLedger):
                 raise TypeError("ledger_provider_invalid")
+            if match.group(2) == "catalogue":
+                if load_catalogue_rate is None:
+                    return respond("409 Conflict", {"error": "catalogue_rates_not_connected"})
+                row = resolve_catalogue_quantity(
+                    command, principal=principal, workspace=workspace, ledger=ledger, rows=rows,
+                )
+                binding = load_catalogue_rate(principal, workspace, command["catalogueItemId"], row)
+                if binding is None:
+                    return respond("409 Conflict", {"error": "catalogue_rate_not_linked"})
+                selection = price_catalogue_selection(
+                    command, row=row, workspace=workspace,
+                    book=load_authorized_cost_book(principal, workspace), binding=binding,
+                )
+                return respond("200 OK", selection)
             quantity = preview_editor_command(
                 command, principal=principal, workspace=workspace,
                 ledger=ledger, existing_rows=rows,

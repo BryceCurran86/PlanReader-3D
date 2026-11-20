@@ -13,13 +13,18 @@ import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
 import { activeStart, buildGuide, newPlacementId, validWallLength } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
-import { aimBuild, createBuildOverlay, displayWallDraft } from "./buildScene";
+import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft, displayWallDraft, draftGesturePreview } from "./buildScene";
+import type { DraftGesture } from "./buildScene";
+import { roofEdges } from "./roofComponents";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, showConstructionItem, showConstructionSurface } from "./constructionStages";
+import type { ConstructionStage } from "./constructionStages";
+import { getCatalogueItem } from "./itemCatalogue";
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
 import type { ItemAction, MenuAction } from "./catalogueMenu";
 import type { CatalogueItem } from "./itemCatalogue";
-import { itemGuide, makeItemHostId } from "./itemPlacement";
+import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
 import { evaluateSourceFloorTeleport,describeTeleportReason } from "./verifiedTeleport";
 import { scopeKey } from "./reviewDraft";
@@ -47,6 +52,8 @@ type Props = {
   buildState: BuildState;
   buildLevel: string | null;
   buildSizes: BuildSizes;
+  stage: ConstructionStage;
+  onStage: (stage: ConstructionStage) => void;
   onBuildAction: (action: BuildAction) => void;
   onBuildHint: (hint: string) => void;
   catalogue: {
@@ -172,7 +179,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
+export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
@@ -187,6 +194,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint };
+  const construction = useRef({ stage, onStage });
+  construction.current = { stage, onStage };
   const itemControls = useRef(catalogue);
   itemControls.current = catalogue;
   const moveSettings = useRef({ moveMode, wallMoveState, onMoveDelta });
@@ -269,14 +278,21 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const sourceItemHosts = itemControls.current.demo ? demoCatalogueHosts(scene) : [];
     let draftItemHosts: CatalogueHost[] = [];
     let itemBrowser = EMPTY_ITEM_BROWSER;
-    const toolsBusy = () => !!build.current.buildState.tool || !!itemControls.current.active || itemBrowser.open;
+    let stageMenuOpen = false;
+    const toolsBusy = () => !!build.current.buildState.tool || !!itemControls.current.active || itemBrowser.open || stageMenuOpen;
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
-      return buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint);
+      return buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint,
+        construction.current.stage, stageMenuOpen);
     }
     function menuAction(choice: MenuAction) {
-      if (choice.area === "browse") itemBrowser = updateItemBrowser(itemBrowser, choice.action);
+      if (choice.area === "view") {
+        if (choice.stage) {
+          construction.current.onStage(choice.stage);
+          stageMenuOpen = false;
+        } else stageMenuOpen = !stageMenuOpen;
+      } else if (choice.area === "browse") itemBrowser = updateItemBrowser(itemBrowser, choice.action);
       else if (choice.area === "build") build.current.onBuildAction(choice.action);
       else {
         if (choice.action.kind === "choose") itemBrowser = { ...itemBrowser, open: false };
@@ -310,12 +326,13 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     // Optional verified room/ceiling/roof triangles are genuine existing
     // source-derived surface evidence, not the synthetic shadow ground plane.
+    const edgesByRoof = roofEdges(manifest.sourceSurfaces ?? []);
     for (const surface of manifest.sourceSurfaces ?? []) {
+      if (!sourceById.has(surface.objectId)) continue;
       const mesh = displaySourceSurface(surface);
       if(surface.kind==="floor")verifiedFloorMeshes.push(mesh);
-      if (sourceById.has(surface.objectId)) {
-        sourceItemHosts.push({ id: makeItemHostId(surface.kind, surface.surfaceId), target: surface.kind, mesh });
-      }
+      sourceItemHosts.push({ id: makeItemHostId(surface.kind, surface.surfaceId), target: surface.kind, mesh,
+        roofEdges: edgesByRoof.get(surface.surfaceId) });
       physical.add(mesh);
       pickables.push(mesh);
       mesh.userData.originalReviewColor =
@@ -331,14 +348,16 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
     let lastBuildWalls = build.current.buildState.walls;
+    let lastBuildCeilings = build.current.buildState.ceilings;
     let lastBuildLevel = build.current.buildLevel;
     let lastReviewSketch: WallVisual | null | undefined;
     let lastReviewWalls: WallVisual[] | undefined;
     function refreshWallAddition() {
       const { buildState, buildLevel } = build.current;
-      if (lastBuildWalls === buildState.walls && lastBuildLevel === buildLevel &&
-          lastReviewSketch === addedWallRef.current && lastReviewWalls === addedWallsRef.current) return;
+      if (lastBuildWalls === buildState.walls && lastBuildCeilings === buildState.ceilings &&
+          lastBuildLevel === buildLevel && lastReviewSketch === addedWallRef.current && lastReviewWalls === addedWallsRef.current) return;
       lastBuildWalls = buildState.walls;
+      lastBuildCeilings = buildState.ceilings;
       lastBuildLevel = buildLevel;
       lastReviewSketch = addedWallRef.current;
       lastReviewWalls = addedWallsRef.current;
@@ -354,7 +373,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         byId.set(wall.proposalId, wall);
       }
       const active = [...byId.values()];
-      const signature = JSON.stringify(active);
+      const ceilings = buildState.ceilings.filter(ceiling => !buildLevel || ceiling.levelId === buildLevel);
+      const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
       lastAddedWall = signature;
       itemView.clear();
@@ -375,6 +395,12 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         group.userData.proposalId = wall.proposalId;
         wallAdditionLayer.add(group);
         draftItemHosts.push(...draftCatalogueHosts(wall, group));
+      }
+      for (const ceiling of ceilings) {
+        const mesh = displayCeilingDraft(ceiling);
+        mesh.userData.surfaceKind = "ceiling";
+        wallAdditionLayer.add(mesh);
+        draftItemHosts.push({ id: ceilingDraftHostId(ceiling.proposalId), target: "ceiling", mesh, ceilingDraft: ceiling });
       }
     }
 
@@ -441,26 +467,53 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     function syncItems() {
       refreshWallAddition();
-      itemView.sync(sourceItemHosts, draftItemHosts, itemControls.current.items);
+      itemView.sync(sourceItemHosts, draftItemHosts, itemControls.current.items, construction.current.stage);
     }
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
-      const { hit: target } = itemView.candidate(raycaster, item, itemControls.current.turn);
+      const { hit: target, reason } = itemView.candidate(raycaster, item, itemControls.current.turn);
       if (target) itemControls.current.onPlace(item.id, target);
+      else setBuildHint(reason ?? itemGuide(item));
     }
     const select = (id: string | null) => callback.current(id);
     function pick() {
-      const hits = raycaster.intersectObjects(pickables, false);
+      const hits = raycaster.intersectObjects(pickables.filter(object =>
+        showConstructionSurface(construction.current.stage, object.userData.surfaceKind)), false);
       const hit = hits[0];
       select(typeof hit?.object.userData.objectId === "string"
         ? hit.object.userData.objectId : null);
     }
-    let startPointer: { id: number; x: number; y: number } | null = null;
-    function pointerDown(e: PointerEvent) {
-      if (renderer.xr.isPresenting || e.button !== 0 || !e.isPrimary) return;
-      startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    let startPointer: { id: number; x: number; y: number; gesture: DraftGesture | null } | null = null;
+    function draftGesture() {
+      const { buildState, buildLevel } = build.current;
+      return !itemControls.current.active && beginDraftGesture(buildState, buildLevel, raycaster.ray) || null;
     }
-    function trackPointer(e: PointerEvent) {
+    function previewDrag(gesture: DraftGesture) {
+      const { buildState, buildLevel, buildSizes } = build.current;
+      if (buildState.tool !== gesture.mode || buildLevel !== gesture.levelId) return null;
+      return draftGesturePreview(gesture, buildSizes, raycaster.ray);
+    }
+    function completeDrag(gesture: DraftGesture) {
+      const preview = previewDrag(gesture);
+      if (!preview) return false;
+      const { action } = preview;
+      if (action?.kind === "drag") {
+        build.current.onBuildAction({ ...action, id: newPlacementId(gesture.mode) });
+      } else if (action) build.current.onBuildAction(action);
+      else setBuildHint(preview.aim.hint);
+      return true;
+    }
+    function pointerDown(e: PointerEvent) {
+      if (renderer.xr.isPresenting || e.button !== 0 || !e.isPrimary || !trackPointer(e)) return;
+      raycaster.setFromCamera(mouse, camera);
+      const gesture = draftGesture();
+      startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture };
+      if (gesture) {
+        controls.enabled = false;
+        renderer.domElement.setPointerCapture(e.pointerId);
+      }
+    }
+    function trackPointer(e: MouseEvent) {
       const rect = renderer.domElement.getBoundingClientRect();
       if (!rect.width || !rect.height) return false;
       mouse.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -470,15 +523,21 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     }
     function leaveCanvas() { hoveringCanvas = false; }
     function cancelPointer() {
+      if (startPointer?.gesture) controls.enabled = true;
       startPointer = null;
       leaveCanvas();
     }
     function pointerUp(e: PointerEvent) {
       const start = startPointer;
       startPointer = null;
-      if (renderer.xr.isPresenting || !start || start.id !== e.pointerId) return;
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6 || !trackPointer(e)) return;
+      if (!start || start.id !== e.pointerId) return;
+      if (start.gesture) controls.enabled = true;
+      if (renderer.xr.isPresenting || !trackPointer(e)) return;
       raycaster.setFromCamera(mouse, camera);
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) {
+        if (start.gesture) completeDrag(start.gesture);
+        return;
+      }
       const active = itemControls.current.active;
       if (active) {
         placeSelectedItem(active);
@@ -497,7 +556,34 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       else if (build.current.buildState.tool) build.current.onBuildAction({ kind: "done" });
       else select(null);
     }
-    renderer.domElement.addEventListener("pointerdown", pointerDown);
+    function dragOver(event: DragEvent) {
+      if (event.dataTransfer?.types.some(type => type === CATALOGUE_DRAG_TYPE || type === OPENING_DRAG_TYPE) &&
+          trackPointer(event)) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }
+    }
+    function dropItem(event: DragEvent) {
+      if (!trackPointer(event)) return;
+      const opening = event.dataTransfer?.getData(OPENING_DRAG_TYPE);
+      raycaster.setFromCamera(mouse, camera);
+      if (opening === "door" || opening === "frame") {
+        if (build.current.buildState.tool !== opening) return;
+        event.preventDefault();
+        const target = aim();
+        if (target.hit?.kind === "opening") place(target.hit);
+        else setBuildHint(target.hint);
+        return;
+      }
+      const item = getCatalogueItem(event.dataTransfer?.getData(CATALOGUE_DRAG_TYPE) ?? null);
+      if (!item || itemControls.current.active?.id !== item.id ||
+          !showConstructionItem(construction.current.stage, item)) return;
+      event.preventDefault();
+      placeSelectedItem(item);
+    }
+    renderer.domElement.addEventListener("dragover", dragOver);
+    renderer.domElement.addEventListener("drop", dropItem);
+    renderer.domElement.addEventListener("pointerdown", pointerDown, true);
     renderer.domElement.addEventListener("pointerup", pointerUp);
     renderer.domElement.addEventListener("pointermove", trackPointer);
     renderer.domElement.addEventListener("pointerleave", leaveCanvas);
@@ -537,10 +623,23 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         [head.x,head.y,head.z],
       );
     }
+    const xrGestures: (DraftGesture | null)[] = [null, null];
+    function beginXrGesture(index: number) {
+      aimController(controllers[index]);
+      const layout = menuLayout("");
+      buildOverlay.sizeMenu(layout);
+      if (!itemBrowser.open && !stageMenuOpen && !buildOverlay.menuHit(raycaster, layout))
+        xrGestures[index] = draftGesture();
+    }
+    const selectStart0 = () => beginXrGesture(0), selectStart1 = () => beginXrGesture(1);
+    const selectEnd0 = () => { xrGestures[0] = null; }, selectEnd1 = () => { xrGestures[1] = null; };
     const trigger=(index:number)=>{
       lastController = index;
       aimController(controllers[index]);
       const { buildState } = build.current;
+      const gesture = xrGestures[index];
+      xrGestures[index] = null;
+      if (gesture && completeDrag(gesture)) return;
       const layout = menuLayout("");
       buildOverlay.sizeMenu(layout);
       const menuChoice = buildOverlay.menuHit(raycaster, layout);
@@ -548,7 +647,7 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         if (menuChoice.action) menuAction(menuChoice.action);
         return;
       }
-      if (itemBrowser.open) return;
+      if (itemBrowser.open || stageMenuOpen) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -686,6 +785,8 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     const onSessionEnd = () => {
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
+      stageMenuOpen = false;
+      xrGestures.fill(null);
       inputSources[0] = null;
       inputSources[1] = null;
       squeezeTracker.clear();
@@ -708,6 +809,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
     controllers[1].addEventListener("squeeze", squeeze1);
     controllers[0].addEventListener("select", select0);
     controllers[1].addEventListener("select", select1);
+    controllers[0].addEventListener("selectstart", selectStart0);
+    controllers[1].addEventListener("selectstart", selectStart1);
+    controllers[0].addEventListener("selectend", selectEnd0);
+    controllers[1].addEventListener("selectend", selectEnd1);
     for (const controller of controllers) {
       const pointer = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
@@ -783,6 +888,28 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           obj.position.set(dx,0,dz);
       }
       syncItems();
+      const currentStage = construction.current.stage;
+      const framing = currentStage === "framing" || currentStage === "rough-in";
+      for (const obj of pickables) {
+        const kind = obj.userData.surfaceKind;
+        const visible = showConstructionSurface(currentStage, kind);
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material.visible = visible;
+          obj.material.wireframe = !kind && framing;
+          if (kind === "roof") obj.castShadow = visible;
+        } else obj.visible = visible;
+      }
+      for (const shape of wallAdditionLayer.children) {
+        shape.visible = currentStage !== "slab";
+        if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshBasicMaterial) {
+          shape.material.visible = showConstructionSurface(currentStage, "ceiling");
+        } else {
+          for (const child of shape.children) {
+            if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial)
+              child.material.visible = !framing;
+          }
+        }
+      }
       const origin = activeStart(buildState, buildLevel);
       const item = itemControls.current.active;
       const prompt = item ? itemGuide(item) : buildGuide(buildState, buildLevel);
@@ -796,19 +923,23 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
-        const ready = active >= 0 && !hover && !itemBrowser.open;
+        const held = xrGestures.findIndex(gesture => gesture !== null);
+        if (held >= 0) aimController(controllers[held]);
+        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
-        const buildTarget = ready && !item ? aim() : null;
+        const drag = held >= 0 ? xrGestures[held] : null;
+        const buildTarget = drag ? previewDrag(drag)?.aim ?? null : ready && !item ? aim() : null;
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (!itemBrowser.open) layout.note = itemPick?.hit ? "Pull the trigger to place." :
+        if (!itemBrowser.open && !stageMenuOpen) layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
         buildOverlay.drawMenu(layout, hover?.index ?? -1);
       } else {
-        const canAim = !!(buildState.tool || item) && hoveringCanvas && !startPointer;
+        const drag = startPointer?.gesture;
+        const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
         const itemPick = canAim && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
-        const buildTarget = canAim && !item ? aim() : null;
+        const buildTarget = canAim && !item ? drag ? previewDrag(drag)?.aim ?? null : aim() : null;
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
@@ -936,7 +1067,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
           }
         }
       }
-      const labelKey = picked.current && activeInspection.showLabels
+      const labelVisible = picked.current && pickables.some(object => object.userData.objectId === picked.current &&
+        showConstructionSurface(currentStage, object.userData.surfaceKind));
+      const labelKey = labelVisible && activeInspection.showLabels
         ? `${picked.current}|${activeInspection.showDimensions}` : null;
       if (labelKey !== lastLabelId) {
         if (selectedLabel) {
@@ -1003,7 +1136,9 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       disposed = true;
       renderer.setAnimationLoop(null);
       resizeObserver.disconnect();
-      renderer.domElement.removeEventListener("pointerdown", pointerDown);
+      renderer.domElement.removeEventListener("dragover", dragOver);
+      renderer.domElement.removeEventListener("drop", dropItem);
+      renderer.domElement.removeEventListener("pointerdown", pointerDown, true);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       renderer.domElement.removeEventListener("pointermove", trackPointer);
       renderer.domElement.removeEventListener("pointerleave", leaveCanvas);
@@ -1025,6 +1160,10 @@ export function SceneView({ manifest, selectedId, onSelect, draftState, onCycleS
       sessionReportCallback.current({presenting:false,controllers:[]});
       controllers[0].removeEventListener("select", select0);
       controllers[1].removeEventListener("select", select1);
+      controllers[0].removeEventListener("selectstart", selectStart0);
+      controllers[1].removeEventListener("selectstart", selectStart1);
+      controllers[0].removeEventListener("selectend", selectEnd0);
+      controllers[1].removeEventListener("selectend", selectEnd1);
       controls.dispose();
       if (selectedLabel) {
         scene.remove(selectedLabel);

@@ -1,7 +1,9 @@
 import { catalogueGroupLabel, getCatalogueItem } from "./itemCatalogue.ts";
 import type { CatalogueItem, ItemTarget, TimberVisual } from "./itemCatalogue.ts";
 import { openingFits, planLength, validWallLength } from "./buildPlacement.ts";
-import type { WallVisual } from "./buildPlacement.ts";
+import { projectOnWall } from "./buildPlacement.ts";
+import type { CeilingDraft, WallVisual } from "./buildPlacement.ts";
+import { roofEdgeFits, roofEdges } from "./roofComponents.ts";
 import type { SceneManifest } from "./types.ts";
 
 export type Vector = [number, number, number];
@@ -17,12 +19,15 @@ export type ItemHit = {
   normal: Vector;
   side: 1 | -1;
   opening?: OpeningSize;
+  roofEdgeKey?: string;
+  anchor?: { kind: "wall"; offsetM: number } | { kind: "ceiling"; xFraction: number; zFraction: number };
 };
 export type PlacedItem = ItemHit & { id: string; itemId: string; turn: number };
 export type ItemDraft = { sourceKey: string; items: PlacedItem[]; history: PlacedItem[][] };
 export const emptyItemDraft = (sourceKey: string): ItemDraft => ({ sourceKey, items: [], history: [] });
 
 export const makeItemHostId = (target: string, id: string) => target + ":" + id;
+export const ceilingDraftHostId = (proposalId: string) => makeItemHostId("draft-ceiling", proposalId);
 export const openingHostId = (proposalId: string, openingId: string) =>
   "opening:" + JSON.stringify([proposalId, openingId]);
 
@@ -71,6 +76,7 @@ export function timberFitsWall(spec: TimberVisual, point: Vector, turn: number, 
 
 export function itemGuide(item: CatalogueItem) {
   if (item.visual.kind === "entry") return "Aim at an opening placed with the Door tool.";
+  if (item.visual.kind === "roof-component") return "Aim near a matching edge of the source roof.";
   if (item.visual.kind === "timber" && item.visual.mount === "face") return "Aim at the centre of the timber on a wall face.";
   const target = item.targets;
   if (target.includes("wall") && target.includes("ceiling")) return "Aim at a wall or ceiling.";
@@ -88,6 +94,7 @@ function surfaceSlot(placement: PlacedItem, item: CatalogueItem) {
   const visual = item.visual;
   if (visual.kind === "fixture" || visual.kind === "timber") return null;
   if (visual.kind === "entry") return JSON.stringify([placement.hostId, "entry"]);
+  if (visual.kind === "roof-component") return JSON.stringify([placement.roofEdgeKey, visual.component]);
   const side = placement.target === "wall" || placement.target === "opening" ? placement.side : 1;
   return JSON.stringify([placement.hostId, side, visual.kind === "trim" ? "trim" : visual.slot]);
 }
@@ -112,6 +119,7 @@ export function placeItem(
     return worktopId(entry.id) === hit.hostId && parent && makesWorktop(parent);
   })) return draft;
   if (hit.target === "roof" && hit.normal[1] <= 0.001) return draft;
+  if (item.visual.kind === "roof-component" && !hit.roofEdgeKey) return draft;
   const entry = { ...hit, id, itemId, turn };
   const slot = surfaceSlot(entry, item);
   let items = draft.items;
@@ -143,9 +151,13 @@ export function undoItem(draft: ItemDraft) {
 
 export function currentItemPlacements(
   items: readonly PlacedItem[], manifest: SceneManifest, walls: WallVisual[], demo: boolean,
+  ceilings: readonly CeilingDraft[] = [],
 ) {
   const hosts = new Map<string, ItemTarget>();
   const openingSizes = new Map<string, OpeningSize>();
+  const ceilingByHost = new Map(ceilings.map(ceiling => [ceilingDraftHostId(ceiling.proposalId), ceiling]));
+  for (const [hostId] of ceilingByHost) hosts.set(hostId, "ceiling");
+  const edgeMap = items.some(item => item.roofEdgeKey) ? roofEdges(manifest.sourceSurfaces ?? []) : new Map();
   const wallSections = new Map<string, WallSection>();
   for (const row of manifest.objects) {
     const shape = row.geometry;
@@ -186,18 +198,48 @@ export function currentItemPlacements(
       }
     }
   }
-  return items.filter(entry => {
+  return items.flatMap(entry => {
+    let placement = entry;
     // Saved drafts cannot bypass surface compatibility or source-host binding.
-    if (hosts.get(entry.hostId) !== entry.target) return false;
+    if (hosts.get(entry.hostId) !== entry.target) return [];
     const item = getCatalogueItem(entry.itemId);
     if (!item || !item.targets.includes(entry.target) ||
-        (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return false;
+        (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return [];
     if (entry.target === "roof" && (!Array.isArray(entry.normal) || entry.normal.length !== 3 ||
-        !entry.normal.every(Number.isFinite) || entry.normal[1] <= 0.001)) return false;
-    if (item.visual.kind === "timber" && !timberFitsWall(item.visual, entry.point, entry.turn, wallSections.get(entry.hostId)))
-      return false;
+        !entry.normal.every(Number.isFinite) || entry.normal[1] <= 0.001)) return [];
+    if (item.visual.kind === "roof-component") {
+      const edges = edgeMap.get(entry.hostId.slice("roof:".length));
+      const edge = edges?.find((candidate: import("./roofComponents.ts").RoofEdge) => candidate.key === entry.roofEdgeKey);
+      if (!edge || !roofEdgeFits(item.visual, edge)) return [];
+    }
+    if (entry.anchor?.kind === "wall") {
+      const section = wallSections.get(entry.hostId);
+      const offset = entry.anchor.offsetM;
+      if (!section || !Number.isFinite(offset)) return [];
+      const projection = projectOnWall({ ...section, scopeKey: "", proposalId: "", levelId: "" },
+        section.end);
+      const height = entry.point[1];
+      if (offset < 0 || offset > projection.length + 0.000001 || height > section.heightM ||
+          section.apertures.some(opening => offset > opening.from && offset < opening.to &&
+            height >= opening.bottom && height <= opening.top)) return [];
+      const dx = (section.end[0] - section.start[0]) / projection.length;
+      const dz = (section.end[1] - section.start[1]) / projection.length;
+      placement = { ...entry, point: [section.start[0] + dx * offset, height, section.start[1] + dz * offset],
+        normal: [dz * entry.side, 0, -dx * entry.side] };
+    } else if (entry.anchor?.kind === "ceiling") {
+      const ceiling = ceilingByHost.get(entry.hostId);
+      const { xFraction, zFraction } = entry.anchor;
+      if (!ceiling || ![xFraction, zFraction].every(n => Number.isFinite(n) && n >= 0 && n <= 1)) return [];
+      const [start, end] = [ceiling.start, ceiling.end];
+      placement = { ...entry, point: [
+        Math.min(start[0], end[0]) + Math.abs(end[0] - start[0]) * xFraction,
+        ceiling.heightM, Math.min(start[1], end[1]) + Math.abs(end[1] - start[1]) * zFraction,
+      ] };
+    }
+    if (item.visual.kind === "timber" && !timberFitsWall(item.visual, placement.point, entry.turn, wallSections.get(entry.hostId)))
+      return [];
     if (makesWorktop(item)) hosts.set(worktopId(entry.id), "worktop");
-    return true;
+    return [placement];
   });
 }
 

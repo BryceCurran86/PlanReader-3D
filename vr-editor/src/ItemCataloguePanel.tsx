@@ -5,6 +5,7 @@ import {
 import type { CatalogueGroup, CatalogueItem } from "./itemCatalogue";
 import { itemGuide, itemSchedule, itemScheduleCsv } from "./itemPlacement";
 import type { PlacedItem } from "./itemPlacement";
+import { CATALOGUE_DRAG_TYPE } from "./constructionStages";
 
 const PAGE_SIZE = 16;
 type Props = {
@@ -66,7 +67,12 @@ export function ItemCataloguePanel({
       matches.length + " matching " + (matches.length === 1 ? "item" : "items")}</p>
     <ul className="catalogue-results">
       {options.map(item => <li key={item.id}>
-        <button type="button" aria-pressed={active?.id === item.id} onClick={() => onChoose(item.id)}>
+        <button type="button" draggable aria-pressed={active?.id === item.id} onClick={() => onChoose(item.id)}
+          onDragStart={event => {
+            event.dataTransfer.setData(CATALOGUE_DRAG_TYPE, item.id);
+            event.dataTransfer.effectAllowed = "copy";
+            onChoose(item.id);
+          }}>
           <span className="catalogue-swatch" style={{ backgroundColor: "#" +
             item.visual.color.toString(16).padStart(6, "0") }} aria-hidden="true" />
           <span><strong>{item.label}</strong><small>{catalogueGroupLabel(item.group)}</small></span>
@@ -83,7 +89,7 @@ export function ItemCataloguePanel({
     </div>
     {active && <section className="catalogue-instructions">
       <strong>{active.label}</strong>
-      <p>{itemGuide(active)} Click to place.</p>
+      <p>{itemGuide(active)} Click to place or drag an item onto the scene.</p>
       <div className="catalogue-actions">
         {itemCanRotate(active) && <button type="button" onClick={onRotate}>
           Rotate · {turn * 90}°

@@ -1,5 +1,6 @@
 import { activeStart, BUILD_TOOLS, buildGuide, planLength } from "./buildPlacement";
 import type { BuildAction, BuildSizes, BuildState } from "./buildPlacement";
+import { OPENING_DRAG_TYPE } from "./constructionStages";
 
 type Props = {
   state: BuildState;
@@ -23,10 +24,10 @@ export function BuildTools({
   function sizeInput(key: keyof BuildSizes, label: string) {
     return <label>{label}
       <input type="number" min={50} max={key === "widthM" ? 200000 : 20000} step={1}
-        defaultValue={Math.round(sizes[key] * 1000)} onBlur={event => {
+        defaultValue={Math.round((sizes[key] ?? sizes.wallHeightM) * 1000)} onBlur={event => {
           const input = event.currentTarget;
           if (!input.value || !input.validity.valid) {
-            input.value = String(Math.round(sizes[key] * 1000));
+            input.value = String(Math.round((sizes[key] ?? sizes.wallHeightM) * 1000));
             return;
           }
           onSizes({ ...sizes, [key]: input.valueAsNumber / 1000 });
@@ -36,7 +37,13 @@ export function BuildTools({
   return <section className="build-tools" aria-label="Build tools">
     <div className="build-actions">
       {BUILD_TOOLS.map(({ id, label }) => <button key={id} type="button" className="build-tool"
-        disabled={!levelId} aria-pressed={state.tool === id}
+        disabled={!levelId} aria-pressed={state.tool === id} draggable={!!levelId && (id === "door" || id === "frame")}
+        onDragStart={event => {
+          if (id !== "door" && id !== "frame") return;
+          event.dataTransfer.setData(OPENING_DRAG_TYPE, id);
+          event.dataTransfer.effectAllowed = "copy";
+          onAction({ kind: "tool", tool: id });
+        }}
         onClick={() => onAction({ kind: "tool", tool: id })}>{label}</button>)}
       <button type="button" className="build-tool" aria-expanded={catalogueOpen}
         aria-controls="item-catalogue" onClick={onCatalogueToggle}>Items</button>
@@ -58,10 +65,11 @@ export function BuildTools({
         <summary>Placement sizes</summary>
         <div className="build-sizes">
           {sizeInput("wallHeightM", "Wall height (mm)")}
+          {sizeInput("ceilingHeightM", "Ceiling height (mm)")}
           {sizeInput("widthM", "Door / frame width (mm)")}
           {sizeInput("heightM", "Door / frame height (mm)")}
         </div>
-        <p>Starting sizes for new drafts. Wall points snap to 50 mm.</p>
+        <p>Set sizes for new drafts. Drag or pick two points to place a wall or ceiling. Use Move and Stretch on a draft to adjust it.</p>
       </details>
       {walls.length > 0 && <details open={!state.tool || undefined}>
         <summary>Review drafts ({walls.length})</summary>

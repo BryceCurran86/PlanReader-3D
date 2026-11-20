@@ -8,6 +8,10 @@ import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
+import { ConstructionView } from "./ConstructionView";
+import { CataloguePricingPanel } from "./CataloguePricingPanel";
+import { isRoughIn, showConstructionItem } from "./constructionStages";
+import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem } from "./itemCatalogue";
 import { currentItemPlacements, emptyItemDraft, placeItem, removeItem, undoItem } from "./itemPlacement";
@@ -49,6 +53,7 @@ export function App() {
   const [buildHint, setBuildHint] = useState("");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
   const [catalogueOpen, setCatalogueOpen] = useState(false);
+  const [stage, setStage] = useState<ConstructionStage>("finished");
   const [catalogueSession, setCatalogueSession] = useState<CatalogueSession | null>(null);
   const [wallReview, setWallReview] = useState<{ scene: SceneManifest; proposalId: string; request: number } | null>(null);
   const wallReviewPanel = useRef<HTMLDivElement>(null);
@@ -227,6 +232,9 @@ export function App() {
   }
   function onItemAction(action: ItemAction) {
     if (action.kind === "choose") {
+      const item = getCatalogueItem(action.itemId);
+      if (!item) return;
+      if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
       onBuildAction({ kind: "done" });
       setCatalogueOpen(true);
       changeCatalogue(current => ({ ...current, itemId: action.itemId, turn: 0 }));
@@ -247,7 +255,11 @@ export function App() {
   }
   function onBuildAction(action: BuildAction) {
     if (!manifest) return;
-    if (action.kind === "tool" && activeItem) onItemAction({ kind: "done" });
+    if (action.kind === "tool") {
+      if (activeItem) onItemAction({ kind: "done" });
+      if (action.tool === "ceiling" && stage !== "finished") setStage("finished");
+      else if (stage === "slab") setStage("framing");
+    }
     setBuildHint("");
     const source = scopeKey(manifest);
     setPlaced(previous => ({
@@ -255,6 +267,12 @@ export function App() {
       build: updateBuild(previous?.scene === manifest ? previous.build : EMPTY_BUILD,
         action, source, buildLevel, buildSizes),
     }));
+  }
+  function onStage(next: ConstructionStage) {
+    if (next === stage) return;
+    if (activeItem && !showConstructionItem(next, activeItem)) onItemAction({kind: "done"});
+    if (next === "slab") onBuildAction({kind: "done"});
+    setStage(next);
   }
   function changeLevel(id: string) {
     onBuildAction({ kind: "done" });
@@ -307,8 +325,8 @@ export function App() {
     if (!manifest || !catalogue) return NO_ITEMS;
     const drafts = [...activeBatchSketches, ...buildState.walls];
     if (activeAddedWallSketch) drafts.push(activeAddedWallSketch);
-    return currentItemPlacements(catalogue.draft.items, manifest, drafts, isDemo);
-  }, [manifest, catalogue?.draft.items, activeBatchSketches, buildState.walls, activeAddedWallSketch, isDemo]);
+    return currentItemPlacements(catalogue.draft.items, manifest, drafts, isDemo, buildState.ceilings);
+  }, [manifest, catalogue?.draft.items, activeBatchSketches, buildState.walls, buildState.ceilings, activeAddedWallSketch, isDemo]);
   const reviewCount = manifest?.objects.filter(o => o.unresolvedIssues.length > 0).length ?? 0;
   // Keyboard undo/redo works only outside editable fields and cannot change the source.
   useEffect(() => {
@@ -364,6 +382,7 @@ export function App() {
 
       <main className="workspace-layout">
         <section className="viewer-panel" aria-label="Building scene">
+          {visible && <ConstructionView stage={stage} onStage={onStage} />}
           {visible && <BuildTools state={buildState} sizes={buildSizes} levels={levels}
             levelId={buildLevel} hint={buildHint} onAction={onBuildAction} onSizes={setBuildSizes}
             onLevel={changeLevel} onTopView={() => requestCamera("plan")} onReview={reviewWall}
@@ -379,6 +398,7 @@ export function App() {
                 addedWallSketch={activeAddedWallSketch}
                 addedWallSketches={activeBatchSketches}
                 buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes}
+                stage={stage} onStage={onStage}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
@@ -407,13 +427,14 @@ export function App() {
             </div>
           )}
           <div className="viewer-footer">
-            <span>Drag to orbit, scroll to zoom, click to select or place.</span>
-            <span>In VR, point at a build tool and pull the trigger.</span>
+            <span>Drag in a build tool to draw or edit. With tools off, drag to orbit.</span>
+            <span>In VR, use View or hold the trigger to drag a draft.</span>
           </div>
         </section>
 
         <aside className="inspector" aria-label="Evidence inspector">
           {manifest && catalogueOpen && <div className="section-block catalogue-section">
+            <CataloguePricingPanel scene={manifest} items={placedItems} authenticated={authenticatedSource} />
             <ItemCataloguePanel active={activeItem} items={placedItems}
               canUndo={!!catalogue?.draft.history.length} turn={catalogue?.turn ?? 0}
               onChoose={itemId => onItemAction({ kind: "choose", itemId })}

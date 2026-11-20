@@ -2,6 +2,8 @@ import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
 import type { BuildAction, BuildState } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem } from "./itemCatalogue.ts";
+import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
+import type { ConstructionStage } from "./constructionStages.ts";
 
 export type ItemAction =
   | { kind: "choose"; itemId: string }
@@ -10,7 +12,8 @@ type BrowseAction = { kind: "toggle" } | { kind: "category" | "page"; step: numb
 export type MenuAction =
   | { area: "build"; action: BuildAction }
   | { area: "items"; action: ItemAction }
-  | { area: "browse"; action: BrowseAction };
+  | { area: "browse"; action: BrowseAction }
+  | { area: "view"; stage?: ConstructionStage };
 
 export type MenuButton = {
   label: string; x: number; y: number; w: number; h: number;
@@ -35,6 +38,7 @@ export function updateItemBrowser(state: BrowserState, action: BrowseAction): Br
 export function buildMenuLayout(
   build: BuildState, levelId: string | null, browser: BrowserState,
   item: CatalogueItem | undefined, itemUndo: boolean, turn: number, hint: string,
+  stage: ConstructionStage = "finished", viewsOpen = false,
 ): MenuLayout {
   const buttons: MenuButton[] = [];
   function add(label: string, x: number, y: number, w: number, h: number, action: MenuAction,
@@ -43,6 +47,15 @@ export function buildMenuLayout(
   }
   const browse = (action: BrowseAction): MenuAction => ({ area: "browse", action });
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
+  if (viewsOpen) {
+    for (const [index, option] of CONSTRUCTION_STAGES.entries()) {
+      add(option.label, 20 + 158 * index, 69, 147, 65,
+        { area: "view", stage: option.id }, { active: stage === option.id });
+    }
+    add("Back", 810, 69, 150, 65, { area: "view" });
+    return { buttons, title: "Construction view", width: WIDTH, height: 228,
+      note: stageDetails(stage).description };
+  }
   if (browser.open) {
     const { category, page } = browser;
     const list = optionsByGroup[category];
@@ -69,16 +82,17 @@ export function buildMenuLayout(
       active: build.tool === id, disabled: !levelId }));
   actions.push(
     { label: "Items", target: browse({ kind: "toggle" }), active: !!item },
+    { label: "View", target: { area: "view" } },
     { label: "Undo", target: item ? items({ kind: "undo" }) : { area: "build", action: { kind: "undo" } },
       disabled: item ? !itemUndo : !build.history.length && !activeStart(build, levelId) },
     { label: "Done", target: item ? items({ kind: "done" }) : { area: "build", action: { kind: "done" } },
       disabled: !item && !build.tool },
   );
   if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
-  const stride = (WIDTH - 40) / actions.length;
+  const stride = (WIDTH - 40) / 6;
   for (const [index, entry] of actions.entries()) {
-    add(entry.label, 20 + stride * index, 67, stride - 9, 70, entry.target,
+    add(entry.label, 20 + stride * (index % 6), 67 + Math.floor(index / 6) * 68, stride - 9, 58, entry.target,
       { active: entry.active, disabled: entry.disabled });
   }
-  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 228, note: hint };
+  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 285, note: hint };
 }
