@@ -80,3 +80,29 @@ def test_bundle():
     )
     assert b["measurement_authorized"] is False
     assert "21" in b["tasks_covered"]
+
+
+def test_source_trace_packet_supports_unseen_projects_without_source_exceptions():
+    for project in ("New project 847", "Brisbane tower", "other_2027"):
+        packet = build_source_trace_regression_packet(
+            project_key=project,
+            source_sha256="0123456789abcdef" * 4,
+            before_polygon=((0, 0), (10, 0), (10, 10), (0, 0)),
+            after_polygon=((0, 0), (11, 0), (11, 11), (0, 0)),
+        )
+        assert packet["status"] == "CANDIDATE"
+        assert packet["project_key"] == project
+        assert packet["commercial_publishable"] is False
+
+
+def test_source_trace_packet_rejects_missing_key_and_malformed_sha():
+    inputs = (("", "a" * 64, "project_key_required"),
+              ("Some project", "g" * 64, "source_sha_required"),
+              ("Some project", "z", "source_sha_required"))
+    for project, sha, reason in inputs:
+        packet = build_source_trace_regression_packet(
+            project_key=project, source_sha256=sha,
+            before_polygon=(), after_polygon=(),
+        )
+        assert packet["status"] == "ABSTAINED"
+        assert packet["reason"] == reason
