@@ -3891,8 +3891,18 @@ def resolve_registered_cross_sheet_floor_correspondences(
                    or not math.isfinite(float(w.covered_interval_iou))
                    or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
             or not doors
+            or type(getattr(area, "room_label", None)) is not str
+            or not area.room_label.strip()
             or any(d.status is not EvidenceResolutionStatus.CORROBORATED
                    or d.threshold_aligned_with_internal_face is not True
+                   or d.page_id != floor.page_id
+                   or type(d.scheduled_room_name) is not str
+                   or d.scheduled_room_name.strip().casefold() != area.room_label.strip().casefold()
+                   or type(d.door_width_mm) not in (int, float)
+                   or not math.isfinite(float(d.door_width_mm))
+                   or float(d.door_width_mm) <= 0
+                   or type(d.door_callout) is not str or not d.door_callout.strip()
+                   or type(d.schedule_page_id) is not str or not d.schedule_page_id.strip()
                    for d in doors)
             or dict(record.finish_codes_in_box) != {record.material_code: 1}):
             continue
