@@ -511,9 +511,6 @@ export function App() {
     setPcVrSession(session);
   }
 
-  return () => window.removeEventListener("keydown", keyDown);
-  }, [manifest, moveMode, selectedId, handleMoveDelta]);
-
   useEffect(() => {
     if (!canTeleport && teleportMode) setTeleportMode(false);
   }, [canTeleport, teleportMode]);
