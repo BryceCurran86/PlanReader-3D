@@ -69,7 +69,8 @@ def test_wrong_original_sha_and_nonplan_page_do_not_match():
     r=review_sliding_aperture_representative_owners(
         (_bridge(10,1,2),),c,expected_source_sha256=SHA,
     )
-    assert r["source_typed_door_candidates_reviewed"]==0
+    # Wrong-page door is reviewed but cannot match a bridge on page 3.
+    assert r["source_typed_door_candidates_reviewed"]==1
     assert r["source_door_candidates_with_unique_bridge"]==0
     assert r["measurement_authorized"] is False
 
