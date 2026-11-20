@@ -36,32 +36,52 @@ jobs:
       - run: |
           PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_raster_split_frame_shadow.py tests/test_raster_connected_host_frame.py tests/test_physical_wall_candidate_drafting_motif_filter.py
           ruff check --select F821,F823 pb_opening_host_frame_authority.py pb_physical_wall_candidate_authority.py tests/test_gptmax_raster_split_frame_shadow.py tests/test_physical_wall_candidate_drafting_motif_filter.py tools/diag_gptmax_source_split_frame_shadow.py
+      - name: Record private replay status for pull requests
+        if: github.event_name == 'pull_request' && matrix.python-version == '3.13'
+        run: echo "Private original split-frame replay NOT RUN. Public tests are source-neutral." >> "$GITHUB_STEP_SUMMARY"
   original-sha-pinned-split-host-frame-replay:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Provision exact owner-private original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
       - name: Original source proof and shadow-only frame graph
         run: |
           set -euo pipefail
+          private_dir="$RUNNER_TEMP/gptmax-original-split-frame"
+          mkdir -p "$private_dir"
           PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
-          PYTHONPATH=. python -u tools/diag_gptmax_source_split_frame_shadow.py \
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c --status
+          if ! PYTHONPATH=. python -u tools/diag_gptmax_source_split_frame_shadow.py \
             --pdf "$PDF" --page-id 3 \
             --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
-            --output artifacts/gptmax-original-split-frame-shadow.json
+            --output "$private_dir/report.json" > "$private_dir/replay.log" 2>&1; then
+            echo "::error::Original Lot16 split-frame replay failed. Private details withheld."
+            exit 1
+          fi
       - name: Original host and eight customer body invariants
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
-          r=json.loads(Path('artifacts/gptmax-original-split-frame-shadow.json').read_text())
+          private=Path(os.environ['RUNNER_TEMP'])/'gptmax-original-split-frame'/'report.json'
+          r=json.loads(private.read_text())
           assert r['status']=='UNPUBLISHED_ORIGINAL_SPLIT_FRAME_SHADOW'
           assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
@@ -86,12 +106,8 @@ jobs:
           assert len(selected)==1
           assert 'raster_split_centerline_host_resolved' in selected[0]['original_host_reason_codes']
           assert selected[0]['original_frame_record_id'] is None
-          print('Original split host frame gate:',selected[0]['shadow_frame_reason_codes'])
-          print('Additional frame hypotheses, not quantities:',r['new_frame_hypothesis_ids'])
+          print('Original split-frame shadow and signed opening retention verified.')
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Clean up protected inputs and diagnostic output
         if: always()
-        with:
-          name: gptmax-source-owned-original-split-frame-shadow
-          path: artifacts/gptmax-original-split-frame-shadow.json
-          retention-days: 21
+        run: rm -rf -- documents/sources "${RUNNER_TEMP:?}/gptmax-original-split-frame"
