@@ -808,6 +808,7 @@ def build_coverage_registry_v1(
     takeoff_rows_by_universe: Mapping[tuple[str, str], Sequence[TakeoffOutputRow]] | None = None,
     editable_objects: Sequence[EditableGeometryObject] = (),
     object_metadata_by_id: Mapping[str, Any] | None = None,
+    source_owned_object_aliases_by_id: Mapping[str, str] | None = None,
 ) -> CoverageRegistrySummaryV1:
     """Build one fail-closed, read-only coverage registry run.
 
@@ -876,6 +877,22 @@ def build_coverage_registry_v1(
             geometry_by_id[object_id] = tuple(sorted(explicit_geometry))
             object_join_reasons[object_id] = join_reasons
 
+    # Canonical IDs are not necessarily physical IDs. Only aliases carrying
+    # independent original source geometry ownership can link dependencies.
+    # Never rewrite any original QuantityEvidence or grant commercial authority.
+    quantity_object_aliases: dict[str, str] = {}
+    for alias, physical_id in (source_owned_object_aliases_by_id or {}).items():
+        if (type(alias) is not str or not alias or alias != alias.strip()
+                or type(physical_id) is not str or not physical_id
+                or physical_id not in admitted_by_id
+                or (alias in admitted_by_id and alias != physical_id)
+                or alias not in _metadata_strings(metadata_by_id[physical_id], "geometry_ids")):
+            raise CoverageRegistryContractError(
+                "canonical_physical_object_alias_unverified",
+                "original canonical owner alias lacks source geometry or is ambiguous",
+            )
+        quantity_object_aliases[alias] = physical_id
+
     qe_records_by_id: dict[str, list[QuantityEvidence]] = {}
     row_records_by_id: dict[str, list[TakeoffOutputRow]] = {}
     qe_declared_keys: dict[str, list[tuple[str, str]]] = {}
@@ -942,11 +959,12 @@ def build_coverage_registry_v1(
         reasons: set[str] = set()
         for quantity in records:
             reasons.update(_qe_lineage_conflicts(quantity, manifest))
-            for object_id in quantity.input_entity_ids:
+            for original_object_id in quantity.input_entity_ids:
+                object_id = quantity_object_aliases.get(original_object_id, original_object_id)
                 if object_id in admitted_by_id:
                     qe_links_by_object[object_id].add(quantity_id)
                 else:
-                    qe_unadmitted_targets.setdefault(quantity_id, set()).add(object_id)
+                    qe_unadmitted_targets.setdefault(quantity_id, set()).add(original_object_id)
         qe_lineage_reasons[quantity_id] = tuple(sorted(reasons))
 
     editable_links_by_quantity: dict[str, set[str]] = {}
@@ -963,7 +981,10 @@ def build_coverage_registry_v1(
         exact_links_by_quantity.setdefault(quantity_id, set()).update(object_ids)
         quantities = qe_records_by_id.get(quantity_id, ())
         if len(quantities) == 1 and quantities[0].input_entity_ids:
-            qe_targets = set(quantities[0].input_entity_ids)
+            qe_targets = {
+                quantity_object_aliases.get(source_id, source_id)
+                for source_id in quantities[0].input_entity_ids
+            }
             if any(object_id not in qe_targets for object_id in object_ids):
                 object_link_conflict_ids.add(quantity_id)
 
@@ -1027,7 +1048,10 @@ def build_coverage_registry_v1(
             if (
                 quantity is not None
                 and quantity.input_entity_ids
-                and object_id not in quantity.input_entity_ids
+                and object_id not in {
+                    quantity_object_aliases.get(source_id, source_id)
+                    for source_id in quantity.input_entity_ids
+                }
                 and quantity_id in editable_dependency_ids.get(object_id, ())
             ):
                 dependency_reasons.add("quantity_evidence_object_link_conflict")
@@ -1061,7 +1085,10 @@ def build_coverage_registry_v1(
                 units[quantity_id] = quantity.unit
                 if quantity.abstained:
                     contributions[quantity_id] = None
-                elif not quantity.input_entity_ids or quantity.input_entity_ids == (object_id,):
+                elif (not quantity.input_entity_ids or
+                      (len(quantity.input_entity_ids) == 1 and
+                       quantity_object_aliases.get(quantity.input_entity_ids[0],
+                                                   quantity.input_entity_ids[0]) == object_id)):
                     contributions[quantity_id] = quantity.value
                 else:
                     contributions[quantity_id] = None
