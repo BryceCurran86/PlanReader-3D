@@ -3855,6 +3855,11 @@ def resolve_registered_cross_sheet_floor_correspondences(
         ev = getattr(area, "area_evidence", None)
         if (ev is None or area_evidence_ids[getattr(ev, "evidence_id", None)] != 1
             or ev.status is not EvidenceResolutionStatus.CORROBORATED
+            or ev.kind != "explicit_room_area"
+            or ev.unit not in ("m2", "m²")
+            or type(ev.normalized_value) not in (int, float)
+            or not math.isfinite(float(ev.normalized_value))
+            or float(ev.normalized_value) <= 0
             or not isinstance(ev.metadata, Mapping)):
             continue
         if (record.document_id != floor.document_id
@@ -3868,7 +3873,8 @@ def resolve_registered_cross_sheet_floor_correspondences(
             or ev.metadata.get("room_snapshot_id") != floor.snapshot_id
             or ev.metadata.get("source_sha256") != floor.source_sha256
             or ev.metadata.get("source_room_face_record_id") != record.source_room_face_record_id
-            or ev.metadata.get("physical_room_id") != record.physical_room_id):
+            or ev.metadata.get("physical_room_id") != record.physical_room_id
+            or ev.metadata.get("source_dimension_page_id") != area.source_dimension_page_id):
             continue
         payload = by_revision.get(floor.revision_id)
         if (type(payload) is not bytes
@@ -3880,7 +3886,10 @@ def resolve_registered_cross_sheet_floor_correspondences(
             or {w.side_name for w in walls} != {"x0", "x1", "y0", "y1"}
             or any(w.status is not EvidenceResolutionStatus.CORROBORATED
                    or w.support_page_id != record.support_page_id
-                   or w.target_page_id != record.target_page_id for w in walls)
+                   or w.target_page_id != record.target_page_id
+                   or type(w.covered_interval_iou) not in (int, float)
+                   or not math.isfinite(float(w.covered_interval_iou))
+                   or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
             or not doors
             or any(d.status is not EvidenceResolutionStatus.CORROBORATED
                    or d.threshold_aligned_with_internal_face is not True
