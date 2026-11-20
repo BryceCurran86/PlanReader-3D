@@ -47,7 +47,7 @@ def _first_observable_gate(opening: LiveCanonicalOpeningObject) -> str:
     if not (_valid_identity(opening.canonical_opening_id)
             and opening.canonical_opening_id == opening.physical_opening_id):
         return "canonical_physical_identity_missing_or_mismatch"
-    if opening.opening_kind not in ("window", "door"):
+    if str(opening.opening_kind or "").strip().lower() not in ("window", "door"):
         return "opening_kind_unresolved"
     if not _valid_identity(opening.host_wall_id):
         return "opening_host_wall_missing"
@@ -120,10 +120,26 @@ def audit_original_opening_area_gates(
         quantity_ids.add(quantity.quantity_id)
     seen = set()
     counts: Counter[str] = Counter()
+    kind_counts: Counter[str] = Counter()
+    basis_counts: Counter[str] = Counter()
+    first_gate_by_kind: dict[str, Counter[str]] = {
+        "door": Counter(), "window": Counter(), "unresolved": Counter(),
+    }
+    # Never serialize arbitrary producer/customer text as a metric basis.
+    known_bases = frozenset({
+        "figured_opening_label", "resolved_opening_geometry",
+        "authenticated_elevation_frame", "authenticated_frame_schedule",
+        "owner_approved_second_axis", "assumed_external_door_height_2100_mm",
+    })
     for opening in objects:
         if type(opening) is not LiveCanonicalOpeningObject:
             counts["foreign_or_malformed_opening_object"] += 1
             continue
+        normalized_kind = str(opening.opening_kind or "").strip().lower()
+        kind = normalized_kind if normalized_kind in ("door", "window") else "unresolved"
+        kind_counts[kind] += 1
+        basis = opening.area_basis if opening.area_basis in known_bases else "unrecognized_or_missing"
+        basis_counts[basis] += 1
         canonical_id = opening.canonical_opening_id
         if canonical_id in seen:
             raise ValueError("duplicate canonical source opening identities")
@@ -132,12 +148,15 @@ def audit_original_opening_area_gates(
         # a quantity is actually source-authorized.
         published = _opening_quantity(opening)
         if published is not None:
-            if canonical_id in retained and published.to_dict() == retained[canonical_id].to_dict():
-                counts["source_issued_and_retained"] += 1
-            else:
-                counts["canonical_quantity_not_retained"] += 1
+            reason = (
+                "source_issued_and_retained"
+                if canonical_id in retained and published.to_dict() == retained[canonical_id].to_dict()
+                else "canonical_quantity_not_retained"
+            )
         else:
-            counts[_first_observable_gate(opening)] += 1
+            reason = _first_observable_gate(opening)
+        counts[reason] += 1
+        first_gate_by_kind[kind][reason] += 1
     if not set(retained) <= seen:
         raise ValueError("original opening audit found published area without canonical owner")
     if counts["source_issued_and_retained"] != len(issued):
@@ -150,5 +169,19 @@ def audit_original_opening_area_gates(
         "published_opening_area_count": len(issued),
         "observable_gate_counts": {
             name: counts[name] for name in REASON_CODES if counts[name]
+        },
+        "source_kind_counts": {
+            kind: kind_counts[kind] for kind in ("window", "door", "unresolved")
+            if kind_counts[kind]
+        },
+        "source_metric_basis_counts": {
+            kind: basis_counts[kind] for kind in sorted(basis_counts)
+        },
+        "first_gate_by_opening_kind": {
+            kind: {
+                name: first_gate_by_kind[kind][name] for name in REASON_CODES
+                if first_gate_by_kind[kind][name]
+            }
+            for kind in ("window", "door", "unresolved") if kind_counts[kind]
         },
     }
