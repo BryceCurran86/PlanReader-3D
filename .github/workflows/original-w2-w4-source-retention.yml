@@ -1,0 +1,35 @@
+name: Original W2 W4 source lineage and wall identity
+on:
+  pull_request:
+    paths:
+      - 'pb_wall_room_topology_primitive_lineage.py'
+      - 'pb_wall_room_topology_wall_identity_v2.py'
+      - 'tests/test_wall_topology_primitive_lineage.py'
+      - 'tests/test_p2_w4_stable_wall_identity.py'
+      - '.github/workflows/original-w2-w4-source-retention.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pb_wall_room_topology_primitive_lineage.py'
+      - 'pb_wall_room_topology_wall_identity_v2.py'
+      - 'tests/test_wall_topology_primitive_lineage.py'
+      - 'tests/test_p2_w4_stable_wall_identity.py'
+      - '.github/workflows/original-w2-w4-source-retention.yml'
+permissions:
+  contents: read
+jobs:
+  w2-w4-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install original test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Test W2 source revisions and W4 non-collapsing reversals
+        run: python -m pytest -q tests/test_wall_topology_primitive_lineage.py tests/test_p2_w4_stable_wall_identity.py
