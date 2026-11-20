@@ -147,6 +147,22 @@ def project_live_floor_finish_customer_rows(
             raise SourceClosedRunConflictError(
                 "numeric floor-finish source quantity retains unresolved blockers"
             )
+        # Never silently promote a source-owned exclusion or ambiguous
+        # inclusion witness to an ordinary customer floor finish. Retain the
+        # complete original source family and fail closed until the upstream
+        # physical-room exclusion/special-finish authority resolves it.
+        metadata = original.metadata if isinstance(original.metadata, Mapping) else {}
+        source_inclusion = metadata.get("inclusion_status")
+        if (
+            not original.abstained
+            and original.value is not None
+            and source_inclusion is not None
+            and (type(source_inclusion) is not str
+                 or source_inclusion.strip().upper() != "INCLUSION")
+        ):
+            raise SourceClosedRunConflictError(
+                "floor_finish_source_inclusion_scope_unresolved"
+            )
 
     quantities = tuple(
         quantity
