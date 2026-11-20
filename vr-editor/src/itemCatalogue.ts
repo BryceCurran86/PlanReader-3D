@@ -1,4 +1,5 @@
 import { EXTERIOR_CATALOGUE } from "./exteriorCatalogue.ts";
+import { EXTENSION_CATALOGUE } from "./extensionCatalogue.ts";
 import { ROOF_COMPONENTS } from "./roofComponents.ts";
 import { ROUGH_IN_CATALOGUE } from "./roughInCatalogue.ts";
 
@@ -12,9 +13,12 @@ export const CATALOGUE_GROUPS = [
   ["roofing", "Roof finishes"], ["roof-components", "Roof components"],
   ["plumbing-rough-in", "Plumbing rough-in"], ["electrical-rough-in", "Electrical rough-in"],
   ["air-conditioning", "Air conditioning"],
+  ["stairs", "Stairs"], ["balustrading", "Balustrading"], ["sliding-doors", "Sliding doors"],
+  ["windows", "Windows"], ["window-coverings", "Curtains and blinds"],
+  ["flyovers", "Patio flyovers"], ["pools", "Pools and spas"], ["landscaping", "Landscaping"],
 ] as const;
 export type CatalogueGroup = typeof CATALOGUE_GROUPS[number][0];
-export type ItemTarget = "wall" | "floor" | "ceiling" | "roof" | "opening" | "worktop";
+export type ItemTarget = "wall" | "floor" | "ceiling" | "roof" | "opening" | "worktop" | "site";
 export type Pattern = "solid" | "grain" | "plank" | "tile" | "woven" | "fleck" | "rib" |
   "masonry" | "lap" | "seam" | "sheet" | "corrugation" | "profiled-tile";
 export type TrimProfile = "square" | "pencil" | "bullnose" | "splay" | "step" | "ogee" | "colonial" | "lamb";
@@ -39,7 +43,17 @@ export type EntryVisual = { kind: "entry"; style: EntryStyle; minWidthM: number;
   color: number; grain: number | null };
 export type RoofComponentVisual = { kind: "roof-component"; component: "gutter" | "fascia" | "flashing";
   profile: "quad" | "half-round" | "square" | "eaves" | "barge" | "apron" | "ridge" | "valley"; color: number };
-export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual | TimberVisual | EntryVisual | RoofComponentVisual;
+export type OpeningStyle = { kind: "opening-style"; type: "door" | "window" | "covering";
+  style: "slider" | "stacker" | "wide-stacker" | "lift-slide" | "cavity" | "barn" | "bypass" |
+    "fixed" | "awning" | "casement" | "double-hung" | "louvre" | "bifold" |
+    "curtain" | "sheer" | "roller" | "roman" | "venetian" | "vertical" | "shutter"; color: number };
+export type DesignAssembly = { kind: "design-assembly";
+  shape: "straight-stair" | "l-stair" | "u-stair" | "spiral-stair" | "glass-rail" | "picket-rail" | "wire-rail" |
+    "skillion" | "gable" | "insulated" | "rectangle-pool" | "rounded-pool" | "lawn" | "stepping" |
+    "garden" | "hedge" | "tree" | "retaining";
+  widthM: number; heightM: number; depthM: number; color: number };
+export type ItemVisual = SurfaceVisual | TrimVisual | FixtureVisual | TimberVisual | EntryVisual |
+  RoofComponentVisual | OpeningStyle | DesignAssembly;
 export type CatalogueItem = {
   id: string;
   group: CatalogueGroup;
@@ -251,11 +265,12 @@ export const ITEM_CATALOGUE: readonly CatalogueItem[] = [
     ["Walnut", 0x705240], ["Graphite", 0x4e5154]], "cabinet kitchen vanity joinery benchtop worktop"),
   ...doorFinishes.map(([label, color, pattern]) => surface("doors", label, ["opening"], color,
     pattern, 0.55, [0.22, 1.3], "finish", "door leaf opening door finish")),
-  ...EXTERIOR_CATALOGUE, ...ROOF_COMPONENTS, ...ROUGH_IN_CATALOGUE,
+  ...EXTERIOR_CATALOGUE, ...ROOF_COMPONENTS, ...ROUGH_IN_CATALOGUE, ...EXTENSION_CATALOGUE,
 ];
 
 export const itemCanRotate = (item: CatalogueItem) =>
-  item.visual.kind === "fixture" || item.visual.kind === "timber";
+  item.visual.kind === "fixture" || item.visual.kind === "timber" ||
+  (item.visual.kind === "design-assembly" && item.group !== "flyovers");
 
 const byId = new Map(ITEM_CATALOGUE.map(item => [item.id, item]));
 export const getCatalogueItem = (id: string | null) => id === null ? undefined : byId.get(id);

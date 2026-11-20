@@ -13,7 +13,8 @@ export type MenuAction =
   | { area: "build"; action: BuildAction }
   | { area: "items"; action: ItemAction }
   | { area: "browse"; action: BrowseAction }
-  | { area: "view"; stage?: ConstructionStage };
+  | { area: "view"; stage?: ConstructionStage }
+  | { area: "footprint"; reset?: boolean };
 
 export type MenuButton = {
   label: string; x: number; y: number; w: number; h: number;
@@ -39,6 +40,7 @@ export function buildMenuLayout(
   build: BuildState, levelId: string | null, browser: BrowserState,
   item: CatalogueItem | undefined, itemUndo: boolean, turn: number, hint: string,
   stage: ConstructionStage = "finished", viewsOpen = false,
+  footprint = { available: false, enabled: false, changed: false },
 ): MenuLayout {
   const buttons: MenuButton[] = [];
   function add(label: string, x: number, y: number, w: number, h: number, action: MenuAction,
@@ -79,7 +81,7 @@ export function buildMenuLayout(
   }
   const actions: { label: string; target: MenuAction; active?: boolean; disabled?: boolean }[] =
     BUILD_TOOLS.map(({ id, label }) => ({ label, target: { area: "build" as const, action: { kind: "tool" as const, tool: id } },
-      active: build.tool === id, disabled: !levelId }));
+      active: build.tool === id, disabled: !levelId || footprint.enabled || footprint.changed }));
   actions.push(
     { label: "Items", target: browse({ kind: "toggle" }), active: !!item },
     { label: "View", target: { area: "view" } },
@@ -88,11 +90,14 @@ export function buildMenuLayout(
     { label: "Done", target: item ? items({ kind: "done" }) : { area: "build", action: { kind: "done" } },
       disabled: !item && !build.tool },
   );
+  if (footprint.available) actions.push({ label: footprint.enabled ? "Done resizing" : "Footprint",
+    target: { area: "footprint" }, active: footprint.enabled });
+  if (footprint.changed) actions.push({ label: "Reset size", target: { area: "footprint", reset: true } });
   if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
   const stride = (WIDTH - 40) / 6;
   for (const [index, entry] of actions.entries()) {
     add(entry.label, 20 + stride * (index % 6), 67 + Math.floor(index / 6) * 68, stride - 9, 58, entry.target,
       { active: entry.active, disabled: entry.disabled });
   }
-  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 285, note: hint };
+  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 149 + 68 * Math.ceil(actions.length / 6), note: hint };
 }

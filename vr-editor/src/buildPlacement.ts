@@ -4,14 +4,16 @@ export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
   { id: "door", label: "Door" },
   { id: "frame", label: "Frame" },
+  { id: "window", label: "Window" },
   { id: "ceiling", label: "Ceiling" },
   { id: "move", label: "Move" },
   { id: "stretch", label: "Stretch" },
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
-export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number };
-export const STARTING_SIZES: BuildSizes = { wallHeightM: 2.4, widthM: 0.9, heightM: 2.1, ceilingHeightM: 2.4 };
+export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number };
+export const STARTING_SIZES: BuildSizes = { wallHeightM: 2.4, widthM: 0.9, heightM: 2.1, ceilingHeightM: 2.4,
+  windowWidthM: 1.2, windowHeightM: 1.05, windowSillM: 0.9 };
 export const MAX_DRAFT_WALLS = 25;
 
 export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[] };
@@ -80,17 +82,19 @@ export function openingFits(wall: WallAdditionSketch, opening: WallAdditionOpeni
 }
 
 export function aimOpening(
-  wall: PlacedWall, point: PlanPoint, tool: "door" | "frame", sizes: BuildSizes,
+  wall: PlacedWall, point: PlanPoint, tool: "door" | "frame" | "window", sizes: BuildSizes,
   openingId = "placement-preview",
 ) {
   const projection = projectOnWall(wall, point);
   if (!nearWall(projection)) return null;
   const { offset, length } = projection;
-  const { widthM, heightM } = sizes;
+  const widthM = tool === "window" ? sizes.windowWidthM ?? STARTING_SIZES.windowWidthM! : sizes.widthM;
+  const heightM = tool === "window" ? sizes.windowHeightM ?? STARTING_SIZES.windowHeightM! : sizes.heightM;
+  const sillHeightM = tool === "window" ? sizes.windowSillM ?? STARTING_SIZES.windowSillM! : 0;
   const opening: WallAdditionOpening = {
     openingId,
     offsetM: Math.min(Math.max(snap(offset - widthM / 2), 0), length - widthM),
-    widthM, heightM, sillHeightM: 0, openingKind: tool === "door" ? "door" : "passage",
+    widthM, heightM, sillHeightM, openingKind: tool === "frame" ? "passage" : tool,
   };
   if (!openingFits(wall, opening)) return { opening, error: "Opening is larger than this wall." };
   if (wall.openings.length >= 100) return { opening, error: "This draft has 100 openings." };
@@ -124,6 +128,7 @@ export function buildGuide(state: BuildState, levelId: string | null) {
   }
   if (!state.walls.some(wall => wall.levelId === levelId)) return "Draw a wall first.";
   return state.tool === "door" ? "Point at a draft wall to place a door." :
+    state.tool === "window" ? "Point at a draft wall to place a window opening." :
     "Point at a draft wall to place an open frame.";
 }
 
@@ -218,7 +223,7 @@ export function updateBuild(
     return state;
   }
   if (action.kind !== "place" || action.hit.kind !== "opening" ||
-      action.hit.levelId !== levelId || (tool !== "door" && tool !== "frame")) return state;
+      action.hit.levelId !== levelId || (tool !== "door" && tool !== "frame" && tool !== "window")) return state;
   const { hit, id } = action;
   const wall = state.walls.find(item =>
     item.proposalId === hit.proposalId && item.levelId === levelId && item.scopeKey === scopeKey);

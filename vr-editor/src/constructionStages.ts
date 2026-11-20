@@ -13,12 +13,14 @@ export const stageDetails = (stage: ConstructionStage) => CONSTRUCTION_STAGES.fi
 export const CATALOGUE_DRAG_TYPE = "application/x-planreader-catalogue";
 export const OPENING_DRAG_TYPE = "application/x-planreader-opening";
 const roughIns: readonly CatalogueGroup[] = ["plumbing-rough-in", "electrical-rough-in", "air-conditioning"];
-const envelope: readonly CatalogueGroup[] = ["roofing", "roof-components", "facades", "substrates", "soffits", "entry"];
+const envelope: readonly CatalogueGroup[] = ["roofing", "roof-components", "facades", "substrates", "soffits",
+  "entry", "windows", "sliding-doors", "flyovers"];
 
 export const isRoughIn = (item: CatalogueItem) => roughIns.includes(item.group);
 
 export function showConstructionItem(stage: ConstructionStage, item: CatalogueItem) {
-  if (stage === "slab" || stage === "framing") return false;
+  if (stage === "slab") return false;
+  if (stage === "framing") return item.group === "stairs";
   if (stage === "rough-in") return roughIns.includes(item.group);
   if (stage === "lock-up") return envelope.includes(item.group);
   return !roughIns.includes(item.group);

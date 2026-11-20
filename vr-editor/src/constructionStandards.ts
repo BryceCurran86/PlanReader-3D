@@ -47,6 +47,27 @@ export const CONSTRUCTION_REFERENCES = [
     url: "https://ncc.abcb.gov.au/sites/default/files/resources/2025/ncc2022-volume-one.pdf",
   },
   {
+    area: "Stairs and balustrades", scope: "NCC Volume Two Part H5 and Housing Provisions Section 11",
+    documents: "Stair, ramp, barrier and handrail provisions. AS 1288 for applicable glazed assemblies.",
+    evidence: "Stair geometry, landings, falls, barrier design and glazing details.", url: housing,
+  },
+  {
+    area: "Windows, glazed sliders and coverings", scope: "NCC Volume Two H1D8, with applicable fall and access provisions",
+    documents: "AS 2047 and AS 1288 where the glazing product and use fall within scope.",
+    evidence: "Window and door schedule, glazing, safety, opening restriction and product details.", url: housing,
+  },
+  {
+    area: "Patio flyovers and landscaping structures", scope: "NCC structural provisions and applicable site requirements",
+    documents: "AS/NZS 1170.2 or AS 4055 where applicable for wind actions. Confirm the structural design pathway.",
+    evidence: "Engineered supports and connections, site levels, retaining and drainage designs.", url: housing,
+  },
+  {
+    area: "Swimming pools and spas", scope: "NCC and the applicable state or territory pool safety rules",
+    documents: "Confirm the barrier standard, applicable AS 1926 documents and local variations with the pool certifier.",
+    evidence: "Pool and barrier layout, gates, clearances, approvals and inspection evidence.",
+    url: "https://www.qbcc.qld.gov.au/home-owner-hub/swimming-pools/pool-safety-standard",
+  },
+  {
     area: "Gypsum linings and ceilings", scope: "Applicable support, lining and fire or acoustic assembly requirements",
     documents: "AS/NZS 2589 for gypsum lining application and finishing.",
     evidence: "Ceiling system specification, fixing and support details and any required rated assembly evidence.",

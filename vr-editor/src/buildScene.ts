@@ -268,11 +268,11 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   const result = host && aimOpening(host.wall, host.point, state.tool, sizes);
   if (!host || !result) return { hit: null, hint: guide };
   if (result.error) return { hit: null, hint: result.error };
-  const label = state.tool === "door" ? "door" : "frame";
+  const label = state.tool;
   return {
     hit: { kind: "opening", levelId, proposalId: host.wall.proposalId, point: host.point },
     line: openingOutline(host.wall, result.opening), valid: true,
-    hint: "Place " + label + " · " + Math.round(sizes.widthM * 1000) + " × " + Math.round(sizes.heightM * 1000) + " mm",
+    hint: "Place " + label + " · " + Math.round(result.opening.widthM * 1000) + " × " + Math.round(result.opening.heightM * 1000) + " mm",
   };
 }
 

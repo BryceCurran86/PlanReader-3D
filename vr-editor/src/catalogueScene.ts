@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { nearestRoofEdge } from "./roofComponents.ts";
 import type { RoofEdge } from "./roofComponents.ts";
 import { roofComponentMesh } from "./roofComponentGeometry.ts";
-import { showConstructionItem } from "./constructionStages.ts";
+import { showConstructionItem, showConstructionSurface } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
 import type { CeilingDraft } from "./buildPlacement.ts";
 import { openingFits, planLength } from "./buildPlacement.ts";
@@ -14,6 +14,8 @@ import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./it
 import { createCatalogueFixture } from "./catalogueFixtures.ts";
 import { finishMesh, trimRun } from "./catalogueGeometry.ts";
 import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
+import { createDesignAssembly, createOpeningStyle } from "./extensionGeometry.ts";
+import { SITE_HOST_ID } from "./itemPlacement.ts";
 
 type WallRun = WallSection & { gaps: [number, number][] };
 type Opening = { start: PlanPoint; end: PlanPoint; bottom: number; top: number; size: OpeningSize;
@@ -56,11 +58,11 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
     const bottom = opening.sillHeightM, top = bottom + opening.heightM;
     apertures.push({ from: opening.offsetM, to: lastEnd, bottom, top });
     if (bottom < 0.001) floorGaps.push([opening.offsetM, lastEnd]);
-    if (opening.openingKind === "window") continue;
     const a = start.clone().addScaledVector(tangent, opening.offsetM);
     const b = start.clone().addScaledVector(tangent, lastEnd);
     const outline: Opening = { start: [a.x, a.z], end: [b.x, b.z], bottom, top,
-      size: { widthM: opening.widthM, heightM: opening.heightM, door: opening.openingKind === "door" },
+      size: { widthM: opening.widthM, heightM: opening.heightM, door: opening.openingKind === "door",
+         window: opening.openingKind === "window" },
       reviewLeaf: leaves.get(opening.openingId) };
     const points = [xy(outline.start, bottom), xy(outline.end, bottom), xy(outline.end, top),
       xy(outline.start, bottom), xy(outline.end, top), xy(outline.start, top)];
@@ -75,6 +77,13 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
       run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
+}
+
+export function draftSiteHost(scene: THREE.Scene): CatalogueHost {
+  const geometry = new THREE.PlaneGeometry(20000, 20000).rotateX(-Math.PI / 2).translate(0, -0.025, 0);
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false }));
+  scene.add(mesh);
+  return { id: SITE_HOST_ID, target: "site", mesh };
 }
 
 /** Only the built-in demo asks for these planes. They cannot become evidence or teleport targets. */
@@ -203,7 +212,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const item = getCatalogueItem(placement.itemId);
       const opening = byId.get(placement.hostId)?.opening;
       if (!item || !opening || openingFitMessage(item, opening.size)) continue;
-      if (item.visual.kind === "entry") designedDoors.add(placement.hostId);
+      if (item.visual.kind === "entry" || (item.visual.kind === "opening-style" && item.visual.type === "door"))
+        designedDoors.add(placement.hostId);
       if (item.group === "doors" && item.visual.kind === "surface") doorFinishes.set(surfaceKey(placement), item.visual);
     }
     for (const placement of items) {
@@ -225,15 +235,16 @@ export function createCatalogueScene(scene: THREE.Scene) {
         node = finishMesh(host.mesh, visual, host.target, normal, placement.side);
       } else if (visual.kind === "trim") {
         node = trimMount(host, item, normal);
-      } else if (visual.kind === "entry") {
+      } else if (visual.kind === "entry" || visual.kind === "opening-style") {
         const opening = host.opening;
         if (!opening) continue;
         const { widthM, heightM } = opening.size;
         const entryFront = xy(opening.end).sub(xy(opening.start)).normalize()
           .cross(up).multiplyScalar(placement.side);
-        const assembly = createEntryAssembly(visual, widthM, heightM,
-          doorFinishes.get(surfaceKey(placement)),
-          doorFinishes.get(surfaceKey({ ...placement, side: placement.side === 1 ? -1 : 1 })));
+        const frontFinish = doorFinishes.get(surfaceKey(placement));
+        const rearFinish = doorFinishes.get(surfaceKey({ ...placement, side: placement.side === 1 ? -1 : 1 }));
+        const assembly = visual.kind === "entry" ? createEntryAssembly(visual, widthM, heightM, frontFinish, rearFinish) :
+          createOpeningStyle(visual, widthM, heightM, visual.type === "door" ? frontFinish?.color : undefined);
         assembly.position.copy(xy(opening.start, opening.bottom).lerp(xy(opening.end, opening.bottom), 0.5));
         assembly.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
           up.clone().cross(entryFront), up, entryFront,
@@ -251,6 +262,17 @@ export function createCatalogueScene(scene: THREE.Scene) {
         section.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(axis, placement.turn * Math.PI / 2));
         section.position.copy(point).addScaledVector(normal, 0.001);
         node = section;
+      } else if (visual.kind === "design-assembly") {
+        node = createDesignAssembly(visual);
+        if (host.target === "wall") {
+          // Flyovers project out from the selected wall face and travel with that wall.
+          node.position.set(point.x, 0, point.z).addScaledVector(normal, visual.depthM / 2);
+          node.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(up.clone().cross(normal), up, normal));
+        } else {
+          node.position.copy(point).addScaledVector(normal, 0.002);
+          node.quaternion.setFromUnitVectors(up, normal);
+          node.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(up, placement.turn * Math.PI / 2));
+        }
       } else {
         const { group, worktop } = createCatalogueFixture(visual, host.target);
         group.position.set(...placement.point).addScaledVector(normal, 0.001);
@@ -272,7 +294,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const host = hosts.get(hit.object);
       if (!host || !hit.face) continue;
       // Keep floor and interior placement available under roof finishes and behind opening targets.
-      if ((host.target === "opening" || host.target === "roof") && !item.targets.includes(host.target)) continue;
+      if ((host.target === "opening" || host.target === "roof" || host.target === "site" ||
+          (host.target === "ceiling" && !showConstructionSurface(stageKey, "ceiling")) ||
+          item.targets.includes("site")) && !item.targets.includes(host.target)) continue;
       if (!item.targets.includes(host.target)) return { hit: null };
       if (host.target === "opening") {
         const reason = openingFitMessage(item, host.opening?.size);

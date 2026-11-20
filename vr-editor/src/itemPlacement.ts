@@ -7,7 +7,8 @@ import { roofEdgeFits, roofEdges } from "./roofComponents.ts";
 import type { SceneManifest } from "./types.ts";
 
 export type Vector = [number, number, number];
-export type OpeningSize = { widthM: number; heightM: number; door: boolean };
+export type OpeningSize = { widthM: number; heightM: number; door: boolean; window?: boolean };
+export const SITE_HOST_ID = "site:draft-ground";
 export type WallSection = {
   start: [number, number]; end: [number, number]; heightM: number;
   apertures: { from: number; to: number; bottom: number; top: number }[];
@@ -41,6 +42,10 @@ export function makesWorktop(item: CatalogueItem) {
 }
 
 export function openingFitMessage(item: CatalogueItem, opening: OpeningSize | undefined) {
+  if (item.visual.kind === "opening-style") {
+    if (item.visual.type === "door") return opening?.door ? null : "Choose a draft door opening.";
+    return opening?.window ? null : "Choose a draft window opening.";
+  }
   if (item.visual.kind !== "entry" && item.group !== "doors") return null;
   if (!opening?.door) return "Choose an opening placed with the Door tool.";
   if (item.visual.kind !== "entry") return null;
@@ -76,7 +81,10 @@ export function timberFitsWall(spec: TimberVisual, point: Vector, turn: number, 
 
 export function itemGuide(item: CatalogueItem) {
   if (item.visual.kind === "entry") return "Aim at an opening placed with the Door tool.";
+  if (item.visual.kind === "opening-style") return item.visual.type === "door"
+    ? "Aim at a draft door opening." : "Aim at a draft window opening.";
   if (item.visual.kind === "roof-component") return "Aim near a matching edge of the source roof.";
+  if (item.group === "flyovers") return "Aim at the outside face of the wall the patio will extend from.";
   if (item.visual.kind === "timber" && item.visual.mount === "face") return "Aim at the centre of the timber on a wall face.";
   const target = item.targets;
   if (target.includes("wall") && target.includes("ceiling")) return "Aim at a wall or ceiling.";
@@ -86,13 +94,19 @@ export function itemGuide(item: CatalogueItem) {
     case "ceiling": return "Aim at the underside of a ceiling.";
     case "roof": return "Aim at the top of a source-backed roof face.";
     case "opening": return "Aim at a door or frame you drafted.";
+    case "site": return "Aim at the outdoor draft site plane.";
     case "worktop": return "Aim at a worktop. You can place a vanity or base cabinet first.";
   }
 }
 
 function surfaceSlot(placement: PlacedItem, item: CatalogueItem) {
   const visual = item.visual;
-  if (visual.kind === "fixture" || visual.kind === "timber") return null;
+  if (visual.kind === "fixture" || visual.kind === "timber" || visual.kind === "design-assembly") return null;
+  if (visual.kind === "opening-style") {
+    if (visual.type === "door") return JSON.stringify([placement.hostId, "entry"]);
+    const side = visual.type === "covering" ? placement.side : 1;
+    return JSON.stringify([placement.hostId, visual.type, side]);
+  }
   if (visual.kind === "entry") return JSON.stringify([placement.hostId, "entry"]);
   if (visual.kind === "roof-component") return JSON.stringify([placement.roofEdgeKey, visual.component]);
   const side = placement.target === "wall" || placement.target === "opening" ? placement.side : 1;
@@ -153,7 +167,7 @@ export function currentItemPlacements(
   items: readonly PlacedItem[], manifest: SceneManifest, walls: WallVisual[], demo: boolean,
   ceilings: readonly CeilingDraft[] = [],
 ) {
-  const hosts = new Map<string, ItemTarget>();
+  const hosts = new Map<string, ItemTarget>([[SITE_HOST_ID, "site"]]);
   const openingSizes = new Map<string, OpeningSize>();
   const ceilingByHost = new Map(ceilings.map(ceiling => [ceilingDraftHostId(ceiling.proposalId), ceiling]));
   for (const [hostId] of ceilingByHost) hosts.set(hostId, "ceiling");
@@ -190,12 +204,10 @@ export function currentItemPlacements(
       end = opening.offsetM + opening.widthM;
       apertures.push({ from: opening.offsetM, to: end, bottom: opening.sillHeightM,
         top: opening.sillHeightM + opening.heightM });
-      if (opening.openingKind !== "window") {
-        const id = openingHostId(wall.proposalId, opening.openingId);
-        hosts.set(id, "opening");
-        openingSizes.set(id, { widthM: opening.widthM, heightM: opening.heightM,
-          door: opening.openingKind === "door" });
-      }
+      const id = openingHostId(wall.proposalId, opening.openingId);
+      hosts.set(id, "opening");
+      openingSizes.set(id, { widthM: opening.widthM, heightM: opening.heightM,
+        door: opening.openingKind === "door", window: opening.openingKind === "window" });
     }
   }
   return items.flatMap(entry => {
