@@ -54,6 +54,7 @@ def test_positive_original_workspace_identity_reaches_only_supported_empty_path(
         quantity_evidence=()
         floor_finish_quantity_evidence=()
         room_area_quantity_evidence=()
+        canonical_ceilings=()
     monkeypatch.setattr(module,claim_type_name,EmptyClaim)
     if hasattr(module,"publish_live_floor_area_quantities"):
         monkeypatch.setattr(module,"publish_live_floor_area_quantities",lambda *_:())

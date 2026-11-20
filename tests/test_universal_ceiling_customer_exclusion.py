@@ -27,7 +27,7 @@ def _project(source, variant):
 
 
 @pytest.mark.parametrize("variant", ["canonical", "legacy"])
-@pytest.mark.parametrize("scope", ["EXCLUSION", "EXCLUDED", "ABSTAIN", "REVIEW", "", 12, True])
+@pytest.mark.parametrize("scope", ["EXCLUSION", "EXCLUDED", "ABSTAIN", "REVIEW", "", None, 12, True])
 def test_excluded_or_unresolved_original_ceiling_cannot_be_included(variant, scope):
     source = _quantity() if variant == "canonical" else _shadow_quantity()
     source = replace(source, metadata={
