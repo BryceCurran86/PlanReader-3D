@@ -62,3 +62,32 @@ def test_direct_legacy_adapter_cannot_overwrite_exclusion():
         _customer_quantity(
             source, room_entity_id="arbitrary-room", finish_descriptor="acoustic",
         )
+
+
+@pytest.mark.parametrize("variant", ["canonical", "legacy"])
+def test_duplicate_canonical_ceiling_cannot_choose_last_customer_owner(variant):
+    source = _quantity() if variant == "canonical" else _shadow_quantity()
+    if variant == "canonical":
+        claim = replace(_claim(source), ceiling_lining_quantity_evidence=(source,))
+        assert claim.canonical_ceilings
+        claim = replace(claim, canonical_ceilings=(claim.canonical_ceilings[0],) * 2)
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="duplicate_canonical_ceiling_customer_owner",
+        ):
+            project_live_ceiling_customer_rows(
+                claim, workspace_id=3, project_id="unknown-project",
+            )
+    else:
+        original = replace(legacy_result(), quantity_evidence=(source,))
+        assert original.canonical_ceilings
+        original = replace(
+            original, canonical_ceilings=(original.canonical_ceilings[0],) * 2,
+        )
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="duplicate_canonical_ceiling_customer_owner",
+        ):
+            project_live_ceiling_area_customer_rows(
+                original, workspace_id=3, project_id="unknown-project",
+            )
