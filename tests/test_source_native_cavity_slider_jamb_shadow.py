@@ -145,3 +145,33 @@ def test_two_distinct_cs_receipts_for_same_gap_fail_closed(monkeypatch):
     assert source_cs == []
 
 
+
+
+
+@pytest.mark.parametrize("layer", [
+    "Enclosure_WallInternal",
+    "Wall_Internal",
+    "InternalWall",
+    "building.wall.internal",
+    "A-WALL-INTR",
+])
+def test_same_native_cavity_slider_geometry_works_across_cad_layer_names(layer):
+    """Recognition depends on signed source geometry, not a job/project name."""
+    drawings, words = _scene()
+    for row in drawings:
+        row["layer"] = layer
+    found = match_source_native_cavity_sliders(drawings, words, page_index=2)
+    assert len(found) == 1
+    assert found[0].host_path_ids == (0, 1)
+    assert not found[0].customer_quantity_authorized
+
+
+@pytest.mark.parametrize("layer", [
+    "Annotation_FloorPlan", "Interior_Joinery", "Enclosure_WallExternal",
+    "building.wall.external", "DoorLegend", "Demolition",
+])
+def test_foreign_nonwall_layers_cannot_mint_cavity_slider_witness(layer):
+    drawings, words = _scene()
+    for row in drawings:
+        row["layer"] = layer
+    assert match_source_native_cavity_sliders(drawings, words, page_index=2) == ()

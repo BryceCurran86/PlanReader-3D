@@ -16,7 +16,11 @@ from pb_source_swing_door_footprint_continuity import (
     detect_exterior_swing_door_footprint_bridges,
 )
 
-_INTERNAL_WALL_LAYER = re.compile(r"WallInternal|Wall_Internal|InternalWall", re.I)
+_INTERNAL_WALL_LAYER = re.compile(
+    r"^(?:Enclosure[_ .-]*WallInternal|Wall[_ .-]*Internal|"
+    r"Internal[_ .-]*Wall|building[._ -]+wall[._ -]+internal|"
+    r"A-WALL-INTR)$", re.I,
+)
 
 
 @dataclass(frozen=True)
