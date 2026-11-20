@@ -66,8 +66,9 @@ def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: obj
         ("snapshot_id", getattr(ceiling, "snapshot_id", None)),
         ("source_sha256", getattr(ceiling, "source_sha256", None)),
         ("canonical_ceiling_id", getattr(ceiling, "canonical_ceiling_id", None)),
-        ("physical_room_id", getattr(ceiling, "room_entity_id", None)),
         ("canonical_room_id", getattr(ceiling, "room_entity_id", None)),
+        ("source_room_index_id", getattr(ceiling, "source_room_index_id", None)),
+        ("room_area_quantity_id", getattr(ceiling, "room_area_quantity_id", None)),
     )
     for key, value in expected:
         if key not in metadata:
