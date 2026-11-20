@@ -17,10 +17,13 @@ def require_uncontested_source_inclusion(quantity: QuantityEvidence) -> None:
     if quantity.abstained or quantity.value is None:
         return
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    scope = metadata.get("inclusion_status")
-    if scope is not None and (
-        type(scope) is not str or scope.strip().upper() != "INCLUSION"
-    ):
+    # A missing optional scope is not a newly granted inclusion; upstream
+    # source authority still controls. An explicitly null scope is ambiguous
+    # and must never be rewritten as a customer inclusion.
+    if "inclusion_status" not in metadata:
+        return
+    scope = metadata["inclusion_status"]
+    if type(scope) is not str or scope.strip().upper() != "INCLUSION":
         raise SourceClosedRunConflictError("customer_source_inclusion_scope_unresolved")
 
 
