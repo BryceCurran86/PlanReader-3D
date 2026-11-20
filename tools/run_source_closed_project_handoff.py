@@ -142,7 +142,7 @@ _THREE_LAUREL_SOURCE_SHA256 = (
 )
 
 
-def _original_three_laurel_family_handoff(
+def _verified_source_family_handoff(
     pdf_path: Path,
     *,
     workspace_id: int,
@@ -151,8 +151,17 @@ def _original_three_laurel_family_handoff(
     family: str,
     expected_count: int,
 ) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
-    """SHA-locked original 3Laurel figured-finish issuer for one sealed family."""
-    if source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+    """Verify one independently source-issued family from *any* project.
+
+    The caller selects an authenticated source producer; this helper never
+    picks an issuer by project name, PDF filename or benchmark receipt.
+    """
+    if (type(source_sha256) is not str
+        or re.fullmatch(r"[0-9a-fA-F]{64}", source_sha256) is None
+        or type(workspace_id) is not int or workspace_id <= 0
+        or type(expected_count) is not int or expected_count < 1
+        or type(family) is not str or not family.strip()
+        or not callable(issuer)):
         return None
     issued = issuer(pdf_path, workspace_id=workspace_id)
     if (
@@ -169,7 +178,7 @@ def _original_three_laurel_family_handoff(
         or q.family != family
         or q.abstained
         or str(q.status).lower() != "firm"
-        or q.metadata.get("source_sha256") != _THREE_LAUREL_SOURCE_SHA256
+        or q.metadata.get("source_sha256") != source_sha256
         or q.metadata.get("commercial_projection_allowed") is not True
         for q in quantities
     ):
@@ -182,12 +191,30 @@ def _original_three_laurel_family_handoff(
         if (
             verified.customer_row_count != expected_count
             or set(verified.verified_quantity_ids) != sealed_ids
-            or set(issued.sealed_run.source_sha256s) != {_THREE_LAUREL_SOURCE_SHA256}
+            or set(issued.sealed_run.source_sha256s) != {source_sha256}
         ):
             return None
     except (ValueError, RuntimeError, TypeError, KeyError):
         return None
     return quantities, issued.sealed_run, tuple(issued.customer_rows)
+
+
+def _original_three_laurel_family_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+    issuer,
+    family: str,
+    expected_count: int,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """Legacy SHA-owned fixture adapter; never selected for other sources."""
+    if source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return None
+    return _verified_source_family_handoff(
+        pdf_path, workspace_id=workspace_id, source_sha256=source_sha256,
+        issuer=issuer, family=family, expected_count=expected_count,
+    )
 
 
 def _original_three_laurel_floor_finish_handoff(
