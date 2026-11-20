@@ -71,7 +71,7 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
     seal_live_floor_finish_area_run,
 )
-from pb_migration_contracts import QuantityEvidence
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     combine_source_closed_runs,
@@ -197,6 +197,79 @@ def _verified_source_family_handoff(
     except (ValueError, RuntimeError, TypeError, KeyError):
         return None
     return quantities, issued.sealed_run, tuple(issued.customer_rows)
+
+
+
+def require_source_issuer_revision_contract(
+    *, source_sha256: str, issuer_receipts: Iterable[tuple[str, str, str]],
+) -> None:
+    """Fail before expensive extraction if independently signed issuer inputs disagree.
+
+    The expected source revision is the SAME general immutable document+SHA
+    contract used by the original native source observation producer. The
+    caller's issuer registry provides its own metadata; benchmark truth and
+    PDF filenames never participate.
+    """
+    if type(source_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None:
+        raise ValueError("canonical_original_source_digest_required")
+    receipts = tuple(issuer_receipts)
+    if not receipts:
+        raise ValueError("independent_source_issuer_receipts_required")
+    for document_id, declared_sha, declared_revision in receipts:
+        if (
+            type(document_id) is not str or not document_id
+            or document_id != "live-source:" + source_sha256[:32]
+            or type(declared_sha) is not str or declared_sha != source_sha256
+            or type(declared_revision) is not str
+            or declared_revision != stable_contract_id(
+                "source_revision",
+                {"document_id": document_id, "source_sha256": source_sha256},
+                digest_chars=32,
+            )
+        ):
+            raise ValueError("independent_source_issuer_revision_mismatch_before_decode")
+
+
+def _preflight_registered_original_figure_issuers(
+    project_id: str, source_sha256: str,
+) -> None:
+    """Check only exact-source registered issuers that may join this producer.
+
+    Source-owned figured finish issuers are currently registered for one
+    authenticated source; other projects retain their existing native path.
+    This is a generic revision contract, NOT a drawing-specific wall rule.
+    """
+    if project_id != _THREE_LAUREL_PROJECT_ID or source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
+        return
+    from pb_three_laurel_vinyl_floor_customer import (
+        THREE_LAUREL_DOCUMENT_ID as vinyl_doc,
+        THREE_LAUREL_SOURCE_SHA256 as vinyl_sha,
+        THREE_LAUREL_REVISION_ID as vinyl_rev,
+    )
+    from pb_three_laurel_wet_area_floor_customer import (
+        THREE_LAUREL_DOCUMENT_ID as wet_doc,
+        THREE_LAUREL_SOURCE_SHA256 as wet_sha,
+        THREE_LAUREL_REVISION_ID as wet_rev,
+    )
+    from pb_three_laurel_wall_tile_customer import (
+        THREE_LAUREL_DOCUMENT_ID as wall_doc,
+        THREE_LAUREL_SOURCE_SHA256 as wall_sha,
+        THREE_LAUREL_REVISION_ID as wall_rev,
+    )
+    from pb_three_laurel_ceiling_customer import (
+        THREE_LAUREL_DOCUMENT_ID as ceiling_doc,
+        THREE_LAUREL_SOURCE_SHA256 as ceiling_sha,
+        THREE_LAUREL_REVISION_ID as ceiling_rev,
+    )
+    require_source_issuer_revision_contract(
+        source_sha256=source_sha256,
+        issuer_receipts=(
+            (vinyl_doc, vinyl_sha, vinyl_rev),
+            (wet_doc, wet_sha, wet_rev),
+            (wall_doc, wall_sha, wall_rev),
+            (ceiling_doc, ceiling_sha, ceiling_rev),
+        ),
+    )
 
 
 def _original_three_laurel_family_handoff(
@@ -503,6 +576,9 @@ def _generate_project_handoff_locked(
     _reject_existing_sealed_handoff(output_dir, project_id)
 
     source_sha256 = _sha256(pdf_path)
+    # Before any source decode/18-page geometry work, reject incompatible
+    # registered signed-family revisions rather than failing after 12 minutes.
+    _preflight_registered_original_figure_issuers(project_id, source_sha256)
     topology_pages, room_area_support_pages, page_count = _source_page_scopes(
         pdf_path
     )
