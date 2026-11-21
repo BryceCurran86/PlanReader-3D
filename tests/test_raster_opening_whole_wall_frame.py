@@ -9,6 +9,7 @@ import pb_opening_host_binding_authority as host
 import pb_opening_host_frame_authority as frame
 from pb_physical_opening_authority import (
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    RASTER_CORNER_FRAMED_OPENING_LEG,
     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
 )
@@ -99,11 +100,14 @@ def _producer(scope):
     return producer
 
 
-def test_raster_whole_wall_binding_produces_source_space_frame() -> None:
+@pytest.mark.parametrize("pattern", [
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION, RASTER_CORNER_FRAMED_OPENING_LEG,
+])
+def test_raster_whole_wall_binding_produces_source_space_frame(pattern: str) -> None:
     records = (_record("wall:host"),)
     result = _producer(_scope(records))._raster_whole_wall_frame(
         binding=_binding(),
-        opening=_opening(),
+        opening=_opening(pattern=pattern),
         geometry=GEOMETRY,
     )
 
@@ -134,11 +138,14 @@ def test_raster_swing_whole_wall_binding_produces_same_source_space_frame() -> N
     assert result.candidate_ids == ("wall:host",)
 
 
-def test_binding_member_must_match_reproved_whole_wall_host() -> None:
+@pytest.mark.parametrize("pattern", [
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION, RASTER_CORNER_FRAMED_OPENING_LEG,
+])
+def test_binding_member_must_match_reproved_whole_wall_host(pattern: str) -> None:
     records = (_record("wall:host"),)
     result = _producer(_scope(records))._raster_whole_wall_frame(
         binding=_binding("wall:other"),
-        opening=_opening(),
+        opening=_opening(pattern=pattern),
         geometry=GEOMETRY,
     )
     assert result is None
@@ -159,13 +166,56 @@ def test_off_center_whole_wall_cannot_mint_host_frame() -> None:
     assert result is None
 
 
-def test_incomplete_wall_scope_cannot_mint_host_frame() -> None:
+@pytest.mark.parametrize("pattern", [
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION, RASTER_CORNER_FRAMED_OPENING_LEG,
+])
+def test_incomplete_wall_scope_cannot_mint_host_frame(pattern: str) -> None:
     records = (_record("wall:host"),)
     result = _producer(_scope(records, complete=False))._raster_whole_wall_frame(
         binding=_binding(),
-        opening=_opening(),
+        opening=_opening(pattern=pattern),
         geometry=GEOMETRY,
     )
+    assert result is None
+
+
+def test_corner_leg_with_only_one_flank_cannot_mint_whole_wall_frame() -> None:
+    record = _record("wall:host")
+    record.wall_candidate.centerline_pts = ((140.0, 55.0), (220.0, 55.0))
+    result = _producer(_scope((record,)))._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_CORNER_FRAMED_OPENING_LEG),
+        geometry=GEOMETRY,
+    )
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "decision_scope_id"),
+)
+def test_corner_leg_requires_the_exact_live_wall_scope(field: str) -> None:
+    scope = _scope((_record("wall:host"),))
+    setattr(scope, field, "different-source-scope")
+
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_CORNER_FRAMED_OPENING_LEG),
+        geometry=GEOMETRY,
+    )
+
+    assert result is None
+
+
+def test_corner_leg_rejects_conflicting_records_for_the_same_wall() -> None:
+    records = (_record("wall:host"), _record("wall:host", offset=0.25))
+
+    result = _producer(_scope(records))._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_CORNER_FRAMED_OPENING_LEG),
+        geometry=GEOMETRY,
+    )
+
     assert result is None
 
 
@@ -201,9 +251,12 @@ def test_backtracking_or_repeated_path_cannot_mint_whole_wall_frame(points):
 
 
 @pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('pattern', [
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION, RASTER_CORNER_FRAMED_OPENING_LEG,
+])
 @pytest.mark.parametrize('angle,scale,shift', [(0., 1., (0., 0.)),
     (1.2, 2., (70., -32.)), (3.141592653589793 / 2, .5, (-40., 100.))])
-def test_ordered_split_whole_wall_projection_is_transform_invariant(reverse, angle, scale, shift):
+def test_ordered_split_whole_wall_projection_is_transform_invariant(reverse, pattern, angle, scale, shift):
     import math
     axis = (math.cos(angle), math.sin(angle))
     normal = (-axis[1], axis[0])
@@ -217,7 +270,7 @@ def test_ordered_split_whole_wall_projection_is_transform_invariant(reverse, ang
         normal=normal, length=40. * scale, thickness=10. * scale)
     before = record.wall_candidate.centerline_pts
     result = _producer(_scope((record,)))._raster_whole_wall_frame(
-        binding=_binding(), opening=_opening(), geometry=geometry)
+        binding=_binding(), opening=_opening(pattern=pattern), geometry=geometry)
     assert result is not None
     assert result.origin == pytest.approx(transform((20., 55.)))
     assert (result.u0, result.u1, result.whole_wall_length) == pytest.approx(

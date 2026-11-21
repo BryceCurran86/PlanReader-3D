@@ -22,6 +22,7 @@ from pb_live_physical_opening_void_composition import (
     LivePhysicalOpeningVoidComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import RASTER_CORNER_FRAMED_OPENING_LEG
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     CommercialTakeoffSourceTrace,
@@ -134,6 +135,21 @@ def test_figured_opening_area_becomes_identity_bound_quantity_evidence() -> None
     assert quantity.metadata["measurement_record_id"] == "figured-1"
     assert quantity.metadata["host_wall_id"] == "wall-1"
     assert quantity.metadata["host_binding_record_id"] == "host-binding-1"
+
+
+@pytest.mark.parametrize("frame_id", (None, "host-frame-1"))
+def test_corner_diagnostic_label_cannot_publish_area(frame_id: str | None) -> None:
+    ordinary = _opening(kind="door")
+    corner = replace(
+        _opening(canonical_id="corner-1", kind="door"),
+        structural_pattern=RASTER_CORNER_FRAMED_OPENING_LEG,
+        host_frame_record_id=frame_id,
+    )
+
+    assert _opening_quantity(corner) is None
+    assert publish_live_opening_area_quantities(_composition(ordinary, corner)) == (
+        _opening_quantity(ordinary),
+    )
 
 
 def test_untyped_opening_never_publishes_trade_area() -> None:
