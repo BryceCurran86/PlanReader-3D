@@ -183,6 +183,12 @@ def project_live_ceiling_area_customer_rows(
         unique_customer_ceiling_owners(result.canonical_ceilings)
         if result.quantity_evidence else {}
     )
+    # An empty original source inventory has no ceiling quantity to reissue.
+    # Preserve the existing empty-output contract, including diagnostic
+    # callers with no dataclass instance and no canonical quantity evidence.
+    if not result.quantity_evidence:
+        return ()
+
     # Validate the PRE-REISSUE legacy source-owner metadata and square-metre
     # unit. The FIRM canonical publisher generates new metadata by copying
     # canonical ceiling identity; checking only that newly minted quantity
