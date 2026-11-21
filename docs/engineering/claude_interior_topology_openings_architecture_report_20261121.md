@@ -118,3 +118,23 @@ Not proven: Python 3.14 and exact-head CI, the protected replay, sealing, custom
 **D1 revised.** My earlier recommendation (abstain, owner approves) did not say what it costs. The owner-approved second-axis rows and the provisional 2100 rows are review-lineage rows that never enter the scored runs, so under that end-state the 18 interior door items cannot score and 3Laurel tops out at 45 of 63. Only a source-proof path (the document head note plus a base proof) can make them scorable. The recommendation is withdrawn; the decision stays the owner's, and both outcomes need the kind, host and identity steps being ported.
 
 **First gate unchanged.** The donor's own original collect still left eight hinges without producer receipts, which agrees with the host-binding gate measured above (host wall 0 of 29 records).
+
+## 10. Decision D1 (same day): interior doors end as scorable rows
+
+The owner chose scorable rows in chat on 21 Nov. The end state for the 14 interior access doors (and the 4 sliding joinery doors) is a quantity row that can be FIRM and therefore scored, built through a source-backed path. Review rows (the owner-approved second axis, the assumed 2100 mm provisional) remain only as the fallback for a door that fails the source tests; they are never the goal.
+
+**What that requires, in order.** Each step is shadow first, publishes only through an existing seam, and promotes nothing by itself:
+
+1. Aperture identity (done in S1, review-only): one physical aperture, several G17 representatives retained.
+2. Two wall sections per aperture (owner rule 7056071002 / 7056082708, GPT1 draft contract in PR 4638): an adapter from the door inventory's two native wall-end paths to that contract. Consume it, do not fork it. The hub (7056774272) asks for this integration without duplicate adapters.
+3. Wall-side authority: the interior walls are drawn as thick filled strips and today produce no authenticated host band (0 of 29 records). This is a wall-end / physical-strip authority deficit, not a door problem. It sits on the boundary with the wall producer lane (Cursor) and the host code owned by MAX, so the architecture note for it names who changes what before any code.
+4. Kind: piece A of the donor port (structural door patterns on a hosted, unkinded opening), wired only after step 3 gives it a host.
+5. Metric axes: width from a figured or schedule value with its own authority (piece B covers in-swing figures); height from the existing document joinery head-height authority, converted only with a base proof, with an explicit per-door applicability rule. Nothing assumes a sill at zero.
+6. A new area basis for interior doors through the existing opening-area issuer, then seal, customer row and identity map.
+7. A documented authority-promotion review before any commercial output changes (AGENTS.md).
+
+**Owner policy still to confirm (not decided by me):** what counts as a base proof for a door; whether the joinery head note applies to each door type (hinged, cavity slider, sliding robe door); what happens when a door carries its own height; which door types are excluded.
+
+**Hub boundary (7058201153):** two-wall topology evidence must not be promoted to commercial opening area until physical host, frame and kind independently corroborate. This lane keeps to that: steps 2 to 5 are evidence, step 6 is MAX's issuer, step 7 is the owner's gate.
+
+**Slice delivered after the decision (same day).** Steps 2 and 5 of the chain now exist as shadow code on a branch stacked on GPT1's contract (`claude/interior-door-two-wall-tags-20261121`, hub 7060064536, note `claude_door_two_wall_tags_and_row_compiler_20261121.md`): a convention-agnostic wall-end core and the internal-door front end (12 of 14 interior door marks tagged on the measured original; outlined walls proved on Maryborough insets, 4 of 5 swing doorways), and a compiler of the four verifications (wall connections, width, head level, base level) into one candidate row per physical door. Measured first gates: width and head-note text are not corroborated under default text trust, the base has no proof in the drawings, and the canonical host binding does not yet recognise two traced sections. No row is ready on either measured plan, and nothing is issued.
