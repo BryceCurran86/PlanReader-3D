@@ -211,9 +211,16 @@ def tag_native_segmented_doorway_chords(
             left = tuple(chord["source_wall_end_left_path_indices"])
             right = tuple(chord["source_wall_end_right_path_indices"])
             source_opening = tuple(chord["source_swing_native_path_indices"])
-            if type(horizontal) is not bool or not all(
-                math.isfinite(float(x)) for x in (lo, hi, band_lo, band_hi)
-            ):
+            # Source receipts must be actual native numeric measurements.
+            # float(True) and float("10") would silently launder an
+            # unverified source value into a valid-looking wall contact.
+            values = (lo, hi, band_lo, band_hi)
+            if (type(horizontal) is not bool
+                    or not all(type(x) in (int, float) and math.isfinite(x)
+                               for x in values)
+                    or lo > hi or band_lo > band_hi
+                    or not _ids(left) or not _ids(right)
+                    or not _ids(source_opening)):
                 raise ValueError("invalid chord")
         except (KeyError, TypeError, ValueError, OverflowError):
             tags.append(TwoWallOpeningTag(str(number), "UNRESOLVED", "source_chord_receipt_invalid"))
