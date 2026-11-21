@@ -159,7 +159,7 @@ def test_same_physical_aperture_and_same_code_cannot_be_counted_twice():
 
 def test_one_assembly_cannot_be_reused_on_two_distant_hosts():
     r = reconcile_acacia_schedule_hosts(
-        _package(), (_receipt("SD1"), _receipt("SD2", host="distant", schedule_path=510)),
+        _package(), (_receipt("SD1"), _receipt("SD2", host="distant", floor_path=401, schedule_path=510)),
     )
     assert r.status == "ABSTAINED"
     assert r.reasons == ("one_assembly_reused_on_distinct_floor_hosts",)
@@ -386,3 +386,77 @@ def test_installed_opening_page_receipt_requires_exact_integer_type(field, bad_v
     assert result.reasons == ("unproved_floor_or_schedule_source_host",)
     assert result.installed_opening_quantity_authorized is False
     assert result.customer_row_authorized is False
+
+
+# Donor #4556 security/performance safeguards, preserved without merging its
+# stale stacked branch. These receipts are not commercial opening quantities.
+def test_identical_native_floor_host_cannot_mint_second_installed_aperture():
+    review = reconcile_acacia_schedule_hosts(
+        _package(),
+        (_receipt("W2", host="aperture-a", assembly="frame-a"),
+         _receipt("W2", host="aperture-b", assembly="frame-b", schedule_path=501)),
+    )
+    assert review.status == "ABSTAINED"
+    assert review.reasons == ("native_host_witness_reused_for_distinct_apertures",)
+    assert review.customer_row_authorized is False
+
+
+def test_distinct_native_floor_hosts_remain_separate_noncommercial_candidates():
+    review = reconcile_acacia_schedule_hosts(
+        _package(),
+        (_receipt("W2", host="aperture-a", assembly="frame-a"),
+         _receipt("W2", host="aperture-b", assembly="frame-b", floor_path=401)),
+    )
+    assert review.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert review.composite_assembly_count == 0
+    assert review.customer_row_authorized is False
+
+
+def test_bounded_source_receipts_accept_exact_safety_limit_without_customer_release():
+    receipts = (
+        _receipt("W2", host=f"aperture-{i}", assembly=f"assembly-{i}",
+                 floor_path=i)
+        for i in range(256)
+    )
+    review = reconcile_acacia_schedule_hosts(_package(), receipts)
+    assert review.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert review.installed_opening_quantity_authorized is False
+    assert review.customer_row_authorized is False
+
+
+def test_source_receipts_abstain_when_beyond_bounded_limit():
+    receipts = (
+        _receipt("W2", host=f"aperture-{i}", assembly=f"assembly-{i}",
+                 floor_path=i)
+        for i in range(257)
+    )
+    review = reconcile_acacia_schedule_hosts(_package(), receipts)
+    assert review.status == "ABSTAINED"
+    assert review.reasons == ("schedule_host_receipts_over_limit",)
+
+
+def test_endless_source_receipt_stream_is_stopped_after_limit_plus_one():
+    count = [0]
+
+    def unbounded():
+        while True:
+            i = count[0]
+            count[0] += 1
+            yield _receipt("W2", host=f"aperture-{i}", assembly=f"assembly-{i}",
+                           floor_path=i)
+
+    review = reconcile_acacia_schedule_hosts(_package(), unbounded())
+    assert review.status == "ABSTAINED"
+    assert review.reasons == ("schedule_host_receipts_over_limit",)
+    assert count[0] == 257
+
+
+def test_source_receipt_iterator_exception_abstains_without_partial_review():
+    def interrupted():
+        yield _receipt("W2")
+        raise RuntimeError("foreign producer stopped")
+
+    review = reconcile_acacia_schedule_hosts(_package(), interrupted())
+    assert review.status == "ABSTAINED"
+    assert review.reasons == ("schedule_host_receipts_invalid",)
+    assert review.customer_row_authorized is False
