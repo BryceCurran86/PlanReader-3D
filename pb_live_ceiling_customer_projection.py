@@ -14,6 +14,8 @@ from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
 from pb_source_customer_inclusion_scope import (
     require_uncontested_source_inclusion, unique_customer_ceiling_owners,
+    require_uncontested_source_commercial_scope,
+    require_source_ceiling_owner_parity,
 )
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
@@ -86,6 +88,7 @@ def project_live_ceiling_customer_rows(
             )
         seen_original_ids.add(source_id)
         require_uncontested_source_inclusion(original)
+        require_uncontested_source_commercial_scope(original)
         if (
             not original.abstained
             and original.value is not None
@@ -124,6 +127,7 @@ def project_live_ceiling_customer_rows(
         ceiling = ceilings.get(_clean(quantity.input_entity_ids[0]))
         if ceiling is None:
             continue
+        require_source_ceiling_owner_parity(quantity, ceiling)
         metadata = (
             dict(quantity.metadata)
             if isinstance(quantity.metadata, Mapping)
