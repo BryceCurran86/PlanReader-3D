@@ -7,6 +7,7 @@ do not prove a measured room boundary or an installed opening on floor p2.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import islice
 from typing import Iterable
 
 from pb_gpt1_acacia_source_packet import (
@@ -168,16 +169,26 @@ def reconcile_acacia_schedule_hosts(
             "ABSTAINED", ("original_four_sheet_roles_unverified",),
         )
     try:
-        receipts = tuple(instances)
-    except (TypeError, ValueError):
+        # Bound foreign producer iterables before validating their source
+        # witnesses; an endless stream must never consume unbounded memory.
+        receipts = tuple(islice(iter(instances), 257))
+    except (TypeError, ValueError, RuntimeError):
         return AcaciaScheduleHostReview(
             "ABSTAINED", ("schedule_host_receipts_invalid",),
+        )
+    if len(receipts) > 256:
+        return AcaciaScheduleHostReview(
+            "ABSTAINED", ("schedule_host_receipts_over_limit",),
         )
     if not receipts:
         return AcaciaScheduleHostReview(
             "ABSTAINED", ("schedule_codes_not_installed_host_evidence",),
         )
     source_ids: set[tuple[str, str]] = set()
+    # One immutable native floor-host witness cannot authenticate distinct
+    # installed apertures just because their caller-selected IDs differ.
+    # Two composite codes may still claim ONE identical aperture owner.
+    native_floor_host_owners: dict[tuple[int, ...], str] = {}
     aperture_owners: dict[str, list[AcaciaOpeningWitness]] = {}
     code_list: list[str] = []
     for r in receipts:
@@ -220,6 +231,13 @@ def reconcile_acacia_schedule_hosts(
         ):
             return AcaciaScheduleHostReview(
                 "ABSTAINED", ("unproved_floor_or_schedule_source_host",),
+            )
+        existing_owner = native_floor_host_owners.setdefault(
+            floor_paths, r.physical_aperture_identity,
+        )
+        if existing_owner != r.physical_aperture_identity:
+            return AcaciaScheduleHostReview(
+                "ABSTAINED", ("native_host_witness_reused_for_distinct_apertures",),
             )
         key = (r.physical_aperture_identity, r.schedule_code)
         if key in source_ids:
