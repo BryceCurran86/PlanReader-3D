@@ -1,5 +1,35 @@
 # PlanReader-3D agent contract
 
+## Owner all-pages source evidence rule — 21 November 2026 (mandatory)
+
+**No original plan page may be silently ignored.** Inspect/index every source
+page and every bounded viewport for its usable evidence. Mixed sheets may
+contain a floor-plan inset, elevations, sections, notes, schedules and legends
+simultaneously; a sheet-level non-floor-plan classification must NOT discard
+its detail-plan evidence. For any wall, opening, room, floor, ceiling or
+customer quantity, consult relevant uniquely registered source views from the
+**entire** original package before declaring the source missing or
+commercially complete. Source-specific dimensions, wall ends/jambs, door/window
+types, head heights, finishes, exclusions and exceptions from other views
+must be retained as independent corroboration with source/revision ancestry.
+
+**Do not replay non-plan sheets as extra installed walls, rooms or doors.**
+Only canonical plan-topology source views mint physical instances. Supporting
+sheets inform those same instances after exact page/viewport, transform,
+physical identity and ambiguity checks. A door can link two traced wall
+sections on either side of a gap OR at an intersection of two angled walls.
+A two-wall tag is topology-only until commercial host/frame/metric/quantity
+proofs independently pass. Never invent an opening, duplicate one because it
+appears in detail/elevation/schedule, or fabricate a wall continuation.
+
+Publish page-coverage decisions including explicit no-evidence, unreadable,
+unreviewed and conflicting pages instead of silent drops. Maintain a complete
+source-page/viewport index and report which evidence pages contributed to
+each result; run expensive trace/OCR per scoped source and reuse cached
+authenticated observations for speed. This is a universal owner rule, **not**
+a per-job hardcoding instruction. See
+`docs/engineering/OWNER_ALL_PAGES_SOURCE_EVIDENCE_RULE_20261121.md`.
+
 ## Mandatory private-source reuse — no repeat upload requests (20 November 2026)
 
 The owner has already supplied and verified the complete 18-original-PDF PlanReader source archive, retained in the user's **private ChatGPT Library**. Before requesting any source file, agents MUST check currently attached files, prior conversation uploads and the Library (files.list/files.search), and materialize the existing private archive to the authorized execution environment if not automatically mounted. Do NOT ask the owner to upload an original already present.
