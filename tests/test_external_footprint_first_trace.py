@@ -700,3 +700,58 @@ def test_original_runner_rejects_invalid_page_before_trace_without_title_pin(
         runner.run(original, bad_page, destination)
     assert not calls
     assert not destination.exists()
+
+
+def test_original_evidence_pair_refuses_existing_png_without_json(tmp_path):
+    """An existing overlay must not acquire a mismatched new JSON receipt."""
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    destination = tmp_path / "evidence_pair_collision"
+    destination.mkdir()
+    existing = destination / "page_1_footprint_first.png"
+    existing.write_bytes(b"previous-private-overlay")
+    with pytest.raises(FileExistsError, match="original_footprint_evidence_pair_already_exists"):
+        run(original, 0, destination, expected_sha256=sha)
+    assert existing.read_bytes() == b"previous-private-overlay"
+    assert not (destination / "page_1_footprint_first.json").exists()
+
+
+def test_original_evidence_pair_rolls_back_on_second_write_failure(tmp_path, monkeypatch):
+    """A JSON write error must remove the PNG created in the same run."""
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    destination = tmp_path / "evidence_pair_failed"
+    real_open = Path.open
+
+    def reject_json(self, *args, **kwargs):
+        if self.name == "page_1_footprint_first.json" and args and args[0] == "xb":
+            raise OSError("simulated JSON write failure")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_json)
+    with pytest.raises(OSError, match="simulated JSON write failure"):
+        run(original, 0, destination, expected_sha256=sha)
+    assert not (destination / "page_1_footprint_first.png").exists()
+    assert not (destination / "page_1_footprint_first.json").exists()
+
+
+def test_original_evidence_render_failure_leaves_no_partial_json(tmp_path, monkeypatch):
+    """Both artifacts must be generated BEFORE publishing either one."""
+    import tools.run_original_footprint_first as runner
+
+    source = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "render_refused"
+
+    def render_failed(self, *args, **kwargs):
+        raise RuntimeError("source overlay render failure")
+
+    monkeypatch.setattr(fitz.Page, "get_pixmap", render_failed)
+    with pytest.raises(RuntimeError, match="source overlay render failure"):
+        runner.run(source, 0, destination, expected_sha256=sha)
+    assert not (destination / "page_1_footprint_first.json").exists()
+    assert not (destination / "page_1_footprint_first.png").exists()
