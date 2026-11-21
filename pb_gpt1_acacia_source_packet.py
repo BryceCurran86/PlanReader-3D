@@ -48,6 +48,21 @@ class AcaciaOriginalSheet:
 
 
 @dataclass(frozen=True)
+class AcaciaOriginalPageEvidence:
+    """One complete native page receipt, including pages not issuing geometry."""
+
+    page_index: int
+    drawing_title: str
+    drawing_number: str
+    scale: str
+    native_path_count: int
+    native_word_count: int
+    native_image_count: int
+    source_page_reviewed: bool = True
+    geometry_or_customer_authorized: bool = False
+
+
+@dataclass(frozen=True)
 class AcaciaOriginalPackage:
     status: str
     reason: str
@@ -63,6 +78,10 @@ class AcaciaOriginalPackage:
     finish_material_authorized: bool = False
     customer_quantities_authorized: bool = False
     frozen120_score_authorized: bool = False
+    # Kept separate from the four page-specific role receipts for backward
+    # compatibility. The source verifier now indexes ALL original pages once.
+    full_page_evidence: tuple[AcaciaOriginalPageEvidence, ...] = ()
+    all_original_pages_indexed: bool = False
 
     def to_dict(self):
         return {
@@ -70,6 +89,16 @@ class AcaciaOriginalPackage:
             "source_sha256": self.source_sha256,
             "region": self.region, "source_pages": self.source_pages,
             "sheets": [vars(s) for s in self.sheets],
+            "full_page_evidence": [vars(s) for s in self.full_page_evidence],
+            "all_original_pages_indexed": (
+                self.all_original_pages_indexed is True
+                and len(self.full_page_evidence) == self.source_pages
+                and tuple(r.page_index for r in self.full_page_evidence)
+                    == tuple(range(self.source_pages))
+                and all(r.source_page_reviewed is True
+                        and r.geometry_or_customer_authorized is False
+                        for r in self.full_page_evidence)
+            ),
             "original_byte_roles_verified": self.original_byte_roles_verified,
             "physical_outer_wall_verified": False,
             "interior_finished_face_verified": False,
@@ -150,19 +179,45 @@ def inspect_acacia_original_bytes(raw: bytes, *, expected_region: str) -> Acacia
                     digest, expected_region, source_pages=len(source),
                 )
             sheets = []
+            page_evidence = []
             for index, page in enumerate(source):
                 title, number, scale = _title_block(
                     page.get_text(), index, expected_region
                 )
+                # Read original native source once for every sheet, regardless
+                # of its topology/height/schedule role. An elevation, detail,
+                # legend, roof sheet or note may still corroborate a physical
+                # instance, but must never mint a second installed instance.
+                native_paths = len(page.get_drawings())
+                native_words = len(page.get_text("words", sort=False))
+                native_images = len(page.get_images(full=True))
+                if not native_paths and not native_words and not native_images:
+                    raise ValueError("original_source_page_unreadable_or_empty")
+                page_evidence.append(AcaciaOriginalPageEvidence(
+                    page_index=index,
+                    drawing_title=title,
+                    drawing_number=number,
+                    scale=scale,
+                    native_path_count=native_paths,
+                    native_word_count=native_words,
+                    native_image_count=native_images,
+                ))
                 if index in (1, 7, 8, 9):
                     sheets.append(AcaciaOriginalSheet(
-                        index, title, number, scale, len(page.get_drawings())
+                        index, title, number, scale, native_paths,
                     ))
+            if (len(page_evidence) != len(source)
+                    or tuple(row.page_index for row in page_evidence)
+                       != tuple(range(len(source)))
+                    or len(sheets) != len(ACACIA_REQUIRED_ROLES)):
+                raise ValueError("original_source_page_inventory_incomplete")
         return AcaciaOriginalPackage(
             "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY",
             "exact_original_four_roles_verified_missing_physical_metric_and_spec",
             digest, expected_region, 10, tuple(sheets),
             original_byte_roles_verified=True,
+            full_page_evidence=tuple(page_evidence),
+            all_original_pages_indexed=True,
         )
     except (RuntimeError, ValueError, TypeError, OSError, IndexError):
         return AcaciaOriginalPackage(
