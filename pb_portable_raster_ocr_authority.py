@@ -22,6 +22,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cache
 import asyncio
 import hashlib
 import math
@@ -462,6 +463,17 @@ class RapidOCRBackend(RasterOCRBackend):
 
     _engine_cache: Any = None
 
+    @staticmethod
+    @cache
+    def _load_rapidocr() -> Any:
+        import onnxruntime
+
+        # Apply the runtime opt-out before importing the optional OCR package.
+        onnxruntime.disable_telemetry_events()
+        import rapidocr
+
+        return rapidocr
+
     @property
     def name(self) -> str:
         return "rapid_ocr"
@@ -469,15 +481,14 @@ class RapidOCRBackend(RasterOCRBackend):
     @property
     def version(self) -> str:
         try:
-            import rapidocr
+            rapidocr = self._load_rapidocr()
             return str(getattr(rapidocr, "__version__", "unknown"))
         except Exception:
             return "unknown"
 
     def is_available(self) -> bool:
         try:
-            import rapidocr  # noqa: F401
-            import onnxruntime  # noqa: F401
+            self._load_rapidocr()
             return True
         except Exception:
             return False
@@ -485,19 +496,14 @@ class RapidOCRBackend(RasterOCRBackend):
     @classmethod
     def _get_engine(cls) -> Any:
         if cls._engine_cache is None:
-            import onnxruntime
-            from rapidocr import RapidOCR
-
-            # Set the runtime opt-out before RapidOCR opens its model sessions.
-            onnxruntime.disable_telemetry_events()
-            cls._engine_cache = RapidOCR()
+            cls._engine_cache = cls._load_rapidocr().RapidOCR()
         return cls._engine_cache
 
     @classmethod
     def _reset_engine_cache_for_tests(cls) -> None:
-        """Test-only: clear the cached engine so a test's mock construction
-        is not silently reused by a later, unrelated test."""
+        """Test-only: clear cached package and engine state between mocks."""
         cls._engine_cache = None
+        cls._load_rapidocr.cache_clear()
 
     def extract_lines(
         self,

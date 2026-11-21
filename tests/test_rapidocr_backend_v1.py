@@ -10,6 +10,7 @@ into another.
 """
 from __future__ import annotations
 
+import builtins
 import sys
 import types
 
@@ -115,8 +116,10 @@ def test_is_available_does_not_construct_engine(monkeypatch: pytest.MonkeyPatch)
 
     mod = types.ModuleType("rapidocr")
     mod.RapidOCR = TrackingRapidOCR
+    mod_onnxruntime = types.ModuleType("onnxruntime")
+    mod_onnxruntime.disable_telemetry_events = lambda: None
     monkeypatch.setitem(sys.modules, "rapidocr", mod)
-    monkeypatch.setitem(sys.modules, "onnxruntime", types.ModuleType("onnxruntime"))
+    monkeypatch.setitem(sys.modules, "onnxruntime", mod_onnxruntime)
 
     backend = RapidOCRBackend()
     assert backend.is_available() is True
@@ -202,6 +205,43 @@ def test_engine_disables_runtime_telemetry_before_cached_construction(
     assert startup_steps == ["disable telemetry", "open model sessions"]
 
 
+@pytest.mark.parametrize("entry_point", ("is_available", "version", "_get_engine"))
+def test_every_rapidocr_entry_point_opts_out_before_import(
+    monkeypatch: pytest.MonkeyPatch, entry_point: str,
+) -> None:
+    _install_fake_rapidocr(monkeypatch)
+    events = []
+    monkeypatch.setattr(sys.modules["onnxruntime"], "disable_telemetry_events",
+                        lambda: events.append("disable telemetry"))
+    original_import = builtins.__import__
+
+    def observed_import(name, *args, **kwargs):
+        if name == "rapidocr":
+            events.append("import rapidocr")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", observed_import)
+    entry = getattr(RapidOCRBackend(), entry_point)
+    if callable(entry):
+        entry()
+    assert events == ["disable telemetry", "import rapidocr"]
+
+
+def test_failed_opt_out_leaves_rapidocr_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_rapidocr(monkeypatch)
+
+    def telemetry_unavailable():
+        raise RuntimeError("telemetry opt-out unavailable")
+
+    monkeypatch.setattr(sys.modules["onnxruntime"], "disable_telemetry_events",
+                        telemetry_unavailable)
+    backend = RapidOCRBackend()
+    assert backend.is_available() is False
+    assert backend.version == "unknown"
+    with pytest.raises(RuntimeError, match="telemetry opt-out unavailable"):
+        backend._get_engine()
+
+
 def test_never_publishes_corroborated(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_rapidocr(monkeypatch, detections=(("W-1", (0.0, 0.0, 10.0, 10.0), 0.9),))
     backend = RapidOCRBackend()
@@ -264,8 +304,10 @@ def _install_recognition_engine(monkeypatch: pytest.MonkeyPatch, engine: _Recogn
     mod_rapidocr = types.ModuleType("rapidocr")
     mod_rapidocr.RapidOCR = FakeRapidOCR
     mod_rapidocr.__version__ = "test-1.0.0"
+    mod_onnxruntime = types.ModuleType("onnxruntime")
+    mod_onnxruntime.disable_telemetry_events = lambda: None
     monkeypatch.setitem(sys.modules, "rapidocr", mod_rapidocr)
-    monkeypatch.setitem(sys.modules, "onnxruntime", types.ModuleType("onnxruntime"))
+    monkeypatch.setitem(sys.modules, "onnxruntime", mod_onnxruntime)
 
 
 def test_recognition_only_keeps_every_reading_and_restores_detector(
