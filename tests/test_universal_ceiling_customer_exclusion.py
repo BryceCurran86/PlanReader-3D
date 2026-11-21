@@ -163,3 +163,50 @@ def test_legacy_customer_adapter_denial_never_overwritten():
             source, room_entity_id="source-owning-room",
             finish_descriptor="ceiling finish",
         )
+
+
+def test_foreign_provisional_owner_does_not_mint_legacy_customer_or_mutate_source():
+    original = _shadow_quantity()
+    foreign = replace(
+        original,
+        metadata={**dict(original.metadata), "canonical_ceiling_id": "foreign-ceiling"},
+    )
+    before = foreign.to_dict()
+    assert _project(foreign, "legacy") == ()
+    assert foreign.to_dict() == before
+
+
+@pytest.mark.parametrize("bad_key,bad_value", (
+    ("source_room_index_id", "room-index-of-another-ceiling"),
+    ("upstream_area_quantity_id", "foreign-area-quantity"),
+    ("document_id", "other-document"),
+    ("source_sha256", "f" * 64),
+))
+def test_legacy_provisional_source_cannot_have_its_identity_repaired_by_reissue(
+    bad_key, bad_value,
+):
+    original = _shadow_quantity()
+    false_source = replace(
+        original, metadata={**dict(original.metadata), bad_key: bad_value},
+    )
+    assert _project(false_source, "legacy") == ()
+
+
+def test_invalid_original_firm_legacy_owner_is_conflict_not_silent_empty():
+    original = _shadow_quantity()
+    forged = replace(
+        original, status="firm",
+        metadata={**dict(original.metadata),
+                  "quantity_handoff_only": False,
+                  "commercial_projection_allowed": True,
+                  "canonical_room_id": "foreign-room"},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="source_ceiling_original_owner_or_unit_unresolved"):
+        _project(forged, "legacy")
+
+
+def test_provisional_legacy_source_wrong_units_refused_even_with_matching_area():
+    original = _shadow_quantity()
+    forged = replace(original, unit="ft2")
+    assert _project(forged, "legacy") == ()
