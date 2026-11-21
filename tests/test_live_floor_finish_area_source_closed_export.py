@@ -3,11 +3,16 @@ from __future__ import annotations
 from copy import copy
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
-from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
+from pb_live_canonical_floor_surface import (
+    LiveCanonicalFloorSurfaceObject,
+    quarantine_unverified_floor_finish_boundaries,
+)
+from pb_live_canonical_room_composition import LiveCanonicalRoomObject
 from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
 )
@@ -856,6 +861,81 @@ def _two_original_floor_finish_claims(
         canonical_floors=(first_floor, second_floor),
         floor_finish_quantity_evidence=(first, second),
     )
+
+
+@pytest.mark.parametrize("wall_role, identity_resolved, reason", (
+    (None, False, "floor_finish_bounding_wall_authority_incomplete"),
+    ("wall_centerline", True, "floor_finish_bounding_wall_not_finished_face"),
+    ("internal_finished_wall_face", False, "floor_finish_bounding_wall_identity_unresolved"),
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unverified_floor_wall_keeps_independent_signed_finish(wall_role, identity_resolved, reason, reverse):
+    claim = _two_original_floor_finish_claims(
+        second_occurrence="occ-2", second_observation="ev-occ-2",
+    )
+    valid, unverified = claim.floor_finish_quantity_evidence
+    rooms = tuple(
+        LiveCanonicalRoomObject(
+            canonical_room_id=floor.room_entity_id,
+            physical_room_id=floor.room_entity_id,
+            document_id=floor.document_id,
+            revision_id=floor.revision_id,
+            source_sha256=floor.source_sha256,
+            snapshot_id=floor.snapshot_id,
+            page_id=floor.page_id,
+            viewport_id=floor.viewport_id,
+            decision_scope_id="original-plan-view",
+            polygon_pdf_pts=floor.polygon_pdf_pts,
+            bounding_wall_ids=(f"wall-{index}",),
+            canonical_bounding_wall_ids=(f"wall-{index}",) if index == 1 or wall_role else (),
+            wall_relationships_complete=index == 1 or wall_role is not None,
+            area_page_pts2=floor.area_page_pts2,
+            source_room_face_record_id=floor.source_room_face_record_id,
+            evidence_ids=floor.evidence_ids,
+            geometry_complete=True,
+            metric_geometry_complete=True,
+        )
+        for index, floor in enumerate(claim.canonical_floors, start=1)
+    )
+    walls = {
+        "wall-1": SimpleNamespace(
+            canonical_wall_id="wall-1",
+            role="internal_finished_wall_face",
+            physical_identity_resolved=True,
+        ),
+    }
+    if wall_role is not None:
+        walls["wall-2"] = SimpleNamespace(
+            canonical_wall_id="wall-2", role=wall_role, physical_identity_resolved=identity_resolved,
+        )
+    source_quantities = (unverified, valid) if reverse else (valid, unverified)
+    claim = replace(
+        claim,
+        canonical_rooms=rooms,
+        canonical_walls=tuple(walls.values()),
+        floor_finish_quantity_evidence=source_quantities,
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="floor-finish bounding wall"):
+        seal_live_floor_finish_area_run(claim, workspace_id=1, project_id="independent-plan")
+
+    recovered = quarantine_unverified_floor_finish_boundaries(
+        source_quantities, floors=claim.canonical_floors, rooms=rooms, walls_by_id=walls,
+    )
+    retained, abstained = tuple(reversed(recovered)) if reverse else recovered
+    assert retained is valid
+    assert abstained.abstained and abstained.value is None
+    assert abstained.blocking_reasons == (reason,)
+    assert abstained.quantity_id == unverified.quantity_id
+    assert abstained.evidence_ids == unverified.evidence_ids
+    assert abstained.metadata == unverified.metadata
+    assert not unverified.abstained
+
+    clean = replace(claim, floor_finish_quantity_evidence=(valid,))
+    validated = replace(claim, floor_finish_quantity_evidence=recovered)
+    sealed = seal_live_floor_finish_area_run(validated, workspace_id=1, project_id="independent-plan")
+    assert sealed == seal_live_floor_finish_area_run(clean, workspace_id=1, project_id="independent-plan")
+    rows = project_live_floor_finish_customer_rows(validated, workspace_id=1, project_id="independent-plan")
+    assert verify_sealed_customer_output(sealed, rows).verified_quantity_ids == (valid.quantity_id,)
 
 
 @pytest.mark.parametrize("source_root", (

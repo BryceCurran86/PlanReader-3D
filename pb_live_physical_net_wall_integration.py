@@ -25,6 +25,7 @@ from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceObject,
     compose_live_canonical_floor_surfaces,
     enrich_live_canonical_floor_metric_areas,
+    quarantine_unverified_floor_finish_boundaries,
 )
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
@@ -1324,16 +1325,6 @@ def _collect_live_physical_net_wall_claim(
             if floor_finishes is not None
             else 0
         ),
-        "floor_finish_firm_quantities_count": (
-            sum(
-                1
-                for q in floor_finish_quantity_evidence
-                if not q.abstained and str(q.status).lower() in ("firm", "corroborated")
-            )
-        ),
-        "floor_finish_abstain_quantities_count": (
-            sum(1 for q in floor_finish_quantity_evidence if q.abstained)
-        ),
         "ceiling_finish_records_count": (
             len(getattr(ceiling_finishes, "records", ()))
             if ceiling_finishes is not None
@@ -1401,6 +1392,21 @@ def _collect_live_physical_net_wall_claim(
         canonical_walls_by_id[wall_id]
         for wall_id in sorted(canonical_walls_by_id)
     )
+    final_floor_finish_quantities = quarantine_unverified_floor_finish_boundaries(
+        floor_finish_quantity_evidence,
+        floors=canonical_floors.floors,
+        rooms=canonical_rooms.rooms,
+        walls_by_id=canonical_walls_by_id,
+    )
+    surface_pipeline_diagnostics.update({
+        "floor_finish_firm_quantities_count": sum(
+            1 for q in final_floor_finish_quantities
+            if not q.abstained and str(q.status).lower() in ("firm", "corroborated")
+        ),
+        "floor_finish_abstain_quantities_count": sum(
+            1 for q in final_floor_finish_quantities if q.abstained
+        ),
+    })
 
     evidence = publication.quantity_evidence
     if (
@@ -1458,7 +1464,7 @@ def _collect_live_physical_net_wall_claim(
             opening_count_quantity_evidence=opening_count_quantity_evidence,
             opening_dimension_quantity_evidence=opening_dimension_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
-            floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+            floor_finish_quantity_evidence=final_floor_finish_quantities,
             ceiling_lining_quantity_evidence=tuple(
                 ceiling_lining_quantity_evidence
             ),
@@ -1518,7 +1524,7 @@ def _collect_live_physical_net_wall_claim(
         opening_count_quantity_evidence=opening_count_quantity_evidence,
         opening_dimension_quantity_evidence=opening_dimension_quantity_evidence,
         room_area_quantity_evidence=tuple(room_area_quantity_evidence),
-        floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+        floor_finish_quantity_evidence=final_floor_finish_quantities,
         ceiling_lining_quantity_evidence=tuple(
             ceiling_lining_quantity_evidence
         ),
