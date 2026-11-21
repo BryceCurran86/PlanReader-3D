@@ -141,7 +141,15 @@ def project_live_floor_finish_customer_rows(
                 "duplicate_original_floor_finish_quantity_id"
             )
         original_quantity_ids.add(source_id)
-        require_uncontested_source_inclusion(original)
+        # Keep the existing public first-gate reason for a disputed original
+        # floor scope; callers already rely on this to route the unresolved
+        # quantity for review. The shared guard still supplies the policy.
+        try:
+            require_uncontested_source_inclusion(original)
+        except SourceClosedRunConflictError as exc:
+            raise SourceClosedRunConflictError(
+                "floor_finish_source_inclusion_scope_unresolved"
+            ) from exc
         require_uncontested_source_commercial_scope(original)
         # A producer's explicit commercial veto cannot be upgraded by a
         # customer presentation adapter. Absence is not new authority: the
