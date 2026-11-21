@@ -42,6 +42,14 @@ No wiring, no kind written on any live opening, no quantity, seal, customer row 
 
 `pb_physical_opening_authority.py`, host binding and frame authorities, the area issuer and estimate publication, the extractor, the canonical preview and its ring options, MAX exterior host code, Cursor's branches, frozen files, signed receipts and identity maps.
 
+## 7. Piece B: in-swing figured width (second PR, stacked on piece A)
+
+Donor file and tests committed verbatim first (`6d13688f1`), then one fix commit and one test file.
+
+- **Audit finding 1, order dependence.** A figure inside two doors' swings was claimed by whichever door was processed first. It now belongs to neither; a door that is the only one to own a figure in its swing still takes it.
+- **Audit finding 2, silent first-wins.** A callout id seen twice kept the first copy. Identical copies now collapse; a different value or box drops the id.
+- **Contract kept as ported.** The figure's id is written to `figured_area_record_id` and to the evidence ids with the value in `figured_single_axis_mm`, which is what the owner-approved single-axis path of the area publisher reads. "Trusted native dimension" is the caller's claim; the docstring now says a wiring caller must pass producer-owned, text-integrity-corroborated dimensions. No plausibility range is applied here (that is the measurement authority's job downstream).
+- **Evidence.** 42 audit tests (two fail on the donor), the 7 donor tests, 18 of 18 single-line mutants caught, 155 tests of pieces A and B together, local CI guards pass. Nothing is wired and the interior doors are unaffected until they have a host and a kind.
 ## 8. Revision after the owner's two-wall opening rule (same day)
 
 Hub comments 7056071002 and 7056082708 (the owner, relayed by GPT1): every detected opening is tagged with the TWO traced wall sections that terminate at it, either side of a doorway or two sections meeting at a corner, and no one section is elected as the only wall. GPT1's draft contract is `pb_opening_two_wall_contact_tags` (draft PR 4638). Consequences for this port:
