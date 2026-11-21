@@ -7,20 +7,29 @@ slider text witness, not a constructed jamb/threshold/billable door.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 import math
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from pb_layered_wall_doorway_room_ring_shadow import _swing_arcs
-from pb_source_internal_swing_room_barrier import detect_source_internal_swing_room_barriers
+from pb_source_internal_swing_room_barrier import (
+    _INTERNAL_WALL_LAYER,
+    detect_source_internal_swing_room_barriers,
+)
 from pb_source_native_cavity_slider_jamb_shadow import (
     match_source_native_cavity_sliders,
 )
 
-_INTERNAL_WALL = re.compile(r"(?:WallInternal|Wall_Internal|InternalWall)", re.I)
+# One internal-wall layer predicate for the whole door evidence path: the barrier's (five CAD conventions,
+# anchored). The inventory used to keep a looser three-name copy that could list a swing the hosting
+# detector could never host, and miss every convention it did not spell.
 _WIDTH = re.compile(r"^(?:6\d\d|7\d\d|8\d\d|9\d\d|1[,]?[0-4]\d\d)$")
+# The pattern bounds the lower end at 600; this trims the 1401-1499 the pattern would still pass.
+_MAX_DOOR_WIDTH_MM = 1400
+# A hinge owns a printed width only when exactly one plausible door-width token lies this close.
+_HINGE_WIDTH_RADIUS_PT = 15.0
 
 
 @dataclass(frozen=True)
@@ -103,11 +112,16 @@ def _word(row: Sequence[Any] | Mapping[str, Any]) -> tuple[tuple[float, float, f
         return None
 
 
-def _nearest_native_hinge_width(
+def _owned_hinge_width(
     box: tuple[float, float, float, float],
     source_words: Sequence[Sequence[Any] | Mapping[str, Any]],
 ) -> tuple[int | None, int | None]:
-    """A hinge gets a printed width only from a UNIQUE nearby source token."""
+    """A hinge gets a printed width only when exactly ONE plausible door-width token lies near it.
+
+    Every plausible token (600-1400 mm, the range the cavity-slider detector uses) inside the radius is a
+    candidate. Two or more are ambiguous: none is chosen, and no nearest tie-break is applied. No width value is
+    privileged. The result is a witness, never a measurement.
+    """
     cx, cy = (box[0] + box[2]) / 2., (box[1] + box[3]) / 2.
     options = []
     for index, row in enumerate(source_words):
@@ -115,18 +129,17 @@ def _nearest_native_hinge_width(
         if parsed is None:
             continue
         bounds, token = parsed
-        if token not in ("720", "870"):
+        if _WIDTH.fullmatch(token) is None:
+            continue
+        width_mm = int(token.replace(",", ""))
+        if width_mm > _MAX_DOOR_WIDTH_MM:
             continue
         x, y = (bounds[0] + bounds[2]) / 2., (bounds[1] + bounds[3]) / 2.
-        distance = math.hypot(x - cx, y - cy)
-        if distance < 15:
-            options.append((distance, index, int(token)))
-    options.sort()
-    if not options or (
-        len(options) > 1 and options[1][0] - options[0][0] <= 2.
-    ):
+        if math.hypot(x - cx, y - cy) < _HINGE_WIDTH_RADIUS_PT:
+            options.append((index, width_mm))
+    if len(options) != 1:
         return None, None
-    return options[0][1], options[0][2]
+    return options[0]
 
 
 def inspect_source_internal_door_completeness(
@@ -149,7 +162,7 @@ def inspect_source_internal_door_completeness(
     for arc in arcs:
         arc_id, leaf_id = arc["arc"], arc["leaf"]
         row = drawings[arc_id]
-        if not isinstance(row, Mapping) or not _INTERNAL_WALL.search(str(row.get("layer") or "")):
+        if not isinstance(row, Mapping) or not _INTERNAL_WALL_LAYER.search(str(row.get("layer") or "")):
             continue
         rect = row.get("rect")
         if rect is None:
@@ -165,7 +178,7 @@ def inspect_source_internal_door_completeness(
         native = ((arc_id, leaf_id, matches[0].first_host_path_id,
                    matches[0].second_host_path_id, *matches[0].jamb_cap_path_ids)
                   if matches else (arc_id, leaf_id))
-        width_index, width_mm = _nearest_native_hinge_width(bounds, source_words)
+        width_index, width_mm = _owned_hinge_width(bounds, source_words)
         marks.append(SourceInternalDoorMark(
             "native_swing_arc_leaf",
             "HOSTED_TOPOLOGY_ONLY" if matches else "NEEDS_HOST",
@@ -195,7 +208,7 @@ def inspect_source_internal_door_completeness(
         if rect is None:
             continue
         bounds = tuple(float(v) for v in rect)
-        width_index, width_mm = _nearest_native_hinge_width(bounds, source_words)
+        width_index, width_mm = _owned_hinge_width(bounds, source_words)
         marks.append(SourceInternalDoorMark(
             "native_swing_arc_leaf", "HOSTED_TOPOLOGY_ONLY",
             bounds,
@@ -219,7 +232,7 @@ def inspect_source_internal_door_completeness(
         bounds, token = value
         if _WIDTH.fullmatch(token):
             mm = int(token.replace(",", ""))
-            if 600 <= mm <= 1400:
+            if mm <= _MAX_DOOR_WIDTH_MM:
                 widths.append((i, mm, bounds))
     for index, value in enumerate(parsed):
         if value is None or value[1] != "CS":
