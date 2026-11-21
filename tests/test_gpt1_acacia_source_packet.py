@@ -145,6 +145,10 @@ def test_source_page_evidence_is_read_only_and_all_page_inventory_cannot_be_fake
     report = base.to_dict()
     assert report["all_original_pages_indexed"] is True
     assert [r["page_index"] for r in report["full_page_evidence"]] == [0, 1]
+    assert report["all_page_viewports_reviewed"] is False
+    assert [row["status"] for row in report["page_dispositions"]] == ["UNREVIEWED", "UNREVIEWED"]
+    assert [row["drawing_title"] for row in report["page_dispositions"]] == ["First plan", "Enlarged detail and elevations"]
+    assert all(row["viewports"] == [] for row in report["page_dispositions"])
     assert all(not r["geometry_or_customer_authorized"]
                for r in report["full_page_evidence"])
     assert not report["customer_quantities_authorized"]
@@ -200,4 +204,9 @@ def test_private_original_10_of_10_page_native_source_coverage_is_retained():
         report = original.to_dict()
         assert report["all_original_pages_indexed"] is True
         assert len(report["full_page_evidence"]) == 10
+        assert len(report["page_dispositions"]) == 10
+        assert [row["page_index"] for row in report["page_dispositions"]] == list(range(10))
+        assert all(row["status"] == "UNREVIEWED" and row["viewports"] == []
+                   for row in report["page_dispositions"])
+        assert report["all_page_viewports_reviewed"] is False
         assert report["customer_quantities_authorized"] is False
