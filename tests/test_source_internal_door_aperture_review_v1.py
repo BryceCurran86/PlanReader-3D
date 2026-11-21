@@ -198,6 +198,7 @@ def test_a_symbol_without_a_unique_detector_box_is_reported_not_dropped(monkeypa
     assert [e.state for e in entries] == [mod.STATE_NO_APERTURE_BOX, mod.STATE_NO_APERTURE_BOX]
     assert all(e.first_open_gate == mod.GATE_NO_APERTURE_BOX and e.representative_ids == () for e in entries)
     assert {e.printed_width_mm for e in entries} == {None, 870}
+    assert {e.mark_status for e in entries} == {"NEEDS_HOST", "NEEDS_JAMB_WITNESS"}
 
 
 def test_competing_detector_receipts_for_one_symbol_leave_it_without_a_box(monkeypatch):
@@ -217,10 +218,32 @@ def test_competing_detector_receipts_for_one_symbol_leave_it_without_a_box(monke
 
 def test_entries_are_sorted_by_symbol_then_box_not_by_detector_order(monkeypatch):
     boxes = [(300.0, 100.0, 330.0, 104.0), (100.0, 100.0, 130.0, 104.0), (200.0, 100.0, 230.0, 104.0)]
-    _stub(monkeypatch, hinged=boxes, sliders=[((40.0, 63.0), (100.0, 103.0), True)])
+    _stub(monkeypatch, hinged=boxes, sliders=[((900.0, 930.0), (100.0, 103.0), True)])
+    no_box = SimpleNamespace(kind="native_swing_arc_leaf", status="NEEDS_HOST", native_path_ids=(9, 10),
+                             source_word_index=None, label_width_mm=None)
+    original = mod.inspect_source_internal_door_completeness
+    monkeypatch.setattr(
+        mod, "inspect_source_internal_door_completeness",
+        lambda *a, **k: SimpleNamespace(marks=(no_box, *original().marks)),
+    )
     entries = _run([]).entries
-    assert [e.symbol_kind for e in entries] == ["cavity_slider"] + ["hinged_swing"] * 3
-    assert [e.aperture_bounds_pdf_pts[0] for e in entries if e.symbol_kind == "hinged_swing"] == [100.0, 200.0, 300.0]
+    assert [e.symbol_kind for e in entries] == ["cavity_slider"] + ["hinged_swing"] * 4
+    hinged = [e for e in entries if e.symbol_kind == "hinged_swing"]
+    assert [e.aperture_bounds_pdf_pts[0] if e.aperture_bounds_pdf_pts else None for e in hinged] == [
+        100.0, 200.0, 300.0, None]
+
+
+@pytest.mark.parametrize("bad_box", [
+    (float("nan"), 0.0, 5.0, 5.0), (10.0, 10.0, 5.0, 20.0), (10.0, 10.0, 20.0, 5.0), (1.0, 2.0, 3.0), None, "box",
+])
+def test_an_invalid_detector_box_is_no_box_never_a_guess(monkeypatch, bad_box):
+    _stub(monkeypatch, hinged=[BOX])
+    monkeypatch.setattr(
+        mod, "detect_source_internal_swing_room_barriers",
+        lambda *a, **k: (SimpleNamespace(swing_arc_path_id=100, bounds_pdf_pts=bad_box),),
+    )
+    entry = _run([_inside("x")]).entries[0]
+    assert entry.state == mod.STATE_NO_APERTURE_BOX and entry.aperture_bounds_pdf_pts is None
 
 
 def test_kind_values_are_normalised_like_the_issuer_audit_and_counts_are_exact(monkeypatch):
