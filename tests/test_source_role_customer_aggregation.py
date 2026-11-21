@@ -12,7 +12,7 @@ from pb_quantity_takeoff_adapter import (
     quantity_evidence_to_takeoff_output_row,
 )
 from pb_source_closed_run_export import seal_source_closed_run
-from tests.test_gpt3_owner_all_source_role_handoff import _fake_sources
+from tests.test_gpt3_owner_all_source_role_handoff import _fake_sources, _generic_scope
 from tests.test_source_closed_project_handoff import _quantity
 from tools import gpt3_owner_all_source_role_handoff as roles
 
@@ -41,7 +41,8 @@ def _run(tmp_path, monkeypatch, corruption=None):
         ))
         rows = [row]
         path = dest / "verified_customer_rows.json"
-        summary = {"status": "sealed", "combined_run_file": str(seal_path),
+        summary = {**_generic_scope(project, docs[index]),
+                   "status": "sealed", "combined_run_file": str(seal_path),
                    "customer_rows_verified": True, "customer_rows_file": str(path),
                    "family_counts": {"floor_area": 1}}
         if index == 1:
