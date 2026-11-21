@@ -56,8 +56,11 @@ def test_explicit_unknown_original_floor_inclusion_is_never_assumed_positive(sco
         q, metadata={**dict(q.metadata), "inclusion_status": scope},
     )
     with pytest.raises(SourceClosedRunConflictError,
-                       match="customer_source_inclusion_scope_unresolved"):
+                       match="customer_source_inclusion_scope_unresolved") as raised:
         _customer(source)
+    # Existing floor-first error routing and shared source-policy audit are
+    # both retained. Neither is a quantity/customer permission.
+    assert "floor_finish_source_inclusion_scope_unresolved" in str(raised.value)
 
 
 @pytest.mark.parametrize("denied", [None, 0, "false"])
