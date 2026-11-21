@@ -148,7 +148,12 @@ def project_live_floor_finish_customer_rows(
             require_uncontested_source_inclusion(original)
         except SourceClosedRunConflictError as exc:
             raise SourceClosedRunConflictError(
-                "floor_finish_source_inclusion_scope_unresolved"
+                # Both first-gate contracts describe this same upstream
+                # source dispute: retain the older floor-specific diagnostic
+                # and the newer shared source-policy reason. Neither signal
+                # grants a customer row or swallows the original exception.
+                "floor_finish_source_inclusion_scope_unresolved: "
+                "customer_source_inclusion_scope_unresolved"
             ) from exc
         require_uncontested_source_commercial_scope(original)
         # A producer's explicit commercial veto cannot be upgraded by a
