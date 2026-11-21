@@ -91,3 +91,75 @@ def test_duplicate_canonical_ceiling_cannot_choose_last_customer_owner(variant):
             project_live_ceiling_area_customer_rows(
                 original, workspace_id=3, project_id="unknown-project",
             )
+
+
+@pytest.mark.parametrize("denied", [False, None, 0, "false"])
+def test_explicit_firm_source_commercial_denial_never_becomes_customer_ceiling(denied):
+    source = _quantity()
+    source = replace(source, metadata={
+        **dict(source.metadata), "commercial_projection_allowed": denied,
+    })
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="customer_source_commercial_scope_denied",
+    ):
+        _project(source, "canonical")
+
+
+@pytest.mark.parametrize("variant", ["canonical", "legacy"])
+@pytest.mark.parametrize("field,incorrect", (
+    ("source_sha256", "f" * 64),
+    ("revision_id", "other-revision"),
+    ("document_id", "other-document"),
+    ("snapshot_id", "stale-snapshot"),
+    ("canonical_ceiling_id", "foreign-ceiling"),
+    ("canonical_room_id", "another-canonical-room"),
+    ("room_area_quantity_id", "different-source-area"),
+))
+def test_customer_ceiling_cannot_move_to_foreign_original_owner(variant, field, incorrect):
+    source = _quantity() if variant == "canonical" else _shadow_quantity()
+    source = replace(source, metadata={
+        **dict(source.metadata), field: incorrect,
+    })
+    if variant == "canonical":
+        with pytest.raises((SourceClosedRunConflictError, ValueError, TypeError)):
+            _project(source, variant)
+    else:
+        # Provisional shadow is never an eligible commercial row; a rejected
+        # original must return zero rather than masquerade as final authority.
+        assert _project(source, variant) == ()
+
+
+@pytest.mark.parametrize("variant", ["canonical", "legacy"])
+def test_source_ceiling_must_be_square_metres_not_implicit_area_conversion(variant):
+    source = _quantity() if variant == "canonical" else _shadow_quantity()
+    source = replace(source, unit="ft2")
+    if variant == "canonical":
+        with pytest.raises((SourceClosedRunConflictError, ValueError)):
+            _project(source, variant)
+    else:
+        assert _project(source, variant) == ()
+
+
+def test_physical_room_id_may_differ_from_source_canonical_room_id():
+    source = _quantity()
+    assert source.metadata["physical_room_id"] != source.metadata["canonical_room_id"]
+    assert len(_project(source, "canonical")) == 1
+
+
+def test_legacy_customer_adapter_denial_never_overwritten():
+    source = replace(
+        _shadow_quantity(),
+        metadata={**dict(_shadow_quantity().metadata),
+                  "commercial_projection_allowed": False},
+    )
+    source = replace(
+        source, status="firm",
+        metadata={**dict(source.metadata), "quantity_handoff_only": False},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="customer_source_commercial_scope_denied"):
+        _customer_quantity(
+            source, room_entity_id="source-owning-room",
+            finish_descriptor="ceiling finish",
+        )
