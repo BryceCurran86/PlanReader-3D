@@ -118,7 +118,8 @@ def test_cavity_slider_box_is_clear_interval_by_band_in_both_orientations(monkey
 
 def test_records_outside_the_tolerance_or_spilling_out_are_not_bound(monkeypatch):
     _stub(monkeypatch, hinged=[BOX])
-    edge = CONTAINMENT_TOLERANCE_PT
+    assert CONTAINMENT_TOLERANCE_PT == 1.25  # the rule of the merged window and sliding-aperture reviews
+    edge = 1.25
     just_in = _rec("in", (100 - edge, 100, 100 - edge, 104))
     just_out = _rec("out", (100 - edge - 0.5, 100, 100 - edge - 0.5, 104))
     spill = _rec("spill", (110, 102, 400, 102))  # runs far beyond the box
@@ -437,11 +438,17 @@ def test_module_source_has_no_project_sha_page_or_width_literal():
 
 def test_containment_rule_matches_the_merged_window_review_for_single_segment_records():
     rng = random.Random(5)
-    for _ in range(400):
-        box = (rng.uniform(0, 50), rng.uniform(0, 50), 0.0, 0.0)
-        box = (box[0], box[1], box[0] + rng.uniform(1, 40), box[1] + rng.uniform(1, 40))
-        geom = tuple(rng.uniform(-5, 95) for _ in range(4))
-        assert mod._record_inside((geom,), box) == _geometry_in_original_aperture((geom,), box)
+    inside_count = 0
+    for _ in range(2000):
+        x0, y0 = rng.uniform(0, 50), rng.uniform(0, 50)
+        box = (x0, y0, x0 + rng.uniform(5, 40), y0 + rng.uniform(5, 40))
+        # endpoints within +-3 pt of the box edges: the tolerance band is where the rules could differ
+        geom = (box[0] + rng.uniform(-3, 3), box[1] + rng.uniform(-3, 3),
+                box[2] + rng.uniform(-3, 3), box[3] + rng.uniform(-3, 3))
+        mine = mod._record_inside((geom,), box)
+        assert mine == _geometry_in_original_aperture((geom,), box)
+        inside_count += mine
+    assert 200 < inside_count < 1800  # both outcomes were really exercised
 
 
 # ---------------------------------------------------------------- real detectors on synthetic drawings
