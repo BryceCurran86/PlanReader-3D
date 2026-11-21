@@ -232,8 +232,10 @@ def reconcile_acacia_schedule_hosts(
             return AcaciaScheduleHostReview(
                 "ABSTAINED", ("unproved_floor_or_schedule_source_host",),
             )
+        # Native path order is a traversal detail, not aperture identity.
+        # Reordered evidence for the same physical strokes must share owner.
         existing_owner = native_floor_host_owners.setdefault(
-            floor_paths, r.physical_aperture_identity,
+            tuple(sorted(floor_paths)), r.physical_aperture_identity,
         )
         if existing_owner != r.physical_aperture_identity:
             return AcaciaScheduleHostReview(
