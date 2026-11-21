@@ -64,12 +64,14 @@ def require_uncontested_source_commercial_scope(quantity: QuantityEvidence) -> N
         raise SourceClosedRunConflictError("customer_source_commercial_scope_denied")
 
 
-def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: object) -> None:
-    """Match every source-declared canonical ceiling owner field to its physical object."""
-    if quantity.abstained or quantity.value is None:
-        return
-    if len(quantity.input_entity_ids) != 1 or quantity.input_entity_ids[0] != getattr(ceiling, "canonical_ceiling_id", None):
-        raise SourceClosedRunConflictError("source_ceiling_physical_owner_mismatch")
+def _source_ceiling_declared_owner_matches(quantity: QuantityEvidence, ceiling: object) -> bool:
+    """One universal source-identity predicate for original and reissued ceilings.
+
+    The legacy provisional source refers to its ROOM and its own shadow
+    quantity ID, not the later canonical-ceiling quantity ID. Therefore
+    canonical input-entity ownership is checked by the final adapter, while
+    any *explicitly declared* source identity must agree in either stage.
+    """
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     expected = (
         ("document_id", getattr(ceiling, "document_id", None)),
@@ -80,6 +82,7 @@ def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: obj
         ("canonical_room_id", getattr(ceiling, "room_entity_id", None)),
         ("source_room_index_id", getattr(ceiling, "source_room_index_id", None)),
         ("room_area_quantity_id", getattr(ceiling, "room_area_quantity_id", None)),
+        ("upstream_area_quantity_id", getattr(ceiling, "room_area_quantity_id", None)),
     )
     for key, value in expected:
         if key not in metadata:
@@ -89,6 +92,35 @@ def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: obj
                 or type(value) is not str or not value
                 or (claimed.lower() != value.lower() if key == "source_sha256"
                     else claimed != value)):
-            raise SourceClosedRunConflictError("source_ceiling_physical_owner_mismatch")
+            return False
+    return True
+
+
+def original_legacy_ceiling_source_matches_owner(quantity: QuantityEvidence, ceiling: object) -> bool:
+    """Check a provisional ORIGINAL against its ceiling before FIRM reissue.
+
+    A bad provisional witness can never be repaired by a later adapter copying
+    canonical metadata over it. It is removed from this candidate's customer
+    projection only; independent other valid ceiling sources remain available.
+    No geometry, identity or commercial permission is inferred here.
+    """
+    if type(quantity) is not QuantityEvidence:
+        return False
+    if quantity.abstained or quantity.value is None:
+        return False
+    return (
+        quantity.unit in ("m2", "m²")
+        and _source_ceiling_declared_owner_matches(quantity, ceiling)
+    )
+
+
+def require_source_ceiling_owner_parity(quantity: QuantityEvidence, ceiling: object) -> None:
+    """Match every source-declared canonical ceiling owner field to its physical object."""
+    if quantity.abstained or quantity.value is None:
+        return
+    if (len(quantity.input_entity_ids) != 1
+            or quantity.input_entity_ids[0] != getattr(ceiling, "canonical_ceiling_id", None)
+            or not _source_ceiling_declared_owner_matches(quantity, ceiling)):
+        raise SourceClosedRunConflictError("source_ceiling_physical_owner_mismatch")
     if quantity.unit not in ("m2", "m²"):
         raise SourceClosedRunConflictError("source_ceiling_customer_unit_not_area")
