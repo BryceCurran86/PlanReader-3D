@@ -137,26 +137,35 @@ def collect_native_green_hatch_exclusions(
         for index, floors in by_page.items():
             strokes = _diagonals(pdf[index])
             xpos = [s[0] for s in strokes]
+            path_floor_counts = Counter()
+            room_strokes = []
             for floor in floors:
                 polygon = tuple(floor.polygon_pdf_pts)
                 xs, ys = zip(*polygon)
                 left, right = min(xs), max(xs)
                 top, bottom = min(ys), max(ys)
                 width, height = right - left, bottom - top
-                if min(width, height) < 15:
-                    continue
-                min_length = max(4, .08 * min(width, height))
-                local = [
+                contained = [
                     row for row in strokes[
                         bisect_left(xpos, left):bisect_right(xpos, right)
                     ]
-                    if (top <= row[1] <= bottom and row[2] >= min_length
-                        and _inside(row[0], row[1], polygon))
+                    if top <= row[1] <= bottom and _inside(row[0], row[1], polygon)
                 ]
-                if not local:
+                # A native path may contain several line items. Count each
+                # floor once before applying room-level hatch thresholds.
+                path_floor_counts.update({stroke[3] for stroke in contained})
+                if min(width, height) < 15:
                     continue
+                min_length = max(4, .08 * min(width, height))
+                local = [stroke for stroke in contained if stroke[2] >= min_length]
+                if local:
+                    room_strokes.append((floor, width, height, local))
+            for floor, width, height, local in room_strokes:
                 dominant = Counter(s[4] for s in local).most_common(1)[0][0]
-                parallel = [s for s in local if s[4] == dominant]
+                parallel = [
+                    stroke for stroke in local
+                    if stroke[4] == dominant and path_floor_counts[stroke[3]] == 1
+                ]
                 ids = tuple(sorted({s[3] for s in parallel}))
                 if (len(ids) < 5 or len(parallel) < 6
                         or len(parallel) < .7 * len(local)

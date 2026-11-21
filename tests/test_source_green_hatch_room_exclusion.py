@@ -46,6 +46,55 @@ def test_source_native_parallel_hatch_crosses_unseen_physical_room():
     assert (witness,) == collect_native_green_hatch_exclusions(data, (_floor(data),))
 
 
+def test_shared_native_hatch_cannot_exclude_distinct_overlapping_rooms():
+    data = _pdf()
+    first = _floor(data)
+    second = _floor(
+        data,
+        canonical_floor_id="unseen-f2",
+        source_room_face_record_id="unseen-face-2",
+        physical_floor_surface_id="physical-floor-2",
+        polygon_pdf_pts=((37., 35.), (164., 35.), (164., 155.), (37., 155.)),
+    )
+    assert collect_native_green_hatch_exclusions(data, (first,))
+    assert collect_native_green_hatch_exclusions(data, (second,))
+    assert collect_native_green_hatch_exclusions(data, (first, second)) == ()
+    assert collect_native_green_hatch_exclusions(data, (second, first)) == ()
+
+
+def test_hatch_owner_competition_precedes_room_coverage_checks():
+    data = _pdf()
+    first = _floor(data)
+    second = _floor(
+        data,
+        canonical_floor_id="unseen-f2",
+        source_room_face_record_id="unseen-face-2",
+        physical_floor_surface_id="physical-floor-2",
+        polygon_pdf_pts=((86., 50.), (114., 50.), (114., 140.), (86., 140.)),
+    )
+    assert collect_native_green_hatch_exclusions(data, (first,))
+    assert collect_native_green_hatch_exclusions(data, (second,)) == ()
+    assert collect_native_green_hatch_exclusions(data, (first, second)) == ()
+
+
+def test_native_hatch_path_indexes_are_independent_across_source_pages():
+    with fitz.open(stream=_pdf(), filetype="pdf") as original_page, fitz.open() as pdf:
+        pdf.insert_pdf(original_page)
+        pdf.insert_pdf(original_page)
+        data = pdf.tobytes()
+    second = _floor(
+        data, page_id="2",
+        canonical_floor_id="unseen-f2",
+        source_room_face_record_id="unseen-face-2",
+        physical_floor_surface_id="physical-floor-2",
+    )
+    first_witness, second_witness = collect_native_green_hatch_exclusions(
+        data, (_floor(data), second),
+    )
+    assert (first_witness.page_id, second_witness.page_id) == ("1", "2")
+    assert first_witness.native_path_ids == second_witness.native_path_ids
+
+
 def test_not_blue_not_two_green_strokes_not_false_source_or_missing_room():
     for source in (_pdf(green=False), _pdf(full=False)):
         assert collect_native_green_hatch_exclusions(source, (_floor(source),)) == ()
