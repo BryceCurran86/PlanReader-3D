@@ -12,17 +12,25 @@ Structural slabs remain a separate canonical object family.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import math
-from typing import Optional
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Optional
 
-from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
 )
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+    stable_contract_id,
+)
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+
+if TYPE_CHECKING:
+    from pb_live_external_physical_net_wall_publication import LiveCanonicalWallObject
 
 
 LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION = "1.1.0"
@@ -120,6 +128,85 @@ class LiveCanonicalFloorSurfaceComposition:
     floors: tuple[LiveCanonicalFloorSurfaceObject, ...]
     source_pages: tuple[int, ...]
     schema_version: str = LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION
+
+
+def floor_finish_boundary_wall_failure(
+    room: LiveCanonicalRoomObject,
+    walls_by_id: Mapping[str, LiveCanonicalWallObject],
+    *,
+    quantity_id: str,
+) -> tuple[str, str] | None:
+    """Return the first unresolved finished-face requirement for this floor."""
+    boundary_ids = (
+        getattr(room, "canonical_bounding_wall_ids", ())
+        or getattr(room, "bounding_wall_ids", ())
+    )
+    for wall_id in boundary_ids:
+        wall = walls_by_id.get(wall_id)
+        if wall is None:
+            return (
+                "floor_finish_bounding_wall_authority_incomplete",
+                f"floor-finish bounding wall authority incomplete: {quantity_id}",
+            )
+        if getattr(wall, "role", None) != "internal_finished_wall_face":
+            return (
+                "floor_finish_bounding_wall_not_finished_face",
+                f"floor-finish bounding wall is not an internal finished face: {wall_id}",
+            )
+        if getattr(wall, "physical_identity_resolved", None) is not True:
+            return (
+                "floor_finish_bounding_wall_identity_unresolved",
+                f"floor-finish bounding wall physical identity is not resolved: {wall_id}",
+            )
+    return None
+
+
+def quarantine_unverified_floor_finish_boundaries(
+    quantities: Sequence[QuantityEvidence],
+    *,
+    floors: Sequence[LiveCanonicalFloorSurfaceObject],
+    rooms: Sequence[LiveCanonicalRoomObject],
+    walls_by_id: Mapping[str, LiveCanonicalWallObject],
+) -> tuple[QuantityEvidence, ...]:
+    """Withhold live floor finishes that cannot pass the owned wall-face check."""
+    if not quantities or not rooms or not walls_by_id:
+        return tuple(quantities)
+    floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
+    rooms_by_id = {room.canonical_room_id: room for room in rooms}
+    if len(floors_by_id) != len(floors) or len(rooms_by_id) != len(rooms):
+        return tuple(quantities)
+
+    result = []
+    for quantity in quantities:
+        if (
+            quantity.family != "floor_finish_area"
+            or quantity.status != AuthorityStatus.FIRM.value
+            or quantity.abstained
+            or quantity.value is None
+            or quantity.blocking_reasons
+            or len(quantity.input_entity_ids) != 1
+        ):
+            result.append(quantity)
+            continue
+        floor = floors_by_id.get(quantity.input_entity_ids[0])
+        room = rooms_by_id.get(floor.room_entity_id) if floor is not None else None
+        failure = (
+            floor_finish_boundary_wall_failure(room, walls_by_id, quantity_id=quantity.quantity_id)
+            if room is not None else None
+        )
+        if failure is None:
+            result.append(quantity)
+        else:
+            reason, _ = failure
+            result.append(replace(
+                quantity,
+                value=None,
+                status=EvidenceResolutionStatus.ABSTAINED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=(reason,),
+            ))
+    return tuple(result)
 
 
 def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurfaceObject:
@@ -535,4 +622,6 @@ __all__ = [
     "LiveCanonicalFloorSurfaceObject",
     "compose_live_canonical_floor_surfaces",
     "enrich_live_canonical_floor_metric_areas",
+    "floor_finish_boundary_wall_failure",
+    "quarantine_unverified_floor_finish_boundaries",
 ]
