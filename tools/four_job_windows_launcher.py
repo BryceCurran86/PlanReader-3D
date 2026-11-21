@@ -347,9 +347,12 @@ def run_logged(
             start_new_session=(os.name != "nt"),
         )
         started = time.monotonic()
+        # A short source role can exit before the regular polling interval.
+        # Take the first memory sample early, then use the configured cadence.
+        wait_interval = min(poll_s, 1.0) if measure else poll_s
         while True:
             try:
-                rc = proc.wait(timeout=poll_s)
+                rc = proc.wait(timeout=wait_interval)
                 break
             except subprocess.TimeoutExpired:
                 elapsed = time.monotonic() - started
@@ -381,9 +384,10 @@ def run_logged(
                 if elapsed >= timeout_s:
                     kill_tree(proc)
                     return None, "TIMEOUT", usage
-                if int(elapsed) % 300 < max(poll_s, 1):
+                if int(elapsed) % 300 < max(wait_interval, 1):
                     note(f"  ... running {int(elapsed // 60)} min, peak private {usage['peak_private_kb'] // 1024} MB "
                          f"(log: {log.name})")
+                wait_interval = poll_s
         # Both exit paths require recorded values for the configured guards.
         if ((max_private_mb is not None and usage["peak_private_kb"] <= 0)
                 or (min_free_commit_mb is not None and usage["min_system_free_commit_kb"] is None)):
