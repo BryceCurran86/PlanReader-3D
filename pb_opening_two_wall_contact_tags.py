@@ -91,10 +91,14 @@ def _vector_at_contact(
         return None
     # A real native wall endpoint, not nearest midpoint or unlimited snap.
     if math.dist(a, contact) <= _SOURCE_ENDPOINT_TOL_PT:
-        return b[0] - a[0], b[1] - a[1]
-    if math.dist(b, contact) <= _SOURCE_ENDPOINT_TOL_PT:
-        return a[0] - b[0], a[1] - b[1]
-    return None
+        vec = b[0] - a[0], b[1] - a[1]
+    elif math.dist(b, contact) <= _SOURCE_ENDPOINT_TOL_PT:
+        vec = a[0] - b[0], a[1] - b[1]
+    else:
+        return None
+    # Finite original points can still overflow when subtracted; an infinite
+    # direction is not a legitimate wall and must never create a two-wall tag.
+    return vec if all(math.isfinite(v) for v in vec) else None
 
 
 def tag_opening_to_two_wall_sections(
@@ -165,7 +169,13 @@ def tag_opening_to_two_wall_sections(
     assert va is not None and vb is not None
     na = math.hypot(*va)
     nb = math.hypot(*vb)
-    cross = abs(va[0] * vb[1] - va[1] * vb[0]) / (na * nb)
+    if not all(math.isfinite(v) for v in (na, nb)) or min(na, nb) <= 0:
+        return blocked("wall_direction_invalid", first_ids, second_ids)
+    # Normalized cross product avoids intermediate overflow for very large
+    # but finite vector coordinates; the source's real geometry still decides.
+    ua = va[0] / na, va[1] / na
+    ub = vb[0] / nb, vb[1] / nb
+    cross = abs(ua[0] * ub[1] - ua[1] * ub[0])
     angular = cross > math.sin(math.radians(5))
     joined = math.dist(first_pt, second_pt) <= _SOURCE_ENDPOINT_TOL_PT
     if joined and not angular:
@@ -219,13 +229,19 @@ def tag_native_segmented_doorway_chords(
                 if not isinstance(row, Mapping) or row.get("fill") is not None:
                     continue
                 segments = row.get("items", ())
-                if len(segments) != 1 or segments[0][0] != "l":
+                if not isinstance(segments, (tuple, list)) or len(segments) != 1:
                     continue
-                a, b = segments[0][1:3]
+                segment = segments[0]
+                if (not isinstance(segment, (tuple, list))
+                        or len(segment) != 3 or segment[0] != "l"):
+                    continue
                 try:
+                    a, b = segment[1:3]
                     p = (float(a.x), float(a.y))
                     q = (float(b.x), float(b.y))
                 except (TypeError, ValueError, AttributeError, OverflowError):
+                    continue
+                if not all(math.isfinite(v) for v in (*p, *q)):
                     continue
                 axis = 0 if horizontal else 1
                 across = 1 - axis
