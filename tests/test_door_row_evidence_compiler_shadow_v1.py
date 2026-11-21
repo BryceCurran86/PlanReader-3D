@@ -224,6 +224,7 @@ def test_row_ids_depend_on_scope_and_door_not_on_witness_values():
     a = one()
     b = compile_door(("b" * 64, "revision-a"), door())
     assert a.row_id != b.row_id
+    assert compile_door(SCOPE, door("door-2")).row_id != a.row_id      # two doors in one scope are two rows
     assert one(widths=(replace(WIDTH, value_mm=910.0),)).row_id == a.row_id
 
 
