@@ -96,3 +96,13 @@ The frozen 3Laurel reference lists internal and robe doors, 22 finishes and an o
 ## 7. Claim (exclusive, new files unless stated)
 
 `pb_source_internal_door_aperture_review.py`; `tests/test_source_internal_door_aperture_review_v1.py`; `tools/diag_internal_door_aperture_review.py`; this report. For S1b, a later claim on `pb_source_internal_door_completeness_shadow.py` (width allowlist, layer predicate) and its tests only. No existing authority, issuer, extractor or ring module is edited. Dependencies: none open. Source scope: SHA-authenticated originals read in place; counts only in public text.
+
+## 8. Status of S1 (same day, after the report)
+
+Built, all new files: `pb_source_internal_door_aperture_review.py`, `tools/diag_internal_door_aperture_review.py`, `tests/test_source_internal_door_aperture_review_v1.py` (50 tests), `tests/test_diag_internal_door_aperture_review_v1.py` (7 tests). No existing file is edited.
+
+Verified: 44 of 44 single-line mutants of the module are caught; 96 related tests (this module, the internal door inventory, barrier, cavity slider and window review) pass together; the repository's private-source, truth-separation, canonical-route and provider-isolation guards and `ruff --select F821,F823` pass locally. On the saved collector output of the 3Laurel original the module returns exactly the funnel of 2.6: 14 apertures, 29 records bound, none shared; 8 apertures with several representatives retained, 3 with one, 3 with none; first open gate kind unresolved on 11 and no representative on 3. Tool end to end on the original: TOOL_RESULT_PLACEHOLDER.
+
+Measured for S1b (read only): replacing the 720 / 870 width allowlist with the plausible-width range the cavity-slider detector already uses changes nothing on the one drawing where hosted swings exist. All 8 hinged marks have exactly one plausible token within 15 pt, equal to the current pick (870 for seven, 720 for one). So that part of S1b is behaviour-preserving there and removes the project-specific literals.
+
+Not proven: Python 3.14 and exact-head CI, the protected replay, sealing, customer output, any score. Not started: S1b, S2 to S6.
