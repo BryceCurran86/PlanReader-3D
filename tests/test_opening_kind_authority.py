@@ -8,6 +8,8 @@ from pb_opening_kind_authority import (
     OPENING_KIND_STRUCTURAL_DOOR,
     OPENING_KIND_STRUCTURAL_WINDOW,
     OPENING_KIND_UNAVAILABLE,
+    SOURCE_DIAGONAL_DOOR_LEAF,
+    SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
     resolve_opening_kind,
 )
 from pb_physical_opening_authority import (
@@ -28,6 +30,18 @@ def test_structural_door_pattern_classifies_without_schedule() -> None:
     assert result.schedule_kind is None
     assert OPENING_KIND_STRUCTURAL_DOOR in result.reason_codes
     assert OPENING_KIND_CORROBORATED in result.reason_codes
+
+
+def test_source_quarter_swing_and_diagonal_leaf_classify_as_door() -> None:
+    for pattern in (
+        SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
+        SOURCE_DIAGONAL_DOOR_LEAF,
+    ):
+        result = resolve_opening_kind(structural_pattern=pattern)
+        assert result.status is EvidenceResolutionStatus.CORROBORATED
+        assert result.opening_kind == "door"
+        assert result.structural_kind == "door"
+        assert OPENING_KIND_STRUCTURAL_DOOR in result.reason_codes
 
 
 def test_raster_swing_structural_pattern_classifies_as_door() -> None:
