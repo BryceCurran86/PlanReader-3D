@@ -1281,7 +1281,14 @@ def _swing_arcs(drawings: Sequence[Mapping[str, Any]], *, unlabelled_source_ink:
             rejected += 1
             continue
         leaf_index, open_tip, closed_tip = leaf_hits[0]
-        arcs.append({"arc": index, "leaf": leaf_index, "centre": centre, "closed_tip": closed_tip, "radius": radius})
+        arcs.append({
+            "arc": index,
+            "leaf": leaf_index,
+            "centre": centre,
+            "open_tip": open_tip,
+            "closed_tip": closed_tip,
+            "radius": radius,
+        })
     return arcs, rejected
 
 

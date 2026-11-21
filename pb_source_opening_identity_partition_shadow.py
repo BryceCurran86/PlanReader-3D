@@ -31,7 +31,6 @@ AMBIGUOUS = "ambiguous"
 # 0.5 pt covers native PDF rounding of a shared jamb vertex; it does not
 # join two openings that only pass near a hinge (those sit ~1 pt apart).
 _SHARED_JAMB_VERTEX_PT = 0.5
-_DISTINCT_SEPARATION_PT = 2.5
 
 
 def _segment(opening: LiveCanonicalOpeningObject) -> LineString | None:
@@ -158,7 +157,14 @@ def _issued_aperture_ownership(
         return True
     left_frame = str(left.host_frame_record_id or "").strip()
     right_frame = str(right.host_frame_record_id or "").strip()
-    return bool(left_frame and left_frame == right_frame)
+    # Same rule as the binding branch: an issued receipt is on the record's own evidence, so a bare matching
+    # string (caller-built, foreign or forged) never makes two records one aperture.
+    return bool(
+        left_frame
+        and left_frame == right_frame
+        and left_frame in left.evidence_ids
+        and right_frame in right.evidence_ids
+    )
 
 
 def compare_live_canonical_opening_identity(
@@ -212,8 +218,7 @@ def compare_live_canonical_opening_identity(
         if _issued_aperture_ownership(left, right):
             return SAME
         return AMBIGUOUS
-    if left_line.distance(right_line) > _DISTINCT_SEPARATION_PT:
-        return AMBIGUOUS
+    # Beyond the production snap is still not DISTINCT without an independently bounded aperture.
     return AMBIGUOUS
 
 

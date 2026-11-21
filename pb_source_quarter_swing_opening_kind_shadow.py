@@ -133,6 +133,10 @@ def _witnesses(
             "pattern": SOURCE_QUARTER_SWING_AND_RADIAL_LEAF,
         }
         for item in arcs
+        # The shared swing detector pairs wall-layer strokes whatever their paint. A swing or leaf whose stroke
+        # is not visibly painted (zero or non-numeric opacity) is not source door ink, so it never kinds a door.
+        if _visible_source_stroke_paint(drawings[item["arc"]])
+        and _visible_source_stroke_paint(drawings[item["leaf"]])
     )
     return cubic + _collect_diagonal_leaves(drawings)
 
