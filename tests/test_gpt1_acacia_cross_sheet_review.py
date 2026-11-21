@@ -460,3 +460,25 @@ def test_source_receipt_iterator_exception_abstains_without_partial_review():
     assert review.status == "ABSTAINED"
     assert review.reasons == ("schedule_host_receipts_invalid",)
     assert review.customer_row_authorized is False
+
+
+def test_permuted_native_host_path_order_cannot_mint_second_aperture():
+    one = replace(_receipt("W2", host="aperture-a", assembly="frame-a"),
+                  floor_host_native_path_ids=(400, 401))
+    other = replace(_receipt("W2", host="aperture-b", assembly="frame-b"),
+                    floor_host_native_path_ids=(401, 400))
+    review = reconcile_acacia_schedule_hosts(_package(), (one, other))
+    assert review.status == "ABSTAINED"
+    assert review.reasons == ("native_host_witness_reused_for_distinct_apertures",)
+
+
+def test_composite_components_with_permuted_native_path_order_remain_one_aperture():
+    window = replace(_receipt("W1", host="one-aperture", assembly="W1D1"),
+                     floor_host_native_path_ids=(400, 401))
+    door = replace(_receipt("D1", host="one-aperture", assembly="W1D1",
+                            schedule_path=501),
+                   floor_host_native_path_ids=(401, 400))
+    review = reconcile_acacia_schedule_hosts(_package(), (window, door))
+    assert review.status == "HOST_SCHEDULE_CORRESPONDENCE_REVIEW_ONLY"
+    assert review.composite_assembly_count == 1
+    assert review.customer_row_authorized is False
