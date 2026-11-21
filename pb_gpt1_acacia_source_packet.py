@@ -55,6 +55,7 @@ class AcaciaOriginalPackage:
     region: str | None
     source_pages: int = 0
     sheets: tuple[AcaciaOriginalSheet, ...] = ()
+    page_dispositions: tuple[dict, ...] = ()
     original_byte_roles_verified: bool = False
     physical_outer_wall_verified: bool = False
     interior_finished_face_verified: bool = False
@@ -70,6 +71,8 @@ class AcaciaOriginalPackage:
             "source_sha256": self.source_sha256,
             "region": self.region, "source_pages": self.source_pages,
             "sheets": [vars(s) for s in self.sheets],
+            "page_dispositions": list(self.page_dispositions),
+            "all_page_viewports_reviewed": False,
             "original_byte_roles_verified": self.original_byte_roles_verified,
             "physical_outer_wall_verified": False,
             "interior_finished_face_verified": False,
@@ -150,10 +153,20 @@ def inspect_acacia_original_bytes(raw: bytes, *, expected_region: str) -> Acacia
                     digest, expected_region, source_pages=len(source),
                 )
             sheets = []
+            dispositions = []
             for index, page in enumerate(source):
                 title, number, scale = _title_block(
                     page.get_text(), index, expected_region
                 )
+                # Title metadata authenticates a page, not its viewports.
+                # Do not silently discard the other six pages or imply use.
+                dispositions.append({
+                    "source_sha256": digest, "page_index": index,
+                    "drawing_title": title, "drawing_number": number,
+                    "status": "UNREVIEWED",
+                    "reason": "bounded_viewports_not_yet_source_registered",
+                    "viewports": [],
+                })
                 if index in (1, 7, 8, 9):
                     sheets.append(AcaciaOriginalSheet(
                         index, title, number, scale, len(page.get_drawings())
@@ -161,7 +174,7 @@ def inspect_acacia_original_bytes(raw: bytes, *, expected_region: str) -> Acacia
         return AcaciaOriginalPackage(
             "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY",
             "exact_original_four_roles_verified_missing_physical_metric_and_spec",
-            digest, expected_region, 10, tuple(sheets),
+            digest, expected_region, 10, tuple(sheets), tuple(dispositions),
             original_byte_roles_verified=True,
         )
     except (RuntimeError, ValueError, TypeError, OSError, IndexError):
