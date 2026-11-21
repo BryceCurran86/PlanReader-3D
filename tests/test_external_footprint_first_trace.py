@@ -755,3 +755,19 @@ def test_original_evidence_render_failure_leaves_no_partial_json(tmp_path, monke
         runner.run(source, 0, destination, expected_sha256=sha)
     assert not (destination / "page_1_footprint_first.json").exists()
     assert not (destination / "page_1_footprint_first.png").exists()
+
+
+def test_original_evidence_pair_refuses_existing_json_without_png(tmp_path):
+    """An existing source receipt must not acquire a mismatched overlay."""
+    from tools.run_original_footprint_first import run
+
+    original = _plan(tmp_path, walls=True)
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    destination = tmp_path / "evidence_pair_json_collision"
+    destination.mkdir()
+    existing = destination / "page_1_footprint_first.json"
+    existing.write_bytes(b"previous-private-source-receipt")
+    with pytest.raises(FileExistsError, match="original_footprint_evidence_pair_already_exists"):
+        run(original, 0, destination, expected_sha256=sha)
+    assert existing.read_bytes() == b"previous-private-source-receipt"
+    assert not (destination / "page_1_footprint_first.png").exists()
