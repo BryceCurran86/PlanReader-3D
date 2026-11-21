@@ -68,21 +68,26 @@ def point_in_painted_swing_sector(
 def callouts_from_trusted_native_dimensions(
     dimensions: Sequence[Any],
 ) -> tuple[SwingFiguredWidthCallout, ...]:
-    """Keep trusted native dims that still carry a source text box and mm value."""
-    rows: list[SwingFiguredWidthCallout] = []
-    seen: set[str] = set()
+    """Keep dims that carry a source text box and a positive mm value.
+
+    "Trusted" is the caller's claim: this shadow does not authenticate a dimension, so a wiring caller must hand it
+    producer-owned, text-integrity-corroborated dimensions only. One id seen twice with the same value and box is one
+    callout; the same id with a different value or box is ambiguous and is dropped, never resolved by order.
+    """
+    rows: dict[str, SwingFiguredWidthCallout] = {}
+    conflicting: set[str] = set()
+    order: list[str] = []
     for item in dimensions:
         if type(item) is SwingFiguredWidthCallout:
-            if item.callout_id and item.callout_id not in seen:
-                seen.add(item.callout_id)
-                rows.append(item)
-            continue
-        callout_id = _clean(getattr(item, "dimension_id", None))
-        bbox = getattr(item, "text_bbox", None)
-        value = getattr(item, "value_mm", None)
+            callout_id, bbox, value = item.callout_id, item.text_bbox, item.value_mm
+            if type(callout_id) is not str or not callout_id:
+                continue
+        else:
+            callout_id = _clean(getattr(item, "dimension_id", None))
+            bbox = getattr(item, "text_bbox", None)
+            value = getattr(item, "value_mm", None)
         if (
             not callout_id
-            or callout_id in seen
             or not isinstance(bbox, (tuple, list))
             or len(bbox) < 4
             or not _positive_mm(value)
@@ -99,15 +104,16 @@ def callouts_from_trusted_native_dimensions(
             continue
         if not all(math.isfinite(part) for part in box):
             continue
-        seen.add(callout_id)
-        rows.append(
-            SwingFiguredWidthCallout(
-                callout_id=callout_id,
-                value_mm=float(value),
-                text_bbox=box,
-            )
+        callout = SwingFiguredWidthCallout(
+            callout_id=callout_id, value_mm=float(value), text_bbox=box,
         )
-    return tuple(rows)
+        if callout_id in rows:
+            if rows[callout_id] != callout:
+                conflicting.add(callout_id)
+            continue
+        rows[callout_id] = callout
+        order.append(callout_id)
+    return tuple(rows[callout_id] for callout_id in order if callout_id not in conflicting)
 
 
 def _callouts_in_witness(
@@ -162,20 +168,22 @@ def apply_source_swing_figured_widths(
             continue
         witnesses = _witnesses(drawings)
         bindings = _unique_hosted_door_bindings(openings, witnesses)
-        claimed: set[str] = set()
+        by_opening_id = {item.canonical_opening_id: item for item in openings}
+        sole_callout: dict[str, SwingFiguredWidthCallout] = {}
+        owners: dict[str, list[str]] = {}
         for opening_id, witness in bindings.items():
-            opening = next(
-                item for item in openings if item.canonical_opening_id == opening_id
-            )
-            if opening.figured_single_axis_mm is not None:
+            if by_opening_id[opening_id].figured_single_axis_mm is not None:
                 continue
             hits = _callouts_in_witness(witness, callouts)
             if len(hits) != 1:
                 continue
-            callout = hits[0]
-            if callout.callout_id in claimed:
+            sole_callout[opening_id] = hits[0]
+            owners.setdefault(hits[0].callout_id, []).append(opening_id)
+        for opening_id, callout in sole_callout.items():
+            # A figure that sits in two doors' swings is ambiguous: it belongs to neither, whatever the order.
+            if len(owners[callout.callout_id]) != 1:
                 continue
-            claimed.add(callout.callout_id)
+            opening = by_opening_id[opening_id]
             evidence_ids = tuple(
                 dict.fromkeys((*opening.evidence_ids, callout.callout_id))
             )
