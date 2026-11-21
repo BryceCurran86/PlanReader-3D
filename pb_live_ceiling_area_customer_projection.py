@@ -26,6 +26,7 @@ from pb_source_customer_inclusion_scope import (
     require_uncontested_source_inclusion, unique_customer_ceiling_owners,
     require_uncontested_source_commercial_scope,
     require_source_ceiling_owner_parity,
+    original_legacy_ceiling_source_matches_owner,
 )
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
@@ -156,7 +157,9 @@ def project_live_ceiling_area_customer_rows(
             )
         original_ids.add(source_id)
         require_uncontested_source_inclusion(source)
-        require_uncontested_source_commercial_scope(source)
+        # An original positive FIRM with unresolved blocking evidence is the
+        # primary defect. Preserve the existing first-failure reason before
+        # a later generic commercial-status check, without relaxing either.
         # A contradictory original FIRM numeric claim must never silently
         # disappear before whole-customer reconciliation. Ordinary provisional
         # shadows retain their existing nonpublishing behavior.
@@ -170,6 +173,7 @@ def project_live_ceiling_area_customer_rows(
                 "legacy numeric firm ceiling source retains unresolved blockers: "
                 f"{source_id}"
             )
+        require_uncontested_source_commercial_scope(source)
 
     # Reject duplicate physical ceiling owners BEFORE the existing source
     # quantity publisher, while preserving the legitimate empty-inventory
@@ -179,9 +183,35 @@ def project_live_ceiling_area_customer_rows(
         unique_customer_ceiling_owners(result.canonical_ceilings)
         if result.quantity_evidence else {}
     )
+    # Validate the PRE-REISSUE legacy source-owner metadata and square-metre
+    # unit. The FIRM canonical publisher generates new metadata by copying
+    # canonical ceiling identity; checking only that newly minted quantity
+    # would hide a conflicting original revision/room/area from the source.
+    # Drop only an invalid provisional member: a separate valid original
+    # ceiling must retain its existing customer output. An invalid original
+    # FIRM cannot disappear; it is a whole-family conflict.
+    admissible_sources: list[QuantityEvidence] = []
+    for source in result.quantity_evidence:
+        owners = tuple(
+            ceiling for ceiling in result.canonical_ceilings
+            if _clean(ceiling.ceiling_quantity_id) == source.quantity_id
+        )
+        if len(owners) == 1 and not original_legacy_ceiling_source_matches_owner(
+            source, owners[0],
+        ):
+            if (not source.abstained and source.value is not None
+                    and _clean(source.status).casefold() == "firm"):
+                raise SourceClosedRunConflictError(
+                    "source_ceiling_original_owner_or_unit_unresolved"
+                )
+            continue
+        admissible_sources.append(source)
+    admissible_result = replace(
+        result, quantity_evidence=tuple(admissible_sources),
+    )
     original = tuple(
         quantity
-        for quantity in publish_live_ceiling_area_quantities(result)
+        for quantity in publish_live_ceiling_area_quantities(admissible_result)
         if (
             isinstance(quantity, QuantityEvidence)
             and not quantity.abstained
@@ -212,7 +242,7 @@ def project_live_ceiling_area_customer_rows(
             authorities[customer_quantity.quantity_id] = authority
 
     traces = build_live_ceiling_area_source_traces(
-        result,
+        admissible_result,
         workspace_id=workspace_id,
         project_id=project_id,
     )
