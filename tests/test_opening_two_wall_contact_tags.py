@@ -203,3 +203,53 @@ def test_existing_original_segmented_swing_chord_tag_uses_both_native_wall_ends(
     assert tags[0].status == "TWO_WALL_SECTIONS_TAGGED"
     assert tags[0].wall_section_ids == ("native-wall-end:0", "native-wall-end:1")
     assert tags[0].measurement_authorized is False
+
+
+@pytest.mark.parametrize("malformed", (
+    None, [None], [("l",)], ["l"], [("l", None, None)],
+    "not_a_source_segment", [("qu", 12)],
+))
+def test_malformed_native_segmented_door_wall_end_does_not_crash_or_tag(malformed):
+    """The review projection must never bring down original source tracing."""
+    def stroke(a, b):
+        return {"fill": None, "items": [("l", fitz.Point(*a), fitz.Point(*b))]}
+    drawings = (
+        {"fill": None, "items": malformed},
+        stroke((12., 0.), (20., 0.)),
+    )
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (3,),
+    }
+    tags = tag_native_segmented_doorway_chords(drawings, (chord,), scope=SCOPE)
+    assert len(tags) == 1
+    assert tags[0].status == "UNRESOLVED"
+    assert tags[0].measurement_authorized is False
+
+
+def test_extreme_finite_coordinates_cannot_overflow_into_wall_authentication():
+    first = wall("overflow", (100,), (1e308, 0.), (-1e308, 0.))
+    second = two_straight()[1]
+    observed = opening((1e308, 0.), (12., 0.))
+    result = tag_opening_to_two_wall_sections(observed, (first, second))
+    assert result.status == "UNRESOLVED"
+    assert not result.wall_section_ids
+    assert not result.measurement_authorized
+
+
+def test_extreme_but_finite_perpendicular_wall_vectors_remain_junctions():
+    length = 1e200
+    source = (
+        wall("east", (100,), (0., 0.), (length, 0.)),
+        wall("north", (200,), (0., 0.), (0., length)),
+    )
+    result = tag_opening_to_two_wall_sections(
+        opening((0., 0.), (0., 0.)), source,
+    )
+    assert result.status == "TWO_WALL_SECTIONS_TAGGED"
+    assert result.contact_geometry == "WALL_JUNCTION"
+    assert result.measurement_authorized is False
