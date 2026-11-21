@@ -90,6 +90,24 @@ class AcaciaOriginalPackage:
             "region": self.region, "source_pages": self.source_pages,
             "sheets": [vars(s) for s in self.sheets],
             "full_page_evidence": [vars(s) for s in self.full_page_evidence],
+            # A fully indexed page is NOT a fully examined set of bounded
+            # viewports. Never report a room, elevation, plan inset or schedule
+            # as source-reconciled merely because its title/native paths exist.
+            # Donor #4640's explicit unreviewed dispositions are derived from
+            # the SAME immutable all-page census, not rebuilt independently.
+            "page_dispositions": [
+                {
+                    "source_sha256": self.source_sha256,
+                    "page_index": page.page_index,
+                    "drawing_title": page.drawing_title,
+                    "drawing_number": page.drawing_number,
+                    "status": "UNREVIEWED",
+                    "reason": "bounded_viewports_not_yet_source_registered",
+                    "viewports": [],
+                }
+                for page in self.full_page_evidence
+            ],
+            "all_page_viewports_reviewed": False,
             "all_original_pages_indexed": (
                 self.all_original_pages_indexed is True
                 and len(self.full_page_evidence) == self.source_pages
