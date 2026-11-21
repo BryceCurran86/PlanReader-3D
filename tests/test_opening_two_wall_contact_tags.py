@@ -253,3 +253,52 @@ def test_extreme_but_finite_perpendicular_wall_vectors_remain_junctions():
     assert result.status == "TWO_WALL_SECTIONS_TAGGED"
     assert result.contact_geometry == "WALL_JUNCTION"
     assert result.measurement_authorized is False
+
+
+def test_original_chord_source_receipts_reject_numeric_coercion():
+    """Source-native wall ends can be tagged; forged typed geometry cannot."""
+    def stroke(a, b):
+        return {"fill": None, "items": [
+            ("l", fitz.Point(*a), fitz.Point(*b)),
+        ]}
+
+    drawings = (
+        stroke((0., 0.), (10., 0.)),
+        stroke((12., 0.), (20., 0.)),
+        stroke((40., 0.), (50., 0.)),
+    )
+    good = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (2,),
+    }
+    valid = tag_native_segmented_doorway_chords(drawings, (good,), scope=SCOPE)[0]
+    assert valid.status == "TWO_WALL_SECTIONS_TAGGED"
+    assert valid.wall_section_ids == ("native-wall-end:0", "native-wall-end:1")
+    assert valid.physical_host_authorized is False
+    assert valid.measurement_authorized is False
+
+    for field, malformed in (
+        ("door_interval_pdf_pts", (True, 12.)),
+        ("door_interval_pdf_pts", ("10", 12.)),
+        ("door_interval_pdf_pts", (12., 10.)),
+        ("wall_band_pdf_pts", (False, 1.)),
+        ("wall_band_pdf_pts", ("-1", 1.)),
+        ("wall_band_pdf_pts", (2., -2.)),
+        ("source_wall_end_left_path_indices", (True,)),
+        ("source_wall_end_right_path_indices", (1.0,)),
+        ("source_swing_native_path_indices", ("2",)),
+        ("source_swing_native_path_indices", (2, 2)),
+    ):
+        candidate = dict(good)
+        candidate[field] = malformed
+        out = tag_native_segmented_doorway_chords(
+            drawings, (candidate,), scope=SCOPE,
+        )[0]
+        assert out.status == "UNRESOLVED", (field, malformed)
+        assert out.reason == "source_chord_receipt_invalid", (field, malformed)
+        assert out.wall_section_ids == ()
+        assert out.measurement_authorized is False
