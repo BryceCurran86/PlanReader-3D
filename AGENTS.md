@@ -1,5 +1,44 @@
 # PlanReader-3D agent contract
 
+## Owner zero job-specific production rule — 21 November 2026 (mandatory for ALL agents)
+
+**No fix may be built around one named drawing, benchmark item, door, room, page,
+source SHA, source coordinates, or expected result.** Apply a single
+source-driven wall/opening/room, dimension/height, cross-sheet registration,
+finish and customer quantity rule to ALL plans. A job is a held-out **test
+fixture**, not a hidden selector for the measuring engine. Do not use
+frozen120 expected counts/values as algorithm inputs or call a one-project
+source-positive diagnostic a cross-project accuracy gain.
+
+**Allowed:** immutable original-source SHA/revision verification, source
+manifests, independently authenticated page/view IDs and dimension witnesses,
+per-client material selections, project-specific regression tests, exact
+source/customer retention adapters and read-only source reports. These are
+source evidence, not an excuse for a production rule choosing a hardcoded
+location, 2040/2100 default over a real schedule, source page 7/11 pair,
+"OFFICE" label or fixed ceiling area for one drawing.
+
+**Before EACH agent's PR merge:** (1) audit changed production functions,
+their live callers and existing source-specific defaults; (2) move any
+job-specific detector/issuer condition into **genuine source-provided typed
+evidence** consumed by a generic algorithm; (3) test at least two structurally
+different plan styles, the applicable protected original projects and
+negative geometry/revision/identity cases; (4) preserve exact existing
+signed/customer rows, dual Python 3.13/3.14 CI and frozen120; (5) report
+unknowns/ABSTAIN instead of faking an extra match. Do not duplicate an agent's
+existing implementation or delete signed evidence just to remove job literals.
+
+**Known unresolved mainline P1:** the shared
+`pb_source_cross_view_floor_correspondence_shadow.py` still contains
+Maryborough-special room/page/coordinate/ceiling branches and one literal
+source ceiling area; its live caller makes this a genuine generalisation
+blocker. MAX/GPT2 must replace it with producer-owned cross-view geometry and
+prove retained original customer outputs. Owner audit
+[issue #4594](https://github.com/BryceCurran86/PlanReader-3D/issues/4594)
+is the existing backlog; do not create a duplicate. The source-neutral
+`tools/audit_no_job_specific_shared_rules.py` regression checks common
+producer modules and explicitly does NOT certify this known legacy offender.
+
 ## Mandatory private-source reuse — no repeat upload requests (20 November 2026)
 
 The owner has already supplied and verified the complete 18-original-PDF PlanReader source archive, retained in the user's **private ChatGPT Library**. Before requesting any source file, agents MUST check currently attached files, prior conversation uploads and the Library (files.list/files.search), and materialize the existing private archive to the authorized execution environment if not automatically mounted. Do NOT ask the owner to upload an original already present.
