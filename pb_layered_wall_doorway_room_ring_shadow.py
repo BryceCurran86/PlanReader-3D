@@ -408,6 +408,9 @@ class LayeredRoomRingResult:
     # openings, hosted frames or customer wall geometry.
     source_segmented_swing_witnesses: tuple[Mapping[str, Any], ...] = ()
     source_owned_doorway_chords: tuple[Mapping[str, Any], ...] = ()
+    # Read-only two-wall section tags: normal interruptions AND corner/junction
+    # geometry, with explicit missing/competing sides, never host/metric FIRM.
+    source_two_wall_opening_tags: tuple[Mapping[str, Any], ...] = ()
     # Candidate-only original-path witnesses for each unclosed collinear wall
     # interruption. No hosts, closures, lengths, room quantities or FIRM.
     unresolved_gap_witnesses: tuple[Mapping[str, Any], ...] = ()
@@ -2223,6 +2226,7 @@ def build_layered_wall_doorway_room_rings(
     )
     segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
     sourced_doorway_chords: tuple[Mapping[str, Any], ...] = ()
+    source_two_wall_opening_tags: tuple[Mapping[str, Any], ...] = ()
     if dark_painted_wall_source:
         from pb_source_segmented_door_swing_shadow import (
             collect_source_black_segmented_door_swings,
@@ -2233,6 +2237,28 @@ def build_layered_wall_doorway_room_rings(
         # swing. Never close the whole oversized original _Gap.
         sourced_doorway_chords = propose_source_owned_doorway_chords(
             drawings, segmented_witnesses, gaps,
+        )
+        # Tag BOTH source wall sections after trace and swing discovery.
+        # This is a non-authoritative association; commercial host-wall,
+        # opening area, and customer issuer gates are completely untouched.
+        from pb_opening_two_wall_contact_tags import tag_native_segmented_doorway_chords
+        source_two_wall_opening_tags = tuple(
+            {
+                "opening_id": tag.opening_id,
+                "status": tag.status,
+                "reason": tag.reason,
+                "wall_section_ids": tag.wall_section_ids,
+                "contact_geometry": tag.contact_geometry,
+                "candidate_sections_first": tag.candidate_sections_first,
+                "candidate_sections_second": tag.candidate_sections_second,
+                "source_topology_only": tag.source_topology_only,
+                "physical_host_authorized": False,
+                "measurement_authorized": False,
+            }
+            for tag in tag_native_segmented_doorway_chords(
+                drawings, sourced_doorway_chords,
+                scope=(source_sha256, str(page_index)),
+            )
         )
         gaps.extend(
             _Gap(
@@ -2496,6 +2522,7 @@ def build_layered_wall_doorway_room_rings(
         sliver_region_count=sliver_count,
         source_segmented_swing_witnesses=segmented_witnesses,
         source_owned_doorway_chords=sourced_doorway_chords,
+        source_two_wall_opening_tags=source_two_wall_opening_tags,
         unresolved_gap_witnesses=gap_witnesses,
         unresolved_gap_witness_count=gap_witness_count,
         free_space_part_count=free_space_part_count,
