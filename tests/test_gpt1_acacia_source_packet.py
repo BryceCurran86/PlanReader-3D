@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 import os
 
 import pytest
 
 from pb_gpt1_acacia_source_packet import (
     ACACIA_ALL_TITLES, ACACIA_ORIGINAL_SHA256,
-    ACACIA_REQUIRED_ROLES, _title_block,
+    ACACIA_REQUIRED_ROLES, AcaciaOriginalPackage, AcaciaOriginalPageEvidence, _title_block,
     inspect_acacia_original_bytes, inspect_acacia_original_file,
 )
 
@@ -123,3 +124,80 @@ def test_directory_or_symlink_original_abstains(tmp_path):
     alias.symlink_to(dummy)
     linked = inspect_acacia_original_file(alias, expected_region="Brisbane")
     assert linked.status == "ABSTAINED"
+
+
+def test_source_page_evidence_is_read_only_and_all_page_inventory_cannot_be_faked_by_length():
+    # Source-neutral record tests. No customer/metric/physical authority comes
+    # from merely having all pages inventoried or their drawing titles.
+    base = AcaciaOriginalPackage(
+        "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY", "read-only",
+        ACACIA_ORIGINAL_SHA256["Brisbane"], "Brisbane", source_pages=2,
+        full_page_evidence=(
+            AcaciaOriginalPageEvidence(
+                0, "First plan", "1/2", "1:100", 80, 20, 0
+            ),
+            AcaciaOriginalPageEvidence(
+                1, "Enlarged detail and elevations", "2/2", "1:25", 32, 9, 1
+            ),
+        ),
+        all_original_pages_indexed=True,
+    )
+    report = base.to_dict()
+    assert report["all_original_pages_indexed"] is True
+    assert [r["page_index"] for r in report["full_page_evidence"]] == [0, 1]
+    assert all(not r["geometry_or_customer_authorized"]
+               for r in report["full_page_evidence"])
+    assert not report["customer_quantities_authorized"]
+    assert not report["frozen120_score_authorized"]
+
+    missing = replace(base, full_page_evidence=base.full_page_evidence[:1])
+    assert missing.to_dict()["all_original_pages_indexed"] is False
+    duplicate = replace(
+        base,
+        full_page_evidence=(base.full_page_evidence[0], base.full_page_evidence[0]),
+    )
+    assert duplicate.to_dict()["all_original_pages_indexed"] is False
+    unread = replace(
+        base,
+        full_page_evidence=(
+            base.full_page_evidence[0],
+            replace(base.full_page_evidence[1], source_page_reviewed=False),
+        ),
+    )
+    assert unread.to_dict()["all_original_pages_indexed"] is False
+
+
+def test_private_original_10_of_10_page_native_source_coverage_is_retained():
+    private = os.environ.get("PLANREADER_ACACIA_ORIGINAL_DIR", "")
+    if not private:
+        pytest.skip("Original Acacia PDF source is private, never required in public CI")
+    for region, name in _REGION_FILES.items():
+        original = inspect_acacia_original_file(
+            Path(private) / name, expected_region=region,
+        )
+        assert original.status == "ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY"
+        assert original.all_original_pages_indexed is True
+        assert len(original.full_page_evidence) == original.source_pages == 10
+        assert tuple(p.page_index for p in original.full_page_evidence) == tuple(range(10))
+        assert tuple(p.drawing_number for p in original.full_page_evidence) == tuple(
+            f"{i + 1}/10" for i in range(10)
+        )
+        assert [p.drawing_title for p in original.full_page_evidence] == list(
+            ACACIA_ALL_TITLES
+        )
+        assert all(p.source_page_reviewed and p.native_path_count > 0
+                   and p.native_word_count > 0
+                   and p.native_image_count >= 0
+                   and not p.geometry_or_customer_authorized
+                   for p in original.full_page_evidence)
+        assert tuple(
+            (p.page_index, p.native_path_count)
+            for p in original.full_page_evidence
+            if p.page_index in (1, 7, 8, 9)
+        ) == tuple(
+            (p.page_index, p.source_page_path_count) for p in original.sheets
+        )
+        report = original.to_dict()
+        assert report["all_original_pages_indexed"] is True
+        assert len(report["full_page_evidence"]) == 10
+        assert report["customer_quantities_authorized"] is False
