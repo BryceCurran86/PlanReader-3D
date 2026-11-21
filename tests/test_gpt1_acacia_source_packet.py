@@ -102,6 +102,10 @@ def test_private_original_all_four_pages_authenticate(region):
     assert result.original_byte_roles_verified is True
     assert result.source_sha256 == ACACIA_ORIGINAL_SHA256[region]
     assert len(result.sheets) == 4
+    assert len(result.page_dispositions) == 10
+    assert [d['page_index'] for d in result.page_dispositions] == list(range(10))
+    assert all(d['status'] == 'UNREVIEWED' and not d['viewports'] for d in result.page_dispositions)
+    assert result.to_dict()['all_page_viewports_reviewed'] is False
     assert [x.page_index for x in result.sheets] == [1, 7, 8, 9]
     assert result.to_dict()["missing_original_design_options_specification"] is True
     assert result.customer_quantities_authorized is False
@@ -123,3 +127,12 @@ def test_directory_or_symlink_original_abstains(tmp_path):
     alias.symlink_to(dummy)
     linked = inspect_acacia_original_file(alias, expected_region="Brisbane")
     assert linked.status == "ABSTAINED"
+
+
+def test_title_authentication_does_not_authorize_customer():
+    from pb_gpt1_acacia_source_packet import AcaciaOriginalPackage
+    packet = AcaciaOriginalPackage("ORIGINAL_ROLES_AUTHENTICATED_REVIEW_ONLY", "review_only", "a" * 64, "Brisbane", 10, page_dispositions=({"page_index": 0, "status": "UNREVIEWED", "viewports": []},), original_byte_roles_verified=True)
+    payload = packet.to_dict()
+    assert payload["page_dispositions"][0]["status"] == "UNREVIEWED"
+    assert payload["all_page_viewports_reviewed"] is False
+    assert payload["customer_quantities_authorized"] is False
