@@ -276,3 +276,98 @@ def test_identity_refuses_foreign_objects():
         compare_live_canonical_opening_identity(object(), _scoped((1.0, 1.0, 2.0, 1.0), "a"))
     with pytest.raises(TypeError):
         compare_live_canonical_opening_identity(_scoped((1.0, 1.0, 2.0, 1.0), "a"), "b")
+
+
+# ---------------------------------------------------------------- boundaries the mutation check showed were unpinned
+
+def _diagonal_leaf(length_leg):
+    return [_stroke("l", (100.0, 100.0), (100.0 + length_leg, 100.0 + length_leg))]
+
+
+@pytest.mark.parametrize("offset,binds", [(0.0, True), (2.4, True), (2.5, True), (2.6, False), (6.0, False)])
+def test_an_opening_binds_to_a_swing_end_only_inside_the_two_point_five_snap(offset, binds):
+    opening = _hosted(geom=(HINGE[0] - 1.0, HINGE[1] + offset, HINGE[0] + 3.0, HINGE[1] + offset))  # offset from the hinge
+    distance = kind_module._opening_distance(opening, HINGE)
+    assert math.isclose(distance, offset, abs_tol=1e-9)
+    assert (_kind(_quarter_swing_drawings(), opening)["opening-1"] == "door") is binds
+
+
+@pytest.mark.parametrize("leg,kept", [(5.0, False), (6.9, False), (7.1, True), (50.0, True), (98.9, True), (99.1, False), (150.0, False)])
+def test_a_diagonal_leaf_must_be_between_ten_and_one_hundred_forty_points(leg, kept):
+    assert bool(kind_module._collect_diagonal_leaves(_diagonal_leaf(leg))) is kept
+
+
+def test_a_diagonal_leaf_binds_only_when_the_opening_touches_exactly_one_end():
+    drawings = _diagonal_leaf(30.0)  # hinge (100, 100), closed tip (130, 130)
+    one_end = _hosted(geom=(100.0, 100.0, 102.5, 100.0))
+    assert _kind(drawings, one_end) == {"opening-1": "door"}
+    both_ends = _hosted(geom=(100.0, 100.0, 130.0, 130.0))
+    assert _kind(drawings, both_ends) == {"opening-1": None}
+    # the far end sits exactly on the snap, which counts as touching it, so this is still two ends
+    exactly_at_snap = _hosted(geom=(100.0, 100.0, 127.5, 130.0))
+    assert kind_module._opening_distance(exactly_at_snap, (130.0, 130.0)) == 2.5
+    assert _kind(drawings, exactly_at_snap) == {"opening-1": None}
+
+
+def test_the_hosted_unkinded_predicate_needs_no_kind_a_host_wall_and_a_receipt():
+    ok = _hosted(geom=AT_HINGE)
+    assert kind_module._hosted_unkinded(ok) is True
+    assert kind_module._hosted_unkinded(replace(ok, opening_kind="door")) is False
+    assert kind_module._hosted_unkinded(replace(ok, opening_kind="window")) is False
+    assert kind_module._hosted_unkinded(replace(ok, host_wall_id=None)) is False
+    assert kind_module._hosted_unkinded(replace(ok, host_wall_id="  ")) is False
+    assert kind_module._hosted_unkinded(replace(ok, host_binding_record_id=None, host_frame_record_id=None)) is False
+    assert kind_module._hosted_unkinded(replace(ok, host_binding_record_id=None, host_frame_record_id="frame-1")) is True
+    assert kind_module._hosted_unkinded("not an opening") is False
+
+
+def test_the_existing_kind_authority_decides_and_its_refusal_is_final(monkeypatch):
+    class _Refusal:
+        opening_kind = None
+
+    monkeypatch.setattr(kind_module, "resolve_opening_kind", lambda **_: _Refusal())
+    assert _kind(_quarter_swing_drawings(), _hosted(geom=AT_HINGE)) == {"opening-1": None}
+
+
+def test_without_an_authenticated_viewport_a_jamb_tick_never_joins_the_hosted_record():
+    unhosted_tick = dict(host_wall_id=None, host_binding_record_id=None, host_frame_record_id=None, viewport_id="")
+    hosted = replace(_hosted(geom=AT_HINGE, opening_id="hosted"), viewport_id="")
+    tick = replace(_hosted(geom=(50.0, 50.0, 50.0, 52.5), opening_id="tick"), **unhosted_tick)
+    assert compare_live_canonical_opening_identity(hosted, tick) == AMBIGUOUS
+    assert _kind(_quarter_swing_drawings(), hosted, tick) == {"hosted": None, "tick": None}
+    with_viewport = (replace(hosted, viewport_id="vp"), replace(tick, viewport_id="vp"))
+    assert _kind(_quarter_swing_drawings(), *with_viewport) == {"hosted": "door", "tick": None}
+
+
+def test_a_third_cluster_at_the_swing_prevents_the_hinge_and_tip_collapse():
+    hinge_record = _hosted(geom=AT_HINGE, opening_id="hinge")
+    tip_tick = replace(
+        _hosted(geom=(50.0, 25.0, 52.5, 25.0), opening_id="tip"),
+        host_wall_id=None, host_binding_record_id=None, host_frame_record_id=None,
+    )
+    assert _kind(_quarter_swing_drawings(), hinge_record, tip_tick) == {"hinge": "door", "tip": None}
+    foreign_spanning = replace(_hosted(geom=(50.0, 50.0, 50.0, 25.0), opening_id="foreign"), viewport_id="vp-foreign")
+    kinds = _kind(_quarter_swing_drawings(), hinge_record, tip_tick, foreign_spanning)
+    assert kinds == {"hinge": None, "tip": None, "foreign": None}
+
+
+def test_receipts_are_checked_on_both_sides_not_just_the_right_one():
+    geom = (10.0, 10.0, 14.0, 10.0)
+    bare = _scoped(geom, "a", host_binding_record_id=None, host_frame_record_id="frame-9")
+    issued = replace(_scoped(geom, "b", host_binding_record_id=None, host_frame_record_id="frame-9"),
+                     evidence_ids=("b", "frame-9"))
+    assert compare_live_canonical_opening_identity(bare, issued) == AMBIGUOUS
+    assert compare_live_canonical_opening_identity(issued, bare) == AMBIGUOUS
+    bound_bare = _scoped(geom, "c", host_binding_record_id="bind-7", evidence_ids=("c",))
+    bound_issued = _scoped(geom, "d", host_binding_record_id="bind-7", evidence_ids=("d", "bind-7"))
+    assert compare_live_canonical_opening_identity(bound_bare, bound_issued) == AMBIGUOUS
+    assert compare_live_canonical_opening_identity(bound_issued, bound_bare) == AMBIGUOUS
+
+
+@pytest.mark.parametrize("gap,joined", [(0.0, True), (0.4, True), (0.5, True), (0.51, False), (2.0, False)])
+def test_two_segments_share_a_jamb_vertex_only_within_half_a_point(gap, joined):
+    from pb_source_opening_identity_partition_shadow import share_source_jamb_vertex
+
+    left = _scoped((10.0, 10.0, 14.0, 10.0), "left")
+    right = _scoped((14.0 + gap, 10.0, 20.0 + gap, 10.0), "right")
+    assert share_source_jamb_vertex(left, right) is joined
