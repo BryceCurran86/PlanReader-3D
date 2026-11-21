@@ -41,3 +41,12 @@ No wiring, no kind written on any live opening, no quantity, seal, customer row 
 ## 6. Untouched
 
 `pb_physical_opening_authority.py`, host binding and frame authorities, the area issuer and estimate publication, the extractor, the canonical preview and its ring options, MAX exterior host code, Cursor's branches, frozen files, signed receipts and identity maps.
+
+## 8. Revision after the owner's two-wall opening rule (same day)
+
+Hub comments 7056071002 and 7056082708 (the owner, relayed by GPT1): every detected opening is tagged with the TWO traced wall sections that terminate at it, either side of a doorway or two sections meeting at a corner, and no one section is elected as the only wall. GPT1's draft contract is `pb_opening_two_wall_contact_tags` (draft PR 4638). Consequences for this port:
+
+- **Withdrawn from the port:** the core of donor piece C, the unique-swing nomination of a single `host_wall_id` (and the envelope role stamping built on it), is the opposite of that rule.
+- **Kept for a small piece C':** the receipt-gate diagnostics of the rebind module (`first_failing_host_publish_gate`, `first_failing_live_host_trace_gate`). They are read-only and give the first-failing-gate record the hub asks for per door.
+- **Next piece:** the interior doors already carry two-sided source evidence. In the door inventory each hosted swing and each cavity-slider mark has exactly two native wall-end host paths plus jambs (14 of 14 on the measured page). The next piece is an adapter from that inventory to GPT1's contact contract, written against it once the dataclasses are stable, not a fork.
+- **Unaffected:** pieces A and B (kind and width do not elect a wall).
