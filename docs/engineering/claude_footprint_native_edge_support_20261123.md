@@ -40,7 +40,7 @@ No measurement, commercial or deduction authority; the flag is OFF in every call
 
 ## 7. Finding not changed here: the footprint chain mixes coordinate spaces on rotated sheets
 
-`trace_external_footprint_first` returns `polygon_pdf_pts` and `bbox_pdf_pts` in visible (rotated) page space. `refine_external_footprint_against_wall_ink` and `bound_native_drawings_to_footprint`, as `tools/run_original_footprint_first.py` calls them, compare those with `page.get_drawings()` rows in the unrotated space. On the 8 candidate pages of one rotated original (every page rotated 90 degrees) the scoped window selects 19,459 rows in total, against 49,836 with the polygon derotated; only 9,162 rows are in both, and three pages share no row at all. I did not change that chain here: it alters which native rows reach the bounded room tracing and needs its own change with parity on rotated sheets. It is the natural next step of item 2.
+`trace_external_footprint_first` returns `polygon_pdf_pts` and `bbox_pdf_pts` in visible (rotated) page space. `refine_external_footprint_against_wall_ink` and `bound_native_drawings_to_footprint`, as `tools/run_original_footprint_first.py` calls them, compare those with `page.get_drawings()` rows in the unrotated space. On the 8 candidate pages of one rotated original (29 of its 31 pages are rotated 90 degrees) the scoped window selects 19,459 rows in total, against 49,836 with the polygon derotated; only 9,162 rows are in both, and three pages share no row at all. I did not change that chain here: it alters which native rows reach the bounded room tracing and needs its own change with parity on rotated sheets. It is the natural next step of item 2.
 
 ## 8. Promotion path
 
