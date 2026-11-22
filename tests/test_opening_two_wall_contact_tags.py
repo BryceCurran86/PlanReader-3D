@@ -331,3 +331,32 @@ def test_original_chord_source_receipts_reject_numeric_coercion():
         assert out.reason == "source_chord_receipt_invalid", (field, malformed)
         assert out.wall_section_ids == ()
         assert out.measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad", (True, "10", None, float("nan"), float("inf")))
+def test_native_wall_end_coordinates_reject_invalid_receipts(bad):
+    """Malformed native endpoints cannot become two-wall source evidence."""
+    class NativePoint:
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+    def stroke(a, b):
+        return {"fill": None, "items": [("l", a, b)]}
+
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (2,),
+    }
+    drawings = (
+        stroke(NativePoint(0., 0.), NativePoint(bad, 0.)),
+        stroke(NativePoint(12., 0.), NativePoint(20., 0.)),
+        stroke(NativePoint(30., 0.), NativePoint(40., 0.)),
+    )
+    result = tag_native_segmented_doorway_chords(drawings, (chord,), scope=SCOPE)[0]
+    assert result.status == "UNRESOLVED"
+    assert result.measurement_authorized is False
+    assert not result.wall_section_ids
