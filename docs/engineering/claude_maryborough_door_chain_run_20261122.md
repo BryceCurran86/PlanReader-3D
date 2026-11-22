@@ -1,6 +1,6 @@
 # Maryborough door chain run: first failing gate per door (22 Nov 2026)
 
-Branch `claude/interior-door-two-wall-tags-20261121`. Original: Maryborough architectural set, SHA prefix `b1be5353` (31 pages, every page rotated 90 degrees, no layer names). Counts only; no coordinates or drawing content. Shadow only: nothing here is wired, issued, sealed or scored. The owner asked (22 Nov, "Yes, run it") to run the door chain on Maryborough with heads from the A600 door schedule.
+Branch `claude/interior-door-two-wall-tags-20261121`. Original: Maryborough architectural set, SHA prefix `b1be5353` (31 pages, 29 of them rotated 90 degrees and the last two upright, no layer names). Counts only; no coordinates or drawing content. Shadow only: nothing here is wired, issued, sealed or scored. The owner asked (22 Nov, "Yes, run it") to run the door chain on Maryborough with heads from the A600 door schedule.
 
 ## 1. What the drawings say about identity and size
 
