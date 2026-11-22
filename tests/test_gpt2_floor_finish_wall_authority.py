@@ -51,6 +51,14 @@ class FloorFinishWallAuthorityTests(unittest.TestCase):
         result = self.failure(room("w1"), {"w1": wall(role="external_wall")})
         self.assertEqual(result[0], "floor_finish_bounding_wall_not_finished_face")
 
+    def test_duplicate_boundary_wall_identity_abstains(self):
+        result = self.failure(room("w1", "w1"), {"w1": wall()})
+        self.assertEqual(result[0], "floor_finish_bounding_wall_identity_unresolved")
+
+    def test_blank_boundary_wall_identity_abstains(self):
+        result = self.failure(room(" "), {" ": wall(identity=" ")})
+        self.assertEqual(result[0], "floor_finish_bounding_wall_identity_unresolved")
+
     def test_authenticated_finished_face_passes(self):
         self.assertIsNone(self.failure(room("w1"), {"w1": wall()}))
 
