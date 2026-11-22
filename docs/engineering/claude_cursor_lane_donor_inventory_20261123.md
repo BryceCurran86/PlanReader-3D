@@ -78,3 +78,10 @@ Open PRs owned by others that this lane consumes and does not edit: #4638 (two-w
 ## 7. Benchmark observations that must not influence implementation
 
 The numbers quoted on the hub (zero of 28 doors customer-ready, nine swing witnesses with five two-wall tags, Lot16 page 3 abstaining, seven protected IDs not retained by #4646) are failure-mode observations only. No threshold, tolerance or rule in this plan is derived from them, from a filename, a project name or an expected quantity.
+
+## 8. Update after steps 1 and 2 (23 Nov 2026, later)
+
+- Step 1 is done: the door branch is draft PR #4649 (head `16c743941`, stacked on #4638).
+- Step 2 changed: #4573 was not ported verbatim. Draft PR #4650 adds a shadow native-edge support check and a default-off flag instead; its note `docs/engineering/claude_footprint_native_edge_support_20261123.md` holds the measurements. The donor guard compared visible-space polygons with unrotated native rows on rotated sheets, vetoed on missing evidence and ignored filled strips.
+- New finding for item 2, not fixed: the footprint polygon is in visible page space, while `refine_external_footprint_against_wall_ink` and `bound_native_drawings_to_footprint`, as `tools/run_original_footprint_first.py` calls them, compare it with unrotated native rows. On the 8 candidate pages of one rotated original the scoped window selects 19,459 rows against 49,836 when derotated. Proposed next change: derotate in that chain, with parity on rotated sheets. It becomes a step after step 2 in section 5.
+- The hub audit 7082492417 is already reflected in section 6 (producer ownership of the opening-support functions).
