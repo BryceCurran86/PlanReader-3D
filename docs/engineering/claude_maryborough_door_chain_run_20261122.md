@@ -26,3 +26,10 @@ Result: **0 of 28 doors compile to a ready row.** Nothing contradicts a door; th
 2. A source-owned door-tag association (tag to symbol) that does not rely on nearest: for example a tag-to-symbol rule with a stated, scale-relative tolerance and retained ambiguity, registered across A110, the insets and the schedule (GPT2's schedule and plan identity item).
 3. A bounded-viewport path for the dark-painted wall and swing detection, so A110 and A500 give door closures without exceeding the 20,000-primitive cap (wall and ring topology lane).
 4. The owner's base-level convention for slab set-down documents (finished floor unchanged under a topping, ramps and steps as the only finished-level changes), so the level proof can use the structural slab datum and set-down vocabulary instead of an FFL statement.
+
+## 4. Update (same day): pages 23 and 24
+
+- **A500 (page 24) runs once it is bounded to the amenity plan.** With a viewport over the plan inset (11,015 of 20,334 rows, under the cap) the dark-painted ring gives 3 rings and 12 closures (8 stroke closures, 4 swing doorways). The wall-end core tags 1 of the 4 (`STRAIGHT_GAP`); the other 3 stop at `wall_ends_not_collinear_across_the_gap` (2) and `opening_edge_does_not_meet_wall_end` (1). The tiled canonical preview path finds no door closure on this page (3 rings, 5 stroke closures). Door code by containment: 0.
+- **Totals for the amenity insets A500 to A503: 9 swing doorways found, 5 tagged.**
+- **A300 (page 23, wall sections)** is three 1:20 sections of the exterior walls. It names one door, D01 (the automatic sliding door at the sales shopfront), and carries figured levels (ground 15.50, top of glazing and building ceiling 18.50, top of parapet 19.99). The existing elevation witness finds no self-calibrating datum view on it (0 views), as on A500 to A503. No interior door, nothing to tag; it is a possible vertical source for D01 only.
+
