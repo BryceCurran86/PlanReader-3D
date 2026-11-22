@@ -13,6 +13,7 @@ Structural slabs remain a separate canonical object family.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Optional
@@ -141,6 +142,11 @@ def floor_finish_boundary_wall_failure(
         getattr(room, "canonical_bounding_wall_ids", ())
         or getattr(room, "bounding_wall_ids", ())
     )
+    if not boundary_ids:
+        return (
+            "floor_finish_bounding_wall_authority_incomplete",
+            f"floor-finish bounding wall authority incomplete: {quantity_id}",
+        )
     for wall_id in boundary_ids:
         wall = walls_by_id.get(wall_id)
         if wall is None:
@@ -169,12 +175,12 @@ def quarantine_unverified_floor_finish_boundaries(
     walls_by_id: Mapping[str, LiveCanonicalWallObject],
 ) -> tuple[QuantityEvidence, ...]:
     """Withhold live floor finishes that cannot pass the owned wall-face check."""
-    if not quantities or not rooms or not walls_by_id:
+    if not quantities:
         return tuple(quantities)
     floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
+    floor_owner_counts = Counter(floor.canonical_floor_id for floor in floors)
     rooms_by_id = {room.canonical_room_id: room for room in rooms}
-    if len(floors_by_id) != len(floors) or len(rooms_by_id) != len(rooms):
-        return tuple(quantities)
+    room_owner_counts = Counter(room.canonical_room_id for room in rooms)
 
     result = []
     for quantity in quantities:
@@ -184,20 +190,31 @@ def quarantine_unverified_floor_finish_boundaries(
             or quantity.abstained
             or quantity.value is None
             or quantity.blocking_reasons
-            or len(quantity.input_entity_ids) != 1
         ):
             result.append(quantity)
             continue
-        floor = floors_by_id.get(quantity.input_entity_ids[0])
-        room = rooms_by_id.get(floor.room_entity_id) if floor is not None else None
-        failure = (
-            floor_finish_boundary_wall_failure(room, walls_by_id, quantity_id=quantity.quantity_id)
-            if room is not None else None
-        )
-        if failure is None:
+        floor_id = quantity.input_entity_ids[0] if len(quantity.input_entity_ids) == 1 else ""
+        floor = floors_by_id.get(floor_id)
+        room_id = floor.room_entity_id if floor is not None else ""
+        room = rooms_by_id.get(room_id) if room_id else None
+        if not floor_id:
+            reason = "floor_finish_canonical_floor_scope_missing"
+        elif floor is None:
+            reason = "floor_finish_canonical_floor_owner_missing"
+        elif floor_owner_counts[floor_id] > 1:
+            reason = "floor_finish_canonical_floor_owner_ambiguous"
+        elif room is None:
+            reason = "floor_finish_canonical_room_owner_missing"
+        elif room_owner_counts[room_id] > 1:
+            reason = "floor_finish_canonical_room_owner_ambiguous"
+        else:
+            failure = floor_finish_boundary_wall_failure(
+                room, walls_by_id, quantity_id=quantity.quantity_id,
+            )
+            reason = failure[0] if failure is not None else None
+        if reason is None:
             result.append(quantity)
         else:
-            reason, _ = failure
             result.append(replace(
                 quantity,
                 value=None,

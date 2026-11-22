@@ -112,6 +112,16 @@ def build_live_floor_finish_area_source_traces(
             "floor finish source workspace_id must be an original positive integer"
         )
 
+    # Only numeric finishes need a unique floor owner. Abstained quantities
+    # still participate in the original quantity and material-evidence census.
+    claimed_floor_ids = {
+        _clean(quantity.input_entity_ids[0])
+        for quantity in claim.floor_finish_quantity_evidence
+        if isinstance(quantity, QuantityEvidence)
+        and not quantity.abstained
+        and quantity.value is not None
+        and len(quantity.input_entity_ids) == 1
+    }
     floors_by_id: dict[str, LiveCanonicalFloorSurfaceObject] = {}
     for floor in claim.canonical_floors:
         if type(floor) is not LiveCanonicalFloorSurfaceObject:
@@ -119,7 +129,7 @@ def build_live_floor_finish_area_source_traces(
                 "canonical_floors must contain LiveCanonicalFloorSurfaceObject"
             )
         floor_id = _clean(floor.canonical_floor_id)
-        if not floor_id:
+        if not floor_id or floor_id not in claimed_floor_ids:
             continue
         if floor_id in floors_by_id:
             raise SourceClosedRunConflictError(
