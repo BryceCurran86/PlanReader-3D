@@ -177,9 +177,20 @@ def tag_opening_to_two_wall_sections(
     ub = vb[0] / nb, vb[1] / nb
     cross = abs(ua[0] * ub[1] - ua[1] * ub[0])
     angular = cross > math.sin(math.radians(5))
-    joined = math.dist(first_pt, second_pt) <= _SOURCE_ENDPOINT_TOL_PT
+    gap = (second_pt[0] - first_pt[0], second_pt[1] - first_pt[1])
+    gap_length = math.hypot(*gap)
+    if not math.isfinite(gap_length):
+        return blocked("opening_contact_geometry_invalid", first_ids, second_ids)
+    joined = gap_length <= _SOURCE_ENDPOINT_TOL_PT
     if joined and not angular:
         return blocked("coincident_collinear_contact_not_an_opening", first_ids, second_ids)
+    if not angular:
+        gap_x, gap_y = (gap[0] / gap_length, gap[1] / gap_length)
+        # For a straight aperture both wall ends must run away from its gap.
+        # A native endpoint inside a wall that continues through the aperture
+        # is not a valid contact for that aperture.
+        if ua[0] * gap_x + ua[1] * gap_y >= 0 or ub[0] * gap_x + ub[1] * gap_y <= 0:
+            return blocked("straight_wall_section_runs_into_opening", first_ids, second_ids)
     shape = ("WALL_JUNCTION" if joined else
              "ANGLED_OPENING" if angular else "STRAIGHT_GAP")
     return TwoWallOpeningTag(

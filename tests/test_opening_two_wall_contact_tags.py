@@ -51,6 +51,35 @@ def test_opening_tagged_to_two_distinct_traced_wall_sections():
     assert tag.measurement_authorized is False
 
 
+@pytest.mark.parametrize("first_runs_in, second_runs_in", (
+    (True, False), (False, True), (True, True),
+))
+@pytest.mark.parametrize("reverse_contacts", (False, True))
+def test_straight_opening_rejects_wall_sections_that_run_into_gap(
+    first_runs_in, second_runs_in, reverse_contacts,
+):
+    door = opening()
+    first, second = two_straight()
+    if first_runs_in:
+        first = replace(first, start_pdf_pts=(18., 0.))
+    if second_runs_in:
+        second = replace(second, end_pdf_pts=(2., 0.))
+    if reverse_contacts:
+        door = replace(door, first=door.second, second=door.first)
+
+    tag = tag_opening_to_two_wall_sections(door, (second, first))
+
+    assert tag.status == "UNRESOLVED"
+    assert tag.reason == "straight_wall_section_runs_into_opening"
+    assert tag.wall_section_ids == ()
+    assert tag.candidate_sections_first == (
+        second.section_id if reverse_contacts else first.section_id,
+    )
+    assert tag.candidate_sections_second == (
+        first.section_id if reverse_contacts else second.section_id,
+    )
+
+
 def test_one_opening_at_intersection_of_two_perpendicular_traced_walls():
     segments = (
         wall("wall-heading-east", (100,), (-10., 0.), (0., 0.)),
