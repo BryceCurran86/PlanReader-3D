@@ -360,3 +360,23 @@ def test_native_wall_end_coordinates_reject_invalid_receipts(bad):
     assert result.status == "UNRESOLVED"
     assert result.measurement_authorized is False
     assert not result.wall_section_ids
+
+
+@pytest.mark.parametrize("field", ("door_interval_pdf_pts", "wall_band_pdf_pts"))
+def test_oversized_native_chord_integer_fails_closed_without_crashing(field):
+    """Huge native integer receipts cannot overflow the source adapter."""
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (2,),
+    }
+    chord[field] = (10 ** 1000, 10 ** 1001)
+    result = tag_native_segmented_doorway_chords((), (chord,), scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_receipt_invalid"
+    assert result[0].wall_section_ids == ()
+    assert result[0].measurement_authorized is False
