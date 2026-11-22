@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import dataclasses
 import json
 import math
 import random
@@ -37,6 +38,7 @@ from pb_door_base_level_scope_shadow import (
     is_level_statement,
     level_marks,
     prove_door_bases,
+    statement_corroborated,
 )
 from pb_door_row_evidence_compiler_shadow import (
     SOURCE_PLAN_LABEL,
@@ -58,15 +60,23 @@ def square(x0, y0, x1, y1):
     return ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
 
 
-def words(text, x, y, *, size=10.0):
+def words(text, x, y, *, size=10.0, corroborated=True, line=0):
     out = []
     for i, token in enumerate(text.split()):
-        out.append(TextWord(token, (x + i * size * 4, y, x + i * size * 4 + size * 3, y + size)))
+        out.append(TextWord(token, (x + i * size * 4, y, x + i * size * 4 + size * 3, y + size), corroborated, line))
     return tuple(out)
 
 
 def block(page, block_id, text, x, y, *, corroborated=True):
-    return TextBlock(page, block_id, words(text, x, y), corroborated, (f"obs-{page}-{block_id}",))
+    return TextBlock(page, block_id, words(text, x, y, corroborated=corroborated), (f"obs-{page}-{block_id}",))
+
+
+def W(text, bbox, corroborated=True, line=0):
+    return TextWord(text, bbox, corroborated, line)
+
+
+def B(page, block_id, *ws):
+    return TextBlock(page, block_id, tuple(ws), (f"obs-{page}-{block_id}",))
 
 
 # Rooms A | B share the closure c1 (door d1); room C | D share c2 (door d2); E is a lone room at c3 (an outside door).
@@ -165,21 +175,21 @@ def test_a_missing_plan_page_text_abstains():
 
 
 def test_raw_statement_or_raw_mark_text_never_verifies():
-    raw_statement = TextBlock(SHEET, "s1", STATEMENT.words, False, ("obs-6-s1",))
+    raw_statement = block(SHEET, "s1", "SERVICE SLAB STEPPED DOWN 100mm FROM FFL", 500, 500, corroborated=False)
     assert door(prove(blocks=(raw_statement, SHEET_MARK, PLAN_MARK_OUTSIDE, PLAN_TEXT)), "d1").reason == GATE_TEXT_RAW
-    raw_mark = TextBlock(PLAN, "p1", PLAN_MARK_OUTSIDE.words, False, ("obs-3-p1",))
+    raw_mark = block(PLAN, "p1", "100 STEP DOWN", 700, 700, corroborated=False)
     assert door(prove(blocks=(STATEMENT, SHEET_MARK, raw_mark, PLAN_TEXT)), "d1").reason == GATE_TEXT_RAW
-    raw_sheet_mark = TextBlock(SHEET, "m1", SHEET_MARK.words, False, ("obs-6-m1",))
+    raw_sheet_mark = block(SHEET, "m1", "100 STEP", 600, 600, corroborated=False)
     assert door(prove(blocks=(STATEMENT, raw_sheet_mark, PLAN_MARK_OUTSIDE, PLAN_TEXT)), "d1").reason == GATE_TEXT_RAW
 
 
 def test_a_word_the_text_authority_could_not_read_inside_a_room_blocks_that_room():
-    unreadable_inside = TextBlock(PLAN, "t1", words("L1VING", 20, 20), False, ("obs-3-t1",))
+    unreadable_inside = block(PLAN, "t1", "L1VING", 20, 20, corroborated=False)
     review = prove(blocks=(STATEMENT, SHEET_MARK, PLAN_MARK_OUTSIDE, unreadable_inside))
     assert door(review, "d1").reason == GATE_TEXT_RAW and door(review, "d2").verified    # d2's rooms hold no such word
-    unreadable_far = TextBlock(PLAN, "t1", words("L1VING", 800, 800), False, ("obs-3-t1",))
+    unreadable_far = block(PLAN, "t1", "L1VING", 800, 800, corroborated=False)
     assert door(prove(blocks=(STATEMENT, SHEET_MARK, PLAN_MARK_OUTSIDE, unreadable_far)), "d1").verified
-    unreadable_on_other_sheet = TextBlock(SHEET, "t9", words("L1VING", 20, 20), False)
+    unreadable_on_other_sheet = block(SHEET, "t9", "L1VING", 20, 20, corroborated=False)
     assert door(prove(blocks=BLOCKS + (unreadable_on_other_sheet,)), "d1").verified   # another sheet's text is not this plan
 
 
@@ -222,11 +232,10 @@ def test_a_mark_in_one_room_blocks_only_the_doors_that_open_into_it():
 
 def test_a_mark_on_a_room_boundary_counts_as_inside():
     # word centre exactly on the shared wall x = 100
-    word = TextWord("STEP", (95.0, 40.0, 105.0, 50.0))
-    on_wall = TextBlock(PLAN, "p9", (word,), True, ("obs-3-p9",))
+    on_wall = B(PLAN, "p9", W("STEP", (95.0, 40.0, 105.0, 50.0)))
     sheet = block(SHEET, "m2", "50 STEP", 650, 650)
     assert door(prove(blocks=BLOCKS + (on_wall, sheet)), "d1").reason == GATE_ROOM_MARKED
-    just_out = TextBlock(PLAN, "p9", (TextWord("STEP", (-12.0, 40.0, -0.002, 50.0)),), True, ("obs-3-p9",))
+    just_out = B(PLAN, "p9", W("STEP", (-12.0, 40.0, -0.002, 50.0)))
     assert door(prove(blocks=BLOCKS + (just_out, sheet)), "d1").verified
 
 
@@ -303,9 +312,14 @@ def test_invalid_inputs_fail_closed_instead_of_being_dropped():
         dict(rooms=(RoomRegion("room-a", ((0, 0), (1, 0)), ("c1",)),)),
         dict(rooms=nan_room),
         dict(blocks=BLOCKS + ("not a block",)),
-        dict(blocks=(TextBlock(PLAN, "b", (TextWord("STEP", (0, 0, 1)),), True),)),
-        dict(blocks=(TextBlock("", "b", (), True),)),
-        dict(blocks=(TextBlock(PLAN, "b", (), "yes"),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (0, 0, 1))),)),
+        dict(blocks=(B("", "b"),)),
+        dict(blocks=(TextBlock(PLAN, 5, (W("STEP", (0, 0, 1, 1)),), ()),)),
+        dict(blocks=(TextBlock(PLAN, None, (W("STEP", (0, 0, 1, 1)),), ()),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (0, 0, 1, 1), corroborated="yes")),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (0, 0, 1, 1), line="0")),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (0, 0, 1, 1), line=True)),)),
+        dict(blocks=(TextBlock(PLAN, "b", [W("STEP", (0, 0, 1, 1))], ()),)),
     ]
     for case in cases:
         review = prove(**case)
@@ -377,8 +391,9 @@ def transform_scene_blocks(blocks, fn):
         ws = []
         for w in b.words:
             a, c = fn(w.bbox[0], w.bbox[1]), fn(w.bbox[2], w.bbox[3])
-            ws.append(TextWord(w.text, (min(a[0], c[0]), min(a[1], c[1]), max(a[0], c[0]), max(a[1], c[1]))))
-        out.append(TextBlock(b.page_id, b.block_id, tuple(ws), b.corroborated, b.observation_ids))
+            ws.append(TextWord(w.text, (min(a[0], c[0]), min(a[1], c[1]), max(a[0], c[0]), max(a[1], c[1])),
+                               w.corroborated, w.line))
+        out.append(TextBlock(b.page_id, b.block_id, tuple(ws), b.observation_ids))
     return tuple(out)
 
 
@@ -413,33 +428,31 @@ def test_input_order_replay_unrelated_content_and_no_mutation():
 def test_a_mark_on_any_edge_of_a_room_counts_as_inside_even_with_one_room_to_test():
     sheet = block(SHEET, "m2", "50 STEP", 650, 650)
     for centre_x, centre_y in ((200.0, 50.0), (150.0, 0.0), (150.0, 100.0), (0.0, 50.0), (0.0, 0.0), (200.0, 100.0)):
-        word = TextWord("STEP", (centre_x - 5, centre_y - 5, centre_x + 5, centre_y + 5))
-        on_edge = TextBlock(PLAN, "p9", (word,), True, ("obs-3-p9",))
+        on_edge = B(PLAN, "p9", W("STEP", (centre_x - 5, centre_y - 5, centre_x + 5, centre_y + 5)))
         assert door(prove(blocks=BLOCKS + (on_edge, sheet)), "d1").reason == GATE_ROOM_MARKED, (centre_x, centre_y)
 
 
 def test_a_point_on_the_extension_of_an_edge_line_is_not_on_the_edge():
     sheet = block(SHEET, "m2", "50 STEP", 650, 650)
     for centre_x, centre_y in ((350.0, 200.0), (350.0, 300.0), (-50.0, 250.0), (250.0, 250.0)):
-        word = TextWord("STEP", (centre_x - 5, centre_y - 5, centre_x + 5, centre_y + 5))
-        beside = TextBlock(PLAN, "p9", (word,), True, ("obs-3-p9",))
+        beside = B(PLAN, "p9", W("STEP", (centre_x - 5, centre_y - 5, centre_x + 5, centre_y + 5)))
         assert door(prove(blocks=BLOCKS + (beside, sheet)), "d2").verified, (centre_x, centre_y)
 
 
 def test_a_mark_is_placed_by_the_centre_of_its_box_not_by_a_corner():
     sheet = block(SHEET, "m2", "50 STEP", 650, 650)
-    straddling_left = TextBlock(PLAN, "p9", (TextWord("STEP", (-5.0, 40.0, 25.0, 50.0)),), True, ("obs-3-p9",))   # centre (10, 45)
+    straddling_left = B(PLAN, "p9", W("STEP", (-5.0, 40.0, 25.0, 50.0)))   # centre (10, 45)
     assert door(prove(blocks=BLOCKS + (straddling_left, sheet)), "d1").reason == GATE_ROOM_MARKED
-    straddling_top = TextBlock(PLAN, "p9", (TextWord("STEP", (40.0, 95.0, 70.0, 125.0)),), True, ("obs-3-p9",))    # centre (55, 110)
+    straddling_top = B(PLAN, "p9", W("STEP", (40.0, 95.0, 70.0, 125.0)))    # centre (55, 110)
     assert door(prove(blocks=BLOCKS + (straddling_top, sheet)), "d1").verified
-    straddling_out = TextBlock(PLAN, "p9", (TextWord("STEP", (-25.0, 40.0, 5.0, 50.0)),), True, ("obs-3-p9",))    # centre (-10, 45)
+    straddling_out = B(PLAN, "p9", W("STEP", (-25.0, 40.0, 5.0, 50.0)))    # centre (-10, 45)
     assert door(prove(blocks=BLOCKS + (straddling_out, sheet)), "d1").verified
 
 
 def test_more_invalid_inputs_fail_closed():
     for case in (
-        dict(blocks=(TextBlock(PLAN, "b", (TextWord("STEP", (0.0, 0.0, float("nan"), 1.0)),), True),)),
-        dict(blocks=(TextBlock(PLAN, "b", (TextWord("STEP", (True, 0.0, 1.0, 1.0)),), True),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (0.0, 0.0, float("nan"), 1.0))),)),
+        dict(blocks=(B(PLAN, "b", W("STEP", (True, 0.0, 1.0, 1.0))),)),
         dict(rooms=(RoomRegion("room-a", ((0, 0), (1, 0), (True, 1)), ("c1",)),)),
         dict(closures=(DoorClosure("c1", (True,)),)),
         dict(closures=(DoorClosure("c1", (1.0,)),)),
@@ -469,7 +482,7 @@ def test_marks_of_other_sheets_never_land_in_the_plans_rooms():
 
 
 def test_an_unreadable_word_in_either_room_blocks_and_only_verified_doors_carry_evidence():
-    in_second_room = TextBlock(PLAN, "t1", words("L1VING", 140, 20), False, ("obs-3-t1",))     # inside room-b only
+    in_second_room = block(PLAN, "t1", "L1VING", 140, 20, corroborated=False)     # inside room-b only
     review = prove(blocks=(STATEMENT, SHEET_MARK, PLAN_MARK_OUTSIDE, in_second_room))
     assert door(review, "d1").reason == GATE_TEXT_RAW
     good = prove()
@@ -489,6 +502,61 @@ def test_competing_closures_report_no_closure_id():
     two = DoorTopologyInput("d1", (11, 21))
     d1 = door(prove(doors=(two,)), "d1")
     assert d1.closure_id is None and d1.room_ids == ()
+
+
+def multi_line_statement(*, unverified_word=None, corroborate_all=True):
+    """A producer block that holds the real statement on lines 0 to 2 and an UNRELATED sentence on lines 3 to 4."""
+    spec = [
+        ("SERVICE", 0), ("SLAB", 0), ("STEPPED", 1), ("DOWN", 1), ("100mm", 2), ("FROM", 2), ("FFL", 2),
+        ("NO", 3), ("FALL", 3), ("TO", 3), ("FLOOR", 3), ("WASTES", 4), ("AS", 4), ("THE", 4),
+    ]
+    ws = []
+    for i, (text, line) in enumerate(spec):
+        ok = corroborate_all and text != unverified_word
+        ws.append(TextWord(text, (500.0 + i * 40, 500.0 + line * 12, 530.0 + i * 40, 510.0 + line * 12), ok, line))
+    return TextBlock(SHEET, "s1", tuple(ws), ("obs-6-s1",))
+
+
+def test_a_garbled_word_in_an_unrelated_sentence_of_the_same_block_does_not_unverify_the_statement():
+    garbled_elsewhere = multi_line_statement(unverified_word="TO")                  # line 3: another sentence
+    assert is_level_statement(garbled_elsewhere) and statement_corroborated(garbled_elsewhere)
+    review = prove(blocks=(garbled_elsewhere, SHEET_MARK, PLAN_MARK_OUTSIDE, PLAN_TEXT))
+    assert review.reason_codes == () and door(review, "d1").verified
+
+
+def test_a_garbled_word_on_a_line_that_carries_the_statement_does_unverify_it():
+    for word in ("STEPPED", "DOWN", "100mm", "FROM", "FFL", "SERVICE", "SLAB"):
+        ws = multi_line_statement(unverified_word=word)
+        carries = word not in ("SERVICE", "SLAB")          # lines 1 and 2 carry the step-like word and the datum word
+        assert statement_corroborated(ws) is (not carries), word
+    unverified = multi_line_statement(unverified_word="FFL")
+    review = prove(blocks=(unverified, SHEET_MARK, PLAN_MARK_OUTSIDE, PLAN_TEXT))
+    assert review.reason_codes == (GATE_TEXT_RAW,) and door(review, "d1").reason == GATE_TEXT_RAW
+
+
+def test_a_mark_is_corroborated_by_its_own_word_not_by_its_neighbours():
+    own_unverified = B(PLAN, "p1", W("100", (700, 700, 730, 710)), W("STEP", (740, 700, 770, 710), False), W("DOWN", (780, 700, 810, 710)))
+    assert door(prove(blocks=(STATEMENT, SHEET_MARK, own_unverified, PLAN_TEXT)), "d1").reason == GATE_TEXT_RAW
+    neighbours_unverified = B(PLAN, "p1", W("100", (700, 700, 730, 710), False), W("STEP", (740, 700, 770, 710)),
+                              W("DOWN", (780, 700, 810, 710), False))
+    assert door(prove(blocks=(STATEMENT, SHEET_MARK, neighbours_unverified, PLAN_TEXT)), "d1").verified
+    assert level_marks([neighbours_unverified])[0].corroborated is True
+    assert level_marks([own_unverified])[0].corroborated is False
+
+
+def test_unreadable_words_are_judged_one_by_one_by_where_they_sit():
+    mixed = B(PLAN, "t1", W("LIVING", (20, 20, 50, 30), True), W("L1VING", (300, 800, 330, 810), False))   # bad word far away
+    assert door(prove(blocks=(STATEMENT, SHEET_MARK, PLAN_MARK_OUTSIDE, mixed)), "d1").verified
+    mixed_inside = B(PLAN, "t1", W("LIVING", (300, 800, 330, 810), True), W("L1VING", (20, 20, 50, 30), False))   # bad word in room-a
+    assert door(prove(blocks=(STATEMENT, SHEET_MARK, PLAN_MARK_OUTSIDE, mixed_inside)), "d1").reason == GATE_TEXT_RAW
+
+
+def test_words_must_say_their_trust_and_their_line():
+    for bad_word in (TextWord("STEP", (0, 0, 1, 1), None, 0), TextWord("STEP", (0, 0, 1, 1), True, None),
+                     TextWord("STEP", (0, 0, 1, 1), True, 1.5)):
+        review = prove(blocks=BLOCKS + (B(PLAN, "zz", bad_word),))
+        assert review.reason_codes == (GATE_INPUT_INVALID,), bad_word
+    assert "corroborated" in TextWord.__dataclass_fields__ and TextWord.__dataclass_fields__["corroborated"].default is dataclasses.MISSING
 
 
 # ---------------------------------------------------------------------------------------------------------------------

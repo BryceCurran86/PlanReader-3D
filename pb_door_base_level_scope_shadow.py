@@ -13,8 +13,9 @@ into a proof, and abstains when any link of it is missing:
 3. no level-change mark on the plan page lies inside either adjoining room;
 4. every sheet that carries such a statement agrees with the plan on HOW MANY level-change marks exist (a stepped area
    the plan does not mark would make the absence meaningless);
-5. every text block those steps rest on is text-integrity corroborated (raw text never verifies), and no word the
-   text-integrity authority could not corroborate lies inside either adjoining room (it could hide a level note).
+5. the words those steps rest on are text-integrity corroborated (raw text never verifies): the printed lines that carry the
+   statement, and each mark's own word; and no word the authority could not corroborate lies inside either adjoining room
+   (it could hide a level note). Trust is judged per word and per line, because a producer's text blocks are arbitrary.
 
 It is a candidate proof for the authority-promotion review, never an authority: it writes no quantity, host, kind or
 frame, and every authority flag is False by construction. Nothing is chosen by proximity: a door that matches two
@@ -101,18 +102,23 @@ def _finite(*values: object) -> bool:
 
 @dataclass(frozen=True)
 class TextWord:
+    """One printed word: its text, its box, the printed line it sits on and whether the text-integrity authority
+    corroborated it. There is no default trust: the caller must say."""
+
     text: str
     bbox: Rect
+    corroborated: bool
+    line: int
 
 
 @dataclass(frozen=True)
 class TextBlock:
-    """One printed text block of one page: its words in reading order and whether every word is corroborated."""
+    """One printed text block of one page: its words in reading order. The producer's block boundaries are arbitrary
+    (two unrelated sentences can share one), so trust is judged per word and per line, never per block."""
 
     page_id: str
     block_id: str
     words: tuple[TextWord, ...]
-    corroborated: bool
     observation_ids: tuple[str, ...] = ()
 
 
@@ -263,15 +269,27 @@ def is_level_statement(block: TextBlock) -> bool:
     return any(STATEMENT_LEVEL_WORD.match(t) for t in tokens) and any(DATUM_WORD.match(t) for t in tokens)
 
 
+def statement_corroborated(block: TextBlock) -> bool:
+    """A statement is corroborated when every word on the printed lines that carry its step-like word and its datum word
+    is. A garbled word in a neighbouring sentence of the same producer block does not change what the statement says."""
+    tokens = _tokens(block)
+    lines = {
+        w.line for w, tok in zip(block.words, tokens)
+        if STATEMENT_LEVEL_WORD.match(tok) or DATUM_WORD.match(tok)
+    }
+    return all(w.corroborated for w in block.words if w.line in lines)
+
+
 def level_marks(blocks: Iterable[TextBlock]) -> tuple[LevelMark, ...]:
-    """Every level-change word in a block that is not itself a statement, in a deterministic order."""
+    """Every level-change word in a block that is not itself a statement, in a deterministic order. A mark is
+    corroborated when ITS OWN word is."""
     marks: list[LevelMark] = []
     for block in blocks:
         if is_level_statement(block):
             continue
         for word, token in zip(block.words, _tokens(block)):
             if LEVEL_CHANGE_WORD.match(token):
-                marks.append(LevelMark(block.page_id, block.block_id, token, word.bbox, block.corroborated,
+                marks.append(LevelMark(block.page_id, block.block_id, token, word.bbox, word.corroborated,
                                        tuple(block.observation_ids)))
     return tuple(sorted(marks, key=lambda m: (m.page_id, m.block_id, m.bbox, m.token)))
 
@@ -279,11 +297,12 @@ def level_marks(blocks: Iterable[TextBlock]) -> tuple[LevelMark, ...]:
 def _blocks_valid(blocks: Sequence[TextBlock]) -> bool:
     for block in blocks:
         if not (isinstance(block, TextBlock) and type(block.page_id) is str and block.page_id.strip()
-                and type(block.block_id) is str and type(block.corroborated) is bool):
+                and type(block.block_id) is str and type(block.words) is tuple):
             return False
         for word in block.words:
             if not (isinstance(word, TextWord) and type(word.text) is str and isinstance(word.bbox, tuple)
-                    and len(word.bbox) == 4 and _finite(*word.bbox)):
+                    and len(word.bbox) == 4 and _finite(*word.bbox) and type(word.corroborated) is bool
+                    and type(word.line) is int):
                 return False
     return True
 
@@ -357,7 +376,7 @@ def prove_door_bases(
     # words the text-integrity authority could not corroborate: they could hide a level note, so a room that holds one
     # cannot be proven free of marks
     unverified_centres = [
-        _bbox_centre(w.bbox) for b in blocks if b.page_id == plan_page_id and not b.corroborated for w in b.words
+        _bbox_centre(w.bbox) for b in blocks if b.page_id == plan_page_id for w in b.words if not w.corroborated
     ]
 
     # document-level gates: the same answer for every door
@@ -366,7 +385,7 @@ def prove_door_bases(
         document_gate = GATE_NO_PLAN_TEXT
     elif not statements:
         document_gate = GATE_NO_STATEMENT
-    elif any(not b.corroborated for b in statements) or any(not m.corroborated for m in marks):
+    elif any(not statement_corroborated(b) for b in statements) or any(not m.corroborated for m in marks):
         document_gate = GATE_TEXT_RAW
     elif any(count > 0 and count != len(plan_marks) for _, count in sheet_counts):
         document_gate = GATE_NOT_RECONCILED
