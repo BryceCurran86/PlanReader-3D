@@ -64,8 +64,8 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
             blocking_reasons=reasons,
         )
 
-    def floor(self, room_id="room"):
-        return SimpleNamespace(canonical_floor_id="floor", room_entity_id=room_id)
+    def floor(self, room_id="room", resolved=True):
+        return SimpleNamespace(canonical_floor_id="floor", room_entity_id=room_id, physical_floor_surface_identity_resolved=resolved)
 
     def owned_room(self):
         return SimpleNamespace(canonical_room_id="room", canonical_bounding_wall_ids=("w1",), bounding_wall_ids=())
@@ -94,6 +94,18 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         out, = self.quarantine([self.candidate()], rooms=[self.owned_room(), self.owned_room()])
         self.assertTrue(out.abstained)
         self.assertIn("floor_finish_canonical_room_owner_ambiguous", out.blocking_reasons)
+
+    def test_unresolved_physical_floor_owner_abstains(self):
+        out, = self.quarantine([self.candidate()], floors=[self.floor(resolved=False)])
+        self.assertTrue(out.abstained)
+        self.assertIsNone(out.value)
+        self.assertIn("floor_finish_physical_floor_identity_unresolved", out.blocking_reasons)
+
+    def test_missing_physical_floor_authority_abstains(self):
+        floor = SimpleNamespace(canonical_floor_id="floor", room_entity_id="room")
+        out, = self.quarantine([self.candidate()], floors=[floor])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_physical_floor_identity_unresolved", out.blocking_reasons)
 
     def test_missing_room_owner_abstains(self):
         out, = self.quarantine([self.candidate()], rooms=[])
