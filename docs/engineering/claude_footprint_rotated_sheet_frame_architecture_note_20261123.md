@@ -54,3 +54,23 @@ The row counts above and the hub's quoted results are failure-mode evidence only
 2. The live extractor's page bounds (item 4): a separate PR with MAX's promotion review, or leave as is.
 3. Real /Rotate 180 and 270 sheets do not exist in the local corpus, so those two stay synthetic-only, as `pb_page_frame_shadow.py` requires until real files exist. Accept?
 4. The extra key on rotated traces: GPT1, whose #4647 writes the trace JSON, should confirm its writer tolerates it.
+
+## 8. Implementation results (23 Nov 2026)
+
+The design above was approved in chat and implemented as proposed (items 1 to 3), with these deviations and findings.
+
+**Deviations from the reviewed design**
+- `tools/run_native_exterior_path_ownership.py` needed a small edit the review did not list: edge records and span endpoints are now in native space on rotated traces, so the overlay maps them back to the displayed page before drawing.
+- A frame that is not an invertible map of six finite numbers is treated as invalid (the design said "six finite numbers"), and a rotated page whose frame cannot be read abstains in the tracer (`external_footprint_rotated_page_frame_unreadable`).
+
+**Replay on the local originals** (702 pages of 58 PDFs, main versus this change; counts only)
+- **Upright pages: unchanged.** 573 pages (258 candidates): the first-trace payload, the refine receipt and polygon, the bounded scope and the edge ownership are identical on all 573, and the frame key is present on none.
+- **Rotated pages: 129 pages, 35 candidates** (7 originals, all /Rotate 90). The frame is recorded on all 35 and the trace polygon is unchanged. The bounded scope selects different rows on all 35 (35,662 rows in total on main, 93,788 with the frame). Six pages move from CANDIDATE to ABSTAINED (`bounded_source_viewport_has_no_native_wall_ink`: with the window in the right place there is no native wall ink inside the footprint; inference: main's window had caught ink from elsewhere on the page) and one moves the other way.
+- **Edge ownership changes on 30 pages.** Contour edges bound to native wall ink rise from 11 to 233 (109 single paths plus 124 chains) and unmatched contour segments fall from 389 to 147; competing owners go from 0 to 3. The refine receipt changes on 7 pages.
+- Time per page stays under 3 s (2.2 s on main).
+
+**Tests.** 59 tests (page-rotation invariance at 0, 90, 180 and 270, round trips against PyMuPDF and `pb_page_frame_shadow`, invalid frames at every site, scale, order, collinear splitting, far content and page-size invariance, deterministic replay, no mutation); 25 of 25 single-line mutants killed; 484 related tests pass.
+
+**Still open (not changed here)**
+- The live extractor's `page_bounds_pdf_pts=page.rect`. The page-frame refusal in the inside-face stage wants the NATIVE extent, but `classify_native_path_role` (used by the native wall-role shadow) excludes rows in the bottom 18 percent of the page, which is a DISPLAY-space notion (the title block) applied to native y; there the right fix converts each row's rect to display space, not the bounds to native. The door-legend reader's legend-region search has the same mixed spaces. These need their own change; MAX owns the live writer.
+- The extra key on rotated traces also appears in the live extractor's `external_footprint_trace_live.traces`; MAX and GPT1 to confirm nothing hashes it.
