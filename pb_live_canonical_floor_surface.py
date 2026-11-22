@@ -210,6 +210,10 @@ def quarantine_unverified_floor_finish_boundaries(
             reason = "floor_finish_canonical_floor_owner_missing"
         elif floor_owner_counts[floor_id] > 1:
             reason = "floor_finish_canonical_floor_owner_ambiguous"
+        elif str(getattr(floor, "canonical_floor_id", "") or "") != str(floor_id):
+            reason = "floor_finish_canonical_floor_identity_mismatch"
+        elif getattr(floor, "physical_floor_surface_identity_resolved", None) is not True:
+            reason = "floor_finish_physical_floor_identity_unresolved"
         elif room is None:
             reason = "floor_finish_canonical_room_owner_missing"
         elif room_owner_counts[room_id] > 1:
