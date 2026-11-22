@@ -24,9 +24,14 @@ class ExternalFootprintTrace:
     page_drawings_examined: int = 0
     commercial_publishable: bool = False
     measurement_authorized: bool = False
+    # ``polygon_pdf_pts`` / ``bbox_pdf_pts`` come from the DISPLAYED raster, so on a rotated page they live in
+    # display space, while ``get_drawings()`` rows and ``get_text()`` words live in the page's NATIVE space.
+    # None means upright (the two spaces coincide). Otherwise the six floats of PyMuPDF's
+    # ``page.derotation_matrix``: display space -> native space.
+    page_derotation_matrix: tuple[float, float, float, float, float, float] | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "source_sha256": self.source_sha256,
             "page_index": self.page_index,
             "status": self.status,
@@ -38,6 +43,89 @@ class ExternalFootprintTrace:
             "commercial_publishable": False,
             "measurement_authorized": False,
         }
+        if self.page_derotation_matrix is not None:  # absent on an upright page: its output is unchanged
+            payload["page_derotation_matrix"] = list(self.page_derotation_matrix)
+        return payload
+
+
+Point = tuple[float, float]
+Matrix6 = tuple[float, float, float, float, float, float]
+_MATRIX_DET_FLOOR = 1e-12
+
+
+def _valid_matrix(matrix: object) -> bool:
+    """Six finite numbers that form an invertible map (a singular frame cannot relate the two spaces)."""
+    return (
+        type(matrix) is tuple
+        and len(matrix) == 6
+        and all(type(v) in (int, float) and math.isfinite(v) for v in matrix)
+        and abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]) >= _MATRIX_DET_FLOOR
+    )
+
+
+def _matrix_inverse(matrix: Matrix6) -> Matrix6 | None:
+    a, b, c, d, e, f = matrix
+    det = a * d - b * c
+    if not math.isfinite(det) or abs(det) < _MATRIX_DET_FLOOR:
+        return None
+    return (d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det)
+
+
+def _apply_matrix(matrix: Matrix6, points: Sequence[Sequence[float]]) -> tuple[Point, ...]:
+    a, b, c, d, e, f = matrix
+    return tuple((a * x + c * y + e, b * x + d * y + f) for x, y in points)
+
+
+def footprint_polygon_in_native_space(trace: "ExternalFootprintTrace") -> tuple[Point, ...] | None:
+    """The trace polygon in the native page space of ``get_drawings()`` rows (identity on an upright page).
+
+    None when the trace carries a frame that is not six finite numbers: callers abstain, never guess.
+    """
+    matrix = trace.page_derotation_matrix
+    if matrix is None:
+        return trace.polygon_pdf_pts
+    if not _valid_matrix(matrix):
+        return None
+    return _apply_matrix(matrix, trace.polygon_pdf_pts)
+
+
+def footprint_bbox_in_native_space(trace: "ExternalFootprintTrace") -> tuple[float, float, float, float] | None:
+    """The trace bbox in native page space (identity on an upright page; None for an invalid frame)."""
+    bbox = trace.bbox_pdf_pts
+    matrix = trace.page_derotation_matrix
+    if bbox is None or matrix is None:
+        return bbox
+    if not _valid_matrix(matrix):
+        return None
+    x0, y0, x1, y1 = bbox
+    corners = _apply_matrix(matrix, ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
+    xs, ys = [p[0] for p in corners], [p[1] for p in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def native_points_to_display_space(
+    trace: "ExternalFootprintTrace", points: Sequence[Sequence[float]],
+) -> tuple[Point, ...] | None:
+    """Native-space points in the trace's own (display) space, rounded to 0.001 (identity when upright)."""
+    matrix = trace.page_derotation_matrix
+    pts = tuple((float(x), float(y)) for x, y in points)
+    if matrix is None:
+        return pts
+    inverse = _matrix_inverse(matrix) if _valid_matrix(matrix) else None
+    if inverse is None:
+        return None
+    return tuple((round(x, 3) + 0.0, round(y, 3) + 0.0) for x, y in _apply_matrix(inverse, pts))
+
+
+def _read_page_frame(page: object) -> tuple[bool, Matrix6 | None]:
+    """(readable, matrix): the page's /Rotate frame as six floats, None when upright."""
+    try:
+        if not int(page.rotation):  # type: ignore[attr-defined]
+            return True, None
+        matrix = tuple(float(v) + 0.0 for v in page.derotation_matrix)  # type: ignore[attr-defined]  # + 0.0: no -0.0
+    except (AttributeError, TypeError, ValueError):
+        return False, None
+    return (True, matrix) if _valid_matrix(matrix) else (False, None)
 
 
 def _abstain(sha: str, index: int, reason: str, drawings: int = 0) -> ExternalFootprintTrace:
@@ -220,6 +308,10 @@ def trace_external_footprint_first(
                 results.append(_abstain(source_sha256, index, "external_footprint_self_intersecting_candidate"))
                 continue
             bbox = tuple(round(float(v) / scale, 3) for v in (x, y, x + w, y + h))
+            frame_readable, frame_matrix = _read_page_frame(page)
+            if not frame_readable:
+                results.append(_abstain(source_sha256, index, "external_footprint_rotated_page_frame_unreadable"))
+                continue
             results.append(ExternalFootprintTrace(
                 source_sha256=source_sha256,
                 page_index=index,
@@ -230,6 +322,7 @@ def trace_external_footprint_first(
                 candidate_count=len(outer),
                 commercial_publishable=False,
                 measurement_authorized=False,
+                page_derotation_matrix=frame_matrix,
             ))
     return tuple(results)
 
@@ -274,6 +367,14 @@ def bound_native_drawings_to_footprint(
         x0 < x1 and y0 < y1
     ):
         raise ValueError("footprint_nonfinite_or_invalid_bbox")
+    # The raster bbox is in display space; the rows are in native page space. Compare them in one space.
+    native_bbox = footprint_bbox_in_native_space(trace)
+    if native_bbox is None:
+        return BoundedFootprintDrawingScope(
+            "ABSTAINED", "footprint_frame_matrix_invalid",
+            trace.page_index, (), (), 0, len(drawings),
+        )
+    x0, y0, x1, y1 = native_bbox
     # Source-PDF points, never a physical mm scale inference. Expand enough
     # to keep the wall's drawn stroke outside the visual envelope.
     padx = min(24.0, max(3.0, (x1 - x0) * .02))
@@ -361,19 +462,40 @@ def refine_external_footprint_against_wall_ink(
         wall_ink_segments_from_drawings,
     )
 
+    # The raster polygon is in display space; the rows are in native page space. Compare them in one space,
+    # then hand the corrected polygon back in the trace's own space.
+    native_polygon = footprint_polygon_in_native_space(trace)
+    if native_polygon is None:
+        return trace, {
+            "collapsed_detour_count": 0,
+            "reason_codes": ["footprint_frame_matrix_invalid"],
+            "commercial_publishable": False,
+            "measurement_authorized": False,
+        }
     mapping_rows = tuple(
         row for row in drawings if isinstance(row, Mapping)
     )
     receipt = collapse_unsupported_rectangular_detours(
-        trace.polygon_pdf_pts,
+        native_polygon,
         wall_ink_segments_from_drawings(mapping_rows),
     )
+
+    def receipt_in_trace_space() -> Mapping[str, object]:
+        payload = receipt.to_dict()
+        if trace.page_derotation_matrix is None:
+            return payload
+        shown = native_points_to_display_space(trace, receipt.polygon_pdf_pts)
+        return {**payload, "polygon_pdf_pts": [list(p) for p in shown or ()]}
+
     if receipt.collapsed_detour_count <= 0:
-        return trace, receipt.to_dict()
+        return trace, receipt_in_trace_space()
     # The old raster bbox still contains the rejected fake excursions.
     # Crop native-source review using the corrected, source-backed outline;
     # keep the regular scoping pad and all original source path indices.
-    coords = receipt.polygon_pdf_pts
+    coords = (
+        receipt.polygon_pdf_pts if trace.page_derotation_matrix is None
+        else native_points_to_display_space(trace, receipt.polygon_pdf_pts)
+    )
     corrected_bbox = (
         round(min(x for x, _ in coords), 3),
         round(min(y for _, y in coords), 3),
@@ -389,4 +511,4 @@ def refine_external_footprint_against_wall_ink(
             "needs_physical_wall_owner_and_scale"
         ),
     )
-    return refined, receipt.to_dict()
+    return refined, receipt_in_trace_space()

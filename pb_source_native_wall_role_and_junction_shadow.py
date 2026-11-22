@@ -18,7 +18,10 @@ from typing import Any
 
 from shapely.geometry import LineString
 
-from pb_external_footprint_first_trace import ExternalFootprintTrace
+from pb_external_footprint_first_trace import (
+    ExternalFootprintTrace,
+    footprint_bbox_in_native_space,
+)
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
     _collect_source_heavy_stroke_strips,
@@ -242,23 +245,27 @@ def identify_source_wall_junctions_and_roles(
         for edge in owned:
             if edge.classification == "source_native_wall_ink_candidate":
                 exterior_owners.update(edge.native_path_indices)
-        x0, y0, x1, y1 = trace.bbox_pdf_pts
-        padx = min(24.0, max(3.0, (x1 - x0) * 0.02))
-        pady = min(24.0, max(3.0, (y1 - y0) * 0.02))
-        for index, raw in enumerate(drawings):
-            if not isinstance(raw, Mapping) or not raw.get("items"):
-                continue
-            box = raw.get("rect")
-            if box is None:
-                continue
-            try:
-                a, b, c, d = map(float, (box.x0, box.y0, box.x1, box.y1))
-            except (TypeError, ValueError, AttributeError):
-                continue
-            outside = c < x0 - padx or a > x1 + padx or d < y0 - pady or b > y1 + pady
-            if outside and not _dashed(raw) and not _owner_excluded_green_ink(raw.get("color")):
-                if is_explicit_wall_layer_name(str(raw.get("layer") or "")):
-                    attached.add(index)
+        # The raster bbox is in display space; the rows are in native page space. Compare them in one space.
+        # An invalid frame leaves ``attached`` empty: nothing is judged outside a window that cannot be placed.
+        native_bbox = footprint_bbox_in_native_space(trace)
+        if native_bbox is not None:
+            x0, y0, x1, y1 = native_bbox
+            padx = min(24.0, max(3.0, (x1 - x0) * 0.02))
+            pady = min(24.0, max(3.0, (y1 - y0) * 0.02))
+            for index, raw in enumerate(drawings):
+                if not isinstance(raw, Mapping) or not raw.get("items"):
+                    continue
+                box = raw.get("rect")
+                if box is None:
+                    continue
+                try:
+                    a, b, c, d = map(float, (box.x0, box.y0, box.x1, box.y1))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                outside = c < x0 - padx or a > x1 + padx or d < y0 - pady or b > y1 + pady
+                if outside and not _dashed(raw) and not _owner_excluded_green_ink(raw.get("color")):
+                    if is_explicit_wall_layer_name(str(raw.get("layer") or "")):
+                        attached.add(index)
     roles: list[NativePathRoleRecord] = []
     rejected_diagonals = 0
     for index, raw in enumerate(drawings):
