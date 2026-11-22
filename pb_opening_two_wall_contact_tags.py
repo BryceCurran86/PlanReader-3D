@@ -56,6 +56,16 @@ class TwoWallOpeningTag:
     measurement_authorized: bool = False
 
 
+def _finite_source_number(value: object) -> bool:
+    """Reject malformed or unrepresentable native measurements without raising."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _point(value: object) -> tuple[float, float] | None:
     if type(value) is not tuple or len(value) != 2:
         return None
@@ -227,7 +237,7 @@ def tag_native_segmented_doorway_chords(
             # unverified source value into a valid-looking wall contact.
             values = (lo, hi, band_lo, band_hi)
             if (type(horizontal) is not bool
-                    or not all(type(x) in (int, float) and math.isfinite(x)
+                    or not all(type(x) in (int, float) and _finite_source_number(x)
                                for x in values)
                     or lo > hi or band_lo > band_hi
                     or not _ids(left) or not _ids(right)
