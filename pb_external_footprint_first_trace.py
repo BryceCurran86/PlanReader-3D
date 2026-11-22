@@ -114,12 +114,19 @@ def trace_external_footprint_first(
     *,
     source_sha256: str,
     page_indices: Sequence[int],
+    require_native_edge_support: bool = False,
 ) -> tuple[ExternalFootprintTrace, ...]:
     """Attempt one exterior outline per selected topology page, before inner geometry.
 
     The visual mask is a bounded *diagnostic candidate*, never physical wall
     existence/face ownership. Open or rival building envelopes are not promoted.
     No source locations or hand-drawn polygons are caller inputs.
+
+    ``require_native_edge_support`` (default OFF: results are unchanged) abstains
+    a near-rectangular candidate whose long edges are drawn only in a much
+    lighter native pen than the wall linework inside it (a site or roof frame).
+    Missing, ambiguous or oversized native evidence never abstains. See
+    ``pb_source_footprint_native_edge_support_shadow``.
     """
     if not isinstance(pdf_bytes, bytes) or hashlib.sha256(pdf_bytes).hexdigest() != source_sha256:
         raise ValueError("external_footprint_original_source_sha_mismatch")
@@ -219,6 +226,28 @@ def trace_external_footprint_first(
             if _polygon_has_self_intersection(points):
                 results.append(_abstain(source_sha256, index, "external_footprint_self_intersecting_candidate"))
                 continue
+            if require_native_edge_support:
+                from pb_source_footprint_native_edge_support_shadow import (
+                    MAX_CANDIDATE_VERTICES,
+                    STATUS_UNSUPPORTED,
+                    assess_footprint_native_edge_support,
+                )
+
+                # The raster polygon is in VISIBLE page space; native rows are in the page's UNROTATED
+                # space. Compare them in one space (identity on an unrotated page).
+                try:
+                    native_rows = page.get_drawings() if len(points) <= MAX_CANDIDATE_VERTICES else ()
+                    native_points = tuple(
+                        tuple(fitz.Point(px, py) * page.derotation_matrix) for px, py in points
+                    )
+                except (ValueError, RuntimeError, OSError, AttributeError):
+                    native_rows, native_points = (), points
+                if assess_footprint_native_edge_support(native_points, native_rows).status == STATUS_UNSUPPORTED:
+                    results.append(_abstain(
+                        source_sha256, index, "external_footprint_unverified_native_wall_edges",
+                        drawings=len(native_rows),
+                    ))
+                    continue
             bbox = tuple(round(float(v) / scale, 3) for v in (x, y, x + w, y + h))
             results.append(ExternalFootprintTrace(
                 source_sha256=source_sha256,
