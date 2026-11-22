@@ -267,8 +267,13 @@ def test_a_statement_pairs_a_level_word_with_a_floor_datum_and_is_not_itself_a_m
     assert is_level_statement(blk("SLAB STEPPED DOWN 100mm FROM FFL"))
     assert is_level_statement(blk("raised 50 above affl"))
     assert not is_level_statement(blk("100 STEP DOWN"))
+    assert not is_level_statement(blk("STEPHEN 100 FROM FFL"))               # look-alikes never define a statement
+    assert not is_level_statement(blk("FOOTSTEP 100 FROM AFFL"))
     assert not is_level_statement(blk("FFL T.B.C."))
     assert not is_level_statement(blk("TOWEL RAIL HEIGHT 1200 AFL"))
+    assert not is_level_statement(blk("HANDRAIL TO STAIRS 1000 AFFL"))       # a stair note defines no annotation rule
+    assert len(level_marks([blk("HANDRAIL TO STAIRS 1000 AFFL")])) == 1        # so it is a MARK: a stair is a level change
+    assert len(level_marks([blk("STAIR")])) == 1
     assert level_marks([blk("SLAB STEPPED DOWN 100mm FROM FFL")]) == ()
     assert len(level_marks([blk("SLAB STEPPED DOWN 100mm FROM FFL"), blk("100 STEP")])) == 1
 

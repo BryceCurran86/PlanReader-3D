@@ -20,6 +20,10 @@ It is a candidate proof for the authority-promotion review, never an authority: 
 frame, and every authority flag is False by construction. Nothing is chosen by proximity: a door that matches two
 closures, a closure that bounds three rooms, or a mark on the boundary of a room is retained and the proof abstains.
 
+The caller passes only the topology's CANDIDATE rings as rooms (a ring the topology itself abstained on is not a room) and
+only the doorway closures of door kinds. Where the topology encloses only one side of a door (the other side leaks into open
+space through an unresolved gap), the door abstains: the proof never guesses what the open side holds.
+
 Limits kept explicit: the rule is only as complete as the drawing's own annotation (a level change that no sheet marks is
 invisible to it); the word list below is policy and is tested with look-alikes; a room's holes are not known to the
 caller (a mark inside a hole counts as inside the room, which can only add an abstention); one plan page per call.
@@ -66,7 +70,12 @@ NEXT_STEP = "authority_promotion_review_then_existing_issuer"
 LEVEL_CHANGE_WORD = re.compile(
     r"^(?:STEP|STEPS|STEPPED|STEPPING|RAMP|RAMPS|RAMPED|SUNK|SUNKEN|DEPRESSED|RAISED|STAIR|STAIRS|STAIRCASE)$"
 )
-# A finished-floor datum word. Statement = a block that pairs a level-change word with one of these.
+# A statement defines how level changes are annotated, so it pairs a STEP-LIKE word (not a stair: "handrail to stairs 1000
+# AFFL" says nothing about annotating floor level changes) with a finished-floor datum word. Stairs still count as marks.
+STATEMENT_LEVEL_WORD = re.compile(
+    r"^(?:STEP|STEPS|STEPPED|STEPPING|RAMP|RAMPS|RAMPED|SUNK|SUNKEN|DEPRESSED|RAISED)$"
+)
+# A finished-floor datum word. Statement = a block that pairs a step-like word with one of these.
 DATUM_WORD = re.compile(r"^(?:FFL|AFFL|AFL)$")
 _LETTERS = re.compile(r"[^A-Za-z]")
 
@@ -249,9 +258,9 @@ def _tokens(block: TextBlock) -> list[str]:
 
 
 def is_level_statement(block: TextBlock) -> bool:
-    """A block that pairs a level-change word with a finished-floor datum word."""
+    """A block that pairs a step-like word with a finished-floor datum word."""
     tokens = _tokens(block)
-    return any(LEVEL_CHANGE_WORD.match(t) for t in tokens) and any(DATUM_WORD.match(t) for t in tokens)
+    return any(STATEMENT_LEVEL_WORD.match(t) for t in tokens) and any(DATUM_WORD.match(t) for t in tokens)
 
 
 def level_marks(blocks: Iterable[TextBlock]) -> tuple[LevelMark, ...]:
