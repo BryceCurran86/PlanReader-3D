@@ -255,8 +255,13 @@ def tag_native_segmented_doorway_chords(
                     continue
                 try:
                     a, b = segment[1:3]
-                    p = (float(a.x), float(a.y))
-                    q = (float(b.x), float(b.y))
+                    # Native PyMuPDF coordinates must be numeric, not
+                    # coercible strings or booleans from malformed receipts.
+                    raw = (a.x, a.y, b.x, b.y)
+                    if not all(type(value) in (int, float) for value in raw):
+                        continue
+                    p = (float(raw[0]), float(raw[1]))
+                    q = (float(raw[2]), float(raw[3]))
                 except (TypeError, ValueError, AttributeError, OverflowError):
                     continue
                 if not all(math.isfinite(v) for v in (*p, *q)):
