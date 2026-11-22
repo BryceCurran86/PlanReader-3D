@@ -154,6 +154,14 @@ def floor_finish_boundary_wall_failure(
                 "floor_finish_bounding_wall_authority_incomplete",
                 f"floor-finish bounding wall authority incomplete: {quantity_id}",
             )
+        # A mapping key alone does not authenticate the wall's own identity.
+        # A producer that collapses duplicate IDs must report that conflict
+        # before building this mapping; never accept a mismatched wall object.
+        if str(getattr(wall, "canonical_wall_id", "") or "") != str(wall_id):
+            return (
+                "floor_finish_bounding_wall_identity_unresolved",
+                f"floor-finish bounding wall identity does not match owner: {wall_id}",
+            )
         if getattr(wall, "role", None) != "internal_finished_wall_face":
             return (
                 "floor_finish_bounding_wall_not_finished_face",
@@ -189,7 +197,6 @@ def quarantine_unverified_floor_finish_boundaries(
             or quantity.status != AuthorityStatus.FIRM.value
             or quantity.abstained
             or quantity.value is None
-            or quantity.blocking_reasons
         ):
             result.append(quantity)
             continue
@@ -212,6 +219,8 @@ def quarantine_unverified_floor_finish_boundaries(
                 room, walls_by_id, quantity_id=quantity.quantity_id,
             )
             reason = failure[0] if failure is not None else None
+        if reason is None and quantity.blocking_reasons:
+            reason = "floor_finish_preexisting_authority_block"
         if reason is None:
             result.append(quantity)
         else:
@@ -221,7 +230,7 @@ def quarantine_unverified_floor_finish_boundaries(
                 status=EvidenceResolutionStatus.ABSTAINED.value,
                 confidence=0.0,
                 abstained=True,
-                blocking_reasons=(reason,),
+                blocking_reasons=tuple(dict.fromkeys((*quantity.blocking_reasons, reason))),
             ))
     return tuple(result)
 
