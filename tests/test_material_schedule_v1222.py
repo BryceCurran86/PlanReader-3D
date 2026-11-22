@@ -23,19 +23,34 @@ class _App:
 
 
 class MaterialScheduleV1222Tests(unittest.TestCase):
-    def test_source_schedule_parser_does_not_import_the_workspace_editor(self):
+    def test_source_schedule_and_model_substrates_do_not_import_the_workspace_editor(self):
         script = """
 import sys
 
-def reject_editor_import(event, args):
-    if event == "import" and args[0] in {"pb_3d_surface_editor_v1212", "streamlit"}:
-        raise SystemExit("source schedule parsing imported " + args[0])
+def reject_optional_import(event, args):
+    if event == "import" and args[0].split(".")[0] in {
+        "pb_3d_surface_editor_v1212", "pb_takeoff_studio_v1211", "plotly",
+        "streamlit", "onnxruntime",
+    }:
+        raise SystemExit("source path imported " + args[0])
 
-sys.addaudithook(reject_editor_import)
+sys.addaudithook(reject_optional_import)
+from pb_auto_geometry_v1219 import _surface_code_for
+from pb_autopilot_v1223 import _surface_code
+from pb_editor_ux_v154 import install
 from pb_source_material_semantic_authority import parse_schedule_text
 
-rows = parse_schedule_text("FINISH SCHEDULE\\nWT1 - Porcelain wall tile")
-assert len(rows) == 1 and rows[0]["code"] == "WT1"
+rows = parse_schedule_text(
+    "FINISH SCHEDULE\\nEC1 - Lineaboard Cladding\\nWT1 - Porcelain wall tile"
+)
+assert [row["code"] for row in rows] == ["EC1", "WT1"]
+assert _surface_code_for([rows[0]]) == "EC1"
+assert _surface_code_for([{"code": "OTHER_CODE", "name": "Soffit FC Sheet"}]) == "SOF"
+assert _surface_code_for([{"code": "OTHER_CODE", "name": "Unidentified"}]) == "OTHER"
+assert _surface_code_for([{"name": "Soffit and rendered masonry"}]) == "OTHER"
+assert _surface_code_for(rows) == "OTHER"
+install()
+assert _surface_code([{"code": "PB", "substrate": "Plasterboard / Gyprock"}]) == "PB"
 """
         result = subprocess.run(
             [sys.executable, "-B", "-c", script],
