@@ -142,6 +142,12 @@ def floor_finish_boundary_wall_failure(
         getattr(room, "canonical_bounding_wall_ids", ())
         or getattr(room, "bounding_wall_ids", ())
     )
+    if (any(not isinstance(wall_id, str) or not wall_id.strip() for wall_id in boundary_ids)
+            or len(set(boundary_ids)) != len(boundary_ids)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish boundary wall identities are invalid or repeated: {quantity_id}",
+        )
     if not boundary_ids:
         return (
             "floor_finish_bounding_wall_authority_incomplete",
