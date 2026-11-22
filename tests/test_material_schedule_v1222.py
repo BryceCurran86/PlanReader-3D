@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +23,29 @@ class _App:
 
 
 class MaterialScheduleV1222Tests(unittest.TestCase):
+    def test_source_schedule_parser_does_not_import_the_workspace_editor(self):
+        script = """
+import sys
+
+def reject_editor_import(event, args):
+    if event == "import" and args[0] in {"pb_3d_surface_editor_v1212", "streamlit"}:
+        raise SystemExit("source schedule parsing imported " + args[0])
+
+sys.addaudithook(reject_editor_import)
+from pb_source_material_semantic_authority import parse_schedule_text
+
+rows = parse_schedule_text("FINISH SCHEDULE\\nWT1 - Porcelain wall tile")
+assert len(rows) == 1 and rows[0]["code"] == "WT1"
+"""
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=Path(mat.__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_schedule_code_resolves_substrate(self):
         rows = mat.parse_schedule_text(
             "FINISH SCHEDULE\nEC1 - James Hardie Linea 180mm cladding\nEC2 - Textureboard cladding\nPT1 - Dulux Natural White low sheen",
