@@ -20,7 +20,7 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -142,6 +142,36 @@ _THREE_LAUREL_SOURCE_SHA256 = (
 )
 
 
+def _source_family_customers_verified(
+    quantities: tuple[QuantityEvidence, ...],
+    sealed: SealedSourceClosedRun,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_sha256: str,
+    expected_count: int,
+) -> bool:
+    verified = verify_sealed_customer_output(sealed, rows)
+    issued_ids = {quantity.quantity_id for quantity in quantities}
+    sealed_ids = {quantity.quantity_id for quantity in sealed.quantities}
+    # A source-issued finish area claims a whole canonical floor surface.
+    # Competing finishes on that surface stay out of the customer handoff.
+    floor_owners = [
+        owner
+        for quantity in sealed.quantities
+        if quantity.family == "floor_finish_area"
+        for owner in quantity.object_identity_refs
+    ]
+    return (
+        len(quantities) == len(issued_ids) == expected_count
+        and len(sealed.quantities) == len(sealed_ids) == expected_count
+        and len(rows) == verified.customer_row_count == expected_count
+        and len(verified.verified_quantity_ids) == expected_count
+        and issued_ids == sealed_ids == set(verified.verified_quantity_ids)
+        and set(sealed.source_sha256s) == {source_sha256}
+        and len(floor_owners) == len(set(floor_owners))
+    )
+
+
 def _verified_source_family_handoff(
     pdf_path: Path,
     *,
@@ -184,23 +214,9 @@ def _verified_source_family_handoff(
     ):
         return None
     try:
-        verified = verify_sealed_customer_output(
-            issued.sealed_run, issued.customer_rows,
-        )
-        issued_ids = tuple(q.quantity_id for q in quantities)
-        sealed_ids = tuple(q.quantity_id for q in issued.sealed_run.quantities)
-        verified_ids = tuple(verified.verified_quantity_ids)
-        # Set equality alone silently collapses duplicate physical instances.
-        # Require one distinct issued, sealed and customer-verified identity per
-        # accepted source quantity, independent of drawing or benchmark.
-        if (
-            verified.customer_row_count != expected_count
-            or len(set(issued_ids)) != expected_count
-            or len(set(sealed_ids)) != expected_count
-            or len(set(verified_ids)) != expected_count
-            or set(issued_ids) != set(sealed_ids)
-            or set(verified_ids) != set(sealed_ids)
-            or set(issued.sealed_run.source_sha256s) != {source_sha256}
+        if not _source_family_customers_verified(
+            quantities, issued.sealed_run, issued.customer_rows,
+            source_sha256=source_sha256, expected_count=expected_count,
         ):
             return None
     except (ValueError, RuntimeError, TypeError, KeyError):
@@ -347,23 +363,8 @@ def _original_three_laurel_floor_finish_handoff(
             project_id=_THREE_LAUREL_PROJECT_ID,
         )
         rows = tuple(wet_rows) + tuple(vinyl_rows)
-        verified = verify_sealed_customer_output(sealed, rows)
-        issued_ids = tuple(q.quantity_id for q in quantities)
-        sealed_ids = tuple(q.quantity_id for q in sealed.quantities)
-        verified_ids = tuple(verified.verified_quantity_ids)
-        # Never let set comparison conceal duplicate quantity IDs after
-        # independently sealed families have been combined.
-        if (
-            len(quantities) != 7
-            or len(sealed_ids) != 7
-            or len(rows) != 7
-            or verified.customer_row_count != 7
-            or len(set(issued_ids)) != len(issued_ids)
-            or len(set(sealed_ids)) != len(sealed_ids)
-            or len(set(verified_ids)) != len(verified_ids)
-            or set(issued_ids) != set(sealed_ids)
-            or set(verified_ids) != set(sealed_ids)
-            or set(sealed.source_sha256s) != {_THREE_LAUREL_SOURCE_SHA256}
+        if not _source_family_customers_verified(
+            quantities, sealed, rows, source_sha256=source_sha256, expected_count=7,
         ):
             return None
     except (ValueError, RuntimeError, TypeError, KeyError):

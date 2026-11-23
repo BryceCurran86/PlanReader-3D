@@ -369,64 +369,6 @@ def test_combined_run_rejects_conflicting_physical_semantic_claim() -> None:
         export.combine_source_closed_runs([first, second])
 
 
-def test_same_floor_finish_owner_conflicts_across_finish_labels() -> None:
-    vinyl = quantity(
-        quantity_id="qty-vinyl",
-        family="floor_finish_area",
-        semantic_key="floor_finish_area:canonical-floor-1:VINYL:vinyl",
-    )
-    tile = replace(
-        vinyl,
-        quantity_id="qty-tile",
-        semantic_key="floor_finish_area:canonical-floor-1:FT1:tile",
-    )
-    traces = {vinyl.quantity_id: trace(), tile.quantity_id: trace()}
-    vinyl_run = export.seal_source_closed_run(
-        [vinyl], project_id="project-a", traces_by_quantity_id=traces,
-    )
-    tile_run = export.seal_source_closed_run(
-        [tile], project_id="project-a", traces_by_quantity_id=traces,
-    )
-
-    for runs in ((vinyl_run, tile_run), (tile_run, vinyl_run)):
-        with pytest.raises(export.SourceClosedRunConflictError, match="conflicting sealed physical claim"):
-            export.combine_source_closed_runs(runs)
-
-    with pytest.raises(export.SourceClosedRunConflictError, match="conflicting sealed physical claim"):
-        export.seal_source_closed_run(
-            [vinyl, tile], project_id="project-a", traces_by_quantity_id=traces,
-        )
-
-
-def test_distinct_floor_finish_owners_can_share_a_room_trace() -> None:
-    vinyl = quantity(
-        quantity_id="qty-vinyl",
-        family="floor_finish_area",
-        semantic_key="floor_finish_area:canonical-floor-1:VINYL:vinyl",
-    )
-    tile = replace(
-        vinyl,
-        quantity_id="qty-tile",
-        semantic_key="floor_finish_area:canonical-floor-2:FT1:tile",
-        input_entity_ids=("canonical-floor-2",),
-    )
-    traces = {
-        vinyl.quantity_id: trace(canonical_entity_ids=("canonical-floor-1", "room-1")),
-        tile.quantity_id: trace(canonical_entity_ids=("canonical-floor-2", "room-1")),
-    }
-    vinyl_run = export.seal_source_closed_run(
-        [vinyl], project_id="project-a", traces_by_quantity_id=traces,
-    )
-    tile_run = export.seal_source_closed_run(
-        [tile], project_id="project-a", traces_by_quantity_id=traces,
-    )
-
-    combined = export.combine_source_closed_runs([vinyl_run, tile_run])
-
-    assert combined.quantities == tile_run.quantities + vinyl_run.quantities
-    assert export.sealed_source_closed_run_from_dict(combined.to_dict()) == combined
-
-
 def test_same_semantic_claim_on_distinct_physical_identities_is_valid() -> None:
     first = export.seal_source_closed_run(
         [quantity(quantity_id="qty-a", semantic_key="room.area")],

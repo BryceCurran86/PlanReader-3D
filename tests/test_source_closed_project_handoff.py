@@ -1406,7 +1406,11 @@ def test_source_family_customer_verifier_is_project_neutral_and_fail_closed(monk
                   "commercial_projection_allowed": True},
     )
     issued_run = SimpleNamespace(
-        quantities=(SimpleNamespace(quantity_id=quantity.quantity_id),),
+        quantities=(SimpleNamespace(
+            quantity_id=quantity.quantity_id,
+            family=quantity.family,
+            object_identity_refs=quantity.input_entity_ids,
+        ),),
         source_sha256s=(arbitrary_sha,),
     )
     issued = SimpleNamespace(
