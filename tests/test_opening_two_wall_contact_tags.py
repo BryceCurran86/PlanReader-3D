@@ -391,3 +391,24 @@ def test_oversized_native_wall_contact_integer_fails_closed(contact):
     assert result.reason == "opening_contact_geometry_invalid"
     assert result.wall_section_ids == ()
     assert result.measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad_chord", (None, 4, "not-a-chord", [], True))
+def test_malformed_segmented_chord_record_abstains_without_crashing(bad_chord):
+    result = tag_native_segmented_doorway_chords((), (bad_chord,), scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_receipt_invalid"
+    assert result[0].measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad_drawings,bad_chords", (
+    (None, ()), ((), None), ("not-a-native-drawing-list", ()),
+    ((), "not-a-chord-list"),
+))
+def test_malformed_segmented_source_collections_abstain(bad_drawings, bad_chords):
+    result = tag_native_segmented_doorway_chords(bad_drawings, bad_chords, scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_collection_invalid"
+    assert result[0].measurement_authorized is False
