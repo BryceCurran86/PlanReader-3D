@@ -184,56 +184,6 @@ def _assert_provision_before_preflight(path: Path, pdf_name: str) -> None:
     assert "secrets.ORIGINAL_SOURCES_TOKEN" in text
 
 
-def test_lot16_original_source_job_provisions_then_classifies() -> None:
-    _assert_provision_before_preflight(
-        LOT16_WORKFLOW,
-        "1. Construction Plans - Lot 16 Power (REV E).pdf",
-    )
-
-
-def test_maryborough_original_source_job_provisions_then_classifies() -> None:
-    _assert_provision_before_preflight(
-        MARY_WORKFLOW,
-        "Arch_Combined_Maryborough_Service_Station.pdf",
-    )
-
-
-def test_lot16_sealed_original_job_provisions_then_classifies() -> None:
-    _assert_provision_before_preflight(
-        LOT16_SEAL_WORKFLOW,
-        "1. Construction Plans - Lot 16 Power (REV E).pdf",
-    )
-    text = LOT16_SEAL_WORKFLOW.read_text(encoding="utf-8")
-    always = text.index("if: always()")
-    producer = text.index("tools.run_gpt3_lot16_original_sealed_score_input")
-    assert always < producer
-
-
-@pytest.mark.parametrize("path,pdf_name,copies_into_worktree", REMAINING_ORIGINAL_JOBS)
-def test_remaining_gpt3_original_jobs_provision_then_classify(
-    path: Path, pdf_name: str, copies_into_worktree: bool
-) -> None:
-    _assert_provision_before_preflight(path, pdf_name)
-    text = path.read_text(encoding="utf-8")
-    if copies_into_worktree:
-        copy_at = text.index("python scripts/copy_provisioned_originals_into_worktree.py")
-        provision = text.index("uses: ./.github/actions/provision-original-sources")
-        assert provision < copy_at
-    else:
-        assert "python scripts/copy_provisioned_originals_into_worktree.py" not in text
-
-
-def test_selected_two_originals_classify_always_runs() -> None:
-    _assert_provision_before_preflight(
-        ROOT / ".github/workflows/score-gpt3-selected-two-original-projects.yml",
-        LOT16_PDF,
-    )
-    text = (
-        ROOT / ".github/workflows/score-gpt3-selected-two-original-projects.yml"
-    ).read_text(encoding="utf-8")
-    assert MARY_PDF in text
-
-
 def test_four_project_fail_closed_inventory_is_not_provisioned() -> None:
     text = (
         ROOT / ".github/workflows/test-gpt3-four-project-evidence.yml"

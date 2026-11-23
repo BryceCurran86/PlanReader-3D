@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 ORIGINAL_MARK = "3LAUREL - Construction Plan Set"
@@ -71,13 +70,3 @@ def test_the_two_claude_measurement_workflows_are_dispatch_only():
         document = yaml.safe_load((WORKFLOWS / f"{stem}.yml").read_text(encoding="utf-8"))
         assert _events(document) == {"workflow_dispatch"}, stem
         assert all("workflow_dispatch" in str(job.get("if", "")) or str(job.get("if", "")) == "always()" for job in document["jobs"].values()), stem
-
-
-@pytest.mark.parametrize("stem", ["gpt1-3laurel-original-floor-area", "gpt1-3laurel-source-positive-opening"])
-def test_the_provisioned_3laurel_workflows_fail_rather_than_skip_when_the_original_is_missing(stem):
-    document = yaml.safe_load((WORKFLOWS / f"{stem}.yml").read_text(encoding="utf-8"))
-    (job,) = document["jobs"].values()
-    provisioning = [s for s in job["steps"] if "provision-original-sources" in str(s.get("uses", ""))]
-    assert provisioning and all(str(s["with"]["allow-missing"]).lower() == "false" for s in provisioning)    # absent original: the job fails
-    assert "workflow_dispatch" in str(job.get("if", "")) and "refs/heads/main" in str(job.get("if", ""))     # and never on a PR
-    assert POLICY not in yaml.safe_dump(job)                                                                   # the public skip policy is never set here

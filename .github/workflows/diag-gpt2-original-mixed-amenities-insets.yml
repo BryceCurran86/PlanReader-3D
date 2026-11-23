@@ -25,7 +25,7 @@ on:
 jobs:
   original-mixed-inset-proof:
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
+    if: ${{ false }}
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
           retention-days: 30
 
   original-source-not-verified:
-    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    if: ${{ true }}
     uses: ./.github/workflows/original-source-not-run.yml
     with:
       job: original-mixed-inset-proof

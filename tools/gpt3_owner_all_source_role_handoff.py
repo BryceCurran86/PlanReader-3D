@@ -256,20 +256,37 @@ def build_source_role_abstention_run(
     return run
 
 
-def _generic_producer_abstained_on_every_page(summary: dict, *, project_id: str, role: dict) -> bool:
-    """Exactly a complete, successful, empty generic run; never a blocked or partial one."""
+def _generic_producer_completed_source_scope(summary: dict, *, project_id: str, role: dict) -> bool:
+    """Require the generic producer's all-family scope for this exact original."""
     pages = list(range(1, role["page_count"] + 1))
-    counts = summary.get("family_counts")
-    return (
-        summary.get("status") == "no_sealable_quantities"
-        and summary.get("project_id") == project_id
+    if not (
+        summary.get("project_id") == project_id
         and summary.get("source_sha256") == role["sha256"]
+        and type(summary.get("page_count")) is int
         and summary.get("page_count") == role["page_count"]
         and summary.get("family_group") == "all"
         and summary.get("complete_project_handoff") is True
-        and summary.get("source_positive_partial_page") is None
-        and summary.get("execution_pages") == pages
-        and summary.get("semantic_execution_pages") == pages
+        and "source_positive_partial_page" in summary
+        and summary["source_positive_partial_page"] is None
+    ):
+        return False
+    for field in ("execution_pages", "semantic_execution_pages"):
+        numbers = summary.get(field)
+        if (
+            type(numbers) is not list
+            or numbers != pages
+            or any(type(page) is not int for page in numbers)
+        ):
+            return False
+    return True
+
+
+def _generic_producer_abstained_on_every_page(summary: dict, *, project_id: str, role: dict) -> bool:
+    """Exactly a complete, successful, empty generic run; never a blocked or partial one."""
+    counts = summary.get("family_counts")
+    return (
+        summary.get("status") == "no_sealable_quantities"
+        and _generic_producer_completed_source_scope(summary, project_id=project_id, role=role)
         and summary.get("combined_run_file") is None
         and summary.get("combined_quantity_count") == 0
         and summary.get("family_run_files") == {}
@@ -492,7 +509,14 @@ def produce_all_source_roles(
                     gate if type(gate) is str and gate in customer_gates else "UNAVAILABLE"
                 )
                 file = summary.get("combined_run_file")
-                if summary.get("status") == "sealed" and type(file) is str:
+                if (
+                    summary.get("status") == "sealed"
+                    and producer_module == GENERIC_ROLE_PRODUCER
+                    and family_group == "all"
+                    and not _generic_producer_completed_source_scope(summary, project_id=project_id, role=role)
+                ):
+                    row["first_failure"] = "generic_role_source_scope_unverified"
+                elif summary.get("status") == "sealed" and type(file) is str:
                     sealed_file = Path(file)
                     if (
                         sealed_file.resolve().parent == role_dir.resolve()

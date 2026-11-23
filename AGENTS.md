@@ -1,5 +1,34 @@
 # PlanReader-3D agent contract
 
+## Owner 24 November 2026 — retired private GitHub runner (current, mandatory)
+
+**There is no longer a private-source GitHub runner or companion-source workflow to
+fix, start, wait for or recreate.** Merged PR #4658 retired the hosted original
+PDF provisioning, private CI credentials and private companion benchmark paths.
+A missing private CI runner is NEVER a release blocker: stop citing it in
+coordination reports, review checklists and agent handoffs. Do not recreate
+`ORIGINAL_SOURCES_TOKEN`, source-provisioning workflows or self-hosted
+private GitHub Actions jobs to get a score.
+
+**Official original benchmark:** use the existing Windows app checkout and
+`RUN_PLANREADER_WINDOWS.bat benchmark --check-only`, followed by
+`RUN_PLANREADER_WINDOWS.bat benchmark` under its local execution guards.
+Use already-supplied originals (including the owner's existing Windows
+`documents/sources` directory or verified ChatGPT Library archive) and four
+independent identity maps, with private results outside the repository.
+GitHub Actions is source-free Python 3.13/3.14 and security/regression CI only.
+Historical requests for "protected/private original replay" mean the
+**local original-source-to-signed-customer acceptance on this Windows path**,
+not a separate private hosted runner or an excuse to request files again.
+
+Retiring the runner does **not** certify replay or relax source identity,
+physical/metric authority, signed/customer byte retention, security or the
+unchanged frozen120 scorer. A verified file preflight alone cannot publish a
+benchmark score. If an exact-head real local source→issuer→sealed customer
+execution is unavailable or fails, report the particular producer/record
+failure as UNVERIFIED/ABSTAIN/BLOCKED and progress independent tasks, never
+pretend private CI needs to be restored.
+
 ## Owner all-pages source evidence rule — 21 November 2026 (mandatory)
 
 **No original plan page may be silently ignored.** Inspect/index every source
@@ -191,7 +220,7 @@ This owner-authorized estimating assumption must be labelled **"Assumed 2100 mm 
 
 **Any of the three continuing agents may edit end-to-end across former lane boundaries** when required to complete an original-source-to-customer vertical slice. The strict cross-lane file editing prohibition is rescinded. Coordinate exact file/function claims on [#4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135); never overwrite concurrent work, force-push unexplained branches or wait for retired agents. Preserve existing PRs and source-positive evidence; review overlaps before integrating. The old 2026-10-31 GPT1/GPT2/GPT3 role table below is historical only and **superseded**.
 
-**Unchanged non-negotiables:** all ten original PDFs stay in the private companion repo; immutable four-project frozen 120-item evaluator, reference truth/tolerances, 20,000 primitive cap and 2.5-point snap remain intact; no gold-based prediction, fake dimension, missing width/height default, source-ambiguous FIRM, or customer score. Existing signed Lot16 and Maryborough outputs and their full source lineage must be retained. Source-positive original private replay, exact-head Python 3.13/3.14 CI and verified customer results remain prerequisites to any release merge (independent reviewer vote is optional). As of the takeover, only a **provisional 9/120 development coverage** after merged Q5446 #4218 is known; the **official four-project score is not published**.
+**Benchmark execution:** use the local owner benchmark in [docs/PRIVATE_ORIGINAL_SOURCES.md](docs/PRIVATE_ORIGINAL_SOURCES.md). Keep original PDFs and derived private evidence on the owner's computer. GitHub Actions is for source-free checks. The immutable four-project frozen 120-item evaluator, reference truth/tolerances, 20,000 primitive cap and 2.5-point snap apply. Reject gold-based prediction, fake dimensions, missing width/height defaults and source-ambiguous FIRM. Retain existing signed Lot16 and Maryborough outputs with full source lineage. Source-positive local replay, exact-head Python 3.13/3.14 CI and verified customer results remain prerequisites for release.
 
 
 This file records the default engineering contract. Explicit current owner instructions supersede conflicting repository workflow instructions.
