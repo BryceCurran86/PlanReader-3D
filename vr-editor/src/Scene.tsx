@@ -12,7 +12,7 @@ import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
 import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
-  translatedDraftWall, validWallLength } from "./buildPlacement";
+  translatedDraftWall, validWallLength, viewRelativeNudge } from "./buildPlacement";
 import type { WallAxis } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
@@ -389,11 +389,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           reportTool("Draft wall duplicated 500 mm to the side. Undo restores.");
           return;
         }
-        const vectors = {left:[-1,0],right:[1,0],forward:[0,-1],back:[0,1]} as const;
-        const direction = choice.direction;
-        const vector = direction ? vectors[direction] : null;
+        const facing = renderer.xr.getCamera().getWorldDirection(new THREE.Vector3());
+        const vector = choice.direction ?
+          viewRelativeNudge(choice.direction,[facing.x,facing.z],nudgeStep) : null;
         const edited = choice.action === "rotate" ? rotatedDraftWall(wall) :
-          vector ? translatedDraftWall(wall,vector[0]*nudgeStep,vector[1]*nudgeStep) : null;
+          vector ? translatedDraftWall(wall,vector[0],vector[1]) : null;
         if (edited) {
           build.current.onBuildAction({kind:"adjust",previous:wall,wall:edited});
           reportTool(choice.action === "rotate" ? "Rotated draft wall 90°." :
@@ -833,7 +833,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       buildOverlay.sizeMenu(layout);
       const menu = menuKey(layout);
       xrPress[index] = { context: pointerContext(), menu };
-      if (itemBrowser.open || stageMenuOpen || menu !== null) return;
+      if (itemBrowser.open || stageMenuOpen || helpOpen || menu !== null) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
         const gesture = draftGesture();
@@ -876,7 +876,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (menuChoice.action) menuAction(menuChoice.action);
         return;
       }
-      if (itemBrowser.open || stageMenuOpen || resize.current.enabled) return;
+      if (itemBrowser.open || stageMenuOpen || helpOpen || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -1175,7 +1175,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         const held = xrGestures.findIndex(gesture => gesture !== null);
         if (held >= 0) aimController(controllers[held]);
-        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !resize.current.enabled;
+        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen &&
+          !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
         const buildTarget = drag ? previewDrag(drag, held)?.aim ?? null : ready && !item ? aim() : null;
