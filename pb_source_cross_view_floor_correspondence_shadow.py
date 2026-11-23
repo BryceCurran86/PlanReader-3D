@@ -244,6 +244,10 @@ def rank_registrations(
         # Keep identity_only as the legacy fixed-scale diagnostic mode.
         scales = identity_scales if not identity_only else (1.0,)
         for scale in scales:
+            # Malformed viewport metadata must not manufacture a correspondence.
+            # Keep valid scale hypotheses available independently.
+            if not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+                continue
             moved = orient_lines(src, tuple(scale * v for v in mat))
             xs, ys = _shift_votes(moved, index, topn)
             pool = sorted(
