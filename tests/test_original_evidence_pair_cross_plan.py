@@ -87,6 +87,9 @@ def test_generic_evidence_json_and_png_match_across_source_styles_and_pages(
         assert receipt["official_frozen120_score_change"] == 0
         assert receipt["topology"]["room_quantity_authorized"] is False
         raw_png = png_path.read_bytes()
+        assert receipt["overlay"]["png_filename"] == png_path.name
+        assert receipt["overlay"]["png_byte_count"] == len(raw_png)
+        assert receipt["overlay"]["png_sha256"] == hashlib.sha256(raw_png).hexdigest()
         assert raw_png.startswith(b"\x89PNG\r\n\x1a\n")
         pixel_width, pixel_height = struct.unpack(">II", raw_png[16:24])
         assert pixel_width >= width and pixel_height >= height
