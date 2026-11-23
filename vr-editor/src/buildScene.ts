@@ -4,7 +4,7 @@ import {
   openingFits, planLength, projectOnWall, snappedPoint, snapDraftWallPoint, validWallLength,
   draftShape, validCeiling, validEditedWall,
 } from "./buildPlacement.ts";
-import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallVisual } from "./buildPlacement.ts";
+import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import type { MenuLayout } from "./catalogueMenu";
 
@@ -123,7 +123,8 @@ function ceilingHost(ceilings: CeilingDraft[], ray: THREE.Ray, levelId: string) 
   return closest;
 }
 
-export function beginDraftGesture(state: BuildState, levelId: string | null, ray: THREE.Ray): DraftGesture | null {
+export function beginDraftGesture(state: BuildState, levelId: string | null, ray: THREE.Ray,
+  options: WallSnapOptions = {}): DraftGesture | null {
   if (!levelId || !state.tool) return null;
   // A level controller ray can hit a vertical wall but never the floor.
   // Recognise that direct wall contact as a valid draft manipulation target.
@@ -133,7 +134,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (!from) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
-    const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from)?.point : from;
+    const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from, null, options)?.point : from;
     return activeStart(state, levelId) || !alignedStart ? null : { mode, from: alignedStart, levelId };
   }
   if (mode !== "move" && mode !== "stretch") return null;
@@ -160,7 +161,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
 }
 
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
-  state?: BuildState, controllerPosition?: PlanPoint) {
+  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}) {
   // With Quest controllers, manipulation should follow the hand in X/Z, not
   // require aiming at an imaginary ground plane throughout the drag.
   const current = "previous" in gesture && gesture.fromController && controllerPosition
@@ -170,7 +171,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   if (!current) return null;
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   const aligned = gesture.mode === "wall" && !("previous" in gesture) && state && floor
-    ? snapDraftWallPoint(state, gesture.levelId, [floor.x, floor.z], gesture.from) : null;
+    ? snapDraftWallPoint(state, gesture.levelId, [floor.x, floor.z], gesture.from, options) : null;
   const to = aligned?.point ?? current;
   const delta = planLength(gesture.from, to);
   if (delta < 0.045) return null;
@@ -251,7 +252,17 @@ function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 |
   return direct ?? fromAbove;
 }
 
-export function aimBuild(state: BuildState, levelId: string | null, sizes: BuildSizes, ray: THREE.Ray): Aim {
+// Source walls are never returned: this explicitly targets editable local drafts.
+export function pickDraftWall(state: BuildState, levelId: string | null,
+  ray: THREE.Ray): PlacedWall | null {
+  if (!levelId) return null;
+  const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
+  return openingHost(state.walls.filter(wall => wall.levelId === levelId),
+    ray, floor)?.wall ?? null;
+}
+
+export function aimBuild(state: BuildState, levelId: string | null, sizes: BuildSizes, ray: THREE.Ray,
+  options: WallSnapOptions = {}): Aim {
   const guide = buildGuide(state, levelId);
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -268,7 +279,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     if ((ceiling ? state.ceilings : state.walls).length >= MAX_DRAFT_WALLS) return { hit: null, hint: guide };
     const start = activeStart(state, levelId);
     const snap = state.tool === "wall" && floor
-      ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start) : null;
+      ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start, options) : null;
     const point = snap?.point ?? (floor && snappedPoint([floor.x, floor.z]));
     if (!point) return { hit: null, hint: "Aim at the plan to place a point." };
     const hit: BuildHit = { kind: state.tool, levelId, point };
@@ -349,13 +360,18 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const facing = new THREE.Vector3();
   const right = new THREE.Vector3();
   let drawn = "";
-  function positionMenu(camera: THREE.Camera) {
+  function positionMenu(camera: THREE.Camera, pinned = false, force = false) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
     facing.y = 0;
     if (facing.lengthSq() < 0.01) return;
     facing.normalize();
-    if (menu.visible && previousHead.distanceToSquared(head) <= 0.36 && previousFacing.dot(facing) > 0.75) return;
+    // Pinned is world-locked during editing, but auto-recentres if the user
+    // walks too far away and would otherwise lose the control surface.
+    if (!force && pinned && menu.visible && menu.position.distanceTo(head) < 2.25) return;
+    if (!force && !pinned && menu.visible &&
+      previousHead.distanceToSquared(head) <= 0.36 &&
+      previousFacing.dot(facing) > 0.75) return;
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
@@ -399,6 +415,18 @@ export function createBuildOverlay(scene: THREE.Scene) {
       context.textAlign = "center";
       context.fillText(layout.subtitle, layout.width / 2, 105, 560);
       context.textAlign = "left";
+    }
+    for (const section of layout.sections ?? []) {
+      context.fillStyle = "#96e6dd";
+      context.font = "bold 24px sans-serif";
+      context.fillText(section.label, 20, section.y, layout.width - 40);
+    }
+    if (layout.helpLines) {
+      context.font = "bold 27px sans-serif";
+      layout.helpLines.forEach((line,index) => {
+        context.fillStyle = index%2===0 ? "#f0fbfc" : "#b9d5d8";
+        context.fillText(line, 28, 95+index*44, layout.width-56);
+      });
     }
     for (const [index, button] of layout.buttons.entries()) {
       const highlight = index === hover || button.active;
