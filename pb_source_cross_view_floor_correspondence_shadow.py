@@ -246,7 +246,7 @@ def rank_registrations(
         for scale in scales:
             # Malformed viewport metadata must not manufacture a correspondence.
             # Keep valid scale hypotheses available independently.
-            if not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+            if type(scale) not in (int, float) or not math.isfinite(scale) or scale <= 0:
                 continue
             # Reject malformed orientation witnesses and overflowed products before
             # they reach coordinate rounding or line indexing.  A corrupt source
