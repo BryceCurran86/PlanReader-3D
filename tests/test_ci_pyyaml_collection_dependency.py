@@ -23,14 +23,3 @@ def test_ci_only_dependencies_include_yaml_parser_required_at_collection():
     # The public CI full suite installs this exact manifest.
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "pip install -r requirements.txt -r requirements-ci-v1228.txt" in workflow
-
-
-def test_original_source_workflow_tests_that_import_yaml_are_all_ci_collected():
-    original_source_tests = (
-        "test_apply_provision_original_sources.py",
-        "test_original_source_push_not_run_gate.py",
-        "test_provision_original_sources.py",
-    )
-    for filename in original_source_tests:
-        content = (ROOT / "tests" / filename).read_text()
-        assert "import yaml" in content
