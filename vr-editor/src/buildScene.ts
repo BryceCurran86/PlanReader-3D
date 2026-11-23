@@ -319,6 +319,23 @@ export function createBuildOverlay(scene: THREE.Scene) {
   mark.rotation.x = -Math.PI / 2;
   mark.visible = false;
   scene.add(mark);
+  // The live length is shown next to the point in the world, rather than
+  // only on the distant tool panel where a Quest user must look away.
+  const dimensionCanvas = document.createElement("canvas");
+  dimensionCanvas.width = 640;
+  dimensionCanvas.height = 96;
+  const dimensionContext = dimensionCanvas.getContext("2d");
+  const dimensionTexture = new THREE.CanvasTexture(dimensionCanvas);
+  dimensionTexture.colorSpace = THREE.SRGBColorSpace;
+  const dimensionMaterial = new THREE.SpriteMaterial({
+    map: dimensionTexture, depthTest: false, depthWrite: false,
+  });
+  const dimensionSprite = new THREE.Sprite(dimensionMaterial);
+  dimensionSprite.scale.set(1.7, 0.255, 1);
+  dimensionSprite.renderOrder = 22;
+  dimensionSprite.visible = false;
+  scene.add(dimensionSprite);
+  let lastDimension = "";
   const positions = new THREE.Float32BufferAttribute(new Float32Array(15), 3);
   const geometry = new THREE.BufferGeometry().setAttribute("position", positions);
   const outline = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x71f7dc }));
@@ -406,6 +423,24 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
     const marker = aim?.marker ?? origin;
+    const text = marker && aim?.line && aim.valid !== false &&
+      /\\bmm\\b/.test(aim.hint) ? aim.hint : "";
+    dimensionSprite.visible = !!text;
+    if (text && marker) {
+      dimensionSprite.position.set(marker[0], 0.38, marker[1]);
+      if (text !== lastDimension && dimensionContext) {
+        lastDimension = text;
+        dimensionContext.clearRect(0, 0, 640, 96);
+        dimensionContext.fillStyle = "rgba(12, 31, 38, .96)";
+        dimensionContext.fillRect(0, 0, 640, 96);
+        dimensionContext.fillStyle = "#b2fff0";
+        dimensionContext.font = "bold 32px sans-serif";
+        dimensionContext.textAlign = "center";
+        dimensionContext.textBaseline = "middle";
+        dimensionContext.fillText(text, 320, 48, 610);
+        dimensionTexture.needsUpdate = true;
+      }
+    }
     mark.visible = !!marker;
     if (marker) {
       mark.position.set(marker[0], 0.027, marker[1]);
@@ -421,5 +456,5 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   return { positionMenu, sizeMenu, menuHit, drawMenu, showAim,
     hideMenu: () => { menu.visible = false; },
-    dispose: () => texture.dispose() };
+    dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }
