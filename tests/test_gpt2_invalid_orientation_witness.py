@@ -18,6 +18,18 @@ class InvalidOrientationWitnessTests(unittest.TestCase):
                 self.assertFalse(any(row["orientation"] == "invalid" for row in rows))
 
 
+    def test_boolean_scale_cannot_authenticate_viewport(self):
+        # bool is a subclass of int, but is not a measured viewport scale.
+        src = {"H": {0.0: [(0.0, 100.0)]}, "V": {0.0: [(0.0, 100.0)]}}
+        invalid = rank_registrations(src, src,
+            orientations={"identity": (1, 0, 0, 1)},
+            identity_scales=(True, False), topn=2)
+        self.assertEqual(invalid, [])
+        valid = rank_registrations(src, src,
+            orientations={"identity": (1, 0, 0, 1)},
+            identity_scales=(1.0,), topn=2)
+        self.assertTrue(any(row["orientation"] == "identity" for row in valid))
+
     def test_finite_matrix_overflowing_source_coordinates_abstains(self):
         # All metadata numbers are finite, but applying scale to source
         # geometry overflows. Keep the independent valid candidate alive.
