@@ -50,11 +50,11 @@ def _unrelated_source(tmp_path, layout: str):
                 fitz.Rect(970, 760, 1220, 840), color=(0, .6, 0), width=1,
             )
         floor.insert_text(
-            (35, 65), "Drawing title: Floor Plan\\nScale: 1:100",
+            (35, 65), "Drawing title: Floor Plan\nScale: 1:100",
         )
         non_plan = document.new_page(width=width, height=height)
         non_plan.insert_text(
-            (35, 65), "Drawing title: Roof Plan\\nScale: 1:100",
+            (35, 65), "Drawing title: Roof Plan\nScale: 1:100",
         )
         document.save(path)
     return path, width, height
@@ -87,7 +87,7 @@ def test_generic_evidence_json_and_png_match_across_source_styles_and_pages(
         assert receipt["official_frozen120_score_change"] == 0
         assert receipt["topology"]["room_quantity_authorized"] is False
         raw_png = png_path.read_bytes()
-        assert raw_png.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+        assert raw_png.startswith(b"\x89PNG\r\n\x1a\n")
         pixel_width, pixel_height = struct.unpack(">II", raw_png[16:24])
         assert pixel_width >= width and pixel_height >= height
         assert pixel_width <= width * 2 and pixel_height <= height * 2
