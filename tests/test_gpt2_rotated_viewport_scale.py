@@ -47,3 +47,17 @@ def test_identity_only_diagnostic_retains_legacy_fixed_scale():
     assert rows
     assert {r["orientation"] for r in rows} == {"identity"}
     assert {r["scale"] for r in rows} == {1.0}
+
+
+def test_invalid_viewport_scale_hypotheses_are_ignored_without_losing_valid_one():
+    source = build_lines(_segments([
+        ((0, 0), (40, 0)), ((0, 0), (0, 25)),
+    ]))
+    rows = rank_registrations(
+        source, source,
+        identity_scales=(float("nan"), float("inf"), 0.0, -1.0, 1.0),
+        identity_only=False,
+    )
+    assert rows
+    assert {r["scale"] for r in rows} == {1.0}
+    assert all(r["min_support_pt"] >= 0 for r in rows)
