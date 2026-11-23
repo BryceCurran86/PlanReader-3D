@@ -523,6 +523,11 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             png_bytes = layer.get_pixmap(
                 matrix=fitz.Matrix(1.2, 1.2), alpha=False,
             ).tobytes("png")
+            # Bind the source-only JSON receipt to these precise overlay bytes.
+            # A swapped or truncated PNG can no longer masquerade as its pair.
+            result["overlay"]["png_sha256"] = hashlib.sha256(png_bytes).hexdigest()
+            result["overlay"]["png_byte_count"] = len(png_bytes)
+            result["overlay"]["png_filename"] = png_file.name
             json_bytes = json.dumps(result, indent=2).encode("utf8")
             if json_file.exists() or png_file.exists():
                 raise FileExistsError(
