@@ -1,5 +1,21 @@
 # PlanReader-3D agent contract
 
+## Owner 24 November 2026 — active PlanReader team
+
+- **GPT MAX** owns the remaining GPT1, GPT2 and GPT3 lanes, including Acacia
+  source admission, Q5446 floors and customer output, cross-sheet and finish
+  authority, Lot16 host/frame integration, signed/customer retention, the
+  local benchmark and merge decisions.
+- **Claude** owns original footprint, wall, installed-opening and room-ring
+  geometry, canonical preview work and 3Laurel.
+- **Antigravity** owns Maryborough source registration, finish-source evidence
+  and schedule parsing. Coordinate his source handoffs with Claude and GPT MAX.
+
+Use the [owner handoff in #4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135#issuecomment-7111817975)
+and record exact function claims there before editing. The older assignments
+below document prior work and the donor lanes. Use the active assignments above
+for any unfinished work and continue with the existing acceptance rules.
+
 ## Owner 24 November 2026 — retired private GitHub runner (current, mandatory)
 
 **There is no longer a private-source GitHub runner or companion-source workflow to
@@ -134,15 +150,12 @@ and customer lineage. No new customer amount from a shadow candidate.
 See docs/engineering/ONE_APP_PRODUCTION_CONSOLIDATION_20261112.md.
 
 
-## Owner autonomous completion directive — 2026-11-10 (current)
+## Owner autonomous completion directive — 2026-11-10
 
-The owner directs **GPT MAX, Cursor, Claude and AntiGravity** to continue their
-assigned source-to-customer and benchmark work autonomously until the documented
-acceptance conditions are met. Read the current ordered queues and handoff
-contract in [Autonomous completion queues](docs/engineering/AUTONOMOUS_COMPLETION_QUEUES_20261110.md)
-and the latest claims on #4135 before each task. This four-agent assignment
-supersedes the historical "no new Cursor tasks" wording below. GPT1/GPT2/GPT3
-remain retired.
+Continue assigned source-to-customer and benchmark work autonomously until the
+documented acceptance conditions are met. Use the latest claims on #4135 and
+the [earlier completion queues](docs/engineering/AUTONOMOUS_COMPLETION_QUEUES_20261110.md)
+to connect the current assignments to pending work.
 
 - An architecture report is followed by implementation and validation within
   the same authorized task. Do not stop at "waiting for MAX/review/approval".
@@ -177,13 +190,13 @@ an external agent process alive. Report execution and progress only when observe
 
 This owner-authorized estimating assumption must be labelled **"Assumed 2100 mm — verify on site"** and tracked with review provenance. It does not itself authenticate a drawing dimension, opening kind/host/frame/width or permit FIRM source-sealed quantities, verified commercial measurements or frozen benchmark scoring. The earlier general no-missing-height-default rule continues to apply to source-authenticated measurement/quantity authority; this is a separate provisional costing policy only. Full detail: [Owner external-door height policy](docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md). Reusable read-only resolver: `pb_external_door_height_estimate_policy.py`.
 
-## Owner three-agent succession — 2026-11-06 (current top-priority role assignment)
+## Owner three-agent succession — 2026-11-06 (historical assignments)
 
-**Effective immediately, GPT1, GPT2 and GPT3 are retired as separate working agents.** The owner has reassigned ALL of their open code, source, measurement, customer and release responsibilities to **GPT MAX, Claude and AntiGravity**. Their three recurring ChatGPT tasks have been disabled. Do not reenable, message, assign to, await handoff from or create new GPT1/GPT2/GPT3 agents. Historical PR/issue author names are not active assignments.
+This handover records the earlier transfer of the GPT1, GPT2 and GPT3 backlog to GPT MAX, Claude and AntiGravity. Use its references to recover code and source evidence for the active team assignments above.
 
 **Mandatory master handover:** [docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md](docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md). Read it alongside this contract and the playbook before touching work inherited from the three retired agents.
 
-| Continuing agent | Full inherited owner role |
+| Agent | Role in the 6 November handover |
 |---|---|
 | **GPT MAX** | Overall technical/integration/release lead; former GPT3 pinned private-original replay, signed/customer lineage and frozen four-project 120 scorer; former GPT1 quantity/customer release integration; existing Lot16 source host/frame work. Coordinates conflicts, final-head CI, source verification and safe merges. |
 | **Claude** | Former GPT2 Maryborough pages 7/11/9 physical room/FT2/FT3/D13-D15/RCP source interpretation; former GPT1 finish and ceiling issuers/customer output; former GPT3 family semantic/lineage verification; related glazing-source work. |
