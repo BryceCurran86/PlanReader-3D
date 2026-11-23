@@ -120,3 +120,30 @@ def test_generic_diagnostic_junction_graph_has_no_job_specific_focus_default():
         item.arg == "focus_native_path_ids"
         for item in matching[0].keywords
     )
+
+
+@pytest.mark.parametrize("layout", ("small_residential", "stepped_commercial"))
+def test_repeat_diagnostic_preserves_existing_verified_evidence_pair(
+    tmp_path, layout,
+):
+    """A repeated source-only trace cannot replace either published receipt."""
+    path, _, _ = _unrelated_source(tmp_path, layout)
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    destination = tmp_path / layout / "diagnostic"
+    _, json_path, png_path = run(
+        path, 0, destination, expected_sha256=sha,
+        expected_drawing_title="Floor Plan",
+    )
+    before_json, before_png = json_path.read_bytes(), png_path.read_bytes()
+
+    with pytest.raises(FileExistsError, match="original_footprint_evidence_pair_already_exists"):
+        run(
+            path, 0, destination, expected_sha256=sha,
+            expected_drawing_title="Floor Plan",
+        )
+
+    assert json_path.read_bytes() == before_json
+    assert png_path.read_bytes() == before_png
+    assert json.loads(before_json)["overlay"]["png_sha256"] == hashlib.sha256(
+        before_png
+    ).hexdigest()
