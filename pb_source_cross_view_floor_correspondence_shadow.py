@@ -252,8 +252,13 @@ def rank_registrations(
             # they reach coordinate rounding or line indexing.  A corrupt source
             # viewport must not suppress other valid registration hypotheses.
             try:
+                # Boolean entries are flags, not authenticated numeric orientation
+                # coefficients. Reject the entire witness instead of coercing True
+                # to 1.0 or False to 0.0 and manufacturing registration.
+                if len(mat) != 4 or any(type(v) not in (int, float) for v in mat):
+                    continue
                 matrix = tuple(float(v) for v in mat)
-                if len(matrix) != 4 or not all(math.isfinite(v) for v in matrix):
+                if not all(math.isfinite(v) for v in matrix):
                     continue
                 scaled = tuple(scale * v for v in matrix)
                 if not all(math.isfinite(v) for v in scaled):
