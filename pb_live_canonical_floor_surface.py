@@ -250,6 +250,16 @@ def quarantine_unverified_floor_finish_boundaries(
             reason = "floor_finish_canonical_room_owner_missing"
         elif room_owner_counts[room_id.strip()] > 1:
             reason = "floor_finish_canonical_room_owner_ambiguous"
+        elif (not isinstance(getattr(room, "physical_room_id", None), str)
+              or not room.physical_room_id.strip()
+              or room.physical_room_id != room.physical_room_id.strip()):
+            reason = "floor_finish_physical_room_identity_unresolved"
+        elif any(
+            getattr(floor, field) != getattr(room, field)
+            for field in ("document_id", "revision_id", "source_sha256", "snapshot_id",
+                          "page_id", "viewport_id", "source_room_face_record_id")
+        ):
+            reason = "floor_finish_room_source_lineage_mismatch"
         else:
             failure = floor_finish_boundary_wall_failure(
                 room, walls_by_id, quantity_id=quantity.quantity_id,
