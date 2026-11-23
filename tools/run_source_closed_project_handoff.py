@@ -187,10 +187,19 @@ def _verified_source_family_handoff(
         verified = verify_sealed_customer_output(
             issued.sealed_run, issued.customer_rows,
         )
-        sealed_ids = {q.quantity_id for q in issued.sealed_run.quantities}
+        issued_ids = tuple(q.quantity_id for q in quantities)
+        sealed_ids = tuple(q.quantity_id for q in issued.sealed_run.quantities)
+        verified_ids = tuple(verified.verified_quantity_ids)
+        # Set equality alone silently collapses duplicate physical instances.
+        # Require one distinct issued, sealed and customer-verified identity per
+        # accepted source quantity, independent of drawing or benchmark.
         if (
             verified.customer_row_count != expected_count
-            or set(verified.verified_quantity_ids) != sealed_ids
+            or len(set(issued_ids)) != expected_count
+            or len(set(sealed_ids)) != expected_count
+            or len(set(verified_ids)) != expected_count
+            or set(issued_ids) != set(sealed_ids)
+            or set(verified_ids) != set(sealed_ids)
             or set(issued.sealed_run.source_sha256s) != {source_sha256}
         ):
             return None
