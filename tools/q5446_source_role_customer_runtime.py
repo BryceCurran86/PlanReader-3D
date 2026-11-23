@@ -100,17 +100,28 @@ def _authenticated_companion_roles(plan_path: Path) -> tuple[Path, Path] | None:
     return found["standard_inclusions"][0], found["scope_and_allowance_reference"][0]
 
 
-def _write_new(path: Path, value: str) -> None:
-    # A role directory is pre-created by the owner launcher. Never replace an
-    # earlier signed body or follow a symlink to foreign customer/source data.
+def _write_new(
+    path: Path, value: str, *, created: list[Path] | None = None,
+) -> None:
+    # A role directory is pre-created by the owner launcher. Never overwrite
+    # prior signed/customer evidence or follow an existing symlink.
     with path.open("x", encoding="utf-8") as out:
-        out.write(value)
+        # Record ownership immediately after exclusive creation, before write
+        # or flush can fail. Only these paths may be removed by rollback.
+        if created is not None:
+            created.append(path)
+        if out.write(value) != len(value):
+            raise OSError("source_role_output_short_write")
 
 
-def _summary(output_dir: Path, data: dict[str, Any]) -> None:
+def _summary(
+    output_dir: Path, data: dict[str, Any], *,
+    created: list[Path] | None = None,
+) -> None:
     _write_new(
         output_dir / "production_summary.json",
         json.dumps(data, sort_keys=True, indent=2) + "\n",
+        created=created,
     )
 
 
@@ -357,13 +368,21 @@ def produce_q5446_source_role(
                         family_counts.get("floor_finish_area", 0) + 1
                     )
 
-        # Everything below is an authenticated, ordinary canonical role
-        # output consumed by the *existing* exact-bijection aggregate reader.
-        # Never label one original document as a completed six-role project.
-        seal_path = output_dir / (project_id + ".json")
-        rows_path = output_dir / "verified_customer_rows.json"
-        _write_new(seal_path, sealed.to_json())
-        # Re-read via the same real verifier used by the owner role combiner.
+    except (OSError, ValueError, TypeError, RuntimeError):
+        # A rejected producer is not a source-positive customer receipt.
+        # No signed/customer output has been published at this point.
+        _summary(output_dir, result)
+        return result
+
+    # Serialize the authenticated source role only after all issuer gates
+    # succeeded. Keep the seal, customer receipt, and success summary as a
+    # create-only publication unit: a failure never leaves an orphan seal.
+    seal_path = output_dir / (project_id + ".json")
+    rows_path = output_dir / "verified_customer_rows.json"
+    created: list[Path] = []
+    try:
+        _write_new(seal_path, sealed.to_json(), created=created)
+        # Re-read via the same verifier used by the owner role combiner.
         reloaded = load_verified_sealed_run(seal_path)
         if (reloaded.run_id != sealed.run_id
                 or set(reloaded.source_sha256s) != {SOURCE_SHA256}):
@@ -371,28 +390,29 @@ def produce_q5446_source_role(
         verify_sealed_customer_output(reloaded, customer_rows)
         _write_new(
             rows_path, json.dumps(list(customer_rows), sort_keys=True) + "\n",
+            created=created,
         )
-    except (OSError, ValueError, TypeError, RuntimeError):
-        # A failed issuer or seal cannot be converted into a commercial row.
-        # Any unexpected failure after seal creation propagates, so the owner
-        # process is marked FAILED rather than reporting a partial role sealed.
-        if (output_dir / (project_id + ".json")).exists():
-            raise
-        _summary(output_dir, result)
-        return result
-
-    result.update({
-        "status": "sealed",
-        "combined_run_file": str(seal_path),
-        "customer_rows_file": str(rows_path),
-        "customer_rows_verified": True,
-        "verified_customer_row_count": len(customer_rows),
-        "full_project_customer_first_gate": "PROJECT_VERIFIED",
-        "combined_quantity_count": len(sealed.quantities),
-        "family_counts": family_counts,
-        "source_role_coverage_verified": False,
-    })
-    _summary(output_dir, result)
+        result.update({
+            "status": "sealed",
+            "combined_run_file": str(seal_path),
+            "customer_rows_file": str(rows_path),
+            "customer_rows_verified": True,
+            "verified_customer_row_count": len(customer_rows),
+            "full_project_customer_first_gate": "PROJECT_VERIFIED",
+            "combined_quantity_count": len(sealed.quantities),
+            "family_counts": family_counts,
+            "source_role_coverage_verified": False,
+        })
+        _summary(output_dir, result, created=created)
+    except BaseException:
+        # Roll back only files exclusively created by this invocation.
+        # Preserve the original write/verification failure if cleanup fails.
+        for published in reversed(created):
+            try:
+                published.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     return result
 
 
