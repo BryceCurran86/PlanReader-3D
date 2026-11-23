@@ -431,8 +431,6 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             graph = build_source_native_wall_body_junction_graph(
                 drawings,
                 page_index=page_index,
-                # Optional Acacia host-stroke audit filter only; never a join.
-                focus_native_path_ids=(4000, 4002, 5862, 5848, 5849),
             )
             result["junction_graph_summary"] = {
                 "exterior_preflight_status": graph.get("exterior_preflight_status"),
