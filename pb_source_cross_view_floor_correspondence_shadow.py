@@ -248,7 +248,19 @@ def rank_registrations(
             # Keep valid scale hypotheses available independently.
             if not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
                 continue
-            moved = orient_lines(src, tuple(scale * v for v in mat))
+            # Reject malformed orientation witnesses and overflowed products before
+            # they reach coordinate rounding or line indexing.  A corrupt source
+            # viewport must not suppress other valid registration hypotheses.
+            try:
+                matrix = tuple(float(v) for v in mat)
+                if len(matrix) != 4 or not all(math.isfinite(v) for v in matrix):
+                    continue
+                scaled = tuple(scale * v for v in matrix)
+                if not all(math.isfinite(v) for v in scaled):
+                    continue
+            except (TypeError, ValueError, OverflowError):
+                continue
+            moved = orient_lines(src, scaled)
             xs, ys = _shift_votes(moved, index, topn)
             pool = sorted(
                 ((*min_axis_support(moved, index, dx, dy, tol), dx, dy) for dx in xs for dy in ys),
