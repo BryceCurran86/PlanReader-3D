@@ -1,0 +1,3492 @@
+{
+ "cases": {
+  "adapter_boolean_and_text_numbers": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_chord_repeated": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    }
+   ]
+  },
+  "adapter_collections_not_list_or_tuple": {
+   "after": {
+    "chords_generator": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_chord_collection_invalid",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "chords_user_list": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_chord_collection_invalid",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "drawings_user_list": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_chord_collection_invalid",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "plain_tuple": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   },
+   "before": {
+    "chords_generator": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "chords_user_list": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "drawings_user_list": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "plain_tuple": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_competing_wall_ends": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0",
+      "native-wall-end:4"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_end_contact_ambiguous",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_contacts_reversed": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_end_contact_ambiguous",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_duck_typed_chord": {
+   "after": {
+    "duck_alone": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_chord_receipt_invalid",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "duck_between_two_mappings": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     },
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "1",
+      "physical_host_authorized": false,
+      "reason": "source_chord_receipt_invalid",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     },
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "2",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   },
+   "before": {
+    "duck_alone": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "duck_between_two_mappings": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     },
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "1",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     },
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "2",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_infinite_and_nan_widths": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "3",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_interval_and_band_reversed": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_invalid_scope": {
+   "before": {
+    "blank_part": [],
+    "empty_scope": [],
+    "list_scope": [],
+    "one_part": []
+   }
+  },
+  "adapter_missing_keys": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "3",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "4",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "5",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    }
+   ]
+  },
+  "adapter_non_mapping_chord": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "3",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_none_and_empty_rows": {
+   "before": {
+    "no_chords": [],
+    "no_rows": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "none_rows": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ]
+   }
+  },
+  "adapter_oversized_integer_widths": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "2",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_perpendicular_corner": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "ANGLED_OPENING",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    }
+   ]
+  },
+  "adapter_rows_changed_between_calls": {
+   "before": {
+    "after_the_wall_end_moved": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "first": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "third": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w138.0_h_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w138.0_h_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w138.0_v_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w138.0_v_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w23.0_h_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w23.0_h_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w23.0_v_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w23.0_v_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w52.08_h_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w52.08_h_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w52.08_v_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w52.08_v_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w90.0_h_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w90.0_h_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w90.0_v_plain": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_seam_w90.0_v_thr": {
+   "before": {
+    "chords": 1,
+    "tags": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_solid_pier_between_two_openings": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    },
+    {
+     "candidate_sections_first": [
+      "native-wall-end:1"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:2"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "1",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:1",
+      "native-wall-end:2"
+     ]
+    }
+   ]
+  },
+  "adapter_stroke_with_both_endpoints_at_the_contact": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    }
+   ]
+  },
+  "adapter_unrelated_rows_added": {
+   "before": {
+    "plain": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "with_unrelated_rows": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_wall_end_around_the_endpoint_tolerance": {
+   "before": {
+    "exact": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "inside_0_17": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "outside_0_19": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "outside_0_4": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ]
+   }
+  },
+  "adapter_wall_end_in_and_beyond_the_band_slack": {
+   "before": {
+    "beyond_the_slack": [
+     {
+      "candidate_sections_first": [],
+      "candidate_sections_second": [],
+      "contact_geometry": "UNRESOLVED",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_end_contact_ambiguous",
+      "source_topology_only": true,
+      "status": "UNRESOLVED",
+      "wall_section_ids": []
+     }
+    ],
+    "in_the_slack": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ],
+    "inside_the_band": [
+     {
+      "candidate_sections_first": [
+       "native-wall-end:0"
+      ],
+      "candidate_sections_second": [
+       "native-wall-end:1"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "0",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native-wall-end:0",
+       "native-wall-end:1"
+      ]
+     }
+    ]
+   }
+  },
+  "adapter_wall_end_split_in_two_strokes": {
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:1"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:2"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:1",
+      "native-wall-end:2"
+     ]
+    }
+   ]
+  },
+  "adapter_wall_runs_through_the_opening": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_end_contact_ambiguous",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "adapter_zero_width_chord": {
+   "after": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_chord_receipt_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ],
+   "before": [
+    {
+     "candidate_sections_first": [
+      "native-wall-end:0"
+     ],
+     "candidate_sections_second": [
+      "native-wall-end:1"
+     ],
+     "contact_geometry": "WALL_JUNCTION",
+     "measurement_authorized": false,
+     "opening_id": "0",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native-wall-end:0",
+      "native-wall-end:1"
+     ]
+    }
+   ]
+  },
+  "contract_competing_sections_at_one_contact": {
+   "before": {
+    "candidate_sections_first": [
+     "segment-before",
+     "segment-before-twin"
+    ],
+    "candidate_sections_second": [
+     "segment-after"
+    ],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "competing_traced_wall_sections",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   }
+  },
+  "contract_competing_sections_on_both_sides": {
+   "before": {
+    "sorted_input": {
+     "candidate_sections_first": [
+      "segment-before",
+      "segment-before-twin"
+     ],
+     "candidate_sections_second": [
+      "segment-after",
+      "segment-after-twin"
+     ],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "competing_traced_wall_sections",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    "unsorted_input": {
+     "candidate_sections_first": [
+      "segment-before",
+      "segment-before-twin"
+     ],
+     "candidate_sections_second": [
+      "segment-after",
+      "segment-after-twin"
+     ],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "competing_traced_wall_sections",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   }
+  },
+  "contract_contacts_reversed_and_sections_shuffled": {
+   "before": {
+    "contacts_swapped": {
+     "candidate_sections_first": [
+      "segment-after"
+     ],
+     "candidate_sections_second": [
+      "segment-before"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "segment-after",
+      "segment-before"
+     ]
+    },
+    "normal": {
+     "candidate_sections_first": [
+      "segment-before"
+     ],
+     "candidate_sections_second": [
+      "segment-after"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "segment-before",
+      "segment-after"
+     ]
+    },
+    "sections_shuffled": {
+     "candidate_sections_first": [
+      "segment-before"
+     ],
+     "candidate_sections_second": [
+      "segment-after"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "segment-before",
+      "segment-after"
+     ]
+    }
+   }
+  },
+  "contract_duplicate_section_ids": {
+   "before": {
+    "candidate_sections_first": [],
+    "candidate_sections_second": [],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "duplicate_traced_wall_section_identity",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   }
+  },
+  "contract_infinite_and_boolean_contacts": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "opening_contact_geometry_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "opening_contact_geometry_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "opening_contact_geometry_invalid",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "contract_junction_coincident_contacts": {
+   "before": {
+    "candidate_sections_first": [
+     "w-a"
+    ],
+    "candidate_sections_second": [
+     "w-b"
+    ],
+    "contact_geometry": "WALL_JUNCTION",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "source_wall_ends_and_opening_contacts_match",
+    "source_topology_only": true,
+    "status": "TWO_WALL_SECTIONS_TAGGED",
+    "wall_section_ids": [
+     "w-a",
+     "w-b"
+    ]
+   }
+  },
+  "contract_one_wall_cannot_supply_both_sides": {
+   "before": {
+    "candidate_sections_first": [
+     "only"
+    ],
+    "candidate_sections_second": [
+     "only"
+    ],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "one_wall_section_cannot_supply_two_sides",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   }
+  },
+  "contract_oversized_integer_contact": {
+   "after": {
+    "candidate_sections_first": [],
+    "candidate_sections_second": [],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "opening_contact_geometry_invalid",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   },
+   "before": {
+    "raised": "OverflowError"
+   }
+  },
+  "contract_perpendicular_corner": {
+   "before": {
+    "candidate_sections_first": [
+     "w-a"
+    ],
+    "candidate_sections_second": [
+     "w-b"
+    ],
+    "contact_geometry": "ANGLED_OPENING",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "source_wall_ends_and_opening_contacts_match",
+    "source_topology_only": true,
+    "status": "TWO_WALL_SECTIONS_TAGGED",
+    "wall_section_ids": [
+     "w-a",
+     "w-b"
+    ]
+   }
+  },
+  "contract_straight_gap": {
+   "before": {
+    "candidate_sections_first": [
+     "segment-before"
+    ],
+    "candidate_sections_second": [
+     "segment-after"
+    ],
+    "contact_geometry": "STRAIGHT_GAP",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "source_wall_ends_and_opening_contacts_match",
+    "source_topology_only": true,
+    "status": "TWO_WALL_SECTIONS_TAGGED",
+    "wall_section_ids": [
+     "segment-before",
+     "segment-after"
+    ]
+   }
+  },
+  "contract_straight_wall_runs_into_the_gap": {
+   "before": {
+    "candidate_sections_first": [
+     "a"
+    ],
+    "candidate_sections_second": [
+     "b"
+    ],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "straight_wall_section_runs_into_opening",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   }
+  },
+  "contract_wrong_scope_or_revision": {
+   "before": [
+    {
+     "candidate_sections_first": [],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "two_source_wall_end_contacts_required",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    },
+    {
+     "candidate_sections_first": [
+      "segment-before"
+     ],
+     "candidate_sections_second": [],
+     "contact_geometry": "UNRESOLVED",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "two_source_wall_end_contacts_required",
+     "source_topology_only": true,
+     "status": "UNRESOLVED",
+     "wall_section_ids": []
+    }
+   ]
+  },
+  "contract_zero_span_collinear": {
+   "before": {
+    "candidate_sections_first": [
+     "w-a"
+    ],
+    "candidate_sections_second": [
+     "w-b"
+    ],
+    "contact_geometry": "UNRESOLVED",
+    "measurement_authorized": false,
+    "opening_id": "opening-a",
+    "physical_host_authorized": false,
+    "reason": "coincident_collinear_contact_not_an_opening",
+    "source_topology_only": true,
+    "status": "UNRESOLVED",
+    "wall_section_ids": []
+   }
+  },
+  "core_cavity_pocket": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.275
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.275
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.275
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.275
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.275
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       60.0,
+       101.275
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "core_coincident_junction": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       10.0,
+       80.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "WALL_JUNCTION",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "core_face_of_a_passing_wall": {
+   "before": {
+    "blocked": "wall_end_group_is_far_thicker_than_the_opening_edge_a_wall_face_not_an_end"
+   }
+  },
+  "core_first_and_second_group_swapped": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       60.0,
+       101.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "core_group_ids_given_out_of_order": {
+   "before": {
+    "ascending": {
+     "contacts": [
+      {
+       "position": [
+        10.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        0,
+        1
+       ]
+      },
+      {
+       "position": [
+        36.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        2,
+        3
+       ]
+      }
+     ],
+     "opening_native_path_ids": [
+      4
+     ],
+     "sections": [
+      {
+       "end": [
+        10.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_1c637b3067644b1de240",
+       "native_path_ids": [
+        0,
+        1
+       ],
+       "start": [
+        0.0,
+        101.0
+       ]
+      },
+      {
+       "end": [
+        36.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_63b60a39cc8514194b32",
+       "native_path_ids": [
+        2,
+        3
+       ],
+       "start": [
+        60.0,
+        101.0
+       ]
+      }
+     ],
+     "tag": {
+      "candidate_sections_first": [
+       "native_wall_end_section_1c637b3067644b1de240"
+      ],
+      "candidate_sections_second": [
+       "native_wall_end_section_63b60a39cc8514194b32"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "opening-a",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native_wall_end_section_1c637b3067644b1de240",
+       "native_wall_end_section_63b60a39cc8514194b32"
+      ]
+     }
+    },
+    "descending": {
+     "contacts": [
+      {
+       "position": [
+        10.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        0,
+        1
+       ]
+      },
+      {
+       "position": [
+        36.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        2,
+        3
+       ]
+      }
+     ],
+     "opening_native_path_ids": [
+      4
+     ],
+     "sections": [
+      {
+       "end": [
+        10.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_1c637b3067644b1de240",
+       "native_path_ids": [
+        0,
+        1
+       ],
+       "start": [
+        0.0,
+        101.0
+       ]
+      },
+      {
+       "end": [
+        36.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_63b60a39cc8514194b32",
+       "native_path_ids": [
+        2,
+        3
+       ],
+       "start": [
+        60.0,
+        101.0
+       ]
+      }
+     ],
+     "tag": {
+      "candidate_sections_first": [
+       "native_wall_end_section_1c637b3067644b1de240"
+      ],
+      "candidate_sections_second": [
+       "native_wall_end_section_63b60a39cc8514194b32"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "opening-a",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native_wall_end_section_1c637b3067644b1de240",
+       "native_wall_end_section_63b60a39cc8514194b32"
+      ]
+     }
+    }
+   }
+  },
+  "core_group_meets_the_opening_on_two_sides": {
+   "before": {
+    "blocked": "wall_end_group_meets_opening_on_two_sides"
+   }
+  },
+  "core_malformed_native_points": {
+   "after": {
+    "bytes": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "dict": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "list_of_text": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "nested_lists": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "none_attribute": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "one_number": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "oversized_integer_attribute": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "text": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    }
+   },
+   "before": {
+    "bytes": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "dict": {
+     "raised": "KeyError"
+    },
+    "list_of_text": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "nested_lists": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "none_attribute": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "one_number": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "oversized_integer_attribute": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    },
+    "text": {
+     "blocked": "wall_end_does_not_reach_its_faces_at_the_opening_edge"
+    }
+   }
+  },
+  "core_malformed_receipts": {
+   "before": {
+    "boolean_id": {
+     "blocked": "wall_end_group_invalid"
+    },
+    "duplicate_ids": {
+     "blocked": "wall_end_group_invalid"
+    },
+    "id_out_of_range": {
+     "blocked": "wall_end_group_invalid"
+    },
+    "nan_anchor": {
+     "blocked": "opening_edge_rectangles_missing"
+    },
+    "no_anchors": {
+     "blocked": "opening_edge_rectangles_missing"
+    },
+    "opening_inside_a_group": {
+     "blocked": "opening_native_paths_missing"
+    },
+    "reversed_anchor": {
+     "blocked": "opening_edge_rectangles_missing"
+    },
+    "shared_path": {
+     "blocked": "wall_end_groups_share_a_native_path"
+    }
+   }
+  },
+  "core_outlined_faces": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0,
+       1
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       2,
+       3
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     4
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_1c637b3067644b1de240",
+      "native_path_ids": [
+       0,
+       1
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_63b60a39cc8514194b32",
+      "native_path_ids": [
+       2,
+       3
+      ],
+      "start": [
+       60.0,
+       101.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_1c637b3067644b1de240"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_63b60a39cc8514194b32"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_1c637b3067644b1de240",
+      "native_wall_end_section_63b60a39cc8514194b32"
+     ]
+    }
+   }
+  },
+  "core_outlined_with_end_caps": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0,
+       1,
+       2
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     6
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_5009b4dd0a3aa3150cc9",
+      "native_path_ids": [
+       0,
+       1,
+       2
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_1357bdae905d953b7980",
+      "native_path_ids": [
+       3,
+       4,
+       5
+      ],
+      "start": [
+       60.0,
+       101.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_5009b4dd0a3aa3150cc9"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_1357bdae905d953b7980"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_5009b4dd0a3aa3150cc9",
+      "native_wall_end_section_1357bdae905d953b7980"
+     ]
+    }
+   }
+  },
+  "core_oversized_integer_anchors": {
+   "after": {
+    "high_x": {
+     "blocked": "opening_edge_rectangles_missing"
+    },
+    "high_y": {
+     "blocked": "opening_edge_rectangles_missing"
+    },
+    "low_x": {
+     "blocked": "opening_edge_rectangles_missing"
+    }
+   },
+   "before": {
+    "high_x": {
+     "raised": "OverflowError"
+    },
+    "high_y": {
+     "raised": "OverflowError"
+    },
+    "low_x": {
+     "raised": "OverflowError"
+    }
+   }
+  },
+  "core_perpendicular_corner": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       11.0,
+       100.0
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       11.0,
+       100.0
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       11.0,
+       80.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "ANGLED_OPENING",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "core_single_hairline": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       60.0,
+       101.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "core_solid_pier_between_two_doorways": {
+   "before": {
+    "door_1": {
+     "contacts": [
+      {
+       "position": [
+        10.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        0
+       ]
+      },
+      {
+       "position": [
+        36.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        1
+       ]
+      }
+     ],
+     "opening_native_path_ids": [
+      3
+     ],
+     "sections": [
+      {
+       "end": [
+        10.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+       "native_path_ids": [
+        0
+       ],
+       "start": [
+        0.0,
+        101.0
+       ]
+      },
+      {
+       "end": [
+        36.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+       "native_path_ids": [
+        1
+       ],
+       "start": [
+        46.0,
+        101.0
+       ]
+      }
+     ],
+     "tag": {
+      "candidate_sections_first": [
+       "native_wall_end_section_b4f841319e93ac9dcdee"
+      ],
+      "candidate_sections_second": [
+       "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "door-1",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native_wall_end_section_b4f841319e93ac9dcdee",
+       "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+      ]
+     }
+    },
+    "door_2": {
+     "contacts": [
+      {
+       "position": [
+        46.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        1
+       ]
+      },
+      {
+       "position": [
+        72.0,
+        101.0
+       ],
+       "wall_end_native_path_ids": [
+        2
+       ]
+      }
+     ],
+     "opening_native_path_ids": [
+      4
+     ],
+     "sections": [
+      {
+       "end": [
+        46.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+       "native_path_ids": [
+        1
+       ],
+       "start": [
+        36.0,
+        101.0
+       ]
+      },
+      {
+       "end": [
+        72.0,
+        101.0
+       ],
+       "id": "native_wall_end_section_215c62ecf00b855b301b",
+       "native_path_ids": [
+        2
+       ],
+       "start": [
+        90.0,
+        101.0
+       ]
+      }
+     ],
+     "tag": {
+      "candidate_sections_first": [
+       "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+      ],
+      "candidate_sections_second": [
+       "native_wall_end_section_215c62ecf00b855b301b"
+      ],
+      "contact_geometry": "STRAIGHT_GAP",
+      "measurement_authorized": false,
+      "opening_id": "door-2",
+      "physical_host_authorized": false,
+      "reason": "source_wall_ends_and_opening_contacts_match",
+      "source_topology_only": true,
+      "status": "TWO_WALL_SECTIONS_TAGGED",
+      "wall_section_ids": [
+       "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+       "native_wall_end_section_215c62ecf00b855b301b"
+      ]
+     }
+    }
+   }
+  },
+  "core_solid_strips": {
+   "before": {
+    "contacts": [
+     {
+      "position": [
+       10.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       0
+      ]
+     },
+     {
+      "position": [
+       36.0,
+       101.0
+      ],
+      "wall_end_native_path_ids": [
+       1
+      ]
+     }
+    ],
+    "opening_native_path_ids": [
+     2
+    ],
+    "sections": [
+     {
+      "end": [
+       10.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_path_ids": [
+       0
+      ],
+      "start": [
+       0.0,
+       101.0
+      ]
+     },
+     {
+      "end": [
+       36.0,
+       101.0
+      ],
+      "id": "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+      "native_path_ids": [
+       1
+      ],
+      "start": [
+       60.0,
+       101.0
+      ]
+     }
+    ],
+    "tag": {
+     "candidate_sections_first": [
+      "native_wall_end_section_b4f841319e93ac9dcdee"
+     ],
+     "candidate_sections_second": [
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ],
+     "contact_geometry": "STRAIGHT_GAP",
+     "measurement_authorized": false,
+     "opening_id": "opening-a",
+     "physical_host_authorized": false,
+     "reason": "source_wall_ends_and_opening_contacts_match",
+     "source_topology_only": true,
+     "status": "TWO_WALL_SECTIONS_TAGGED",
+     "wall_section_ids": [
+      "native_wall_end_section_b4f841319e93ac9dcdee",
+      "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+     ]
+    }
+   }
+  },
+  "front_end_cavity_slider_and_hinged_mark": {
+   "before": {
+    "hinged_first": {
+     "entries": [
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_b4f841319e93ac9dcdee"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_b30c993ba4c66afa73e0",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        0,
+        1
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "cavity_slider",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_b4f841319e93ac9dcdee",
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ]
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_07bd7bc940748eb841b8"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_35701837615e01aa191c"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_31348f81c3395d4357c3",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        6,
+        7
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_07bd7bc940748eb841b8",
+        "native_wall_end_section_35701837615e01aa191c"
+       ]
+      }
+     ],
+     "public_summary": {
+      "by_contact_geometry": {
+       "STRAIGHT_GAP": 2
+      },
+      "by_reason": {
+       "source_wall_ends_and_opening_contacts_match": 2
+      },
+      "by_symbol_kind": {
+       "cavity_slider": 1,
+       "hinged_swing": 1
+      },
+      "customer_quantity_authorized": false,
+      "frozen_benchmark_scored": false,
+      "kind_authorized": false,
+      "marks": 2,
+      "measurement_authorized": false,
+      "physical_host_authorized": false,
+      "physical_opening_authenticated": false,
+      "physical_wall_authenticated": false,
+      "reason_codes": [],
+      "schema_version": "1.0.0",
+      "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY",
+      "tagged": 2,
+      "unresolved": 0
+     },
+     "reason_codes": [],
+     "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY"
+    },
+    "slider_first": {
+     "entries": [
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_b4f841319e93ac9dcdee"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_b30c993ba4c66afa73e0",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        0,
+        1
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "cavity_slider",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_b4f841319e93ac9dcdee",
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ]
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_07bd7bc940748eb841b8"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_35701837615e01aa191c"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_31348f81c3395d4357c3",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        6,
+        7
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_07bd7bc940748eb841b8",
+        "native_wall_end_section_35701837615e01aa191c"
+       ]
+      }
+     ],
+     "public_summary": {
+      "by_contact_geometry": {
+       "STRAIGHT_GAP": 2
+      },
+      "by_reason": {
+       "source_wall_ends_and_opening_contacts_match": 2
+      },
+      "by_symbol_kind": {
+       "cavity_slider": 1,
+       "hinged_swing": 1
+      },
+      "customer_quantity_authorized": false,
+      "frozen_benchmark_scored": false,
+      "kind_authorized": false,
+      "marks": 2,
+      "measurement_authorized": false,
+      "physical_host_authorized": false,
+      "physical_opening_authenticated": false,
+      "physical_wall_authenticated": false,
+      "reason_codes": [],
+      "schema_version": "1.0.0",
+      "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY",
+      "tagged": 2,
+      "unresolved": 0
+     },
+     "reason_codes": [],
+     "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY"
+    }
+   }
+  },
+  "front_end_invalid_scope": {
+   "before": {
+    "entries": [],
+    "public_summary": {
+     "by_contact_geometry": {},
+     "by_reason": {},
+     "by_symbol_kind": {},
+     "customer_quantity_authorized": false,
+     "frozen_benchmark_scored": false,
+     "kind_authorized": false,
+     "marks": 0,
+     "measurement_authorized": false,
+     "physical_host_authorized": false,
+     "physical_opening_authenticated": false,
+     "physical_wall_authenticated": false,
+     "reason_codes": [
+      "scope_invalid"
+     ],
+     "schema_version": "1.0.0",
+     "status": "ABSTAINED",
+     "tagged": 0,
+     "unresolved": 0
+    },
+    "reason_codes": [
+     "scope_invalid"
+    ],
+    "status": "ABSTAINED"
+   }
+  },
+  "front_end_two_doors_one_pier_one_unhosted_mark": {
+   "before": {
+    "in_order": {
+     "entries": [
+      {
+       "candidate_sections_first": [],
+       "candidate_sections_second": [],
+       "contact_geometry": "UNRESOLVED",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_b96381eb95cc13c83ef2",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        7
+       ],
+       "mark_status": "NEEDS_HOST",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "mark_has_no_two_native_host_paths",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "UNRESOLVED",
+       "wall_section_ids": []
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_b4f841319e93ac9dcdee"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_4c0da8db4b350d18166e",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        0,
+        1
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        7,
+        0,
+        1,
+        3,
+        4
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_b4f841319e93ac9dcdee",
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ]
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_215c62ecf00b855b301b"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_8256ab499a39cd1115f4",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        1,
+        2
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        8,
+        1,
+        2,
+        5,
+        6
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+        "native_wall_end_section_215c62ecf00b855b301b"
+       ]
+      }
+     ],
+     "public_summary": {
+      "by_contact_geometry": {
+       "STRAIGHT_GAP": 2,
+       "UNRESOLVED": 1
+      },
+      "by_reason": {
+       "mark_has_no_two_native_host_paths": 1,
+       "source_wall_ends_and_opening_contacts_match": 2
+      },
+      "by_symbol_kind": {
+       "hinged_swing": 3
+      },
+      "customer_quantity_authorized": false,
+      "frozen_benchmark_scored": false,
+      "kind_authorized": false,
+      "marks": 3,
+      "measurement_authorized": false,
+      "physical_host_authorized": false,
+      "physical_opening_authenticated": false,
+      "physical_wall_authenticated": false,
+      "reason_codes": [],
+      "schema_version": "1.0.0",
+      "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY",
+      "tagged": 2,
+      "unresolved": 1
+     },
+     "reason_codes": [],
+     "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY"
+    },
+    "reversed": {
+     "entries": [
+      {
+       "candidate_sections_first": [],
+       "candidate_sections_second": [],
+       "contact_geometry": "UNRESOLVED",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_b96381eb95cc13c83ef2",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        7
+       ],
+       "mark_status": "NEEDS_HOST",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "mark_has_no_two_native_host_paths",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "UNRESOLVED",
+       "wall_section_ids": []
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_b4f841319e93ac9dcdee"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_4c0da8db4b350d18166e",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        0,
+        1
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        7,
+        0,
+        1,
+        3,
+        4
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_b4f841319e93ac9dcdee",
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ]
+      },
+      {
+       "candidate_sections_first": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a"
+       ],
+       "candidate_sections_second": [
+        "native_wall_end_section_215c62ecf00b855b301b"
+       ],
+       "contact_geometry": "STRAIGHT_GAP",
+       "customer_quantity_authorized": false,
+       "entry_id": "internal_door_two_wall_8256ab499a39cd1115f4",
+       "frozen_benchmark_scored": false,
+       "host_native_path_ids": [
+        1,
+        2
+       ],
+       "kind_authorized": false,
+       "mark_native_path_ids": [
+        8,
+        1,
+        2,
+        5,
+        6
+       ],
+       "mark_status": "HOSTED_TOPOLOGY_ONLY",
+       "measurement_authorized": false,
+       "next_authority": "physical_host_frame_kind_and_metric_authority_required",
+       "physical_host_authorized": false,
+       "physical_opening_authenticated": false,
+       "physical_wall_authenticated": false,
+       "reason": "source_wall_ends_and_opening_contacts_match",
+       "symbol_kind": "hinged_swing",
+       "tag_status": "TWO_WALL_SECTIONS_TAGGED",
+       "wall_section_ids": [
+        "native_wall_end_section_dc4ee6ee5ee4da59d59a",
+        "native_wall_end_section_215c62ecf00b855b301b"
+       ]
+      }
+     ],
+     "public_summary": {
+      "by_contact_geometry": {
+       "STRAIGHT_GAP": 2,
+       "UNRESOLVED": 1
+      },
+      "by_reason": {
+       "mark_has_no_two_native_host_paths": 1,
+       "source_wall_ends_and_opening_contacts_match": 2
+      },
+      "by_symbol_kind": {
+       "hinged_swing": 3
+      },
+      "customer_quantity_authorized": false,
+      "frozen_benchmark_scored": false,
+      "kind_authorized": false,
+      "marks": 3,
+      "measurement_authorized": false,
+      "physical_host_authorized": false,
+      "physical_opening_authenticated": false,
+      "physical_wall_authenticated": false,
+      "reason_codes": [],
+      "schema_version": "1.0.0",
+      "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY",
+      "tagged": 2,
+      "unresolved": 1
+     },
+     "reason_codes": [],
+     "status": "INTERNAL_DOOR_TWO_WALL_TAGS_REVIEW_ONLY"
+    }
+   }
+  }
+ }
+}
