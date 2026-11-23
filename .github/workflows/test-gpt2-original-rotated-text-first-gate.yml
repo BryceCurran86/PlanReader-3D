@@ -17,7 +17,7 @@ on:
 jobs:
   native-pdf-text-integrity-difference:
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
+    if: ${{ false }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
           if-no-files-found: warn
 
   original-source-not-verified:
-    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    if: ${{ true }}
     uses: ./.github/workflows/original-source-not-run.yml
     with:
       job: native-pdf-text-integrity-difference

@@ -31,3 +31,5 @@ benchmark_results/.report_set.lock
 **/.npmrc
 **/id_rsa
 **/id_ed25519
+# Machine-local paths for original-source benchmarking.
+.planreader-benchmark.local.json

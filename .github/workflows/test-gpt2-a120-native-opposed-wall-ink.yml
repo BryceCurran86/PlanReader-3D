@@ -17,7 +17,7 @@ on:
 jobs:
   a120-original-source-no-synthetic-wall-closure:
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
+    if: ${{ false }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
           python scripts/check_provider_gold_isolation.py
 
   original-source-not-verified:
-    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    if: ${{ true }}
     uses: ./.github/workflows/original-source-not-run.yml
     with:
       job: a120-original-source-no-synthetic-wall-closure

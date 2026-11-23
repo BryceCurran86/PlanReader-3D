@@ -43,39 +43,3 @@ jobs:
             tests/test_gpt3_max_area_review_source_issuer_bijection.py
       # Exact client-original PDF is not checked into this public repository.
       # A missing-original test is SKIPPED, never source-positive verified.
-
-  owner-original-lot16-source-replay:
-    # Public pull-request runners do not contain private client-owned PDFs.
-    # A skipped job is NOT positive original-source verification.
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Provision manifest-verified owner Lot16 original
-        uses: ./.github/actions/provision-original-sources
-        with:
-          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
-          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
-          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
-          names: |
-            1. Construction Plans - Lot 16 Power (REV E).pdf
-          allow-missing: "false"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
-      - name: Reproduce actual Lot16 original opening source, MAX and GPT3 seals
-        run: |
-          set -euo pipefail
-          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
-          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
-          PYTHONPATH=. python -u tools/diag_gpt3_lot16_max_area_owner_original_replay.py \
-            --pdf "$PDF" --output artifacts/gpt3-lot16-max-original-area-source-replay.json
-      - name: Erase private originals and unpublished audit results
-        if: always()
-        shell: bash
-        run: rm -rf documents/sources artifacts

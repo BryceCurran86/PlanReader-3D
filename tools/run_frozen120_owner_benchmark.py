@@ -1,14 +1,111 @@
-"""Run the four frozen projects or verify and re-score saved results."""
+"""Run the official four-project benchmark on this computer."""
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 from time import perf_counter
+from typing import Callable
 
 from tools.gpt3_safe_original_report_output import preflight_new_diagnostic
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, main as report_evidence
+
+
+_REPO = Path(__file__).resolve().parents[1]
+_SETTINGS = ".planreader-benchmark.local.json"
+_WINDOWS_ONLINE_CHECK = (
+    "[Console]::WriteLine([int](@("
+    "[System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | "
+    "Where-Object { $_.NetworkInterfaceType -ne 'Loopback' "
+    "-and $_.OperationalStatus -eq 'Up' }).Count -gt 0))"
+)
+
+
+def _require_local_offline() -> None:
+    """Verify the local execution session is disconnected before extraction."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        raise ValueError("original-source benchmark execution is local only")
+    if os.name == "nt":
+        powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
+            "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        result = subprocess.run(
+            [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_ONLINE_CHECK],
+            check=True, capture_output=True, text=True, timeout=15,
+        )
+        if result.stdout.strip() == "0":
+            return
+        if result.stdout.strip() != "1":
+            raise ValueError("could not verify the local network state")
+    else:
+        interfaces = Path("/sys/class/net")
+        if not interfaces.is_dir():
+            raise ValueError("could not verify the local network state")
+        if not any(
+            dev.name != "lo" and int((dev / "flags").read_text(), 16) & 1
+            for dev in interfaces.iterdir()
+        ):
+            return
+    raise ValueError("original-source extraction requires a disconnected local session")
+
+
+def _read_checkout_head() -> str:
+    command = ["git", "-C", str(_REPO)]
+    head = subprocess.check_output(
+        [*command, "rev-parse", "--verify", "HEAD"], text=True, timeout=15,
+    ).strip()
+    status = subprocess.check_output(
+        [*command, "status", "--porcelain", "--untracked-files=all"], text=True, timeout=15,
+    )
+    if status.strip():
+        raise ValueError("benchmark checkout must be clean")
+    return head
+
+
+def _local_paths(args: argparse.Namespace) -> tuple[Path, Path, Path | None]:
+    settings_path = args.config or _REPO / _SETTINGS
+    if settings_path.is_file():
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        if type(settings) is not dict or any(
+            name not in ("source_dir", "identity_map_dir", "run_root")
+            or type(value) is not str or not value.strip()
+            for name, value in settings.items()
+        ):
+            raise ValueError("invalid local benchmark configuration")
+    elif args.config is not None:
+        raise ValueError("local benchmark configuration file is unavailable")
+    else:
+        settings = {}
+
+    source_dir = args.source_dir or settings.get("source_dir") or os.getenv(
+        "PLANREADER_PRIVATE_SOURCE_ROOT"
+    ) or _REPO / "documents" / "sources"
+    identity_map_dir = args.identity_map_dir or settings.get("identity_map_dir")
+    if identity_map_dir is None:
+        raise ValueError("configure the local benchmark identity map directory")
+    output_dir = args.output_dir
+    if output_dir is None and not args.check_only:
+        root = Path(settings.get("run_root") or Path.home() / "PlanReader" / "benchmark-runs")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        output_dir = root / timestamp
+    return Path(source_dir).expanduser(), Path(identity_map_dir).expanduser(), output_dir
+
+
+def _check_local_inputs(source_dir: Path, identity_map_dir: Path) -> dict:
+    from tools.gpt3_owner_all_source_role_handoff import PROJECTS, original_roster
+
+    count = sum(len(original_roster(project, source_dir.resolve())) for project in PROJECTS)
+    if count != 10:
+        raise ValueError("expected ten authentic frozen benchmark sources")
+    for project in PROJECTS:
+        identity_map = identity_map_dir / f"{project}.identity_map.json"
+        if not identity_map.is_file() or identity_map.is_symlink():
+            raise ValueError("a required local identity map is unavailable")
+    return {"source_files_verified": count, "identity_maps_present": len(PROJECTS)}
 
 
 def _score_run(source_dir: Path, identity_map_dir: Path, evidence_dir: Path, output_dir: Path) -> int:
@@ -22,12 +119,13 @@ def _score_run(source_dir: Path, identity_map_dir: Path, evidence_dir: Path, out
 def run_benchmark(
     *, source_dir: Path, identity_map_dir: Path, output_dir: Path, timeout_min: int,
     saved_run_dir: Path | None = None,
+    check_execution: Callable[[], None] | None = None,
 ) -> int:
     """Run serially or re-score existing handoffs through the same verifier."""
     source_dir = source_dir.resolve()
     identity_map_dir = identity_map_dir.resolve()
     preflight_new_diagnostic(
-        output_dir, protected_roots=(source_dir, identity_map_dir, FROZEN_ROOT, saved_run_dir),
+        output_dir, protected_roots=(source_dir, identity_map_dir, _REPO, saved_run_dir),
     )
     if saved_run_dir is not None:
         saved_run_dir = saved_run_dir.resolve()
@@ -52,6 +150,8 @@ def run_benchmark(
     total_started = perf_counter()
     outcomes = []
     for project in PROJECTS:
+        if check_execution is not None:
+            check_execution()
         started = perf_counter()
         role_dir = output_dir / "production" / project
         print(f"Starting original-source replay for {project}", flush=True)
@@ -86,14 +186,20 @@ def run_benchmark(
         )
         staged.replace(status_path)
 
+    if check_execution is not None:
+        check_execution()
     return _score_run(source_dir, identity_map_dir, output_dir, output_dir)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-dir", type=Path, required=True)
-    parser.add_argument("--identity-map-dir", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("launcher", nargs="?", choices=("benchmark",), help=argparse.SUPPRESS)
+    parser.add_argument("--config", type=Path, help="Local JSON settings file")
+    parser.add_argument("--source-dir", type=Path)
+    parser.add_argument("--identity-map-dir", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--check-only", action="store_true",
+                        help="Verify the local original roster and map availability")
     parser.add_argument("--timeout-min", type=int, default=180,
                         help="Maximum extraction time per source document")
     parser.add_argument("--saved-run-dir", type=Path,
@@ -101,11 +207,39 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.timeout_min < 1:
         parser.error("--timeout-min must be positive")
-    return run_benchmark(
-        source_dir=args.source_dir, identity_map_dir=args.identity_map_dir,
-        output_dir=args.output_dir, timeout_min=args.timeout_min,
-        saved_run_dir=args.saved_run_dir,
-    )
+    if args.check_only and args.saved_run_dir is not None:
+        parser.error("--check-only and --saved-run-dir are mutually exclusive")
+    try:
+        source_dir, identity_map_dir, output_dir = _local_paths(args)
+        if args.check_only:
+            print(json.dumps(_check_local_inputs(source_dir, identity_map_dir), sort_keys=True))
+            return 0
+        assert output_dir is not None
+        if args.saved_run_dir is not None:
+            return run_benchmark(
+                source_dir=source_dir, identity_map_dir=identity_map_dir,
+                output_dir=output_dir, timeout_min=args.timeout_min,
+                saved_run_dir=args.saved_run_dir,
+            )
+        _require_local_offline()
+        expected_head = _read_checkout_head()
+
+        def check_execution() -> None:
+            _require_local_offline()
+            if _read_checkout_head() != expected_head:
+                raise ValueError("benchmark checkout changed during execution")
+
+        _check_local_inputs(source_dir, identity_map_dir)
+        print(f"Local benchmark checkout {expected_head}", flush=True)
+        return run_benchmark(
+            source_dir=source_dir, identity_map_dir=identity_map_dir,
+            output_dir=output_dir, timeout_min=args.timeout_min,
+            check_execution=check_execution,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        parser.exit(2, f"Local benchmark could not run ({type(exc).__name__}).\n")
+    except (TypeError, ValueError) as exc:
+        parser.exit(2, f"Local benchmark could not run: {exc}\n")
 
 
 if __name__ == "__main__":
