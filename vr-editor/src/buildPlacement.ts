@@ -224,6 +224,23 @@ export function translatedDraftWall(wall: PlacedWall, dx: number, dz: number): P
   return validEditedWall(edited) ? edited : null;
 }
 
+// Large spatial arrow actions are relative to the user's current Quest view,
+// then constrained to the nearest plan axis for construction-friendly nudges.
+export function viewRelativeNudge(
+  direction: "left" | "right" | "forward" | "back",
+  facing: PlanPoint, stepM: number,
+): PlanPoint | null {
+  if (!Number.isFinite(stepM) || stepM <= 0 ||
+      !facing.every(Number.isFinite) || Math.hypot(...facing) < 0.001) return null;
+  const forward: PlanPoint = Math.abs(facing[0]) > Math.abs(facing[1])
+    ? [Math.sign(facing[0]), 0] : [0, Math.sign(facing[1])];
+  const right: PlanPoint = [-forward[1], forward[0]];
+  const delta = direction === "forward" ? forward :
+    direction === "back" ? [-forward[0], -forward[1]] :
+    direction === "right" ? right : [-right[0], -right[1]];
+  return [delta[0] * stepM, delta[1] * stepM];
+}
+
 export function rotatedDraftWall(wall: PlacedWall): PlacedWall | null {
   const cx = (wall.start[0] + wall.end[0]) / 2;
   const cz = (wall.start[1] + wall.end[1]) / 2;
