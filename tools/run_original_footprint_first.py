@@ -152,10 +152,11 @@ def _original_source_native_outer_wall_review(drawings, words, page_index):
 
 
 def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | None) -> bool:
-    """Fail before any geometry or output if the regional original is wrong.
+    """Fail before geometry or output if the supplied source revision is wrong.
 
-    A Brisbane acceptance run must not silently use the similar Sydney or
-    Melbourne Acacia PDF. No PDF bytes, source paths, or quantities are changed.
+    Source identity comes exclusively from the caller's expected SHA-256, not
+    the filename, directory, project name, region, or a benchmark-specific path.
+    No PDF bytes, source paths, or quantities are changed.
     """
     if expected_sha256 is None:
         return False
