@@ -380,3 +380,14 @@ def test_oversized_native_chord_integer_fails_closed_without_crashing(field):
     assert result[0].reason == "source_chord_receipt_invalid"
     assert result[0].wall_section_ids == ()
     assert result[0].measurement_authorized is False
+
+
+@pytest.mark.parametrize("contact", ((10 ** 1000, 0.), (0., -(10 ** 1000))))
+def test_oversized_native_wall_contact_integer_fails_closed(contact):
+    """A valid integer type may still be unrepresentable as PDF float."""
+    bad = replace(opening(), first=OpeningWallContact(contact, (100,)))
+    result = tag_opening_to_two_wall_sections(bad, two_straight())
+    assert result.status == "UNRESOLVED"
+    assert result.reason == "opening_contact_geometry_invalid"
+    assert result.wall_section_ids == ()
+    assert result.measurement_authorized is False
