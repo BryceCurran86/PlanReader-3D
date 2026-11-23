@@ -44,6 +44,27 @@ def publish_staged_file(staged_path: Path, output: Path) -> None:
         os.link(staged_path, output)
 
 
+def publish_staged_files(staged_targets: Iterable[tuple[Path, Path]]) -> None:
+    """Promote complete artifacts in order and roll back owned files on failure."""
+    attempts: list[tuple[Path, os.stat_result]] = []
+    try:
+        for staged, target in staged_targets:
+            identity = staged.lstat()
+            if not S_ISREG(identity.st_mode) or not identity.st_ino:
+                raise OSError("staged_evidence_file_identity_unavailable")
+            attempts.append((target, identity))
+            publish_staged_file(staged, target)
+    except BaseException:
+        for target, identity in reversed(attempts):
+            try:
+                if os.path.samestat(target.lstat(), identity):
+                    target.unlink()
+            except OSError:
+                # Preserve the initial publication error if cleanup fails.
+                pass
+        raise
+
+
 def _assert_published_report_unchanged(
     output: Path, staged_path: Path | None, staged: os.stat_result, expected_bytes: bytes,
 ) -> None:

@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -37,6 +38,7 @@ from pb_source_native_exterior_perimeter_graph_shadow import (  # noqa: E402
     export_exterior_face_evidence_packet,
     select_outermost_vertical_face_edge_index,
 )
+from tools.gpt3_safe_original_report_output import publish_staged_files  # noqa: E402
 from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
     build_source_native_wall_body_junction_graph,
 )
@@ -152,10 +154,11 @@ def _original_source_native_outer_wall_review(drawings, words, page_index):
 
 
 def _enforce_original_source_sha_pin(actual_sha: str, expected_sha256: str | None) -> bool:
-    """Fail before any geometry or output if the regional original is wrong.
+    """Fail before geometry or output if the supplied source revision is wrong.
 
-    A Brisbane acceptance run must not silently use the similar Sydney or
-    Melbourne Acacia PDF. No PDF bytes, source paths, or quantities are changed.
+    Source identity comes exclusively from the caller's expected SHA-256, not
+    the filename, directory, project name, region, or a benchmark-specific path.
+    No PDF bytes, source paths, or quantities are changed.
     """
     if expected_sha256 is None:
         return False
@@ -430,8 +433,6 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             graph = build_source_native_wall_body_junction_graph(
                 drawings,
                 page_index=page_index,
-                # Optional Acacia host-stroke audit filter only; never a join.
-                focus_native_path_ids=(4000, 4002, 5862, 5848, 5849),
             )
             result["junction_graph_summary"] = {
                 "exterior_preflight_status": graph.get("exterior_preflight_status"),
@@ -513,17 +514,42 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "wall_ink_segments_shown": shown,
             "all_segments_shown": shown < 1600,
         }
-        out_dir.mkdir(parents=True, exist_ok=True)
-        json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
-        png_file = out_dir / f"page_{page_index+1}_footprint_first.png"
-        # No source PDF is ever copied or added to the repo.
-        with json_file.open("x", encoding="utf8") as target:
-            json.dump(result, target, indent=2)
-        with png_file.open("xb") as target:
-            target.write(layer.get_pixmap(
-                matrix=fitz.Matrix(1.2, 1.2), alpha=False).tobytes("png")
-            )
-        canvas.close()
+        # Output-directory creation can also fail. Keep it inside the
+        # closure/rollback guard so the diagnostic canvas is always released.
+        # Neither successful output nor a half-written pair grants quantity authority.
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
+            png_file = out_dir / f"page_{page_index+1}_footprint_first.png"
+            # Render AND serialize in memory before publishing either artifact.
+            # An interrupted render/encode must not leave a plausible JSON receipt.
+            png_bytes = layer.get_pixmap(
+                matrix=fitz.Matrix(1.2, 1.2), alpha=False,
+            ).tobytes("png")
+            # Bind the source-only JSON receipt to these precise overlay bytes.
+            # A swapped or truncated PNG can no longer masquerade as its pair.
+            result["overlay"]["png_sha256"] = hashlib.sha256(png_bytes).hexdigest()
+            result["overlay"]["png_byte_count"] = len(png_bytes)
+            result["overlay"]["png_filename"] = png_file.name
+            json_bytes = json.dumps(result, indent=2).encode("utf8")
+            if json_file.exists() or png_file.exists():
+                raise FileExistsError(
+                    "original_footprint_evidence_pair_already_exists"
+                )
+            # The receipt names the PNG, so expose the complete overlay first.
+            with TemporaryDirectory(dir=out_dir, prefix=".footprint-evidence-") as staging:
+                staging_dir = Path(staging)
+                staged_targets = (
+                    (staging_dir / png_file.name, png_file),
+                    (staging_dir / json_file.name, json_file),
+                )
+                for (staged, _), payload in zip(staged_targets, (png_bytes, json_bytes)):
+                    with staged.open("xb") as target:
+                        if target.write(payload) != len(payload):
+                            raise OSError("original_footprint_evidence_pair_short_write")
+                publish_staged_files(staged_targets)
+        finally:
+            canvas.close()
     return result, json_file, png_file
 
 
