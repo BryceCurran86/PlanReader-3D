@@ -153,7 +153,8 @@ class _Table:
 
 
 class _PageWithGrid(_RotatedPage):
-    def __init__(self, tables):
+    def __init__(self, tables, valid=True):
+        super().__init__(valid=valid)
         self.tables = tuple(_Table(rows) for rows in tables)
     def find_tables(self, *, strategy):
         assert strategy == "lines_strict"
