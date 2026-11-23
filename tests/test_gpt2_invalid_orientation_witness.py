@@ -18,6 +18,19 @@ class InvalidOrientationWitnessTests(unittest.TestCase):
                 self.assertFalse(any(row["orientation"] == "invalid" for row in rows))
 
 
+    def test_boolean_orientation_coefficients_cannot_authenticate(self):
+        # A truth value must not be coerced into a rotation/scale witness.
+        src = {"H": {0.0: [(0.0, 100.0)]}, "V": {0.0: [(0.0, 100.0)]}}
+        for bad in ((True, 0, 0, 1), (1, False, 0, 1),
+                    (1, 0, True, 1), (1, 0, 0, False)):
+            with self.subTest(matrix=bad):
+                rows = rank_registrations(
+                    src, src,
+                    orientations={"bad": bad, "good": (1, 0, 0, 1)},
+                    identity_scales=(1.0,), topn=2)
+                self.assertFalse(any(row["orientation"] == "bad" for row in rows))
+                self.assertTrue(any(row["orientation"] == "good" for row in rows))
+
     def test_boolean_scale_cannot_authenticate_viewport(self):
         # bool is a subclass of int, but is not a measured viewport scale.
         src = {"H": {0.0: [(0.0, 100.0)]}, "V": {0.0: [(0.0, 100.0)]}}
