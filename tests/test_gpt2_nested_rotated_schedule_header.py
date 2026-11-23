@@ -143,3 +143,86 @@ def test_ordinary_default_path_is_not_opted_into_rotated_reader(monkeypatch):
     assert called
     assert len(entries) == 1
     assert entries[0].dimension_basis == ""
+
+
+class _Table:
+    def __init__(self, rows):
+        self.rows = rows
+    def extract(self):
+        return self.rows
+
+
+class _PageWithGrid(_RotatedPage):
+    def __init__(self, tables):
+        self.tables = tuple(_Table(rows) for rows in tables)
+    def find_tables(self, *, strategy):
+        assert strategy == "lines_strict"
+        from types import SimpleNamespace
+        return SimpleNamespace(tables=self.tables)
+
+
+def _nested_grid_rows():
+    return [
+        [None, "DOOR SCHEDULE", None, None, None, None, None, None, None],
+        [None, "DOOR No.", "ROOM NAME", "TYPE", "DOOR LEAF", None, None,
+         None, "DOOR FRAME"],
+        [None, None, None, None, "WIDTH", "HEIGHT", None, "THICKNESS",
+         "TYPE"],
+        [None, "D01", "Sales", "AUTOMATED DOUBLE", None, None, None, None,
+         "Aluminium"],
+        [None, "D07", "WC & SHOWER", "SINGLE SWING", "920", "2040", None,
+         "40", "Aluminium"],
+        [None, "D08", "WC & SHOWER", "SINGLE SWING", "920", "2040", None,
+         "40", "Aluminium"],
+        [None, "D18", "Freezer", "AS PER MANUFACTURER", None, None, None,
+         None, "Lessee contractor"],
+    ]
+
+
+def test_original_style_spanning_parent_and_native_grid_cell_ownership():
+    page = _PageWithGrid([_nested_grid_rows()])
+    entries = parse_schedule_page(page, page_no=28, two_level_header=True)
+    assert [e.type_mark for e in entries] == ["D01", "D07", "D08", "D18"]
+    assert [(e.width_mm, e.height_mm) for e in entries] == [
+        (None, None), (920, 2040), (920, 2040), (None, None)
+    ]
+    assert all(e.dimension_basis == "leaf" for e in entries)
+    assert all(e.parse_source == "source_grid_nested_header" for e in entries)
+    assert all(e.count_explicit is False for e in entries)
+
+
+def test_unrelated_spanning_window_frame_grid_uses_same_rule():
+    rows = [
+        ["WINDOW MARK", "WINDOW FRAME", None, None],
+        [None, "WIDTH", "HEIGHT", "DESCRIPTION"],
+        ["W01", "1200", "1500", "aluminium"],
+    ]
+    out = parse_schedule_page(_PageWithGrid([rows]), two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis)
+            for e in out] == [("W01", 1200, 1500, "frame")]
+
+
+def test_conflicting_competing_scheduled_grid_tables_abstain():
+    rows = _nested_grid_rows()
+    assert parse_schedule_page(
+        _PageWithGrid([rows, rows]), two_level_header=True
+    ) == []
+
+
+def test_duplicate_grid_mark_is_not_silently_overwritten():
+    rows = _nested_grid_rows()
+    rows.append([None, "D07", "other", "SWING", "820", "2040",
+                 None, "40", "steel"])
+    assert parse_schedule_page(
+        _PageWithGrid([rows]), two_level_header=True
+    ) == []
+
+
+def test_invalid_grid_without_unique_child_dimension_basis_falls_back_without_promotion():
+    rows = _nested_grid_rows()
+    rows[2][5] = "WIDTH"
+    # Invalid grid goes to ordinary rotated-word candidate. Fake visible
+    # words still independently describe one explicit nested leaf row.
+    out = parse_schedule_page(_PageWithGrid([rows]), two_level_header=True)
+    assert [e.type_mark for e in out] == ["D01"]
+    assert out[0].dimension_basis == "leaf"
