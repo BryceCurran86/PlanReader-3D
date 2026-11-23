@@ -68,3 +68,16 @@ def test_duplicate_customer_verified_ids_rejected_even_when_sealed_distinct(monk
 
 def test_mismatched_customer_verified_ids_rejected(monkeypatch):
     assert _case(monkeypatch, ("floor-a", "floor-b"), verified_ids=("floor-a", "floor-c")) is None
+
+
+def test_reordered_sealed_ids_preserve_identity_not_position(monkeypatch):
+    # Independently sealed customer quantities may be ordered differently.
+    assert _case(monkeypatch, ("floor-a", "floor-b"), sealed_ids=("floor-b", "floor-a")) is not None
+
+
+def test_missing_sealed_identity_rejected_even_with_matching_row_count(monkeypatch):
+    assert _case(monkeypatch, ("floor-a", "floor-b"), sealed_ids=("floor-a", "floor-c")) is None
+
+
+def test_missing_verified_identity_rejected_even_with_matching_row_count(monkeypatch):
+    assert _case(monkeypatch, ("floor-a", "floor-b"), verified_ids=("floor-a", "floor-c")) is None
