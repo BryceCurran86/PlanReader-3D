@@ -213,6 +213,54 @@ def _is_source_wall_support_row(row: Mapping[str, Any]) -> bool:
     )
 
 
+_ROLE_GREEN = "green"
+_ROLE_WALL_SUPPORT = "wall_support"
+_ROLE_OPAQUE_FILL = "opaque_fill"
+_ROLE_EVIDENCE = "evidence"
+_ROLE_BLANK = "blank"
+# The rows the structural wall hypothesis is built from. Evidence strokes are not in this set.
+_STRUCTURAL_ROLES = frozenset({_ROLE_WALL_SUPPORT, _ROLE_OPAQUE_FILL})
+
+
+def _source_wall_ink_role(row: Any) -> str:
+    """The one decision of how a source row is used by the wall-ink selector.
+
+    ``green``: owner-excluded aisle/equipment ink (blanked). ``wall_support``: named wall layer,
+    black stroke or near-black fill. ``opaque_fill``: any other opaque fill, kept only because it
+    can hide a stroke. ``evidence``: an unfilled, visible, non-green stroke that is not wall
+    support: doorway/glazing evidence for the closure searches, never a wall strip. ``blank``:
+    everything else (including a row that is not a mapping).
+    """
+    if not isinstance(row, Mapping):
+        return _ROLE_BLANK
+    fill, stroke = row.get("fill"), row.get("color")
+    if _owner_excluded_green_ink(fill) or _owner_excluded_green_ink(stroke):
+        return _ROLE_GREEN
+    if _is_source_wall_support_row(row):
+        return _ROLE_WALL_SUPPORT
+    if row.get("fill") is not None and _opaque(row):
+        return _ROLE_OPAQUE_FILL
+    if fill is None and row.get("items") and _visible_source_stroke_paint(row):
+        return _ROLE_EVIDENCE
+    return _ROLE_BLANK
+
+
+def structural_native_primitive_count(drawings: Sequence[Any]) -> int:
+    """Native primitives (line/curve/rect operations, not PDF path containers) on the STRUCTURAL rows.
+
+    Structural means ``wall_support`` and ``opaque_fill`` rows: the set the 20,000-primitive cap of
+    the dark-painted layered ring counted until ``_source_wall_ink_candidate_drawings`` began
+    retaining doorway/glazing evidence strokes. Evidence strokes and green ink are not counted.
+    The classification is idempotent over the selector, so the count is the same on the original
+    rows and on the selector's output. This is a bound on work, not an authority.
+    """
+    total = 0
+    for row in drawings:
+        if _source_wall_ink_role(row) in _STRUCTURAL_ROLES:
+            total += len(row.get("items", ()))
+    return total
+
+
 def _source_wall_ink_candidate_drawings(
     drawings: Sequence[Mapping[str, Any]],
 ) -> tuple[tuple[Mapping[str, Any], ...], int, int]:
@@ -235,29 +283,18 @@ def _source_wall_ink_candidate_drawings(
     supported = 0
     green_excluded = 0
     for row in drawings:
-        if not isinstance(row, Mapping):
-            kept.append(blank)
-            continue
-        fill, stroke = row.get("fill"), row.get("color")
-        if _owner_excluded_green_ink(fill) or _owner_excluded_green_ink(stroke):
+        role = _source_wall_ink_role(row)
+        if role == _ROLE_GREEN:
             kept.append(blank)
             green_excluded += 1
-            continue
-        if _is_source_wall_support_row(row):
-            supported += 1
-            kept.append(row)
-        elif row.get("fill") is not None and _opaque(row):
-            # Keep later opaque fills so they can hide a stroke. Not a wall.
-            kept.append(row)
-        elif (
-            fill is None
-            and row.get("items")
-            and _visible_source_stroke_paint(row)
-        ):
-            # Glazing/lining CAD strokes (often mid-gray) close host wall gaps.
-            kept.append(row)
-        else:
+        elif role == _ROLE_BLANK:
             kept.append(blank)
+        else:
+            if role == _ROLE_WALL_SUPPORT:
+                supported += 1
+            # Later opaque fills are kept so they can hide a stroke (not a wall);
+            # glazing/lining CAD strokes (often mid-gray) close host wall gaps.
+            kept.append(row)
     return tuple(kept), supported, green_excluded
 
 
@@ -2179,9 +2216,12 @@ def build_layered_wall_doorway_room_rings(
         )
         # The frozen limit counts native PRIMITIVES, not PDF path
         # containers; a path may own multiple line/arc/rect operations.
-        selected_native_primitives = sum(
-            len(row.get("items", ())) for row in drawings
-        )
+        # It bounds the STRUCTURAL wall hypothesis (wall-support rows and the
+        # opaque fills that can hide them), as it did before the selector began
+        # retaining doorway/glazing evidence strokes. Those evidence rows stay
+        # in ``drawings`` with their original indices, never mint a wall strip
+        # and are not counted here (see ``structural_native_primitive_count``).
+        selected_native_primitives = structural_native_primitive_count(drawings)
         if selected_native_primitives > 20_000:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED,
