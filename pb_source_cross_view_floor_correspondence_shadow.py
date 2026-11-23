@@ -4053,7 +4053,14 @@ def resolve_registered_cross_sheet_floor_correspondences(
                    or w.target_page_id != record.target_page_id
                    or type(w.covered_interval_iou) not in (int, float)
                    or not math.isfinite(float(w.covered_interval_iou))
-                   or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
+                   or float(w.covered_interval_iou) < (
+                       0.55
+                       if (
+                           record.side_kinds.get(w.side_name) in {"with_openings", "door"}
+                           or w.doorway_transition is not None
+                       )
+                       else SIDE_FULL
+                   ) for w in walls)
             or not doors
             or set(record.side_kinds) != {"x0", "x1", "y0", "y1"}
             # The existing source wall producer uses "with_openings" for a
