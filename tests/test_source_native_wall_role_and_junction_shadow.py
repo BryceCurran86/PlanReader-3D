@@ -244,3 +244,21 @@ def test_heavy_stroke_closed_rectangle_has_no_invented_bridge():
     assert report.rejected_diagonal_bridge_count == 0
     assert report.to_dict()["can_issue_area"] is False
     assert report.to_dict()["measurement_authorized"] is False
+
+
+def test_junction_bbox_prefilter_keeps_true_contact_and_rejects_near_miss():
+    from shapely.geometry import box
+    from types import SimpleNamespace
+    from pb_source_native_wall_role_and_junction_shadow import _count_junctions_and_open_ends
+
+    # One endpoint of the horizontal strip touches the vertical strip.
+    # A third nearby strip is beyond the exact contact tolerance.
+    strips = [
+        SimpleNamespace(polygon=box(0, 0, 100, 2)),
+        SimpleNamespace(polygon=box(99.99, 0, 102, 80)),
+        SimpleNamespace(polygon=box(200, 200, 300, 202)),
+    ]
+    junctions, open_ends = _count_junctions_and_open_ends(strips)
+    assert junctions >= 1
+    assert junctions + open_ends == 2 * len(strips)
+    assert open_ends >= 2
