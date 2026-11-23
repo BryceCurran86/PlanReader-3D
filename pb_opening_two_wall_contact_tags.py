@@ -278,7 +278,7 @@ def tag_native_segmented_doorway_chords(
             if (type(horizontal) is not bool
                     or not all(type(x) in (int, float) and _finite_source_number(x)
                                for x in values)
-                    or lo > hi or band_lo > band_hi
+                    or lo >= hi or band_lo > band_hi
                     or not _ids(left) or not _ids(right)
                     or not _ids(source_opening)):
                 raise ValueError("invalid chord")
