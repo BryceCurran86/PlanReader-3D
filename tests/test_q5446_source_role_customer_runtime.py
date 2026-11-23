@@ -268,7 +268,7 @@ def test_private_sha_original_single_role_optional(tmp_path):
 @pytest.mark.parametrize("failed_file", (
     "seal", "customer", "summary",
 ))
-def test_source_role_publication_failure_removes_own_signed_customer_pair(
+def test_source_role_staging_failure_leaves_no_committed_outputs(
     tmp_path, monkeypatch, failed_file,
 ):
     """No orphan accepted seal, customer row, or summary on a late IO fault."""
@@ -283,8 +283,8 @@ def test_source_role_publication_failure_removes_own_signed_customer_pair(
         "summary": "production_summary.json",
     }
 
-    def fail_after_creating_file(path, value, *, created=None):
-        real_write(path, value, created=created)
+    def fail_after_creating_file(path, value):
+        real_write(path, value)
         if path.name == targets[failed_file]:
             raise OSError("simulated late role publication failure")
 
@@ -296,6 +296,59 @@ def test_source_role_publication_failure_removes_own_signed_customer_pair(
     assert tuple(folder.iterdir()) == ()
     assert source.read_bytes() == original_source_bytes
     assert hashlib.sha256(source.read_bytes()).hexdigest() == sha
+
+
+def test_source_role_rollback_preserves_competing_replacement(tmp_path, monkeypatch):
+    source, _sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "role"
+    folder.mkdir()
+    seal_path = folder / (project + ".json")
+    replacement = tmp_path / "replacement.json"
+    competing_bytes = b"another publisher's seal"
+    replacement.write_bytes(competing_bytes)
+    publish = runtime.publish_staged_file
+
+    def fail_summary_promotion(staged, target):
+        if target.name == "production_summary.json":
+            replacement.replace(seal_path)
+            raise OSError("simulated failure after replacement")
+        publish(staged, target)
+
+    monkeypatch.setattr(runtime, "publish_staged_file", fail_summary_promotion)
+    with pytest.raises(OSError, match="simulated failure after replacement"):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+
+    assert tuple(folder.iterdir()) == (seal_path,)
+    assert seal_path.read_bytes() == competing_bytes
+
+
+@pytest.mark.parametrize("use_symlink", (False, True))
+def test_source_role_promotion_preserves_existing_output(tmp_path, monkeypatch, use_symlink):
+    source, _sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "role"
+    folder.mkdir()
+    customer = folder / "verified_customer_rows.json"
+    preexisting_bytes = b"previous customer evidence"
+    if use_symlink:
+        evidence = tmp_path / "previous-customer.json"
+        evidence.write_bytes(preexisting_bytes)
+        try:
+            customer.symlink_to(evidence)
+        except (OSError, NotImplementedError):
+            pytest.skip("filesystem does not permit test symlinks")
+    else:
+        customer.write_bytes(preexisting_bytes)
+
+    with pytest.raises(FileExistsError):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+
+    assert tuple(folder.iterdir()) == (customer,)
+    assert customer.is_symlink() is use_symlink
+    assert customer.read_bytes() == preexisting_bytes
 
 
 @pytest.mark.parametrize("failed_file", (
