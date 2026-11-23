@@ -85,10 +85,14 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         )
 
     def floor(self, room_id="room", resolved=True):
-        return SimpleNamespace(canonical_floor_id="floor", room_entity_id=room_id, physical_floor_surface_id="surface-one", physical_floor_surface_identity_resolved=resolved)
+        return SimpleNamespace(canonical_floor_id="floor", room_entity_id=room_id, physical_floor_surface_id="surface-one", physical_floor_surface_identity_resolved=resolved, **self.lineage())
+
+    @staticmethod
+    def lineage():
+        return dict(document_id="document", revision_id="revision", source_sha256="source", snapshot_id="snapshot", page_id="page", viewport_id=None, source_room_face_record_id="face")
 
     def owned_room(self):
-        return SimpleNamespace(canonical_room_id="room", canonical_bounding_wall_ids=("w1",), bounding_wall_ids=())
+        return SimpleNamespace(canonical_room_id="room", physical_room_id="physical-room", canonical_bounding_wall_ids=("w1",), bounding_wall_ids=(), **self.lineage())
 
     def quarantine(self, quantities, floors=None, rooms=None):
         return quarantine_unverified_floor_finish_boundaries(
@@ -200,6 +204,20 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         out, = self.quarantine([q], floors=[], rooms=[])
         self.assertIs(out, q)
         self.assertEqual(out, q)
+
+    def test_missing_physical_room_owner_abstains(self):
+        room = self.owned_room()
+        room.physical_room_id = ""
+        out, = self.quarantine([self.candidate()], rooms=[room])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_physical_room_identity_unresolved", out.blocking_reasons)
+
+    def test_cross_revision_room_owner_abstains(self):
+        room = self.owned_room()
+        room.revision_id = "different-revision"
+        out, = self.quarantine([self.candidate()], rooms=[room])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_room_source_lineage_mismatch", out.blocking_reasons)
 
     def test_valid_finished_face_preserves_original_quantity(self):
         q = self.candidate()
