@@ -1,5 +1,5 @@
 import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
-import type { BuildAction, BuildState } from "./buildPlacement.ts";
+import type { BuildAction, BuildState, PlacedWall, WallAxis } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem } from "./itemCatalogue.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
@@ -19,14 +19,23 @@ export type MenuAction =
   | { area: "footprint"; reset?: boolean }
   | { area: "history"; action: HistoryAction }
   | { area: "level"; id: string }
-  | { area: "done" };
+  | { area: "done" }
+  | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" }
+  | { area: "draft"; action: "nudge" | "rotate" | "duplicate" | "delete";
+      direction?: "left" | "right" | "forward" | "back" };
 
 export type MenuButton = {
   label: string; x: number; y: number; w: number; h: number;
   action: MenuAction; active?: boolean; disabled?: boolean; swatch?: number;
 };
 export type MenuLayout = { title: string; width: number; height: number;
-  note: string; subtitle?: string; buttons: MenuButton[] };
+  note: string; subtitle?: string; buttons: MenuButton[];
+  sections?: { label: string; y: number }[]; helpLines?: string[] };
+export type QuestMenuState = {
+  selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
+  axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
+  pinned: boolean; help: boolean; deleteArmed: boolean;
+};
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
 export const EMPTY_ITEM_BROWSER: BrowserState = { open: false, category: 0, page: 0 };
 const optionsByGroup = CATALOGUE_GROUPS.map(([key]) => ITEM_CATALOGUE.filter(entry => entry.group === key));
@@ -55,6 +64,7 @@ export function buildMenuLayout(
   stage: ConstructionStage = "finished", viewsOpen = false,
   footprint = { available: false, enabled: false, changed: false },
   interaction?: { mode: ControlMode; canUndo: boolean; canRedo: boolean; levels?: readonly string[]; level?: string },
+  quest?: QuestMenuState,
 ): MenuLayout {
   const buttons: MenuButton[] = [];
   function add(label: string, x: number, y: number, w: number, h: number, action: MenuAction,
@@ -63,6 +73,46 @@ export function buildMenuLayout(
   }
   const browse = (action: BrowseAction): MenuAction => ({ area: "browse", action });
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
+  const questAction = (action: Extract<MenuAction, {area:"quest"}>["action"]): MenuAction =>
+    ({ area: "quest", action });
+  if (quest?.help) {
+    add("Back to tools", 20, 369, 260, 74, questAction("help"));
+    return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 510,
+      note: "Everything here is local draft review until an authenticated save.",
+      helpLines: [
+        "Trigger: point, select, confirm or place.",
+        "Choose Wall, pick start and end; a corner glows when snapped.",
+        "Select a purple draft wall to open precision controls.",
+        "Move: hold trigger on a draft wall and move your hand.",
+        "Use Nudge for 50/100/250 mm adjustments.",
+        "Grid and Axis change the next draft wall's alignment.",
+      ] };
+  }
+  // A selected local wall replaces the crowded toolbox with direct manipulation.
+  if (quest?.selectedWall && !viewsOpen && !browser.open) {
+    const wall = quest.selectedWall;
+    const length = Math.round(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1])*1000);
+    const edit = (action: Extract<MenuAction,{area:"draft"}>["action"],
+      direction?: Extract<MenuAction,{area:"draft"}>["direction"]): MenuAction =>
+      ({area:"draft",action,direction});
+    const controls: {label:string; action:MenuAction}[] = [
+      {label:"Nudge left",action:edit("nudge","left")},
+      {label:"Nudge right",action:edit("nudge","right")},
+      {label:"Nudge forward",action:edit("nudge","forward")},
+      {label:"Nudge back",action:edit("nudge","back")},
+      {label:"Rotate 90°",action:edit("rotate")},
+      {label:"Duplicate",action:edit("duplicate")},
+      {label:"Nudge " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
+      {label:quest.deleteArmed?"Confirm delete":"Delete…",action:edit("delete")},
+      {label:"Back to tools",action:questAction("back")},
+    ];
+    for (const [i,c] of controls.entries()) add(c.label,
+      20+(i%3)*320, 105+Math.floor(i/3)*86, 302, 72, c.action);
+    return { buttons, title: "EDIT DRAFT WALL · " + length + " mm",
+      width: WIDTH, height: 445,
+      note: quest.deleteArmed?"Confirm delete or Back to cancel. Undo will restore.":"Draft only · Select a different wall to change target.",
+      sections: [{label:"PRECISE POSITION & OBJECT ACTIONS",y:90}] };
+  }
   if (viewsOpen) {
     for (const [index, option] of CONSTRUCTION_STAGES.entries()) {
       add(option.label, 20 + 158 * index, 69, 147, 65,
@@ -135,10 +185,28 @@ export function buildMenuLayout(
     target: { area: "footprint" }, active: footprint.enabled });
   if (footprint.changed) actions.push({ label: "Reset size", target: { area: "footprint", reset: true } });
   if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
-  const stride = (WIDTH - 40) / 6;
-  for (const [index, entry] of actions.entries()) {
-    add(entry.label, 20 + stride * (index % 6), 67 + Math.floor(index / 6) * 68, stride - 9, 58, entry.target,
-      { active: entry.active, disabled: entry.disabled });
+  if (quest) {
+    actions.push(
+      {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
+      {label:"Axis " + quest.axis,target:questAction("axis")},
+      {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
+      {label:"Recenter",target:questAction("recenter")},
+      {label:"Help",target:questAction("help")},
+    );
   }
-  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 149 + 68 * Math.ceil(actions.length / 6), note: hint };
+  const columns = 5, stride = (WIDTH - 40) / columns, rowHeight = 77;
+  const toolCount = BUILD_TOOLS.length;
+  const sections = [{label:"BUILD & EDIT",y:90}];
+  function addGroup(entries: typeof actions, startY: number) {
+    for (const [index, entry] of entries.entries()) add(entry.label,
+      20+stride*(index%columns), startY+Math.floor(index/columns)*rowHeight,
+      stride-12, 65, entry.target, {active:entry.active,disabled:entry.disabled});
+    return startY + Math.ceil(entries.length / columns)*rowHeight;
+  }
+  const afterTools = addGroup(actions.slice(0,toolCount),108);
+  const controlsY = afterTools + 54;
+  sections.push({label:"MATERIALS, VIEWS & CONTROLS",y:controlsY-20});
+  const afterControls = addGroup(actions.slice(toolCount),controlsY);
+  return {buttons,sections,title:item?.label??"PLANREADER TOOLS",width:WIDTH,
+    height:afterControls+58, note:hint||"Point and trigger to choose. All changes are drafts."};
 }
