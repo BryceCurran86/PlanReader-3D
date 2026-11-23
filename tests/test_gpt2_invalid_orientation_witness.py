@@ -18,5 +18,16 @@ class InvalidOrientationWitnessTests(unittest.TestCase):
                 self.assertFalse(any(row["orientation"] == "invalid" for row in rows))
 
 
+    def test_finite_matrix_overflowing_source_coordinates_abstains(self):
+        # All metadata numbers are finite, but applying scale to source
+        # geometry overflows. Keep the independent valid candidate alive.
+        src = {"H": {0.0: [(0.0, 1e308)]}, "V": {0.0: [(0.0, 1e308)]}}
+        dst = {"H": {0.0: [(0.0, 100.0)]}, "V": {0.0: [(0.0, 100.0)]}}
+        rows = rank_registrations(src, dst,
+            orientations={"identity": (1, 0, 0, 1)},
+            identity_scales=(2.0,), topn=2)
+        self.assertEqual(rows, [])
+
+
 if __name__ == "__main__":
     unittest.main()
