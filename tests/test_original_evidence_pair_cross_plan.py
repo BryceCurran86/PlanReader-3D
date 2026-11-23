@@ -147,3 +147,50 @@ def test_repeat_diagnostic_preserves_existing_verified_evidence_pair(
     assert json.loads(before_json)["overlay"]["png_sha256"] == hashlib.sha256(
         before_png
     ).hexdigest()
+
+
+@pytest.mark.parametrize("artifact", ("png", "json"))
+def test_short_write_rolls_back_both_diagnostic_artifacts(
+    tmp_path, monkeypatch, artifact,
+):
+    """A silent partial filesystem write must not publish a valid-looking pair.
+
+    The two styles also check that this is not conditioned on any plan identity.
+    """
+    from pathlib import Path
+
+    layout = "small_residential" if artifact == "png" else "stepped_commercial"
+    source, _, _ = _unrelated_source(tmp_path, layout)
+    sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / layout / "short_write"
+    real_open = Path.open
+
+    class ShortWriter:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def __enter__(self):
+            self.wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.wrapped.__exit__(*args)
+
+        def write(self, payload):
+            truncated = payload[:-1]
+            self.wrapped.write(truncated)
+            return len(truncated)
+
+    def partial_write_only_for_selected_artifact(path, mode="r", *args, **kwargs):
+        wrapped = real_open(path, mode, *args, **kwargs)
+        if mode == "xb" and path.suffix == f".{artifact}":
+            return ShortWriter(wrapped)
+        return wrapped
+
+    monkeypatch.setattr(Path, "open", partial_write_only_for_selected_artifact)
+    with pytest.raises(OSError, match="original_footprint_evidence_pair_short_write"):
+        run(source, 0, destination, expected_sha256=sha,
+            expected_drawing_title="Floor Plan")
+
+    assert not (destination / "page_1_footprint_first.json").exists()
+    assert not (destination / "page_1_footprint_first.png").exists()
