@@ -143,7 +143,7 @@ def floor_finish_boundary_wall_failure(
         or getattr(room, "bounding_wall_ids", ())
     )
     if (any(not isinstance(wall_id, str) or not wall_id.strip() for wall_id in boundary_ids)
-            or len(set(boundary_ids)) != len(boundary_ids)):
+            or len({wall_id.strip() for wall_id in boundary_ids}) != len(boundary_ids)):
         return (
             "floor_finish_bounding_wall_identity_unresolved",
             f"floor-finish boundary wall identities are invalid or repeated: {quantity_id}",
@@ -152,6 +152,15 @@ def floor_finish_boundary_wall_failure(
         return (
             "floor_finish_bounding_wall_authority_incomplete",
             f"floor-finish bounding wall authority incomplete: {quantity_id}",
+        )
+    # Fail closed when mapping keys hide whitespace-colliding owner identities.
+    canonical_keys = [key.strip() for key in walls_by_id if isinstance(key, str)]
+    if (len(canonical_keys) != len(walls_by_id)
+            or len(set(canonical_keys)) != len(canonical_keys)
+            or any(not key for key in canonical_keys)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish wall owner mapping contains ambiguous identities: {quantity_id}",
         )
     for wall_id in boundary_ids:
         wall = walls_by_id.get(wall_id)
