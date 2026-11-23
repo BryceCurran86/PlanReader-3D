@@ -127,6 +127,8 @@ def _counts(owned) -> dict[str, int]:
 
 def _draw_overlay(raw, page_index, trace, owned, first_span, out_dir: Path) -> None:
     import fitz
+    from pb_external_footprint_first_trace import native_points_to_display_space
+
     source = fitz.open(stream=raw, filetype="pdf")
     overlay = fitz.open()
     page = overlay.new_page(width=source[page_index].rect.width, height=source[page_index].rect.height)
@@ -139,10 +141,14 @@ def _draw_overlay(raw, page_index, trace, owned, first_span, out_dir: Path) -> N
             "topology_only_opening_closure": (1.0, 0.45, 0.0),
             "competing_exterior_path_owners": (0.9, 0.7, 0.0),
         }.get(edge.classification, (0.4, 0.4, 0.4))
-        page.draw_line(edge.start_pdf_pts, edge.end_pdf_pts, color=color, width=1.2)
+        # Edges and span endpoints are in NATIVE page space; the overlay page is the DISPLAYED page.
+        shown = native_points_to_display_space(trace, (edge.start_pdf_pts, edge.end_pdf_pts))
+        if shown is not None:
+            page.draw_line(shown[0], shown[1], color=color, width=1.2)
     if first_span is not None:
-        a, b = first_span.endpoints_pdf_pts
-        page.draw_line(a, b, color=(0.55, 0.0, 0.55), width=2.4)
+        shown = native_points_to_display_space(trace, first_span.endpoints_pdf_pts)
+        if shown is not None:
+            page.draw_line(shown[0], shown[1], color=(0.55, 0.0, 0.55), width=2.4)
     dest = out_dir / f"page_{page_index + 1}_native_exterior_owners.png"
     pix = page.get_pixmap(matrix=fitz.Matrix(1.4, 1.4), alpha=False)
     pix.save(dest)
