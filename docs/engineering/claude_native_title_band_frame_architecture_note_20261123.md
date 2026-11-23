@@ -1,6 +1,6 @@
 # Title-band test in the native wall-role classifier: architecture note (23 Nov 2026)
 
-For review before any code (AGENTS.md: first deliverable on a new change). Follow-up to the rotated-sheet frame work in #4652 (the one display-space test that change left in this lane). Counts and public identifiers only: no private source content, coordinates or customer data.
+For review before any code (AGENTS.md: first deliverable on a new change). Follow-up to the rotated-sheet frame work in #4652 (the one display-space test that change left in this lane). Counts and public identifiers only: no private source content, coordinates or customer data. **Status:** approved in chat on 23 Nov 2026 ("Yes, implement") and implemented in the same PR; section 8 records what was measured after the change and corrects two figures of section 1.7 (marked there).
 
 ## 0. Compliance
 
@@ -8,7 +8,7 @@ For review before any code (AGENTS.md: first deliverable on a new change). Follo
 - **Functions traced:** `classify_native_path_role` (lines 84 to 124) and its only caller `identify_source_wall_junctions_and_roles` (lines 215 to 314); then every importer of the module (one tool, one PowerShell runner, tests) and every other place that applies a title-band idea (section 1.5).
 - **Authority boundaries crossed:** none. The report is always `ABSTAINED`; every role record is `topology_only=True`, `physical_wall_authenticated=False`, `can_issue_area=False`; nothing here reaches `QuantityEvidence`, W10, JobHub or any commercial row.
 - **Untouched by this proposal:** the live extractor and its `page_bounds_pdf_pts` (MAX's #4653), the raster tracer's own title band (display raster, correct as is), `refuse_title_block_as_walls`, the second classifier `classify_source_native_path_role`, `pb_native_page_frame.py` (consumed, not changed), `pb_page_frame_shadow.py` (a guard forbids importing it), `benchmarks/frozen_holdout/full_plan_v2/**`, the 20,000-primitive cap and the 2.5 pt snap.
-- **Not done:** no production code or test written. Only local read-only measurements (section 1.7) were run.
+- **Not done (when this note was written):** no production code or test written. Only local read-only measurements (section 1.7) were run. Implemented afterwards: see section 8.
 
 ## 1. Observed repository behavior
 
@@ -21,14 +21,14 @@ For review before any code (AGENTS.md: first deliverable on a new change). Follo
 7. **Measured on the 58 local original PDFs (702 pages; 129 rotated pages, all /Rotate 90 and native-portrait; counts only, not a protected run).**
    - Path rows on the rotated pages: 1,353,356. Today's test flags 764,990 (56.5 percent). The same test in display space flags 32,817 (2.4 percent); 14,264 rows are flagged by both. 750,726 rows (55.5 percent) are excluded today and are not in the displayed band; 18,553 rows in the real band are missed. All 129 pages differ; on the median page 44.9 percent of rows are wrongly inside today's band.
    - Role effect of this test alone: 695,019 rows labelled `exclusion_site_roof_hatch_title_green` would be `unknown`, 23,744 would be `rejected_diagonal_bridge`; 17,090 `unknown` and 1,461 diagonal rows would become exclusions. Status is ABSTAINED either way: none of these rows is on a layer that `is_explicit_wall_layer_name` accepts.
-   - Rows that own the traced exterior contour (the rows that would be `exterior_outer_face_candidate`), computed on the #4652 head: 116 rows on 26 pages. Today's test labels 59 of them `exclusion` (ABSTAINED); the display-space test labels 12; so 47 rows on 19 pages would be `exterior_outer_face_candidate` (CANDIDATE) instead. On `main`, where ownership is still computed in mixed spaces, only 8 owner rows exist (7 pages), so this test is not yet the first blocker there. Owners were computed without ring closures (an approximation of the tool).
+   - Rows that own the traced exterior contour (the rows that would be `exterior_outer_face_candidate`), computed on the #4652 head: 116 rows on 26 pages. Today's test labels 59 of them `exclusion` (ABSTAINED); the display-space test labels 12; so 47 fewer rows would be `exclusion` and `exterior_outer_face_candidate` would rise from 55 to 100 rows (**corrected in section 8**: this first draft said "47 rows on 19 pages would be exterior"; 51 rows leave exclusion and 4 enter it, 45 become exterior candidates and 2 diagonal bridges, and the labels differ on 19 pages in all). On `main`, where ownership is still computed in mixed spaces, only 8 owner rows exist (7 pages), so this test is not yet the first blocker there. Owners were computed without ring closures (an approximation of the tool).
    - Upright control (checks the measurement itself): 99 upright pages (325,763 rows): the display-space test equals today's test on every row.
 8. **No test covers a rotated page** for this classifier; its one title test uses an upright 400 x 800 page.
 
 ## 2. Inference
 
 - Same defect class as #4652, different carrier: here the caller's `page_bounds` is display space while the rows are native, and nothing in the signature says so, so every caller silently assumes upright.
-- Nothing commercial depends on it: the role report is diagnostic. The consequence is a systematically wrong `role_counts` and owner-role report on rotated sheets, and it becomes the main remaining thing hiding exterior-contour ownership once #4652 lands (47 of 116 owner rows).
+- Nothing commercial depends on it: the role report is diagnostic. The consequence is a systematically wrong `role_counts` and owner-role report on rotated sheets, and it becomes the main remaining thing hiding exterior-contour ownership once #4652 lands (51 of the 116 owner rows are wrongly excluded today and 4 in the real band are missed; section 8).
 - A silent skip would be the wrong repair: on a page whose frame cannot be established, title-block rows would then be free to take a positive role. The test must either be evaluated in the right space or abstain.
 
 ## 3. Proposed change (shadow, additive, upright byte-identical)
@@ -51,7 +51,7 @@ Segment-splitting invariance is not a property of today's semantics (one row, lo
 
 ## 5. Expected behaviour (stated before the tests)
 
-Upright pages: nothing changes, asserted. /Rotate 90 pages: the display-space counts of section 1.7 (reported as measured, not tuned): far fewer rows labelled exclusion, 47 more rows on the #4652 head labelled `exterior_outer_face_candidate` in that measurement, none of it a quantity. `page_rotation` None, 180, 270 or invalid: positive roles abstain as UNKNOWN. The tool's `role_counts` on rotated pages move accordingly.
+Upright pages: nothing changes, asserted. /Rotate 90 pages: the display-space counts of section 1.7 (reported as measured, not tuned): far fewer rows labelled exclusion, 45 more rows (55 to 100) on the #4652 head labelled `exterior_outer_face_candidate` in that measurement and 2 more `rejected_diagonal_bridge`, none of it a quantity. `page_rotation` None, 180, 270 or invalid: positive roles abstain as UNKNOWN. The tool's `role_counts` on rotated pages move accordingly.
 
 ## 6. Benchmark observations that must not influence implementation
 
@@ -63,3 +63,25 @@ The counts above are failure-mode evidence only. The fix is an exact axis identi
 2. 180 and 270: fail closed (recommended, same as the live seam; revisit when real files exist). Align with MAX's answer on the same question for #4652.
 3. Leave the lowest-edge row semantics as they are (recommended) and raise "row wholly inside the band" as a separate decision if wanted.
 4. Frame source: the production `effective_pdf_rotation` (recommended) rather than #4652's matrix or the guarded shadow module.
+
+## 8. Result after implementation (23 Nov 2026)
+
+Decisions 1 and 4 were built as recommended. Decisions 2 (180 and 270 fail closed) and 3 (lowest-edge row semantics unchanged) are built as recommended too and stay open for MAX's answer.
+
+**What changed.** `pb_source_native_wall_role_and_junction_shadow.py`: `_in_title_band` (the frame-aware test), `page_rotation` on `classify_native_path_role` and on `identify_source_wall_junctions_and_roles`, and the public constant `TITLE_BAND_START_FRACTION` (0.82, value unchanged). `tools/run_native_exterior_path_ownership.py`: `_page_rotation_for_roles` (the production `effective_pdf_rotation`; `NativePageFrameUnresolved` becomes `None`), passed to the report and also recorded in the payload as `title_band_page_rotation`, so a fail-closed run is visible in the JSON (the one addition beyond section 3). `tests/test_source_native_wall_role_and_junction_shadow.py`. Nothing else.
+
+**Behaviour as built.** Rotation `0`: the old expression, unchanged. Rotation `90`: the displayed lowest edge is native `x1`; the bounds must be finite, anchored at the page origin (within the frame seam's 1e-6 pt) and positive in height, otherwise band membership is unestablished. Anything that is not an exact `int` 0 or 90 (`None`, 180, 270, `True`, `False`, `90.0`, `"90"`, out of range) is unestablished. Unestablished: a placed row that would take a wall role becomes `unknown`; green, dashed, excluded-layer and diagonal rows keep their role; a neutral row is not claimed as title block either. No bounds or no readable rect: no test, as before. Recorded, not changed: at rotation 0 a zero or negative bounds height still skips the test (the module's own behaviour; no caller passes such bounds).
+
+**Synthetic proof.** 81 tests in the role test file (11 before). Rotation 0 equals a frozen copy of the old rule on 4,000 random rows (random layers, paints, dashes, odd or missing rects, owner and attached sets, five bounds including degenerate and non-origin). On real PyMuPDF pages at /Rotate 0 and 90, four sheet sizes (native portrait and landscape), the new label equals the old rule applied to the row mapped with `page.rotation_matrix`; 180 and 270 pages abstain; one displayed drawing authored upright or on a rotated sheet gets the same roles per row. Look-alike negatives fail on the old rule (a native-bottom wall row is title block there; the real displayed band is missed). Scale, translation (along and across the band), input-order, far-content, replay (two hash seeds) and no-mutation checks; the report stays `ABSTAINED` with `can_issue_area=False`; an import-graph test pins the tool as the module's only importer outside tests; the tool is exercised end to end on a synthetic rotated PDF at /Rotate 90 and 180. 33 single-line mutants of the module and the tool (fraction, comparison, `x1` versus `y1`, each rotation branch, bool and float rotations, each bounds clause, the demotion, the pass-through, the tool wiring, including the old behaviour behind the new signature): 33 killed, 0 survived.
+
+**Measured on the 58 local original PDFs (same 702 pages, 228 measured, counts only, not a protected run).**
+- Upright (99 pages, 325,763 rows): the new label equals the old on every row.
+- Rotated (129 pages, all /Rotate 90, 1,353,356 rows): the new label equals the display-space oracle on every row. It differs from the old label on 737,314 rows (54.5 percent), on all 129 pages, which is exactly the sum of the role changes predicted in section 1.7 (695,019 + 23,744 + 17,090 + 1,461). Rows labelled `exclusion` for any reason: 807,933 before, 107,721 after.
+- None of the 129 rotated pages has a row on an explicit wall layer, so this change creates and removes no `internal_wall_candidate` there; the effect is on `exclusion`, `unknown` and diagonal labels and on owner roles. On the 99 upright pages 22,125 rows are on explicit wall layers and 75 are excluded, before and after.
+- Rows that own the traced exterior contour (116 on 26 pages), on #4652's head plus these commits: `exterior_outer_face_candidate` 55 to 100 (17 pages), `exclusion` 59 to 12 (51 rows leave it and 4 enter it, on 2 pages), `rejected_diagonal_bridge` 2 to 4; the labels equal the display-space oracle on every row and differ from the old labels on 19 pages. This corrects section 1.7.
+
+**Interplay.** #4652 is the only open PR that touches these files (all 30 open PR heads checked). `git merge-tree` reports no conflict; on #4652's head plus these commits the role tests and #4652's own test pass together (281 tests). This change does not depend on #4652; the owner-row figures above do.
+
+**Checks.** `ruff check --select F821,F823` on the three files and the trace-route, private-additions, truth-separation, provider-gold-isolation and full-plan-v2-integrity guards pass locally; 592 tests of neighbouring modules and of tests that scan tools pass (3 skipped, as before).
+
+**Not done.** No protected-runner replay and no exact-head Actions run at the time of writing. No quantity path is touched, so signed Lot16 and Maryborough parity does not apply and was not run. Nothing is scored. No hub post.
