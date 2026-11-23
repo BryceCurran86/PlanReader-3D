@@ -493,6 +493,8 @@ def test_an_unestablished_frame_demotes_wall_roles_and_keeps_band_independent_ne
         (0.0, 0.0, 800.0, float("nan")),
         (float("nan"), 0.0, 800.0, 600.0),
         (0.0, 0.0, float("nan"), 600.0),
+        (2e-6, 0.0, 800.0, 600.0),  # just beyond the frame seam's 1e-6 pt tolerance
+        (0.0, -2e-6, 800.0, 600.0),
     ),
     ids=repr,
 )
@@ -500,6 +502,13 @@ def test_a_rotated_band_needs_finite_origin_anchored_bounds(bounds):
     row = _row((100, 100, 102, 400), layer=WALL)
     assert _role(row, bounds=bounds, rotation=90) == ROLE_UNKNOWN
     assert _role(_row((100, 100, 102, 400)), owners=(0,), bounds=bounds, rotation=90) == ROLE_UNKNOWN
+
+
+def test_a_rotated_band_tolerates_sub_micro_point_origin_noise():
+    """The frame seam's own tolerance (1e-6 pt): float noise at the page origin must not abstain."""
+    noisy = (5e-7, -5e-7, 800.0, 600.0)
+    assert _role(_row((100, 100, 102, 400), layer=WALL), bounds=noisy, rotation=90) == ROLE_INTERNAL_WALL
+    assert _role(_row((500, 100, 502, 400), layer=WALL), bounds=noisy, rotation=90) == ROLE_EXCLUSION
 
 
 def test_rotation_zero_keeps_the_legacy_handling_of_degenerate_bounds():
