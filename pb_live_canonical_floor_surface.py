@@ -142,10 +142,25 @@ def floor_finish_boundary_wall_failure(
         getattr(room, "canonical_bounding_wall_ids", ())
         or getattr(room, "bounding_wall_ids", ())
     )
+    if (any(not isinstance(wall_id, str) or not wall_id.strip() for wall_id in boundary_ids)
+            or len({wall_id.strip() for wall_id in boundary_ids}) != len(boundary_ids)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish boundary wall identities are invalid or repeated: {quantity_id}",
+        )
     if not boundary_ids:
         return (
             "floor_finish_bounding_wall_authority_incomplete",
             f"floor-finish bounding wall authority incomplete: {quantity_id}",
+        )
+    # Fail closed when mapping keys hide whitespace-colliding owner identities.
+    canonical_keys = [key.strip() for key in walls_by_id if isinstance(key, str)]
+    if (len(canonical_keys) != len(walls_by_id)
+            or len(set(canonical_keys)) != len(canonical_keys)
+            or any(not key for key in canonical_keys)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish wall owner mapping contains ambiguous identities: {quantity_id}",
         )
     for wall_id in boundary_ids:
         wall = walls_by_id.get(wall_id)
@@ -153,6 +168,14 @@ def floor_finish_boundary_wall_failure(
             return (
                 "floor_finish_bounding_wall_authority_incomplete",
                 f"floor-finish bounding wall authority incomplete: {quantity_id}",
+            )
+        # A mapping key alone does not authenticate the wall's own identity.
+        # A producer that collapses duplicate IDs must report that conflict
+        # before building this mapping; never accept a mismatched wall object.
+        if str(getattr(wall, "canonical_wall_id", "") or "") != str(wall_id):
+            return (
+                "floor_finish_bounding_wall_identity_unresolved",
+                f"floor-finish bounding wall identity does not match owner: {wall_id}",
             )
         if getattr(wall, "role", None) != "internal_finished_wall_face":
             return (
@@ -177,10 +200,19 @@ def quarantine_unverified_floor_finish_boundaries(
     """Withhold live floor finishes that cannot pass the owned wall-face check."""
     if not quantities:
         return tuple(quantities)
+    # Normalize only for collision detection. Never silently repair an invalid
+    # producer identity or allow whitespace variants to impersonate owners.
+    floor_owner_counts = Counter(str(floor.canonical_floor_id).strip() for floor in floors)
+    room_owner_counts = Counter(str(room.canonical_room_id).strip() for room in rooms)
+    # Two canonical floor IDs must never independently claim one physical surface.
+    # Missing physical identities are handled by the existing resolved-owner gate.
+    physical_floor_owner_counts = Counter(
+        str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+        for floor in floors
+        if str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+    )
     floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
-    floor_owner_counts = Counter(floor.canonical_floor_id for floor in floors)
     rooms_by_id = {room.canonical_room_id: room for room in rooms}
-    room_owner_counts = Counter(room.canonical_room_id for room in rooms)
 
     result = []
     for quantity in quantities:
@@ -189,7 +221,6 @@ def quarantine_unverified_floor_finish_boundaries(
             or quantity.status != AuthorityStatus.FIRM.value
             or quantity.abstained
             or quantity.value is None
-            or quantity.blocking_reasons
         ):
             result.append(quantity)
             continue
@@ -197,21 +228,32 @@ def quarantine_unverified_floor_finish_boundaries(
         floor = floors_by_id.get(floor_id)
         room_id = floor.room_entity_id if floor is not None else ""
         room = rooms_by_id.get(room_id) if room_id else None
-        if not floor_id:
+        if not isinstance(floor_id, str) or not floor_id or floor_id != floor_id.strip():
             reason = "floor_finish_canonical_floor_scope_missing"
         elif floor is None:
             reason = "floor_finish_canonical_floor_owner_missing"
-        elif floor_owner_counts[floor_id] > 1:
+        elif floor_owner_counts[floor_id.strip()] > 1:
             reason = "floor_finish_canonical_floor_owner_ambiguous"
+        elif (str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+              and physical_floor_owner_counts[str(floor.physical_floor_surface_id).strip()] > 1):
+            reason = "floor_finish_physical_floor_owner_ambiguous"
+        elif str(getattr(floor, "canonical_floor_id", "") or "") != str(floor_id):
+            reason = "floor_finish_canonical_floor_identity_mismatch"
+        elif getattr(floor, "physical_floor_surface_identity_resolved", None) is not True:
+            reason = "floor_finish_physical_floor_identity_unresolved"
+        elif not isinstance(room_id, str) or not room_id or room_id != room_id.strip():
+            reason = "floor_finish_canonical_room_owner_missing"
         elif room is None:
             reason = "floor_finish_canonical_room_owner_missing"
-        elif room_owner_counts[room_id] > 1:
+        elif room_owner_counts[room_id.strip()] > 1:
             reason = "floor_finish_canonical_room_owner_ambiguous"
         else:
             failure = floor_finish_boundary_wall_failure(
                 room, walls_by_id, quantity_id=quantity.quantity_id,
             )
             reason = failure[0] if failure is not None else None
+        if reason is None and quantity.blocking_reasons:
+            reason = "floor_finish_preexisting_authority_block"
         if reason is None:
             result.append(quantity)
         else:
@@ -221,7 +263,7 @@ def quarantine_unverified_floor_finish_boundaries(
                 status=EvidenceResolutionStatus.ABSTAINED.value,
                 confidence=0.0,
                 abstained=True,
-                blocking_reasons=(reason,),
+                blocking_reasons=tuple(dict.fromkeys((*quantity.blocking_reasons, reason))),
             ))
     return tuple(result)
 

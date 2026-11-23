@@ -184,6 +184,32 @@ def test_fast_exit_without_any_memory_sample_cannot_pass_guard(tmp_path, monkeyp
     assert usage["peak_private_kb"] == 0
 
 
+def test_short_lived_worker_is_sampled_before_the_regular_wait(tmp_path, monkeypatch):
+    waits = []
+
+    class Worker:
+        pid = 123
+
+        def wait(self, timeout):
+            waits.append(timeout)
+            if len(waits) == 1 and timeout < 3:
+                raise subprocess.TimeoutExpired("worker", timeout)
+            return 0
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *args, **kwargs: Worker())
+    monkeypatch.setattr(launcher, "sample_memory_kb", lambda pid: (1024, 2048, 4096))
+
+    rc, status, usage = launcher.run_logged(
+        ["worker"], tmp_path, tmp_path / "short-role.log",
+        poll_s=15, max_private_mb=100, min_free_commit_mb=1,
+    )
+
+    assert (rc, status) == (0, "COMPLETED")
+    assert waits == [1, 15]
+    assert usage["peak_private_kb"] == 2048
+    assert usage["min_system_free_commit_kb"] == 4096
+
+
 def test_memory_limit_stops_a_process_that_commits_too_much(tmp_path):
     code = ("b = bytearray(400 * 1024 * 1024); "
             "[b.__setitem__(i, 1) for i in range(0, len(b), 4096)]; "
