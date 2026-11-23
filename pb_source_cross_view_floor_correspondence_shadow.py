@@ -240,7 +240,9 @@ def rank_registrations(
     for name, mat in orientations.items():
         if identity_only and name != "identity":
             continue
-        # A support viewport can have a different scale at any orientation.\n        # Keep identity_only as the legacy fixed-scale diagnostic mode.\n        scales = identity_scales if not identity_only else (1.0,)
+        # A support viewport can have a different scale at any orientation.
+        # Keep identity_only as the legacy fixed-scale diagnostic mode.
+        scales = identity_scales if not identity_only else (1.0,)
         for scale in scales:
             moved = orient_lines(src, tuple(scale * v for v in mat))
             xs, ys = _shift_votes(moved, index, topn)
