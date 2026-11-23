@@ -100,3 +100,23 @@ def test_generic_evidence_json_and_png_match_across_source_styles_and_pages(
 
     assert reports[0] != reports[1]
     assert all(path.is_file() for pair in reports for path in pair)
+
+
+def test_generic_diagnostic_junction_graph_has_no_job_specific_focus_default():
+    """Source-native graph must inspect whole submitted page, not Acacia paths."""
+    import ast
+    import inspect
+    from tools.run_original_footprint_first import run
+
+    tree = ast.parse(inspect.getsource(run))
+    matching = [
+        call for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "build_source_native_wall_body_junction_graph"
+    ]
+    assert len(matching) == 1
+    assert not any(
+        item.arg == "focus_native_path_ids"
+        for item in matching[0].keywords
+    )
