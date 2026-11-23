@@ -191,10 +191,12 @@ def quarantine_unverified_floor_finish_boundaries(
     """Withhold live floor finishes that cannot pass the owned wall-face check."""
     if not quantities:
         return tuple(quantities)
+    # Normalize only for collision detection. Never silently repair an invalid
+    # producer identity or allow whitespace variants to impersonate owners.
+    floor_owner_counts = Counter(str(floor.canonical_floor_id).strip() for floor in floors)
+    room_owner_counts = Counter(str(room.canonical_room_id).strip() for room in rooms)
     floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
-    floor_owner_counts = Counter(floor.canonical_floor_id for floor in floors)
     rooms_by_id = {room.canonical_room_id: room for room in rooms}
-    room_owner_counts = Counter(room.canonical_room_id for room in rooms)
 
     result = []
     for quantity in quantities:
@@ -210,19 +212,21 @@ def quarantine_unverified_floor_finish_boundaries(
         floor = floors_by_id.get(floor_id)
         room_id = floor.room_entity_id if floor is not None else ""
         room = rooms_by_id.get(room_id) if room_id else None
-        if not floor_id:
+        if not isinstance(floor_id, str) or not floor_id or floor_id != floor_id.strip():
             reason = "floor_finish_canonical_floor_scope_missing"
         elif floor is None:
             reason = "floor_finish_canonical_floor_owner_missing"
-        elif floor_owner_counts[floor_id] > 1:
+        elif floor_owner_counts[floor_id.strip()] > 1:
             reason = "floor_finish_canonical_floor_owner_ambiguous"
         elif str(getattr(floor, "canonical_floor_id", "") or "") != str(floor_id):
             reason = "floor_finish_canonical_floor_identity_mismatch"
         elif getattr(floor, "physical_floor_surface_identity_resolved", None) is not True:
             reason = "floor_finish_physical_floor_identity_unresolved"
+        elif not isinstance(room_id, str) or not room_id or room_id != room_id.strip():
+            reason = "floor_finish_canonical_room_owner_missing"
         elif room is None:
             reason = "floor_finish_canonical_room_owner_missing"
-        elif room_owner_counts[room_id] > 1:
+        elif room_owner_counts[room_id.strip()] > 1:
             reason = "floor_finish_canonical_room_owner_ambiguous"
         else:
             failure = floor_finish_boundary_wall_failure(
