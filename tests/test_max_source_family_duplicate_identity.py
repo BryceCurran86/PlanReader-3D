@@ -11,7 +11,7 @@ import tools.run_source_closed_project_handoff as handoff
 SHA = "a" * 64
 
 
-def _case(monkeypatch, ids):
+def _case(monkeypatch, ids, sealed_ids=None, verified_ids=None):
     class Quantity:
         def __init__(self, identity):
             self.quantity_id = identity
@@ -25,7 +25,7 @@ def _case(monkeypatch, ids):
 
     monkeypatch.setattr(handoff, "QuantityEvidence", Quantity)
     quantities = tuple(Quantity(identity) for identity in ids)
-    sealed = SimpleNamespace(quantities=quantities, source_sha256s=(SHA,))
+    sealed = SimpleNamespace(quantities=tuple(Quantity(identity) for identity in (sealed_ids if sealed_ids is not None else ids)), source_sha256s=(SHA,))
     issued = SimpleNamespace(
         status="FIRM_SOURCE_CUSTOMER_TO_REVIEW",
         sealed_run=sealed,
@@ -37,7 +37,7 @@ def _case(monkeypatch, ids):
         "verify_sealed_customer_output",
         lambda run, rows: SimpleNamespace(
             customer_row_count=len(rows),
-            verified_quantity_ids=tuple(row["quantity_id"] for row in rows),
+            verified_quantity_ids=tuple(verified_ids if verified_ids is not None else (row["quantity_id"] for row in rows)),
         ),
     )
     return handoff._verified_source_family_handoff(
@@ -56,3 +56,15 @@ def test_distinct_signed_quantity_ids_preserved(monkeypatch):
 
 def test_duplicate_signed_quantity_ids_rejected(monkeypatch):
     assert _case(monkeypatch, ("floor-a", "floor-a")) is None
+
+
+def test_duplicate_sealed_ids_rejected_even_when_issued_distinct(monkeypatch):
+    assert _case(monkeypatch, ("floor-a", "floor-b"), sealed_ids=("floor-a", "floor-a")) is None
+
+
+def test_duplicate_customer_verified_ids_rejected_even_when_sealed_distinct(monkeypatch):
+    assert _case(monkeypatch, ("floor-a", "floor-b"), verified_ids=("floor-a", "floor-a")) is None
+
+
+def test_mismatched_customer_verified_ids_rejected(monkeypatch):
+    assert _case(monkeypatch, ("floor-a", "floor-b"), verified_ids=("floor-a", "floor-c")) is None
