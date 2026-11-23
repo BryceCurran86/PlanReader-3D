@@ -3,7 +3,6 @@ on:
   pull_request:
     paths:
       - .github/workflows/gpt2-trusted-original-source-replay-manual.yml
-      - tests/test_gpt2_trusted_original_replay_workflow_contract.py
       - .github/workflows/test-gpt2-offline-collection-no-original.yml
 permissions:
   contents: read

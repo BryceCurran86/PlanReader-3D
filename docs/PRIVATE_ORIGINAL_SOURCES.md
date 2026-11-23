@@ -1,29 +1,51 @@
 # Local original construction source package
 
-The four owner-provided original construction PDFs must **not** be committed
-to this public GitHub repository. Their names, exact sizes and immutable
+The owner-provided construction PDFs stay on the local computer. Their names, exact sizes and immutable
 SHA-256 digests remain in the existing **frozen source manifests**, which must
 never be edited to make a missing input pass.
 
-## For authorized local production and benchmarks
+## Run the official benchmark locally
 
-1. Obtain the originals directly from the rightful owner via a private channel.
-2. Create `documents/sources/` in the local checkout (this directory is now
-   Git-ignored).
-3. Place each original PDF under its expected exact filename from the frozen
-   manifest. If a source is missing or wrong, **ABSTAIN/INCOMPLETE**; do not
-   silently synthesize or substitute another PDF.
-4. Run the repository's existing `tools/diag_gpt1_source_pdf_package_preflight`
-   to verify original bytes, SHA-256, page count and size before production.
-5. Keep diagnostic output, PDF renders, page vectors, material descriptions,
-   client locations and the original raw pages on an authorized private disk.
+The Windows app launcher uses the existing original producer and frozen scorer.
+Configure the originals, the four independent identity maps and a private
+results directory with `.planreader-benchmark.local.json` beside the launcher.
+This file is Git-ignored.
 
-The production scorer still requires the ten original source documents for
-the four-job suite, including companion files not included in this repository.
-GitHub Actions cannot run original-source tests requiring missing private
-inputs unless they are supplied to an authorized, isolated runner. **Do not
-"fix" red source tests by changing frozen truth, removing required targets, or
-assuming missing sources are a zero score.**
+```json
+{
+  "source_dir": "D:/PlanReader/Originals",
+  "identity_map_dir": "D:/PlanReader/IdentityMaps",
+  "run_root": "D:/PlanReader/BenchmarkRuns"
+}
+```
+
+Use a clean checkout and install the normal app dependencies before extraction.
+Check the setup with:
+
+```powershell
+.\RUN_PLANREADER_WINDOWS.bat benchmark --check-only
+```
+
+This verifies the unchanged ten-PDF roster by SHA-256, size and page count
+and checks that all four maps are present. For a fresh run, disconnect the
+computer's network connections for the duration of extraction and execute:
+
+```powershell
+.\RUN_PLANREADER_WINDOWS.bat benchmark
+```
+
+The benchmark checks the local network state and Git head before starting each
+project and before scoring. It writes a new run directory with the four-project
+status and the existing `frozen120_score.json` evaluator result. The signed
+quantities and customer records stay in that private directory. An incomplete
+source, issuer or customer record leaves the official result unpublished.
+
+The same module accepts explicit `--source-dir`, `--identity-map-dir` and
+`--output-dir` arguments. Use `--saved-run-dir` to verify archived signed
+evidence locally. A saved run verifies the archived output.
+
+GitHub Actions runs public code and synthetic checks. Original PDF replay,
+scoring and signed customer verification use the local benchmark path.
 
 ## Git history and residual exposure
 
