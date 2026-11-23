@@ -102,3 +102,37 @@ def test_saved_run_protects_original_output_directory(tmp_path):
             output_dir=output, timeout_min=20, saved_run_dir=saved,
         )
     assert not output.exists()
+
+
+def test_local_launcher_checks_configured_inputs_without_starting_extraction(
+    tmp_path, monkeypatch, capsys
+):
+    inputs = tmp_path / "originals"
+    maps = tmp_path / "maps"
+    config = tmp_path / "settings.json"
+    config.write_text(json.dumps({"source_dir": str(inputs), "identity_map_dir": str(maps)}))
+
+    def verified(source_dir, identity_map_dir):
+        assert (source_dir, identity_map_dir) == (inputs, maps)
+        return {"source_files_verified": 10, "identity_maps_present": 4}
+
+    monkeypatch.setattr(runner, "_check_local_inputs", verified)
+    monkeypatch.setattr(runner, "run_benchmark", lambda **kw: pytest.fail("extraction started"))
+    assert runner.main(["benchmark", "--config", str(config), "--check-only"]) == 0
+    assert json.loads(capsys.readouterr().out)["source_files_verified"] == 10
+
+
+def test_hosted_run_fails_before_opening_any_original(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(
+        runner, "_check_local_inputs", lambda *a: pytest.fail("opened private originals"),
+    )
+    with pytest.raises(SystemExit) as stopped:
+        runner.main([
+            "benchmark", "--source-dir", str(tmp_path / "sources"),
+            "--identity-map-dir", str(tmp_path / "maps"),
+            "--output-dir", str(tmp_path / "attempt"),
+        ])
+    assert stopped.value.code == 2
+    assert "local only" in capsys.readouterr().err
+    assert not (tmp_path / "attempt").exists()

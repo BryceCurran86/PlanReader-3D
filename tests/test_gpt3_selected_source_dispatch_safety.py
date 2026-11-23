@@ -1,8 +1,6 @@
 """Public selected-two CI must not falsely score unavailable private drawings.
 
-Only owner-dispatched replay may provision exact original PDFs, and that job
-must run byte verification before original-source reconciliation. This test
-never needs access to private drawings or any GitHub secret.
+The hosted workflow exercises the source-neutral evaluator checks.
 """
 from pathlib import Path
 
@@ -24,36 +22,6 @@ def test_public_pr_only_executes_source_neutral_project_tests():
     full = WORKFLOW.read_text(encoding="utf-8")
     assert "pull_request:" in full and "workflow_dispatch:" in full
     focused = _job("focused")
-    replay = _job("original-two-project-replay")
     assert "pytest -q tests/test_gpt3_selected_two_project_original_evidence.py" in focused
     assert "secrets.ORIGINAL_SOURCES_TOKEN" not in focused
-    assert "github.event_name == 'workflow_dispatch'" in replay
-    assert "actions/checkout" in replay
-    assert "secrets.ORIGINAL_SOURCES_TOKEN" in replay
-    assert "vars.ORIGINAL_SOURCES_REPOSITORY" in replay
-
-
-def test_exact_original_replay_requires_frozen_source_provision_before_any_score():
-    replay = _job("original-two-project-replay")
-    provision = replay.index("uses: ./.github/actions/provision-original-sources")
-    recalc = replay.index("Reverify original PDF bytes")
-    assert provision < recalc
-    assert "1. Construction Plans - Lot 16 Power (REV E).pdf" in replay
-    assert "Arch_Combined_Maryborough_Service_Station.pdf" in replay
-    assert "allow-missing: true" not in replay
-    assert "allow-missing: 'true'" not in replay
-    assert "--output \"$ROOT/selected_two_project_development_ONLY.json\"" in replay
-    assert "full_four_project_publication_allowed" in replay
-    assert "official_four_project_accuracy" in replay
-
-
-def test_private_source_runs_never_upload_original_derived_reports():
-    replay = _job("original-two-project-replay")
-    assert "github.event_name == 'workflow_dispatch'" in replay
-    assert "github.ref == 'refs/heads/main'" in replay
-    assert "github.actor == 'BryceCurran86'" in replay
-    assert "ref: ${{ github.sha }}" in replay
-    assert "persist-credentials: false" in replay
-    assert "actions/upload-artifact" not in replay
-    assert "rm -rf documents/sources artifacts" in replay
-    assert "if: always()" in replay
+    assert "  original-two-project-replay:\n" not in full

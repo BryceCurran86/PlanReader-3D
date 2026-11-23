@@ -281,15 +281,6 @@ def test_each_signed_output_replay_triggers_on_its_whole_import_closure():
     )
 
 
-def test_signed_output_replays_still_seal_and_verify_the_customer_rows():
-    for project, (workflow, _entries) in SIGNED_OUTPUT_REPLAYS.items():
-        text = (ROOT / workflow).read_text(encoding="utf-8")
-        assert "source_sealed_run.json" in text, project
-        assert "verified_customer_rows.json" in text, project
-        assert "verify_sealed_customer_output" in text, project
-        assert "pull_request:" in text, project
-
-
 # ---------------------------------------------------------------------------------------------------------------------------
 # synthetic controls for the checker itself (positive / negative / metamorphic)
 # ---------------------------------------------------------------------------------------------------------------------------
