@@ -204,6 +204,13 @@ def quarantine_unverified_floor_finish_boundaries(
     # producer identity or allow whitespace variants to impersonate owners.
     floor_owner_counts = Counter(str(floor.canonical_floor_id).strip() for floor in floors)
     room_owner_counts = Counter(str(room.canonical_room_id).strip() for room in rooms)
+    # Two canonical floor IDs must never independently claim one physical surface.
+    # Missing physical identities are handled by the existing resolved-owner gate.
+    physical_floor_owner_counts = Counter(
+        str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+        for floor in floors
+        if str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+    )
     floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
     rooms_by_id = {room.canonical_room_id: room for room in rooms}
 
@@ -227,6 +234,9 @@ def quarantine_unverified_floor_finish_boundaries(
             reason = "floor_finish_canonical_floor_owner_missing"
         elif floor_owner_counts[floor_id.strip()] > 1:
             reason = "floor_finish_canonical_floor_owner_ambiguous"
+        elif (str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+              and physical_floor_owner_counts[str(floor.physical_floor_surface_id).strip()] > 1):
+            reason = "floor_finish_physical_floor_owner_ambiguous"
         elif str(getattr(floor, "canonical_floor_id", "") or "") != str(floor_id):
             reason = "floor_finish_canonical_floor_identity_mismatch"
         elif getattr(floor, "physical_floor_surface_identity_resolved", None) is not True:
