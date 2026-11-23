@@ -100,7 +100,7 @@ type DragDraw = { mode: "wall" | "ceiling"; from: PlanPoint };
 type DragEdit = { mode: "move" | "stretch"; from: PlanPoint; anchor: PlanPoint; stretchStart?: boolean };
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-))) & { levelId: string };
+))) & { levelId: string; fromController?: PlanPoint };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -124,8 +124,13 @@ function ceilingHost(ceilings: CeilingDraft[], ray: THREE.Ray, levelId: string) 
 }
 
 export function beginDraftGesture(state: BuildState, levelId: string | null, ray: THREE.Ray): DraftGesture | null {
-  const from = planPoint(ray);
-  if (!from || !levelId || !state.tool) return null;
+  if (!levelId || !state.tool) return null;
+  // A level controller ray can hit a vertical wall but never the floor.
+  // Recognise that direct wall contact as a valid draft manipulation target.
+  const directWall = state.tool === "move" || state.tool === "stretch"
+    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
+  const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
+  if (!from) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
     const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from)?.point : from;
@@ -154,8 +159,14 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   return null;
 }
 
-export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray, state?: BuildState) {
-  const current = planPoint(ray);
+export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
+  state?: BuildState, controllerPosition?: PlanPoint) {
+  // With Quest controllers, manipulation should follow the hand in X/Z, not
+  // require aiming at an imaginary ground plane throughout the drag.
+  const current = "previous" in gesture && gesture.fromController && controllerPosition
+    ? snappedPoint([gesture.from[0] + controllerPosition[0] - gesture.fromController[0],
+        gesture.from[1] + controllerPosition[1] - gesture.fromController[1]])
+    : planPoint(ray);
   if (!current) return null;
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   const aligned = gesture.mode === "wall" && !("previous" in gesture) && state && floor
