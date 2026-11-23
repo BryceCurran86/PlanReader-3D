@@ -73,6 +73,16 @@ class Blocked:
     reason: str
 
 
+def _finite_number(value: object) -> bool:
+    """A native measurement: an int or float that converts to a finite float (an oversized integer is not one)."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def scope_ok(scope: object) -> bool:
     return (
         type(scope) is tuple and len(scope) >= 2
@@ -108,7 +118,7 @@ def _xy(point: object) -> tuple[float, float] | None:
     except (AttributeError, TypeError, ValueError, OverflowError):
         try:
             x, y = float(point[0]), float(point[1])  # type: ignore[index]
-        except (TypeError, ValueError, IndexError, OverflowError):
+        except (TypeError, ValueError, IndexError, KeyError, OverflowError):
             return None
     return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
@@ -289,7 +299,7 @@ def build_contract_inputs(
     ):
         return Blocked(GATE_OPENING_PATHS_MISSING)
     anchors = tuple(a for a in receipt.anchors if isinstance(a, tuple) and len(a) == 4
-                    and all(type(v) in (int, float) and math.isfinite(v) for v in a)
+                    and all(_finite_number(v) for v in a)
                     and a[2] >= a[0] and a[3] >= a[1])
     if not anchors:
         return Blocked(GATE_NO_ANCHORS)
