@@ -357,6 +357,13 @@ export function createBuildOverlay(scene: THREE.Scene) {
       context.fillText(layout.subtitle, layout.width / 2, 105, 560);
       context.textAlign = "left";
     }
+    // Spatial-tool groups are labels only: ray hit regions remain exactly
+    // the existing actionable buttons, with no accidental source edits.
+    for (const section of layout.sections ?? []) {
+      context.fillStyle = "#95e9de";
+      context.font = "bold 24px sans-serif";
+      context.fillText(section.label, 20, section.y, layout.width - 40);
+    }
     for (const [index, button] of layout.buttons.entries()) {
       const highlight = index === hover || button.active;
       context.fillStyle = highlight ? "#69dbca" : "#2a4651";
