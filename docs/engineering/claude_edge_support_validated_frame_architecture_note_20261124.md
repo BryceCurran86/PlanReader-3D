@@ -1,0 +1,75 @@
+# Footprint edge-support veto: route it through the validated display-to-native frame — architecture note (24 Nov 2026)
+
+For review before any code (AGENTS.md: first deliverable on a new change). Item 1 of MAX's next instructions ([#2608 comment 7100270347](https://github.com/BryceCurran86/PlanReader-3D/issues/2608#issuecomment-7100270347)); follow-up to #4650 (the default-off `require_native_edge_support` veto) and #4652 (the page frame recorded on the footprint trace). Counts and public identifiers only: no private source content, coordinates, overlays or customer data. **Status:** note only. The owner approved item 1 in chat on 24 Nov 2026 ("Yes, item 1"), note first; no production code or test is written.
+
+## 0. Compliance
+
+- **Read:** AGENTS.md (live `main` ad191709a, including the 21 Nov zero job-specific rule, the 10 Nov autonomous-completion directive and the first-deliverable wording); `docs/AI_ENGINEERING_PLAYBOOK.md` sections 1, 2 and 5 to 13; `docs/engineering/CANONICAL_TRACE_ROUTE_CONTRACT_20261120.md`; the notes of #4650 and #4652; `pb_external_footprint_first_trace.py` lines 1 to 440 on a tree holding both PRs; `pb_source_footprint_native_edge_support_shadow.py` (header and `assess_footprint_native_edge_support`); `pb_page_frame_shadow.native_to_display` (docstring); both PRs' test files (fixtures, UserUnit and CropBox helpers); the two live callers of `trace_external_footprint_first`.
+- **Functions traced:** `trace_external_footprint_first` (the flag branch, lines 396 to 417, and the frame read at 419 to 422); `_read_page_frame`, `_declared_user_unit`, `_float_matrix`, `_apply_matrix`, `footprint_polygon_in_native_space`; `assess_footprint_native_edge_support`; callers `pb_planreader_pdf_extractor.py:1314` and `pb_live_physical_net_wall_integration.py:558`.
+- **Authority boundaries crossed:** none. The trace is a review-only CANDIDATE or ABSTAINED outline (`measurement_authorized=False`, `commercial_publishable=False`), upstream of physical wall owner and scale. `trace_external_footprint_first` is a SUPPLEMENTARY diagnostic under the canonical trace-route contract, not the official preview and never a score; nothing here is compared with a preview run.
+- **Untouched by this proposal:** `pb_native_page_frame.py` (live frame admission stays MAX's #4653), `pb_page_frame_shadow.py`, `pb_source_footprint_native_edge_support_shadow.py` (the assessment, its 2.5 pt snap and 20,000-row cap), the raster tracer, `tools/**`, `benchmarks/frozen_holdout/full_plan_v2/**`, `documents/sources/*.pdf`, and the other raw-matrix sites listed in 1.7.
+- **Not done:** no code and no test. Only read-only measurements and a synthetic reproduction (1.5, 1.6) were run.
+
+## 1. Observed repository behavior
+
+1. **The branch.** On a tree holding #4650 (`05c0c7ecc`) and #4652 (`54a67f1e6`) merged onto `main` ad191709a (clean merges; the 268 tests of the two PRs' test files pass), `trace_external_footprint_first(..., require_native_edge_support=True)` does this after the raster polygon `points` is built (lines 396 to 417): map each point with `fitz.Point(px, py) * page.derotation_matrix`, read `page.get_drawings()` (only for a contour of at most 8 vertices), call `assess_footprint_native_edge_support(native_points, native_rows)`, and abstain with `external_footprint_unverified_native_wall_edges` only on UNSUPPORTED. A `ValueError`, `RuntimeError`, `OSError` or `AttributeError` falls back to the unmapped points and no rows, which is UNVERIFIABLE (no veto).
+2. **The validated frame is read afterwards.** `_read_page_frame(page)` (line 419, after the branch) derives the display-to-native map from the UserUnit-scaled display extent and the rotation (90, 180, 270), accepts it only when PyMuPDF's own matrix agrees (same rotation part; translation times the declared /UserUnit equals the derived translation), and otherwise the page abstains with `external_footprint_rotated_page_frame_unreadable`. Every other comparison site of the chain converts through it by `footprint_polygon_in_native_space`.
+3. **Two spaces and a scale.** `page.rect`, the raster, the polygon and the `get_drawings()` rows are all in UserUnit-scaled points. PyMuPDF's `page.derotation_matrix` translates by the UNSCALED extent (documented in #4652's tests and in `pb_page_frame_shadow.native_to_display`). The raw matrix and the validated frame therefore share the rotation part and differ in the translation by (unit - 1) times the extent: they agree at rotation 0 (identity) at any unit, and at /UserUnit 1 at any rotation, and disagree exactly on a rotated page with /UserUnit other than 1.
+4. **Consumers.** No caller passes the flag. The two live callers call `trace_external_footprint_first` with the bytes, the SHA and the page list only, so default-off is the only live behavior; only tests pass `True`.
+5. **Reproduction (synthetic only; MAX's finding confirmed).** With #4650's own rotated hairline-frame fixture at /Rotate 90: /UserUnit 1 abstains (correct); /UserUnit 2 returns CANDIDATE, the raw mapping gives UNVERIFIABLE (`long_edge_without_native_ink`), the validated mapping UNSUPPORTED. On two centred scenes (a hairline frame around bold interior walls, which must be vetoed; an enclosure in the wall pen, which must not) over rotation {0, 90, 180, 270} by /UserUnit {1, 2, 1.5} by CropBox {none, offset}: 24 cases per scene. **12 of the 24 false-frame cases are wrong** (all rotated, /UserUnit other than 1, with and without the CropBox: flag ON returns CANDIDATE where the same drawing authored upright is vetoed); **0 of the 24 real-enclosure cases** are wrong. The mapped polygon is displaced by 350 to 1000 pt in these scenes. The failure is one-directional: the veto fails open, and a real enclosure is never vetoed by it.
+6. **Real pages (counts only, local originals, not a protected run).** 61 PDFs under the owner's source folder: 861 pages, 166 rotated, and no page carries a /UserUnit key. On the 57-PDF replay list (774 pages: 621 upright, 153 rotated, all /Rotate 90) the frame derived by `_read_page_frame` is readable on every page and identical to PyMuPDF's own matrix (largest entry difference 0.0). No local page exercises the defect, and the repair cannot change a result on any of them. Its evidence is the PDF contract and synthetic proof, not a corpus gain.
+7. **Same raw-matrix pattern elsewhere (not examined, not changed).** `pb_viewport_segmentation._to_native_bbox` maps a visual bbox with `page.derotation_matrix` (line 1837, called at 3192), and six production modules use `page.rotation_matrix` (`pb_viewport_segmentation`, `pb_page_title_authority`, `pb_source_observation_authority`, `pb_raster_text_corroboration_authority`, `pb_schedule_opening_instance_binding_authority`, `pb_gptmax_native_filled_scale_shadow`). The repository's own frame vocabulary says the matrix is not UserUnit aware. I did not test whether any of these meets a /UserUnit-scaled page in a way that matters. Flagged for MAX's item 3, where the canonical viewports are in scope.
+
+## 2. Inference
+
+- Root cause: the branch was written in #4650, which does not contain #4652, so no validated helper existed; it uses PyMuPDF's raw matrix while its comment promises "one coordinate space". #4652's note already anticipated this ("#4650 derotates the polygon itself ... after this lands it can use the same helper").
+- Blast radius today: none. The flag is default-off and unwired. If enabled, rotated sheets with /UserUnit other than 1 would silently keep false site frames as CANDIDATEs (a miss, never a false veto of a real outline).
+- The right repair is routing, not a second transform: one conversion for every comparison site. A second implementation of the frame would be a second vocabulary (AGENTS.md).
+- The veto also runs before the frame is validated, so on a page whose frame cannot be established it can abstain with the veto reason on a polygon placed by an unvalidated matrix, while flag OFF abstains with the frame reason. After the repair both give the frame reason.
+
+## 3. Proposed change (shadow, additive, default-off byte-identical)
+
+All inside the existing branch of `trace_external_footprint_first`:
+
+1. Read `_read_page_frame(page)` before the veto. Unreadable: the existing abstain `external_footprint_rotated_page_frame_unreadable`, the same result as flag OFF. The veto is never evaluated on an unestablished frame.
+2. Build the CANDIDATE trace (with `page_derotation_matrix=frame_matrix`) before the veto. With the flag on, map the polygon with `footprint_polygon_in_native_space(candidate)`, the helper every other comparison site uses. `None` (a frame that cannot carry the outline) means no veto: flag ON equals flag OFF.
+3. Read `page.get_drawings()` only for at most 8 vertices, as now. Any reader failure gives no rows, UNVERIFIABLE, no veto, as now. `assess_footprint_native_edge_support` is called unchanged, so its 2.5 pt snap, 20,000-row cap and "only UNSUPPORTED abstains" rule are untouched.
+4. Abstain only on UNSUPPORTED, with the same reason code and `page_drawings_examined=len(rows)`.
+
+**Invariant to prove:** for every page, flag ON equals flag OFF except when the validated assessment is UNSUPPORTED. Behaviour changes only where the old mapping was wrong (rotated, /UserUnit other than 1: the 12 synthetic cases) and in the reason on an unreadable frame (both abstain).
+
+/Rotate 180 and 270 are supported in this shadow check on synthetic proof, as MAX asks, because `_read_page_frame` already supports them. The live contract (`pb_native_page_frame`, 0 and 90 only) is not touched.
+
+**Alternatives rejected.** Scaling the raw matrix's translation in place (a second frame implementation). Importing `pb_page_frame_shadow` (a guard forbids any production importer). `native_page_frame` (0 and 90 only; raises on 180 and 270, which drops MAX's request). Abstaining when the polygon cannot be mapped (makes flag ON differ from flag OFF beyond the veto verdict). Edits to the assessment module (the pure function is correct; the input space was wrong).
+
+## 4. Tests to write first (AGENTS.md matrix)
+
+New `tests/test_footprint_edge_support_frame_v1.py`, synthetic only:
+
+- **Positive:** the false frame is vetoed (`external_footprint_unverified_native_wall_edges`) for every rotation {0, 90, 180, 270} by /UserUnit {1, 2, 1.5} by {no CropBox, offset CropBox}, and MAX's exact fixture at /Rotate 90 with /UserUnit 2.
+- **Look-alike negatives:** a real enclosure in the wall pen (stroked and filled strips) stays CANDIDATE and equals the flag-OFF trace in every combination; a frame one pen step lighter is left alone; a page with no native ink is left alone.
+- **Metamorphic and invariance:** the decision equals the decision on the same drawing authored upright at /UserUnit 1 (rotation, scale through /UserUnit, translation through the CropBox); a larger page with the same drawing; unrelated far content; interior walls reversed and split into collinear pieces; deterministic replay; the trace is frozen and the inputs are not mutated.
+- **Ambiguity and abstention (predicted before the tests):** an unreadable /UserUnit ("(abc)", "-2") on a rotated page gives `external_footprint_rotated_page_frame_unreadable` for flag ON and OFF alike, never the veto reason; a frame the helper cannot map (monkeypatched) gives flag ON equal to flag OFF; a contour of more than 8 vertices is NOT_APPLICABLE (no veto); the polygon that reaches the assessment lies on the building's own native bounds (a spy on the assessment), which proves the transform independently of the verdict.
+- **Default-off and upright parity:** the flag defaults to False and the module is not imported when it is off (existing test kept); at rotation 0 flag ON equals flag OFF for the real enclosure at every unit and CropBox and `to_dict()` is identical; the invariant of section 3 over the whole matrix.
+- **Pin:** no production module passes `require_native_edge_support` (an AST scan), so live predictions cannot change.
+- **Mutants:** single-line mutants of the branch (back to the raw matrix, frame read after the veto, inverse instead of forward map, inverted UNSUPPORTED test, dropped unreadable guard, dropped candidate frame).
+- **Real-original replay (counts only):** flag-ON statuses of the old and new code on every local page; expected identical on all of them (section 1.6). Reported, not tuned.
+
+## 5. Expected behaviour (stated before the tests)
+
+Upright pages and /UserUnit 1 pages: nothing changes (asserted). Rotated pages with /UserUnit other than 1 and the flag on: the false frame is vetoed (the 12 synthetic cases flip from CANDIDATE to ABSTAINED); a real enclosure is unchanged. Unreadable frame: ABSTAINED with the frame reason, independent of the flag. Default off: byte-identical. Local originals: identical statuses on every page, because no page has a /UserUnit key and every rotated frame equals PyMuPDF's matrix.
+
+## 6. Benchmark observations that must not influence implementation
+
+None is used. The scenes are authored from the contract (rotation, /UserUnit, CropBox). The real-corpus counts in 1.6 are exposure evidence only. The veto's thresholds are not touched, and the four UNSUPPORTED real candidates reported in #4650's note must not tune anything. No project, page, file name or expected quantity enters the change.
+
+## 7. Decisions for the owner
+
+1. **Where it lands.** (a) Recommended: on #4650's branch (`claude/footprint-false-enclosure-veto-20261123`): bring #4652's head into it (a fast-forward push from a branch that already holds both on current `main`), then the fix; #4650 then depends on #4652, so #4652 merges first or together, and #4650's diff shrinks when it does. (b) A new draft PR holding both plus the fix (a third head to track). (c) Wait for #4652 to merge and rebase.
+2. **Unmappable frame under the flag:** no veto (recommended, keeps the invariant) or abstain.
+3. **Reason on an unreadable frame:** the frame reason, as flag OFF (recommended).
+4. **The same pattern elsewhere (1.7):** leave it for MAX's item 3 unless the owner wants a read-only census first.
+
+## 8. Coordination (not done)
+
+Live frame admission stays with MAX (#4653). The rotated JSON and overlay check MAX asks for is with GPT 1 after the fix lands; this change adds no JSON key (#4652's `page_derotation_matrix` is already in the trace JSON on rotated candidates). Any hub post needs the owner's yes.
