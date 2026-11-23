@@ -13,7 +13,7 @@ test("Quest top-level tools are grouped without losing original actions", () => 
   const layout = root();
   assert.deepEqual(layout.sections?.map(section => section.label),
     ["BUILD & EDIT", "MATERIALS, VIEWS & CONTROLS"]);
-  assert.equal(layout.buttons.length, BUILD_TOOLS.length + 5);
+  assert.equal(layout.buttons.length, BUILD_TOOLS.length + 4);
   for (const tool of BUILD_TOOLS) {
     assert.ok(layout.buttons.some(button =>
       button.action.area === "build" && button.action.action.kind === "tool" &&
