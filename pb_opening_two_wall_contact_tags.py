@@ -227,8 +227,14 @@ def tag_native_segmented_doorway_chords(
     tags: list[TwoWallOpeningTag] = []
     if not _scope(scope):
         return ()
+    # A malformed producer collection must not crash the source-native preview
+    # or be treated as an empty, successfully examined drawing package.
+    if type(drawings) not in (tuple, list) or type(chords) not in (tuple, list):
+        return (TwoWallOpeningTag("0", "UNRESOLVED", "source_chord_collection_invalid"),)
     for number, chord in enumerate(chords):
         try:
+            if not isinstance(chord, Mapping):
+                raise ValueError("invalid chord mapping")
             horizontal = chord["horizontal"]
             lo, hi = tuple(chord["door_interval_pdf_pts"])
             band_lo, band_hi = tuple(chord["wall_band_pdf_pts"])
