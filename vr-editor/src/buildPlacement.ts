@@ -116,6 +116,45 @@ export function snappedPoint(point: PlanPoint): PlanPoint | null {
     : null;
 }
 
+// Magnetic alignment is strictly for LOCAL draft wall placement. It does not
+// alter source/verified geometry or override any source authority checks.
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" };
+export function snapDraftWallPoint(
+  state: Pick<BuildState, "walls">,
+  levelId: string,
+  raw: PlanPoint,
+  anchor: PlanPoint | null = null,
+): DraftWallSnap | null {
+  const grid = snappedPoint(raw);
+  if (!grid) return null;
+  let nearest: { point: PlanPoint; distance: number } | null = null;
+  // Prefer exact junctions over ambiguous coordinate alignment.
+  for (const wall of state.walls) {
+    if (wall.levelId !== levelId) continue;
+    for (const endpoint of [wall.start, wall.end]) {
+      const distance = planLength(raw, endpoint);
+      if (distance <= 0.20 && (!nearest || distance < nearest.distance)) {
+        nearest = { point: endpoint, distance };
+      }
+    }
+  }
+  if (nearest) return { point: [...nearest.point], kind: "corner" };
+  if (anchor && snappedPoint(anchor)) {
+    const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
+    // Orthogonal guide holds when the pointer is close to horizontal/vertical,
+    // but not at the origin where accidental zero-length walls are likely.
+    if (Math.hypot(dx, dz) > 0.20) {
+      if (Math.abs(dx) <= 0.15 && Math.abs(dx) <= Math.abs(dz)) {
+        return { point: [anchor[0], grid[1]], kind: "straight" };
+      }
+      if (Math.abs(dz) <= 0.15) {
+        return { point: [grid[0], anchor[1]], kind: "straight" };
+      }
+    }
+  }
+  return { point: grid, kind: "grid" };
+}
+
 export function buildGuide(state: BuildState, levelId: string | null) {
   if (!levelId) return "Choose a source level on the desktop to start building.";
   if (!state.tool) return "Choose Wall or Ceiling, then drag across the plan or pick two points.";
