@@ -348,12 +348,21 @@ def _original_three_laurel_floor_finish_handoff(
         )
         rows = tuple(wet_rows) + tuple(vinyl_rows)
         verified = verify_sealed_customer_output(sealed, rows)
-        sealed_ids = {q.quantity_id for q in sealed.quantities}
+        issued_ids = tuple(q.quantity_id for q in quantities)
+        sealed_ids = tuple(q.quantity_id for q in sealed.quantities)
+        verified_ids = tuple(verified.verified_quantity_ids)
+        # Never let set comparison conceal duplicate quantity IDs after
+        # independently sealed families have been combined.
         if (
-            len(sealed.quantities) != 7
+            len(quantities) != 7
+            or len(sealed_ids) != 7
             or len(rows) != 7
             or verified.customer_row_count != 7
-            or set(verified.verified_quantity_ids) != sealed_ids
+            or len(set(issued_ids)) != len(issued_ids)
+            or len(set(sealed_ids)) != len(sealed_ids)
+            or len(set(verified_ids)) != len(verified_ids)
+            or set(issued_ids) != set(sealed_ids)
+            or set(verified_ids) != set(sealed_ids)
             or set(sealed.source_sha256s) != {_THREE_LAUREL_SOURCE_SHA256}
         ):
             return None
