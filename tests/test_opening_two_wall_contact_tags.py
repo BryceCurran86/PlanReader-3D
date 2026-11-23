@@ -314,6 +314,7 @@ def test_original_chord_source_receipts_reject_numeric_coercion():
         ("door_interval_pdf_pts", (True, 12.)),
         ("door_interval_pdf_pts", ("10", 12.)),
         ("door_interval_pdf_pts", (12., 10.)),
+        ("door_interval_pdf_pts", (10., 10.)),
         ("wall_band_pdf_pts", (False, 1.)),
         ("wall_band_pdf_pts", ("-1", 1.)),
         ("wall_band_pdf_pts", (2., -2.)),
