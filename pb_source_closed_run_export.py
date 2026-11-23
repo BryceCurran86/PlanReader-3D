@@ -541,10 +541,9 @@ def _build_sealed_run(
 
     normalized: list[SealedSourceClosedQuantity] = []
     quantity_ids: set[str] = set()
-    # A+B and B+C are overlapping producer-owned physical geometry despite
-    # different exact sets. Index each identity under its family and semantic
-    # key to prevent source-sealed commercial double counting.
-    physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
+    # A+B and B+C overlap because they share a producer-owned identity. Floor
+    # finish area has one claim per owned surface, even across finish labels.
+    physical_claims: dict[tuple[str, str | None], dict[str, SealedSourceClosedQuantity]] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -606,7 +605,9 @@ def _build_sealed_run(
             sorted({_clean(value) for value in row.object_identity_refs if _clean(value)})
         )
         if not row.abstained and identities:
-            claim_key = (_clean(row.family).lower(), _clean(row.semantic_key))
+            family = _clean(row.family).lower()
+            semantic_key = _clean(row.semantic_key)
+            claim_key = (family, None if family == "floor_finish_area" else semantic_key)
             claimed_ids = physical_claims.setdefault(claim_key, {})
             for identity in identities:
                 prior = claimed_ids.get(identity)
@@ -615,6 +616,7 @@ def _build_sealed_run(
                 prior_ids = tuple(sorted({_clean(value) for value in prior.object_identity_refs if _clean(value)}))
                 same_claim = (
                     prior_ids == identities
+                    and _clean(prior.semantic_key) == semantic_key
                     and prior.value == row.value
                     and _clean(prior.unit).lower() == _clean(row.unit).lower()
                 )

@@ -13,6 +13,7 @@ from pb_source_closed_run_export import (
     seal_source_closed_run,
 )
 from tests.symlink_test_support import symlink_or_skip
+from tools import gpt3_safe_original_report_output
 
 
 SHA_A = "a" * 64
@@ -227,15 +228,17 @@ def test_combiner_cannot_write_to_frozen_v2_root(tmp_path, monkeypatch, relative
         assert not target.exists()
 
 
-def test_unsupported_hard_link_does_not_publish_partial_combined_seal(
+def test_failed_staged_publication_leaves_no_partial_combined_seal(
     tmp_path, monkeypatch,
 ):
     source = _one_source_for_cli(tmp_path)
     output = tmp_path / "combined.json"
-    def _unavailable(*args, **kwargs):
-        raise OSError("source filesystem refuses atomic hard link")
-    monkeypatch.setattr(cli.os, "link", _unavailable)
-    with pytest.raises(OSError, match="refuses atomic"):
+
+    def unavailable(staged_path, destination):
+        raise OSError("source filesystem refuses staged publication")
+
+    monkeypatch.setattr(gpt3_safe_original_report_output, "publish_staged_file", unavailable)
+    with pytest.raises(OSError, match="refuses staged publication"):
         cli.main(_combine_args(source, output))
     assert not output.exists()
     assert not list(tmp_path.glob(".combined.json.*.tmp"))
@@ -248,11 +251,13 @@ def test_simultaneous_combined_publication_cannot_erase_competing_receipt(
     source = _one_source_for_cli(tmp_path)
     output = tmp_path / "combined.json"
     prior = b"another source-signed publisher won target"
-    true_link = cli.os.link
-    def _competing_writer(*args, **kwargs):
-        output.write_bytes(prior)
-        return true_link(*args, **kwargs)
-    monkeypatch.setattr(cli.os, "link", _competing_writer)
+    publish = gpt3_safe_original_report_output.publish_staged_file
+
+    def competing_writer(staged_path, destination):
+        destination.write_bytes(prior)
+        publish(staged_path, destination)
+
+    monkeypatch.setattr(gpt3_safe_original_report_output, "publish_staged_file", competing_writer)
     with pytest.raises(FileExistsError):
         cli.main(_combine_args(source, output))
     assert output.read_bytes() == prior

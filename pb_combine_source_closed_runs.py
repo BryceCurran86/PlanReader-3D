@@ -104,6 +104,8 @@ def combine_sealed_run_files(
 
 
 def main(argv: list[str] | None = None) -> int:
+    from tools.gpt3_safe_original_report_output import publish_staged_file
+
     parser = argparse.ArgumentParser(
         description=(
             "Verify and combine independent benchmark-neutral source-closed "
@@ -146,9 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         project_id=args.project_id,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Publish only a complete verified aggregate. Same-directory hard-link
-    # creation is atomic and create-only; even a racing writer cannot replace
-    # an earlier source-sealed customer receipt. Fail closed on unsupported FS.
+    # Publish the complete aggregate using the same create-only operation as
+    # the original-source benchmark. A competing receipt keeps its path.
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -159,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             temporary.write(combined.to_json())
             temporary.flush()
             os.fsync(temporary.fileno())
-        os.link(temporary_path, args.output)
+        publish_staged_file(temporary_path, args.output)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
