@@ -47,7 +47,10 @@ assert [row["code"] for row in rows] == ["EC1", "WT1"]
 assert _surface_code_for([rows[0]]) == "EC1"
 assert _surface_code_for([{"code": "OTHER_CODE", "name": "Soffit FC Sheet"}]) == "SOF"
 assert _surface_code_for([{"code": "OTHER_CODE", "name": "Unidentified"}]) == "OTHER"
-assert _surface_code_for([{"name": "Soffit and rendered masonry"}]) == "OTHER"
+assert _surface_code_for([{"code": "OTHER_CODE", "name": "Soffit and rendered masonry"}]) == "OTHER"
+assert _surface_code_for([{"code": "OTHER_CODE", "name": "Rendered block / timber cladding"}]) == "OTHER"
+assert _surface_code_for([{"code": "OTHER_CODE", "name": "Soffits / Eaves"}]) == "SOF"
+assert _surface_code_for([{"code": "RBL", "name": "Rendered block / timber cladding"}]) == "RBL"
 assert _surface_code_for(rows) == "OTHER"
 install()
 assert _surface_code([{"code": "PB", "substrate": "Plasterboard / Gyprock"}]) == "PB"

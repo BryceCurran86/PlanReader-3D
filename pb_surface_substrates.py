@@ -58,7 +58,11 @@ def _substrate_code(text: str) -> str:
 
 def infer_substrate(finish: Any) -> str:
     text = str(finish or "").lower()
-    parts = [part.strip() for part in re.split(r"\b(?:and|or)\b", text) if part.strip()]
+    parts = [
+        part.strip()
+        for part in re.split(r"/|\b(?:and|or)\b", text)
+        if part.strip()
+    ]
     if len(parts) > 1:
         codes = []
         for part in parts:
