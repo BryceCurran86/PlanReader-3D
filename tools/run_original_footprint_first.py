@@ -512,14 +512,16 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             "wall_ink_segments_shown": shown,
             "all_segments_shown": shown < 1600,
         }
-        out_dir.mkdir(parents=True, exist_ok=True)
-        json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
-        png_file = out_dir / f"page_{page_index+1}_footprint_first.png"
-        # This is source-only evidence, never a commercial release.
-        # Render AND serialize in memory before publishing either artifact.
-        # An interrupted render/encode must not leave a plausible JSON receipt.
+        # Output-directory creation can also fail. Keep it inside the
+        # closure/rollback guard so the diagnostic canvas is always released.
+        # Neither successful output nor a half-written pair grants quantity authority.
         created: list[Path] = []
         try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
+            png_file = out_dir / f"page_{page_index+1}_footprint_first.png"
+            # Render AND serialize in memory before publishing either artifact.
+            # An interrupted render/encode must not leave a plausible JSON receipt.
             png_bytes = layer.get_pixmap(
                 matrix=fitz.Matrix(1.2, 1.2), alpha=False,
             ).tobytes("png")
@@ -540,7 +542,9 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
             ):
                 with destination.open("xb") as target:
                     created.append(destination)
-                    target.write(payload)
+                    written = target.write(payload)
+                    if written != len(payload):
+                        raise OSError("original_footprint_evidence_pair_short_write")
         except BaseException:
             for destination in reversed(created):
                 destination.unlink(missing_ok=True)
