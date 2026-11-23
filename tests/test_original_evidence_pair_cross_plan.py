@@ -12,6 +12,7 @@ import struct
 import fitz
 import pytest
 
+from tools import gpt3_safe_original_report_output
 from tools.run_original_footprint_first import run
 
 
@@ -192,5 +193,31 @@ def test_short_write_rolls_back_both_diagnostic_artifacts(
         run(source, 0, destination, expected_sha256=sha,
             expected_drawing_title="Floor Plan")
 
-    assert not (destination / "page_1_footprint_first.json").exists()
-    assert not (destination / "page_1_footprint_first.png").exists()
+    assert tuple(destination.iterdir()) == ()
+
+
+@pytest.mark.parametrize("layout", ("small_residential", "stepped_commercial"))
+def test_failed_receipt_promotion_keeps_replaced_overlay(tmp_path, monkeypatch, layout):
+    source, _, _ = _unrelated_source(tmp_path, layout)
+    sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / layout / "promotion_failure"
+    overlay = destination / "page_1_footprint_first.png"
+    replacement = tmp_path / "replacement.png"
+    competing_bytes = b"another publisher's overlay"
+    replacement.write_bytes(competing_bytes)
+    publish = gpt3_safe_original_report_output.publish_staged_file
+
+    def fail_receipt_promotion(staged, target):
+        if target.suffix == ".json":
+            replacement.replace(overlay)
+            raise OSError("simulated failure after overlay replacement")
+        publish(staged, target)
+
+    monkeypatch.setattr(
+        gpt3_safe_original_report_output, "publish_staged_file", fail_receipt_promotion,
+    )
+    with pytest.raises(OSError, match="simulated failure after overlay replacement"):
+        run(source, 0, destination, expected_sha256=sha, expected_drawing_title="Floor Plan")
+
+    assert tuple(destination.iterdir()) == (overlay,)
+    assert overlay.read_bytes() == competing_bytes

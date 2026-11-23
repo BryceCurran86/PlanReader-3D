@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -37,6 +38,7 @@ from pb_source_native_exterior_perimeter_graph_shadow import (  # noqa: E402
     export_exterior_face_evidence_packet,
     select_outermost_vertical_face_edge_index,
 )
+from tools.gpt3_safe_original_report_output import publish_staged_files  # noqa: E402
 from pb_source_native_wall_body_junction_graph_shadow import (  # noqa: E402
     build_source_native_wall_body_junction_graph,
 )
@@ -515,7 +517,6 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
         # Output-directory creation can also fail. Keep it inside the
         # closure/rollback guard so the diagnostic canvas is always released.
         # Neither successful output nor a half-written pair grants quantity authority.
-        created: list[Path] = []
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
             json_file = out_dir / f"page_{page_index+1}_footprint_first.json"
@@ -535,20 +536,18 @@ def run(pdf: Path, page_index: int, out_dir: Path, *,
                 raise FileExistsError(
                     "original_footprint_evidence_pair_already_exists"
                 )
-            # Exclusive creation protects existing evidence from overwrite.
-            # If the second write fails, erase ONLY files opened by this run.
-            for destination, payload in (
-                (png_file, png_bytes), (json_file, json_bytes),
-            ):
-                with destination.open("xb") as target:
-                    created.append(destination)
-                    written = target.write(payload)
-                    if written != len(payload):
-                        raise OSError("original_footprint_evidence_pair_short_write")
-        except BaseException:
-            for destination in reversed(created):
-                destination.unlink(missing_ok=True)
-            raise
+            # The receipt names the PNG, so expose the complete overlay first.
+            with TemporaryDirectory(dir=out_dir, prefix=".footprint-evidence-") as staging:
+                staging_dir = Path(staging)
+                staged_targets = (
+                    (staging_dir / png_file.name, png_file),
+                    (staging_dir / json_file.name, json_file),
+                )
+                for (staged, _), payload in zip(staged_targets, (png_bytes, json_bytes)):
+                    with staged.open("xb") as target:
+                        if target.write(payload) != len(payload):
+                            raise OSError("original_footprint_evidence_pair_short_write")
+                publish_staged_files(staged_targets)
         finally:
             canvas.close()
     return result, json_file, png_file
