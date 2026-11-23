@@ -539,6 +539,18 @@ def parse_schedule_rows(
             if mapping:
                 candidates.append((idx + 1, mapping))
                 consumed.update((idx, idx + 1))
+            elif (
+                any(" ".join(p.lower().split()) in {
+                    "door leaf", "window leaf", "door frame", "window frame",
+                    "rough opening", "clear opening",
+                } for p in parent)
+                and any(c.lower() in (
+                    _HEADER_WIDTH_KEYWORDS | _HEADER_HEIGHT_KEYWORDS
+                ) for c in child)
+            ):
+                # A grouped dimension header with unprovable alignment cannot
+                # be reinterpreted as an unrelated generic child header.
+                return []
         for idx, row in enumerate(rows):
             if idx in consumed:
                 continue
