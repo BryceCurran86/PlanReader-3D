@@ -115,6 +115,33 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         self.assertTrue(out.abstained)
         self.assertIn("floor_finish_physical_floor_identity_unresolved", out.blocking_reasons)
 
+    def test_whitespace_colliding_floor_owners_abstain(self):
+        other = SimpleNamespace(canonical_floor_id=" floor ", room_entity_id="room",
+                                physical_floor_surface_identity_resolved=True)
+        out, = self.quarantine([self.candidate()], floors=[self.floor(), other])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_canonical_floor_owner_ambiguous", out.blocking_reasons)
+
+    def test_whitespace_colliding_room_owners_abstain(self):
+        other = SimpleNamespace(canonical_room_id=" room ",
+                                canonical_bounding_wall_ids=("w1",), bounding_wall_ids=())
+        out, = self.quarantine([self.candidate()], rooms=[self.owned_room(), other])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_canonical_room_owner_ambiguous", out.blocking_reasons)
+
+    def test_blank_floor_owner_scope_abstains(self):
+        q = self.candidate()
+        from dataclasses import replace
+        q = replace(q, input_entity_ids=(" ",))
+        out, = self.quarantine([q])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_canonical_floor_scope_missing", out.blocking_reasons)
+
+    def test_whitespace_room_reference_abstains(self):
+        out, = self.quarantine([self.candidate()], floors=[self.floor(room_id=" room ")])
+        self.assertTrue(out.abstained)
+        self.assertIn("floor_finish_canonical_room_owner_missing", out.blocking_reasons)
+
     def test_missing_room_owner_abstains(self):
         out, = self.quarantine([self.candidate()], rooms=[])
         self.assertTrue(out.abstained)
