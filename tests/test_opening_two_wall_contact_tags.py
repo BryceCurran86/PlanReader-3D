@@ -412,3 +412,46 @@ def test_malformed_segmented_source_collections_abstain(bad_drawings, bad_chords
     assert result[0].status == "UNRESOLVED"
     assert result[0].reason == "source_chord_collection_invalid"
     assert result[0].measurement_authorized is False
+
+
+def test_native_line_validation_cached_once_for_repeated_openings():
+    """Shared source strokes are parsed once; neither opening is promoted."""
+    class CountingPoint:
+        def __init__(self, x, y, reads):
+            self._x, self._y, self.reads = x, y, reads
+
+        @property
+        def x(self):
+            self.reads.append("x")
+            return self._x
+
+        @property
+        def y(self):
+            self.reads.append("y")
+            return self._y
+
+    reads = []
+    def stroke(a, b):
+        return {"fill": None, "items": [(
+            "l", CountingPoint(*a, reads), CountingPoint(*b, reads),
+        )]}
+
+    drawings = (
+        stroke((0., 0.), (10., 0.)),
+        stroke((12., 0.), (20., 0.)),
+    )
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (5,),
+    }
+    tags = tag_native_segmented_doorway_chords(
+        drawings, (chord, dict(chord)), scope=SCOPE,
+    )
+    assert len(tags) == 2
+    assert all(t.status == "TWO_WALL_SECTIONS_TAGGED" for t in tags)
+    assert all(not t.measurement_authorized for t in tags)
+    assert len(reads) == 8  # Two endpoints per native stroke, once each.
