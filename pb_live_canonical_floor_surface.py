@@ -190,12 +190,52 @@ def floor_finish_boundary_wall_failure(
     return None
 
 
+
+def ambiguous_canonical_wall_owner_ids(
+    wall_groups: Sequence[Sequence[LiveCanonicalWallObject]],
+) -> frozenset[str]:
+    """Find nonunique source wall owners before any last-writer-wins mapping.
+
+    Repeated views of one wall from separate producers are legitimate only
+    if their nonempty physical and source identity witnesses agree. Repetition
+    inside one producer is always nonunique. This never repairs source IDs.
+    """
+    conflicts: set[str] = set()
+    seen: dict[str, tuple[str, str, str, str]] = {}
+    for group in wall_groups:
+        group_seen: set[str] = set()
+        for wall in group:
+            raw_id = getattr(wall, "canonical_wall_id", None)
+            if not isinstance(raw_id, str) or not raw_id.strip():
+                continue  # unaddressable source objects cannot match a floor boundary
+            wall_id = raw_id.strip()
+            if wall_id in group_seen or wall_id != raw_id:
+                conflicts.add(wall_id)
+            group_seen.add(wall_id)
+            witness = tuple(
+                str(getattr(wall, field, "") or "").strip()
+                for field in (
+                    "physical_wall_id", "source_sha256", "document_id", "revision_id"
+                )
+            )
+            prior = seen.get(wall_id)
+            if prior is not None and any(
+                left and right and left != right
+                for left, right in zip(prior, witness)
+            ):
+                conflicts.add(wall_id)
+            if prior is None:
+                seen[wall_id] = witness
+    return frozenset(conflicts)
+
+
 def quarantine_unverified_floor_finish_boundaries(
     quantities: Sequence[QuantityEvidence],
     *,
     floors: Sequence[LiveCanonicalFloorSurfaceObject],
     rooms: Sequence[LiveCanonicalRoomObject],
     walls_by_id: Mapping[str, LiveCanonicalWallObject],
+    ambiguous_wall_ids: frozenset[str] = frozenset(),
 ) -> tuple[QuantityEvidence, ...]:
     """Withhold live floor finishes that cannot pass the owned wall-face check."""
     if not quantities:
@@ -247,6 +287,14 @@ def quarantine_unverified_floor_finish_boundaries(
             reason = "floor_finish_canonical_room_owner_missing"
         elif room_owner_counts[room_id.strip()] > 1:
             reason = "floor_finish_canonical_room_owner_ambiguous"
+        elif any(
+            wall_id in ambiguous_wall_ids
+            for wall_id in (
+                getattr(room, "canonical_bounding_wall_ids", ())
+                or getattr(room, "bounding_wall_ids", ())
+            )
+        ):
+            reason = "floor_finish_canonical_wall_owner_ambiguous"
         else:
             failure = floor_finish_boundary_wall_failure(
                 room, walls_by_id, quantity_id=quantity.quantity_id,
@@ -681,6 +729,7 @@ __all__ = [
     "LiveCanonicalFloorSurfaceObject",
     "compose_live_canonical_floor_surfaces",
     "enrich_live_canonical_floor_metric_areas",
+    "ambiguous_canonical_wall_owner_ids",
     "floor_finish_boundary_wall_failure",
     "quarantine_unverified_floor_finish_boundaries",
 ]

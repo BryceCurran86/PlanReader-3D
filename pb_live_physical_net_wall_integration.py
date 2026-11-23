@@ -26,6 +26,7 @@ from pb_live_canonical_floor_surface import (
     compose_live_canonical_floor_surfaces,
     enrich_live_canonical_floor_metric_areas,
     quarantine_unverified_floor_finish_boundaries,
+    ambiguous_canonical_wall_owner_ids,
 )
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
@@ -1397,6 +1398,10 @@ def _collect_live_physical_net_wall_claim(
         floors=canonical_floors.floors,
         rooms=canonical_rooms.rooms,
         walls_by_id=canonical_walls_by_id,
+        ambiguous_wall_ids=ambiguous_canonical_wall_owner_ids((
+            canonical_wall_core.walls,
+            publication.canonical_walls,
+        )),
     )
     surface_pipeline_diagnostics.update({
         "floor_finish_firm_quantities_count": sum(

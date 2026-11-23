@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from pb_live_canonical_floor_surface import (
     floor_finish_boundary_wall_failure,
+    ambiguous_canonical_wall_owner_ids,
     quarantine_unverified_floor_finish_boundaries,
 )
 from pb_migration_contracts import QuantityEvidence
@@ -190,6 +191,61 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         q = self.candidate()
         out, = self.quarantine([q])
         self.assertIs(out, q)
+
+
+class WallOwnerCollisionTests(unittest.TestCase):
+    def test_repeated_owner_inside_one_producer_is_ambiguous(self):
+        self.assertEqual(
+            ambiguous_canonical_wall_owner_ids(((wall(), wall()),)),
+            frozenset({"w1"}),
+        )
+
+    def test_same_canonical_id_from_two_producers_with_matching_witness_is_valid(self):
+        one = wall()
+        two = wall()
+        one.physical_wall_id = two.physical_wall_id = "physical"
+        one.source_sha256 = two.source_sha256 = "source"
+        self.assertEqual(
+            ambiguous_canonical_wall_owner_ids(((one,), (two,))),
+            frozenset(),
+        )
+
+    def test_competing_physical_owner_across_producers_is_ambiguous(self):
+        one = wall()
+        two = wall()
+        one.physical_wall_id = "physical-one"
+        two.physical_wall_id = "physical-two"
+        self.assertEqual(
+            ambiguous_canonical_wall_owner_ids(((one,), (two,))),
+            frozenset({"w1"}),
+        )
+
+    def test_competing_source_revision_is_ambiguous(self):
+        one = wall()
+        two = wall()
+        one.revision_id = "R1"
+        two.revision_id = "R2"
+        self.assertEqual(
+            ambiguous_canonical_wall_owner_ids(((one,), (two,))),
+            frozenset({"w1"}),
+        )
+
+    def test_ambiguous_boundary_abstains_but_other_quantity_survives(self):
+        check = FloorFinishQuantityAuthorityTests()
+        finish = check.candidate()
+        other = check.candidate(family="room_area")
+        result = quarantine_unverified_floor_finish_boundaries(
+            (finish, other),
+            floors=(check.floor(),),
+            rooms=(check.owned_room(),),
+            walls_by_id={"w1": wall()},
+            ambiguous_wall_ids=frozenset({"w1"}),
+        )
+        self.assertTrue(result[0].abstained)
+        self.assertIsNone(result[0].value)
+        self.assertIn("floor_finish_canonical_wall_owner_ambiguous", result[0].blocking_reasons)
+        self.assertIs(result[1], other)
+
 
 
 if __name__ == "__main__":
