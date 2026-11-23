@@ -211,6 +211,32 @@ def _abstain(sha: str, index: int, reason: str, drawings: int = 0) -> ExternalFo
     return ExternalFootprintTrace(sha, index, "ABSTAINED", reason, page_drawings_examined=drawings)
 
 
+def _native_edge_support_vetoes(page: object, candidate: ExternalFootprintTrace) -> tuple[bool, int]:
+    """(vetoed, native rows read): True only when the candidate's long edges are drawn in a much lighter pen than
+    the wall linework inside it (``pb_source_footprint_native_edge_support_shadow``).
+
+    The raster polygon is in DISPLAY space and the native rows are in the page's NATIVE space. The polygon is carried
+    across by the frame recorded on the candidate (``footprint_polygon_in_native_space``), the conversion every other
+    comparison site uses, never by PyMuPDF's raw ``page.derotation_matrix``: that matrix translates by the UNSCALED
+    page extent and misplaces the outline on a turned page whose /UserUnit is not 1. A frame that cannot carry the
+    outline, or rows that cannot be read, are missing evidence and never a veto.
+    """
+    from pb_source_footprint_native_edge_support_shadow import (
+        MAX_CANDIDATE_VERTICES,
+        STATUS_UNSUPPORTED,
+        assess_footprint_native_edge_support,
+    )
+
+    native_points = footprint_polygon_in_native_space(candidate)
+    if native_points is None:
+        return False, 0
+    try:
+        rows = page.get_drawings() if len(native_points) <= MAX_CANDIDATE_VERTICES else ()  # type: ignore[attr-defined]
+    except (ValueError, RuntimeError, OSError, AttributeError):
+        rows = ()
+    return assess_footprint_native_edge_support(native_points, rows).status == STATUS_UNSUPPORTED, len(rows)
+
+
 def _bounded_raster_scale(page_width_pts: float, page_height_pts: float) -> float:
     """Keep the diagnostic raster longest axis at or under 2400 pixels."""
     axes = (page_width_pts, page_height_pts)
@@ -292,8 +318,10 @@ def trace_external_footprint_first(
     ``require_native_edge_support`` (default OFF: results are unchanged) abstains
     a near-rectangular candidate whose long edges are drawn only in a much
     lighter native pen than the wall linework inside it (a site or roof frame).
-    Missing, ambiguous or oversized native evidence never abstains. See
-    ``pb_source_footprint_native_edge_support_shadow``.
+    Missing, ambiguous or oversized native evidence never abstains, and neither does a frame that cannot carry the
+    outline into native space; on a page whose frame cannot be established the page abstains with the frame reason,
+    flag or not. The polygon is compared with the native rows through the page frame the trace records (UserUnit
+    scaled, 90, 180 and 270). See ``pb_source_footprint_native_edge_support_shadow``.
     """
     if not isinstance(pdf_bytes, bytes) or hashlib.sha256(pdf_bytes).hexdigest() != source_sha256:
         raise ValueError("external_footprint_original_source_sha_mismatch")
@@ -393,34 +421,12 @@ def trace_external_footprint_first(
             if _polygon_has_self_intersection(points):
                 results.append(_abstain(source_sha256, index, "external_footprint_self_intersecting_candidate"))
                 continue
-            if require_native_edge_support:
-                from pb_source_footprint_native_edge_support_shadow import (
-                    MAX_CANDIDATE_VERTICES,
-                    STATUS_UNSUPPORTED,
-                    assess_footprint_native_edge_support,
-                )
-
-                # The raster polygon is in VISIBLE page space; native rows are in the page's UNROTATED
-                # space. Compare them in one space (identity on an unrotated page).
-                try:
-                    native_rows = page.get_drawings() if len(points) <= MAX_CANDIDATE_VERTICES else ()
-                    native_points = tuple(
-                        tuple(fitz.Point(px, py) * page.derotation_matrix) for px, py in points
-                    )
-                except (ValueError, RuntimeError, OSError, AttributeError):
-                    native_rows, native_points = (), points
-                if assess_footprint_native_edge_support(native_points, native_rows).status == STATUS_UNSUPPORTED:
-                    results.append(_abstain(
-                        source_sha256, index, "external_footprint_unverified_native_wall_edges",
-                        drawings=len(native_rows),
-                    ))
-                    continue
             bbox = tuple(round(float(v) / scale, 3) for v in (x, y, x + w, y + h))
             frame_readable, frame_matrix = _read_page_frame(page)
             if not frame_readable:
                 results.append(_abstain(source_sha256, index, "external_footprint_rotated_page_frame_unreadable"))
                 continue
-            results.append(ExternalFootprintTrace(
+            candidate = ExternalFootprintTrace(
                 source_sha256=source_sha256,
                 page_index=index,
                 status="CANDIDATE",
@@ -431,7 +437,18 @@ def trace_external_footprint_first(
                 commercial_publishable=False,
                 measurement_authorized=False,
                 page_derotation_matrix=frame_matrix,
-            ))
+            )
+            if require_native_edge_support:
+                # Only after the page frame is established: the polygon is compared with the native rows in
+                # native space through that frame (see ``_native_edge_support_vetoes``).
+                vetoed, rows_read = _native_edge_support_vetoes(page, candidate)
+                if vetoed:
+                    results.append(_abstain(
+                        source_sha256, index, "external_footprint_unverified_native_wall_edges",
+                        drawings=rows_read,
+                    ))
+                    continue
+            results.append(candidate)
     return tuple(results)
 
 @dataclass(frozen=True)
