@@ -14,7 +14,7 @@ from pb_migration_contracts import QuantityEvidence
 
 
 def room(*ids):
-    return SimpleNamespace(canonical_bounding_wall_ids=ids, bounding_wall_ids=())
+    return SimpleNamespace(canonical_bounding_wall_ids=ids, bounding_wall_ids=(), wall_relationships_complete=True)
 
 
 def wall(identity="w1", role="internal_finished_wall_face", resolved=True):
@@ -35,6 +35,18 @@ class FloorFinishWallAuthorityTests(unittest.TestCase):
         result = self.failure(room(), {"w1": wall()})
         self.assertIsNotNone(result)
         self.assertEqual(result[0], "floor_finish_bounding_wall_authority_incomplete")
+
+    def test_missing_wall_relationships_authority_abstains(self):
+        candidate = room("w1")
+        delattr(candidate, "wall_relationships_complete")
+        result = self.failure(candidate, {"w1": wall()})
+        self.assertEqual(result[0], "floor_finish_boundary_wall_relationships_incomplete")
+
+    def test_explicit_incomplete_wall_relationships_abstain(self):
+        candidate = room("w1")
+        candidate.wall_relationships_complete = False
+        result = self.failure(candidate, {"w1": wall()})
+        self.assertEqual(result[0], "floor_finish_boundary_wall_relationships_incomplete")
 
     def test_missing_wall_abstains(self):
         result = self.failure(room("w1"), {})
@@ -89,7 +101,7 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         return SimpleNamespace(canonical_floor_id="floor", room_entity_id=room_id, physical_floor_surface_identity_resolved=resolved)
 
     def owned_room(self):
-        return SimpleNamespace(canonical_room_id="room", canonical_bounding_wall_ids=("w1",), bounding_wall_ids=())
+        return SimpleNamespace(canonical_room_id="room", canonical_bounding_wall_ids=("w1",), bounding_wall_ids=(), wall_relationships_complete=True)
 
     def quarantine(self, quantities, floors=None, rooms=None):
         return quarantine_unverified_floor_finish_boundaries(

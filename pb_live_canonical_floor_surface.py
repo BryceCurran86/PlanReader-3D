@@ -153,6 +153,11 @@ def floor_finish_boundary_wall_failure(
             "floor_finish_bounding_wall_authority_incomplete",
             f"floor-finish bounding wall authority incomplete: {quantity_id}",
         )
+    if getattr(room, "wall_relationships_complete", None) is not True:
+        return (
+            "floor_finish_boundary_wall_relationships_incomplete",
+            f"room has no complete producer-owned wall relationships: {quantity_id}",
+        )
     # Fail closed when mapping keys hide whitespace-colliding owner identities.
     canonical_keys = [key.strip() for key in walls_by_id if isinstance(key, str)]
     if (len(canonical_keys) != len(walls_by_id)
