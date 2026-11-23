@@ -26,7 +26,8 @@ export type MenuButton = {
   action: MenuAction; active?: boolean; disabled?: boolean; swatch?: number;
 };
 export type MenuLayout = { title: string; width: number; height: number;
-  note: string; subtitle?: string; buttons: MenuButton[] };
+  note: string; subtitle?: string; buttons: MenuButton[];
+  sections?: { label: string; y: number }[] };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
 export const EMPTY_ITEM_BROWSER: BrowserState = { open: false, category: 0, page: 0 };
 const optionsByGroup = CATALOGUE_GROUPS.map(([key]) => ITEM_CATALOGUE.filter(entry => entry.group === key));
@@ -135,10 +136,28 @@ export function buildMenuLayout(
     target: { area: "footprint" }, active: footprint.enabled });
   if (footprint.changed) actions.push({ label: "Reset size", target: { area: "footprint", reset: true } });
   if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
-  const stride = (WIDTH - 40) / 6;
-  for (const [index, entry] of actions.entries()) {
-    add(entry.label, 20 + stride * (index % 6), 67 + Math.floor(index / 6) * 68, stride - 9, 58, entry.target,
-      { active: entry.active, disabled: entry.disabled });
+  // Quest-first grouping: preserve every existing action and its guard, but
+  // give the controller ray larger targets and reduce tool-finding confusion.
+  const columns = 5;
+  const stride = (WIDTH - 40) / columns;
+  const buttonHeight = 64;
+  const rowHeight = 76;
+  const toolCount = BUILD_TOOLS.length;
+  const sections = [{ label: "BUILD & EDIT", y: 85 }];
+  function addGroup(entries: typeof actions, startY: number) {
+    for (const [index, entry] of entries.entries()) {
+      add(entry.label, 20 + stride * (index % columns),
+        startY + Math.floor(index / columns) * rowHeight,
+        stride - 12, buttonHeight, entry.target,
+        { active: entry.active, disabled: entry.disabled });
+    }
+    return startY + Math.ceil(entries.length / columns) * rowHeight;
   }
-  return { buttons, title: item?.label ?? "Build tools", width: WIDTH, height: 149 + 68 * Math.ceil(actions.length / 6), note: hint };
+  const buildEnd = addGroup(actions.slice(0, toolCount), 106);
+  const actionStart = buildEnd + 54;
+  sections.push({ label: "MATERIALS, VIEWS & CONTROLS", y: actionStart - 19 });
+  const end = addGroup(actions.slice(toolCount), actionStart);
+  return { buttons, sections, title: item?.label ?? "PlanReader tools",
+    width: WIDTH, height: end + 60,
+    note: hint || "Point and trigger to choose. Use Undo to reverse a draft action." };
 }
