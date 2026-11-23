@@ -260,7 +260,15 @@ def rank_registrations(
                     continue
             except (TypeError, ValueError, OverflowError):
                 continue
-            moved = orient_lines(src, scaled)
+            # Even finite matrix entries can overflow when multiplied by large
+            # source coordinates. Such a viewport is not a valid witness.
+            try:
+                moved = orient_lines(src, scaled)
+                if any(not math.isfinite(k) or any(not math.isfinite(v) for pair in ivs for v in pair)
+                       for axis in ("H", "V") for k, ivs in moved[axis].items()):
+                    continue
+            except (ValueError, OverflowError, TypeError):
+                continue
             xs, ys = _shift_votes(moved, index, topn)
             pool = sorted(
                 ((*min_axis_support(moved, index, dx, dy, tol), dx, dy) for dx in xs for dy in ys),
