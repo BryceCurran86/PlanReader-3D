@@ -110,6 +110,27 @@ class FloorFinishQuantityAuthorityTests(unittest.TestCase):
         self.assertTrue(out.abstained)
         self.assertIn("floor_finish_canonical_floor_owner_ambiguous", out.blocking_reasons)
 
+    def test_competing_canonical_floors_for_one_physical_surface_abstain(self):
+        original = self.floor()
+        original.physical_floor_surface_id = "physical-surface"
+        competing = self.floor()
+        competing.canonical_floor_id = "other-canonical-floor"
+        competing.physical_floor_surface_id = "physical-surface"
+        out, = self.quarantine([self.candidate()], floors=[original, competing])
+        self.assertTrue(out.abstained)
+        self.assertIsNone(out.value)
+        self.assertIn("floor_finish_physical_floor_owner_ambiguous", out.blocking_reasons)
+
+    def test_distinct_physical_surfaces_preserve_valid_floor_finish(self):
+        original = self.floor()
+        original.physical_floor_surface_id = "physical-surface-one"
+        other = self.floor()
+        other.canonical_floor_id = "other-canonical-floor"
+        other.physical_floor_surface_id = "physical-surface-two"
+        q = self.candidate()
+        out, = self.quarantine([q], floors=[original, other])
+        self.assertIs(out, q)
+
     def test_duplicate_room_owner_abstains(self):
         out, = self.quarantine([self.candidate()], rooms=[self.owned_room(), self.owned_room()])
         self.assertTrue(out.abstained)
