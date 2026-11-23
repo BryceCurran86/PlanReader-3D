@@ -231,6 +231,36 @@ def tag_native_segmented_doorway_chords(
     # or be treated as an empty, successfully examined drawing package.
     if type(drawings) not in (tuple, list) or type(chords) not in (tuple, list):
         return (TwoWallOpeningTag("0", "UNRESOLVED", "source_chord_collection_invalid"),)
+    # Cache validated native segments for this invocation only. Never cache across
+    # source revisions or snapshots, and never convert rejected evidence into
+    # positive wall contacts.
+    native_line_cache: dict[int, tuple[tuple[float, float], tuple[float, float]] | None] = {}
+
+    def native_line(native: int):
+        if native in native_line_cache:
+            return native_line_cache[native]
+        result = None
+        if 0 <= native < len(drawings):
+            row = drawings[native]
+            if isinstance(row, Mapping) and row.get("fill") is None:
+                segments = row.get("items", ())
+                if isinstance(segments, (tuple, list)) and len(segments) == 1:
+                    segment = segments[0]
+                    if (isinstance(segment, (tuple, list))
+                            and len(segment) == 3 and segment[0] == "l"):
+                        try:
+                            a, b = segment[1:3]
+                            raw = (a.x, a.y, b.x, b.y)
+                            if all(type(v) in (int, float) for v in raw):
+                                p = (float(raw[0]), float(raw[1]))
+                                q = (float(raw[2]), float(raw[3]))
+                                if all(math.isfinite(v) for v in (*p, *q)):
+                                    result = (p, q)
+                        except (TypeError, ValueError, AttributeError, OverflowError):
+                            pass
+        native_line_cache[native] = result
+        return result
+
     for number, chord in enumerate(chords):
         try:
             if not isinstance(chord, Mapping):
@@ -262,29 +292,10 @@ def tag_native_segmented_doorway_chords(
             for native in path_ids:
                 if type(native) is not int or native < 0 or native >= len(drawings):
                     continue
-                row = drawings[native]
-                if not isinstance(row, Mapping) or row.get("fill") is not None:
+                line = native_line(native)
+                if line is None:
                     continue
-                segments = row.get("items", ())
-                if not isinstance(segments, (tuple, list)) or len(segments) != 1:
-                    continue
-                segment = segments[0]
-                if (not isinstance(segment, (tuple, list))
-                        or len(segment) != 3 or segment[0] != "l"):
-                    continue
-                try:
-                    a, b = segment[1:3]
-                    # Native PyMuPDF coordinates must be numeric, not
-                    # coercible strings or booleans from malformed receipts.
-                    raw = (a.x, a.y, b.x, b.y)
-                    if not all(type(value) in (int, float) for value in raw):
-                        continue
-                    p = (float(raw[0]), float(raw[1]))
-                    q = (float(raw[2]), float(raw[3]))
-                except (TypeError, ValueError, AttributeError, OverflowError):
-                    continue
-                if not all(math.isfinite(v) for v in (*p, *q)):
-                    continue
+                p, q = line
                 axis = 0 if horizontal else 1
                 across = 1 - axis
                 options = [z for z in (p, q)
