@@ -911,7 +911,10 @@ def test_unverified_floor_wall_keeps_independent_signed_finish(wall_role, identi
     rooms = _finish_rooms(claim.canonical_floors)
     if wall_role is None:
         rooms = (rooms[0], replace(
-            rooms[1], canonical_bounding_wall_ids=(), wall_relationships_complete=False,
+            rooms[1],
+            canonical_bounding_wall_ids=(),
+            bounding_wall_ids=(),
+            wall_relationships_complete=False,
         ))
     walls = {
         "wall-1": _finished_wall("wall-1"),
@@ -950,7 +953,7 @@ def test_unverified_floor_wall_keeps_independent_signed_finish(wall_role, identi
     assert verify_sealed_customer_output(sealed, rows).verified_quantity_ids == (valid.quantity_id,)
 
 
-@pytest.mark.parametrize("missing", ("floors", "rooms", "walls", "boundary_ids"))
+@pytest.mark.parametrize("missing", ("floors", "rooms", "walls", "boundary_ids", "wall_relationships"))
 def test_live_floor_finish_requires_owned_boundaries(missing):
     floor = _floor()
     room, = _finish_rooms((floor,))
@@ -962,6 +965,8 @@ def test_live_floor_finish_requires_owned_boundaries(missing):
     )
     if missing == "boundary_ids":
         room = replace(room, canonical_bounding_wall_ids=(), bounding_wall_ids=())
+    elif missing == "wall_relationships":
+        room = replace(room, wall_relationships_complete=False)
     recovered, retained_area, retained_abstention = quarantine_unverified_floor_finish_boundaries(
         (finish, plain_area, prior_abstention),
         floors=() if missing == "floors" else (floor,),
@@ -973,6 +978,7 @@ def test_live_floor_finish_requires_owned_boundaries(missing):
         "rooms": "floor_finish_canonical_room_owner_missing",
         "walls": "floor_finish_bounding_wall_authority_incomplete",
         "boundary_ids": "floor_finish_bounding_wall_authority_incomplete",
+        "wall_relationships": "floor_finish_boundary_wall_relationships_incomplete",
     }[missing]
     assert recovered == replace(
         finish, abstained=True, value=None, confidence=0.0,

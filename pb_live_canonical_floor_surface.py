@@ -138,10 +138,10 @@ def floor_finish_boundary_wall_failure(
     quantity_id: str,
 ) -> tuple[str, str] | None:
     """Return the first unresolved finished-face requirement for this floor."""
-    boundary_ids = (
-        getattr(room, "canonical_bounding_wall_ids", ())
-        or getattr(room, "bounding_wall_ids", ())
-    )
+    raw_boundary_ids = getattr(room, "canonical_bounding_wall_ids", None)
+    if raw_boundary_ids is None:
+        raw_boundary_ids = getattr(room, "bounding_wall_ids", ())
+    boundary_ids = raw_boundary_ids or ()
     if (any(not isinstance(wall_id, str) or not wall_id.strip() for wall_id in boundary_ids)
             or len({wall_id.strip() for wall_id in boundary_ids}) != len(boundary_ids)):
         return (
@@ -295,8 +295,12 @@ def quarantine_unverified_floor_finish_boundaries(
         elif any(
             wall_id in ambiguous_wall_ids
             for wall_id in (
-                getattr(room, "canonical_bounding_wall_ids", ())
-                or getattr(room, "bounding_wall_ids", ())
+                (
+                    getattr(room, "canonical_bounding_wall_ids", None)
+                    if getattr(room, "canonical_bounding_wall_ids", None) is not None
+                    else getattr(room, "bounding_wall_ids", ())
+                )
+                or ()
             )
         ):
             reason = "floor_finish_canonical_wall_owner_ambiguous"
