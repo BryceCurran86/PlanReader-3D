@@ -1,5 +1,35 @@
 # PlanReader-3D agent contract
 
+## Owner 24 November 2026 — retired private GitHub runner (current, mandatory)
+
+**There is no longer a private-source GitHub runner or companion-source workflow to
+fix, start, wait for or recreate.** Merged PR #4658 retired the hosted original
+PDF provisioning, private CI credentials and private companion benchmark paths.
+A missing private CI runner is NEVER a release blocker: stop citing it in
+coordination reports, review checklists and agent handoffs. Do not recreate
+`ORIGINAL_SOURCES_TOKEN`, source-provisioning workflows or self-hosted
+private GitHub Actions jobs to get a score.
+
+**Official original benchmark:** use the existing Windows app checkout and
+`RUN_PLANREADER_WINDOWS.bat benchmark --check-only`, followed by
+`RUN_PLANREADER_WINDOWS.bat benchmark` under its local execution guards.
+Use already-supplied originals (including the owner's existing Windows
+`documents/sources` directory or verified ChatGPT Library archive) and four
+independent identity maps, with private results outside the repository.
+GitHub Actions is source-free Python 3.13/3.14 and security/regression CI only.
+Historical requests for "protected/private original replay" mean the
+**local original-source-to-signed-customer acceptance on this Windows path**,
+not a separate private hosted runner or an excuse to request files again.
+
+Retiring the runner does **not** certify replay or relax source identity,
+physical/metric authority, signed/customer byte retention, security or the
+unchanged frozen120 scorer. A verified file preflight alone cannot publish a
+benchmark score. If an exact-head real local source→issuer→sealed customer
+execution is unavailable or fails, report the particular producer/record
+failure as UNVERIFIED/ABSTAIN/BLOCKED and progress independent tasks, never
+pretend private CI needs to be restored.
+
+
 ## Owner zero job-specific production rule — 21 November 2026 (mandatory for ALL agents)
 
 **No fix may be built around one named drawing, benchmark item, door, room, page,
