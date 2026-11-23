@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Ray, Vector3 } from "three";
 import { EMPTY_BUILD, STARTING_SIZES, snapDraftWallPoint,
-  translatedDraftWall, rotatedDraftWall, updateBuild } from "../src/buildPlacement.ts";
+  translatedDraftWall, rotatedDraftWall, updateBuild, viewRelativeNudge } from "../src/buildPlacement.ts";
 import { pickDraftWall } from "../src/buildScene.ts";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER } from "../src/catalogueMenu.ts";
 
@@ -98,4 +98,13 @@ test("disabled editing and cross-level draft guards stay in effect",()=>{
   assert.equal(empty.buttons.find(b=>b.label==="Door")?.disabled,true);
   assert.strictEqual(act(state,{kind:"duplicate-local-wall",proposalId:"local-1",id:"local-2"},"upper"),state);
   assert.strictEqual(act(state,{kind:"delete-local-wall",proposalId:"local-1"},"upper"),state);
+});
+
+test("Quest nudge direction follows view orientation without diagonal drift",()=>{
+  assert.deepEqual(viewRelativeNudge("forward",[0,-1],0.05),[0,-0.05]);
+  assert.deepEqual(viewRelativeNudge("right",[0,-1],0.05),[0.05,0]);
+  assert.deepEqual(viewRelativeNudge("forward",[1,0.1],0.1),[0.1,0]);
+  assert.deepEqual(viewRelativeNudge("left",[1,0.1],0.1),[0,-0.1]);
+  assert.equal(viewRelativeNudge("forward",[0,0],0.05),null);
+  assert.equal(viewRelativeNudge("forward",[1,1],Infinity),null);
 });
