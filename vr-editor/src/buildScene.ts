@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import {
   activeStart, aimOpening, buildGuide, MAX_DRAFT_WALLS, nearWall,
-  openingFits, planLength, projectOnWall, snappedPoint, validWallLength,
+  openingFits, planLength, projectOnWall, snappedPoint, snapDraftWallPoint, validWallLength,
   draftShape, validCeiling, validEditedWall,
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallVisual } from "./buildPlacement.ts";
@@ -128,7 +128,8 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (!from || !levelId || !state.tool) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
-    return activeStart(state, levelId) ? null : { mode, from, levelId };
+    const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from)?.point : from;
+    return activeStart(state, levelId) || !alignedStart ? null : { mode, from: alignedStart, levelId };
   }
   if (mode !== "move" && mode !== "stretch") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
@@ -153,13 +154,16 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   return null;
 }
 
-export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray) {
+export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray, state?: BuildState) {
   const current = planPoint(ray);
   if (!current) return null;
-  const delta = planLength(gesture.from, current);
+  const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
+  const aligned = gesture.mode === "wall" && !("previous" in gesture) && state && floor
+    ? snapDraftWallPoint(state, gesture.levelId, [floor.x, floor.z], gesture.from) : null;
+  const to = aligned?.point ?? current;
+  const delta = planLength(gesture.from, to);
   if (delta < 0.045) return null;
   let line: THREE.Vector3[], valid: boolean, action: BuildAction;
-  const to = current;
   if (!("previous" in gesture)) {
     const { from, levelId, mode } = gesture;
     if (mode === "wall") {
@@ -198,8 +202,13 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     line.push(line[0]);
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
-  const hint = valid ? "Release to apply to the draft." : "Size is invalid or an opening would no longer fit.";
-  const aim: Aim = { hit: null, valid, line, hint };
+  const hint = !valid ? "Size is invalid or an opening would no longer fit."
+    : gesture.mode === "wall" && !("previous" in gesture)
+    ? "Release to place · " + Math.round(delta * 1000) + " mm" +
+      (aligned?.kind === "corner" ? " · corner snap" : aligned?.kind === "straight" ? " · straight" : "")
+    : "Release to apply to the draft.";
+  const aim: Aim = { hit: null, valid, line, hint,
+    marker: gesture.mode === "wall" && !("previous" in gesture) ? to : undefined };
   return { action: valid ? action : null, aim };
 }
 
@@ -246,11 +255,14 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   if (state.tool === "wall" || state.tool === "ceiling") {
     const ceiling = state.tool === "ceiling";
     if ((ceiling ? state.ceilings : state.walls).length >= MAX_DRAFT_WALLS) return { hit: null, hint: guide };
-    const point = floor && snappedPoint([floor.x, floor.z]);
+    const start = activeStart(state, levelId);
+    const snap = state.tool === "wall" && floor
+      ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start) : null;
+    const point = snap?.point ?? (floor && snappedPoint([floor.x, floor.z]));
     if (!point) return { hit: null, hint: "Aim at the plan to place a point." };
     const hit: BuildHit = { kind: state.tool, levelId, point };
-    const start = activeStart(state, levelId);
-    if (!start) return { hit, marker: point, hint: guide };
+    if (!start) return { hit, marker: point,
+      hint: snap?.kind === "corner" ? "Place wall start · corner snap" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
       const line = rectangle(start, point, sizes.ceilingHeightM ?? sizes.wallHeightM);
@@ -261,7 +273,10 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     return {
       hit: valid ? hit : null, marker: point, valid,
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
-      hint: valid ? "Place wall end · " + length.toFixed(2) + " m" : "Wall length must be 50 mm to 200 m.",
+      hint: valid
+        ? "Place wall end · " + Math.round(length * 1000) + " mm" +
+          (snap?.kind === "corner" ? " · corner snap" : snap?.kind === "straight" ? " · straight" : "")
+        : "Wall length must be 50 mm to 200 m.",
     };
   }
   const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor);
