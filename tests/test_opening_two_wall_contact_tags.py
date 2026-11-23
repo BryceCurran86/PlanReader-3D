@@ -314,6 +314,7 @@ def test_original_chord_source_receipts_reject_numeric_coercion():
         ("door_interval_pdf_pts", (True, 12.)),
         ("door_interval_pdf_pts", ("10", 12.)),
         ("door_interval_pdf_pts", (12., 10.)),
+        ("door_interval_pdf_pts", (10., 10.)),
         ("wall_band_pdf_pts", (False, 1.)),
         ("wall_band_pdf_pts", ("-1", 1.)),
         ("wall_band_pdf_pts", (2., -2.)),
@@ -331,3 +332,127 @@ def test_original_chord_source_receipts_reject_numeric_coercion():
         assert out.reason == "source_chord_receipt_invalid", (field, malformed)
         assert out.wall_section_ids == ()
         assert out.measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad", (True, "10", None, float("nan"), float("inf")))
+def test_native_wall_end_coordinates_reject_invalid_receipts(bad):
+    """Malformed native endpoints cannot become two-wall source evidence."""
+    class NativePoint:
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+    def stroke(a, b):
+        return {"fill": None, "items": [("l", a, b)]}
+
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (2,),
+    }
+    drawings = (
+        stroke(NativePoint(0., 0.), NativePoint(bad, 0.)),
+        stroke(NativePoint(12., 0.), NativePoint(20., 0.)),
+        stroke(NativePoint(30., 0.), NativePoint(40., 0.)),
+    )
+    result = tag_native_segmented_doorway_chords(drawings, (chord,), scope=SCOPE)[0]
+    assert result.status == "UNRESOLVED"
+    assert result.measurement_authorized is False
+    assert not result.wall_section_ids
+
+
+@pytest.mark.parametrize("field", ("door_interval_pdf_pts", "wall_band_pdf_pts"))
+def test_oversized_native_chord_integer_fails_closed_without_crashing(field):
+    """Huge native integer receipts cannot overflow the source adapter."""
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (2,),
+    }
+    chord[field] = (10 ** 1000, 10 ** 1001)
+    result = tag_native_segmented_doorway_chords((), (chord,), scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_receipt_invalid"
+    assert result[0].wall_section_ids == ()
+    assert result[0].measurement_authorized is False
+
+
+@pytest.mark.parametrize("contact", ((10 ** 1000, 0.), (0., -(10 ** 1000))))
+def test_oversized_native_wall_contact_integer_fails_closed(contact):
+    """A valid integer type may still be unrepresentable as PDF float."""
+    bad = replace(opening(), first=OpeningWallContact(contact, (100,)))
+    result = tag_opening_to_two_wall_sections(bad, two_straight())
+    assert result.status == "UNRESOLVED"
+    assert result.reason == "opening_contact_geometry_invalid"
+    assert result.wall_section_ids == ()
+    assert result.measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad_chord", (None, 4, "not-a-chord", [], True))
+def test_malformed_segmented_chord_record_abstains_without_crashing(bad_chord):
+    result = tag_native_segmented_doorway_chords((), (bad_chord,), scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_receipt_invalid"
+    assert result[0].measurement_authorized is False
+
+
+@pytest.mark.parametrize("bad_drawings,bad_chords", (
+    (None, ()), ((), None), ("not-a-native-drawing-list", ()),
+    ((), "not-a-chord-list"),
+))
+def test_malformed_segmented_source_collections_abstain(bad_drawings, bad_chords):
+    result = tag_native_segmented_doorway_chords(bad_drawings, bad_chords, scope=SCOPE)
+    assert len(result) == 1
+    assert result[0].status == "UNRESOLVED"
+    assert result[0].reason == "source_chord_collection_invalid"
+    assert result[0].measurement_authorized is False
+
+
+def test_native_line_validation_cached_once_for_repeated_openings():
+    """Shared source strokes are parsed once; neither opening is promoted."""
+    class CountingPoint:
+        def __init__(self, x, y, reads):
+            self._x, self._y, self.reads = x, y, reads
+
+        @property
+        def x(self):
+            self.reads.append("x")
+            return self._x
+
+        @property
+        def y(self):
+            self.reads.append("y")
+            return self._y
+
+    reads = []
+    def stroke(a, b):
+        return {"fill": None, "items": [(
+            "l", CountingPoint(*a, reads), CountingPoint(*b, reads),
+        )]}
+
+    drawings = (
+        stroke((0., 0.), (10., 0.)),
+        stroke((12., 0.), (20., 0.)),
+    )
+    chord = {
+        "horizontal": True,
+        "door_interval_pdf_pts": (10., 12.),
+        "wall_band_pdf_pts": (-1., 1.),
+        "source_wall_end_left_path_indices": (0,),
+        "source_wall_end_right_path_indices": (1,),
+        "source_swing_native_path_indices": (5,),
+    }
+    tags = tag_native_segmented_doorway_chords(
+        drawings, (chord, dict(chord)), scope=SCOPE,
+    )
+    assert len(tags) == 2
+    assert all(t.status == "TWO_WALL_SECTIONS_TAGGED" for t in tags)
+    assert all(not t.measurement_authorized for t in tags)
+    assert len(reads) == 8  # Two endpoints per native stroke, once each.

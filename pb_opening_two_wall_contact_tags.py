@@ -56,12 +56,25 @@ class TwoWallOpeningTag:
     measurement_authorized: bool = False
 
 
+def _finite_source_number(value: object) -> bool:
+    """Reject malformed or unrepresentable native measurements without raising."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _point(value: object) -> tuple[float, float] | None:
     if type(value) is not tuple or len(value) != 2:
         return None
     if any(type(v) not in (int, float) for v in value):
         return None
-    point = float(value[0]), float(value[1])
+    try:
+        point = float(value[0]), float(value[1])
+    except (OverflowError, TypeError, ValueError):
+        return None
     return point if all(math.isfinite(v) for v in point) else None
 
 
@@ -214,8 +227,44 @@ def tag_native_segmented_doorway_chords(
     tags: list[TwoWallOpeningTag] = []
     if not _scope(scope):
         return ()
+    # A malformed producer collection must not crash the source-native preview
+    # or be treated as an empty, successfully examined drawing package.
+    if type(drawings) not in (tuple, list) or type(chords) not in (tuple, list):
+        return (TwoWallOpeningTag("0", "UNRESOLVED", "source_chord_collection_invalid"),)
+    # Cache validated native segments for this invocation only. Never cache across
+    # source revisions or snapshots, and never convert rejected evidence into
+    # positive wall contacts.
+    native_line_cache: dict[int, tuple[tuple[float, float], tuple[float, float]] | None] = {}
+
+    def native_line(native: int):
+        if native in native_line_cache:
+            return native_line_cache[native]
+        result = None
+        if 0 <= native < len(drawings):
+            row = drawings[native]
+            if isinstance(row, Mapping) and row.get("fill") is None:
+                segments = row.get("items", ())
+                if isinstance(segments, (tuple, list)) and len(segments) == 1:
+                    segment = segments[0]
+                    if (isinstance(segment, (tuple, list))
+                            and len(segment) == 3 and segment[0] == "l"):
+                        try:
+                            a, b = segment[1:3]
+                            raw = (a.x, a.y, b.x, b.y)
+                            if all(type(v) in (int, float) for v in raw):
+                                p = (float(raw[0]), float(raw[1]))
+                                q = (float(raw[2]), float(raw[3]))
+                                if all(math.isfinite(v) for v in (*p, *q)):
+                                    result = (p, q)
+                        except (TypeError, ValueError, AttributeError, OverflowError):
+                            pass
+        native_line_cache[native] = result
+        return result
+
     for number, chord in enumerate(chords):
         try:
+            if not isinstance(chord, Mapping):
+                raise ValueError("invalid chord mapping")
             horizontal = chord["horizontal"]
             lo, hi = tuple(chord["door_interval_pdf_pts"])
             band_lo, band_hi = tuple(chord["wall_band_pdf_pts"])
@@ -227,9 +276,9 @@ def tag_native_segmented_doorway_chords(
             # unverified source value into a valid-looking wall contact.
             values = (lo, hi, band_lo, band_hi)
             if (type(horizontal) is not bool
-                    or not all(type(x) in (int, float) and math.isfinite(x)
+                    or not all(type(x) in (int, float) and _finite_source_number(x)
                                for x in values)
-                    or lo > hi or band_lo > band_hi
+                    or lo >= hi or band_lo > band_hi
                     or not _ids(left) or not _ids(right)
                     or not _ids(source_opening)):
                 raise ValueError("invalid chord")
@@ -243,24 +292,10 @@ def tag_native_segmented_doorway_chords(
             for native in path_ids:
                 if type(native) is not int or native < 0 or native >= len(drawings):
                     continue
-                row = drawings[native]
-                if not isinstance(row, Mapping) or row.get("fill") is not None:
+                line = native_line(native)
+                if line is None:
                     continue
-                segments = row.get("items", ())
-                if not isinstance(segments, (tuple, list)) or len(segments) != 1:
-                    continue
-                segment = segments[0]
-                if (not isinstance(segment, (tuple, list))
-                        or len(segment) != 3 or segment[0] != "l"):
-                    continue
-                try:
-                    a, b = segment[1:3]
-                    p = (float(a.x), float(a.y))
-                    q = (float(b.x), float(b.y))
-                except (TypeError, ValueError, AttributeError, OverflowError):
-                    continue
-                if not all(math.isfinite(v) for v in (*p, *q)):
-                    continue
+                p, q = line
                 axis = 0 if horizontal else 1
                 across = 1 - axis
                 options = [z for z in (p, q)
