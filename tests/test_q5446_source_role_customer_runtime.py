@@ -263,3 +263,136 @@ def test_private_sha_original_single_role_optional(tmp_path):
     verified = verify_sealed_customer_output(sealed, rows)
     assert verified.customer_row_count == result["verified_customer_row_count"] == sum(expected_counts.values())
     assert result["benchmark_score_granted"] is False
+
+
+@pytest.mark.parametrize("failed_file", (
+    "seal", "customer", "summary",
+))
+def test_source_role_staging_failure_leaves_no_committed_outputs(
+    tmp_path, monkeypatch, failed_file,
+):
+    """No orphan accepted seal, customer row, or summary on a late IO fault."""
+    source, sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    original_source_bytes = source.read_bytes()
+    folder = tmp_path / "role"
+    folder.mkdir()
+    real_write = runtime._write_new
+    targets = {
+        "seal": project + ".json",
+        "customer": "verified_customer_rows.json",
+        "summary": "production_summary.json",
+    }
+
+    def fail_after_creating_file(path, value):
+        real_write(path, value)
+        if path.name == targets[failed_file]:
+            raise OSError("simulated late role publication failure")
+
+    monkeypatch.setattr(runtime, "_write_new", fail_after_creating_file)
+    with pytest.raises(OSError, match="simulated late role publication failure"):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+    assert tuple(folder.iterdir()) == ()
+    assert source.read_bytes() == original_source_bytes
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == sha
+
+
+def test_source_role_rollback_preserves_competing_replacement(tmp_path, monkeypatch):
+    source, _sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "role"
+    folder.mkdir()
+    seal_path = folder / (project + ".json")
+    replacement = tmp_path / "replacement.json"
+    competing_bytes = b"another publisher's seal"
+    replacement.write_bytes(competing_bytes)
+    publish = runtime.publish_staged_file
+
+    def fail_summary_promotion(staged, target):
+        if target.name == "production_summary.json":
+            replacement.replace(seal_path)
+            raise OSError("simulated failure after replacement")
+        publish(staged, target)
+
+    monkeypatch.setattr(runtime, "publish_staged_file", fail_summary_promotion)
+    with pytest.raises(OSError, match="simulated failure after replacement"):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+
+    assert tuple(folder.iterdir()) == (seal_path,)
+    assert seal_path.read_bytes() == competing_bytes
+
+
+@pytest.mark.parametrize("use_symlink", (False, True))
+def test_source_role_promotion_preserves_existing_output(tmp_path, monkeypatch, use_symlink):
+    source, _sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "role"
+    folder.mkdir()
+    customer = folder / "verified_customer_rows.json"
+    preexisting_bytes = b"previous customer evidence"
+    if use_symlink:
+        evidence = tmp_path / "previous-customer.json"
+        evidence.write_bytes(preexisting_bytes)
+        try:
+            customer.symlink_to(evidence)
+        except (OSError, NotImplementedError):
+            pytest.skip("filesystem does not permit test symlinks")
+    else:
+        customer.write_bytes(preexisting_bytes)
+
+    with pytest.raises(FileExistsError):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+
+    assert tuple(folder.iterdir()) == (customer,)
+    assert customer.is_symlink() is use_symlink
+    assert customer.read_bytes() == preexisting_bytes
+
+
+@pytest.mark.parametrize("failed_file", (
+    "seal", "customer", "summary",
+))
+def test_source_role_short_write_aborts_and_rolls_back_all_its_outputs(
+    tmp_path, monkeypatch, failed_file,
+):
+    """Incomplete writes are failures even if the filesystem raises no error."""
+    source, _sha, project, _receipt = _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "role"
+    folder.mkdir()
+    real_open = Path.open
+    targets = {
+        "seal": project + ".json",
+        "customer": "verified_customer_rows.json",
+        "summary": "production_summary.json",
+    }
+
+    class ShortTextWriter:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def write(self, value):
+            partial = value[:-1]
+            self.stream.write(partial)
+            return len(partial)
+
+    def short_write_one_output(path, mode="r", *args, **kwargs):
+        stream = real_open(path, mode, *args, **kwargs)
+        if mode == "x" and path.name == targets[failed_file]:
+            return ShortTextWriter(stream)
+        return stream
+
+    monkeypatch.setattr(Path, "open", short_write_one_output)
+    with pytest.raises(OSError, match="source_role_output_short_write"):
+        runtime.produce_q5446_source_role(
+            pdf_path=source, project_id=project, output_dir=folder,
+        )
+    assert tuple(folder.iterdir()) == ()

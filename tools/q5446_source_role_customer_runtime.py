@@ -13,7 +13,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+from stat import S_ISREG
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from pb_combine_source_closed_runs import load_verified_sealed_run
@@ -42,6 +45,7 @@ from pb_gptmax_q5446_original_tiled_floor_customer import (
     issue_original_q5446_first_ensuite_tiled_floor,
     issue_original_q5446_ground_ensuite_tiled_floor,
 )
+from tools.gpt3_safe_original_report_output import publish_staged_file
 
 
 def source_owned_role_module(source_sha256: str, *, family_group: str) -> str:
@@ -101,10 +105,9 @@ def _authenticated_companion_roles(plan_path: Path) -> tuple[Path, Path] | None:
 
 
 def _write_new(path: Path, value: str) -> None:
-    # A role directory is pre-created by the owner launcher. Never replace an
-    # earlier signed body or follow a symlink to foreign customer/source data.
     with path.open("x", encoding="utf-8") as out:
-        out.write(value)
+        if out.write(value) != len(value):
+            raise OSError("source_role_output_short_write")
 
 
 def _summary(output_dir: Path, data: dict[str, Any]) -> None:
@@ -112,6 +115,30 @@ def _summary(output_dir: Path, data: dict[str, Any]) -> None:
         output_dir / "production_summary.json",
         json.dumps(data, sort_keys=True, indent=2) + "\n",
     )
+
+
+def _publish_role_outputs(staging_dir: Path, targets: tuple[Path, ...]) -> None:
+    """Publish complete files exclusively, with the success summary last."""
+    attempts: list[tuple[Path, os.stat_result]] = []
+    try:
+        for target in targets:
+            staged = staging_dir / target.name
+            identity = staged.lstat()
+            if not S_ISREG(identity.st_mode) or not identity.st_ino:
+                raise OSError("source_role_staged_output_identity_unavailable")
+            # Track the identity before promotion so an interruption after the
+            # filesystem operation can still roll back this file.
+            attempts.append((target, identity))
+            publish_staged_file(staged, target)
+    except BaseException:
+        for target, identity in reversed(attempts):
+            try:
+                if os.path.samestat(target.lstat(), identity):
+                    target.unlink()
+            except OSError:
+                # Preserve the original publication failure.
+                pass
+        raise
 
 
 def _append_independent_source_tiled_floor(
@@ -357,42 +384,44 @@ def produce_q5446_source_role(
                         family_counts.get("floor_finish_area", 0) + 1
                     )
 
-        # Everything below is an authenticated, ordinary canonical role
-        # output consumed by the *existing* exact-bijection aggregate reader.
-        # Never label one original document as a completed six-role project.
-        seal_path = output_dir / (project_id + ".json")
-        rows_path = output_dir / "verified_customer_rows.json"
-        _write_new(seal_path, sealed.to_json())
-        # Re-read via the same real verifier used by the owner role combiner.
-        reloaded = load_verified_sealed_run(seal_path)
+    except (OSError, ValueError, TypeError, RuntimeError):
+        # A rejected producer is not a source-positive customer receipt.
+        # No signed/customer output has been published at this point.
+        _summary(output_dir, result)
+        return result
+
+    # Verify the serialized source role before making any signed or customer
+    # files visible under their canonical names.
+    seal_path = output_dir / (project_id + ".json")
+    rows_path = output_dir / "verified_customer_rows.json"
+    summary_path = output_dir / "production_summary.json"
+    with TemporaryDirectory(dir=output_dir, prefix=".source-role-") as staging:
+        staging_dir = Path(staging)
+        staged_seal = staging_dir / seal_path.name
+        _write_new(staged_seal, sealed.to_json())
+        # Re-read via the same verifier used by the owner role combiner.
+        reloaded = load_verified_sealed_run(staged_seal)
         if (reloaded.run_id != sealed.run_id
                 or set(reloaded.source_sha256s) != {SOURCE_SHA256}):
             raise ValueError("serialized original role seal differs")
         verify_sealed_customer_output(reloaded, customer_rows)
         _write_new(
-            rows_path, json.dumps(list(customer_rows), sort_keys=True) + "\n",
+            staging_dir / rows_path.name,
+            json.dumps(list(customer_rows), sort_keys=True) + "\n",
         )
-    except (OSError, ValueError, TypeError, RuntimeError):
-        # A failed issuer or seal cannot be converted into a commercial row.
-        # Any unexpected failure after seal creation propagates, so the owner
-        # process is marked FAILED rather than reporting a partial role sealed.
-        if (output_dir / (project_id + ".json")).exists():
-            raise
-        _summary(output_dir, result)
-        return result
-
-    result.update({
-        "status": "sealed",
-        "combined_run_file": str(seal_path),
-        "customer_rows_file": str(rows_path),
-        "customer_rows_verified": True,
-        "verified_customer_row_count": len(customer_rows),
-        "full_project_customer_first_gate": "PROJECT_VERIFIED",
-        "combined_quantity_count": len(sealed.quantities),
-        "family_counts": family_counts,
-        "source_role_coverage_verified": False,
-    })
-    _summary(output_dir, result)
+        result.update({
+            "status": "sealed",
+            "combined_run_file": str(seal_path),
+            "customer_rows_file": str(rows_path),
+            "customer_rows_verified": True,
+            "verified_customer_row_count": len(customer_rows),
+            "full_project_customer_first_gate": "PROJECT_VERIFIED",
+            "combined_quantity_count": len(sealed.quantities),
+            "family_counts": family_counts,
+            "source_role_coverage_verified": False,
+        })
+        _summary(staging_dir, result)
+        _publish_role_outputs(staging_dir, (seal_path, rows_path, summary_path))
     return result
 
 
