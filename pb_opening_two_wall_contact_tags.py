@@ -71,7 +71,10 @@ def _point(value: object) -> tuple[float, float] | None:
         return None
     if any(type(v) not in (int, float) for v in value):
         return None
-    point = float(value[0]), float(value[1])
+    try:
+        point = float(value[0]), float(value[1])
+    except (OverflowError, TypeError, ValueError):
+        return None
     return point if all(math.isfinite(v) for v in point) else None
 
 
