@@ -2,8 +2,10 @@ import * as THREE from "three";
 import { nearestRoofEdge } from "./roofComponents.ts";
 import type { RoofEdge } from "./roofComponents.ts";
 import { roofComponentMesh } from "./roofComponentGeometry.ts";
-import { showConstructionItem, showConstructionSurface } from "./constructionStages.ts";
+import { showConstructionSurface } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
+import {itemLayerVisible,EMPTY_LAYERS} from "./constructionLayers.ts";
+import type {LayerOverrides} from "./constructionLayers.ts";
 import type { CeilingDraft } from "./buildPlacement.ts";
 import { openingFits, planLength } from "./buildPlacement.ts";
 import type { PlanPoint, WallVisual } from "./buildPlacement.ts";
@@ -168,6 +170,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
   let draftKey: readonly CatalogueHost[] | null = null;
   let itemKey: readonly PlacedItem[] | null = null;
   let stageKey: ConstructionStage = "finished";
+  let layersKey:LayerOverrides=EMPTY_LAYERS;
+  let cutawayKey=false;
   const marker = new THREE.Mesh(new THREE.RingGeometry(0.036, 0.047, 22),
     new THREE.MeshBasicMaterial({ color: 0x78ffe1, side: THREE.DoubleSide, depthWrite: false }));
   marker.visible = false;
@@ -187,16 +191,16 @@ export function createCatalogueScene(scene: THREE.Scene) {
   }
 
   function sync(source: readonly CatalogueHost[], drafts: readonly CatalogueHost[], items: readonly PlacedItem[],
-    stage: ConstructionStage = "finished") {
-    if (sourceKey === source && draftKey === drafts && itemKey === items && stageKey === stage) return;
+    stage: ConstructionStage = "finished",layers:LayerOverrides=EMPTY_LAYERS,cutaway=false) {
+    if (sourceKey === source && draftKey === drafts && itemKey === items && stageKey === stage&&layersKey===layers&&cutawayKey===cutaway) return;
     clear();
     sourceKey = source;
     draftKey = drafts;
     itemKey = items;
-    stageKey = stage;
+    stageKey = stage;layersKey=layers;cutawayKey=cutaway;
     items = items.filter(placement => {
       const item = getCatalogueItem(placement.itemId);
-      return !!item && showConstructionItem(stage, item);
+      return !!item && itemLayerVisible(stage,item,layers)&&!(cutaway&&(placement.target==="roof"||placement.target==="ceiling"));
     });
     const byId = new Map<string, CatalogueHost>();
     function addHost(host: CatalogueHost) {

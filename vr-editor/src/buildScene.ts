@@ -9,6 +9,7 @@ import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
+import type {WallTextureLibrary} from "./wallTextures.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -81,9 +82,10 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   return group;
 }
 
-export function displayWallDraft(wall: WallVisual) {
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) {
   const group = new THREE.Group();
-  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[];
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[];
+  const texture=textures?.get(wallAssembly(wall.assembly).profile);
   const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
   const length=planLength(wall.start,wall.end);
   if(!Number.isFinite(length)||length<.001)return group;
@@ -101,6 +103,16 @@ export function displayWallDraft(wall: WallVisual) {
     const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
     function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
     face([...a].reverse(),left);face(b,rightColor);
+    if(texture&&profile.role==="external"){
+      const side=assembly.exteriorSide==="left"?1:-1;
+      const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
+      const ordered=side===1?[...points].reverse():points;
+      panel(ordered,exteriorFaces);
+      for(const index of [0,1,2,0,2,3]){
+        const v=ordered[index],along=(v.x-wall.start[0])*(wall.end[0]-wall.start[0])/length+(v.z-wall.start[1])*(wall.end[1]-wall.start[1])/length;
+        exteriorUV.push(along/texture.repeat[0],v.y/texture.repeat[1]);
+      }
+    }
     for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
 
   }
@@ -137,7 +149,19 @@ export function displayWallDraft(wall: WallVisual) {
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xeeeae1, 1, true);
+  if(texture&&exteriorFaces.length){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
+    g.computeVertexNormals();
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    mesh.userData.exteriorTexture=true;group.add(mesh);
+  }
   // Centre-plane witness retains the existing catalogue anchor convention.
+  if(mountFaces.length&&profile.core!=="masonry"){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    g.computeVertexNormals();
+    const insulation=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd8bb6d,side:THREE.DoubleSide,roughness:1,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1}));
+    insulation.userData.illustrativeInsulation=true;insulation.visible=false;group.add(insulation);
+  }
   if(mountFaces.length){
     const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
     mountGeometry.computeVertexNormals();
@@ -482,7 +506,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, depthTest: false, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
   menu.renderOrder = 20;
   menu.visible = false;
   scene.add(menu);
@@ -565,8 +589,19 @@ export function createBuildOverlay(scene: THREE.Scene) {
     menu.updateMatrixWorld();
     menu.visible = true;
   }
+  function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
+    camera.getWorldPosition(head);
+    hand.getWorldPosition(menu.position);
+    menu.position.y+=.12;
+    // Keep the tool wheel at a comfortable readable distance even if the hand is near the face.
+    const offset=menu.position.clone().sub(head);
+    const distance=offset.length();
+    if(distance<.35||distance>1.2){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.35,Math.min(1.2,distance))));}
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
   function sizeMenu(layout: MenuLayout) {
-    const width = layout.width / 1450, height = layout.height / 1450;
+    const scale=layout.radial?1800:1450;
+    const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
       menu.updateMatrixWorld();
@@ -576,6 +611,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
     const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
+    if(layout.radial&&Math.hypot(x-layout.width/2,y-layout.height/2)>layout.width/2)return null;
     const index = layout.buttons.findIndex(button => !button.disabled &&
       x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
     return { action: layout.buttons[index]?.action ?? null, index };
@@ -588,11 +624,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
       canvas.width = layout.width;
       canvas.height = layout.height;
     }
+    context.clearRect(0,0,canvas.width,canvas.height);
     context.fillStyle = "#13242c";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
+    else context.fillRect(0, 0, canvas.width, canvas.height);
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    context.fillText(layout.title, 20, 45, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.title,layout.width/2,285,300);context.textAlign="left";}
+    else context.fillText(layout.title, 20, 45, layout.width - 40);
     if (layout.subtitle) {
       context.fillStyle = "#ceeceb";
       context.font = "bold 27px sans-serif";
@@ -630,7 +669,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     context.fillStyle = "#edf9fc";
     context.font = "27px sans-serif";
-    context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.note,layout.width/2,layout.height-33,240);context.textAlign="left";}
+    else context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
     texture.needsUpdate = true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
@@ -666,7 +706,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

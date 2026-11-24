@@ -11,14 +11,16 @@ import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
 import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
-import { ConstructionView, StandardsPanel } from "./ConstructionView";
+import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
+import type {LayerOverrides} from "./constructionLayers";
+import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
 import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
-import { isRoughIn, showConstructionItem } from "./constructionStages";
+import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
@@ -68,6 +70,7 @@ export function App() {
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [layers,setLayers]=useState<LayerOverrides>({});
   const [resize, setResize] = useState<{
     scene: SceneManifest; enabled: boolean; hint: string;
   } & ResizeHistory | null>(null);
@@ -338,7 +341,8 @@ export function App() {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
       enterMode("place");
-      if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
+      if(layers[itemLayer(item)]==="hide")setLayers(current=>({...current,[itemLayer(item)]:"auto"}));
+      if (!itemLayerVisible(stage,item,layers)) setStage(isRoughIn(item) ? "rough-in" : "finished");
       setPanel("items");
       setLastEdit("place");
       changeCatalogue(current => ({ ...current, itemId: item.id, turn: 0 }));
@@ -424,7 +428,7 @@ export function App() {
 
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
-    if ((activeItem && !showConstructionItem(next, activeItem)) || next === "slab" ||
+    if ((activeItem && !itemLayerVisible(next,activeItem,layers)) || next === "slab" ||
         buildState.tool === "ceiling" && next !== "finished") enterMode("inspect");
     setStage(next);
   }
@@ -597,6 +601,7 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
             {levels.length > 1 && <label>Level
               <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
                 <option value="all">All levels</option>
@@ -645,7 +650,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
