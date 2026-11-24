@@ -739,11 +739,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       pick();
     }
     function pick() {
-      const hits = raycaster.intersectObjects(pickables.filter(object =>
+      const hits=raycaster.intersectObjects(pickables.filter(object =>
         sourceVisible(object) && showConstructionSurface(construction.current.stage, object.userData.surfaceKind)), false);
-      const hit = hits[0];
-      select(typeof hit?.object.userData.objectId === "string"
-        ? hit.object.userData.objectId : null);
+      const candidates=[...new Set(hits.map(hit=>hit.object.userData.objectId)
+        .filter((id):id is string=>typeof id==="string"))];
+      const current=candidates.indexOf(picked.current??"");
+      const next=candidates.length?candidates[(current+1)%candidates.length]:null;
+      select(next);
+      if(candidates.length>1) reportTool("Overlapping source objects: trigger again to cycle.");
     }
     const resizePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.06);
     type ResizeDrag = { box: FootprintBounds; corner: FootprintCorner; at: THREE.Vector3; token: symbol; last?: string };
