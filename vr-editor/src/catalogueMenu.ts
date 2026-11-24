@@ -28,7 +28,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "lighting-night" | "lighting-on" }
   | {area:"layer";layer:ConstructionLayer}
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
@@ -53,7 +53,7 @@ export type QuestMenuState = {
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
-  elevatedView?:boolean; walkSpeed?:number;
+  elevatedView?:boolean; walkSpeed?:number; night?:boolean; previewLights?:boolean;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
   wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean;
   layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
@@ -355,6 +355,8 @@ export function buildMenuLayout(
       {label:quest.overview?"Hide plan":"Mini plan",action:questAction("overview")},
       {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",action:questAction("elevated-view")},
       {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",action:questAction("walk-speed")},
+      {label:quest.night?"Daylight":"Night view",action:questAction("lighting-night")},
+      {label:quest.previewLights?"Lights ON":"Lights OFF",action:questAction("lighting-on")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:"Done",action:{area:"done"}},
@@ -382,6 +384,8 @@ export function buildMenuLayout(
       {label:quest.overview?"Hide plan":"Plan overview",target:questAction("overview")},
       {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",target:questAction("elevated-view")},
       {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",target:questAction("walk-speed")},
+      {label:quest.night?"Daylight":"Night view",target:questAction("lighting-night")},
+      {label:quest.previewLights?"Lights ON":"Lights OFF",target:questAction("lighting-on"),active:quest.previewLights},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
