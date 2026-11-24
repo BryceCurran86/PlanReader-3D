@@ -433,7 +433,7 @@ def test_two_valid_floor_finish_occurrences_inside_same_floor_fail_closed(
     )
 
 
-def _same_view_payload() -> bytes:
+def _same_view_payload(finish_mark_baselines: tuple[float, ...]) -> bytes:
     doc = fitz.open()
     try:
         plan = doc.new_page(width=400.0, height=300.0)
@@ -450,7 +450,8 @@ def _same_view_payload() -> bytes:
         plan.insert_text((277.0, 147.0), "2400", fontsize=9.0, rotate=90)
 
         plan.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
-        plan.insert_text((165.0, 165.0), "FT1", fontsize=9.0)
+        for y in finish_mark_baselines:
+            plan.insert_text((165.0, y), "FT1", fontsize=9.0)
 
         schedule = doc.new_page(width=400.0, height=300.0)
         schedule.insert_text((40.0, 40.0), "FINISH SCHEDULE", fontsize=10.0)
@@ -460,16 +461,34 @@ def _same_view_payload() -> bytes:
         doc.close()
 
 
+@pytest.mark.parametrize(
+    ("mark_baselines", "material_viewport_id", "expected_status", "binding_mode"),
+    [
+        pytest.param((165.0,), "same-vp-1", EvidenceResolutionStatus.CORROBORATED,
+                     "dimension_box", id="existing-signed-path"),
+        pytest.param((193.0,), "same-vp-1", EvidenceResolutionStatus.CORROBORATED,
+                     "finished_floor_polygon", id="inside-floor-beyond-dimensions"),
+        pytest.param((95.0,), "same-vp-1", EvidenceResolutionStatus.ABSTAINED,
+                     None, id="inside-dimensions-outside-floor"),
+        pytest.param((105.0,), "same-vp-1", EvidenceResolutionStatus.ABSTAINED,
+                     None, id="mark-crosses-finished-face"),
+        pytest.param((165.0, 193.0), "same-vp-1", EvidenceResolutionStatus.CONFLICT,
+                     None, id="two-competing-marks-in-floor"),
+        pytest.param((165.0,), "other-vp-1", EvidenceResolutionStatus.ABSTAINED,
+                     None, id="foreign-viewport"),
+    ],
+)
 def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
-    monkeypatch,
+    monkeypatch, mark_baselines, material_viewport_id, expected_status, binding_mode,
 ) -> None:
-    payload = _same_view_payload()
+    payload = _same_view_payload(mark_baselines)
 
     def segment(_page, *, page_number):
         view_type = "floor_plan" if page_number == 1 else "schedule"
+        viewport_id = material_viewport_id if page_number == 1 else "same-vp-2"
         return tuple(
             _stamp_segment_page_viewports_product(
-                [_viewport(page_number, view_type, f"same-vp-{page_number}")]
+                [_viewport(page_number, view_type, viewport_id)]
             )
         )
 
@@ -563,7 +582,13 @@ def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
         floors=floors,
     ).publish()
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.status is expected_status
+    if binding_mode is None:
+        assert result.records == ()
+        assert result.quantities == ()
+        assert result.unresolved_canonical_floor_ids == (floor.canonical_floor_id,)
+        return
+
     assert result.unresolved_canonical_floor_ids == ()
     assert len(result.records) == 1
     assert result.records[0].canonical_floor_id == floor.canonical_floor_id
@@ -571,6 +596,7 @@ def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
     assert result.records[0].semantic_finish == "tile"
     assert result.records[0].quantity.value == 8.64
     assert result.records[0].quantity.authority == "documented_dimension"
+    assert result.records[0].quantity.metadata["finish_binding_mode"] == binding_mode
     assert len(result.records[0].quantity.metadata["figured_dimension_ids"]) == 2
 
 
