@@ -156,6 +156,12 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     mesh.userData.exteriorTexture=true;group.add(mesh);
   }
   // Centre-plane witness retains the existing catalogue anchor convention.
+  if(mountFaces.length&&profile.core!=="masonry"){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    g.computeVertexNormals();
+    const insulation=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd8bb6d,side:THREE.DoubleSide,roughness:1,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1}));
+    insulation.userData.illustrativeInsulation=true;insulation.visible=false;group.add(insulation);
+  }
   if(mountFaces.length){
     const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
     mountGeometry.computeVertexNormals();
