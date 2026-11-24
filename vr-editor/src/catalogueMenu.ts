@@ -1,5 +1,6 @@
 import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
-import type { BuildAction, BuildState, PlacedWall, WallAxis } from "./buildPlacement.ts";
+import {wallAngleDegrees} from "./buildPlacement.ts";
+import type { BuildAction, BuildState, PlacedWall, WallAxis, WallRotationPivot } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem } from "./itemCatalogue.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
@@ -28,11 +29,12 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" }
   | {area:"layer";layer:ConstructionLayer}
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
+  | { area: "wall-angle"; action:"step"|"pivot"|"connected"|"panel"; degrees?:number }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
@@ -45,17 +47,18 @@ export type MenuButton = {
 export type MenuLayout = { title: string; width: number; height: number;
   note: string; subtitle?: string; buttons: MenuButton[];
   sections?: { label: string; y: number }[]; helpLines?: string[]; radial?:boolean };
-export type NumericDraftField = "length" | "height" | "x" | "z" |
+export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
+  rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
-  elevatedView?:boolean; walkSpeed?:number;
+  elevatedView?:boolean; walkSpeed?:number; ghost?:boolean; night?:boolean; previewLights?:boolean;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
-  wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean;
+  wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean; allDimensions?:boolean;
   layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
   budget?:ImmersiveBudget; budgetOpen?:boolean; budgetPage?:number;
   numeric?: {field:NumericDraftField;digits:string}|null;
@@ -105,10 +108,20 @@ export function buildMenuLayout(
     add("Back",495,630,455,60,questAction("layers"));
     return {buttons,title:"CONSTRUCTION LAYERS",width:WIDTH,height:750,note:"Select a layer to cycle Auto → Show → Hide. Overrides do not change quantities."};
   }
-  if(quest?.radial&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!viewsOpen&&!browser.open&&!footprint.enabled){
+  if(quest?.radial&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!quest.angleTools&&!quest.openingTools&&!quest.multiSelect&&!viewsOpen&&!browser.open&&!footprint.enabled){
     const canDraw=!!levelId&&!footprint.changed;
     const hasWall=build.walls.some(w=>w.levelId===levelId);
-    const radialTools:{label:string;action:MenuAction;disabled?:boolean}[]=[
+    const selected=quest.selectedWall&&!build.tool&&!item&&!footprint.changed?quest.selectedWall:null;
+    const radialTools:{label:string;action:MenuAction;disabled?:boolean}[]=selected?[
+      {label:"Angle",action:{area:"wall-angle",action:"panel"}},
+      {label:"Move",action:{area:"draft",action:"move"}},
+      {label:"Stretch",action:{area:"draft",action:"stretch"}},
+      {label:"Openings",action:questAction("openings"),disabled:!selected.openings.length},
+      {label:"Assembly",action:questAction("wall-profiles")},
+      {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
+      {label:"More edits",action:questAction("more-tools")},
+      {label:"New tools",action:questAction("back")},
+    ]:[
       {label:"Wall",action:{area:"build",action:{kind:"tool",tool:"wall"}},disabled:!canDraw},
       {label:"Door",action:{area:"build",action:{kind:"tool",tool:"door"}},disabled:!canDraw||!hasWall},
       {label:"Window",action:{area:"build",action:{kind:"tool",tool:"window"}},disabled:!canDraw||!hasWall},
@@ -120,10 +133,10 @@ export function buildMenuLayout(
     ];
     radialTools.forEach((entry,i)=>{
       const angle=i*Math.PI/4-Math.PI/2;
-      add(entry.label,330+Math.cos(angle)*225-76,345+Math.sin(angle)*225-34,152,68,entry.action,{disabled:entry.disabled});
+      add(entry.label,330+Math.cos(angle)*218-76,330+Math.sin(angle)*218-34,152,68,entry.action,{disabled:entry.disabled});
     });
-    add("Close",254,310,152,70,questAction("hide-tools"));
-    return {buttons,title:"QUICK TOOLS",width:660,height:660,note:"Left grip · close / reopen",radial:true};
+    add("Close",254,295,152,70,questAction("hide-tools"));
+    return {buttons,title:selected?"EDIT SELECTED WALL":"QUICK TOOLS",width:660,height:660,note:"Aim or right stick · trigger",radial:true};
   }
   if(quest?.wallProfilesOpen){
     const a=wallAssembly(quest.selectedWall?.assembly??quest.nextWallAssembly);
@@ -154,11 +167,11 @@ export function buildMenuLayout(
       20+(i%3)*315,118+Math.floor(i/3)*67,300,58,
       key==="⌫"?number("erase"):number("digit",key),
       {disabled:key==="-"&&!["x","z"].includes(field)});
-    add("Apply exact mm",20,405,300,65,number("apply"),{disabled:!digits||digits==="-"});
+    add(field==="angle"?"Apply angle °":"Apply exact mm",20,405,300,65,number("apply"),{disabled:!digits||digits==="-"});
     add("Clear",338,405,300,65,number("clear"));
     add("Cancel",655,405,300,65,number("cancel"));
-    return {buttons,title:"EXACT "+field.toUpperCase()+" · "+(digits||"—")+" mm",
-      width:WIDTH,height:530,note:"Enter millimetres. Invalid sizes or openings cannot be applied.",
+    return {buttons,title:"EXACT "+field.toUpperCase()+" · "+(digits||"—")+(field==="angle"?"°":" mm"),
+      width:WIDTH,height:530,note:field==="angle"?"Enter 0–360 degrees. Fixed pivot: "+(quest.rotationPivot??"start")+".":"Enter millimetres. Invalid sizes or openings cannot be applied.",
       sections:[{label:"DRAFT ONLY · TRIGGER A NUMBER",y:99}]};
   }
   if (quest?.help) {
@@ -194,6 +207,23 @@ export function buildMenuLayout(
     ];
     for(const [i,e] of controls.entries())add(e.label,20+(i%4)*235,105+Math.floor(i/4)*82,221,69,e.action,{disabled:e.disabled});
     return {buttons,title:"MULTI-SELECT · "+count+" WALLS",width:WIDTH,height:105+Math.ceil(controls.length/4)*82+68,note:"Point at a local draft wall and trigger to add or remove it. Green walls are selected."};
+  }
+  if(quest?.angleTools&&quest.selectedWall&&!viewsOpen&&!browser.open&&!footprint.enabled&&!footprint.changed){
+    const wall=quest.selectedWall;
+    const controls:{label:string;action:MenuAction;disabled?:boolean;active?:boolean}[]=[
+      {label:"Exact angle",action:{area:"number",action:"start",field:"angle"}},
+      {label:"Pivot: "+(quest.rotationPivot??"start"),action:{area:"wall-angle",action:"pivot"}},
+      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"},active:quest.connectedRotation!==false},
+      ...[-15,-5,-1,1,5,15].map(degrees=>({label:(degrees>0?"+":"")+degrees+"°",action:{area:"wall-angle",action:"step",degrees} as MenuAction})),
+      {label:"Rotate 90°",action:{area:"wall-angle",action:"step",degrees:90}},
+      {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
+      {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
+      {label:"Back to wall wheel",action:{area:"wall-angle",action:"panel"}},
+      {label:"Close tools",action:questAction("hide-tools")},
+    ];
+    for(const [i,c] of controls.entries())add(c.label,20+(i%3)*315,118+Math.floor(i/3)*79,300,69,c.action,{active:c.active,disabled:c.disabled});
+    return {buttons,title:"WALL ANGLE · "+wallAngleDegrees(wall).toFixed(1)+"°",subtitle:wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly),width:WIDTH,height:572,
+      note:quest.feedback||"Rotate about the chosen pivot. Junctions ON keeps adjoining endpoints connected.",sections:[{label:"PRECISION ROTATION · LOCAL DRAFT",y:100}]};
   }
   // A selected local wall replaces the crowded toolbox with direct manipulation.
   if (quest?.selectedWall && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
@@ -235,6 +265,7 @@ export function buildMenuLayout(
       {label:"Wall construction",action:questAction("wall-profiles")},
       {label:"Layers",action:questAction("layers")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",action:questAction("dimensions")},
+      {label:quest.allDimensions?"All dimensions ON":"All dimensions OFF",action:questAction("all-dimensions")},
       {label:"Multi-select",action:questAction("multi-select")},
       {label:"Exact length",action:{area:"number",action:"start",field:"length"}},
       {label:"Exact height",action:{area:"number",action:"start",field:"height"}},
@@ -249,7 +280,11 @@ export function buildMenuLayout(
       {label:"Nudge forward",action:edit("nudge","forward")},
       {label:"Nudge back",action:edit("nudge","back")},
       {label:"Step " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
-      {label:"Rotate 90°",action:edit("rotate")},
+      {label:"Angle "+wallAngleDegrees(wall).toFixed(1)+"°",action:{area:"number",action:"start",field:"angle"}},
+      {label:"Pivot "+(quest.rotationPivot??"start"),action:{area:"wall-angle",action:"pivot"}},
+      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"}},
+      ...[-15,-5,-1,1,5,15].map(degrees=>({label:(degrees>0?"+":"")+degrees+"°",action:{area:"wall-angle",action:"step",degrees} as MenuAction})),
+      {label:"Rotate 90°",action:{area:"wall-angle",action:"step",degrees:90}},
       {label:"Duplicate",action:edit("duplicate")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
@@ -355,6 +390,9 @@ export function buildMenuLayout(
       {label:quest.overview?"Hide plan":"Mini plan",action:questAction("overview")},
       {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",action:questAction("elevated-view")},
       {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",action:questAction("walk-speed")},
+      {label:quest.night?"Daylight":"Night view",action:questAction("lighting-night")},
+      {label:quest.previewLights?"Lights ON":"Lights OFF",action:questAction("lighting-on")},
+      {label:quest.ghost?"Ghost ON · walk through":"Ghost OFF · solid walls",action:questAction("ghost")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:"Done",action:{area:"done"}},
@@ -373,6 +411,7 @@ export function buildMenuLayout(
       {label:"Wall construction",target:questAction("wall-profiles")},
       {label:"Layers",target:questAction("layers")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",target:questAction("dimensions")},
+      {label:quest.allDimensions?"All dimensions ON":"All dimensions OFF",target:questAction("all-dimensions"),active:quest.allDimensions},
       ...(quest.budget?[{label:"Live budget",target:questAction("budget")}]:[]),
       {label:"Multi-select",target:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),target:questAction("magnetic")},
@@ -382,6 +421,9 @@ export function buildMenuLayout(
       {label:quest.overview?"Hide plan":"Plan overview",target:questAction("overview")},
       {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",target:questAction("elevated-view")},
       {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",target:questAction("walk-speed")},
+      {label:quest.night?"Daylight":"Night view",target:questAction("lighting-night")},
+      {label:quest.previewLights?"Lights ON":"Lights OFF",target:questAction("lighting-on"),active:quest.previewLights},
+      {label:quest.ghost?"Ghost ON":"Ghost OFF",target:questAction("ghost"),active:quest.ghost},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},

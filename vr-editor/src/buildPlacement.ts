@@ -2,6 +2,7 @@ import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProt
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
+import {connectedWallEdit} from "./connectedWallEdit.ts";
 import type { OutlineEdit } from "./localOutline.ts";
 import {isWallAssembly,wallAssembly} from "./wallProfiles.ts";
 import type {WallAssembly} from "./wallProfiles.ts";
@@ -47,6 +48,7 @@ export type BuildAction =
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
   | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
+  | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
@@ -300,15 +302,31 @@ export function viewRelativeNudge(
   return [delta[0] * stepM, delta[1] * stepM];
 }
 
+export type WallRotationPivot="start"|"centre"|"end";
+export function wallAngleDegrees(wall: Pick<PlacedWall,"start"|"end">):number{
+  const angle=Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0])*180/Math.PI;
+  return (angle+360)%360;
+}
+/** Rotate in plan around a fixed pivot; never grid-snap the endpoints,
+ * which would change physical length or shrink a full-width opening. */
+export function rotateDraftWallTo(wall:PlacedWall,angleDeg:number,pivot:WallRotationPivot="centre"):PlacedWall|null{
+  if(!Number.isFinite(angleDeg)||Math.abs(angleDeg)>3600||!["start","centre","end"].includes(pivot))return null;
+  const length=planLength(wall.start,wall.end);
+  if(!validWallLength(length))return null;
+  const ratio=pivot==="start"?0:pivot==="end"?1:.5;
+  const anchor:PlanPoint=[wall.start[0]+(wall.end[0]-wall.start[0])*ratio,wall.start[1]+(wall.end[1]-wall.start[1])*ratio];
+  const radians=((angleDeg%360)+360)%360*Math.PI/180;
+  const cardinal=(n:number)=>Math.abs(n)<1e-14?0:Math.abs(Math.abs(n)-1)<1e-14?Math.sign(n):n;
+  const dx=cardinal(Math.cos(radians))*length,dz=cardinal(Math.sin(radians))*length;
+  const start:PlanPoint=ratio===0?[...wall.start]:[anchor[0]-dx*ratio,anchor[1]-dz*ratio];
+  const end:PlanPoint=ratio===1?[...wall.end]:[anchor[0]+dx*(1-ratio),anchor[1]+dz*(1-ratio)];
+  if(![...start,...end].every(v=>Number.isFinite(v)&&Math.abs(v)<=10000))return null;
+  const next={...wall,start,end};
+  if(!validEditedWall(next)||Math.abs(planLength(start,end)-length)>1e-7)return null;
+  return next;
+}
 export function rotatedDraftWall(wall: PlacedWall): PlacedWall | null {
-  const cx = (wall.start[0] + wall.end[0]) / 2;
-  const cz = (wall.start[1] + wall.end[1]) / 2;
-  const rotate = (point: PlanPoint): PlanPoint | null =>
-    snappedPoint([cx - (point[1] - cz), cz + (point[0] - cx)]);
-  const start = rotate(wall.start), end = rotate(wall.end);
-  if (!start || !end) return null;
-  const edited = { ...wall, start, end };
-  return validEditedWall(edited) ? edited : null;
+  return rotateDraftWallTo(wall,wallAngleDegrees(wall)+90,"centre");
 }
 
 function sameShape(a: CeilingDraft, b: CeilingDraft) {
@@ -338,6 +356,15 @@ export function updateBuild(
     const next = state.future?.at(-1);
     if (!next) return state;
     return { ...checkpoint(state, next), future: state.future!.slice(0, -1) };
+  }
+  if(action.kind==="rotate-local-wall"){
+    const wall=action.previous;
+    if(!levelId||wall.scopeKey!==scopeKey||wall.levelId!==levelId||!state.walls.includes(wall))return state;
+    const next=rotateDraftWallTo(wall,action.angleDeg+(action.relative?wallAngleDegrees(wall):0),action.pivot);
+    if(!next||Math.hypot(next.start[0]-wall.start[0],next.start[1]-wall.start[1])<1e-8&&Math.hypot(next.end[0]-wall.end[0],next.end[1]-wall.end[1])<1e-8)return state;
+    const walls=action.connected?connectedWallEdit(state.walls,wall,next):state.walls.map(w=>w===wall?next:w);
+    if(!walls||walls.some(w=>!validEditedWall(w)))return state;
+    return checkpoint(state,{walls,ceilings:state.ceilings});
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;

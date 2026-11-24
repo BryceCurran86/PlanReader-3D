@@ -67,6 +67,7 @@ def save(fx, **overrides):
         assembly=spec, routes=(), coverage=coverage,
         original_pdf=original, idempotency_key="request1",
         command_identity={"proposalId": "wall1", "newWall": True},
+        unified_head_verifier=lambda _p, _w, connection: connection.in_transaction,
     )
     kwargs.update(overrides)
     return create_wall_and_related_page_revision(db, **kwargs)
@@ -230,7 +231,9 @@ def test_wall_create_wsgi_requires_revision_grant_and_unified_document_head():
             load_verified_wall_sheet_coverage=lambda _p, _w, _wall: coverage,
             load_original_pdf_bytes=lambda _p, _w: original,
             get_wall_create_db_connection=new_connection,
-            verify_unified_document_head=lambda _p, _w, _db: head_ok,
+            verify_unified_document_head=lambda _p, _w, connection: (
+                head_ok and connection.in_transaction
+            ),
         )
 
     def run(app, data):
@@ -279,3 +282,56 @@ def test_created_wall_crossing_and_overlap_are_atomic_conflicts():
                  coverage=coverage2, idempotency_key="request2",
                  command_identity={"proposalId": "wall2"})
         assert db.execute("SELECT COUNT(*) FROM vr_created_wall_revisions").fetchone()[0] == 1
+
+
+def test_unified_document_head_verifier_cannot_run_before_writer_lock():
+    fx = fixture()
+    db = fx[0]
+    witnessed = []
+
+    def check(_principal, _workspace, connection):
+        witnessed.append(connection.in_transaction)
+        return connection.in_transaction
+
+    created = save(fx, unified_head_verifier=check)
+    assert created["persisted"] is True
+    assert witnessed == [True]
+    assert not db.in_transaction
+
+
+def test_unified_document_head_rejection_rolls_back_everything():
+    fx = fixture()
+    db = fx[0]
+    witnessed = []
+
+    def reject(_principal, _workspace, connection):
+        witnessed.append(connection.in_transaction)
+        return False
+
+    with pytest.raises(WallCreateConflict, match="another_editor"):
+        save(fx, unified_head_verifier=reject)
+    assert witnessed == [True]
+    assert db.execute("SELECT COUNT(*) FROM vr_created_wall_heads").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM vr_created_wall_revisions").fetchone()[0] == 0
+    assert not db.in_transaction
+
+
+def test_unified_document_head_verifier_is_mandatory_even_for_direct_store():
+    fx = fixture()
+    with pytest.raises(ValueError, match="transactional_unified_head_verifier"):
+        save(fx, unified_head_verifier=None)
+
+
+def test_unified_document_head_verifier_exception_aborts_revision_atomically():
+    fx = fixture()
+    db = fx[0]
+
+    def broken(_principal, _workspace, connection):
+        assert connection.in_transaction
+        raise RuntimeError("head_provider_unavailable")
+
+    with pytest.raises(RuntimeError, match="head_provider_unavailable"):
+        save(fx, unified_head_verifier=broken)
+    assert db.execute("SELECT COUNT(*) FROM vr_created_wall_heads").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM vr_created_wall_revisions").fetchone()[0] == 0
+    assert not db.in_transaction

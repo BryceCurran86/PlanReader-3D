@@ -114,6 +114,71 @@ def _point(value: Any) -> tuple[float, float] | None:
     return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
 
+def _review_openings(obj: EditableGeometryObject, geometry: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Report recorded, positioned opening candidates without granting source authority.
+
+    A wall witness is not an opening witness. Aggregated quantities, absent offsets,
+    conflicting apertures and out-of-range geometry never become positioned previews.
+    """
+    raw = obj.coordinates_or_measurements.get("openings")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return None
+    result: dict[str, Any] = {"recordCount": len(raw), "positioned": [], "status": "review_only"}
+    if len(raw) > 100 or not geometry or geometry["kind"] != "wallFace":
+        return result
+    length = math.dist(geometry["start"], geometry["end"])
+    height = geometry["heightM"]
+    candidates = []
+    seen = set()
+    duplicate = set()
+    for opening in raw:
+        if not isinstance(opening, Mapping):
+            continue
+        oid = opening.get("opening_id")
+        if not isinstance(oid, str) or not oid or len(oid) > 200:
+            continue
+        if oid in seen:
+            duplicate.add(oid)
+        seen.add(oid)
+        if opening.get("wall_id") != obj.object_id:
+            continue
+        kind = opening.get("opening_type")
+        if kind not in ("door", "window", "void"):
+            continue
+        width = _finite_positive(opening.get("width_m"))
+        tall = _finite_positive(opening.get("height_m"))
+        area = _finite_positive(opening.get("area_m2"))
+        x, y = opening.get("offset_x_m"), opening.get("offset_z_m")
+        if width is None or tall is None or area is None:
+            continue
+        if not math.isclose(area, width * tall, rel_tol=1e-6, abs_tol=1e-6):
+            continue
+        if type(x) not in (int, float) or type(y) not in (int, float):
+            continue
+        if not math.isfinite(x) or not math.isfinite(y) or x < 0 or y < 0:
+            continue
+        if x + width > length + 1e-7 or y + tall > height + 1e-7:
+            continue
+        if kind == "door" and y > 0.01:
+            continue
+        sheet = opening.get("source_sheet_label")
+        page = opening.get("source_page_no")
+        candidates.append({"openingId": oid, "kind": kind, "offsetM": float(x), "sillM": float(y),
+                           "widthM": width, "heightM": tall, "sheet": sheet if isinstance(sheet, str) and len(sheet) <= 200 else None,
+                           "page": page if type(page) is int and page > 0 else None})
+    # Conflicting rectangles are withheld, not assigned a winner by order.
+    conflicting = set(duplicate)
+    for i, a in enumerate(candidates):
+        for b in candidates[i + 1:]:
+            x_overlap = min(a["offsetM"] + a["widthM"], b["offsetM"] + b["widthM"]) - max(a["offsetM"], b["offsetM"])
+            y_overlap = min(a["sillM"] + a["heightM"], b["sillM"] + b["heightM"]) - max(a["sillM"], b["sillM"])
+            if x_overlap > 1e-7 and y_overlap > 1e-7:
+                conflicting.update((a["openingId"], b["openingId"]))
+    result["positioned"] = sorted((o for o in candidates if o["openingId"] not in conflicting),
+                                  key=lambda o: (o["offsetM"], o["sillM"], o["openingId"]))
+    return result
+
+
 def _scene_object(
     obj: EditableGeometryObject,
     canonical_object_id: str | None,
@@ -160,7 +225,9 @@ def _scene_object(
 
     status = str(obj.authority_status or "provisional").lower()
     verified = bool(geometry and not issues and status in _APPROVED_STATES)
+    opening_review = _review_openings(obj, geometry) if obj.object_type == "wall" else None
     return {
+        **({"openingReview": opening_review} if opening_review is not None else {}),
         "objectId": obj.object_id,
         "canonicalObjectId": canonical_object_id,
         "objectType": obj.object_type,

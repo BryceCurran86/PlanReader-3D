@@ -11,6 +11,9 @@ import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
 import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
+import {DesignReviewPanel} from "./DesignReviewPanel";
+import {captureAlternative,restoreAlternative} from "./vrDesignReview";
+import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
@@ -30,6 +33,9 @@ import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
+import {PreciseCommandPanel} from "./PreciseCommandPanel";
+import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -64,6 +70,9 @@ export function App() {
   const [buildHint, setBuildHint] = useState("");
   const [vrRate,setVrRate]=useState("");
   const [vrDraftStatus,setVrDraftStatus]=useState("");
+  const [alternativeStore,setAlternativeStore]=useState<{scene:SceneManifest;entries:DesignAlternative[]}|null>(null);
+  const [allDimensions,setAllDimensions]=useState(false);
+  const [shellStore,setShellStore]=useState<{scene:SceneManifest;settings:ShellSettings}|null>(null);
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
@@ -84,6 +93,7 @@ export function App() {
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
+  const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
   const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
@@ -257,6 +267,8 @@ export function App() {
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
   const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
+  const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
+  const shell=useMemo(()=>manifest&&buildLevel&&!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -270,6 +282,25 @@ export function App() {
     setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
+  }
+  const alternatives=alternativeStore&&alternativeStore.scene===manifest?alternativeStore.entries:[];
+  function saveAlternative(name:string){
+    if(!manifest||projection||resizeEnabled)return;
+    if(alternatives.length>=8){setVrDraftStatus("Maximum eight alternatives per open scene.");return;}
+    try{
+      const entry=captureAlternative(manifest,buildState,catalogue?.draft??null,name,newPlacementId("alternative"));
+      setAlternativeStore({scene:manifest,entries:[...alternatives,entry]});
+      setVrDraftStatus("Alternative captured. Local geometry and catalogue placements only.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot capture alternative.");}
+  }
+  function loadAlternative(entry:DesignAlternative){
+    if(!manifest||projection||resizeEnabled)return;
+    try{
+      const restored=restoreAlternative(manifest,entry);
+      enterMode("inspect");setPlaced({scene:manifest,build:restored.build});
+      setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");setVrDraftStatus("Restored "+entry.name+" · original source unchanged.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot restore alternative.");}
   }
   function exportLocalVrDraft() {
     if(!manifest)return;
@@ -378,6 +409,19 @@ export function App() {
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
     if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
+    if(action.kind==="rotate-local-wall"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      if(next===buildState){setToolMessage("Wall rotation rejected or unchanged. Check junctions, angle and opening clearance.");return;}
+      if(catalogue?.draft.items.length){
+        const collect=(walls:typeof buildState.walls)=>currentItemPlacements(catalogue.draft.items,manifest,
+          [...activeBatchSketches,...walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])],isDemo,buildState.ceilings);
+        const retained=new Set(collect(next.walls).map(i=>i.id));
+        if(collect(buildState.walls).some(i=>!retained.has(i.id))){
+          setToolMessage("Rotation blocked: a hosted item would no longer fit its wall. Move the item first.");return;
+        }
+      }
+      setLastEdit("draw");applyBuild(action);setToolMessage(action.connected?"Wall angle updated · adjoining walls retained.":"Wall angle updated · independent rotation.");return;
+    }
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
@@ -602,6 +646,7 @@ export function App() {
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
+            <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
             {levels.length > 1 && <label>Level
               <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
                 <option value="all">All levels</option>
@@ -632,6 +677,16 @@ export function App() {
             walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
             blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
             onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
+          {buildLevel&&<details className="footprint-tools"><summary>Connected draft building shell</summary>
+            <p>Preview only. Uses one closed, equal-height local wall ring. Flat and two-plane pitched roofs follow valid irregular rings. Set a fixed ridge angle to keep its direction while editing. No existing local ceilings on the level. Does not replace source surfaces or save roof settings in draft exports.</p>
+            <label>Shell roof <select value={shellSettings.roof} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,roof:e.currentTarget.value as ShellSettings["roof"]}})}><option value="off">Off</option><option value="flat">Flat</option><option value="gable">Two-plane pitched roof</option></select></label>
+            <label>Roof pitch (degrees) <input type="number" min="5" max="60" step=".5" value={shellSettings.pitchDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=5&&n<=60)setShellStore({scene:manifest,settings:{...shellSettings,pitchDeg:n}});}}/></label>
+            {shellSettings.roof==="gable"&&<><label>Fixed ridge direction<input type="checkbox" checked={shellSettings.ridgeDeg!==undefined} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:e.currentTarget.checked?0:undefined}})}/></label>
+            {shellSettings.ridgeDeg!==undefined&&<label>Ridge angle (degrees, +X toward +Z)<input type="number" min="0" max="360" step="1" value={shellSettings.ridgeDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=0&&n<=360)setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:n}});}}/></label>}</>}
+            <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
+            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
+          </details>}
+          <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
@@ -645,15 +700,15 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
-                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
@@ -722,6 +777,7 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
+          <DesignReviewPanel scene={manifest} build={buildState} items={catalogue?.draft.items.length??0} alternatives={alternatives} blocked={!!projection||resizeEnabled} onSave={saveAlternative} onRestore={loadAlternative} onRemove={id=>setAlternativeStore({scene:manifest,entries:alternatives.filter(a=>a.id!==id)})} study={assemblyStudy.study} status={vrDraftStatus}/>
           <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
             <h2>Review source objects</h2>
@@ -866,6 +922,7 @@ export function App() {
                 {Object.entries(VISUAL_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
               </select>
             </label>
+            <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
                 <option value="balanced">Balanced</option><option value="high">High fidelity</option>
