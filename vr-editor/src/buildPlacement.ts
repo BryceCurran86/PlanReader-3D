@@ -315,7 +315,8 @@ export function rotateDraftWallTo(wall:PlacedWall,angleDeg:number,pivot:WallRota
   const ratio=pivot==="start"?0:pivot==="end"?1:.5;
   const anchor:PlanPoint=[wall.start[0]+(wall.end[0]-wall.start[0])*ratio,wall.start[1]+(wall.end[1]-wall.start[1])*ratio];
   const radians=((angleDeg%360)+360)%360*Math.PI/180;
-  const dx=Math.cos(radians)*length,dz=Math.sin(radians)*length;
+  const cardinal=(n:number)=>Math.abs(n)<1e-14?0:Math.abs(Math.abs(n)-1)<1e-14?Math.sign(n):n;
+  const dx=cardinal(Math.cos(radians))*length,dz=cardinal(Math.sin(radians))*length;
   const start:PlanPoint=ratio===0?[...wall.start]:[anchor[0]-dx*ratio,anchor[1]-dz*ratio];
   const end:PlanPoint=ratio===1?[...wall.end]:[anchor[0]+dx*(1-ratio),anchor[1]+dz*(1-ratio)];
   if(![...start,...end].every(v=>Number.isFinite(v)&&Math.abs(v)<=10000))return null;
