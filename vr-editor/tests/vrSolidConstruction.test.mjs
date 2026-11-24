@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {Mesh,MeshStandardMaterial,Vector3} from "three";
+import {Mesh,MeshStandardMaterial,InstancedMesh,Matrix4,Box3,Vector3} from "three";
 import {displayWallDraft,displayCeilingDraft,illustrativeTimberFrame} from "../src/buildScene.ts";
 import {showConstructionItem} from "../src/constructionStages.ts";
 import {ITEM_CATALOGUE} from "../src/itemCatalogue.ts";
@@ -20,11 +20,12 @@ test("nominal framing uses real solid members with door opening clear",()=>{
  const group=illustrativeTimberFrame(wall);
  assert.equal(group.userData.illustrativeFraming,true);
  assert.equal(group.visible,false);
- assert.ok(group.children.length>8);
- for(const m of group.children){
-  assert.ok(m instanceof Mesh);
-  m.geometry.computeBoundingBox();
-  const b=m.geometry.boundingBox.clone().translate(m.position);
+ assert.equal(group.children.length,1);
+ const m=group.children[0];assert.ok(m instanceof InstancedMesh);assert.ok(m.count>8);
+ m.geometry.computeBoundingBox();
+ for(let i=0;i<m.count;i++){
+  const matrix=new Matrix4();m.getMatrixAt(i,matrix);
+  const b=m.geometry.boundingBox.clone().applyMatrix4(matrix);
   assert.ok(!(b.min.x<1.9-1e-6&&b.max.x>1+1e-6&&b.min.y<2.1-1e-6&&b.max.y>1e-6),"framing obstructs door");
  }
  assert.equal(illustrativeTimberFrame({...wall,end:[0,0]}).children.length,0);
