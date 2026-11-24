@@ -35,6 +35,7 @@ import { createVrPlanOverview } from "./vrPlanOverview";
 import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset } from "./vrStationaryNavigation";
 import type { NavigationWall } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
+import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
@@ -88,6 +89,7 @@ type Props = {
   };
   onBuildAction: (action: BuildAction) => void;
   onBuildHint: (hint: string) => void;
+  onBuildSizes:(sizes:BuildSizes)=>void;
   catalogue: {
     active: CatalogueItem | undefined;
     items: readonly PlacedItem[];
@@ -216,7 +218,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -238,8 +240,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
   addedWallsRef.current = addedWallSketches;
-  const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint });
-  build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint };
+  const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
+  build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
   const construction = useRef({ stage, onStage });
   construction.current = { stage, onStage };
   const resize = useRef(footprint);
@@ -345,14 +347,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
-    let toolsOpen=false;
+    let toolsOpen=false,wallProfilesOpen=false,dimensions=true;
     let lastMenuDraw=0;
-    const closeTools=()=>{toolsOpen=false;buildOverlay.hideMenu();};
+    const closeTools=()=>{toolsOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
       if(toolsOpen){lastMenuDraw=0;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
-      else buildOverlay.hideMenu();
+      else closeTools();
     }
     let budgetOpen=false,budgetPage=0;
     let compactMenu = true;
@@ -402,12 +404,20 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
           elevatedView:!!elevatedReturn,walkSpeed,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
+          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,
         });
       if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
       return layout;
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="wall-profile"){
+        if(resize.current.enabled||resize.current.projection)return;
+        const assembly=defaultWallAssembly(choice.profile),wall=selectedDraftWall();
+        if(wall)build.current.onBuildAction({kind:"set-wall-assembly",proposalId:wall.proposalId,assembly});
+        else build.current.onBuildSizes({...build.current.buildSizes,wallAssembly:assembly});
+        wallProfilesOpen=false;return;
+      }
       if (choice.area === "number") {
         if(resize.current.enabled || resize.current.projection) {
           numberPad=null;openingTools=false;return;
@@ -468,6 +478,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
         }
       } else if (choice.area === "quest") {
+        if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
+        if(choice.action==="dimensions"){dimensions=!dimensions;return;}
         if(choice.action==="budget"){budgetOpen=!budgetOpen;budgetPage=0;return;}
         if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
         if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
@@ -723,12 +735,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const group = displayWallDraft(wall);
         group.userData.reviewOnlyWallProposal = true;
         group.userData.proposalId = wall.proposalId;
+        group.userData.wallDimensions=wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly);
+        group.userData.wallProfile=profileDetails(wall.assembly).label;
         wallAdditionLayer.add(group);
         draftItemHosts.push(...draftCatalogueHosts(wall, group));
       }
       for (const ceiling of ceilings) {
         const mesh = displayCeilingDraft(ceiling);
         mesh.userData.surfaceKind = "ceiling";
+        mesh.userData.ceilingDimensions=`${Math.round(Math.abs(ceiling.end[0]-ceiling.start[0])*1000)} × ${Math.round(Math.abs(ceiling.end[1]-ceiling.start[1])*1000)} mm · H ${Math.round(ceiling.heightM*1000)}`;
         wallAdditionLayer.add(mesh);
         draftItemHosts.push({ id: ceilingDraftHostId(ceiling.proposalId), target: "ceiling", mesh, ceilingDraft: ceiling });
       }
@@ -1308,7 +1323,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       report(true);
     };
     const onSessionEnd = () => {
-      toolsOpen=false;renderer.shadowMap.enabled=true;
+      closeTools();renderer.shadowMap.enabled=true;
       budgetOpen=false;budgetPage=0;
       elevatedReturn=null;turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
@@ -1374,6 +1389,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     onResize();
 
     let selectedLabel: THREE.Sprite | null = null;
+    let draftDimension:THREE.Sprite|null=null,draftDimensionKey="";
     let lastLabelId: string | null = null;
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
@@ -1456,6 +1472,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const item = itemControls.current.active;
       const prompt = resize.current.enabled ? resize.current.hint || "Drag a green corner or gold edge handle." :
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
+      let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
         const layout = toolsOpen ? menuLayout(prompt) : null;
         if(layout){buildOverlay.sizeMenu(layout);}
@@ -1464,6 +1481,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           inputSources.findIndex(source => isPointer(source) && source?.handedness === "right");
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
+        activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
         const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
         hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
           !itemBrowser.open && !stageMenuOpen && !budgetOpen && !resize.current.enabled &&
@@ -1485,7 +1503,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const draftAction=dragPreview?.action;
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
-          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !helpOpen && !selectedDraftWall())
@@ -1503,7 +1521,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const draftAction=dragPreview?.action;
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
-          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
@@ -1528,6 +1546,29 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             material.emissive.setHex(selected ? 0x167e70 : hovered ? 0x795619 : 0);
             material.emissiveIntensity=selected||hovered ? .25 : 0;
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
+        }
+      }
+      // One reusable on-model dimension sprite; no per-frame texture allocation.
+      let target:THREE.Object3D|undefined;
+      if(dimensions&&renderer.xr.isPresenting&&!toolsOpen){
+        const id=hoveredDraftId??selectedDraftId;
+        target=wallAdditionLayer.children.find(o=>o.visible&&o.userData.proposalId===id&&id);
+        if(!target&&activeDimensionRay&&currentStage!=="slab"&&!elevatedReturn){
+          target=raycaster.intersectObjects(wallAdditionLayer.children.filter(o=>o.visible&&o.userData.ceilingDimensions&&displaySurface(currentStage,"ceiling")),false)[0]?.object;
+        }
+      }
+      const dimText=target?(target.userData.wallDimensions??target.userData.ceilingDimensions):"";
+      const dimKey=dimText?String(dimText)+"|"+target!.uuid:"";
+      if(dimKey!==draftDimensionKey){
+        if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();draftDimension=null;}
+        draftDimensionKey=dimKey;
+        if(target&&dimText){
+          draftDimension=labelSprite(dimText);
+          const box=new THREE.Box3().setFromObject(target);
+          draftDimension.position.copy(box.getCenter(new THREE.Vector3()));
+          draftDimension.position.y=box.max.y+.18;
+          draftDimension.scale.set(1.65,.33,1);
+          scene.add(draftDimension);
         }
       }
       // Aiming at source-backed floor is visible only in immersive VR.
@@ -1761,6 +1802,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         selectedLabel.material.map?.dispose();
         selectedLabel.material.dispose();
       }
+      if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();}
       itemView.clear();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
