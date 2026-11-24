@@ -229,7 +229,7 @@ export function buildMenuLayout(
     for (const [i,c] of controls.entries()) add(c.label,
       20+(i%columns)*stride, 110+Math.floor(i/columns)*84, stride-13, 70, c.action,
       {disabled:c.disabled});
-    return { buttons, title: "EDIT WALL · " + wallDimensionText(length/1000,wall.heightM,wall.assembly),
+    return { buttons, title: "EDIT WALL · " + length + " mm", subtitle:wallDimensionText(length/1000,wall.heightM,wall.assembly),
       width: WIDTH, height,
       note: quest.deleteArmed?"Confirm delete or Back to cancel. Undo restores.":"Trigger & hold to move a draft wall; source stays unchanged.",
       sections: [{label:"SELECT · GRAB · MOVE · RELEASE",y:93}] };
