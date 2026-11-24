@@ -9,7 +9,7 @@ import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
-import { AssemblyStudyPanel } from "./AssemblyStudyPanel";
+import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
 import { ConstructionView, StandardsPanel } from "./ConstructionView";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
@@ -251,6 +251,8 @@ export function App() {
   const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
+  const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
+  const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -648,7 +650,7 @@ export function App() {
                 teleportAvailable={canTeleport} onTeleportToggle={toggleTeleport}
                 onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
-                onReviewLocalWall={reviewWall} />
+                onReviewLocalWall={reviewWall} budget={{summary:assemblyStudy.summary,onCapture:assemblyStudy.capture,onClear:assemblyStudy.clear}} />
             </Suspense>
           </div>
           <div className="viewer-footer">
@@ -709,7 +711,7 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
-          <AssemblyStudyPanel scope={JSON.stringify(manifest.scope)} build={projection ? {...buildState, walls:buildState.walls.map(w=>projectWall(w,projection)), ceilings:buildState.ceilings.map(c=>projectCeiling(c,projection))}:buildState}/>
+          <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
             <h2>Review source objects</h2>
             <label htmlFor="review-search">Find an object</label>
