@@ -1291,7 +1291,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
-        const buildTarget = drag ? previewDrag(drag, held)?.aim ?? null : ready && !item ? aim() : null;
+        const dragPreview=drag ? previewDrag(drag, held) : null;
+        const buildTarget = dragPreview?.aim ?? (ready&&!item?aim():null);
+        const draftAction=dragPreview?.action;
+        buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
+          draftAction?.kind==="drag" && drag?.mode==="wall"
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (!itemBrowser.open && !stageMenuOpen && !helpOpen && !selectedDraftWall())
@@ -1304,7 +1309,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
         const itemPick = canAim && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
-        const buildTarget = canAim && !item ? drag ? previewDrag(drag)?.aim ?? null : aim() : null;
+        const dragPreview=canAim&&!item&&drag?previewDrag(drag):null;
+        const buildTarget=canAim&&!item ? dragPreview?.aim??aim() : null;
+        const draftAction=dragPreview?.action;
+        buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
+          draftAction?.kind==="drag" && drag?.mode==="wall"
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
