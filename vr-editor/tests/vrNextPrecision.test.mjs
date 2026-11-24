@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {Ray,Vector3} from "three";
 import {exactDraftWall,exactDraftOpening} from "../src/vrDraftGeometry.ts";
 import {EMPTY_BUILD, STARTING_SIZES, snapDraftWallPoint, updateBuild, planLength} from "../src/buildPlacement.ts";
-import {pickDraftWalls} from "../src/buildScene.ts";
+import {pickDraftWalls,beginDraftGesture,draftGesturePreview} from "../src/buildScene.ts";
 import {verifiedSourceWallAnchors} from "../src/vrDraftSourceSnaps.ts";
 
 const scope="source-scoped-draft";
@@ -76,4 +76,20 @@ test("controller hit cycles overlapping drafts in deterministic order",()=>{
   const hits=pickDraftWalls({...state,walls:[same,wall]},"ground",ray);
   assert.deepEqual(hits.map(x=>x.proposalId),["wall-1","wall-2"]);
   assert.equal(pickDraftWalls(state,"upper",ray).length,0);
+});
+
+test("Quest hand-drag slides a door opening on its wall, retaining its identity and source guard",()=>{
+  const edit={...state,tool:"opening-move"};
+  const ray=new Ray(new Vector3(1.45,1.5,2),new Vector3(0,0,-1));
+  const gesture=beginDraftGesture(edit,"ground",ray);
+  assert.equal(gesture?.kind,"opening");
+  assert.equal(gesture?.openingId,"door-1");
+  gesture.fromController=[1.45,2];
+  const preview=draftGesturePreview(gesture,STARTING_SIZES,ray,edit,[1.7,2]);
+  assert.deepEqual(preview?.action,{kind:"exact-local-opening",proposalId:"wall-1",
+    openingId:"door-1",field:"offset",valueMm:1250});
+  const updated=action(edit,preview.action);
+  assert.equal(updated.walls[0].openings[0].offsetM,1.25);
+  assert.equal(edit.walls[0].openings[0].offsetM,1);
+  assert.equal(action(edit,preview.action,"other-tenant"),edit);
 });
