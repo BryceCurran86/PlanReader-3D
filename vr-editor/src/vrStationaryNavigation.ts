@@ -2,6 +2,10 @@
 export type Xz=[number,number];
 export type StickSource={handedness?:string;targetRayMode?:string;gamepad?:{mapping?:string;axes?:readonly number[]}|null};
 export type NavigationWall={start:Xz;end:Xz;halfThickness?:number};
+/** A plan guide has no physical height and must never obstruct locomotion. */
+export function navigationWallFace(geometry:{kind:string;heightM?:number}|null|undefined,visible:boolean):boolean{
+ return visible&&geometry?.kind==="wallFace"&&typeof geometry.heightM==="number"&&Number.isFinite(geometry.heightM)&&geometry.heightM>0;
+}
 export function standardThumbstick(source:StickSource|null|undefined):Xz{
  const a=source?.gamepad?.axes;
  // XR standard thumbstick axes are 2/3, never guess unknown mappings.
