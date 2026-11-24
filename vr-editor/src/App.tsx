@@ -8,6 +8,8 @@ import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
+import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
+import { saveVrReview, restoreVrReview } from "./vrDraftSave";
 import { ConstructionView, StandardsPanel } from "./ConstructionView";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
@@ -56,6 +58,8 @@ export function App() {
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
+  const [vrRate,setVrRate]=useState("");
+  const [vrDraftStatus,setVrDraftStatus]=useState("");
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
@@ -90,6 +94,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const pendingLoad = useRef<AbortController | null>(null);
+  const latestManifest = useRef(manifest);
+  latestManifest.current=manifest;
   const handleSelect = useCallback((id: string | null) => {
     setSelectedId(id);
     setClipboardMessage(null);
@@ -169,7 +175,7 @@ export function App() {
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
     setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all");
     setStage("finished"); setPanel("plan"); setLastEdit("source");
-    setBuildHint(""); setToolMessage("");
+    setBuildHint(""); setToolMessage("");setVrRate("");setVrDraftStatus("");
     setCameraRequest(current => ({ mode: "isometric", focus: "scene", serial: current.serial + 1 }));
   }, []);
 
@@ -257,6 +263,41 @@ export function App() {
     setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
+  }
+  function exportLocalVrDraft() {
+    if(!manifest)return;
+    try {
+      const text=saveVrReview(manifest,buildState,catalogue?.draft??null);
+      const blob=new Blob([text],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const anchor=document.createElement("a");
+      const safe=manifest.scope.projectId.replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,64);
+      anchor.href=url;anchor.download="planreader-vr-draft-"+safe+".json";
+      document.body.append(anchor);anchor.click();anchor.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),30000);
+      setVrDraftStatus("Local draft download requested. The original source and customer quantities were not modified.");
+    } catch {
+      setVrDraftStatus("Could not create a local draft download.");
+    }
+  }
+  async function reopenLocalVrDraft(file:File) {
+    const source=manifest;
+    if(!source)return;
+    if(file.size>3*1024*1024) {
+      setVrDraftStatus("Draft file exceeds the 3 MB review limit.");return;
+    }
+    try {
+      const data:unknown=JSON.parse(await file.text());
+      if(latestManifest.current!==source)
+        throw Error("The open source scene changed. Reopen this draft against its original snapshot.");
+      const restored=restoreVrReview(source,data);
+      setPlaced({scene:source,build:restored.build});
+      setCatalogueSession({scene:source,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");
+      setVrDraftStatus("Review-only draft reopened for the exact original source snapshot. No customer records changed.");
+    } catch(error) {
+      setVrDraftStatus(error instanceof Error?error.message:"Could not read local VR draft.");
+    }
   }
   function applyBuild(action: BuildAction) {
     if (!manifest) return;
@@ -603,7 +644,7 @@ export function App() {
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
                 teleportMode={mode === "teleport" && canTeleport} onTeleportMessage={setTeleportMessage}
-                onPcVrSessionReport={reportHeadset} />
+                onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft} />
             </Suspense>
           </div>
           <div className="viewer-footer">
@@ -661,6 +702,9 @@ export function App() {
         </section>}
 
         {manifest && visible && <section id="panel-review" hidden={panel !== "review"} aria-label="Source and draft review">
+          <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
+            onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
+            status={vrDraftStatus}/>
           <div className="section-block">
             <h2>Review source objects</h2>
             <label htmlFor="review-search">Find an object</label>
