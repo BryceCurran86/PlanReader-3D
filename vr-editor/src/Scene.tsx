@@ -370,6 +370,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
+        if (resize.current.enabled || resize.current.projection) {
+          selectedDraftId=null; deleteArmed=false;
+          reportTool("Finish or reset footprint resizing before editing draft walls.");
+          return;
+        }
         const wall = selectedDraftWall();
         if (!wall) { selectedDraftId=null; deleteArmed=false; return; }
         if (choice.action === "move" || choice.action === "stretch") {
@@ -643,7 +648,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const select = (id: string | null) => callback.current(id);
     function selectAtRay() {
-      const wall = renderer.xr.isPresenting && !resize.current.enabled ?
+      const wall = renderer.xr.isPresenting && !resize.current.enabled &&
+        !resize.current.projection ?
         pickDraftWall(build.current.buildState, build.current.buildLevel, raycaster.ray) : null;
       if (wall && !itemBrowser.open && !stageMenuOpen) {
         selectedDraftId=wall.proposalId;
@@ -1179,7 +1185,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (active >= 0) aimController(controllers[active]);
         const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
         hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
-          !itemBrowser.open && !stageMenuOpen && !resize.current.enabled
+          !itemBrowser.open && !stageMenuOpen && !resize.current.enabled &&
+          !resize.current.projection
           ? pickDraftWall(buildState,buildLevel,raycaster.ray)?.proposalId ?? null : null;
         const heldResize = xrResize.findIndex(drag => drag !== null);
         if (heldResize >= 0 && xrPress[heldResize] && samePointerContext(xrPress[heldResize]!.context)) {
