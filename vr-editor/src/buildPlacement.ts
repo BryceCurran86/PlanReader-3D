@@ -1,6 +1,8 @@
 import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
+import { editLocalOutline } from "./localOutline.ts";
+import type { OutlineEdit } from "./localOutline.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -46,6 +48,7 @@ export type BuildAction =
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
+  | { kind: "edit-local-outline"; expected: string; edit: OutlineEdit }
   | { kind: "group-local-walls"; proposalIds: string[]; operation: "translate" | "rotate" | "delete" | "duplicate" | "height"; delta?: PlanPoint; copyIds?: string[]; heightMm?: number }
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
@@ -343,6 +346,16 @@ export function updateBuild(
     if (!next || JSON.stringify(next) === JSON.stringify(previous)) return state;
     return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
       ceilings: state.ceilings });
+  }
+  if(action.kind==="edit-local-outline"){
+    if(!levelId)return state;
+    const walls=state.walls.filter(w=>w.levelId===levelId&&w.scopeKey===scopeKey);
+    if(JSON.stringify(walls)!==action.expected)return state;
+    const next=editLocalOutline(walls,action.edit);
+    if(!next||state.walls.length-walls.length+next.length>MAX_DRAFT_WALLS||next.some(w=>!validEditedWall(w)))return state;
+    const other=state.walls.filter(w=>!walls.includes(w));
+    if(next.some(w=>other.some(o=>o.proposalId===w.proposalId)))return state;
+    return checkpoint(state,{walls:[...other,...next],ceilings:state.ceilings});
   }
   if(action.kind==="group-local-walls"){
     const ids=new Set(action.proposalIds);

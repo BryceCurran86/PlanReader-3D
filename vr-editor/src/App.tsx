@@ -27,6 +27,7 @@ import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
+import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -370,6 +371,7 @@ export function App() {
 
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
+    if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
@@ -619,6 +621,10 @@ export function App() {
             {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
           </p>}
 
+          {buildLevel && <LocalOutlinePanel key={scopeKey(manifest)+":"+buildLevel}
+            walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
+            blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
+            onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}

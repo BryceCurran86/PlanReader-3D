@@ -24,8 +24,8 @@ import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
 import { createFootprintGizmo, footprintGeometry, projectSourceHost, renderFootprintGeometry } from "./footprintScene";
-import { footprintCorner, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromCorner } from "./footprintResize";
-import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./footprintResize";
+import { footprintHandlePoint, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromHandle } from "./footprintResize";
+import type { FootprintBounds, FootprintHandle, FootprintProjection } from "./footprintResize";
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
@@ -839,7 +839,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(candidates.length>1) reportTool("Overlapping source objects: trigger again to cycle.");
     }
     const resizePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.06);
-    type ResizeDrag = { box: FootprintBounds; corner: FootprintCorner; at: THREE.Vector3; token: symbol; last?: string };
+    type ResizeDrag = { box: FootprintBounds; corner: FootprintHandle; at: THREE.Vector3; token: symbol; last?: string };
     function startResize() {
       if (!resize.current.enabled || !resize.current.box) return null;
       gizmo.show(resize.current.box);
@@ -851,8 +851,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (!resize.current.enabled) return;
       const at = raycaster.ray.intersectPlane(resizePlane, new THREE.Vector3());
       if (!at) return;
-      const [x, z] = footprintCorner(drag.box, drag.corner);
-      const next = resizeFromCorner(drag.box, drag.corner, [x + at.x - drag.at.x, z + at.z - drag.at.z]);
+      const [x, z] = footprintHandlePoint(drag.box, drag.corner);
+      const next = resizeFromHandle(drag.box, drag.corner, [x + at.x - drag.at.x, z + at.z - drag.at.z]);
       const key = JSON.stringify(next);
       if (drag.last === key) return;
       drag.last = key;
@@ -1416,7 +1416,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const origin = activeStart(buildState, buildLevel);
       const item = itemControls.current.active;
-      const prompt = resize.current.enabled ? resize.current.hint || "Point at a footprint corner and hold the trigger to drag." :
+      const prompt = resize.current.enabled ? resize.current.hint || "Drag a green corner or gold edge handle." :
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
       if (renderer.xr.isPresenting) {
         buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned);
