@@ -57,6 +57,9 @@ import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
+import {reviewDimensions} from "./vrDesignReview";
+import type {DraftShell} from "./connectedDraftShell";
+import {reviewOpeningCorners} from "./sourceOpeningReview";
 
 type Props = {
   manifest: SceneManifest;
@@ -90,6 +93,9 @@ type Props = {
   onStage: (stage: ConstructionStage) => void;
   layers:LayerOverrides;
   onLayers:(layers:LayerOverrides)=>void;
+  allDimensions:boolean;
+  shell:DraftShell|null;
+  onAllDimensions:(value:boolean)=>void;
   footprint: {
     box: FootprintBounds | null;
     projection: FootprintProjection | null;
@@ -230,7 +236,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -254,8 +260,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, layers, onLayers });
-  construction.current = { stage, onStage, layers, onLayers };
+  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell });
+  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -429,7 +435,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
           elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
-          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,
+          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
           radial,layersOpen,layers:construction.current.layers,
         });
       if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
@@ -511,6 +517,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
         if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
         if(choice.action==="dimensions"){dimensions=!dimensions;return;}
+        if(choice.action==="all-dimensions"){construction.current.onAllDimensions(!construction.current.allDimensions);return;}
         if(choice.action==="budget"){budgetOpen=!budgetOpen;budgetPage=0;return;}
         if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
         if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
@@ -677,6 +684,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const geometry = row.geometry;
         if (geometry?.kind === "wallFace") {
           item.userData.originalHeight = geometry.heightM;
+          // Recorded opening outlines are review-only, not a verified wall cutout.
+          const preview=new THREE.Group();preview.userData.openingReview=true;
+          for(const o of row.openingReview?.positioned??[]){
+            const points=reviewOpeningCorners(geometry,o).map(p=>new THREE.Vector3(...p));
+            const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineDashedMaterial({color:0x58d9ef,dashSize:.08,gapSize:.04,depthWrite:false}));
+            line.computeLineDistances();preview.add(line);
+          }
+          if(preview.children.length)item.add(preview);
           if (row.objectType === "wall") sourceItemHosts.push(catalogueWallHost(
             row.objectId, item, geometry.start, geometry.end, geometry.heightM,
           ));
@@ -715,6 +730,21 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
+    let currentShell:DraftShell|null=null;
+    function refreshShell(){
+      const next=construction.current.shell;
+      if(next!==currentShell){
+        currentShell=next;
+        for(const child of [...shellGroup.children]){shellGroup.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();child.material.dispose();}}
+        for(const surface of next?.surfaces??[]){
+          const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
+          const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
+          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+        }
+      }
+      for(const mesh of shellGroup.children)mesh.visible=displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+    }
     const buildOverlay = createBuildOverlay(scene);
     const planOverview=createVrPlanOverview(scene,manifest);
     const sceneScope = scopeKey(manifest);
@@ -1535,6 +1565,22 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let selectedLabel: THREE.Sprite | null = null;
     let draftDimension:THREE.Sprite|null=null,draftDimensionKey="";
     let lastLabelId: string | null = null;
+    const dimensionGroup=new THREE.Group();scene.add(dimensionGroup);
+    let dimensionsKey:readonly unknown[]=[];
+    function clearDimensions(){for(const child of [...dimensionGroup.children]){dimensionGroup.remove(child);if(child instanceof THREE.Sprite){child.material.map?.dispose();child.material.dispose();}}}
+    function refreshDimensions(){
+      const s=construction.current,visible=interaction.current.visibleIds,b=build.current.buildState,projection=resize.current.projection;
+      const currentLevel=interaction.current.level,sourceMoves=moveSettings.current.wallMoveState;
+      const key=[s.allDimensions,s.stage,s.layers,visible,b.walls,b.ceilings,currentLevel,projection,sourceMoves,!!elevatedReturn];
+      if(key.every((v,i)=>v===dimensionsKey[i]))return;dimensionsKey=key;clearDimensions();
+      if(!s.allDimensions)return;
+      // Suppress original dimensions when source moves or footprint projection are active.
+      const sourceVisibleIds=projection||sourceMoves?new Set<string>():visible;
+      const geometry=projection?{walls:b.walls.map(w=>projectWall(w,projection)),ceilings:b.ceilings.map(c=>projectCeiling(c,projection))}:b;
+      const entries=reviewDimensions(manifest,geometry,currentLevel,sourceVisibleIds).filter(d=>displaySurface(s.stage,d.kind==="wall"?undefined:d.kind));
+      // Cap simultaneous sprites for standalone headset memory; selected dimensions remain available separately.
+      for(const d of entries.slice(0,40)){const sprite=labelSprite(d.label);sprite.position.set(...d.position);sprite.scale.set(1.45,.29,1);dimensionGroup.add(sprite);}
+    }
     let lastMood: LightingMood | null = null;
     let lastPreviewLighting=-Infinity;
     const lightEye=new THREE.Vector3();
@@ -1591,6 +1637,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         resizeDrag(startPointer.resize);
       }
       const currentStage = construction.current.stage;
+      refreshDimensions();refreshShell();
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in";
       for (const obj of pickables) {
@@ -1601,6 +1648,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           obj.visible = displayed;
           obj.material.visible = visible;
           obj.material.wireframe = !kind && framing;
+          for(const child of obj.children)if(child.userData.openingReview)child.visible=visible&&!resize.current.projection&&layerVisible(construction.current.layers,"openings",currentStage!=="slab")&&!draftMap.current.get(obj.userData.objectId)?.heightM;
           if (kind === "roof") obj.castShadow = visible;
         } else obj.visible = displayed && visible;
       }
@@ -1973,6 +2021,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         selectedLabel.material.dispose();
       }
       if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();}
+      clearDimensions();scene.remove(dimensionGroup);
       itemView.clear();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
