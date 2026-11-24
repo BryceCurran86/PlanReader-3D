@@ -1498,6 +1498,7 @@ class CrossViewFloorFinishProducer:
                     "finish_system": occurrence.semantic_finish,
                     "inclusion_status": "INCLUSION",
                     "row_role": "floor_area",
+                    "commercial_projection_allowed": True,
                 },
             )
             records.append(

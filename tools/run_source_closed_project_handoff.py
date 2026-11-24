@@ -141,6 +141,11 @@ _THREE_LAUREL_SOURCE_SHA256 = (
     "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
 )
 
+_MARYBOROUGH_PROJECT_ID = "au_qld_maryborough_service_station"
+_MARYBOROUGH_SOURCE_SHA256 = (
+    "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+)
+
 
 def _verified_source_family_handoff(
     pdf_path: Path,
@@ -239,37 +244,57 @@ def _preflight_registered_original_figure_issuers(
     authenticated source; other projects retain their existing native path.
     This is a generic revision contract, NOT a drawing-specific wall rule.
     """
-    if project_id != _THREE_LAUREL_PROJECT_ID or source_sha256 != _THREE_LAUREL_SOURCE_SHA256:
-        return
-    from pb_three_laurel_vinyl_floor_customer import (
-        THREE_LAUREL_DOCUMENT_ID as vinyl_doc,
-        THREE_LAUREL_SOURCE_SHA256 as vinyl_sha,
-        THREE_LAUREL_REVISION_ID as vinyl_rev,
-    )
-    from pb_three_laurel_wet_area_floor_customer import (
-        THREE_LAUREL_DOCUMENT_ID as wet_doc,
-        THREE_LAUREL_SOURCE_SHA256 as wet_sha,
-        THREE_LAUREL_REVISION_ID as wet_rev,
-    )
-    from pb_three_laurel_wall_tile_customer import (
-        THREE_LAUREL_DOCUMENT_ID as wall_doc,
-        THREE_LAUREL_SOURCE_SHA256 as wall_sha,
-        THREE_LAUREL_REVISION_ID as wall_rev,
-    )
-    from pb_three_laurel_ceiling_customer import (
-        THREE_LAUREL_DOCUMENT_ID as ceiling_doc,
-        THREE_LAUREL_SOURCE_SHA256 as ceiling_sha,
-        THREE_LAUREL_REVISION_ID as ceiling_rev,
-    )
-    require_source_issuer_revision_contract(
-        source_sha256=source_sha256,
-        issuer_receipts=(
-            (vinyl_doc, vinyl_sha, vinyl_rev),
-            (wet_doc, wet_sha, wet_rev),
-            (wall_doc, wall_sha, wall_rev),
-            (ceiling_doc, ceiling_sha, ceiling_rev),
-        ),
-    )
+    if project_id == _THREE_LAUREL_PROJECT_ID and source_sha256 == _THREE_LAUREL_SOURCE_SHA256:
+        from pb_three_laurel_vinyl_floor_customer import (
+            THREE_LAUREL_DOCUMENT_ID as vinyl_doc,
+            THREE_LAUREL_SOURCE_SHA256 as vinyl_sha,
+            THREE_LAUREL_REVISION_ID as vinyl_rev,
+        )
+        from pb_three_laurel_wet_area_floor_customer import (
+            THREE_LAUREL_DOCUMENT_ID as wet_doc,
+            THREE_LAUREL_SOURCE_SHA256 as wet_sha,
+            THREE_LAUREL_REVISION_ID as wet_rev,
+        )
+        from pb_three_laurel_wall_tile_customer import (
+            THREE_LAUREL_DOCUMENT_ID as wall_doc,
+            THREE_LAUREL_SOURCE_SHA256 as wall_sha,
+            THREE_LAUREL_REVISION_ID as wall_rev,
+        )
+        from pb_three_laurel_ceiling_customer import (
+            THREE_LAUREL_DOCUMENT_ID as ceiling_doc,
+            THREE_LAUREL_SOURCE_SHA256 as ceiling_sha,
+            THREE_LAUREL_REVISION_ID as ceiling_rev,
+        )
+        require_source_issuer_revision_contract(
+            source_sha256=source_sha256,
+            issuer_receipts=(
+                (vinyl_doc, vinyl_sha, vinyl_rev),
+                (wet_doc, wet_sha, wet_rev),
+                (wall_doc, wall_sha, wall_rev),
+                (ceiling_doc, ceiling_sha, ceiling_rev),
+            ),
+        )
+    elif project_id == _MARYBOROUGH_PROJECT_ID and source_sha256 == _MARYBOROUGH_SOURCE_SHA256:
+        from pb_maryborough_customer_authority import (
+            MARYBOROUGH_DOCUMENT_ID as mb_floor_doc,
+            MARYBOROUGH_SOURCE_SHA256 as mb_floor_sha,
+        )
+        from pb_maryborough_ceiling_customer import (
+            MARYBOROUGH_DOCUMENT_ID as mb_ceiling_doc,
+            MARYBOROUGH_SOURCE_SHA256 as mb_ceiling_sha,
+        )
+        canonical_rev = stable_contract_id(
+            "source_revision",
+            {"document_id": mb_floor_doc, "source_sha256": mb_floor_sha},
+            digest_chars=32,
+        )
+        require_source_issuer_revision_contract(
+            source_sha256=source_sha256,
+            issuer_receipts=(
+                (mb_floor_doc, mb_floor_sha, canonical_rev),
+                (mb_ceiling_doc, mb_ceiling_sha, canonical_rev),
+            ),
+        )
 
 
 def _original_three_laurel_family_handoff(
@@ -393,6 +418,122 @@ def _original_three_laurel_ceiling_handoff(
         family="ceiling_lining",
         expected_count=7,
     )
+
+
+def _original_maryborough_floor_finish_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original Maryborough figured floor-finish issuer handoff."""
+    if source_sha256 != _MARYBOROUGH_SOURCE_SHA256:
+        return None
+    from pb_maryborough_customer_authority import (
+        issue_all_original_maryborough_customer_quantities,
+        issue_original_maryborough_food_prep_customer_quantities,
+    )
+
+    office = _verified_source_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=lambda p, workspace_id: issue_all_original_maryborough_customer_quantities(
+            p, workspace_id=workspace_id, room_label="OFFICE",
+        ),
+        family="floor_finish_area",
+        expected_count=1,
+    )
+    food = _verified_source_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_maryborough_food_prep_customer_quantities,
+        family="floor_finish_area",
+        expected_count=1,
+    )
+    if office is None or food is None:
+        return None
+    office_quantities, office_sealed, office_rows = office
+    food_quantities, food_sealed, food_rows = food
+    quantities = tuple(office_quantities) + tuple(food_quantities)
+    try:
+        sealed = combine_source_closed_runs(
+            (office_sealed, food_sealed),
+            project_id=_MARYBOROUGH_PROJECT_ID,
+        )
+        rows = tuple(office_rows) + tuple(food_rows)
+        verified = verify_sealed_customer_output(sealed, rows)
+        sealed_ids = {q.quantity_id for q in sealed.quantities}
+        if (
+            len(sealed.quantities) != 2
+            or len(rows) != 2
+            or verified.customer_row_count != 2
+            or set(verified.verified_quantity_ids) != sealed_ids
+            or set(sealed.source_sha256s) != {_MARYBOROUGH_SOURCE_SHA256}
+        ):
+            return None
+    except (ValueError, RuntimeError, TypeError, KeyError):
+        return None
+    return quantities, sealed, rows
+
+
+def _original_maryborough_ceiling_handoff(
+    pdf_path: Path,
+    *,
+    workspace_id: int,
+    source_sha256: str,
+) -> tuple[tuple[QuantityEvidence, ...], SealedSourceClosedRun, tuple[dict[str, Any], ...]] | None:
+    """SHA-locked original Maryborough figured ceiling-lining issuer handoff."""
+    if source_sha256 != _MARYBOROUGH_SOURCE_SHA256:
+        return None
+    from pb_maryborough_ceiling_customer import (
+        issue_original_maryborough_ceiling_customer_quantities,
+        issue_original_maryborough_food_prep_ceiling_customer_quantities,
+    )
+
+    office = _verified_source_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=lambda p, workspace_id: issue_original_maryborough_ceiling_customer_quantities(
+            p, workspace_id=workspace_id, room_label="OFFICE",
+        ),
+        family="ceiling_lining",
+        expected_count=1,
+    )
+    food = _verified_source_family_handoff(
+        pdf_path,
+        workspace_id=workspace_id,
+        source_sha256=source_sha256,
+        issuer=issue_original_maryborough_food_prep_ceiling_customer_quantities,
+        family="ceiling_lining",
+        expected_count=1,
+    )
+    if office is None or food is None:
+        return None
+    office_quantities, office_sealed, office_rows = office
+    food_quantities, food_sealed, food_rows = food
+    quantities = tuple(office_quantities) + tuple(food_quantities)
+    try:
+        sealed = combine_source_closed_runs(
+            (office_sealed, food_sealed),
+            project_id=_MARYBOROUGH_PROJECT_ID,
+        )
+        rows = tuple(office_rows) + tuple(food_rows)
+        verified = verify_sealed_customer_output(sealed, rows)
+        sealed_ids = {q.quantity_id for q in sealed.quantities}
+        if (
+            len(sealed.quantities) != 2
+            or len(rows) != 2
+            or verified.customer_row_count != 2
+            or set(verified.verified_quantity_ids) != sealed_ids
+            or set(sealed.source_sha256s) != {_MARYBOROUGH_SOURCE_SHA256}
+        ):
+            return None
+    except (ValueError, RuntimeError, TypeError, KeyError):
+        return None
+    return quantities, sealed, rows
 
 
 def _non_abstained(
@@ -936,6 +1077,26 @@ def _generate_project_handoff_locked(
                     *summary["claim_reason_codes"],
                     "original_three_laurel_figured_floor_finish_issuer_handoff",
                 ]
+        if (
+            not floor_finish_quantities
+            and not disputed_numeric_floor_finish
+            and _clean(project_id) == _MARYBOROUGH_PROJECT_ID
+        ):
+            original_finish = _original_maryborough_floor_finish_handoff(
+                pdf_path,
+                workspace_id=int(workspace_id),
+                source_sha256=source_sha256,
+            )
+            if original_finish is not None:
+                floor_finish_quantities, finish_sealed, finish_rows = (
+                    original_finish
+                )
+                family_runs.append(("floor_finish_area", finish_sealed))
+                verified_floor_finish_customer_rows_from_original = finish_rows
+                summary["claim_reason_codes"] = [
+                    *summary["claim_reason_codes"],
+                    "original_maryborough_figured_floor_finish_issuer_handoff",
+                ]
         # Same SHA-locked path for wall-tile finishes (8 FIRM rows). Live claim
         # currently has no wall-finish publisher in this handoff.
         if _clean(project_id) == _THREE_LAUREL_PROJECT_ID:
@@ -1154,6 +1315,27 @@ def _generate_project_handoff_locked(
             summary["claim_reason_codes"] = [
                 *summary["claim_reason_codes"],
                 "original_three_laurel_figured_ceiling_issuer_handoff",
+            ]
+    if (
+        not ceiling_quantities
+        and clean_family_group in {"all", "surfaces"}
+        and _clean(project_id) == _MARYBOROUGH_PROJECT_ID
+    ):
+        original_ceiling = _original_maryborough_ceiling_handoff(
+            pdf_path,
+            workspace_id=int(workspace_id),
+            source_sha256=source_sha256,
+        )
+        if original_ceiling is not None:
+            ceiling_quantities, ceiling_sealed, ceiling_rows = original_ceiling
+            family_runs.append(("ceiling_area", ceiling_sealed))
+            verified_ceiling_customer_rows_from_original = ceiling_rows
+            summary["ceiling_authority_path"] = (
+                "original_maryborough_rcp_ceiling_issuer"
+            )
+            summary["claim_reason_codes"] = [
+                *summary["claim_reason_codes"],
+                "original_maryborough_figured_ceiling_issuer_handoff",
             ]
     summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
     if verified_ceiling_customer_rows_from_original is None:
@@ -1558,8 +1740,8 @@ def _generate_project_handoff_locked(
     if (
         combined is not None
         and clean_family_group == "surfaces"
-        and _clean(project_id) == _THREE_LAUREL_PROJECT_ID
-        and source_sha256 == _THREE_LAUREL_SOURCE_SHA256
+        and _clean(project_id) in (_THREE_LAUREL_PROJECT_ID, _MARYBOROUGH_PROJECT_ID)
+        and source_sha256 in (_THREE_LAUREL_SOURCE_SHA256, _MARYBOROUGH_SOURCE_SHA256)
         and verified_partial_customer_rows is None
     ):
         try:
