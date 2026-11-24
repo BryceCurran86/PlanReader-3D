@@ -58,6 +58,7 @@ import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
 import {reviewDimensions} from "./vrDesignReview";
+import type {DraftShell} from "./connectedDraftShell";
 import {reviewOpeningCorners} from "./sourceOpeningReview";
 
 type Props = {
@@ -93,6 +94,7 @@ type Props = {
   layers:LayerOverrides;
   onLayers:(layers:LayerOverrides)=>void;
   allDimensions:boolean;
+  shell:DraftShell|null;
   onAllDimensions:(value:boolean)=>void;
   footprint: {
     box: FootprintBounds | null;
@@ -258,8 +260,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions });
-  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions };
+  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell });
+  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -728,6 +730,21 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
+    let currentShell:DraftShell|null=null;
+    function refreshShell(){
+      const next=construction.current.shell;
+      if(next!==currentShell){
+        currentShell=next;
+        for(const child of [...shellGroup.children]){shellGroup.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();child.material.dispose();}}
+        for(const surface of next?.surfaces??[]){
+          const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
+          const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
+          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+        }
+      }
+      for(const mesh of shellGroup.children)mesh.visible=displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+    }
     const buildOverlay = createBuildOverlay(scene);
     const planOverview=createVrPlanOverview(scene,manifest);
     const sceneScope = scopeKey(manifest);
