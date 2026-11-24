@@ -1182,7 +1182,38 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
       }catch{reportTool("The XR runtime declined the view change.");}
     }
-    const wallPickableById=new Map(pickables.map(o=>[o.userData.objectId as string,o]));
+    let collisionKey:readonly unknown[]=[];let collisionWalls:NavigationWall[]=[];
+    function cachedNavigationWalls(){
+      const key=[interaction.current.visibleIds,resize.current.projection,build.current.buildState.walls,build.current.buildLevel,moveSettings.current.wallMoveState];
+      if(key.every((v,i)=>v===collisionKey[i]))return collisionWalls;
+      collisionKey=key;collisionWalls=[];
+      const walls=collisionWalls;
+      const sourceMoves=new Map((moveSettings.current.wallMoveState?safeWallMoves(moveSettings.current.wallMoveState,manifest):[]).map(m=>[m.objectId,m]));
+        for(const row of manifest.objects){
+          const g=row.geometry;
+          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
+          const projection=resize.current.projection;
+          const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
+          const move=sourceMoves.get(row.objectId);
+          const dx=(move?.dx??0)*(projection?.scaleX??1),dz=(move?.dz??0)*(projection?.scaleZ??1);
+          walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
+        }
+        for(const raw of build.current.buildState.walls){
+          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
+          const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
+          const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
+          if(length<.05)continue;
+          const at=(d:number):[number,number]=>[w.start[0]+(w.end[0]-w.start[0])*d/length,w.start[1]+(w.end[1]-w.start[1])*d/length];
+          let end=0;
+          for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
+            if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
+            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+            end=Math.max(end,o.offsetM+o.widthM);
+          }
+          if(end<length)walls.push({start:at(end),end:w.end,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+        }
+      return walls;
+    }
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
@@ -1203,31 +1234,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const bounded=(at:number,d:number,min:number,max:number)=>at<min?Math.max(0,d):at>max?Math.min(0,d):Math.max(min,Math.min(max,at+d))-at;
       delta=[bounded(head.x,delta[0],box.minX-3,box.maxX+3),bounded(head.z,delta[1],box.minZ-3,box.maxZ+3)];
       if(!elevatedReturn){
-        const walls:NavigationWall[]=[];
-        for(const row of manifest.objects){
-          const g=row.geometry;
-          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
-          const projection=resize.current.projection;
-          const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
-          const obj=wallPickableById.get(row.objectId);
-          const dx=obj?.position.x??0,dz=obj?.position.z??0;
-          walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
-        }
-        for(const raw of build.current.buildState.walls){
-          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
-          const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
-          if(length<.05)continue;
-          const at=(d:number):[number,number]=>[w.start[0]+(w.end[0]-w.start[0])*d/length,w.start[1]+(w.end[1]-w.start[1])*d/length];
-          let end=0;
-          for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
-            if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
-            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
-            end=Math.max(end,o.offsetM+o.widthM);
-          }
-          if(end<length)walls.push({start:at(end),end:w.end,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
-        }
-        delta=collisionLimitedStep([head.x,head.z],delta,walls);
+        delta=collisionLimitedStep([head.x,head.z],delta,cachedNavigationWalls());
       }
       if(!delta[0]&&!delta[1]&&!turn.angle)return;
       try{
