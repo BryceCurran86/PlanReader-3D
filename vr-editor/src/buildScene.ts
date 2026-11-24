@@ -371,6 +371,27 @@ export function createBuildOverlay(scene: THREE.Scene) {
   outline.frustumCulled = false;
   outline.visible = false;
   scene.add(outline);
+  // Local-only 3D moving-wall outline: shows where the entire wall will land
+  // before release, including height, without moving any source-backed meshes.
+  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(15),3);
+  const ghostGeometry=new THREE.BufferGeometry().setAttribute("position",ghostPositions);
+  const ghost=new THREE.Line(ghostGeometry,new THREE.LineBasicMaterial({
+    color:0x75f7db,transparent:true,opacity:0.9,depthTest:false}));
+  ghost.frustumCulled=false;
+  ghost.renderOrder=18;
+  ghost.visible=false;
+  scene.add(ghost);
+  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number}|null){
+    ghost.visible=!!shape;
+    if(!shape)return;
+    const {start,end,heightM}=shape;
+    [[start[0],0.035,start[1]],[end[0],0.035,end[1]],
+      [end[0],heightM,end[1]],[start[0],heightM,start[1]],
+      [start[0],0.035,start[1]]].forEach((point,i)=>
+      ghostPositions.setXYZ(i,point[0],point[1],point[2]));
+    ghostPositions.needsUpdate=true;
+    ghostGeometry.setDrawRange(0,5);
+  }
 
   const previousHead = new THREE.Vector3();
   const previousFacing = new THREE.Vector3();
@@ -500,7 +521,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim,
+  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }
