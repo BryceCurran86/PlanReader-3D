@@ -136,12 +136,12 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     geometry.computeVertexNormals();
     const material = new THREE.MeshStandardMaterial({
       color,
-      transparent: !trustworthy,
-      opacity: trustworthy ? 0.92 : 0.4,
+      transparent: false,
+      opacity: 1,
       side: THREE.DoubleSide,
       roughness,
       metalness: 0,
-      depthWrite: trustworthy,
+      depthWrite: true,
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.objectId = name;
@@ -1288,12 +1288,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       for (const shape of wallAdditionLayer.children) {
         shape.visible = currentStage !== "slab";
-        if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshBasicMaterial) {
+        if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
           shape.material.visible = showConstructionSurface(currentStage, "ceiling");
         } else {
           for (const child of shape.children) {
-            if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial)
-              child.material.visible = !framing;
+            if (child.userData.illustrativeFraming) child.visible = framing;
+            else if (child instanceof THREE.Mesh) child.visible = !framing;
           }
         }
       }
@@ -1365,12 +1365,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         for (const part of group.children) {
           if (!(part instanceof THREE.Mesh || part instanceof THREE.Line)) continue;
           const material = part.material;
-          if (!(material instanceof THREE.MeshBasicMaterial ||
+          if (!(material instanceof THREE.MeshBasicMaterial || material instanceof THREE.MeshStandardMaterial ||
                 material instanceof THREE.LineBasicMaterial)) continue;
           if (part.userData.originalDraftColor === undefined)
             part.userData.originalDraftColor=material.color.getHex();
           const base = part.userData.originalDraftColor as number;
-          material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
+          if (material instanceof THREE.MeshStandardMaterial) {
+            material.emissive.setHex(selected ? 0x167e70 : hovered ? 0x795619 : 0);
+            material.emissiveIntensity=selected||hovered ? .25 : 0;
+          } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
         }
       }
       // Aiming at source-backed floor is visible only in immersive VR.
