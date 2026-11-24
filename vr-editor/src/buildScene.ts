@@ -37,13 +37,11 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   if(profile.core==="masonry")return group;
   const thickness = .045, depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
   const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+  const members:{from:number;to:number;bottom:number;top:number}[]=[];
   function member(from:number,to:number,bottom:number,top:number) {
     from=Math.max(0,from);to=Math.min(length,to);bottom=Math.max(0,bottom);top=Math.min(wall.heightM,top);
     if(to-from<.001||top-bottom<.001)return;
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,depth),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}));
-    mesh.position.copy(atOffset(wall,(from+to)/2,(bottom+top)/2));
-    mesh.rotation.y=angle;mesh.userData.illustrativeFraming=true;
-    group.add(mesh);
+    members.push({from,to,bottom,top});
   }
   function horizontal(y:number) {
     const cuts=openings.filter(o=>o.sillHeightM<y+thickness&&o.sillHeightM+o.heightM>y).sort((a,b)=>a.offsetM-b.offsetM);
@@ -63,6 +61,22 @@ export function illustrativeTimberFrame(wall: WallVisual) {
     member(o.offsetM+o.widthM,o.offsetM+o.widthM+thickness,thickness,wall.heightM-thickness);
     member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM+o.heightM,o.sillHeightM+o.heightM+thickness);
     if(o.sillHeightM>thickness)member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM-thickness,o.sillHeightM);
+  }
+  // One instanced draw call per wall, rather than a geometry and material per stud.
+  if(members.length){
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}),members.length);
+    const transform=new THREE.Object3D();
+    members.forEach((m,i)=>{
+      transform.position.copy(atOffset(wall,(m.from+m.to)/2,(m.bottom+m.top)/2));
+      transform.rotation.y=angle;
+      transform.scale.set(m.to-m.from,m.top-m.bottom,depth);
+      transform.updateMatrix();
+      mesh.setMatrixAt(i,transform.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate=true;
+    mesh.computeBoundingBox();mesh.computeBoundingSphere();
+    mesh.userData.illustrativeFraming=true;
+    group.add(mesh);
   }
   return group;
 }
