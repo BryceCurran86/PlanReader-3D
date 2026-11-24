@@ -409,6 +409,18 @@ export function App() {
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
     if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
+    if(action.kind==="rotate-local-wall"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      if(next===buildState){setToolMessage("Wall rotation rejected or unchanged. Check junctions, angle and opening clearance.");return;}
+      if(catalogue?.draft.items.length){
+        const collect=(walls:typeof buildState.walls)=>currentItemPlacements(catalogue.draft.items,manifest,
+          [...activeBatchSketches,...walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])],isDemo,buildState.ceilings);
+        const retained=new Set(collect(next.walls).map(i=>i.id));
+        if(collect(buildState.walls).some(i=>!retained.has(i.id))){
+          setToolMessage("Rotation blocked: a hosted item would no longer fit its wall. Move the item first.");return;
+        }
+      }
+    }
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
