@@ -217,7 +217,9 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   const hint = !valid ? "Size is invalid or an opening would no longer fit."
     : gesture.mode === "wall" && !("previous" in gesture)
     ? "Release to place · " + Math.round(delta * 1000) + " mm" +
-      (aligned?.kind === "corner" ? " · corner snap" : aligned?.kind === "straight" ? " · straight" : "")
+      (aligned?.kind === "corner" ? " · corner snap" :
+       aligned?.kind === "verified" ? " · verified source guide (draft only)" :
+       aligned?.kind === "straight" ? " · straight" : "")
     : "Release to apply to the draft.";
   const aim: Aim = { hit: null, valid, line, hint,
     marker: gesture.mode === "wall" && !("previous" in gesture) ? to : undefined };
@@ -252,13 +254,22 @@ function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 |
   return direct ?? fromAbove;
 }
 
-// Source walls are never returned: this explicitly targets editable local drafts.
+// All overlapping local draft targets are ordered by distance, with a stable
+// proposal ID tie-break. The caller may cycle them on repeated trigger presses.
+export function pickDraftWalls(state: BuildState, levelId: string | null,
+  ray: THREE.Ray): PlacedWall[] {
+  if (!levelId) return [];
+  const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
+  return state.walls.filter(wall => wall.levelId === levelId)
+    .map(wall => openingHost([wall],ray,floor))
+    .filter((hit): hit is NonNullable<typeof hit> => !!hit)
+    .sort((a,b) => a.distance-b.distance ||
+      a.wall.proposalId.localeCompare(b.wall.proposalId))
+    .map(hit => hit.wall);
+}
 export function pickDraftWall(state: BuildState, levelId: string | null,
   ray: THREE.Ray): PlacedWall | null {
-  if (!levelId) return null;
-  const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
-  return openingHost(state.walls.filter(wall => wall.levelId === levelId),
-    ray, floor)?.wall ?? null;
+  return pickDraftWalls(state,levelId,ray)[0] ?? null;
 }
 
 export function aimBuild(state: BuildState, levelId: string | null, sizes: BuildSizes, ray: THREE.Ray,
@@ -284,7 +295,8 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     if (!point) return { hit: null, hint: "Aim at the plan to place a point." };
     const hit: BuildHit = { kind: state.tool, levelId, point };
     if (!start) return { hit, marker: point,
-      hint: snap?.kind === "corner" ? "Place wall start · corner snap" : guide };
+      hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
+        snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
       const line = rectangle(start, point, sizes.ceilingHeightM ?? sizes.wallHeightM);
@@ -297,7 +309,9 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
       hint: valid
         ? "Place wall end · " + Math.round(length * 1000) + " mm" +
-          (snap?.kind === "corner" ? " · corner snap" : snap?.kind === "straight" ? " · straight" : "")
+          (snap?.kind === "corner" ? " · corner snap" :
+           snap?.kind === "verified" ? " · verified source guide (draft only)" :
+           snap?.kind === "straight" ? " · straight" : "")
         : "Wall length must be 50 mm to 200 m.",
     };
   }
