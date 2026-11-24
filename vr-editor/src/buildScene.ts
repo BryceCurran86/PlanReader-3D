@@ -8,6 +8,7 @@ import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanP
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
+import {wallAssembly,profileDetails} from "./wallProfiles.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -32,12 +33,14 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   const length = planLength(wall.start, wall.end);
   if (!Number.isFinite(length) || length < .05 || length > 200 || !Number.isFinite(wall.heightM) || wall.heightM < .1 || wall.heightM > 20) return group;
   const openings = (wall.openings ?? []).filter(o => openingFits(wall,o));
-  const thickness = .045, depth = .09;
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  if(profile.core==="masonry")return group;
+  const thickness = .045, depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
   const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
   function member(from:number,to:number,bottom:number,top:number) {
     from=Math.max(0,from);to=Math.min(length,to);bottom=Math.max(0,bottom);top=Math.min(wall.heightM,top);
     if(to-from<.001||top-bottom<.001)return;
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,depth),new THREE.MeshStandardMaterial({color:0xc99c65,roughness:.88}));
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,depth),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}));
     mesh.position.copy(atOffset(wall,(from+to)/2,(bottom+top)/2));
     mesh.rotation.y=angle;mesh.userData.illustrativeFraming=true;
     group.add(mesh);
@@ -66,22 +69,34 @@ export function illustrativeTimberFrame(wall: WallVisual) {
 
 export function displayWallDraft(wall: WallVisual) {
   const group = new THREE.Group();
-  const faces: number[] = [];
+  const faces: number[] = [],colors:number[]=[];
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  const length=planLength(wall.start,wall.end);
+  if(!Number.isFinite(length)||length<.001)return group;
+  const normal=new THREE.Vector3(-(wall.end[1]-wall.start[1])/length,0,(wall.end[0]-wall.start[0])/length);
+  const half=assembly.thicknessMm/2000;
+  const exterior=new THREE.Color(profile.outerColor),interior=new THREE.Color(0xeeeae1);
+  const left=assembly.exteriorSide==="left"?exterior:interior,rightColor=assembly.exteriorSide==="right"?exterior:interior;
   function panel(points: THREE.Vector3[], vertices: number[]) {
     for (const index of [0, 1, 2, 0, 2, 3]) vertices.push(...points[index].toArray());
   }
   function surface(from: number, to: number, bottom: number, top: number) {
     if (to <= from || top <= bottom) return;
-    panel([atOffset(wall, from, bottom), atOffset(wall, from, top),
-      atOffset(wall, to, top), atOffset(wall, to, bottom)], faces);
+    const p=[atOffset(wall,from,bottom),atOffset(wall,from,top),atOffset(wall,to,top),atOffset(wall,to,bottom)];
+    const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
+    function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
+    face(a,left);face([...b].reverse(),rightColor);
+    for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
+
   }
   function addMesh(vertices: number[], color: number, opacity: number, wallFace = false, doorId?: string) {
     if (!vertices.length) return;
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
+    if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-      color, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
+      color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
