@@ -52,7 +52,8 @@ export function AssemblyStudyPanel({controller}:Props){
      <button type="button" onClick={capture}>Capture comparison baseline</button>
      {baseline&&<button type="button" onClick={clear}>Clear baseline</button>}
     </div>
-    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(prior.total)} → {money(result.total)} · change {money(result.total-prior.total)}. Both totals may be partial; manual allowances remain fixed.</p>}
+    {baselineError&&<p role="alert">{baselineError}</p>}
+    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(hasPricedWork(prior)?prior.total:null)} → {money(summary.total)} · change {money(summary.delta)}. Both totals may be partial; manual allowances remain fixed.</p>}
     <details><summary>Trade breakdown</summary><ul>{summary.trades.map(t=><li key={t.trade}>{t.trade}: {money(t.cents)}{t.partial?" (partial)":""}</li>)}</ul></details>
     <details><summary>Quantities and separate rates</summary>
      <p>Enter local AUD ex-GST component rates, not bundled supply/install rates. Material rates apply to purchase quantities; labour rates apply to net quantities. Blank means unpriced; zero is an explicit zero allowance.</p>
