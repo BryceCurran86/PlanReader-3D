@@ -117,17 +117,23 @@ export function activeStart(state: BuildState, levelId: string | null) {
   return state.start && state.start.levelId === levelId ? state.start.point : null;
 }
 
-export function snappedPoint(point: PlanPoint): PlanPoint | null {
+export function millimetrePoint(point: PlanPoint): PlanPoint | null {
   return point.every(v => Number.isFinite(v) && Math.abs(v) <= 10000)
-    ? [snap(point[0]), snap(point[1])]
+    ? [Math.round(point[0]*1000)/1000,Math.round(point[1]*1000)/1000]
     : null;
+}
+export function snappedPoint(point: PlanPoint): PlanPoint | null {
+  const bounded = millimetrePoint(point);
+  return bounded ? [snap(bounded[0]),snap(bounded[1])] : null;
 }
 
 // Magnetic alignment is strictly for LOCAL draft wall placement. It does not
 // alter source/verified geometry or override any source authority checks.
-export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" };
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified";
+  witness?: string };
 export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
-export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis };
+export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+  verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
   levelId: string,
@@ -155,6 +161,27 @@ export function snapDraftWallPoint(
     }
   }
   if (nearest) return { point: [...nearest.point], kind: "corner" };
+  // Read-only, already verified source endpoints may GUIDE local preview placement.
+  // They are never promoted into source geometry or pricing authority.
+  const candidates = (options.verifiedAnchors ?? []).filter(candidate =>
+    candidate.objectId && candidate.point.length === 2 &&
+    candidate.point.every(v => Number.isFinite(v) && Math.abs(v) <= 10000) &&
+    planLength(raw, candidate.point) <= 0.20 &&
+    (!anchor || options.axis !== "horizontal" ||
+      Math.abs(candidate.point[1] - anchor[1]) <= 0.001) &&
+    (!anchor || options.axis !== "vertical" ||
+      Math.abs(candidate.point[0] - anchor[0]) <= 0.001))
+    .sort((a,b) => planLength(raw,a.point)-planLength(raw,b.point) ||
+      a.objectId.localeCompare(b.objectId));
+  const best = candidates[0];
+  // Do not choose arbitrarily between two distinct source endpoints
+  // when both are equidistant from the user's hand.
+  const second = candidates.find(candidate =>
+    !best || planLength(candidate.point,best.point) > 0.001);
+  if (best && (!second ||
+      planLength(raw,second.point) - planLength(raw,best.point) > 0.005)) {
+    return { point: [...best.point], kind: "verified", witness: best.objectId };
+  }
   if (anchor && snappedPoint(anchor)) {
     const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
     if (options.axis === "horizontal") return {
@@ -345,8 +372,8 @@ export function updateBuild(
     if (tool !== "wall" && tool !== "ceiling") return state;
     const hitLevel = action.kind === "drag" ? action.levelId : action.hit.levelId;
     if (hitLevel !== levelId || (action.kind === "place" && action.hit.kind !== tool)) return state;
-    const point = snappedPoint(action.kind === "drag" ? action.to : action.hit.point);
-    const start = action.kind === "drag" ? snappedPoint(action.from) : activeStart(state, levelId);
+    const point = millimetrePoint(action.kind === "drag" ? action.to : action.hit.point);
+    const start = action.kind === "drag" ? millimetrePoint(action.from) : activeStart(state, levelId);
     if (!point || (action.kind === "drag" && !start)) return state;
     if (!start) return { ...state, start: { levelId, point } };
     const heightM = tool === "wall" ? sizes.wallHeightM : sizes.ceilingHeightM ?? STARTING_SIZES.wallHeightM;
