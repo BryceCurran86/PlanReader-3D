@@ -55,6 +55,7 @@ import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
+import {reviewDimensions} from "./vrDesignReview";
 
 type Props = {
   manifest: SceneManifest;
@@ -85,6 +86,8 @@ type Props = {
   onStage: (stage: ConstructionStage) => void;
   layers:LayerOverrides;
   onLayers:(layers:LayerOverrides)=>void;
+  allDimensions:boolean;
+  onAllDimensions:(value:boolean)=>void;
   footprint: {
     box: FootprintBounds | null;
     projection: FootprintProjection | null;
@@ -225,7 +228,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -249,8 +252,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, layers, onLayers });
-  construction.current = { stage, onStage, layers, onLayers };
+  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions });
+  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -422,7 +425,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
           elevatedView:!!elevatedReturn,walkSpeed,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
-          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,
+          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
           radial,layersOpen,layers:construction.current.layers,
         });
       if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
@@ -504,6 +507,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
         if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
         if(choice.action==="dimensions"){dimensions=!dimensions;return;}
+        if(choice.action==="all-dimensions"){construction.current.onAllDimensions(!construction.current.allDimensions);return;}
         if(choice.action==="budget"){budgetOpen=!budgetOpen;budgetPage=0;return;}
         if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
         if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
@@ -1475,6 +1479,22 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let selectedLabel: THREE.Sprite | null = null;
     let draftDimension:THREE.Sprite|null=null,draftDimensionKey="";
     let lastLabelId: string | null = null;
+    const dimensionGroup=new THREE.Group();scene.add(dimensionGroup);
+    let dimensionsKey:readonly unknown[]=[];
+    function clearDimensions(){for(const child of [...dimensionGroup.children]){dimensionGroup.remove(child);if(child instanceof THREE.Sprite){child.material.map?.dispose();child.material.dispose();}}}
+    function refreshDimensions(){
+      const s=construction.current,visible=interaction.current.visibleIds,b=build.current.buildState,projection=resize.current.projection;
+      const currentLevel=interaction.current.level,sourceMoves=moveSettings.current.wallMoveState;
+      const key=[s.allDimensions,s.stage,s.layers,visible,b.walls,b.ceilings,currentLevel,projection,sourceMoves,!!elevatedReturn];
+      if(key.every((v,i)=>v===dimensionsKey[i]))return;dimensionsKey=key;clearDimensions();
+      if(!s.allDimensions)return;
+      // Suppress original dimensions when source moves or footprint projection are active.
+      const sourceVisibleIds=projection||sourceMoves?new Set<string>():visible;
+      const geometry=projection?{walls:b.walls.map(w=>projectWall(w,projection)),ceilings:b.ceilings.map(c=>projectCeiling(c,projection))}:b;
+      const entries=reviewDimensions(manifest,geometry,currentLevel,sourceVisibleIds).filter(d=>displaySurface(s.stage,d.kind==="wall"?undefined:d.kind));
+      // Cap simultaneous sprites for standalone headset memory; selected dimensions remain available separately.
+      for(const d of entries.slice(0,40)){const sprite=labelSprite(d.label);sprite.position.set(...d.position);sprite.scale.set(1.45,.29,1);dimensionGroup.add(sprite);}
+    }
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
     let lastPresenting=false;
@@ -1529,6 +1549,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         resizeDrag(startPointer.resize);
       }
       const currentStage = construction.current.stage;
+      refreshDimensions();
       const framing = currentStage === "framing" || currentStage === "rough-in";
       for (const obj of pickables) {
         const kind = obj.userData.surfaceKind;
@@ -1904,6 +1925,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         selectedLabel.material.dispose();
       }
       if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();}
+      clearDimensions();scene.remove(dimensionGroup);
       itemView.clear();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
