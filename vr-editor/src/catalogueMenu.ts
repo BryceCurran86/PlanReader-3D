@@ -34,7 +34,7 @@ export type MenuAction =
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
-  | { area: "wall-angle"; action:"step"|"pivot"; degrees?:number }
+  | { area: "wall-angle"; action:"step"|"pivot"|"connected"; degrees?:number }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
@@ -50,7 +50,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  rotationPivot?:WallRotationPivot;
+  rotationPivot?:WallRotationPivot; connectedRotation?:boolean;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
@@ -254,6 +254,7 @@ export function buildMenuLayout(
       {label:"Step " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
       {label:"Angle "+wallAngleDegrees(wall).toFixed(1)+"°",action:{area:"number",action:"start",field:"angle"}},
       {label:"Pivot "+(quest.rotationPivot??"start"),action:{area:"wall-angle",action:"pivot"}},
+      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"},active:quest.connectedRotation!==false},
       ...[-15,-5,-1,1,5,15].map(degrees=>({label:(degrees>0?"+":"")+degrees+"°",action:{area:"wall-angle",action:"step",degrees} as MenuAction})),
       {label:"Rotate 90°",action:{area:"wall-angle",action:"step",degrees:90}},
       {label:"Duplicate",action:edit("duplicate")},
