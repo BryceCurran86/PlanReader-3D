@@ -22,7 +22,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
@@ -45,6 +45,8 @@ export type QuestMenuState = {
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
+  elevatedView?:boolean; walkSpeed?:number;
+  multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
@@ -107,6 +109,7 @@ export function buildMenuLayout(
     return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 510,
       note: "Everything here is local draft review until an authenticated save.",
       helpLines: [
+        "Left stick: walk/strafe. Right stick: snap turn.",
         "Trigger: point, select, confirm or place.",
         "Choose Wall, pick start and end; a corner glows when snapped.",
         "Select a purple draft wall to open precision controls.",
@@ -114,6 +117,24 @@ export function buildMenuLayout(
         "Use Nudge for 50/100/250 mm adjustments.",
         "Grid and Axis change the next draft wall's alignment.",
       ] };
+  }
+  if (quest?.multiSelect && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
+    const count=quest.selectedCount??0;
+    const edit=(action:Extract<MenuAction,{area:"draft"}>["action"],direction?:Extract<MenuAction,{area:"draft"}>["direction"]):MenuAction=>({area:"draft",action,direction});
+    const controls:{label:string;action:MenuAction;disabled?:boolean}[]=[
+      {label:"Single select",action:questAction("multi-select")},
+      {label:"Clear selection",action:questAction("clear-group"),disabled:!count},
+      {label:"Magnetic "+(quest.magnetic===false?"off":"on"),action:questAction("magnetic")},
+      {label:"Step "+Math.round(quest.nudgeM*1000)+"mm",action:questAction("nudge-size")},
+      ...(["left","right","forward","back"] as const).map(direction=>({label:"Nudge "+direction,action:edit("nudge",direction),disabled:!count})),
+      {label:"Rotate group 90°",action:edit("rotate"),disabled:!count},
+      {label:"Duplicate group",action:edit("duplicate"),disabled:!count},
+      {label:quest.deleteArmed?"Confirm delete":"Delete group…",action:edit("delete"),disabled:!count},
+      {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
+      {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
+    ];
+    for(const [i,e] of controls.entries())add(e.label,20+(i%4)*235,105+Math.floor(i/4)*82,221,69,e.action,{disabled:e.disabled});
+    return {buttons,title:"MULTI-SELECT · "+count+" WALLS",width:WIDTH,height:105+Math.ceil(controls.length/4)*82+68,note:"Point at a local draft wall and trigger to add or remove it. Green walls are selected."};
   }
   // A selected local wall replaces the crowded toolbox with direct manipulation.
   if (quest?.selectedWall && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
@@ -152,6 +173,7 @@ export function buildMenuLayout(
       ({area:"draft",action,direction});
     const controls: {label:string; action:MenuAction; disabled?:boolean}[] = [
       {label:"Grab / Move",action:edit("move")},
+      {label:"Multi-select",action:questAction("multi-select")},
       {label:"Exact length",action:{area:"number",action:"start",field:"length"}},
       {label:"Exact height",action:{area:"number",action:"start",field:"height"}},
       {label:"Set X (start)",action:{area:"number",action:"start",field:"x"}},
@@ -256,13 +278,17 @@ export function buildMenuLayout(
   if (quest?.compact) {
     const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Build tools",action:questAction("compact")},
+      {label:"Multi-select",action:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
+      {label:"Magnetic "+(quest.magnetic===false?"off":"on"),action:questAction("magnetic")},
       {label:"Items",action:browse({kind:"groups"})},
       {label:"Next stage",action:questAction("next-stage")},
       {label:"Next level",action:questAction("next-floor")},
       {label:quest.teleport?"Exit teleport":"Teleport",action:questAction("teleport"),
         disabled:!quest.canTeleport},
       {label:"Save draft",action:questAction("save")},
-      {label:quest.overview?"Hide plan":"Plan view",action:questAction("overview")},
+      {label:quest.overview?"Hide plan":"Mini plan",action:questAction("overview")},
+      {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",action:questAction("elevated-view")},
+      {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",action:questAction("walk-speed")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:"Done",action:{area:"done"}},
@@ -278,10 +304,14 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      {label:"Multi-select",target:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
+      {label:"Magnetic "+(quest.magnetic===false?"off":"on"),target:questAction("magnetic")},
       {label:quest.teleport?"Exit teleport":"Teleport",target:questAction("teleport"),
         disabled:!quest.canTeleport},
       {label:"Save draft",target:questAction("save")},
       {label:quest.overview?"Hide plan":"Plan overview",target:questAction("overview")},
+      {label:quest.elevatedView?"Walkthrough":"3D bird’s-eye",target:questAction("elevated-view")},
+      {label:"Walk "+(quest.walkSpeed??1.2)+" m/s",target:questAction("walk-speed")},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
