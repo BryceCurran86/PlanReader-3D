@@ -1,7 +1,7 @@
 /** Local WebXR viewer navigation. No edits to scene geometry or measurement evidence. */
 export type Xz=[number,number];
 export type StickSource={handedness?:string;targetRayMode?:string;gamepad?:{mapping?:string;axes?:readonly number[]}|null};
-export type NavigationWall={start:Xz;end:Xz};
+export type NavigationWall={start:Xz;end:Xz;halfThickness?:number};
 export function standardThumbstick(source:StickSource|null|undefined):Xz{
  const a=source?.gamepad?.axes;
  // XR standard thumbstick axes are 2/3, never guess unknown mappings.
@@ -28,11 +28,15 @@ function segmentDistance(p:Xz,w:NavigationWall){
 export function collisionLimitedStep(from:Xz,delta:Xz,walls:readonly NavigationWall[],radius=.25):Xz{
  if(![...from,...delta,radius].every(Number.isFinite)||radius<=0)return [0,0];
  const steps=Math.max(1,Math.ceil(Math.hypot(...delta)/.05));
+ // Broad-phase: skip distant walls before checking each movement substep.
+ const minX=Math.min(from[0],from[0]+delta[0]),maxX=Math.max(from[0],from[0]+delta[0]);
+ const minZ=Math.min(from[1],from[1]+delta[1]),maxZ=Math.max(from[1],from[1]+delta[1]);
+ const nearby=walls.filter(w=>{const pad=radius+Math.max(0,w.halfThickness??0);return Math.max(w.start[0],w.end[0])+pad>=minX&&Math.min(w.start[0],w.end[0])-pad<=maxX&&Math.max(w.start[1],w.end[1])+pad>=minZ&&Math.min(w.start[1],w.end[1])-pad<=maxZ;});
  if(steps>100)return [0,0];
  let p:Xz=[...from];
- const clear=(q:Xz)=>walls.every(w=>{
+ const clear=(q:Xz)=>nearby.every(w=>{
   const old=segmentDistance(p,w),next=segmentDistance(q,w);
-  return next>=radius||next>old+1e-7;
+  return next>=radius+Math.max(0,w.halfThickness??0)||next>old+1e-7;
  });
  for(let i=0;i<steps;i++){
   const x=delta[0]/steps,z=delta[1]/steps;
@@ -55,4 +59,14 @@ export function navigationOffset(head:{x:number;y:number;z:number},delta:{x:numb
  const c=Math.cos(yaw),s=Math.sin(yaw);
  const x=head.x+delta.x,z=head.z+delta.z;
  return {position:{x:head.x-(c*x+s*z),y:-delta.y,z:head.z-(-s*x+c*z)},orientation:{x:0,y:Math.sin(yaw/2),z:0,w:Math.cos(yaw/2)}};
+}
+
+/** Compose rigid yaw transforms in a single stable base reference space. */
+export type NavOffset=ReturnType<typeof navigationOffset>;
+export const identityNavOffset=():NavOffset=>({position:{x:0,y:0,z:0},orientation:{x:0,y:0,z:0,w:1}});
+export function composeNavigationOffset(a:NavOffset,b:NavOffset):NavOffset{
+ const {y,w}=a.orientation,c=w*w-y*y,s=2*y*w;
+ const ay=y*b.orientation.w+w*b.orientation.y,aw=w*b.orientation.w-y*b.orientation.y;
+ const n=Math.hypot(ay,aw)||1;
+ return {position:{x:a.position.x+c*b.position.x+s*b.position.z,y:a.position.y+b.position.y,z:a.position.z-s*b.position.x+c*b.position.z},orientation:{x:0,y:ay/n,z:0,w:aw/n}};
 }

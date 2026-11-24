@@ -3,6 +3,8 @@ import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
 import type { OutlineEdit } from "./localOutline.ts";
+import {isWallAssembly,wallAssembly} from "./wallProfiles.ts";
+import type {WallAssembly} from "./wallProfiles.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -16,13 +18,13 @@ export const BUILD_TOOLS = [
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
-export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number };
+export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number; wallAssembly?:WallAssembly };
 export const STARTING_SIZES: BuildSizes = { wallHeightM: 2.4, widthM: 0.9, heightM: 2.1, ceilingHeightM: 2.4,
   windowWidthM: 1.2, windowHeightM: 1.05, windowSillM: 0.9 };
 export const MAX_DRAFT_WALLS = 25;
 
-export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[] };
-export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[] };
+export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[]; assembly?:WallAssembly };
+export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[]; assembly?:WallAssembly };
 export type CeilingDraft = {
   proposalId: string; scopeKey: string; levelId: string;
   start: PlanPoint; end: PlanPoint; heightM: number;
@@ -48,6 +50,7 @@ export type BuildAction =
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
+  | { kind: "set-wall-assembly"; proposalId:string; assembly:WallAssembly }
   | { kind: "edit-local-outline"; expected: string; edit: OutlineEdit }
   | { kind: "group-local-walls"; proposalIds: string[]; operation: "translate" | "rotate" | "delete" | "duplicate" | "height"; delta?: PlanPoint; copyIds?: string[]; heightMm?: number }
   | { kind: "delete-local-wall"; proposalId: string }
@@ -347,6 +350,11 @@ export function updateBuild(
     return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
       ceilings: state.ceilings });
   }
+  if(action.kind==="set-wall-assembly"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    if(!wall||!isWallAssembly(action.assembly))return state;
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?{...w,assembly:{...action.assembly}}:w),ceilings:state.ceilings});
+  }
   if(action.kind==="edit-local-outline"){
     if(!levelId)return state;
     const walls=state.walls.filter(w=>w.levelId===levelId&&w.scopeKey===scopeKey);
@@ -438,7 +446,7 @@ export function updateBuild(
     if (!validHeight(heightM)) return state;
     const shape = { scopeKey, proposalId: action.id, levelId, start, end: point, heightM };
     if (tool === "wall" && state.walls.length < MAX_DRAFT_WALLS && validWallLength(planLength(start, point))) {
-      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [] }] });
+      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [], ...(sizes.wallAssembly?{assembly:wallAssembly(sizes.wallAssembly)}:{}) }] });
     }
     if (tool === "ceiling" && state.ceilings.length < MAX_DRAFT_WALLS && validCeiling(start, point)) {
       return checkpoint(state, { walls: state.walls, ceilings: [...state.ceilings, shape] });

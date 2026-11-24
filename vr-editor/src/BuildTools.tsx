@@ -1,6 +1,8 @@
 import { BUILD_TOOLS, planLength, STARTING_SIZES } from "./buildPlacement";
 import type { BuildAction, BuildSizes, BuildState } from "./buildPlacement";
 import { OPENING_DRAG_TYPE } from "./constructionStages";
+import { WALL_PROFILES, defaultWallAssembly, wallAssembly, wallDimensionText } from "./wallProfiles";
+import type { WallProfileId } from "./wallProfiles";
 
 type Props = {
   state: BuildState;
@@ -25,7 +27,7 @@ type Props = {
 export function BuildTools({ state, sizes, levelId, layoutEnabled, onAction, onSizes, onReview,
   hint, catalogueOpen, onCatalogueToggle, canUndo, canRedo, onUndo, onRedo, onDone, busy, undoLabel }: Props) {
   const walls = state.walls.filter(wall => !levelId || wall.levelId === levelId);
-  function sizeInput(key: keyof BuildSizes, label: string) {
+  function sizeInput(key: Exclude<keyof BuildSizes,"wallAssembly">, label: string) {
     const mm = Math.round((sizes[key] ?? STARTING_SIZES[key] ?? sizes.wallHeightM) * 1000);
     return <label>{label}
       <input type="number" min={key === "windowSillM" ? 0 : 50} max={key.endsWith("idthM") ? 200000 : 20000}
@@ -70,6 +72,12 @@ export function BuildTools({ state, sizes, levelId, layoutEnabled, onAction, onS
     </div>
     <p className="build-hint" id="editor-instructions">{hint}</p>
     <div className="build-options">
+      <details open><summary>Wall construction · new walls</summary>
+        <label>Assembly <select value={wallAssembly(sizes.wallAssembly).profile} onChange={e=>onSizes({...sizes,wallAssembly:defaultWallAssembly(e.currentTarget.value as WallProfileId)})}>{WALL_PROFILES.map(p=><option key={p.id} value={p.id}>{p.label} · {p.thicknessMm} mm</option>)}</select></label>
+        <label>Overall thickness (mm) <input type="number" min={50} max={600} step={1} value={wallAssembly(sizes.wallAssembly).thicknessMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(Number.isInteger(n)&&n>=50&&n<=600)onSizes({...sizes,wallAssembly:{...wallAssembly(sizes.wallAssembly),thicknessMm:n}});}}/></label>
+        <label>Exterior side (looking along wall start → end) <select value={wallAssembly(sizes.wallAssembly).exteriorSide} onChange={e=>onSizes({...sizes,wallAssembly:{...wallAssembly(sizes.wallAssembly),exteriorSide:e.currentTarget.value==="right"?"right":"left"}})}><option value="left">Left</option><option value="right">Right</option></select></label>
+        <p>Nominal design assembly. Imported wall specifications must be verified; no structural certification.</p>
+      </details>
       <details>
         <summary>Placement sizes</summary>
         <div className="build-sizes">
@@ -86,9 +94,10 @@ export function BuildTools({ state, sizes, levelId, layoutEnabled, onAction, onS
         <summary>Draft walls ({walls.length})</summary>
         <ul>{walls.map((wall, index) => <li key={wall.proposalId}>
           <button type="button" onClick={() => onReview(wall.proposalId)}>
-            Review wall {index + 1} · {planLength(wall.start, wall.end).toFixed(2)} m
+            Review wall {index + 1} · {wallDimensionText(planLength(wall.start, wall.end),wall.heightM,wall.assembly)}
             {wall.openings.length > 0 && " · " + wall.openings.length + " openings"}
           </button>
+          <label>Assembly <select disabled={!layoutEnabled} value={wallAssembly(wall.assembly).profile} onChange={e=>onAction({kind:"set-wall-assembly",proposalId:wall.proposalId,assembly:defaultWallAssembly(e.currentTarget.value as WallProfileId)})}>{WALL_PROFILES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
         </li>)}</ul>
       </details>}
     </div>
