@@ -84,6 +84,7 @@ export function App() {
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
+  const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
   const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
@@ -645,7 +646,7 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
@@ -866,6 +867,7 @@ export function App() {
                 {Object.entries(VISUAL_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
               </select>
             </label>
+            <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
                 <option value="balanced">Balanced</option><option value="high">High fidelity</option>
