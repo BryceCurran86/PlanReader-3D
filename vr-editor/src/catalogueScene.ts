@@ -16,6 +16,7 @@ import { finishMesh, trimRun } from "./catalogueGeometry.ts";
 import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
 import { createDesignAssembly, createOpeningStyle } from "./extensionGeometry.ts";
 import { SITE_HOST_ID } from "./itemPlacement.ts";
+import {wallAssembly} from "./wallProfiles.ts";
 
 type WallRun = WallSection & { gaps: [number, number][] };
 type Opening = { start: PlanPoint; end: PlanPoint; bottom: number; top: number; size: OpeningSize;
@@ -29,6 +30,7 @@ export type CatalogueHost = {
   opening?: Opening;
   roofEdges?: RoofEdge[];
   ceilingDraft?: CeilingDraft;
+  halfThickness?:number;
 };
 
 export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint, heightM: number): CatalogueHost {
@@ -41,7 +43,7 @@ function xy(point: PlanPoint, y = 0) {
 
 export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): CatalogueHost[] {
   const hosts: CatalogueHost[] = [];
-  const face = group.children.find(child => child.userData.catalogueWallFace);
+  const face = group.children.find(child=>child.userData.catalogueMountFace) ?? group.children.find(child => child.userData.catalogueWallFace);
   const floorGaps: [number, number][] = [];
   const apertures: WallSection["apertures"] = [];
   const leaves = new Map(group.children.flatMap(child => child instanceof THREE.Mesh &&
@@ -73,7 +75,7 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
     hosts.push({ id: openingHostId(wall.proposalId, opening.openingId), target: "opening", mesh, opening: outline });
   }
   if (face instanceof THREE.Mesh) {
-    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face,
+    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
       run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
@@ -282,6 +284,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
         if (worktop) addHost({ id: worktopId(placement.id), target: "worktop", mesh: worktop });
         node = group;
       }
+      // Stored wall anchors remain on the design centreline. Mount to the selected physical face.
+      if(host.target==="wall"&&host.halfThickness)node.position.addScaledVector(normal,host.halfThickness);
       host.mesh.add(node);
       node.updateWorldMatrix(true, true);
       mounts.push(node);
@@ -344,7 +348,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
     const host = [...hosts.values()].find(entry => entry.id === hit.hostId);
     if (!host) return;
     const normal = new THREE.Vector3(...hit.normal).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(host.mesh.matrixWorld));
-    marker.position.copy(host.mesh.localToWorld(new THREE.Vector3(...hit.point))).addScaledVector(normal, 0.015);
+    marker.position.copy(host.mesh.localToWorld(new THREE.Vector3(...hit.point))).addScaledVector(normal, 0.015+(host.halfThickness??0));
     marker.quaternion.setFromUnitVectors(front, normal);
     marker.visible = true;
   }
