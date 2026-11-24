@@ -345,6 +345,35 @@ export function pickDraftWalls(state: BuildState, levelId: string | null,
       a.wall.proposalId.localeCompare(b.wall.proposalId))
     .map(hit => hit.wall);
 }
+/** Exact visible draft faces win; near misses use bounded magnetic tolerance.
+ * The previous hover receives a wider release band only when no exact face is hit. */
+export function magneticDraftWalls(state:BuildState,levelId:string|null,ray:THREE.Ray,previous:string|null=null,strength=.15):PlacedWall[]{
+ if(!levelId||!Number.isFinite(strength)||strength<0||strength>.4)return [];
+ const exact:{wall:PlacedWall;distance:number}[]=[],near:{wall:PlacedWall;miss:number;distance:number}[]=[];
+ const floor=ray.intersectPlane(PLAN,new THREE.Vector3());
+ for(const wall of state.walls){
+  if(wall.levelId!==levelId)continue;
+  const length=planLength(wall.start,wall.end);if(length<.05)continue;
+  const normal=new THREE.Vector3(wall.end[1]-wall.start[1],0,wall.start[0]-wall.end[0]).normalize();
+  const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,new THREE.Vector3(wall.start[0],0,wall.start[1]));
+  const hit=ray.intersectPlane(plane,new THREE.Vector3());
+  const tolerance=strength*(wall.proposalId===previous?1.6:1);
+  if(hit){
+   const {offset}=projectOnWall(wall,[hit.x,hit.z]);
+   const miss=Math.hypot(Math.max(0,-offset,offset-length),Math.max(0,-hit.y,hit.y-wall.heightM));
+   if(miss<1e-7){exact.push({wall,distance:ray.origin.distanceToSquared(hit)});continue;}
+   if(miss<=tolerance&&strength>0){near.push({wall,miss,distance:ray.origin.distanceToSquared(hit)});continue;}
+  }
+  if(floor&&strength>0){
+   const projection=projectOnWall(wall,[floor.x,floor.z]);
+   const miss=Math.hypot(projection.distance,Math.max(0,-projection.offset,projection.offset-length));
+   if(miss<=tolerance)near.push({wall,miss,distance:ray.origin.distanceToSquared(floor)});
+  }
+ }
+ if(exact.length)return exact.sort((a,b)=>a.distance-b.distance||a.wall.proposalId.localeCompare(b.wall.proposalId)).map(x=>x.wall);
+ return near.sort((a,b)=>Number(b.wall.proposalId===previous)-Number(a.wall.proposalId===previous)||a.miss-b.miss||a.distance-b.distance||a.wall.proposalId.localeCompare(b.wall.proposalId)).map(x=>x.wall);
+}
+
 export function pickDraftWall(state: BuildState, levelId: string | null,
   ray: THREE.Ray): PlacedWall | null {
   return pickDraftWalls(state,levelId,ray)[0] ?? null;
