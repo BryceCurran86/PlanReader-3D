@@ -10,6 +10,7 @@ export const BUILD_TOOLS = [
   { id: "ceiling", label: "Ceiling" },
   { id: "move", label: "Move" },
   { id: "stretch", label: "Stretch" },
+  { id: "opening-move", label: "Slide opening" },
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
@@ -207,6 +208,7 @@ export function snapDraftWallPoint(
 export function buildGuide(state: BuildState, levelId: string | null) {
   if (!levelId) return "Choose a source level on the desktop to start building.";
   if (!state.tool) return "Choose Wall or Ceiling, then drag across the plan or pick two points.";
+  if (state.tool === "opening-move") return "Point near a local door/window opening, hold trigger and slide it along its host wall.";
   if (state.tool === "move") return "Drag a draft wall or ceiling to move it.";
   if (state.tool === "stretch") return "Drag a wall end or ceiling corner to resize it.";
   if (state.tool === "ceiling") return activeStart(state, levelId)
