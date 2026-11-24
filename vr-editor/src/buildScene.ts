@@ -9,6 +9,7 @@ import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
+import type {WallTextureLibrary} from "./wallTextures.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -81,9 +82,10 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   return group;
 }
 
-export function displayWallDraft(wall: WallVisual) {
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) {
   const group = new THREE.Group();
-  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[];
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[];
+  const texture=textures?.get(wallAssembly(wall.assembly).profile);
   const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
   const length=planLength(wall.start,wall.end);
   if(!Number.isFinite(length)||length<.001)return group;
@@ -101,6 +103,16 @@ export function displayWallDraft(wall: WallVisual) {
     const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
     function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
     face([...a].reverse(),left);face(b,rightColor);
+    if(texture&&profile.role==="external"){
+      const side=assembly.exteriorSide==="left"?1:-1;
+      const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
+      const ordered=side===1?[...points].reverse():points;
+      panel(ordered,exteriorFaces);
+      for(const index of [0,1,2,0,2,3]){
+        const v=ordered[index],along=(v.x-wall.start[0])*(wall.end[0]-wall.start[0])/length+(v.z-wall.start[1])*(wall.end[1]-wall.start[1])/length;
+        exteriorUV.push(along/texture.repeat[0],v.y/texture.repeat[1]);
+      }
+    }
     for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
 
   }
@@ -137,6 +149,12 @@ export function displayWallDraft(wall: WallVisual) {
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xeeeae1, 1, true);
+  if(texture&&exteriorFaces.length){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
+    g.computeVertexNormals();
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    mesh.userData.exteriorTexture=true;group.add(mesh);
+  }
   // Centre-plane witness retains the existing catalogue anchor convention.
   if(mountFaces.length){
     const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
