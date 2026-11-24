@@ -38,6 +38,7 @@ import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
+import {thumbstickSector} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -357,12 +358,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let panelPinned = false;
     let helpOpen = false;
     let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
-    let lastMenuDraw=0;
-    const closeTools=()=>{toolsOpen=false;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    let lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
+    let stickNeedsNeutral=false;
+    const closeTools=()=>{toolsOpen=false;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
-      if(toolsOpen){radial=true;lastMenuDraw=0;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
+      if(toolsOpen){radial=true;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
       else closeTools();
     }
     let budgetOpen=false,budgetPage=0;
@@ -1132,14 +1134,37 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const xrGestures: (DraftGesture | null)[] = [null, null];
     const xrResize: (ResizeDrag | null)[] = [null, null];
     const xrPress: ({ context: PointerContext; menu: string | null; wallKey?:string|null } | null)[] = [null, null];
+    const menuConsumed=[false,false];
+    function menuTarget(layout:ReturnType<typeof menuLayout>){
+      if(!toolsOpen)return null;
+      if(layout.radial){
+        const right=inputSources.find(s=>s?.handedness==="right");
+        const i=thumbstickSector(standardThumbstick(right));
+        if(i>=0)return {index:i,action:layout.buttons[i]?.disabled?null:layout.buttons[i]?.action??null};
+      }
+      return buildOverlay.menuHit(raycaster,layout);
+    }
+    function activateMenu(choice:MenuAction){
+      menuAction(choice);
+      if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
+    }
     function menuKey(layout: ReturnType<typeof menuLayout>) {
-      const hit = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
+      const hit=menuTarget(layout);
       return hit ? JSON.stringify(hit.action) : null;
     }
     function beginXrGesture(index: number) {
+      menuConsumed[index]=false;
       aimController(controllers[index]);
       const layout = menuLayout("");
       buildOverlay.sizeMenu(layout);
+      if(toolsOpen){
+        menuConsumed[index]=true;
+        // The first trigger press activates one button. Release never needs to hit it again.
+        if(inputSources[index]?.handedness!=="left"||!inputSources.some(s=>s?.handedness==="right")){
+          const hit=menuTarget(layout);if(hit?.action)activateMenu(hit.action);
+        }
+        return;
+      }
       const menu = menuKey(layout);
       xrPress[index] = { context: pointerContext(), menu,wallKey:!menu&&magnetic&&!build.current.buildState.tool&&!itemControls.current.active&&!resize.current.enabled&&!teleportSettings.current.teleportMode?targetWallAim()?.target.key??null:undefined };
       if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
@@ -1160,6 +1185,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const selectEnd0 = () => selectEnd(0), selectEnd1 = () => selectEnd(1);
     const trigger=(index:number)=>{
       if (!renderer.xr.isPresenting) return;
+      if(menuConsumed[index]){menuConsumed[index]=false;return;}
       lastController = index;
       aimController(controllers[index]);
       const layout = menuLayout("");
@@ -1180,15 +1206,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
-      const menuChoice = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
-      if (menuChoice) {
-        if (menuChoice.action) {
-          const choice=menuChoice.action;
-          menuAction(choice);
-          if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
-        }
-        return;
-      }
+      if(toolsOpen){const hit=menuTarget(layout);if(hit?.action)activateMenu(hit.action);return;}
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
@@ -1287,9 +1305,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
-      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||layersOpen||wallProfilesOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      if(!renderer.xr.isPresenting||!dt||toolsOpen||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||layersOpen||wallProfilesOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
       const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
-      const move=standardThumbstick(left),turn=snapTurn(standardThumbstick(right)[0],turnArmed);
+      const move=standardThumbstick(left),rightStick=standardThumbstick(right);
+      if(stickNeedsNeutral){if(Math.hypot(...rightStick)<.2)stickNeedsNeutral=false;else return;}
+      const turn=snapTurn(rightStick[0],turnArmed);
       turnArmed=turn.armed;
       if(!move[0]&&!move[1]&&!turn.angle)return;
       const space=renderer.xr.getReferenceSpace();
@@ -1395,8 +1415,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
-      toolsOpen=false;renderer.shadowMap.enabled=false;
-      reportTool("Left grip opens or hides tools. Right trigger edits. Left stick walks.");
+      toolsOpen=false;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
+      reportTool("Left grip opens tools. Aim or use right stick, then trigger. Left stick walks when tools are closed.");
       elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
@@ -1415,7 +1435,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       stageMenuOpen = false;
       xrGestures.fill(null);
       xrResize.fill(null);
-      xrPress.fill(null);
+      xrPress.fill(null);menuConsumed.fill(false);
       inputSources[0] = null;
       inputSources[1] = null;
       squeezeTracker.clear();
@@ -1567,16 +1587,20 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(layout){
           buildOverlay.sizeMenu(layout);
           const left=inputSources.findIndex(s=>s?.handedness==="left"&&s.gripSpace);
-          if(layout.radial&&left>=0&&grips[left].visible)buildOverlay.positionHandMenu(renderer.xr.getCamera(),grips[left]);
-          else buildOverlay.positionMenu(renderer.xr.getCamera(),true);
+          const pose=layout.radial?"radial":"panel";
+          if(menuPose!==pose){
+            if(layout.radial&&left>=0&&grips[left].visible)buildOverlay.positionHandMenu(renderer.xr.getCamera(),grips[left]);
+            else buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);
+            menuPose=pose;lastMenuHover=-2;
+          }
         }
         const isPointer = (source: PcVrInputSource | null | undefined) => source?.targetRayMode === "tracked-pointer";
-        const favoured = isPointer(inputSources[lastController]) ? lastController :
+        const favoured = !toolsOpen&&isPointer(inputSources[lastController]) ? lastController :
           inputSources.findIndex(source => isPointer(source) && source?.handedness === "right");
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
-        const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
+        const hover=active>=0&&layout?menuTarget(layout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
         if(canLock&&magnetic){
@@ -1593,7 +1617,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         const held = xrGestures.findIndex(gesture => gesture !== null);
         if (held >= 0) aimController(controllers[held]);
-        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen &&
+        const ready = active >= 0 && !toolsOpen && !hover && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen &&
           !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
@@ -1608,7 +1632,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(layout&&now-lastMenuDraw>=100){buildOverlay.drawMenu(layout, hover?.index ?? -1);lastMenuDraw=now;}
+        if(layout&&(hover?.index??-1)!==lastMenuHover||layout&&now-lastMenuDraw>=100){
+          buildOverlay.drawMenu(layout,hover?.index??-1);lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+        }
       } else {
         hoveredDraftId=null;hoveredSourceId=null;wallLock=null;
         const drag = startPointer?.gesture;

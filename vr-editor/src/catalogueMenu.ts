@@ -120,10 +120,10 @@ export function buildMenuLayout(
     ];
     radialTools.forEach((entry,i)=>{
       const angle=i*Math.PI/4-Math.PI/2;
-      add(entry.label,330+Math.cos(angle)*225-76,345+Math.sin(angle)*225-34,152,68,entry.action,{disabled:entry.disabled});
+      add(entry.label,330+Math.cos(angle)*218-76,330+Math.sin(angle)*218-34,152,68,entry.action,{disabled:entry.disabled});
     });
-    add("Close",254,310,152,70,questAction("hide-tools"));
-    return {buttons,title:"QUICK TOOLS",width:660,height:660,note:"Left grip · close / reopen",radial:true};
+    add("Close",254,295,152,70,questAction("hide-tools"));
+    return {buttons,title:"QUICK TOOLS",width:660,height:660,note:"Aim or right stick · trigger",radial:true};
   }
   if(quest?.wallProfilesOpen){
     const a=wallAssembly(quest.selectedWall?.assembly??quest.nextWallAssembly);
