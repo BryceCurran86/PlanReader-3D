@@ -646,7 +646,8 @@ export function App() {
                 teleportMode={mode === "teleport" && canTeleport}
                 teleportAvailable={canTeleport} onTeleportToggle={toggleTeleport}
                 onTeleportMessage={setTeleportMessage}
-                onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft} />
+                onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
+                onReviewLocalWall={reviewWall} />
             </Suspense>
           </div>
           <div className="viewer-footer">
