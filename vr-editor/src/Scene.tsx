@@ -31,6 +31,7 @@ import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
 import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
 import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
+import { createVrPlanOverview } from "./vrPlanOverview";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
@@ -334,6 +335,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let panelPinned = false;
     let helpOpen = false;
     let compactMenu = true;
+    let overviewOpen=false;
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
@@ -372,7 +374,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
-          teleport:teleportSettings.current.teleportMode,
+          teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
         });
     }
     function menuAction(choice: MenuAction) {
@@ -444,6 +446,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           snapAxis = axes[(axes.indexOf(snapAxis)+1)%axes.length];
         }
         if (choice.action === "compact") compactMenu=!compactMenu;
+        if (choice.action === "overview") overviewOpen=!overviewOpen;
         if (choice.action === "teleport") {
           if(teleportSettings.current.teleportAvailable)
             teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
@@ -609,6 +612,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
     const buildOverlay = createBuildOverlay(scene);
+    const planOverview=createVrPlanOverview(scene,manifest);
     const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
     let lastBuildWalls = build.current.buildState.walls;
@@ -1261,6 +1265,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
+      planOverview.update(build.current.buildState,interaction.current.level,
+        interaction.current.visibleIds,renderer.xr.isPresenting?renderer.xr.getCamera():camera,
+        renderer.xr.isPresenting&&overviewOpen);
       gizmo.show(resize.current.enabled ? resize.current.box : null);
       if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
         raycaster.setFromCamera(mouse, camera);
@@ -1607,6 +1614,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       });
       roughTile.dispose();
       buildOverlay.dispose();
+      planOverview.dispose();
       presentationFloor.geometry.dispose();
       presentationFloor.material.dispose();
       sunlight.shadow.dispose();
