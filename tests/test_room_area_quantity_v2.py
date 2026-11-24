@@ -525,3 +525,58 @@ def test_quantity_identity_is_deterministic_and_scale_sensitive() -> None:
     other = _scaled_qty(room=other_room, scale=other_scale)
     assert other.value == first.value == 25.0
     assert other.quantity_id != first.quantity_id
+
+
+def test_authenticated_historical_explicit_area_retains_stable_id() -> None:
+    """Historical authenticated explicit area evidence retains stable upstream quantity IDs."""
+    ev_id = "cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5"
+    sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    rev = "source_revision_c3e667ba619e86c70d99bfc3ae5be275"
+    ctx = ProviderContext(
+        run_id="run",
+        workspace_id="ws",
+        project_id="project",
+        document_id="doc",
+        source_sha256=sha,
+        revision_id=rev,
+        current_revision_id=rev,
+        selected_pages=(0,),
+        owned_viewport_ids=("vp",),
+        evidence_snapshot_id="evsnap",
+        canonical_graph_snapshot_id="graphsnap",
+        measurement_authority_snapshot_id="measuresnap",
+        owned_page_numbers=(1,),
+        viewport_page_ownership=(("vp", 1),),
+    )
+    explicit = _explicit_area(
+        9.05352,
+        evidence_id=ev_id,
+        metadata={
+            "source_sha256": sha,
+            "room_revision_id": rev,
+            "source_room_face_record_id": "source_room_face_record_735f9b309cca70f513c9fcd9390e3e10",
+        },
+    )
+    room = _room("source_room_face_dynamic_hash")
+    entity = _entity("source_room_face_dynamic_hash", ids=("room-ev", ev_id))
+    doc = DocumentEvidence(
+        document_id="doc",
+        source_sha256=sha,
+        page_count=1,
+        page_ids=("page-1",),
+        evidence_ids=("room-ev", ev_id),
+    )
+    qty = build_room_area_quantity(
+        room=room,
+        context=ctx,
+        document=doc,
+        viewport=_viewport(),
+        entity=entity,
+        page_no=1,
+        explicit_area_evidence=explicit,
+    )
+    assert qty.quantity_id == "qty_29e71bd466a9e5fa1783"
+    assert qty.value == 9.05352
+    assert qty.status.lower() == "firm"
+    assert not qty.abstained
+

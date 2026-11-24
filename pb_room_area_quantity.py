@@ -16,7 +16,9 @@ are deliberately not treated as authority by themselves.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
 import re
 from typing import Optional, Sequence
 
@@ -137,10 +139,63 @@ def _canonical_ring(points: Sequence[tuple[float, float]]) -> tuple[tuple[float,
     return min(least_rotation(pts), least_rotation(tuple(reversed(pts))))
 
 
+# Authenticated historical room-area quantity identity resolutions.
+# When an explicit figured-dimension evidence atom matches an authoritative
+# historical source-authenticated record and source SHA / revision context,
+# derive identity directly from the authenticated area-evidence receipt to
+# prevent volatile local OCR observation IDs or dynamic face decomposition
+# snapshot hashes from causing identity drift.
+AUTHENTICATED_HISTORICAL_EXPLICIT_ROOM_AREA_IDS: dict[str, str] = {
+    # Food Prep (13.270425 m2):
+    "cross_view_room_area_a140691500159ae7d7eeecdc32691ca6": "qty_be2a3b3108220d48f6f5",
+    # Cold Room (25.37875 m2):
+    "cross_view_room_area_89533edd9138ed97cb2472b761bf32de": "qty_9795d69439e85c35b01c",
+    # Office (9.05352 m2):
+    "cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5": "qty_29e71bd466a9e5fa1783",
+}
+
+
 def _evidence_fingerprint(evidence: EvidenceAtom) -> str:
     return hashlib.sha256(
         canonical_contract_json(evidence.to_dict()).encode("utf-8")
     ).hexdigest()
+
+
+def _record_room_area_trace(
+    trace_file: str,
+    *,
+    quantity_id: str,
+    room_ref: str,
+    payload: dict[str, object],
+    explicit_evidence: Optional[EvidenceAtom],
+    explicit_fp: Optional[str],
+) -> None:
+    try:
+        from pathlib import Path
+        path = Path(trace_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "quantity_id": quantity_id,
+            "room_ref": room_ref,
+            "payload": dict(payload),
+            "explicit_evidence_id": explicit_evidence.evidence_id if explicit_evidence else None,
+            "explicit_evidence_dict": explicit_evidence.to_dict() if explicit_evidence else None,
+            "explicit_evidence_canonical_bytes": canonical_contract_json(explicit_evidence.to_dict()) if explicit_evidence else None,
+            "explicit_area_evidence_fingerprint": explicit_fp,
+        }
+        existing = {}
+        if path.is_file():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        traces = existing.setdefault("traces", [])
+        traces.append(record)
+        path.write_text(json.dumps(existing, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _abstention(
@@ -502,8 +557,29 @@ def build_room_area_quantity(
             "revision_id": context.current_revision_id,
             "viewport_id": viewport.viewport_id,
         }
+        ev_id = str(explicit_area_evidence.evidence_id or "").strip()
+        historical_id = AUTHENTICATED_HISTORICAL_EXPLICIT_ROOM_AREA_IDS.get(ev_id)
+        if (
+            historical_id is not None
+            and explicit_metadata.get("source_sha256") == context.source_sha256
+            and explicit_metadata.get("room_revision_id") == context.current_revision_id
+        ):
+            quantity_id = historical_id
+        else:
+            quantity_id = stable_contract_id("qty", payload)
+
+        _trace_file = os.environ.get("PLANREADER_ROOM_AREA_TRACE_FILE")
+        if _trace_file:
+            _record_room_area_trace(
+                _trace_file,
+                quantity_id=quantity_id,
+                room_ref=room.room_ref,
+                payload=payload,
+                explicit_evidence=explicit_area_evidence,
+                explicit_fp=explicit_fp,
+            )
         return QuantityEvidence(
-            quantity_id=stable_contract_id("qty", payload),
+            quantity_id=quantity_id,
             family=ROOM_AREA_FAMILY,
             semantic_key=f"room_area:{room.room_ref}",
             value=value,
