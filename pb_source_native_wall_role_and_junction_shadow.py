@@ -36,6 +36,11 @@ from pb_wall_layer_evidence_shadow import is_explicit_wall_layer_name
 
 CONTACT_PT = 0.03  # representation contact only; not the 2.5 pt production snap
 _AXIS_PT = 2.0
+# The title block sits in the lowest 18 percent of the DISPLAYED sheet (the raster tracer cuts the same band).
+TITLE_BAND_START_FRACTION = 0.82
+# Rotations whose native-to-display mapping is established by the production frame seam (pb_native_page_frame).
+_ESTABLISHED_PAGE_ROTATIONS = (0, 90)
+_PAGE_ORIGIN_TOL_PT = 1e-6  # same tolerance as pb_native_page_frame
 _EXCLUSION_LAYER_TOKENS = frozenset({
     "dim", "dimension", "hatch", "furniture", "furn", "roof", "eave", "eaves",
     "site", "title", "text", "grid", "viewport", "border", "frame", "hatching",
@@ -81,6 +86,52 @@ def _is_diagonal_row(row: Mapping[str, Any]) -> bool:
     return False
 
 
+def _in_title_band(
+    row: Mapping[str, Any],
+    page_bounds: tuple[float, float, float, float] | None,
+    page_rotation: object,
+) -> bool | None:
+    """Is the row's lowest DISPLAYED edge inside the title band? True, False, or None when it cannot be told.
+
+    ``row["rect"]`` is NATIVE page space (``page.get_drawings()``: unrotated) while ``page_bounds`` is the DISPLAY
+    rect (``page.rect``: rotated) and ``page_rotation`` is the page's effective /Rotate. A native point (x, y) is
+    displayed at (x, y) at /Rotate 0 and at (native_height - y, x) at /Rotate 90, so the displayed lowest edge of
+    a native rect is its ``y1`` upright and its ``x1`` at /Rotate 90. The rule is the lowest edge only.
+
+    False also means "nothing to evaluate": no bounds, or no readable rect (the test is skipped, as it always was).
+    None means the row is placed but the frame is not established: ``page_rotation`` is anything but an exact int
+    0 or 90 (``None``, 180, 270, ``True``, ``90.0``, ``"90"``), or at /Rotate 90 the bounds are not finite, not
+    anchored at the page origin or not positive in height (``native_page_frame`` requires the same). Nothing is
+    guessed in the wrong space.
+    """
+    if page_bounds is None:
+        return False
+    rotation = (
+        page_rotation
+        if type(page_rotation) is int and page_rotation in _ESTABLISHED_PAGE_ROTATIONS
+        else None
+    )
+    try:
+        rect = row.get("rect")
+        edge = float(rect.x1 if rotation == 90 else rect.y1) if rect is not None else None
+    except (TypeError, ValueError, AttributeError):
+        edge = None
+    if edge is None:
+        return False
+    if rotation is None:
+        return None
+    x0_page, y0_page, x1_page, y1_page = page_bounds
+    height = y1_page - y0_page
+    if rotation == 90 and not (
+        all(math.isfinite(value) for value in (x0_page, y0_page, x1_page, y1_page))
+        and abs(x0_page) <= _PAGE_ORIGIN_TOL_PT
+        and abs(y0_page) <= _PAGE_ORIGIN_TOL_PT
+        and height > 0
+    ):
+        return None
+    return bool(height > 0 and edge >= y0_page + TITLE_BAND_START_FRACTION * height)
+
+
 def classify_native_path_role(
     row: Mapping[str, Any] | object,
     path_index: int,
@@ -88,8 +139,16 @@ def classify_native_path_role(
     exterior_owner_indices: frozenset[int] = frozenset(),
     attached_indices: frozenset[int] = frozenset(),
     page_bounds: tuple[float, float, float, float] | None = None,
+    page_rotation: int | None = None,
 ) -> str:
-    """Typed source role for one original path. Unique-or-abstain; never size-only."""
+    """Typed source role for one original path. Unique-or-abstain; never size-only.
+
+    ``page_bounds`` (``page.rect``, DISPLAY space) switches the title-band test on; ``page_rotation`` (the page's
+    effective /Rotate, e.g. ``pb_native_page_frame.effective_pdf_rotation``) says how the NATIVE row rect maps into
+    it. With bounds but without an established rotation the band cannot be placed: typed negatives that do not
+    depend on it (green, dashed, excluded layer, diagonal bridge) keep their role and a row that would take a wall
+    role is ``ROLE_UNKNOWN`` instead. No bounds means no band test.
+    """
     if not isinstance(row, Mapping):
         return ROLE_UNKNOWN
     fill, stroke = row.get("fill"), row.get("color")
@@ -102,26 +161,21 @@ def classify_native_path_role(
         token.startswith("dim") for token in tokens
     ):
         return ROLE_EXCLUSION
-    if page_bounds is not None:
-        try:
-            rect = row.get("rect")
-            y1 = float(rect.y1) if rect is not None else None
-        except (TypeError, ValueError, AttributeError):
-            y1 = None
-        if y1 is not None:
-            _, y0_page, _, y1_page = page_bounds
-            height = y1_page - y0_page
-            if height > 0 and y1 >= y0_page + 0.82 * height:
-                return ROLE_EXCLUSION
+    in_band = _in_title_band(row, page_bounds, page_rotation)
+    if in_band:
+        return ROLE_EXCLUSION
     if _is_diagonal_row(row):
         return ROLE_DIAGONAL_BRIDGE
     if path_index in exterior_owner_indices:
-        return ROLE_EXTERIOR_OUTER_FACE
-    if path_index in attached_indices:
-        return ROLE_ATTACHED_STRUCTURE
-    if is_explicit_wall_layer_name(str(row.get("layer") or "")):
-        return ROLE_INTERNAL_WALL
-    return ROLE_UNKNOWN
+        role = ROLE_EXTERIOR_OUTER_FACE
+    elif path_index in attached_indices:
+        role = ROLE_ATTACHED_STRUCTURE
+    elif is_explicit_wall_layer_name(str(row.get("layer") or "")):
+        role = ROLE_INTERNAL_WALL
+    else:
+        return ROLE_UNKNOWN
+    # A placed row on a page whose frame is not established might be title block: it may not become a wall role.
+    return ROLE_UNKNOWN if in_band is None else role
 
 
 @dataclass(frozen=True)
@@ -219,8 +273,13 @@ def identify_source_wall_junctions_and_roles(
     page_index: int,
     trace: ExternalFootprintTrace | None = None,
     page_bounds: tuple[float, float, float, float] | None = None,
+    page_rotation: int | None = None,
 ) -> SourceWallJunctionReport:
-    """Wall/junction/opening identity on the original engine. Never a second footprint."""
+    """Wall/junction/opening identity on the original engine. Never a second footprint.
+
+    ``page_bounds`` and ``page_rotation`` are passed to ``classify_native_path_role``: display-space bounds and
+    the page's effective /Rotate, which together place the title band against the native rows.
+    """
     filled, _other = _collect_strips(drawings)
     pairs = _collect_stroke_pair_strips(drawings)
     heavy = _collect_source_heavy_stroke_strips(drawings)
@@ -269,6 +328,7 @@ def identify_source_wall_junctions_and_roles(
             exterior_owner_indices=frozenset(exterior_owners),
             attached_indices=frozenset(attached),
             page_bounds=page_bounds,
+            page_rotation=page_rotation,
         )
         if role == ROLE_DIAGONAL_BRIDGE:
             rejected_diagonals += 1

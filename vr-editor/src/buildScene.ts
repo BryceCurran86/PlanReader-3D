@@ -4,8 +4,9 @@ import {
   openingFits, planLength, projectOnWall, snappedPoint, snapDraftWallPoint, validWallLength,
   draftShape, validCeiling, validEditedWall,
 } from "./buildPlacement.ts";
-import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallVisual } from "./buildPlacement.ts";
+import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
@@ -98,9 +99,11 @@ export function displayCeilingDraft(draft: CeilingDraft) {
 
 type DragDraw = { mode: "wall" | "ceiling"; from: PlanPoint };
 type DragEdit = { mode: "move" | "stretch"; from: PlanPoint; anchor: PlanPoint; stretchStart?: boolean };
+type DragOpening = {kind:"opening";mode:"opening-move";from:PlanPoint;
+  previous:PlacedWall;openingId:string};
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-))) & { levelId: string; fromController?: PlanPoint };
+)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -123,21 +126,36 @@ function ceilingHost(ceilings: CeilingDraft[], ray: THREE.Ray, levelId: string) 
   return closest;
 }
 
-export function beginDraftGesture(state: BuildState, levelId: string | null, ray: THREE.Ray): DraftGesture | null {
+export function beginDraftGesture(state: BuildState, levelId: string | null, ray: THREE.Ray,
+  options: WallSnapOptions = {}): DraftGesture | null {
   if (!levelId || !state.tool) return null;
   // A level controller ray can hit a vertical wall but never the floor.
   // Recognise that direct wall contact as a valid draft manipulation target.
-  const directWall = state.tool === "move" || state.tool === "stretch"
+  const directWall = state.tool === "move" || state.tool === "stretch" ||
+    state.tool === "opening-move"
     ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
   const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
   if (!from) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
-    const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from)?.point : from;
-    return activeStart(state, levelId) || !alignedStart ? null : { mode, from: alignedStart, levelId };
+    const aligned = mode === "wall" ? snapDraftWallPoint(state, levelId, from, null, options) : null;
+    const alignedStart = aligned?.point ?? from;
+    return activeStart(state, levelId) || !alignedStart ? null :
+      { mode, from: alignedStart, levelId, precisionSource:aligned?.kind==="verified" };
   }
-  if (mode !== "move" && mode !== "stretch") return null;
+  if (mode !== "move" && mode !== "stretch" && mode !== "opening-move") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
+  if(mode==="opening-move"){
+    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor);
+    if(!host)return null;
+    const projection=projectOnWall(host.wall,host.point);
+    const opening=host.wall.openings.filter(item=>
+      Math.abs(item.offsetM+item.widthM/2-projection.offset)<item.widthM/2+0.12)
+      .sort((a,b)=>Math.abs(a.offsetM+a.widthM/2-projection.offset)-
+        Math.abs(b.offsetM+b.widthM/2-projection.offset))[0];
+    return opening?{kind:"opening",mode,from,levelId,previous:host.wall,
+      openingId:opening.openingId}:null;
+  }
   const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor);
   const ceiling = ceilingHost(state.ceilings, ray, levelId);
   const nearestWall = wall && (mode === "move" || Math.min(
@@ -160,7 +178,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
 }
 
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
-  state?: BuildState, controllerPosition?: PlanPoint) {
+  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}) {
   // With Quest controllers, manipulation should follow the hand in X/Z, not
   // require aiming at an imaginary ground plane throughout the drag.
   const current = "previous" in gesture && gesture.fromController && controllerPosition
@@ -170,7 +188,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   if (!current) return null;
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   const aligned = gesture.mode === "wall" && !("previous" in gesture) && state && floor
-    ? snapDraftWallPoint(state, gesture.levelId, [floor.x, floor.z], gesture.from) : null;
+    ? snapDraftWallPoint(state, gesture.levelId, [floor.x, floor.z], gesture.from, options) : null;
   const to = aligned?.point ?? current;
   const delta = planLength(gesture.from, to);
   if (delta < 0.045) return null;
@@ -185,7 +203,25 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
       line = rectangle(from, to, sizes.ceilingHeightM ?? sizes.wallHeightM);
       line.push(line[0]);
     }
-    action = { kind: "drag", levelId, from, to, id: "" };
+    action = { kind: "drag", levelId, from, to, id: "",
+      precisionSource:gesture.precisionSource===true || aligned?.kind==="verified" };
+  } else if (gesture.kind === "opening") {
+    const {previous,openingId,from}=gesture;
+    const opening=previous.openings.find(item=>item.openingId===openingId);
+    if(!opening)return null;
+    const length=planLength(previous.start,previous.end);
+    if(length<0.05)return null;
+    const direction:[number,number]=[
+      (previous.end[0]-previous.start[0])/length,
+      (previous.end[1]-previous.start[1])/length];
+    const along=(to[0]-from[0])*direction[0]+(to[1]-from[1])*direction[1];
+    const offsetMm=Math.round((opening.offsetM+along)*20)*50;
+    const changed=exactDraftOpening(previous,openingId,"offset",offsetMm);
+    valid=!!changed;
+    const nextOpening=(changed??previous).openings.find(item=>item.openingId===openingId)!;
+    line=openingOutline(changed??previous,nextOpening);
+    action={kind:"exact-local-opening",proposalId:previous.proposalId,openingId,
+      field:"offset",valueMm:offsetMm};
   } else if (gesture.kind === "wall") {
     const { previous, mode, from, anchor, stretchStart } = gesture;
     const moving = stretchStart ? previous.start : previous.end;
@@ -214,9 +250,13 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
   const hint = !valid ? "Size is invalid or an opening would no longer fit."
+    : gesture.mode === "opening-move" ?
+      "Release to slide draft opening along its host wall."
     : gesture.mode === "wall" && !("previous" in gesture)
     ? "Release to place · " + Math.round(delta * 1000) + " mm" +
-      (aligned?.kind === "corner" ? " · corner snap" : aligned?.kind === "straight" ? " · straight" : "")
+      (aligned?.kind === "corner" ? " · corner snap" :
+       aligned?.kind === "verified" ? " · verified source guide (draft only)" :
+       aligned?.kind === "straight" ? " · straight" : "")
     : "Release to apply to the draft.";
   const aim: Aim = { hit: null, valid, line, hint,
     marker: gesture.mode === "wall" && !("previous" in gesture) ? to : undefined };
@@ -251,15 +291,35 @@ function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 |
   return direct ?? fromAbove;
 }
 
-export function aimBuild(state: BuildState, levelId: string | null, sizes: BuildSizes, ray: THREE.Ray): Aim {
+// All overlapping local draft targets are ordered by distance, with a stable
+// proposal ID tie-break. The caller may cycle them on repeated trigger presses.
+export function pickDraftWalls(state: BuildState, levelId: string | null,
+  ray: THREE.Ray): PlacedWall[] {
+  if (!levelId) return [];
+  const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
+  return state.walls.filter(wall => wall.levelId === levelId)
+    .map(wall => openingHost([wall],ray,floor))
+    .filter((hit): hit is NonNullable<typeof hit> => !!hit)
+    .sort((a,b) => a.distance-b.distance ||
+      a.wall.proposalId.localeCompare(b.wall.proposalId))
+    .map(hit => hit.wall);
+}
+export function pickDraftWall(state: BuildState, levelId: string | null,
+  ray: THREE.Ray): PlacedWall | null {
+  return pickDraftWalls(state,levelId,ray)[0] ?? null;
+}
+
+export function aimBuild(state: BuildState, levelId: string | null, sizes: BuildSizes, ray: THREE.Ray,
+  options: WallSnapOptions = {}): Aim {
   const guide = buildGuide(state, levelId);
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
-  if (state.tool === "move" || state.tool === "stretch") {
+  if (state.tool === "move" || state.tool === "stretch" || state.tool === "opening-move") {
     const edit = beginDraftGesture(state, levelId, ray);
     if (!edit || !("previous" in edit)) return { hit: null, hint: guide };
     const { previous } = edit;
-    const marker = state.tool === "move" ? edit.from : edit.kind === "wall" ?
+    const marker = state.tool === "move" || edit.kind === "opening" ?
+      edit.from : edit.kind === "wall" ?
       edit.stretchStart ? previous.start : previous.end : undefined;
     return { hit: null, marker, hint: guide };
   }
@@ -268,12 +328,14 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     if ((ceiling ? state.ceilings : state.walls).length >= MAX_DRAFT_WALLS) return { hit: null, hint: guide };
     const start = activeStart(state, levelId);
     const snap = state.tool === "wall" && floor
-      ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start) : null;
+      ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start, options) : null;
     const point = snap?.point ?? (floor && snappedPoint([floor.x, floor.z]));
     if (!point) return { hit: null, hint: "Aim at the plan to place a point." };
-    const hit: BuildHit = { kind: state.tool, levelId, point };
+    const hit: BuildHit = { kind: state.tool, levelId, point,
+      precisionSource:snap?.kind==="verified" };
     if (!start) return { hit, marker: point,
-      hint: snap?.kind === "corner" ? "Place wall start · corner snap" : guide };
+      hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
+        snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
       const line = rectangle(start, point, sizes.ceilingHeightM ?? sizes.wallHeightM);
@@ -286,7 +348,9 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
       hint: valid
         ? "Place wall end · " + Math.round(length * 1000) + " mm" +
-          (snap?.kind === "corner" ? " · corner snap" : snap?.kind === "straight" ? " · straight" : "")
+          (snap?.kind === "corner" ? " · corner snap" :
+           snap?.kind === "verified" ? " · verified source guide (draft only)" :
+           snap?.kind === "straight" ? " · straight" : "")
         : "Wall length must be 50 mm to 200 m.",
     };
   }
@@ -342,6 +406,27 @@ export function createBuildOverlay(scene: THREE.Scene) {
   outline.frustumCulled = false;
   outline.visible = false;
   scene.add(outline);
+  // Local-only 3D moving-wall outline: shows where the entire wall will land
+  // before release, including height, without moving any source-backed meshes.
+  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(15),3);
+  const ghostGeometry=new THREE.BufferGeometry().setAttribute("position",ghostPositions);
+  const ghost=new THREE.Line(ghostGeometry,new THREE.LineBasicMaterial({
+    color:0x75f7db,transparent:true,opacity:0.9,depthTest:false}));
+  ghost.frustumCulled=false;
+  ghost.renderOrder=18;
+  ghost.visible=false;
+  scene.add(ghost);
+  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number}|null){
+    ghost.visible=!!shape;
+    if(!shape)return;
+    const {start,end,heightM}=shape;
+    [[start[0],0.035,start[1]],[end[0],0.035,end[1]],
+      [end[0],heightM,end[1]],[start[0],heightM,start[1]],
+      [start[0],0.035,start[1]]].forEach((point,i)=>
+      ghostPositions.setXYZ(i,point[0],point[1],point[2]));
+    ghostPositions.needsUpdate=true;
+    ghostGeometry.setDrawRange(0,5);
+  }
 
   const previousHead = new THREE.Vector3();
   const previousFacing = new THREE.Vector3();
@@ -349,13 +434,18 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const facing = new THREE.Vector3();
   const right = new THREE.Vector3();
   let drawn = "";
-  function positionMenu(camera: THREE.Camera) {
+  function positionMenu(camera: THREE.Camera, pinned = false, force = false) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
     facing.y = 0;
     if (facing.lengthSq() < 0.01) return;
     facing.normalize();
-    if (menu.visible && previousHead.distanceToSquared(head) <= 0.36 && previousFacing.dot(facing) > 0.75) return;
+    // Pinned is world-locked during editing, but auto-recentres if the user
+    // walks too far away and would otherwise lose the control surface.
+    if (!force && pinned && menu.visible && menu.position.distanceTo(head) < 2.25) return;
+    if (!force && !pinned && menu.visible &&
+      previousHead.distanceToSquared(head) <= 0.36 &&
+      previousFacing.dot(facing) > 0.75) return;
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
@@ -399,6 +489,18 @@ export function createBuildOverlay(scene: THREE.Scene) {
       context.textAlign = "center";
       context.fillText(layout.subtitle, layout.width / 2, 105, 560);
       context.textAlign = "left";
+    }
+    for (const section of layout.sections ?? []) {
+      context.fillStyle = "#96e6dd";
+      context.font = "bold 24px sans-serif";
+      context.fillText(section.label, 20, section.y, layout.width - 40);
+    }
+    if (layout.helpLines) {
+      context.font = "bold 27px sans-serif";
+      layout.helpLines.forEach((line,index) => {
+        context.fillStyle = index%2===0 ? "#f0fbfc" : "#b9d5d8";
+        context.fillText(line, 28, 95+index*44, layout.width-56);
+      });
     }
     for (const [index, button] of layout.buttons.entries()) {
       const highlight = index === hover || button.active;
@@ -454,7 +556,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim,
+  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

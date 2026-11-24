@@ -1,4 +1,6 @@
 import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
+import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
+import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -8,6 +10,7 @@ export const BUILD_TOOLS = [
   { id: "ceiling", label: "Ceiling" },
   { id: "move", label: "Move" },
   { id: "stretch", label: "Stretch" },
+  { id: "opening-move", label: "Slide opening" },
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
@@ -32,7 +35,7 @@ export type BuildState = DraftGeometry & {
 };
 export const EMPTY_BUILD: BuildState = { tool: null, start: null, walls: [], ceilings: [], history: [] };
 export type BuildHit =
-  | { kind: "wall" | "ceiling"; levelId: string; point: PlanPoint }
+  | { kind: "wall" | "ceiling"; levelId: string; point: PlanPoint; precisionSource?:boolean }
   | { kind: "opening"; levelId: string; proposalId: string; point: PlanPoint };
 export type BuildAction =
   | { kind: "tool"; tool: BuildTool }
@@ -41,7 +44,13 @@ export type BuildAction =
   | { kind: "saved"; proposalId: string }
   | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
-  | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string };
+  | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
+      precisionSource?:boolean }
+  | { kind: "delete-local-wall"; proposalId: string }
+  | { kind: "duplicate-local-wall"; proposalId: string; id: string }
+  | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
+  | { kind: "exact-local-opening"; proposalId: string; openingId: string;
+      field: OpeningField; valueMm: number };
 
 const EPSILON = 0.000001;
 const HOST_TOLERANCE_M = 0.22;
@@ -110,37 +119,78 @@ export function activeStart(state: BuildState, levelId: string | null) {
   return state.start && state.start.levelId === levelId ? state.start.point : null;
 }
 
-export function snappedPoint(point: PlanPoint): PlanPoint | null {
+export function millimetrePoint(point: PlanPoint): PlanPoint | null {
   return point.every(v => Number.isFinite(v) && Math.abs(v) <= 10000)
-    ? [snap(point[0]), snap(point[1])]
+    ? [Math.round(point[0]*1000)/1000,Math.round(point[1]*1000)/1000]
     : null;
+}
+export function snappedPoint(point: PlanPoint): PlanPoint | null {
+  const bounded = millimetrePoint(point);
+  return bounded ? [snap(bounded[0]),snap(bounded[1])] : null;
 }
 
 // Magnetic alignment is strictly for LOCAL draft wall placement. It does not
 // alter source/verified geometry or override any source authority checks.
-export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" };
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified";
+  witness?: string };
+export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
+export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+  verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
   levelId: string,
   raw: PlanPoint,
   anchor: PlanPoint | null = null,
+  options: WallSnapOptions = {},
 ): DraftWallSnap | null {
-  const grid = snappedPoint(raw);
-  if (!grid) return null;
+  if (!snappedPoint(raw)) return null;
+  const step = options.gridM ?? 0.05;
+  const gridRound = (value: number) => Math.round(Math.round(value / step) * step * 100) / 100;
+  const grid: PlanPoint = [gridRound(raw[0]), gridRound(raw[1])];
   let nearest: { point: PlanPoint; distance: number } | null = null;
   // Prefer exact junctions over ambiguous coordinate alignment.
   for (const wall of state.walls) {
     if (wall.levelId !== levelId) continue;
     for (const endpoint of [wall.start, wall.end]) {
       const distance = planLength(raw, endpoint);
-      if (distance <= 0.20 && (!nearest || distance < nearest.distance)) {
+      const axis = options.axis ?? "auto";
+      const axisAligned = !anchor || axis === "auto" || axis === "free" ||
+        (axis === "horizontal" && Math.abs(endpoint[1] - anchor[1]) <= 0.001) ||
+        (axis === "vertical" && Math.abs(endpoint[0] - anchor[0]) <= 0.001);
+      if (axisAligned && distance <= 0.20 && (!nearest || distance < nearest.distance)) {
         nearest = { point: endpoint, distance };
       }
     }
   }
   if (nearest) return { point: [...nearest.point], kind: "corner" };
+  // Read-only, already verified source endpoints may GUIDE local preview placement.
+  // They are never promoted into source geometry or pricing authority.
+  const candidates = (options.verifiedAnchors ?? []).filter(candidate =>
+    candidate.objectId && candidate.point.length === 2 &&
+    candidate.point.every(v => Number.isFinite(v) && Math.abs(v) <= 10000) &&
+    planLength(raw, candidate.point) <= 0.20 &&
+    (!anchor || options.axis !== "horizontal" ||
+      Math.abs(candidate.point[1] - anchor[1]) <= 0.001) &&
+    (!anchor || options.axis !== "vertical" ||
+      Math.abs(candidate.point[0] - anchor[0]) <= 0.001))
+    .sort((a,b) => planLength(raw,a.point)-planLength(raw,b.point) ||
+      a.objectId.localeCompare(b.objectId));
+  const best = candidates[0];
+  // Do not choose arbitrarily between two distinct source endpoints
+  // when both are equidistant from the user's hand.
+  const second = candidates.find(candidate =>
+    !best || planLength(candidate.point,best.point) > 0.001);
+  if (best && (!second ||
+      planLength(raw,second.point) - planLength(raw,best.point) > 0.005)) {
+    return { point: [...best.point], kind: "verified", witness: best.objectId };
+  }
   if (anchor && snappedPoint(anchor)) {
     const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
+    if (options.axis === "horizontal") return {
+      point: [grid[0], anchor[1]], kind: "straight" };
+    if (options.axis === "vertical") return {
+      point: [anchor[0], grid[1]], kind: "straight" };
+    if (options.axis === "free") return { point: grid, kind: "grid" };
     // Orthogonal guide holds when the pointer is close to horizontal/vertical,
     // but not at the origin where accidental zero-length walls are likely.
     if (Math.hypot(dx, dz) > 0.20) {
@@ -158,6 +208,7 @@ export function snapDraftWallPoint(
 export function buildGuide(state: BuildState, levelId: string | null) {
   if (!levelId) return "Choose a source level on the desktop to start building.";
   if (!state.tool) return "Choose Wall or Ceiling, then drag across the plan or pick two points.";
+  if (state.tool === "opening-move") return "Point near a local door/window opening, hold trigger and slide it along its host wall.";
   if (state.tool === "move") return "Drag a draft wall or ceiling to move it.";
   if (state.tool === "stretch") return "Drag a wall end or ceiling corner to resize it.";
   if (state.tool === "ceiling") return activeStart(state, levelId)
@@ -196,6 +247,44 @@ export function draftShape<T extends CeilingDraft>(
 export function validEditedWall(wall: PlacedWall) {
   return validWallLength(planLength(wall.start, wall.end)) && validHeight(wall.heightM) &&
     wall.openings.every(opening => openingFits(wall, opening));
+}
+
+// Reversible draft-only edits: callers must dispatch an "adjust" action with
+// the original object reference, which is checked against the current scope.
+export function translatedDraftWall(wall: PlacedWall, dx: number, dz: number): PlacedWall | null {
+  const start = snappedPoint([wall.start[0] + dx, wall.start[1] + dz]);
+  const end = snappedPoint([wall.end[0] + dx, wall.end[1] + dz]);
+  if (!start || !end) return null;
+  const edited = { ...wall, start, end };
+  return validEditedWall(edited) ? edited : null;
+}
+
+// Large spatial arrow actions are relative to the user's current Quest view,
+// then constrained to the nearest plan axis for construction-friendly nudges.
+export function viewRelativeNudge(
+  direction: "left" | "right" | "forward" | "back",
+  facing: PlanPoint, stepM: number,
+): PlanPoint | null {
+  if (!Number.isFinite(stepM) || stepM <= 0 ||
+      !facing.every(Number.isFinite) || Math.hypot(...facing) < 0.001) return null;
+  const forward: PlanPoint = Math.abs(facing[0]) > Math.abs(facing[1])
+    ? [Math.sign(facing[0]), 0] : [0, Math.sign(facing[1])];
+  const right: PlanPoint = [-forward[1], forward[0]];
+  const delta = direction === "forward" ? forward :
+    direction === "back" ? [-forward[0], -forward[1]] :
+    direction === "right" ? right : [-right[0], -right[1]];
+  return [delta[0] * stepM, delta[1] * stepM];
+}
+
+export function rotatedDraftWall(wall: PlacedWall): PlacedWall | null {
+  const cx = (wall.start[0] + wall.end[0]) / 2;
+  const cz = (wall.start[1] + wall.end[1]) / 2;
+  const rotate = (point: PlanPoint): PlanPoint | null =>
+    snappedPoint([cx - (point[1] - cz), cz + (point[0] - cx)]);
+  const start = rotate(wall.start), end = rotate(wall.end);
+  if (!start || !end) return null;
+  const edited = { ...wall, start, end };
+  return validEditedWall(edited) ? edited : null;
 }
 
 function sameShape(a: CeilingDraft, b: CeilingDraft) {
@@ -243,6 +332,37 @@ export function updateBuild(
     return checkpoint(state, { walls: state.walls,
       ceilings: state.ceilings.map(item => item === previous ? ceiling : item) });
   }
+  if (action.kind === "exact-local-wall" || action.kind === "exact-local-opening") {
+    const previous = state.walls.find(wall => wall.proposalId === action.proposalId &&
+      wall.scopeKey === scopeKey && wall.levelId === levelId);
+    if (!previous) return state;
+    const next = action.kind === "exact-local-wall"
+      ? exactDraftWall(previous, action.field, action.valueMm)
+      : exactDraftOpening(previous, action.openingId, action.field, action.valueMm);
+    if (!next || JSON.stringify(next) === JSON.stringify(previous)) return state;
+    return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
+      ceilings: state.ceilings });
+  }
+  if (action.kind === "delete-local-wall") {
+    const wall = state.walls.find(item => item.proposalId === action.proposalId &&
+      item.scopeKey === scopeKey && item.levelId === levelId);
+    if (!wall) return state;
+    return checkpoint(state, { walls: state.walls.filter(item => item !== wall),
+      ceilings: state.ceilings });
+  }
+  if (action.kind === "duplicate-local-wall") {
+    const wall = state.walls.find(item => item.proposalId === action.proposalId &&
+      item.scopeKey === scopeKey && item.levelId === levelId);
+    if (!wall || state.walls.length >= MAX_DRAFT_WALLS || !action.id ||
+      state.walls.some(item => item.proposalId === action.id)) return state;
+    const shifted = translatedDraftWall(wall, 0.5, 0);
+    if (!shifted) return state;
+    const copy: PlacedWall = { ...shifted, proposalId: action.id,
+      openings: shifted.openings.map((opening, index) => ({
+        ...opening, openingId: action.id + "-opening-" + index,
+      })) };
+    return checkpoint(state, { walls: [...state.walls, copy], ceilings: state.ceilings });
+  }
   if (action.kind === "saved") {
     const keep = (wall: PlacedWall) => wall.proposalId !== action.proposalId;
     return { ...state, walls: state.walls.filter(keep), start: null,
@@ -255,8 +375,11 @@ export function updateBuild(
     if (tool !== "wall" && tool !== "ceiling") return state;
     const hitLevel = action.kind === "drag" ? action.levelId : action.hit.levelId;
     if (hitLevel !== levelId || (action.kind === "place" && action.hit.kind !== tool)) return state;
-    const point = snappedPoint(action.kind === "drag" ? action.to : action.hit.point);
-    const start = action.kind === "drag" ? snappedPoint(action.from) : activeStart(state, levelId);
+    const precisionSource=action.kind==="drag" ? action.precisionSource===true :
+      ("precisionSource" in action.hit && action.hit.precisionSource===true);
+    const roundPoint=precisionSource ? millimetrePoint : snappedPoint;
+    const point = roundPoint(action.kind === "drag" ? action.to : action.hit.point);
+    const start = action.kind === "drag" ? roundPoint(action.from) : activeStart(state, levelId);
     if (!point || (action.kind === "drag" && !start)) return state;
     if (!start) return { ...state, start: { levelId, point } };
     const heightM = tool === "wall" ? sizes.wallHeightM : sizes.ceilingHeightM ?? STARTING_SIZES.wallHeightM;
