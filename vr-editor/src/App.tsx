@@ -643,7 +643,9 @@ export function App() {
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
-                teleportMode={mode === "teleport" && canTeleport} onTeleportMessage={setTeleportMessage}
+                teleportMode={mode === "teleport" && canTeleport}
+                teleportAvailable={canTeleport} onTeleportToggle={toggleTeleport}
+                onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft} />
             </Suspense>
           </div>
