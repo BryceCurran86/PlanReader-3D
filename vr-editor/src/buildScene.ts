@@ -508,7 +508,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
     facing.y = 0;
-    if (facing.lengthSq() < 0.01) return;
+    if (facing.lengthSq() < 0.01) facing.set(0,0,-1);
     facing.normalize();
     // Pinned is world-locked during editing, but auto-recentres if the user
     // walks too far away and would otherwise lose the control surface.
@@ -519,14 +519,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
-    menu.position.copy(head).addScaledVector(facing, 1.3).addScaledVector(right, 0.32);
-    menu.position.y -= 0.38;
+    menu.position.copy(head).addScaledVector(facing, 1.0).addScaledVector(right, -0.58);
+    menu.position.y -= 0.62;
     menu.lookAt(head);
     menu.updateMatrixWorld();
     menu.visible = true;
   }
   function sizeMenu(layout: MenuLayout) {
-    const width = layout.width / 1030, height = layout.height / 1030;
+    const width = layout.width / 1450, height = layout.height / 1450;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
       menu.updateMatrixWorld();
