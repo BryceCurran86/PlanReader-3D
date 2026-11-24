@@ -32,7 +32,7 @@ import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalo
 import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
 import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import { createVrPlanOverview } from "./vrPlanOverview";
-import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset } from "./vrStationaryNavigation";
+import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset, navigationWallFace } from "./vrStationaryNavigation";
 import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
@@ -1254,14 +1254,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     let collisionKey:readonly unknown[]=[];let collisionWalls:NavigationWall[]=[];
     function cachedNavigationWalls(){
-      const key=[interaction.current.visibleIds,resize.current.projection,build.current.buildState.walls,build.current.buildLevel,moveSettings.current.wallMoveState];
+      const stage=construction.current.stage,layers=construction.current.layers;
+      const key=[interaction.current.visibleIds,resize.current.projection,build.current.buildState.walls,build.current.buildLevel,moveSettings.current.wallMoveState,stage,layers];
       if(key.every((v,i)=>v===collisionKey[i]))return collisionWalls;
       collisionKey=key;collisionWalls=[];
       const walls=collisionWalls;
       const sourceMoves=new Map((moveSettings.current.wallMoveState?safeWallMoves(moveSettings.current.wallMoveState,manifest):[]).map(m=>[m.objectId,m]));
         for(const row of manifest.objects){
           const g=row.geometry;
-          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
+          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!navigationWallFace(g,interaction.current.visibleIds.has(row.objectId)&&displaySurface(stage,undefined)))continue;
           const projection=resize.current.projection;
           const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
           const move=sourceMoves.get(row.objectId);
@@ -1270,6 +1271,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         for(const raw of build.current.buildState.walls){
           if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"))continue;
           const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
           const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
           if(length<.05)continue;
