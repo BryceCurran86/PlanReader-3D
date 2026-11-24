@@ -5,6 +5,7 @@ import {saveVrReview,restoreVrReview} from "../src/vrDraftSave.ts";
 import {vrDraftTakeoff,localIndicativeWallCost} from "../src/vrDraftTakeoff.ts";
 import {buildMenuLayout,EMPTY_ITEM_BROWSER} from "../src/catalogueMenu.ts";
 import {scopeKey} from "../src/reviewDraft.ts";
+import {overviewSegments} from "../src/vrPlanOverview.ts";
 
 const scene={scope:{
  workspaceId:"test-workspace",projectId:"test-project",documentId:"test-document",
@@ -92,4 +93,21 @@ test("non-source placements retain 50mm rounding while explicit verified snap ke
    kind:"wall",levelId:"ground",point:[1.127,0.018],precisionSource:true},id:"point-1"},
    key,"ground",STARTING_SIZES);
  assert.deepEqual(precise.start.point,[1.127,0.018]);
+});
+
+test("read-only Quest overhead plan uses visible source segments and separate local draft segments",()=>{
+  const source={...scene,objects:[
+    {objectId:"verified",objectType:"wall",levelId:"ground",renderState:"verified",
+      unresolvedIssues:[],geometry:{kind:"wallFace",start:[0,1],end:[2,1],heightM:2.4}},
+    {objectId:"blocked",objectType:"wall",levelId:"upper",renderState:"review",
+      unresolvedIssues:["unverified"],geometry:{kind:"wallLine",start:[3,3],end:[4,4]}},
+  ]};
+  const segments=overviewSegments(source,build,"ground",new Set(["verified"]));
+  assert.equal(segments.length,2);
+  assert.equal(segments[0].source,true);
+  assert.equal(segments[0].verified,true);
+  assert.equal(segments[1].source,false);
+  assert.equal(overviewSegments(source,build,"upper",new Set(["verified"])).length,0);
+  const visible=overviewSegments(source,build,"upper",new Set(["blocked"]));
+  assert.equal(visible[0].verified,false);
 });
