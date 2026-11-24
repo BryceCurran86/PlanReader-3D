@@ -372,6 +372,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       } else if (choice.area === "draft") {
         const wall = selectedDraftWall();
         if (!wall) { selectedDraftId=null; deleteArmed=false; return; }
+        if (choice.action === "move" || choice.action === "stretch") {
+          // Selecting a draft wall opens the edit tray; picking Grab or Stretch
+          // switches straight into the existing verified trigger-drag workflow.
+          // This never targets a signed/source wall.
+          const tool = choice.action;
+          selectedDraftId=null;
+          deleteArmed=false;
+          build.current.onBuildAction({kind:"tool",tool});
+          reportTool(tool === "move" ?
+            "Hold trigger on the purple wall and move your hand; release to apply." :
+            "Aim at a draft wall endpoint, hold trigger and stretch; release to apply.");
+          return;
+        }
         if (choice.action === "delete") {
           if (!deleteArmed) { deleteArmed=true; reportTool("Pull Confirm delete to remove this local draft wall."); }
           else {
