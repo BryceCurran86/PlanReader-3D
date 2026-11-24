@@ -11,9 +11,10 @@ This authority composes existing source-owned facts only:
 
 On the same sheet one authenticated finish mark must lie wholly within the
 finished floor polygon in the same native viewport. The attached room area
-supplies the value. Separate sheets use the existing figured-dimension and
-physical correspondence evidence. Label and text-block matches on their own
-only identify candidates for review.
+supplies the value even when the figures come from a separate sheet. Existing
+finish marks on the dimension sheet use the figured-dimension and physical
+correspondence evidence. Label and text-block matches on their own only
+identify candidates for review.
 """
 from __future__ import annotations
 
@@ -1326,27 +1327,13 @@ class CrossViewFloorFinishProducer:
                         )
                     )
 
-        for area_record in area_records:
-            floor = _matching_floor(self._floors, area_record)
-            if floor is None:
-                expected = _expected_floor_id(
-                    document_id=area_record.area_evidence.document_id,
-                    physical_room_id=area_record.physical_room_id,
-                )
-                unresolved.add(expected)
-                continue
-            box = _dimension_box(area_record)
-            if box is None:
-                unresolved.add(floor.canonical_floor_id)
-                continue
-
-            native_floor = None
-            if floor.page_id == area_record.source_dimension_page_id:
-                native_floor = _same_sheet_floor_polygon(floor)
-                if native_floor is None:
-                    unresolved.add(floor.canonical_floor_id)
-                    continue
-
+        def candidates_on_page(
+            page_id: str,
+            dimension_box: Sequence[float],
+            *,
+            native_floor: Polygon | None,
+            viewport_id: str | None,
+        ) -> list[tuple[SourceMaterialOccurrenceRecord, SourceMaterialDefinitionRecord]]:
             candidates: list[
                 tuple[
                     SourceMaterialOccurrenceRecord,
@@ -1355,7 +1342,7 @@ class CrossViewFloorFinishProducer:
             ] = []
             for occurrence in _occurrences_on_page(
                 occurrence_results,
-                page_id=area_record.source_dimension_page_id,
+                page_id=page_id,
             ):
                 if occurrence.semantic_finish not in _FLOOR_FINISH_SEMANTICS:
                     continue
@@ -1364,11 +1351,11 @@ class CrossViewFloorFinishProducer:
                     continue
                 if native_floor is not None:
                     if (
-                        occurrence.viewport_id != floor.viewport_id
+                        occurrence.viewport_id != viewport_id
                         or not native_floor.covers(geometry_box(*mark_box))
                     ):
                         continue
-                elif not _bbox_fully_inside(mark_box, box):
+                elif not _bbox_fully_inside(mark_box, dimension_box):
                     continue
                 definition_result = material_authority.resolve_definition(
                     SourceMaterialDefinitionSelector(
@@ -1392,6 +1379,39 @@ class CrossViewFloorFinishProducer:
                 ):
                     continue
                 candidates.append((occurrence, definition))
+            return candidates
+
+        for area_record in area_records:
+            floor = _matching_floor(self._floors, area_record)
+            if floor is None:
+                expected = _expected_floor_id(
+                    document_id=area_record.area_evidence.document_id,
+                    physical_room_id=area_record.physical_room_id,
+                )
+                unresolved.add(expected)
+                continue
+            box = _dimension_box(area_record)
+            if box is None:
+                unresolved.add(floor.canonical_floor_id)
+                continue
+
+            dimension_page = area_record.source_dimension_page_id
+            same_sheet = floor.page_id == dimension_page
+            native_floor = _same_sheet_floor_polygon(floor) if same_sheet else None
+            if same_sheet and native_floor is None:
+                unresolved.add(floor.canonical_floor_id)
+                continue
+            candidates = candidates_on_page(
+                dimension_page, box, native_floor=native_floor, viewport_id=floor.viewport_id,
+            )
+            if not candidates and not same_sheet:
+                # The attached area identifies the same floor independently.
+                # The mark on that floor's sheet is owned by its native polygon.
+                native_floor = _same_sheet_floor_polygon(floor)
+                if native_floor is not None:
+                    candidates = candidates_on_page(
+                        floor.page_id, box, native_floor=native_floor, viewport_id=floor.viewport_id,
+                    )
 
             binding_mode = "dimension_box"
             support_source_partition_id = ""
@@ -1402,8 +1422,9 @@ class CrossViewFloorFinishProducer:
                 continue
             if len(candidates) == 1:
                 occurrence, definition = candidates[0]
-                if native_floor is not None and not _bbox_fully_inside(
-                    occurrence.bbox_pdf_pts, box,
+                if native_floor is not None and (
+                    occurrence.page_id != dimension_page
+                    or not _bbox_fully_inside(occurrence.bbox_pdf_pts, box)
                 ):
                     binding_mode = "finished_floor_polygon"
                 # The explicit source-owned F07 shadow authenticates the
