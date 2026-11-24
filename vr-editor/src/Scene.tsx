@@ -16,10 +16,10 @@ import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
 import type { WallAxis } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
-  displayWallDraft, draftGesturePreview, pickDraftWall } from "./buildScene";
+  displayWallDraft, draftGesturePreview, pickDraftWall, pickDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, showConstructionItem, showConstructionSurface } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -29,7 +29,8 @@ import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./fo
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
-import type { ItemAction, MenuAction } from "./catalogueMenu";
+import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
+import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
@@ -323,6 +324,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
+    let compactMenu = true;
+    let openingTools = false;
+    let openingIndex = 0;
+    let numberPad: {field:NumericDraftField;digits:string}|null = null;
     const nextStep = (value: 0.05 | 0.1 | 0.25): 0.05 | 0.1 | 0.25 =>
       value === 0.05 ? 0.1 : value === 0.1 ? 0.25 : 0.05;
     function selectedDraftWall() {
@@ -342,6 +347,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const samePointerContext = (expected: PointerContext) =>
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
+    function snapOptions() {
+      return {gridM:snapGrid,axis:snapAxis,
+        verifiedAnchors: resize.current.projection ? [] :
+          verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
+    }
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
@@ -351,22 +361,86 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }, interaction.current, {
           selectedWall: selectedDraftWall(), gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
+          compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
         });
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
-      if (choice.area === "quest") {
+      if (choice.area === "number") {
+        const wall=selectedDraftWall();
+        if (choice.action === "start") {
+          if (wall && choice.field && (!choice.field.startsWith("opening-") ||
+            wall.openings[openingIndex%wall.openings.length])) {
+            numberPad={field:choice.field,digits:""};
+          }
+        } else if (choice.action === "cancel") numberPad=null;
+        else if (numberPad) {
+          if (choice.action === "clear") numberPad={...numberPad,digits:""};
+          else if (choice.action === "erase") numberPad={...numberPad,digits:numberPad.digits.slice(0,-1)};
+          else if (choice.action === "digit") {
+            const digit=choice.digit??"";
+            const text=numberPad.digits;
+            const negative=numberPad.field==="x"||numberPad.field==="z";
+            if ((/^[0-9]$/.test(digit) && text.length<8) ||
+               (digit==="-"&&negative&&!text)) numberPad={...numberPad,digits:text+digit};
+          } else if (choice.action === "apply") {
+            const number=Number(numberPad.digits), field=numberPad.field;
+            if (wall && /^-?[0-9]+$/.test(numberPad.digits) && Number.isSafeInteger(number)) {
+              if (field.startsWith("opening-")) {
+                const opening=wall.openings[openingIndex%wall.openings.length];
+                if (opening) build.current.onBuildAction({kind:"exact-local-opening",
+                  proposalId:wall.proposalId,openingId:opening.openingId,
+                  field:field.slice(8) as "offset"|"width"|"height"|"sill",valueMm:number});
+              } else build.current.onBuildAction({kind:"exact-local-wall",
+                proposalId:wall.proposalId,field:field as "length"|"height"|"x"|"z",valueMm:number});
+              reportTool("Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
+              numberPad=null;
+            } else reportTool("Enter a whole millimetre value to apply.");
+          }
+        }
+      } else if (choice.area === "opening") {
+        const wall=selectedDraftWall();
+        const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
+        if (wall && opening) {
+          const field=choice.action==="shift"?"offset":choice.action;
+          const value=opening[choice.action==="shift"?"offsetM":
+            choice.action==="width"?"widthM":"heightM"]*1000+choice.deltaMm;
+          build.current.onBuildAction({kind:"exact-local-opening",
+            proposalId:wall.proposalId,openingId:opening.openingId,
+            field,valueMm:Math.round(value)});
+          reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
+        }
+      } else if (choice.area === "quest") {
         if (choice.action === "grid") snapGrid = nextStep(snapGrid);
         if (choice.action === "nudge-size") nudgeStep = nextStep(nudgeStep);
         if (choice.action === "axis") {
           const axes: WallAxis[] = ["auto","free","horizontal","vertical"];
           snapAxis = axes[(axes.indexOf(snapAxis)+1)%axes.length];
         }
+        if (choice.action === "compact") compactMenu=!compactMenu;
+        if (choice.action === "next-stage") {
+          const current=CONSTRUCTION_STAGES.findIndex(entry=>entry.id===construction.current.stage);
+          construction.current.onStage(CONSTRUCTION_STAGES[(current+1)%CONSTRUCTION_STAGES.length].id);
+        }
+        if (choice.action === "next-floor") {
+          const levels=["all",...interaction.current.levels];
+          const index=levels.indexOf(interaction.current.level);
+          interaction.current.onLevel(levels[(index+1)%levels.length]);
+          selectedDraftId=null;openingTools=false;numberPad=null;
+        }
+        if (choice.action === "openings") {
+          openingTools=!openingTools;openingIndex=0;numberPad=null;
+        }
+        if (choice.action === "next-opening") {
+          const count=selectedDraftWall()?.openings.length??0;
+          if(count) openingIndex=(openingIndex+1)%count;
+        }
         if (choice.action === "pin") panelPinned = !panelPinned;
         if (choice.action === "recenter" && renderer.xr.isPresenting)
           buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned,true);
-        if (choice.action === "help") { helpOpen = !helpOpen; selectedDraftId = null; deleteArmed=false; }
-        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; }
+        if (choice.action === "help") { helpOpen = !helpOpen; numberPad=null; openingTools=false;
+          selectedDraftId = null; deleteArmed=false; }
+        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; }
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
@@ -612,8 +686,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function aim() {
       const { buildState, buildLevel, buildSizes } = build.current;
-      return aimBuild(buildState, buildLevel, buildSizes, raycaster.ray,
-        {gridM:snapGrid,axis:snapAxis});
+      return aimBuild(buildState, buildLevel, buildSizes, raycaster.ray,snapOptions());
     }
     function place(hit: BuildHit) {
       build.current.onBuildAction({ kind: "place", hit, id: newPlacementId(hit.kind) });
@@ -648,17 +721,20 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const select = (id: string | null) => callback.current(id);
     function selectAtRay() {
-      const wall = renderer.xr.isPresenting && !resize.current.enabled &&
+      const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
-        pickDraftWall(build.current.buildState, build.current.buildLevel, raycaster.ray) : null;
+        pickDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray) : [];
+      const index=walls.findIndex(wall=>wall.proposalId===selectedDraftId);
+      const wall=walls.length?walls[(index+1)%walls.length]:null;
       if (wall && !itemBrowser.open && !stageMenuOpen) {
         selectedDraftId=wall.proposalId;
+        openingTools=false;openingIndex=0;numberPad=null;
         deleteArmed=false;
         select(null);
         reportTool("Draft wall selected · use the precision controls to edit.");
         return;
       }
-      selectedDraftId=null;
+      selectedDraftId=null;openingTools=false;numberPad=null;
       deleteArmed=false;
       pick();
     }
@@ -694,8 +770,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (interaction.current.mode !== "draw" || resize.current.projection) return null;
-      return beginDraftGesture(buildState, buildLevel, raycaster.ray,
-        {gridM:snapGrid,axis:snapAxis});
+      return beginDraftGesture(buildState, buildLevel, raycaster.ray,snapOptions());
     }
     function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
       const { buildState, buildLevel, buildSizes } = build.current;
@@ -703,7 +778,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const hand = controllerIndex === undefined ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
-        hand ? [hand.x, hand.z] : undefined, {gridM:snapGrid,axis:snapAxis});
+        hand ? [hand.x, hand.z] : undefined,snapOptions());
     }
     function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
       const preview = previewDrag(gesture, controllerIndex);
