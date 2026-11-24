@@ -1,5 +1,6 @@
 import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
-import type { BuildAction, BuildState, PlacedWall, WallAxis } from "./buildPlacement.ts";
+import {wallAngleDegrees} from "./buildPlacement.ts";
+import type { BuildAction, BuildState, PlacedWall, WallAxis, WallRotationPivot } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem } from "./itemCatalogue.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
@@ -33,6 +34,7 @@ export type MenuAction =
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
+  | { area: "wall-angle"; action:"step"|"pivot"|"connected"; degrees?:number }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
@@ -45,9 +47,10 @@ export type MenuButton = {
 export type MenuLayout = { title: string; width: number; height: number;
   note: string; subtitle?: string; buttons: MenuButton[];
   sections?: { label: string; y: number }[]; helpLines?: string[]; radial?:boolean };
-export type NumericDraftField = "length" | "height" | "x" | "z" |
+export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
+  rotationPivot?:WallRotationPivot; connectedRotation?:boolean;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
@@ -154,11 +157,11 @@ export function buildMenuLayout(
       20+(i%3)*315,118+Math.floor(i/3)*67,300,58,
       key==="⌫"?number("erase"):number("digit",key),
       {disabled:key==="-"&&!["x","z"].includes(field)});
-    add("Apply exact mm",20,405,300,65,number("apply"),{disabled:!digits||digits==="-"});
+    add(field==="angle"?"Apply angle °":"Apply exact mm",20,405,300,65,number("apply"),{disabled:!digits||digits==="-"});
     add("Clear",338,405,300,65,number("clear"));
     add("Cancel",655,405,300,65,number("cancel"));
-    return {buttons,title:"EXACT "+field.toUpperCase()+" · "+(digits||"—")+" mm",
-      width:WIDTH,height:530,note:"Enter millimetres. Invalid sizes or openings cannot be applied.",
+    return {buttons,title:"EXACT "+field.toUpperCase()+" · "+(digits||"—")+(field==="angle"?"°":" mm"),
+      width:WIDTH,height:530,note:field==="angle"?"Enter 0–360 degrees. Fixed pivot: "+(quest.rotationPivot??"start")+".":"Enter millimetres. Invalid sizes or openings cannot be applied.",
       sections:[{label:"DRAFT ONLY · TRIGGER A NUMBER",y:99}]};
   }
   if (quest?.help) {
@@ -250,7 +253,11 @@ export function buildMenuLayout(
       {label:"Nudge forward",action:edit("nudge","forward")},
       {label:"Nudge back",action:edit("nudge","back")},
       {label:"Step " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
-      {label:"Rotate 90°",action:edit("rotate")},
+      {label:"Angle "+wallAngleDegrees(wall).toFixed(1)+"°",action:{area:"number",action:"start",field:"angle"}},
+      {label:"Pivot "+(quest.rotationPivot??"start"),action:{area:"wall-angle",action:"pivot"}},
+      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"}},
+      ...[-15,-5,-1,1,5,15].map(degrees=>({label:(degrees>0?"+":"")+degrees+"°",action:{area:"wall-angle",action:"step",degrees} as MenuAction})),
+      {label:"Rotate 90°",action:{area:"wall-angle",action:"step",degrees:90}},
       {label:"Duplicate",action:edit("duplicate")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
