@@ -139,3 +139,18 @@ test("selected Grab tool activates the existing Quest wall-face trigger/hand-dra
   assert.deepEqual(preview.action.wall.start,[0.15,0]);
   assert.deepEqual(state.walls[0].start,[0,0]);
 });
+
+test("selected draft wall tools are hidden when footprint projection is active",()=>{
+  for (const footprint of [
+    {available:true,enabled:true,changed:false},
+    {available:true,enabled:false,changed:true},
+  ]) {
+    const layout=buildMenuLayout(state,"ground",EMPTY_ITEM_BROWSER,
+      undefined,false,0,"","finished",false,footprint,
+      {mode:"resize",canUndo:false,canRedo:false},
+      {...quest,selectedWall:wall});
+    assert.ok(!layout.buttons.some(b=>b.label==="Grab / Move"));
+    assert.ok(!layout.buttons.some(b=>b.label==="Stretch end"));
+    assert.ok(layout.buttons.some(b=>b.label==="Wall"&&b.disabled));
+  }
+});
