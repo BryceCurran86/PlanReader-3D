@@ -122,10 +122,11 @@ export function buildMenuLayout(
       sections:[{label:"DRAFT ONLY · TRIGGER A NUMBER",y:99}]};
   }
   if (quest?.help) {
-    add("Back to tools", 20, 369, 260, 74, questAction("help"));
-    return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 510,
+    add("Back to tools", 20, 455, 260, 74, questAction("help"));
+    return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 570,
       note: "Everything here is local draft review until an authenticated save.",
       helpLines: [
+        "Left grip: show/hide tools. Right trigger: edit.",
         "Left stick: walk/strafe. Right stick: snap turn.",
         "Trigger: point, select, confirm or place.",
         "Choose Wall, pick start and end; a corner glows when snapped.",
