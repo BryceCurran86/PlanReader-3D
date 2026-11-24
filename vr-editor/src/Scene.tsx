@@ -24,7 +24,7 @@ import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
 import { createFootprintGizmo, footprintGeometry, projectSourceHost, renderFootprintGeometry } from "./footprintScene";
-import { footprintCorner, projectCeiling, projectPlacement, projectWall, resizeFromCorner } from "./footprintResize";
+import { footprintCorner, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromCorner } from "./footprintResize";
 import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./footprintResize";
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
@@ -1110,14 +1110,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const box=resize.current.box;
       if(!box)return;
       // Local navigation only: stay within the displayed building plus a 3m perimeter.
-      delta=[Math.max(box.minX-3,Math.min(box.maxX+3,head.x+delta[0]))-head.x,
-        Math.max(box.minZ-3,Math.min(box.maxZ+3,head.z+delta[1]))-head.z];
+      const bounded=(at:number,d:number,min:number,max:number)=>at<min?Math.max(0,d):at>max?Math.min(0,d):Math.max(min,Math.min(max,at+d))-at;
+      delta=[bounded(head.x,delta[0],box.minX-3,box.maxX+3),bounded(head.z,delta[1],box.minZ-3,box.maxZ+3)];
       if(!elevatedReturn){
         const walls:NavigationWall[]=[];
         for(const row of manifest.objects){
           const g=row.geometry;
           if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
-          const w=resize.current.projection?projectWall({start:g.start,end:g.end,heightM:g.heightM??2.4} as WallVisual,resize.current.projection):g;
+          const projection=resize.current.projection;
+          const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
           const obj=pickables.find(o=>o.userData.objectId===row.objectId);
           const dx=obj?.position.x??0,dz=obj?.position.z??0;
           walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
