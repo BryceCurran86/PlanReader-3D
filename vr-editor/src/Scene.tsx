@@ -306,6 +306,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
+    renderer.xr.setFramebufferScaleFactor(0.8);
     parent.append(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -344,6 +345,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
+    let toolsOpen=false;
+    let lastMenuDraw=0;
+    const closeTools=()=>{toolsOpen=false;buildOverlay.hideMenu();};
+    function toggleTools(){
+      if(!renderer.xr.isPresenting)return;
+      toolsOpen=!toolsOpen;
+      if(toolsOpen){lastMenuDraw=0;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
+      else buildOverlay.hideMenu();
+    }
     let budgetOpen=false,budgetPage=0;
     let compactMenu = true;
     let overviewOpen=false;
@@ -791,6 +801,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let itemsAtSource: readonly PlacedItem[] | null = null;
     let itemProjection: FootprintProjection | null = null;
     let renderItems: readonly PlacedItem[] = [];
+    let syncedVisible:readonly CatalogueHost[]|null=null,syncedDraft:readonly CatalogueHost[]|null=null,syncedItems:readonly PlacedItem[]|null=null,syncedStage:ConstructionStage|null=null;
     function syncItems() {
       updateSourceLayout();
       refreshWallAddition();
@@ -805,7 +816,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         lastHosts = renderHosts;
         visibleHosts = renderHosts.filter(entry => sourceVisible(entry.mesh));
       }
-      itemView.sync(visibleHosts, draftItemHosts, renderItems, construction.current.stage);
+      const stage=construction.current.stage;
+      if(syncedVisible!==visibleHosts||syncedDraft!==draftItemHosts||syncedItems!==renderItems||syncedStage!==stage){
+        itemView.sync(visibleHosts,draftItemHosts,renderItems,stage);
+        syncedVisible=visibleHosts;syncedDraft=draftItemHosts;syncedItems=renderItems;syncedStage=stage;
+      }
     }
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
@@ -1024,7 +1039,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const xrResize: (ResizeDrag | null)[] = [null, null];
     const xrPress: ({ context: PointerContext; menu: string | null } | null)[] = [null, null];
     function menuKey(layout: ReturnType<typeof menuLayout>) {
-      const hit = buildOverlay.menuHit(raycaster, layout);
+      const hit = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
       return hit ? JSON.stringify(hit.action) : null;
     }
     function beginXrGesture(index: number) {
@@ -1033,7 +1048,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       buildOverlay.sizeMenu(layout);
       const menu = menuKey(layout);
       xrPress[index] = { context: pointerContext(), menu };
-      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || menu !== null) return;
+      if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
         const gesture = draftGesture();
@@ -1071,12 +1086,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
-      const menuChoice = buildOverlay.menuHit(raycaster, layout);
+      const menuChoice = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
       if (menuChoice) {
-        if (menuChoice.action) menuAction(menuChoice.action);
+        if (menuChoice.action) {
+          const choice=menuChoice.action;
+          menuAction(choice);
+          if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
+        }
         return;
       }
-      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || resize.current.enabled) return;
+      if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -1141,10 +1160,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
       }catch{reportTool("The XR runtime declined the view change.");}
     }
+    const wallPickableById=new Map(pickables.map(o=>[o.userData.objectId as string,o]));
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
-      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||stageMenuOpen||budgetOpen||helpOpen||numberPad||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
       const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
       const move=standardThumbstick(left),turn=snapTurn(standardThumbstick(right)[0],turnArmed);
       turnArmed=turn.armed;
@@ -1167,7 +1187,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
           const projection=resize.current.projection;
           const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
-          const obj=pickables.find(o=>o.userData.objectId===row.objectId);
+          const obj=wallPickableById.get(row.objectId);
           const dx=obj?.position.x??0,dz=obj?.position.z??0;
           walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
         }
@@ -1235,24 +1255,26 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (Number.isFinite(dx)&&Number.isFinite(dz))
         moveSettings.current.onMoveDelta(held.objectId,dx,dz);
     };
+    function handleGripAction(index:number){
+      if(inputSources[index]?.handedness==="left"){toggleTools();return;}
+      if(moveSettings.current.moveMode!=="move")applyFinishSqueeze();
+    }
     const nativeStart0 = () => {
       squeezeTracker.onNativeStart("0");
       nativeGripSeen[0] = true;
-      beginGrip(0);
+      if(inputSources[0]?.handedness!=="left")beginGrip(0);
     };
     const nativeStart1 = () => {
       squeezeTracker.onNativeStart("1");
       nativeGripSeen[1] = true;
-      beginGrip(1);
+      if(inputSources[1]?.handedness!=="left")beginGrip(1);
     };
     const nativeEnd0 = () => endGrip(0), nativeEnd1 = () => endGrip(1);
     const squeeze0 = () => {
-      if (squeezeTracker.onNativeSqueeze("0") && moveSettings.current.moveMode !== "move")
-        applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("0"))handleGripAction(0);
     };
     const squeeze1 = () => {
-      if (squeezeTracker.onNativeSqueeze("1") && moveSettings.current.moveMode !== "move")
-        applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("1"))handleGripAction(1);
     };
     const connected = (event: unknown, index: number) => {
       const source = event && typeof event === "object" && "data" in event
@@ -1274,6 +1296,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
+      toolsOpen=false;renderer.shadowMap.enabled=false;
+      reportTool("Left grip opens or hides tools. Right trigger edits. Left stick walks.");
       elevatedReturn=null;turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
@@ -1284,6 +1308,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       report(true);
     };
     const onSessionEnd = () => {
+      toolsOpen=false;renderer.shadowMap.enabled=true;
       budgetOpen=false;budgetPage=0;
       elevatedReturn=null;turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
@@ -1368,13 +1393,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         for (let index=0;index<inputSources.length;index++) {
           const pressed=standardSqueezePressed(inputSources[index]);
           if (moveSettings.current.moveMode === "move" &&
-              !nativeGripSeen[index] && pressed !== null) {
+              !nativeGripSeen[index] && pressed !== null && inputSources[index]?.handedness!=="left") {
             if (pressed && !fallbackGripDown[index]) beginGrip(index);
             if (!pressed && fallbackGripDown[index]) endGrip(index);
             fallbackGripDown[index] = pressed;
           }
-          if (squeezeTracker.poll(String(index),pressed) &&
-              moveSettings.current.moveMode !== "move") applyFinishSqueeze();
+          if (squeezeTracker.poll(String(index),pressed))handleGripAction(index);
         }
       }
       const activeMoves = moveSettings.current.wallMoveState
@@ -1433,15 +1457,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const prompt = resize.current.enabled ? resize.current.hint || "Drag a green corner or gold edge handle." :
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
       if (renderer.xr.isPresenting) {
-        buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned);
-        const layout = menuLayout(prompt);
-        buildOverlay.sizeMenu(layout);
+        const layout = toolsOpen ? menuLayout(prompt) : null;
+        if(layout){buildOverlay.sizeMenu(layout);}
         const isPointer = (source: PcVrInputSource | null | undefined) => source?.targetRayMode === "tracked-pointer";
         const favoured = isPointer(inputSources[lastController]) ? lastController :
           inputSources.findIndex(source => isPointer(source) && source?.handedness === "right");
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
-        const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
+        const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
         hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
           !itemBrowser.open && !stageMenuOpen && !budgetOpen && !resize.current.enabled &&
           !resize.current.projection
@@ -1465,10 +1488,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (!itemBrowser.open && !stageMenuOpen && !budgetOpen && !helpOpen && !selectedDraftWall())
+        if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        buildOverlay.drawMenu(layout, hover?.index ?? -1);
+        if(layout&&now-lastMenuDraw>=100){buildOverlay.drawMenu(layout, hover?.index ?? -1);lastMenuDraw=now;}
       } else {
         hoveredDraftId=null;
         const drag = startPointer?.gesture;
