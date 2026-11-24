@@ -9,12 +9,13 @@ import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
+import { AssemblyStudyPanel } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
 import { ConstructionView, StandardsPanel } from "./ConstructionView";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
-import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint } from "./footprintResize";
+import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
 import { isRoughIn, showConstructionItem } from "./constructionStages";
@@ -708,6 +709,7 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
+          <AssemblyStudyPanel scope={JSON.stringify(manifest.scope)} build={projection ? {...buildState, walls:buildState.walls.map(w=>projectWall(w,projection)), ceilings:buildState.ceilings.map(c=>projectCeiling(c,projection))}:buildState}/>
           <div className="section-block">
             <h2>Review source objects</h2>
             <label htmlFor="review-search">Find an object</label>
