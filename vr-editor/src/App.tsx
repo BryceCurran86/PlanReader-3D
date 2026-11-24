@@ -420,6 +420,7 @@ export function App() {
           setToolMessage("Rotation blocked: a hosted item would no longer fit its wall. Move the item first.");return;
         }
       }
+      setLastEdit("draw");applyBuild(action);setToolMessage(action.connected?"Wall angle updated · adjoining walls retained.":"Wall angle updated · independent rotation.");return;
     }
     if (action.kind === "tool") {
       if (!buildLevel) return;
@@ -707,7 +708,7 @@ export function App() {
                 buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
-                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
