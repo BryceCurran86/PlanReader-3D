@@ -83,7 +83,7 @@ export function illustrativeTimberFrame(wall: WallVisual) {
 
 export function displayWallDraft(wall: WallVisual) {
   const group = new THREE.Group();
-  const faces: number[] = [],colors:number[]=[];
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[];
   const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
   const length=planLength(wall.start,wall.end);
   if(!Number.isFinite(length)||length<.001)return group;
@@ -97,9 +97,10 @@ export function displayWallDraft(wall: WallVisual) {
   function surface(from: number, to: number, bottom: number, top: number) {
     if (to <= from || top <= bottom) return;
     const p=[atOffset(wall,from,bottom),atOffset(wall,from,top),atOffset(wall,to,top),atOffset(wall,to,bottom)];
+    panel(p,mountFaces);
     const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
     function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
-    face(a,left);face([...b].reverse(),rightColor);
+    face([...a].reverse(),left);face(b,rightColor);
     for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
 
   }
@@ -136,6 +137,14 @@ export function displayWallDraft(wall: WallVisual) {
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xeeeae1, 1, true);
+  // Centre-plane witness retains the existing catalogue anchor convention.
+  if(mountFaces.length){
+    const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    mountGeometry.computeVertexNormals();
+    const mount=new THREE.Mesh(mountGeometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));
+    mount.userData.catalogueMountFace=true;
+    group.add(mount);
+  }
   group.add(illustrativeTimberFrame(wall));
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
