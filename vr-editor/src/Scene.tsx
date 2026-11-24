@@ -36,6 +36,8 @@ import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigati
 import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
+import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
+import type {WallAim,WallTarget} from "./wallMagnet";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -345,6 +347,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let selectedDraftId: string | null = null;
     let hoveredDraftId: string | null = null;
     let magnetic=true, multiSelect=false;
+    let wallLock:WallAim|null=null;let hoveredSourceId:string|null=null;
     const selectedGroup=new Set<string>();
     function groupIds(){return build.current.buildState.walls.filter(w=>w.levelId===build.current.buildLevel&&selectedGroup.has(w.proposalId)).map(w=>w.proposalId);}
     let deleteArmed = false;
@@ -393,7 +396,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,resize.current.projection] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
@@ -504,7 +507,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
         if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
         if(choice.action==="budget-page"){budgetPage=(budgetPage+1)%Math.max(1,Math.ceil(liveBudget.current.summary.trades.length/4));return;}
-        if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;return;}
+        if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;hoveredSourceId=null;wallLock=null;return;}
         if(choice.action==="multi-select"){
           if(resize.current.enabled||resize.current.projection)return;
           multiSelect=!multiSelect;selectedGroup.clear();
@@ -866,7 +869,58 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       else reportTool(reason ?? itemGuide(item));
     }
     const select = (id: string | null) => callback.current(id);
-    function selectAtRay() {
+    let targetKey:readonly unknown[]=[];let targets:WallTarget[]=[];
+    function visibleWallTargets(){
+      const {buildState,buildLevel}=build.current;
+      const stage=construction.current.stage,layers=construction.current.layers,projection=resize.current.projection;
+      const key=[buildState.walls,buildLevel,interaction.current.visibleIds,stage,layers,projection,resize.current.enabled,moveSettings.current.wallMoveState,multiSelect];
+      // The source wall list is bounded by the current visible scene; never edit it.
+      if(key.every((v,i)=>v===targetKey[i]))return targets;
+      targetKey=key;targets=[];
+      if(!resize.current.enabled&&!projection){
+        for(const w of buildState.walls){
+          if(w.scopeKey!==sceneScope||w.levelId!==buildLevel)continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(w.assembly).core==="masonry"))&&
+            !layerVisible(layers,"framing",stage==="framing"))continue;
+          targets.push({key:"draft:"+w.proposalId,kind:"draft",id:w.proposalId,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+        }
+      }
+      if(!multiSelect&&displaySurface(stage,undefined)){
+        const moves=new Map((moveSettings.current.wallMoveState?safeWallMoves(moveSettings.current.wallMoveState,manifest):[]).map(m=>[m.objectId,m]));
+        for(const row of manifest.objects){
+          const g=row.geometry;
+          if(row.objectType!=="wall"||g?.kind!=="wallFace"||!interaction.current.visibleIds.has(row.objectId))continue;
+          const move=moves.get(row.objectId),dx=(move?.dx??0)*(projection?.scaleX??1),dz=(move?.dz??0)*(projection?.scaleZ??1);
+          const a=projection?projectPlan(g.start,projection):g.start,b=projection?projectPlan(g.end,projection):g.end;
+          targets.push({key:"source:"+row.objectId,kind:"source",id:row.objectId,start:[a[0]+dx,a[1]+dz],end:[b[0]+dx,b[1]+dz],heightM:g.heightM,halfThickness:0});
+        }
+      }
+      return targets;
+    }
+    function targetWallAim(previous=wallLock?.target.key??null){
+      return chooseWallAim(raycaster.ray,visibleWallTargets().filter(t=>!multiSelect||t.kind==="draft"),previous,magnetic);
+    }
+    function selectAtRay(pressedKey?:string|null) {
+      if(renderer.xr.isPresenting&&magnetic&&!resize.current.enabled){
+        const target=pressedKey?visibleWallTargets().find(t=>t.key===pressedKey):null;
+        const aimed=pressedKey?(target?wallAimWithin(raycaster.ray,target,MAGNET_RELEASE):null):targetWallAim();
+        if(pressedKey&&!aimed){reportTool("Wall lock released · aim again.");return;}
+        if(aimed){
+          wallLock=aimed;
+          if(aimed.target.kind==="source"){
+            selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
+            select(aimed.target.id);reportTool("Imported wall selected · source geometry is read-only.");return;
+          }
+          const id=aimed.target.id;
+          if(multiSelect){if(selectedGroup.has(id))selectedGroup.delete(id);else selectedGroup.add(id);}
+          else selectedDraftId=id;
+          openingTools=false;openingIndex=0;numberPad=null;deleteArmed=false;
+          select(null);reportTool(multiSelect?groupIds().length+" draft walls selected.":"Magnetic wall locked · open precision tools to edit.");return;
+        }
+        // No lock: do not cycle onto a different wall behind the aiming ray.
+        if(multiSelect)return;
+        selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;pick();return;
+      }
       const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
         magneticDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray, hoveredDraftId, magnetic ? 0.15 : 0) : [];
@@ -1076,7 +1130,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const xrGestures: (DraftGesture | null)[] = [null, null];
     const xrResize: (ResizeDrag | null)[] = [null, null];
-    const xrPress: ({ context: PointerContext; menu: string | null } | null)[] = [null, null];
+    const xrPress: ({ context: PointerContext; menu: string | null; wallKey?:string|null } | null)[] = [null, null];
     function menuKey(layout: ReturnType<typeof menuLayout>) {
       const hit = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
       return hit ? JSON.stringify(hit.action) : null;
@@ -1086,7 +1140,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const layout = menuLayout("");
       buildOverlay.sizeMenu(layout);
       const menu = menuKey(layout);
-      xrPress[index] = { context: pointerContext(), menu };
+      xrPress[index] = { context: pointerContext(), menu,wallKey:!menu&&magnetic&&!build.current.buildState.tool&&!itemControls.current.active&&!resize.current.enabled&&!teleportSettings.current.teleportMode?targetWallAim()?.target.key??null:undefined };
       if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
@@ -1147,7 +1201,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         return;
       }
       if(!teleportSettings.current.teleportMode){
-        selectAtRay();return;
+        selectAtRay(press?.wallKey);return;
       }
       if(!renderer.xr.isPresenting){
         teleportSettings.current.onTeleportMessage("Start a VR session before teleporting.");
@@ -1522,10 +1576,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
         const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
-        hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
-          !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !resize.current.enabled &&
-          !resize.current.projection
-          ? magneticDraftWalls(buildState,buildLevel,raycaster.ray,hoveredDraftId,magnetic ? 0.15 : 0)[0]?.proposalId ?? null : null;
+        const canLock=active>=0&&!hover&&!buildState.tool&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
+        if(canLock&&magnetic){
+          const held=xrPress[active]?.wallKey;
+          const target=held?visibleWallTargets().find(t=>t.key===held):null;
+          wallLock=held?(target?wallAimWithin(raycaster.ray,target):null):targetWallAim();
+        }else wallLock=null;
+        hoveredSourceId=wallLock?.target.kind==="source"?wallLock.target.id:null;
+        hoveredDraftId=wallLock?.target.kind==="draft"?wallLock.target.id:null;
         const heldResize = xrResize.findIndex(drag => drag !== null);
         if (heldResize >= 0 && xrPress[heldResize] && samePointerContext(xrPress[heldResize]!.context)) {
           aimController(controllers[heldResize]);
@@ -1550,7 +1608,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
         if(layout&&now-lastMenuDraw>=100){buildOverlay.drawMenu(layout, hover?.index ?? -1);lastMenuDraw=now;}
       } else {
-        hoveredDraftId=null;
+        hoveredDraftId=null;hoveredSourceId=null;wallLock=null;
         const drag = startPointer?.gesture;
         const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
@@ -1582,8 +1640,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             part.userData.originalDraftColor=material.color.getHex();
           const base = part.userData.originalDraftColor as number;
           if (material instanceof THREE.MeshStandardMaterial) {
-            material.emissive.setHex(selected ? 0x167e70 : hovered ? 0x795619 : 0);
-            material.emissiveIntensity=selected||hovered ? .25 : 0;
+            material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
+            material.emissiveIntensity=selected||hovered ? .65 : 0;
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
         }
       }
@@ -1724,8 +1782,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         item.material.depthWrite = !ghost && originalOpacity >= 0.9;
         // Highlight selection without repainting the verified/source-study colour.
         const selected = picked.current === id;
-        item.material.emissive.setHex(selected ? 0x173b36 : 0x000000);
-        item.material.emissiveIntensity = selected ? 0.32 : 0;
+        const hovered=hoveredSourceId===id;
+        item.material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
+        item.material.emissiveIntensity = selected||hovered ? .65 : 0;
         if (originalHeight !== undefined) {
           const height=activeInspection.showGhosts && ghostHeight !== null &&
             ghostHeight !== undefined ? ghostHeight : originalHeight;
