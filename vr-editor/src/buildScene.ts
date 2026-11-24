@@ -500,7 +500,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, depthTest: false, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
   menu.renderOrder = 20;
   menu.visible = false;
   scene.add(menu);
@@ -583,8 +583,19 @@ export function createBuildOverlay(scene: THREE.Scene) {
     menu.updateMatrixWorld();
     menu.visible = true;
   }
+  function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
+    camera.getWorldPosition(head);
+    hand.getWorldPosition(menu.position);
+    menu.position.y+=.12;
+    // Keep the tool wheel at a comfortable readable distance even if the hand is near the face.
+    const offset=menu.position.clone().sub(head);
+    const distance=offset.length();
+    if(distance<.35||distance>1.2){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.35,Math.min(1.2,distance))));}
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
   function sizeMenu(layout: MenuLayout) {
-    const width = layout.width / 1450, height = layout.height / 1450;
+    const scale=layout.radial?1800:1450;
+    const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
       menu.updateMatrixWorld();
@@ -594,6 +605,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
     const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
+    if(layout.radial&&Math.hypot(x-layout.width/2,y-layout.height/2)>layout.width/2)return null;
     const index = layout.buttons.findIndex(button => !button.disabled &&
       x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
     return { action: layout.buttons[index]?.action ?? null, index };
@@ -606,11 +618,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
       canvas.width = layout.width;
       canvas.height = layout.height;
     }
+    context.clearRect(0,0,canvas.width,canvas.height);
     context.fillStyle = "#13242c";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
+    else context.fillRect(0, 0, canvas.width, canvas.height);
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    context.fillText(layout.title, 20, 45, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.title,layout.width/2,285,300);context.textAlign="left";}
+    else context.fillText(layout.title, 20, 45, layout.width - 40);
     if (layout.subtitle) {
       context.fillStyle = "#ceeceb";
       context.font = "bold 27px sans-serif";
@@ -648,7 +663,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     context.fillStyle = "#edf9fc";
     context.font = "27px sans-serif";
-    context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.note,layout.width/2,layout.height-33,240);context.textAlign="left";}
+    else context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
     texture.needsUpdate = true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
@@ -684,7 +700,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }
