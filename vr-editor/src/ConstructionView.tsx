@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
+import { CONSTRUCTION_LAYERS } from "./constructionLayers";
+import type {LayerOverrides,LayerMode} from "./constructionLayers";
 import { CONSTRUCTION_REFERENCES, NCC_ADOPTION, NCC_REFERENCES } from "./constructionStandards";
 
 export function ConstructionView({ stage, onStage }: { stage: ConstructionStage; onStage: (stage: ConstructionStage) => void }) {
@@ -12,6 +14,17 @@ export function ConstructionView({ stage, onStage }: { stage: ConstructionStage;
   </label>;
 }
 
+export function ConstructionLayerPanel({layers,onLayers}:{layers:LayerOverrides;onLayers:(layers:LayerOverrides)=>void}){
+ return <details className="construction-standards">
+ <summary>Construction layers</summary>
+ <p>Auto follows the stage. Show or hide a layer independently; bird’s-eye cutaway still hides roof and ceilings.</p>
+ <button type="button" onClick={()=>onLayers({})}>Reset to stage defaults</button>
+ {CONSTRUCTION_LAYERS.map(([id,label])=><label key={id}>{label}
+ <select value={layers[id]??"auto"} onChange={e=>onLayers({...layers,[id]:e.currentTarget.value as LayerMode})}>
+ <option value="auto">Auto</option><option value="show">Show</option><option value="hide">Hide</option>
+ </select></label>)}
+ </details>;
+}
 export function StandardsPanel() {
   const [region, setRegion] = useState("");
   const [classification, setClassification] = useState("");

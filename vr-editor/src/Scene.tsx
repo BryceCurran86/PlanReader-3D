@@ -19,7 +19,7 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -32,9 +32,15 @@ import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalo
 import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
 import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import { createVrPlanOverview } from "./vrPlanOverview";
-import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset } from "./vrStationaryNavigation";
-import type { NavigationWall } from "./vrStationaryNavigation";
+import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset } from "./vrStationaryNavigation";
+import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
+import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
+import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
+import type {WallAim,WallTarget} from "./wallMagnet";
+import {createWallTextureLibrary} from "./wallTextures";
+import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
+import type {LayerOverrides} from "./constructionLayers";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
@@ -77,6 +83,8 @@ type Props = {
   buildSizes: BuildSizes;
   stage: ConstructionStage;
   onStage: (stage: ConstructionStage) => void;
+  layers:LayerOverrides;
+  onLayers:(layers:LayerOverrides)=>void;
   footprint: {
     box: FootprintBounds | null;
     projection: FootprintProjection | null;
@@ -88,6 +96,7 @@ type Props = {
   };
   onBuildAction: (action: BuildAction) => void;
   onBuildHint: (hint: string) => void;
+  onBuildSizes:(sizes:BuildSizes)=>void;
   catalogue: {
     active: CatalogueItem | undefined;
     items: readonly PlacedItem[];
@@ -216,7 +225,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -238,10 +247,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
   addedWallsRef.current = addedWallSketches;
-  const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint });
-  build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint };
-  const construction = useRef({ stage, onStage });
-  construction.current = { stage, onStage };
+  const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
+  build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
+  const construction = useRef({ stage, onStage, layers, onLayers });
+  construction.current = { stage, onStage, layers, onLayers };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -263,6 +272,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     if (!parent) return;
 
     const scene = new THREE.Scene();
+    const wallTextures=createWallTextureLibrary();
     const initialPreset = VISUAL_PRESETS[visualSettings.current.mood];
     scene.background = new THREE.Color(initialPreset.background);
     const ambient = new THREE.HemisphereLight(
@@ -306,6 +316,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
+    renderer.xr.setFramebufferScaleFactor(0.8);
     parent.append(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -336,6 +347,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let selectedDraftId: string | null = null;
     let hoveredDraftId: string | null = null;
     let magnetic=true, multiSelect=false;
+    let wallLock:WallAim|null=null;let hoveredSourceId:string|null=null;
     const selectedGroup=new Set<string>();
     function groupIds(){return build.current.buildState.walls.filter(w=>w.levelId===build.current.buildLevel&&selectedGroup.has(w.proposalId)).map(w=>w.proposalId);}
     let deleteArmed = false;
@@ -344,13 +356,30 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
+    let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
+    let lastMenuDraw=0;
+    const closeTools=()=>{toolsOpen=false;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    function toggleTools(){
+      if(!renderer.xr.isPresenting)return;
+      toolsOpen=!toolsOpen;
+      if(toolsOpen){radial=true;lastMenuDraw=0;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
+      else closeTools();
+    }
     let budgetOpen=false,budgetPage=0;
     let compactMenu = true;
     let overviewOpen=false;
-    let elevatedReturn: XRReferenceSpace|null=null;
+    let elevatedReturn: NavOffset|null=null;
+    let navBase:XRReferenceSpace|null=null,navOffset=identityNavOffset();
+    function setNavOffset(offset:NavOffset){
+      navBase??=renderer.xr.getReferenceSpace();
+      if(!navBase)throw Error("No XR reference space");
+      renderer.xr.setReferenceSpace(navBase.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+      navOffset=offset;
+    }
+    function moveNavOffset(offset:NavOffset){setNavOffset(composeNavigationOffset(navOffset,offset));}
     let walkSpeed=1.2, turnArmed=true, lastNavTime=0;
     const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>
-      !(elevatedReturn && (kind==="ceiling"||kind==="roof")) && showConstructionSurface(stage,kind);
+      surfaceLayerVisible(stage,kind,construction.current.layers,!!elevatedReturn);
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
@@ -367,14 +396,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,resize.current.projection] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
     function snapOptions() {
-      return {gridM:snapGrid,axis:snapAxis,
+      return {gridM:snapGrid,axis:snapAxis,magnetic,preferredDraftId:wallLock?.target.kind==="draft"?wallLock.target.id:null,
+        wallSegments:resize.current.projection?[]:visibleWallTargets().filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})),
         verifiedAnchors: resize.current.projection ? [] :
           verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
     }
@@ -392,12 +422,22 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
           elevatedView:!!elevatedReturn,walkSpeed,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
+          wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,
+          radial,layersOpen,layers:construction.current.layers,
         });
       if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
       return layout;
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="layer"){construction.current.onLayers(cycleLayer(construction.current.layers,choice.layer));return;}
+      if(choice.area==="wall-profile"){
+        if(resize.current.enabled||resize.current.projection)return;
+        const assembly=defaultWallAssembly(choice.profile),wall=selectedDraftWall();
+        if(wall)build.current.onBuildAction({kind:"set-wall-assembly",proposalId:wall.proposalId,assembly});
+        else build.current.onBuildSizes({...build.current.buildSizes,wallAssembly:assembly});
+        wallProfilesOpen=false;return;
+      }
       if (choice.area === "number") {
         if(resize.current.enabled || resize.current.projection) {
           numberPad=null;openingTools=false;return;
@@ -458,11 +498,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
         }
       } else if (choice.area === "quest") {
+        if(choice.action==="hide-tools"){closeTools();return;}
+        if(choice.action==="more-tools"){radial=false;compactMenu=true;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);return;}
+        if(choice.action==="layers"){layersOpen=!layersOpen;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);return;}
+        if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
+        if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
+        if(choice.action==="dimensions"){dimensions=!dimensions;return;}
         if(choice.action==="budget"){budgetOpen=!budgetOpen;budgetPage=0;return;}
         if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
         if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
         if(choice.action==="budget-page"){budgetPage=(budgetPage+1)%Math.max(1,Math.ceil(liveBudget.current.summary.trades.length/4));return;}
-        if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;return;}
+        if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;hoveredSourceId=null;wallLock=null;return;}
         if(choice.action==="multi-select"){
           if(resize.current.enabled||resize.current.projection)return;
           multiSelect=!multiSelect;selectedGroup.clear();
@@ -481,7 +527,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (choice.action === "compact") compactMenu=!compactMenu;
         if (choice.action === "overview") overviewOpen=!overviewOpen;
         if (choice.action === "walk-speed") walkSpeed=walkSpeed===.6?1.2:walkSpeed===1.2?2:.6;
-        if (choice.action === "elevated-view") toggleElevatedView();
+        if (choice.action === "elevated-view") {toggleElevatedView();closeTools();}
         if (choice.action === "teleport") {
           if(teleportSettings.current.teleportAvailable)
             teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
@@ -710,15 +756,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         });
       }
       for (const wall of active) {
-        const group = displayWallDraft(wall);
+        const group = displayWallDraft(wall,wallTextures);
         group.userData.reviewOnlyWallProposal = true;
         group.userData.proposalId = wall.proposalId;
+        group.userData.wallDimensions=wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly);
+        group.userData.wallProfile=profileDetails(wall.assembly).label;
+        group.userData.masonryAssembly=profileDetails(wall.assembly).core==="masonry";
         wallAdditionLayer.add(group);
         draftItemHosts.push(...draftCatalogueHosts(wall, group));
       }
       for (const ceiling of ceilings) {
         const mesh = displayCeilingDraft(ceiling);
         mesh.userData.surfaceKind = "ceiling";
+        mesh.userData.ceilingDimensions=`${Math.round(Math.abs(ceiling.end[0]-ceiling.start[0])*1000)} × ${Math.round(Math.abs(ceiling.end[1]-ceiling.start[1])*1000)} mm · H ${Math.round(ceiling.heightM*1000)}`;
         wallAdditionLayer.add(mesh);
         draftItemHosts.push({ id: ceilingDraftHostId(ceiling.proposalId), target: "ceiling", mesh, ceilingDraft: ceiling });
       }
@@ -791,6 +841,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let itemsAtSource: readonly PlacedItem[] | null = null;
     let itemProjection: FootprintProjection | null = null;
     let renderItems: readonly PlacedItem[] = [];
+    let syncedVisible:readonly CatalogueHost[]|null=null,syncedDraft:readonly CatalogueHost[]|null=null,syncedItems:readonly PlacedItem[]|null=null,syncedStage:ConstructionStage|null=null;
+    let syncedLayers:LayerOverrides|null=null,syncedCutaway=false;
     function syncItems() {
       updateSourceLayout();
       refreshWallAddition();
@@ -805,7 +857,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         lastHosts = renderHosts;
         visibleHosts = renderHosts.filter(entry => sourceVisible(entry.mesh));
       }
-      itemView.sync(visibleHosts, draftItemHosts, renderItems, construction.current.stage);
+      const stage=construction.current.stage;
+      if(syncedVisible!==visibleHosts||syncedDraft!==draftItemHosts||syncedItems!==renderItems||syncedStage!==stage||syncedLayers!==construction.current.layers||syncedCutaway!==!!elevatedReturn){
+        itemView.sync(visibleHosts,draftItemHosts,renderItems,stage,construction.current.layers,!!elevatedReturn);
+        syncedVisible=visibleHosts;syncedDraft=draftItemHosts;syncedItems=renderItems;syncedStage=stage;syncedLayers=construction.current.layers;syncedCutaway=!!elevatedReturn;
+      }
     }
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
@@ -814,7 +870,58 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       else reportTool(reason ?? itemGuide(item));
     }
     const select = (id: string | null) => callback.current(id);
-    function selectAtRay() {
+    let targetKey:readonly unknown[]=[];let targets:WallTarget[]=[];
+    function visibleWallTargets(){
+      const {buildState,buildLevel}=build.current;
+      const stage=construction.current.stage,layers=construction.current.layers,projection=resize.current.projection;
+      const key=[buildState.walls,buildLevel,interaction.current.visibleIds,stage,layers,projection,resize.current.enabled,moveSettings.current.wallMoveState,multiSelect];
+      // The source wall list is bounded by the current visible scene; never edit it.
+      if(key.every((v,i)=>v===targetKey[i]))return targets;
+      targetKey=key;targets=[];
+      if(!resize.current.enabled&&!projection){
+        for(const w of buildState.walls){
+          if(w.scopeKey!==sceneScope||w.levelId!==buildLevel)continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(w.assembly).core==="masonry"))&&
+            !layerVisible(layers,"framing",stage==="framing"))continue;
+          targets.push({key:"draft:"+w.proposalId,kind:"draft",id:w.proposalId,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+        }
+      }
+      if(!multiSelect&&displaySurface(stage,undefined)){
+        const moves=new Map((moveSettings.current.wallMoveState?safeWallMoves(moveSettings.current.wallMoveState,manifest):[]).map(m=>[m.objectId,m]));
+        for(const row of manifest.objects){
+          const g=row.geometry;
+          if(row.objectType!=="wall"||g?.kind!=="wallFace"||!interaction.current.visibleIds.has(row.objectId))continue;
+          const move=moves.get(row.objectId),dx=(move?.dx??0)*(projection?.scaleX??1),dz=(move?.dz??0)*(projection?.scaleZ??1);
+          const a=projection?projectPlan(g.start,projection):g.start,b=projection?projectPlan(g.end,projection):g.end;
+          targets.push({key:"source:"+row.objectId,kind:"source",id:row.objectId,start:[a[0]+dx,a[1]+dz],end:[b[0]+dx,b[1]+dz],heightM:g.heightM,halfThickness:0});
+        }
+      }
+      return targets;
+    }
+    function targetWallAim(previous=wallLock?.target.key??null){
+      return chooseWallAim(raycaster.ray,visibleWallTargets().filter(t=>!multiSelect||t.kind==="draft"),previous,magnetic);
+    }
+    function selectAtRay(pressedKey?:string|null) {
+      if(renderer.xr.isPresenting&&magnetic&&!resize.current.enabled){
+        const target=pressedKey?visibleWallTargets().find(t=>t.key===pressedKey):null;
+        const aimed=pressedKey?(target?wallAimWithin(raycaster.ray,target,MAGNET_RELEASE):null):pressedKey===null?null:targetWallAim();
+        if(pressedKey!==undefined&&!aimed){if(pressedKey===null&&!multiSelect){selectedDraftId=null;pick(true);}else reportTool("Wall lock released · aim again.");return;}
+        if(aimed){
+          wallLock=aimed;
+          if(aimed.target.kind==="source"){
+            selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
+            select(aimed.target.id);reportTool("Imported wall selected · source geometry is read-only.");return;
+          }
+          const id=aimed.target.id;
+          if(multiSelect){if(selectedGroup.has(id))selectedGroup.delete(id);else selectedGroup.add(id);}
+          else selectedDraftId=id;
+          openingTools=false;openingIndex=0;numberPad=null;deleteArmed=false;
+          select(null);reportTool(multiSelect?groupIds().length+" draft walls selected.":"Magnetic wall locked · open precision tools to edit.");return;
+        }
+        // No lock: do not cycle onto a different wall behind the aiming ray.
+        if(multiSelect)return;
+        selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;pick();return;
+      }
       const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
         magneticDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray, hoveredDraftId, magnetic ? 0.15 : 0) : [];
@@ -841,9 +948,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       deleteArmed=false;
       pick();
     }
-    function pick() {
+    function pick(excludeWalls=false) {
       const hits=raycaster.intersectObjects(pickables.filter(object =>
-        sourceVisible(object) && displaySurface(construction.current.stage, object.userData.surfaceKind)), false);
+        sourceVisible(object) && displaySurface(construction.current.stage, object.userData.surfaceKind)&&(!excludeWalls||sourceById.get(object.userData.objectId)?.objectType!=="wall")), false);
       const candidates=[...new Set(hits.map(hit=>hit.object.userData.objectId)
         .filter((id):id is string=>typeof id==="string"))];
       const current=candidates.indexOf(picked.current??"");
@@ -973,7 +1080,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const item = getCatalogueItem(event.dataTransfer?.getData(CATALOGUE_DRAG_TYPE) ?? null);
       if (!item || itemControls.current.active?.id !== item.id ||
-          !showConstructionItem(construction.current.stage, item)) return;
+          !itemLayerVisible(construction.current.stage,item,construction.current.layers)) return;
       event.preventDefault();
       placeSelectedItem(item);
     }
@@ -991,6 +1098,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // object IDs as desktop. No headset state changes any building geometry.
     const tempMatrix = new THREE.Matrix4();
     const controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
+    const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];
+    grips.forEach(grip=>scene.add(grip));
     function aimController(controller: THREE.Group) {
       controller.updateWorldMatrix(true, false);
       tempMatrix.identity().extractRotation(controller.matrixWorld);
@@ -1022,9 +1131,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const xrGestures: (DraftGesture | null)[] = [null, null];
     const xrResize: (ResizeDrag | null)[] = [null, null];
-    const xrPress: ({ context: PointerContext; menu: string | null } | null)[] = [null, null];
+    const xrPress: ({ context: PointerContext; menu: string | null; wallKey?:string|null } | null)[] = [null, null];
     function menuKey(layout: ReturnType<typeof menuLayout>) {
-      const hit = buildOverlay.menuHit(raycaster, layout);
+      const hit = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
       return hit ? JSON.stringify(hit.action) : null;
     }
     function beginXrGesture(index: number) {
@@ -1032,8 +1141,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const layout = menuLayout("");
       buildOverlay.sizeMenu(layout);
       const menu = menuKey(layout);
-      xrPress[index] = { context: pointerContext(), menu };
-      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || menu !== null) return;
+      xrPress[index] = { context: pointerContext(), menu,wallKey:!menu&&magnetic&&!build.current.buildState.tool&&!itemControls.current.active&&!resize.current.enabled&&!teleportSettings.current.teleportMode?targetWallAim()?.target.key??null:undefined };
+      if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
         const gesture = draftGesture();
@@ -1071,12 +1180,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
-      const menuChoice = buildOverlay.menuHit(raycaster, layout);
+      const menuChoice = toolsOpen ? buildOverlay.menuHit(raycaster, layout) : null;
       if (menuChoice) {
-        if (menuChoice.action) menuAction(menuChoice.action);
+        if (menuChoice.action) {
+          const choice=menuChoice.action;
+          menuAction(choice);
+          if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
+        }
         return;
       }
-      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || resize.current.enabled) return;
+      if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -1089,7 +1202,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         return;
       }
       if(!teleportSettings.current.teleportMode){
-        selectAtRay();return;
+        selectAtRay(press?.wallKey);return;
       }
       if(!renderer.xr.isPresenting){
         teleportSettings.current.onTeleportMessage("Start a VR session before teleporting.");
@@ -1111,10 +1224,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       try {
         // An incremental XR reference-space offset moves the virtual
         // observer without modifying any PlanReader source geometry.
-        const offset=new XRRigidTransform(
-          {x,y:0,z},{x:0,y:0,z:0,w:1},
-        );
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(offset));
+        moveNavOffset({position:{x,y:0,z},orientation:{x:0,y:0,z:0,w:1}});
         teleportSettings.current.onTeleportMessage(
           `Moved ${(target.distanceM??0).toFixed(1)}m on verified floor (review navigation only)`,
         );
@@ -1128,7 +1238,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const space=renderer.xr.getReferenceSpace();
       if(!renderer.xr.isPresenting||!space||typeof XRRigidTransform==="undefined")return;
       try{
-        if(elevatedReturn){renderer.xr.setReferenceSpace(elevatedReturn);elevatedReturn=null;reportTool("Returned to walkthrough position.");return;}
+        if(elevatedReturn){setNavOffset(elevatedReturn);elevatedReturn=null;reportTool("Returned to walkthrough position.");return;}
         const box=resize.current.box;
         if(!box){reportTool("Open a bounded building scene to use 3D bird’s-eye.");return;}
         const width=box.maxX-box.minX,depth=box.maxZ-box.minZ;
@@ -1136,15 +1246,48 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const height=Math.min(100,Math.max(5,Math.hypot(width,depth)*.65+3));
         const target={x:(box.minX+box.maxX)/2,y:height,z:(box.minZ+box.maxZ)/2};
         const offset=navigationOffset(head,{x:target.x-head.x,y:target.y-head.y,z:target.z-head.z},0);
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
-        elevatedReturn=space;
+        const previous=navOffset;
+        moveNavOffset(offset);
+        elevatedReturn=previous;
         reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
       }catch{reportTool("The XR runtime declined the view change.");}
+    }
+    let collisionKey:readonly unknown[]=[];let collisionWalls:NavigationWall[]=[];
+    function cachedNavigationWalls(){
+      const key=[interaction.current.visibleIds,resize.current.projection,build.current.buildState.walls,build.current.buildLevel,moveSettings.current.wallMoveState];
+      if(key.every((v,i)=>v===collisionKey[i]))return collisionWalls;
+      collisionKey=key;collisionWalls=[];
+      const walls=collisionWalls;
+      const sourceMoves=new Map((moveSettings.current.wallMoveState?safeWallMoves(moveSettings.current.wallMoveState,manifest):[]).map(m=>[m.objectId,m]));
+        for(const row of manifest.objects){
+          const g=row.geometry;
+          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
+          const projection=resize.current.projection;
+          const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
+          const move=sourceMoves.get(row.objectId);
+          const dx=(move?.dx??0)*(projection?.scaleX??1),dz=(move?.dz??0)*(projection?.scaleZ??1);
+          walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
+        }
+        for(const raw of build.current.buildState.walls){
+          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
+          const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
+          const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
+          if(length<.05)continue;
+          const at=(d:number):[number,number]=>[w.start[0]+(w.end[0]-w.start[0])*d/length,w.start[1]+(w.end[1]-w.start[1])*d/length];
+          let end=0;
+          for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
+            if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
+            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+            end=Math.max(end,o.offsetM+o.widthM);
+          }
+          if(end<length)walls.push({start:at(end),end:w.end,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
+        }
+      return walls;
     }
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
-      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||stageMenuOpen||budgetOpen||helpOpen||numberPad||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||layersOpen||wallProfilesOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
       const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
       const move=standardThumbstick(left),turn=snapTurn(standardThumbstick(right)[0],turnArmed);
       turnArmed=turn.armed;
@@ -1161,36 +1304,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const bounded=(at:number,d:number,min:number,max:number)=>at<min?Math.max(0,d):at>max?Math.min(0,d):Math.max(min,Math.min(max,at+d))-at;
       delta=[bounded(head.x,delta[0],box.minX-3,box.maxX+3),bounded(head.z,delta[1],box.minZ-3,box.maxZ+3)];
       if(!elevatedReturn){
-        const walls:NavigationWall[]=[];
-        for(const row of manifest.objects){
-          const g=row.geometry;
-          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
-          const projection=resize.current.projection;
-          const w=projection?{start:projectPlan(g.start,projection),end:projectPlan(g.end,projection)}:g;
-          const obj=pickables.find(o=>o.userData.objectId===row.objectId);
-          const dx=obj?.position.x??0,dz=obj?.position.z??0;
-          walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
-        }
-        for(const raw of build.current.buildState.walls){
-          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
-          const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
-          if(length<.05)continue;
-          const at=(d:number):[number,number]=>[w.start[0]+(w.end[0]-w.start[0])*d/length,w.start[1]+(w.end[1]-w.start[1])*d/length];
-          let end=0;
-          for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
-            if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
-            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM)});
-            end=Math.max(end,o.offsetM+o.widthM);
-          }
-          if(end<length)walls.push({start:at(end),end:w.end});
-        }
-        delta=collisionLimitedStep([head.x,head.z],delta,walls);
+        delta=collisionLimitedStep([head.x,head.z],delta,cachedNavigationWalls());
       }
       if(!delta[0]&&!delta[1]&&!turn.angle)return;
       try{
         const offset=navigationOffset(head,{x:delta[0],y:0,z:delta[1]},turn.angle);
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+        moveNavOffset(offset);
       }catch{lastNavTime=0;}
     }
     const select0 = () => trigger(0);
@@ -1235,24 +1354,26 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (Number.isFinite(dx)&&Number.isFinite(dz))
         moveSettings.current.onMoveDelta(held.objectId,dx,dz);
     };
+    function handleGripAction(index:number){
+      if(inputSources[index]?.handedness==="left"){toggleTools();return;}
+      if(moveSettings.current.moveMode!=="move")applyFinishSqueeze();
+    }
     const nativeStart0 = () => {
       squeezeTracker.onNativeStart("0");
       nativeGripSeen[0] = true;
-      beginGrip(0);
+      if(inputSources[0]?.handedness!=="left")beginGrip(0);
     };
     const nativeStart1 = () => {
       squeezeTracker.onNativeStart("1");
       nativeGripSeen[1] = true;
-      beginGrip(1);
+      if(inputSources[1]?.handedness!=="left")beginGrip(1);
     };
     const nativeEnd0 = () => endGrip(0), nativeEnd1 = () => endGrip(1);
     const squeeze0 = () => {
-      if (squeezeTracker.onNativeSqueeze("0") && moveSettings.current.moveMode !== "move")
-        applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("0"))handleGripAction(0);
     };
     const squeeze1 = () => {
-      if (squeezeTracker.onNativeSqueeze("1") && moveSettings.current.moveMode !== "move")
-        applyFinishSqueeze();
+      if (squeezeTracker.onNativeSqueeze("1"))handleGripAction(1);
     };
     const connected = (event: unknown, index: number) => {
       const source = event && typeof event === "object" && "data" in event
@@ -1274,7 +1395,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
-      elevatedReturn=null;turnArmed=true;lastNavTime=0;
+      toolsOpen=false;renderer.shadowMap.enabled=false;
+      reportTool("Left grip opens or hides tools. Right trigger edits. Left stick walks.");
+      elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
       squeezeTracker.clear();
@@ -1284,8 +1407,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       report(true);
     };
     const onSessionEnd = () => {
+      closeTools();renderer.shadowMap.enabled=true;
       budgetOpen=false;budgetPage=0;
-      elevatedReturn=null;turnArmed=true;lastNavTime=0;
+      elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
       stageMenuOpen = false;
@@ -1349,9 +1473,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     onResize();
 
     let selectedLabel: THREE.Sprite | null = null;
+    let draftDimension:THREE.Sprite|null=null,draftDimensionKey="";
     let lastLabelId: string | null = null;
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
+    let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
     let lastCameraSerial: number | null = null;
     let lastCaptureSerial = visualSettings.current.captureSerial;
@@ -1368,13 +1494,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         for (let index=0;index<inputSources.length;index++) {
           const pressed=standardSqueezePressed(inputSources[index]);
           if (moveSettings.current.moveMode === "move" &&
-              !nativeGripSeen[index] && pressed !== null) {
+              !nativeGripSeen[index] && pressed !== null && inputSources[index]?.handedness!=="left") {
             if (pressed && !fallbackGripDown[index]) beginGrip(index);
             if (!pressed && fallbackGripDown[index]) endGrip(index);
             fallbackGripDown[index] = pressed;
           }
-          if (squeezeTracker.poll(String(index),pressed) &&
-              moveSettings.current.moveMode !== "move") applyFinishSqueeze();
+          if (squeezeTracker.poll(String(index),pressed))handleGripAction(index);
         }
       }
       const activeMoves = moveSettings.current.wallMoveState
@@ -1417,14 +1542,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         } else obj.visible = displayed && visible;
       }
       for (const shape of wallAdditionLayer.children) {
-        shape.visible = currentStage !== "slab";
+        shape.visible = true;
         if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
           shape.material.visible = displaySurface(currentStage, "ceiling");
         } else {
           for (const child of shape.children) {
-            if (child.userData.illustrativeFraming) child.visible = currentStage === "framing";
-            else if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial)
-              child.material.visible = !framing;
+            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing");
+            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",false);
+            else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
+              const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true));
+              child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
+                child.userData.catalogueDoorLeaf?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
+            } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
           }
         }
       }
@@ -1432,20 +1561,31 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const item = itemControls.current.active;
       const prompt = resize.current.enabled ? resize.current.hint || "Drag a green corner or gold edge handle." :
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
+      let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
-        buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned);
-        const layout = menuLayout(prompt);
-        buildOverlay.sizeMenu(layout);
+        const layout = toolsOpen ? menuLayout(prompt) : null;
+        if(layout){
+          buildOverlay.sizeMenu(layout);
+          const left=inputSources.findIndex(s=>s?.handedness==="left"&&s.gripSpace);
+          if(layout.radial&&left>=0&&grips[left].visible)buildOverlay.positionHandMenu(renderer.xr.getCamera(),grips[left]);
+          else buildOverlay.positionMenu(renderer.xr.getCamera(),true);
+        }
         const isPointer = (source: PcVrInputSource | null | undefined) => source?.targetRayMode === "tracked-pointer";
         const favoured = isPointer(inputSources[lastController]) ? lastController :
           inputSources.findIndex(source => isPointer(source) && source?.handedness === "right");
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
-        const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
-        hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
-          !itemBrowser.open && !stageMenuOpen && !budgetOpen && !resize.current.enabled &&
-          !resize.current.projection
-          ? magneticDraftWalls(buildState,buildLevel,raycaster.ray,hoveredDraftId,magnetic ? 0.15 : 0)[0]?.proposalId ?? null : null;
+        activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
+        const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
+        const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
+        const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
+        if(canLock&&magnetic){
+          const held=xrPress[active]?.wallKey;
+          const target=held?visibleWallTargets().find(t=>t.key===held):null;
+          wallLock=held?(target?wallAimWithin(raycaster.ray,target):null):hostTool?chooseWallAim(raycaster.ray,visibleWallTargets().filter(t=>t.kind==="draft"),wallLock?.target.key??null,true):targetWallAim();
+        }else wallLock=null;
+        hoveredSourceId=wallLock?.target.kind==="source"?wallLock.target.id:null;
+        hoveredDraftId=wallLock?.target.kind==="draft"?wallLock.target.id:null;
         const heldResize = xrResize.findIndex(drag => drag !== null);
         if (heldResize >= 0 && xrPress[heldResize] && samePointerContext(xrPress[heldResize]!.context)) {
           aimController(controllers[heldResize]);
@@ -1453,7 +1593,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         const held = xrGestures.findIndex(gesture => gesture !== null);
         if (held >= 0) aimController(controllers[held]);
-        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !budgetOpen &&
+        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen &&
           !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
@@ -1462,15 +1602,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const draftAction=dragPreview?.action;
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
-          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (!itemBrowser.open && !stageMenuOpen && !budgetOpen && !helpOpen && !selectedDraftWall())
+        if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        buildOverlay.drawMenu(layout, hover?.index ?? -1);
+        if(layout&&now-lastMenuDraw>=100){buildOverlay.drawMenu(layout, hover?.index ?? -1);lastMenuDraw=now;}
       } else {
-        hoveredDraftId=null;
+        hoveredDraftId=null;hoveredSourceId=null;wallLock=null;
         const drag = startPointer?.gesture;
         const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
@@ -1480,7 +1620,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const draftAction=dragPreview?.action;
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
-          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
@@ -1502,16 +1642,39 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             part.userData.originalDraftColor=material.color.getHex();
           const base = part.userData.originalDraftColor as number;
           if (material instanceof THREE.MeshStandardMaterial) {
-            material.emissive.setHex(selected ? 0x167e70 : hovered ? 0x795619 : 0);
-            material.emissiveIntensity=selected||hovered ? .25 : 0;
+            material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
+            material.emissiveIntensity=selected||hovered ? .65 : 0;
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
+        }
+      }
+      // One reusable on-model dimension sprite; no per-frame texture allocation.
+      let target:THREE.Object3D|undefined;
+      if(dimensions&&renderer.xr.isPresenting&&!toolsOpen){
+        const id=hoveredDraftId??selectedDraftId;
+        target=wallAdditionLayer.children.find(o=>o.visible&&o.userData.proposalId===id&&id);
+        if(!target&&activeDimensionRay&&currentStage!=="slab"&&!elevatedReturn){
+          target=raycaster.intersectObjects(wallAdditionLayer.children.filter(o=>o.visible&&o.userData.ceilingDimensions&&displaySurface(currentStage,"ceiling")),false)[0]?.object;
+        }
+      }
+      const dimText=target?(target.userData.wallDimensions??target.userData.ceilingDimensions):"";
+      const dimKey=dimText?String(dimText)+"|"+target!.uuid:"";
+      if(dimKey!==draftDimensionKey){
+        if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();draftDimension=null;}
+        draftDimensionKey=dimKey;
+        if(target&&dimText){
+          draftDimension=labelSprite(dimText);
+          const box=new THREE.Box3().setFromObject(target);
+          draftDimension.position.copy(box.getCenter(new THREE.Vector3()));
+          draftDimension.position.y=box.max.y+.18;
+          draftDimension.scale.set(1.65,.33,1);
+          scene.add(draftDimension);
         }
       }
       // Aiming at source-backed floor is visible only in immersive VR.
       // Never display this marker over an invented presentation floor.
       teleportMarker.visible=false;
       if(renderer.xr.isPresenting && interaction.current.mode === "teleport" &&
-          !itemBrowser.open && !stageMenuOpen && !budgetOpen && teleportSettings.current.teleportMode) {
+          !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && teleportSettings.current.teleportMode) {
         for(let index=0;index<controllers.length;index++) {
           const source=inputSources[index];
           if(!source || source.targetRayMode!=="tracked-pointer")continue;
@@ -1525,8 +1688,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       grid.visible = activeInspection.showGrid;
-      sunlight.castShadow = activeInspection.showShadows;
-      presentationFloor.visible = activeInspection.showShadows;
+      sunlight.castShadow = activeInspection.showShadows&&!renderer.xr.isPresenting;
+      presentationFloor.visible = activeInspection.showShadows&&!renderer.xr.isPresenting;
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -1557,7 +1720,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         lastDetail = activeDetail;
       }
-      if (lastQuality !== activeQuality) {
+      if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -1568,6 +1731,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           maxRenderPixelRatio(activeQuality, renderer.xr.isPresenting)));
         onResize();
         lastQuality = activeQuality;
+        lastPresenting=renderer.xr.isPresenting;
       }
       if (requestedCamera.serial !== lastCameraSerial && !renderer.xr.isPresenting) {
         const focus = requestedCamera.focus === "selected" ?
@@ -1620,8 +1784,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         item.material.depthWrite = !ghost && originalOpacity >= 0.9;
         // Highlight selection without repainting the verified/source-study colour.
         const selected = picked.current === id;
-        item.material.emissive.setHex(selected ? 0x173b36 : 0x000000);
-        item.material.emissiveIntensity = selected ? 0.32 : 0;
+        const hovered=hoveredSourceId===id;
+        item.material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
+        item.material.emissiveIntensity = selected||hovered ? .65 : 0;
         if (originalHeight !== undefined) {
           const height=activeInspection.showGhosts && ghostHeight !== null &&
             ghostHeight !== undefined ? ghostHeight : originalHeight;
@@ -1738,6 +1903,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         selectedLabel.material.map?.dispose();
         selectedLabel.material.dispose();
       }
+      if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();}
       itemView.clear();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
@@ -1746,7 +1912,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           materials.forEach(m => m.dispose());
         }
       });
-      roughTile.dispose();
+      roughTile.dispose();wallTextures.dispose();
       buildOverlay.dispose();
       planOverview.dispose();
       presentationFloor.geometry.dispose();

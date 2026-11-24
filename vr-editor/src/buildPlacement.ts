@@ -3,6 +3,8 @@ import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
 import type { OutlineEdit } from "./localOutline.ts";
+import {isWallAssembly,wallAssembly} from "./wallProfiles.ts";
+import type {WallAssembly} from "./wallProfiles.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -16,13 +18,13 @@ export const BUILD_TOOLS = [
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
-export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number };
+export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number; wallAssembly?:WallAssembly };
 export const STARTING_SIZES: BuildSizes = { wallHeightM: 2.4, widthM: 0.9, heightM: 2.1, ceilingHeightM: 2.4,
   windowWidthM: 1.2, windowHeightM: 1.05, windowSillM: 0.9 };
 export const MAX_DRAFT_WALLS = 25;
 
-export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[] };
-export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[] };
+export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[]; assembly?:WallAssembly };
+export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[]; assembly?:WallAssembly };
 export type CeilingDraft = {
   proposalId: string; scopeKey: string; levelId: string;
   start: PlanPoint; end: PlanPoint; heightM: number;
@@ -48,6 +50,7 @@ export type BuildAction =
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
+  | { kind: "set-wall-assembly"; proposalId:string; assembly:WallAssembly }
   | { kind: "edit-local-outline"; expected: string; edit: OutlineEdit }
   | { kind: "group-local-walls"; proposalIds: string[]; operation: "translate" | "rotate" | "delete" | "duplicate" | "height"; delta?: PlanPoint; copyIds?: string[]; heightMm?: number }
   | { kind: "delete-local-wall"; proposalId: string }
@@ -135,10 +138,10 @@ export function snappedPoint(point: PlanPoint): PlanPoint | null {
 
 // Magnetic alignment is strictly for LOCAL draft wall placement. It does not
 // alter source/verified geometry or override any source authority checks.
-export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified";
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified" | "wall-face";
   witness?: string };
 export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
-export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+export type WallSnapOptions = { magnetic?:boolean; preferredDraftId?:string|null; wallSegments?:readonly {start:PlanPoint;end:PlanPoint;objectId:string}[]; gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
   verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
@@ -151,6 +154,7 @@ export function snapDraftWallPoint(
   const step = options.gridM ?? 0.05;
   const gridRound = (value: number) => Math.round(Math.round(value / step) * step * 100) / 100;
   const grid: PlanPoint = [gridRound(raw[0]), gridRound(raw[1])];
+  if(options.magnetic===false)return {point:anchor&&options.axis==="horizontal"?[grid[0],anchor[1]]:anchor&&options.axis==="vertical"?[anchor[0],grid[1]]:grid,kind:"grid"};
   let nearest: { point: PlanPoint; distance: number } | null = null;
   // Prefer exact junctions over ambiguous coordinate alignment.
   for (const wall of state.walls) {
@@ -187,6 +191,22 @@ export function snapDraftWallPoint(
   if (best && (!second ||
       planLength(raw,second.point) - planLength(raw,best.point) > 0.005)) {
     return { point: [...best.point], kind: "verified", witness: best.objectId };
+  }
+  // Snap to any point along a nearby wall, not just its endpoints.
+  const segments=[...state.walls.filter(w=>w.levelId===levelId).map(w=>({start:w.start,end:w.end,objectId:w.proposalId})),...(options.wallSegments??[])];
+  const along=segments.flatMap(s=>{
+    const dx=s.end[0]-s.start[0],dz=s.end[1]-s.start[1],length2=dx*dx+dz*dz;
+    if(length2<.0025)return [];
+    const t=Math.max(0,Math.min(1,((raw[0]-s.start[0])*dx+(raw[1]-s.start[1])*dz)/length2));
+    const p:PlanPoint=[s.start[0]+dx*t,s.start[1]+dz*t];
+    if(anchor&&options.axis==="horizontal"&&Math.abs(p[1]-anchor[1])>.001)return [];
+    if(anchor&&options.axis==="vertical"&&Math.abs(p[0]-anchor[0])>.001)return [];
+    if(anchor&&planLength(anchor,p)<.05)return [];
+    return [{point:p,distance:planLength(raw,p),id:s.objectId}];
+  }).filter(s=>s.distance<=.22).sort((a,b)=>a.distance-b.distance||a.id.localeCompare(b.id));
+  if(options.magnetic===true&&along.length){
+    const point=millimetrePoint(along[0].point);
+    if(point)return {point,kind:"wall-face"};
   }
   if (anchor && snappedPoint(anchor)) {
     const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
@@ -347,6 +367,11 @@ export function updateBuild(
     return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
       ceilings: state.ceilings });
   }
+  if(action.kind==="set-wall-assembly"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    if(!wall||!isWallAssembly(action.assembly))return state;
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?{...w,assembly:{...action.assembly}}:w),ceilings:state.ceilings});
+  }
   if(action.kind==="edit-local-outline"){
     if(!levelId)return state;
     const walls=state.walls.filter(w=>w.levelId===levelId&&w.scopeKey===scopeKey);
@@ -438,7 +463,7 @@ export function updateBuild(
     if (!validHeight(heightM)) return state;
     const shape = { scopeKey, proposalId: action.id, levelId, start, end: point, heightM };
     if (tool === "wall" && state.walls.length < MAX_DRAFT_WALLS && validWallLength(planLength(start, point))) {
-      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [] }] });
+      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [], ...(sizes.wallAssembly?{assembly:wallAssembly(sizes.wallAssembly)}:{}) }] });
     }
     if (tool === "ceiling" && state.ceilings.length < MAX_DRAFT_WALLS && validCeiling(start, point)) {
       return checkpoint(state, { walls: state.walls, ceilings: [...state.ceilings, shape] });

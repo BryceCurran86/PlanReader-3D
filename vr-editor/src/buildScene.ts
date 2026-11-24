@@ -8,6 +8,9 @@ import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanP
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
+import {wallAssembly,profileDetails} from "./wallProfiles.ts";
+import {chooseWallAim} from "./wallMagnet.ts";
+import type {WallTextureLibrary} from "./wallTextures.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -32,15 +35,15 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   const length = planLength(wall.start, wall.end);
   if (!Number.isFinite(length) || length < .05 || length > 200 || !Number.isFinite(wall.heightM) || wall.heightM < .1 || wall.heightM > 20) return group;
   const openings = (wall.openings ?? []).filter(o => openingFits(wall,o));
-  const thickness = .045, depth = .09;
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  if(profile.core==="masonry")return group;
+  const thickness = .045, depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
   const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+  const members:{from:number;to:number;bottom:number;top:number}[]=[];
   function member(from:number,to:number,bottom:number,top:number) {
     from=Math.max(0,from);to=Math.min(length,to);bottom=Math.max(0,bottom);top=Math.min(wall.heightM,top);
     if(to-from<.001||top-bottom<.001)return;
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,depth),new THREE.MeshStandardMaterial({color:0xc99c65,roughness:.88}));
-    mesh.position.copy(atOffset(wall,(from+to)/2,(bottom+top)/2));
-    mesh.rotation.y=angle;mesh.userData.illustrativeFraming=true;
-    group.add(mesh);
+    members.push({from,to,bottom,top});
   }
   function horizontal(y:number) {
     const cuts=openings.filter(o=>o.sillHeightM<y+thickness&&o.sillHeightM+o.heightM>y).sort((a,b)=>a.offsetM-b.offsetM);
@@ -61,27 +64,67 @@ export function illustrativeTimberFrame(wall: WallVisual) {
     member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM+o.heightM,o.sillHeightM+o.heightM+thickness);
     if(o.sillHeightM>thickness)member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM-thickness,o.sillHeightM);
   }
+  // One instanced draw call per wall, rather than a geometry and material per stud.
+  if(members.length){
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}),members.length);
+    const transform=new THREE.Object3D();
+    members.forEach((m,i)=>{
+      transform.position.copy(atOffset(wall,(m.from+m.to)/2,(m.bottom+m.top)/2));
+      transform.rotation.y=angle;
+      transform.scale.set(m.to-m.from,m.top-m.bottom,depth);
+      transform.updateMatrix();
+      mesh.setMatrixAt(i,transform.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate=true;
+    mesh.computeBoundingBox();mesh.computeBoundingSphere();
+    mesh.userData.illustrativeFraming=true;
+    group.add(mesh);
+  }
   return group;
 }
 
-export function displayWallDraft(wall: WallVisual) {
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) {
   const group = new THREE.Group();
-  const faces: number[] = [];
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[];
+  const texture=textures?.get(wallAssembly(wall.assembly).profile);
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  const length=planLength(wall.start,wall.end);
+  if(!Number.isFinite(length)||length<.001)return group;
+  const normal=new THREE.Vector3(-(wall.end[1]-wall.start[1])/length,0,(wall.end[0]-wall.start[0])/length);
+  const half=assembly.thicknessMm/2000;
+  const exterior=new THREE.Color(profile.outerColor),interior=new THREE.Color(0xeeeae1);
+  const left=assembly.exteriorSide==="left"?exterior:interior,rightColor=assembly.exteriorSide==="right"?exterior:interior;
   function panel(points: THREE.Vector3[], vertices: number[]) {
     for (const index of [0, 1, 2, 0, 2, 3]) vertices.push(...points[index].toArray());
   }
   function surface(from: number, to: number, bottom: number, top: number) {
     if (to <= from || top <= bottom) return;
-    panel([atOffset(wall, from, bottom), atOffset(wall, from, top),
-      atOffset(wall, to, top), atOffset(wall, to, bottom)], faces);
+    const p=[atOffset(wall,from,bottom),atOffset(wall,from,top),atOffset(wall,to,top),atOffset(wall,to,bottom)];
+    panel(p,mountFaces);
+    const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
+    function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
+    face([...a].reverse(),left);face(b,rightColor);
+    if(texture&&profile.role==="external"){
+      const side=assembly.exteriorSide==="left"?1:-1;
+      const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
+      const ordered=side===1?[...points].reverse():points;
+      panel(ordered,exteriorFaces);
+      for(const index of [0,1,2,0,2,3]){
+        const v=ordered[index],along=(v.x-wall.start[0])*(wall.end[0]-wall.start[0])/length+(v.z-wall.start[1])*(wall.end[1]-wall.start[1])/length;
+        exteriorUV.push(along/texture.repeat[0],v.y/texture.repeat[1]);
+      }
+    }
+    for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
+
   }
   function addMesh(vertices: number[], color: number, opacity: number, wallFace = false, doorId?: string) {
     if (!vertices.length) return;
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
+    if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-      color, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
+      color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
@@ -107,6 +150,26 @@ export function displayWallDraft(wall: WallVisual) {
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xeeeae1, 1, true);
+  if(texture&&exteriorFaces.length){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
+    g.computeVertexNormals();
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    mesh.userData.exteriorTexture=true;group.add(mesh);
+  }
+  // Centre-plane witness retains the existing catalogue anchor convention.
+  if(mountFaces.length&&profile.core!=="masonry"){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    g.computeVertexNormals();
+    const insulation=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd8bb6d,side:THREE.DoubleSide,roughness:1,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1}));
+    insulation.userData.illustrativeInsulation=true;insulation.visible=false;group.add(insulation);
+  }
+  if(mountFaces.length){
+    const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    mountGeometry.computeVertexNormals();
+    const mount=new THREE.Mesh(mountGeometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));
+    mount.userData.catalogueMountFace=true;
+    group.add(mount);
+  }
   group.add(illustrativeTimberFrame(wall));
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
@@ -174,7 +237,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   // Recognise that direct wall contact as a valid draft manipulation target.
   const directWall = state.tool === "move" || state.tool === "stretch" ||
     state.tool === "opening-move"
-    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
+    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null,options) : null;
   const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
   if (!from) return null;
   const mode = state.tool;
@@ -187,7 +250,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (mode !== "move" && mode !== "stretch" && mode !== "opening-move") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
   if(mode==="opening-move"){
-    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor);
+    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor,options);
     if(!host)return null;
     const projection=projectOnWall(host.wall,host.point);
     const opening=host.wall.openings.filter(item=>
@@ -197,7 +260,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
     return opening?{kind:"opening",mode,from,levelId,previous:host.wall,
       openingId:opening.openingId}:null;
   }
-  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor);
+  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor,options);
   const ceiling = ceilingHost(state.ceilings, ray, levelId);
   const nearestWall = wall && (mode === "move" || Math.min(
     planLength(wall.wall.start, wall.point), planLength(wall.wall.end, wall.point)) < .4);
@@ -304,7 +367,13 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   return { action: valid ? action : null, aim };
 }
 
-function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null) {
+function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null,options:WallSnapOptions={}) {
+  if(options.magnetic===true){
+    const targets=walls.map(w=>({key:"draft:"+w.proposalId,id:w.proposalId,kind:"draft" as const,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000}));
+    const aim=chooseWallAim(ray,targets,options.preferredDraftId?"draft:"+options.preferredDraftId:null,true);
+    const wall=aim&&walls.find(w=>w.proposalId===aim.target.id);
+    if(aim&&wall)return {wall,point:aim.point,distance:aim.distance*aim.distance};
+  }
   type HostHit = { wall: PlacedWall; point: PlanPoint; distance: number };
   let direct: HostHit | null = null;
   let fromAbove: HostHit | null = null;
@@ -385,7 +454,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   if (state.tool === "move" || state.tool === "stretch" || state.tool === "opening-move") {
-    const edit = beginDraftGesture(state, levelId, ray);
+    const edit = beginDraftGesture(state, levelId, ray,options);
     if (!edit || !("previous" in edit)) return { hit: null, hint: guide };
     const { previous } = edit;
     const marker = state.tool === "move" || edit.kind === "opening" ?
@@ -404,7 +473,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     const hit: BuildHit = { kind: state.tool, levelId, point,
       precisionSource:snap?.kind==="verified" };
     if (!start) return { hit, marker: point,
-      hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
+      hint: snap?.kind === "wall-face" ? "Place wall start · magnetic wall snap" : snap?.kind === "corner" ? "Place wall start · corner snap" :
         snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
@@ -418,13 +487,13 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
       hint: valid
         ? "Place wall end · " + Math.round(length * 1000) + " mm" +
-          (snap?.kind === "corner" ? " · corner snap" :
+          (snap?.kind === "wall-face" ? " · magnetic wall snap" : snap?.kind === "corner" ? " · corner snap" :
            snap?.kind === "verified" ? " · verified source guide (draft only)" :
            snap?.kind === "straight" ? " · straight" : "")
         : "Wall length must be 50 mm to 200 m.",
     };
   }
-  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor);
+  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor,options);
   const result = host && aimOpening(host.wall, host.point, state.tool, sizes);
   if (!host || !result) return { hit: null, hint: guide };
   if (result.error) return { hit: null, hint: result.error };
@@ -444,7 +513,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, depthTest: false, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
   menu.renderOrder = 20;
   menu.visible = false;
   scene.add(menu);
@@ -478,24 +547,26 @@ export function createBuildOverlay(scene: THREE.Scene) {
   scene.add(outline);
   // Local-only 3D moving-wall outline: shows where the entire wall will land
   // before release, including height, without moving any source-backed meshes.
-  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(15),3);
+  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(72),3);
   const ghostGeometry=new THREE.BufferGeometry().setAttribute("position",ghostPositions);
-  const ghost=new THREE.Line(ghostGeometry,new THREE.LineBasicMaterial({
+  const ghost=new THREE.LineSegments(ghostGeometry,new THREE.LineBasicMaterial({
     color:0x75f7db,transparent:true,opacity:0.9,depthTest:false}));
   ghost.frustumCulled=false;
   ghost.renderOrder=18;
   ghost.visible=false;
   scene.add(ghost);
-  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number}|null){
+  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number;assembly?:WallVisual["assembly"]}|null){
     ghost.visible=!!shape;
     if(!shape)return;
-    const {start,end,heightM}=shape;
-    [[start[0],0.035,start[1]],[end[0],0.035,end[1]],
-      [end[0],heightM,end[1]],[start[0],heightM,start[1]],
-      [start[0],0.035,start[1]]].forEach((point,i)=>
-      ghostPositions.setXYZ(i,point[0],point[1],point[2]));
+    const {start,end,heightM}=shape,length=planLength(start,end);
+    if(length<.001){ghost.visible=false;return;}
+    const half=wallAssembly(shape.assembly).thicknessMm/2000,nx=-(end[1]-start[1])/length*half,nz=(end[0]-start[0])/length*half;
+    const points=[[start[0]+nx,.035,start[1]+nz],[end[0]+nx,.035,end[1]+nz],[end[0]-nx,.035,end[1]-nz],[start[0]-nx,.035,start[1]-nz],
+      [start[0]+nx,heightM,start[1]+nz],[end[0]+nx,heightM,end[1]+nz],[end[0]-nx,heightM,end[1]-nz],[start[0]-nx,heightM,start[1]-nz]];
+    let index=0;
+    for(const [a,b] of [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]])for(const i of [a,b])ghostPositions.setXYZ(index++,points[i][0],points[i][1],points[i][2]);
     ghostPositions.needsUpdate=true;
-    ghostGeometry.setDrawRange(0,5);
+    ghostGeometry.setDrawRange(0,index);
   }
 
   const previousHead = new THREE.Vector3();
@@ -508,7 +579,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
     facing.y = 0;
-    if (facing.lengthSq() < 0.01) return;
+    if (facing.lengthSq() < 0.01) facing.set(0,0,-1);
     facing.normalize();
     // Pinned is world-locked during editing, but auto-recentres if the user
     // walks too far away and would otherwise lose the control surface.
@@ -519,14 +590,25 @@ export function createBuildOverlay(scene: THREE.Scene) {
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
-    menu.position.copy(head).addScaledVector(facing, 1.3).addScaledVector(right, 0.32);
-    menu.position.y -= 0.38;
+    menu.position.copy(head).addScaledVector(facing, 1.0).addScaledVector(right, -0.58);
+    menu.position.y -= 0.62;
     menu.lookAt(head);
     menu.updateMatrixWorld();
     menu.visible = true;
   }
+  function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
+    camera.getWorldPosition(head);
+    hand.getWorldPosition(menu.position);
+    menu.position.y+=.12;
+    // Keep the tool wheel at a comfortable readable distance even if the hand is near the face.
+    const offset=menu.position.clone().sub(head);
+    const distance=offset.length();
+    if(distance<.35||distance>1.2){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.35,Math.min(1.2,distance))));}
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
   function sizeMenu(layout: MenuLayout) {
-    const width = layout.width / 1030, height = layout.height / 1030;
+    const scale=layout.radial?1800:1450;
+    const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
       menu.updateMatrixWorld();
@@ -536,6 +618,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
     const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
+    if(layout.radial&&Math.hypot(x-layout.width/2,y-layout.height/2)>layout.width/2)return null;
     const index = layout.buttons.findIndex(button => !button.disabled &&
       x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
     return { action: layout.buttons[index]?.action ?? null, index };
@@ -548,11 +631,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
       canvas.width = layout.width;
       canvas.height = layout.height;
     }
+    context.clearRect(0,0,canvas.width,canvas.height);
     context.fillStyle = "#13242c";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
+    else context.fillRect(0, 0, canvas.width, canvas.height);
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    context.fillText(layout.title, 20, 45, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.title,layout.width/2,285,300);context.textAlign="left";}
+    else context.fillText(layout.title, 20, 45, layout.width - 40);
     if (layout.subtitle) {
       context.fillStyle = "#ceeceb";
       context.font = "bold 27px sans-serif";
@@ -590,7 +676,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     context.fillStyle = "#edf9fc";
     context.font = "27px sans-serif";
-    context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.note,layout.width/2,layout.height-33,240);context.textAlign="left";}
+    else context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
     texture.needsUpdate = true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
@@ -626,7 +713,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

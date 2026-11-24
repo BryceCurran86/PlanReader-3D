@@ -7,6 +7,10 @@ import type { ConstructionStage } from "./constructionStages.ts";
 import type { ControlMode, HistoryAction } from "./editorControls.ts";
 import { budgetMoney,budgetHeadline } from "./vrAssemblyStudy.ts";
 import type { ImmersiveBudget } from "./vrAssemblyStudy.ts";
+import { WALL_PROFILES, wallAssembly, wallDimensionText } from "./wallProfiles.ts";
+import type { WallAssembly, WallProfileId } from "./wallProfiles.ts";
+import {CONSTRUCTION_LAYERS} from "./constructionLayers.ts";
+import type {ConstructionLayer,LayerOverrides} from "./constructionLayers.ts";
 
 export type ItemAction =
   | { kind: "choose"; itemId: string }
@@ -24,7 +28,9 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" }
+  | {area:"layer";layer:ConstructionLayer}
+  | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
@@ -38,7 +44,7 @@ export type MenuButton = {
 };
 export type MenuLayout = { title: string; width: number; height: number;
   note: string; subtitle?: string; buttons: MenuButton[];
-  sections?: { label: string; y: number }[]; helpLines?: string[] };
+  sections?: { label: string; y: number }[]; helpLines?: string[]; radial?:boolean };
 export type NumericDraftField = "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
@@ -49,6 +55,8 @@ export type QuestMenuState = {
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
   elevatedView?:boolean; walkSpeed?:number;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
+  wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean;
+  layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
   budget?:ImmersiveBudget; budgetOpen?:boolean; budgetPage?:number;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
@@ -91,6 +99,38 @@ export function buildMenuLayout(
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
   const questAction = (action: Extract<MenuAction, {area:"quest"}>["action"]): MenuAction =>
     ({ area: "quest", action });
+  if(quest?.layersOpen){
+    CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));
+    add("Reset to stage defaults",20,630,455,60,questAction("reset-layers"));
+    add("Back",495,630,455,60,questAction("layers"));
+    return {buttons,title:"CONSTRUCTION LAYERS",width:WIDTH,height:750,note:"Select a layer to cycle Auto → Show → Hide. Overrides do not change quantities."};
+  }
+  if(quest?.radial&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!viewsOpen&&!browser.open&&!footprint.enabled){
+    const canDraw=!!levelId&&!footprint.changed;
+    const hasWall=build.walls.some(w=>w.levelId===levelId);
+    const radialTools:{label:string;action:MenuAction;disabled?:boolean}[]=[
+      {label:"Wall",action:{area:"build",action:{kind:"tool",tool:"wall"}},disabled:!canDraw},
+      {label:"Door",action:{area:"build",action:{kind:"tool",tool:"door"}},disabled:!canDraw||!hasWall},
+      {label:"Window",action:{area:"build",action:{kind:"tool",tool:"window"}},disabled:!canDraw||!hasWall},
+      {label:"Ceiling",action:{area:"build",action:{kind:"tool",tool:"ceiling"}},disabled:!canDraw},
+      {label:"Items",action:browse({kind:"groups"})},
+      {label:"3D view",action:questAction("elevated-view")},
+      {label:"Layers",action:questAction("layers")},
+      {label:"More tools",action:questAction("more-tools")},
+    ];
+    radialTools.forEach((entry,i)=>{
+      const angle=i*Math.PI/4-Math.PI/2;
+      add(entry.label,330+Math.cos(angle)*225-76,345+Math.sin(angle)*225-34,152,68,entry.action,{disabled:entry.disabled});
+    });
+    add("Close",254,310,152,70,questAction("hide-tools"));
+    return {buttons,title:"QUICK TOOLS",width:660,height:660,note:"Left grip · close / reopen",radial:true};
+  }
+  if(quest?.wallProfilesOpen){
+    const a=wallAssembly(quest.selectedWall?.assembly??quest.nextWallAssembly);
+    WALL_PROFILES.forEach((profile,i)=>add(profile.label+" · "+profile.thicknessMm+" mm",20+(i%2)*475,95+Math.floor(i/2)*76,455,66,{area:"wall-profile",profile:profile.id},{active:a.profile===profile.id}));
+    add("Back",495,399,455,66,questAction("wall-profiles"));
+    return {buttons,title:quest.selectedWall?"CHANGE WALL ASSEMBLY":"WALL CONSTRUCTION",width:WIDTH,height:530,note:"Nominal design profiles only · choose actual construction; imported wall types remain unverified."};
+  }
   if(quest?.budgetOpen&&quest.budget){
     const b=quest.budget;
     const pages=Math.max(1,Math.ceil(b.trades.length/4)),page=Math.min(pages-1,Math.max(0,quest.budgetPage??0));
@@ -122,10 +162,11 @@ export function buildMenuLayout(
       sections:[{label:"DRAFT ONLY · TRIGGER A NUMBER",y:99}]};
   }
   if (quest?.help) {
-    add("Back to tools", 20, 369, 260, 74, questAction("help"));
-    return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 510,
+    add("Back to tools", 20, 455, 260, 74, questAction("help"));
+    return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 570,
       note: "Everything here is local draft review until an authenticated save.",
       helpLines: [
+        "Left grip: show/hide tools. Right trigger: edit.",
         "Left stick: walk/strafe. Right stick: snap turn.",
         "Trigger: point, select, confirm or place.",
         "Choose Wall, pick start and end; a corner glows when snapped.",
@@ -191,6 +232,9 @@ export function buildMenuLayout(
       ({area:"draft",action,direction});
     const controls: {label:string; action:MenuAction; disabled?:boolean}[] = [
       {label:"Grab / Move",action:edit("move")},
+      {label:"Wall construction",action:questAction("wall-profiles")},
+      {label:"Layers",action:questAction("layers")},
+      {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",action:questAction("dimensions")},
       {label:"Multi-select",action:questAction("multi-select")},
       {label:"Exact length",action:{area:"number",action:"start",field:"length"}},
       {label:"Exact height",action:{area:"number",action:"start",field:"height"}},
@@ -216,7 +260,7 @@ export function buildMenuLayout(
     for (const [i,c] of controls.entries()) add(c.label,
       20+(i%columns)*stride, 110+Math.floor(i/columns)*84, stride-13, 70, c.action,
       {disabled:c.disabled});
-    return { buttons, title: "EDIT DRAFT WALL · " + length + " mm",
+    return { buttons, title: "EDIT WALL · " + length + " mm", subtitle:wallDimensionText(length/1000,wall.heightM,wall.assembly),
       width: WIDTH, height,
       note: quest.deleteArmed?"Confirm delete or Back to cancel. Undo restores.":"Trigger & hold to move a draft wall; source stays unchanged.",
       sections: [{label:"SELECT · GRAB · MOVE · RELEASE",y:93}] };
@@ -297,6 +341,8 @@ export function buildMenuLayout(
   if (quest?.compact) {
     const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Build tools",action:questAction("compact")},
+      {label:"Wall construction",action:questAction("wall-profiles")},
+      {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",action:questAction("dimensions")},
       ...(quest.budget?[{label:"Live budget",action:questAction("budget")}]:[]),
       {label:"Multi-select",action:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),action:questAction("magnetic")},
@@ -324,6 +370,9 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      {label:"Wall construction",target:questAction("wall-profiles")},
+      {label:"Layers",target:questAction("layers")},
+      {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",target:questAction("dimensions")},
       ...(quest.budget?[{label:"Live budget",target:questAction("budget")}]:[]),
       {label:"Multi-select",target:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),target:questAction("magnetic")},
