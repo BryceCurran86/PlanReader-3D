@@ -2170,6 +2170,25 @@ def _source_unresolved_gap_witnesses(
     return ordered[:limit], len(ordered)
 
 
+def _without_door_owned_paths(
+    drawings: Sequence[Any], witnesses: Sequence[Mapping[str, Any]],
+) -> Sequence[Any]:
+    """The rows with every native path a segmented swing witness OWNS made inert: same indices, same length.
+
+    A witness (a quarter-turn chain of black single-line strokes and its one radial leaf) is door symbol ink,
+    not wall ink. The leaf is collinear with the hinge-side jamb line, so the line-based wall-strip collectors
+    (merged collinear dark face, stroke pair, wall-end closure, heavy stroke) read it as a thin wall face that
+    reaches into the doorway and shortens the raw wall gap the chord proposer needs (``4285e133a``). Only the
+    collectors' view changes: the door detection, the proposer and every other consumer keep reading the full
+    rows. With no witness the input itself is returned, so a page without a segmented swing is untouched.
+    """
+    owned = {int(index) for witness in witnesses for index in witness["native_source_path_indices"]}
+    if not owned:
+        return drawings
+    inert: Mapping[str, Any] = {"layer": "", "fill": None, "color": None, "items": ()}
+    return [inert if index in owned else row for index, row in enumerate(drawings)]
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2230,22 +2249,31 @@ def build_layered_wall_doorway_room_rings(
             )
     strips, other_fills = _collect_strips(drawings)
     merged_face_strips: list[_Strip] = []
+    segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
+    wall_ink = drawings
     if dark_painted_wall_source:
+        from pb_source_segmented_door_swing_shadow import (
+            collect_source_black_segmented_door_swings,
+        )
+        # A source door swing's own strokes are door symbol ink, not wall ink. Find the swings once, here, and
+        # give the line-based wall-strip collectors rows in which their native paths are inert (same indices).
+        segmented_witnesses = collect_source_black_segmented_door_swings(drawings)
+        wall_ink = _without_door_owned_paths(drawings, segmented_witnesses)
         # Owner: black paired-line walls, dark filled wall strips and true
         # named wall ink are the structural wall hypothesis sources.
         # Unqualified green aisle/equipment/cold-room graphics are excluded
         # before this stage, with original path indices still intact.
-        merged_face_strips = _collect_merged_collinear_dark_face_strips(drawings)
+        merged_face_strips = _collect_merged_collinear_dark_face_strips(wall_ink)
         strips = (
             strips
             + _collect_dark_painted_source_wall_strips(drawings)
-            + _collect_stroke_pair_strips(drawings)
+            + _collect_stroke_pair_strips(wall_ink)
             + merged_face_strips
         )
         if wall_end_stroke_closures:
-            strips = strips + _collect_wall_end_closing_strips(drawings, strips)
+            strips = strips + _collect_wall_end_closing_strips(wall_ink, strips)
     if source_heavy_stroke_wall_bands:
-        strips = strips + _collect_source_heavy_stroke_strips(drawings)
+        strips = strips + _collect_source_heavy_stroke_strips(wall_ink)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -2268,14 +2296,12 @@ def build_layered_wall_doorway_room_rings(
     arcs, _rejected_arcs = _swing_arcs(
         drawings, unlabelled_source_ink=dark_painted_wall_source,
     )
-    segmented_witnesses: tuple[Mapping[str, Any], ...] = ()
     sourced_doorway_chords: tuple[Mapping[str, Any], ...] = ()
     if dark_painted_wall_source:
         from pb_source_segmented_door_swing_shadow import (
-            collect_source_black_segmented_door_swings,
             propose_source_owned_doorway_chords,
         )
-        segmented_witnesses = collect_source_black_segmented_door_swings(drawings)
+        # ``segmented_witnesses`` were found once, above, on these same rows.
         # One shared wall-end and jamb rule for EVERY segmented source
         # swing. Never close the whole oversized original _Gap.
         sourced_doorway_chords = propose_source_owned_doorway_chords(
