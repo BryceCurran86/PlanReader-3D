@@ -141,7 +141,7 @@ export function snappedPoint(point: PlanPoint): PlanPoint | null {
 export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified" | "wall-face";
   witness?: string };
 export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
-export type WallSnapOptions = { magnetic?:boolean; wallSegments?:readonly {start:PlanPoint;end:PlanPoint;objectId:string}[]; gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+export type WallSnapOptions = { magnetic?:boolean; preferredDraftId?:string|null; wallSegments?:readonly {start:PlanPoint;end:PlanPoint;objectId:string}[]; gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
   verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
@@ -204,7 +204,7 @@ export function snapDraftWallPoint(
     if(anchor&&planLength(anchor,p)<.05)return [];
     return [{point:p,distance:planLength(raw,p),id:s.objectId}];
   }).filter(s=>s.distance<=.22).sort((a,b)=>a.distance-b.distance||a.id.localeCompare(b.id));
-  if(along.length){
+  if(options.magnetic===true&&along.length){
     const point=millimetrePoint(along[0].point);
     if(point)return {point,kind:"wall-face"};
   }
