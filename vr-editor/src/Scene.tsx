@@ -596,13 +596,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (interaction.current.mode !== "draw" || resize.current.projection) return null;
       return beginDraftGesture(buildState, buildLevel, raycaster.ray);
     }
-    function previewDrag(gesture: DraftGesture) {
+    function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
       const { buildState, buildLevel, buildSizes } = build.current;
       if (buildState.tool !== gesture.mode || buildLevel !== gesture.levelId) return null;
-      return draftGesturePreview(gesture, buildSizes, raycaster.ray);
+      const hand = controllerIndex === undefined ? undefined :
+        controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
+      return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
+        hand ? [hand.x, hand.z] : undefined);
     }
-    function completeDrag(gesture: DraftGesture) {
-      const preview = previewDrag(gesture);
+    function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
+      const preview = previewDrag(gesture, controllerIndex);
       if (!preview) return false;
       const { action } = preview;
       if (action?.kind === "drag") {
@@ -750,7 +753,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       xrPress[index] = { context: pointerContext(), menu };
       if (itemBrowser.open || stageMenuOpen || menu !== null) return;
       xrResize[index] = startResize();
-      if (!xrResize[index]) xrGestures[index] = draftGesture();
+      if (!xrResize[index]) {
+        const gesture = draftGesture();
+        if (gesture && "previous" in gesture) {
+          const hand = controllers[index].getWorldPosition(new THREE.Vector3());
+          gesture.fromController = [hand.x, hand.z];
+        }
+        xrGestures[index] = gesture;
+      }
     }
     const selectStart0 = () => beginXrGesture(0), selectStart1 = () => beginXrGesture(1);
     const selectEnd = (index: number) => {
@@ -778,7 +788,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const gesture = xrGestures[index];
       xrGestures[index] = null;
-      if (gesture && completeDrag(gesture)) return;
+      if (gesture && completeDrag(gesture, index)) return;
       const menuChoice = buildOverlay.menuHit(raycaster, layout);
       if (menuChoice) {
         if (menuChoice.action) menuAction(menuChoice.action);
@@ -1083,7 +1093,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
-        const buildTarget = drag ? previewDrag(drag)?.aim ?? null : ready && !item ? aim() : null;
+        const buildTarget = drag ? previewDrag(drag, held)?.aim ?? null : ready && !item ? aim() : null;
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (!itemBrowser.open && !stageMenuOpen) layout.note = itemPick?.hit ? "Pull the trigger to place." :
