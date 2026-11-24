@@ -22,7 +22,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" }
+      "teleport" | "save" | "review" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
@@ -157,6 +157,7 @@ export function buildMenuLayout(
       {label:"Set X (start)",action:{area:"number",action:"start",field:"x"}},
       {label:"Set Z (start)",action:{area:"number",action:"start",field:"z"}},
       {label:"Edit openings",action:questAction("openings"),disabled:!wall.openings.length},
+      {label:"Review + cost",action:questAction("review")},
       {label:"Stretch end",action:edit("stretch")},
       {label:"Nudge left",action:edit("nudge","left")},
       {label:"Nudge right",action:edit("nudge","right")},
