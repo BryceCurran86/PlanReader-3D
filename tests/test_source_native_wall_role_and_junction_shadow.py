@@ -244,3 +244,60 @@ def test_heavy_stroke_closed_rectangle_has_no_invented_bridge():
     assert report.rejected_diagonal_bridge_count == 0
     assert report.to_dict()["can_issue_area"] is False
     assert report.to_dict()["measurement_authorized"] is False
+
+
+def test_junction_bbox_prefilter_keeps_true_contact_and_rejects_near_miss():
+    from shapely.geometry import box
+    from types import SimpleNamespace
+    from pb_source_native_wall_role_and_junction_shadow import _count_junctions_and_open_ends
+
+    # One endpoint of the horizontal strip touches the vertical strip.
+    # A third nearby strip is beyond the exact contact tolerance.
+    strips = [
+        SimpleNamespace(polygon=box(0, 0, 100, 2)),
+        SimpleNamespace(polygon=box(99.99, 0, 102, 80)),
+        SimpleNamespace(polygon=box(200, 200, 300, 202)),
+    ]
+    junctions, open_ends = _count_junctions_and_open_ends(strips)
+    assert junctions >= 1
+    assert junctions + open_ends == 2 * len(strips)
+    assert open_ends >= 2
+
+
+def test_junction_bbox_prefilter_matches_unfiltered_geometry_across_orientations():
+    """Conservative pruning must match the original GEOS contact decision."""
+    from types import SimpleNamespace
+    from shapely.affinity import rotate, translate
+    from shapely.geometry import LineString, box
+    from pb_source_native_wall_role_and_junction_shadow import (
+        CONTACT_PT, _count_junctions_and_open_ends, _strip_tips,
+    )
+
+    def reference(strips):
+        valid = [s for s in strips if s.polygon is not None and not s.polygon.is_empty]
+        junctions = open_ends = 0
+        for i, strip in enumerate(valid):
+            for tip in _strip_tips(strip):
+                point = LineString((tip, tip))
+                if any(
+                    other.polygon.distance(point) <= CONTACT_PT
+                    for j, other in enumerate(valid) if i != j
+                ):
+                    junctions += 1
+                else:
+                    open_ends += 1
+        return junctions, open_ends
+
+    layouts = (
+        (box(0, 0, 100, 2), box(99.99, -20, 102, 30), box(250, 250, 270, 270)),
+        (box(0, 0, 100, 2), box(100.02, -20, 102, 30), box(250, 250, 270, 270)),
+        (box(0, 0, 100, 2), box(100.04, -20, 102, 30), box(250, 250, 270, 270)),
+    )
+    for angle in (0, 27, 45, 90, 135):
+        for dx, dy in ((0, 0), (500, -200)):
+            for polygons in layouts:
+                strips = [
+                    SimpleNamespace(polygon=translate(rotate(p, angle, origin=(0, 0)), dx, dy))
+                    for p in polygons
+                ]
+                assert _count_junctions_and_open_ends(strips) == reference(strips)

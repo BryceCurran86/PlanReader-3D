@@ -196,13 +196,22 @@ def _count_junctions_and_open_ends(strips: Sequence[Any]) -> tuple[int, int]:
     valid = [s for s in strips if getattr(s, "polygon", None) is not None and not s.polygon.is_empty]
     junctions = 0
     open_ends = 0
+    bounds = [tuple(float(v) for v in strip.polygon.bounds) for strip in valid]
     for i, strip in enumerate(valid):
         for tip in _strip_tips(strip):
-            point = LineString((tip, tip))
+            x, y = tip
+            point = None
             hit = 0
             for j, other in enumerate(valid):
                 if i == j:
                     continue
+                x0, y0, x1, y1 = bounds[j]
+                # Exact conservative rejection: never exclude a polygon within
+                # CONTACT_PT of this tip, including diagonally oriented faces.
+                if x < x0 - CONTACT_PT or x > x1 + CONTACT_PT or y < y0 - CONTACT_PT or y > y1 + CONTACT_PT:
+                    continue
+                if point is None:
+                    point = LineString((tip, tip))
                 if other.polygon.distance(point) <= CONTACT_PT:
                     hit += 1
             if hit:
