@@ -33,6 +33,7 @@ import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
+import {PreciseCommandPanel} from "./PreciseCommandPanel";
 import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
@@ -670,6 +671,7 @@ export function App() {
             <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
             {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
           </details>}
+          <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
