@@ -16,10 +16,10 @@ import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
 import type { WallAxis } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
-  displayWallDraft, draftGesturePreview, pickDraftWall } from "./buildScene";
+  displayWallDraft, draftGesturePreview, pickDraftWall, pickDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, showConstructionItem, showConstructionSurface } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -29,7 +29,9 @@ import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./fo
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalogueMenu";
-import type { ItemAction, MenuAction } from "./catalogueMenu";
+import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
+import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
+import { createVrPlanOverview } from "./vrPlanOverview";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
@@ -92,6 +94,10 @@ type Props = {
     onPlace: (itemId: string, hit: ItemHit) => void;
   };
   teleportMode: boolean;
+  teleportAvailable:boolean;
+  onTeleportToggle:(enabled:boolean)=>void;
+  onExportLocalDraft:()=>void;
+  onReviewLocalWall:(proposalId:string)=>void;
   onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
@@ -205,7 +211,8 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+  onExportLocalDraft, onReviewLocalWall, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage };
@@ -214,8 +221,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
-  const teleportSettings = useRef({teleportMode,onTeleportMessage});
-  teleportSettings.current = {teleportMode,onTeleportMessage};
+  const teleportSettings = useRef({teleportMode,teleportAvailable,onTeleportToggle,onTeleportMessage});
+  teleportSettings.current = {teleportMode,teleportAvailable,onTeleportToggle,onTeleportMessage};
+  const exportDraftCallback=useRef(onExportLocalDraft);
+  exportDraftCallback.current=onExportLocalDraft;
+  const reviewDraftCallback=useRef(onReviewLocalWall);
+  reviewDraftCallback.current=onReviewLocalWall;
   const addedWallRef = useRef(addedWallSketch);
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
@@ -323,6 +334,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
+    let compactMenu = true;
+    let overviewOpen=false;
+    let openingTools = false;
+    let openingIndex = 0;
+    let numberPad: {field:NumericDraftField;digits:string}|null = null;
     const nextStep = (value: 0.05 | 0.1 | 0.25): 0.05 | 0.1 | 0.25 =>
       value === 0.05 ? 0.1 : value === 0.1 ? 0.25 : 0.05;
     function selectedDraftWall() {
@@ -342,6 +358,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const samePointerContext = (expected: PointerContext) =>
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
+    function snapOptions() {
+      return {gridM:snapGrid,axis:snapAxis,
+        verifiedAnchors: resize.current.projection ? [] :
+          verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
+    }
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
@@ -351,22 +372,120 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }, interaction.current, {
           selectedWall: selectedDraftWall(), gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
+          compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
+          canTeleport:teleportSettings.current.teleportAvailable,
+          teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
         });
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
-      if (choice.area === "quest") {
+      if (choice.area === "number") {
+        if(resize.current.enabled || resize.current.projection) {
+          numberPad=null;openingTools=false;return;
+        }
+        const wall=selectedDraftWall();
+        if (choice.action === "start") {
+          if (wall && choice.field && (!choice.field.startsWith("opening-") ||
+            wall.openings[openingIndex%wall.openings.length])) {
+            numberPad={field:choice.field,digits:""};
+          }
+        } else if (choice.action === "cancel") numberPad=null;
+        else if (numberPad) {
+          if (choice.action === "clear") numberPad={...numberPad,digits:""};
+          else if (choice.action === "erase") numberPad={...numberPad,digits:numberPad.digits.slice(0,-1)};
+          else if (choice.action === "digit") {
+            const digit=choice.digit??"";
+            const text=numberPad.digits;
+            const negative=numberPad.field==="x"||numberPad.field==="z";
+            if ((/^[0-9]$/.test(digit) && text.length<8) ||
+               (digit==="-"&&negative&&!text)) numberPad={...numberPad,digits:text+digit};
+          } else if (choice.action === "apply") {
+            const number=Number(numberPad.digits), field=numberPad.field;
+            if (wall && /^-?[0-9]+$/.test(numberPad.digits) && Number.isSafeInteger(number)) {
+              if (field.startsWith("opening-")) {
+                const opening=wall.openings[openingIndex%wall.openings.length];
+                if (opening) build.current.onBuildAction({kind:"exact-local-opening",
+                  proposalId:wall.proposalId,openingId:opening.openingId,
+                  field:field.slice(8) as "offset"|"width"|"height"|"sill",valueMm:number});
+              } else build.current.onBuildAction({kind:"exact-local-wall",
+                proposalId:wall.proposalId,field:field as "length"|"height"|"x"|"z",valueMm:number});
+              reportTool("Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
+              numberPad=null;
+            } else reportTool("Enter a whole millimetre value to apply.");
+          }
+        }
+      } else if (choice.area === "opening") {
+        if(resize.current.enabled || resize.current.projection) {
+          openingTools=false;return;
+        }
+        if(choice.action==="drag") {
+          const wall=selectedDraftWall();
+          const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
+          if(!opening)return;
+          selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
+          build.current.onBuildAction({kind:"tool",tool:"opening-move"});
+          reportTool("Aim at the door/window, hold trigger and slide along its draft wall.");
+          return;
+        }
+        const wall=selectedDraftWall();
+        const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
+        if (wall && opening) {
+          const field=choice.action==="shift"?"offset":choice.action;
+          const value=opening[choice.action==="shift"?"offsetM":
+            choice.action==="width"?"widthM":"heightM"]*1000+choice.deltaMm;
+          build.current.onBuildAction({kind:"exact-local-opening",
+            proposalId:wall.proposalId,openingId:opening.openingId,
+            field,valueMm:Math.round(value)});
+          reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
+        }
+      } else if (choice.area === "quest") {
         if (choice.action === "grid") snapGrid = nextStep(snapGrid);
         if (choice.action === "nudge-size") nudgeStep = nextStep(nudgeStep);
         if (choice.action === "axis") {
           const axes: WallAxis[] = ["auto","free","horizontal","vertical"];
           snapAxis = axes[(axes.indexOf(snapAxis)+1)%axes.length];
         }
+        if (choice.action === "compact") compactMenu=!compactMenu;
+        if (choice.action === "overview") overviewOpen=!overviewOpen;
+        if (choice.action === "teleport") {
+          if(teleportSettings.current.teleportAvailable)
+            teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
+          else reportTool("Teleport requires a verified source-backed floor.");
+        }
+        if (choice.action === "save") exportDraftCallback.current();
+        if (choice.action === "review") {
+          const wall=selectedDraftWall();
+          if(!wall)return;
+          selectedDraftId=null;openingTools=false;numberPad=null;
+          const session=renderer.xr.getSession();
+          if(session) {
+            void session.end().then(()=>reviewDraftCallback.current(wall.proposalId))
+              .catch(()=>reportTool("Exit VR before starting authenticated assembly review."));
+          } else reviewDraftCallback.current(wall.proposalId);
+        }
+        if (choice.action === "next-stage") {
+          const current=CONSTRUCTION_STAGES.findIndex(entry=>entry.id===construction.current.stage);
+          construction.current.onStage(CONSTRUCTION_STAGES[(current+1)%CONSTRUCTION_STAGES.length].id);
+        }
+        if (choice.action === "next-floor") {
+          const levels=["all",...interaction.current.levels];
+          const index=levels.indexOf(interaction.current.level);
+          interaction.current.onLevel(levels[(index+1)%levels.length]);
+          selectedDraftId=null;openingTools=false;numberPad=null;
+        }
+        if (choice.action === "openings") {
+          openingTools=!openingTools;openingIndex=0;numberPad=null;
+        }
+        if (choice.action === "next-opening") {
+          const count=selectedDraftWall()?.openings.length??0;
+          if(count) openingIndex=(openingIndex+1)%count;
+        }
         if (choice.action === "pin") panelPinned = !panelPinned;
         if (choice.action === "recenter" && renderer.xr.isPresenting)
           buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned,true);
-        if (choice.action === "help") { helpOpen = !helpOpen; selectedDraftId = null; deleteArmed=false; }
-        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; }
+        if (choice.action === "help") { helpOpen = !helpOpen; numberPad=null; openingTools=false;
+          selectedDraftId = null; deleteArmed=false; }
+        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; }
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
@@ -493,6 +612,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
     const buildOverlay = createBuildOverlay(scene);
+    const planOverview=createVrPlanOverview(scene,manifest);
     const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
     let lastBuildWalls = build.current.buildState.walls;
@@ -612,8 +732,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function aim() {
       const { buildState, buildLevel, buildSizes } = build.current;
-      return aimBuild(buildState, buildLevel, buildSizes, raycaster.ray,
-        {gridM:snapGrid,axis:snapAxis});
+      return aimBuild(buildState, buildLevel, buildSizes, raycaster.ray,snapOptions());
     }
     function place(hit: BuildHit) {
       build.current.onBuildAction({ kind: "place", hit, id: newPlacementId(hit.kind) });
@@ -648,26 +767,32 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const select = (id: string | null) => callback.current(id);
     function selectAtRay() {
-      const wall = renderer.xr.isPresenting && !resize.current.enabled &&
+      const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
-        pickDraftWall(build.current.buildState, build.current.buildLevel, raycaster.ray) : null;
+        pickDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray) : [];
+      const index=walls.findIndex(wall=>wall.proposalId===selectedDraftId);
+      const wall=walls.length?walls[(index+1)%walls.length]:null;
       if (wall && !itemBrowser.open && !stageMenuOpen) {
         selectedDraftId=wall.proposalId;
+        openingTools=false;openingIndex=0;numberPad=null;
         deleteArmed=false;
         select(null);
         reportTool("Draft wall selected · use the precision controls to edit.");
         return;
       }
-      selectedDraftId=null;
+      selectedDraftId=null;openingTools=false;numberPad=null;
       deleteArmed=false;
       pick();
     }
     function pick() {
-      const hits = raycaster.intersectObjects(pickables.filter(object =>
+      const hits=raycaster.intersectObjects(pickables.filter(object =>
         sourceVisible(object) && showConstructionSurface(construction.current.stage, object.userData.surfaceKind)), false);
-      const hit = hits[0];
-      select(typeof hit?.object.userData.objectId === "string"
-        ? hit.object.userData.objectId : null);
+      const candidates=[...new Set(hits.map(hit=>hit.object.userData.objectId)
+        .filter((id):id is string=>typeof id==="string"))];
+      const current=candidates.indexOf(picked.current??"");
+      const next=candidates.length?candidates[(current+1)%candidates.length]:null;
+      select(next);
+      if(candidates.length>1) reportTool("Overlapping source objects: trigger again to cycle.");
     }
     const resizePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.06);
     type ResizeDrag = { box: FootprintBounds; corner: FootprintCorner; at: THREE.Vector3; token: symbol; last?: string };
@@ -694,8 +819,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (interaction.current.mode !== "draw" || resize.current.projection) return null;
-      return beginDraftGesture(buildState, buildLevel, raycaster.ray,
-        {gridM:snapGrid,axis:snapAxis});
+      return beginDraftGesture(buildState, buildLevel, raycaster.ray,snapOptions());
     }
     function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
       const { buildState, buildLevel, buildSizes } = build.current;
@@ -703,7 +827,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const hand = controllerIndex === undefined ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
-        hand ? [hand.x, hand.z] : undefined, {gridM:snapGrid,axis:snapAxis});
+        hand ? [hand.x, hand.z] : undefined,snapOptions());
     }
     function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
       const preview = previewDrag(gesture, controllerIndex);
@@ -1141,6 +1265,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
+      planOverview.update(build.current.buildState,interaction.current.level,
+        interaction.current.visibleIds,renderer.xr.isPresenting?renderer.xr.getCamera():camera,
+        renderer.xr.isPresenting&&overviewOpen);
       gizmo.show(resize.current.enabled ? resize.current.box : null);
       if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
         raycaster.setFromCamera(mouse, camera);
@@ -1199,7 +1326,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
-        const buildTarget = drag ? previewDrag(drag, held)?.aim ?? null : ready && !item ? aim() : null;
+        const dragPreview=drag ? previewDrag(drag, held) : null;
+        const buildTarget = dragPreview?.aim ?? (ready&&!item?aim():null);
+        const draftAction=dragPreview?.action;
+        buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
+          draftAction?.kind==="drag" && drag?.mode==="wall"
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (!itemBrowser.open && !stageMenuOpen && !helpOpen && !selectedDraftWall())
@@ -1212,7 +1344,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
         const itemPick = canAim && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
-        const buildTarget = canAim && !item ? drag ? previewDrag(drag)?.aim ?? null : aim() : null;
+        const dragPreview=canAim&&!item&&drag?previewDrag(drag):null;
+        const buildTarget=canAim&&!item ? dragPreview?.aim??aim() : null;
+        const draftAction=dragPreview?.action;
+        buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
+          draftAction?.kind==="drag" && drag?.mode==="wall"
+          ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
@@ -1477,6 +1614,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       });
       roughTile.dispose();
       buildOverlay.dispose();
+      planOverview.dispose();
       presentationFloor.geometry.dispose();
       presentationFloor.material.dispose();
       sunlight.shadow.dispose();

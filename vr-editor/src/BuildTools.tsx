@@ -45,6 +45,7 @@ export function BuildTools({ state, sizes, levelId, layoutEnabled, onAction, onS
         {BUILD_TOOLS.map(({ id, label }) => {
           const isOpening = id === "door" || id === "frame" || id === "window";
           const available = !!levelId && layoutEnabled && (!isOpening || walls.length > 0) &&
+            (id !== "opening-move" || walls.some(wall=>wall.openings.length>0)) &&
             ((id !== "move" && id !== "stretch") || walls.length > 0 ||
               state.ceilings.some(ceiling => ceiling.levelId === levelId));
           return <button key={id} type="button" className="build-tool" disabled={!available}

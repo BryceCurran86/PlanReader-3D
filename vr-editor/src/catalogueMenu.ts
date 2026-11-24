@@ -20,7 +20,13 @@ export type MenuAction =
   | { area: "history"; action: HistoryAction }
   | { area: "level"; id: string }
   | { area: "done" }
-  | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" }
+  | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
+      "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
+      "teleport" | "save" | "review" | "overview" }
+  | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
+      field?: NumericDraftField; digit?: string }
+  | { area: "opening"; action: "drag" | "shift" | "width" | "height";
+      deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
       direction?: "left" | "right" | "forward" | "back" };
 
@@ -31,10 +37,15 @@ export type MenuButton = {
 export type MenuLayout = { title: string; width: number; height: number;
   note: string; subtitle?: string; buttons: MenuButton[];
   sections?: { label: string; y: number }[]; helpLines?: string[] };
+export type NumericDraftField = "length" | "height" | "x" | "z" |
+  "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
+  compact?: boolean; openingTools?: boolean; openingIndex?: number;
+  canTeleport?:boolean; teleport?:boolean; overview?:boolean;
+  numeric?: {field:NumericDraftField;digits:string}|null;
 };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
 export const EMPTY_ITEM_BROWSER: BrowserState = { open: false, category: 0, page: 0 };
@@ -75,6 +86,22 @@ export function buildMenuLayout(
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
   const questAction = (action: Extract<MenuAction, {area:"quest"}>["action"]): MenuAction =>
     ({ area: "quest", action });
+  if (quest?.numeric && quest.selectedWall) {
+    const { field, digits } = quest.numeric;
+    const number = (action: Extract<MenuAction,{area:"number"}>["action"],digit?:string): MenuAction =>
+      ({area:"number",action,digit});
+    const keys = ["7","8","9","4","5","6","1","2","3","-","0","⌫"];
+    for (const [i,key] of keys.entries()) add(key,
+      20+(i%3)*315,118+Math.floor(i/3)*67,300,58,
+      key==="⌫"?number("erase"):number("digit",key),
+      {disabled:key==="-"&&!["x","z"].includes(field)});
+    add("Apply exact mm",20,405,300,65,number("apply"),{disabled:!digits||digits==="-"});
+    add("Clear",338,405,300,65,number("clear"));
+    add("Cancel",655,405,300,65,number("cancel"));
+    return {buttons,title:"EXACT "+field.toUpperCase()+" · "+(digits||"—")+" mm",
+      width:WIDTH,height:530,note:"Enter millimetres. Invalid sizes or openings cannot be applied.",
+      sections:[{label:"DRAFT ONLY · TRIGGER A NUMBER",y:99}]};
+  }
   if (quest?.help) {
     add("Back to tools", 20, 369, 260, 74, questAction("help"));
     return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 510,
@@ -90,6 +117,34 @@ export function buildMenuLayout(
   }
   // A selected local wall replaces the crowded toolbox with direct manipulation.
   if (quest?.selectedWall && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
+    if (quest.openingTools && quest.selectedWall.openings.length) {
+      const list=quest.selectedWall.openings;
+      const opening=list[(quest.openingIndex??0)%list.length];
+      const field=(name:NumericDraftField):MenuAction=>({area:"number",action:"start",field:name});
+      const adjust=(action:Extract<MenuAction,{area:"opening"}>["action"],deltaMm:number):MenuAction=>
+        ({area:"opening",action,deltaMm});
+      const controls: {label:string;action:MenuAction}[]=[
+        {label:"Next opening",action:questAction("next-opening")},
+        {label:"Slide by hand",action:adjust("drag",0)},
+        {label:"Slide -50mm",action:adjust("shift",-50)},
+        {label:"Slide +50mm",action:adjust("shift",50)},
+        {label:"Width -50mm",action:adjust("width",-50)},
+        {label:"Width +50mm",action:adjust("width",50)},
+        {label:"Height -50mm",action:adjust("height",-50)},
+        {label:"Height +50mm",action:adjust("height",50)},
+        {label:"Exact offset",action:field("opening-offset")},
+        {label:"Exact width",action:field("opening-width")},
+        {label:"Exact height",action:field("opening-height")},
+        {label:"Exact sill",action:field("opening-sill")},
+        {label:"Back to wall",action:questAction("openings")},
+      ];
+      for(const [i,entry] of controls.entries()) add(entry.label,
+        20+(i%3)*315,115+Math.floor(i/3)*79,300,66,entry.action);
+      return {buttons,title:opening.openingKind.toUpperCase()+" · "+
+        Math.round(opening.widthM*1000)+"×"+Math.round(opening.heightM*1000)+" mm",
+        width:WIDTH,height:510,sections:[{label:"OPENING "+((quest.openingIndex??0)%list.length+1)+"/"+list.length,y:98}],
+        note:"Draft wall opening only. Changes preserve host and reject overlap."};
+    }
     const wall = quest.selectedWall;
     const length = Math.round(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1])*1000);
     const edit = (action: Extract<MenuAction,{area:"draft"}>["action"],
@@ -97,6 +152,12 @@ export function buildMenuLayout(
       ({area:"draft",action,direction});
     const controls: {label:string; action:MenuAction; disabled?:boolean}[] = [
       {label:"Grab / Move",action:edit("move")},
+      {label:"Exact length",action:{area:"number",action:"start",field:"length"}},
+      {label:"Exact height",action:{area:"number",action:"start",field:"height"}},
+      {label:"Set X (start)",action:{area:"number",action:"start",field:"x"}},
+      {label:"Set Z (start)",action:{area:"number",action:"start",field:"z"}},
+      {label:"Edit openings",action:questAction("openings"),disabled:!wall.openings.length},
+      {label:"Review + cost",action:questAction("review")},
       {label:"Stretch end",action:edit("stretch")},
       {label:"Nudge left",action:edit("nudge","left")},
       {label:"Nudge right",action:edit("nudge","right")},
@@ -169,7 +230,8 @@ export function buildMenuLayout(
       target: { area: "build", action: { kind: "tool", tool: id } },
       active: build.tool === id, disabled: !levelId || footprint.enabled || footprint.changed ||
         ((id === "door" || id === "window" || id === "frame") && !hasWall) ||
-        ((id === "stretch" || id === "move") && !canMove) }));
+        ((id === "stretch" || id === "move") && !canMove) ||
+        (id==="opening-move" && !build.walls.some(wall=>wall.levelId===levelId&&wall.openings.length>0)) }));
   actions.push(
     { label: "Items", target: browse({ kind: "groups" }), active: !!item },
     { label: "View", target: { area: "view" } },
@@ -191,8 +253,35 @@ export function buildMenuLayout(
     target: { area: "footprint" }, active: footprint.enabled });
   if (footprint.changed) actions.push({ label: "Reset size", target: { area: "footprint", reset: true } });
   if (item && itemCanRotate(item)) actions.push({ label: "Rotate " + turn * 90 + "°", target: items({ kind: "rotate" }) });
+  if (quest?.compact) {
+    const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
+      {label:"Build tools",action:questAction("compact")},
+      {label:"Items",action:browse({kind:"groups"})},
+      {label:"Next stage",action:questAction("next-stage")},
+      {label:"Next level",action:questAction("next-floor")},
+      {label:quest.teleport?"Exit teleport":"Teleport",action:questAction("teleport"),
+        disabled:!quest.canTeleport},
+      {label:"Save draft",action:questAction("save")},
+      {label:quest.overview?"Hide plan":"Plan view",action:questAction("overview")},
+      {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
+      {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
+      {label:"Done",action:{area:"done"}},
+      {label:"Help",action:questAction("help")},
+    ];
+    for(const [i,entry] of compact.entries()) add(entry.label,
+      20+(i%4)*235,105+Math.floor(i/4)*82,221,69,entry.action,{disabled:entry.disabled});
+    return {buttons,title:"QUEST QUICK TOOLS",width:WIDTH,
+      height:105+Math.ceil(compact.length/4)*82+68,
+      note:"Compact palette · Build tools opens the full tool selection.",
+      sections:[{label:"NAVIGATE · EDIT · UNDO",y:88}]};
+  }
   if (quest) {
     actions.push(
+      {label:"Compact",target:questAction("compact")},
+      {label:quest.teleport?"Exit teleport":"Teleport",target:questAction("teleport"),
+        disabled:!quest.canTeleport},
+      {label:"Save draft",target:questAction("save")},
+      {label:quest.overview?"Hide plan":"Plan overview",target:questAction("overview")},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
