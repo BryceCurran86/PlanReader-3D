@@ -493,24 +493,26 @@ export function createBuildOverlay(scene: THREE.Scene) {
   scene.add(outline);
   // Local-only 3D moving-wall outline: shows where the entire wall will land
   // before release, including height, without moving any source-backed meshes.
-  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(15),3);
+  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(72),3);
   const ghostGeometry=new THREE.BufferGeometry().setAttribute("position",ghostPositions);
-  const ghost=new THREE.Line(ghostGeometry,new THREE.LineBasicMaterial({
+  const ghost=new THREE.LineSegments(ghostGeometry,new THREE.LineBasicMaterial({
     color:0x75f7db,transparent:true,opacity:0.9,depthTest:false}));
   ghost.frustumCulled=false;
   ghost.renderOrder=18;
   ghost.visible=false;
   scene.add(ghost);
-  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number}|null){
+  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number;assembly?:WallVisual["assembly"]}|null){
     ghost.visible=!!shape;
     if(!shape)return;
-    const {start,end,heightM}=shape;
-    [[start[0],0.035,start[1]],[end[0],0.035,end[1]],
-      [end[0],heightM,end[1]],[start[0],heightM,start[1]],
-      [start[0],0.035,start[1]]].forEach((point,i)=>
-      ghostPositions.setXYZ(i,point[0],point[1],point[2]));
+    const {start,end,heightM}=shape,length=planLength(start,end);
+    if(length<.001){ghost.visible=false;return;}
+    const half=wallAssembly(shape.assembly).thicknessMm/2000,nx=-(end[1]-start[1])/length*half,nz=(end[0]-start[0])/length*half;
+    const points=[[start[0]+nx,.035,start[1]+nz],[end[0]+nx,.035,end[1]+nz],[end[0]-nx,.035,end[1]-nz],[start[0]-nx,.035,start[1]-nz],
+      [start[0]+nx,heightM,start[1]+nz],[end[0]+nx,heightM,end[1]+nz],[end[0]-nx,heightM,end[1]-nz],[start[0]-nx,heightM,start[1]-nz]];
+    let index=0;
+    for(const [a,b] of [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]])for(const i of [a,b])ghostPositions.setXYZ(index++,points[i][0],points[i][1],points[i][2]);
     ghostPositions.needsUpdate=true;
-    ghostGeometry.setDrawRange(0,5);
+    ghostGeometry.setDrawRange(0,index);
   }
 
   const previousHead = new THREE.Vector3();
