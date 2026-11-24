@@ -549,6 +549,10 @@ guides are vetoed; this affects the draft preview only and is never a measured
 or approved source edit. During movement a green 3D outline indicates the
 candidate wall; release to commit a reversible local draft edit.
 
+Use **Plan view / Hide plan** in quick tools for a world-pinned, read-only
+overhead reference of visible source lines and local drafts. The map uses
+the currently selected level; it cannot select, measure or authenticate walls.
+
 Use **Next stage**, **Next level** and **Teleport** in quick tools. Teleport remains
 disabled without a verified original-source floor and authenticated workspace.
 The floating palette can be pinned or recentered. VR is tested with generic
