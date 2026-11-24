@@ -34,6 +34,8 @@ import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import { createVrPlanOverview } from "./vrPlanOverview";
 import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset } from "./vrStationaryNavigation";
 import type { NavigationWall } from "./vrStationaryNavigation";
+import { budgetHeadline } from "./vrAssemblyStudy";
+import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
@@ -100,6 +102,7 @@ type Props = {
   onTeleportToggle:(enabled:boolean)=>void;
   onExportLocalDraft:()=>void;
   onReviewLocalWall:(proposalId:string)=>void;
+  budget:{summary:ImmersiveBudget;onCapture:()=>void;onClear:()=>void};
   onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
@@ -214,7 +217,7 @@ function labelSprite(value: string): THREE.Sprite {
 }
 
 export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
-  onExportLocalDraft, onReviewLocalWall, onTeleportMessage }: Props) {
+  onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage };
@@ -229,6 +232,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   exportDraftCallback.current=onExportLocalDraft;
   const reviewDraftCallback=useRef(onReviewLocalWall);
   reviewDraftCallback.current=onReviewLocalWall;
+  const liveBudget=useRef(budget);
+  liveBudget.current=budget;
   const addedWallRef = useRef(addedWallSketch);
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
@@ -339,6 +344,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = false;
     let helpOpen = false;
+    let budgetOpen=false,budgetPage=0;
     let compactMenu = true;
     let overviewOpen=false;
     let elevatedReturn: XRReferenceSpace|null=null;
@@ -354,7 +360,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       return build.current.buildState.walls.find(wall =>
         wall.proposalId === selectedDraftId && wall.levelId === build.current.buildLevel) ?? null;
     }
-    const toolsBusy = () => interaction.current.mode !== "inspect" || itemBrowser.open || stageMenuOpen;
+    const toolsBusy = () => interaction.current.mode !== "inspect" || itemBrowser.open || stageMenuOpen || budgetOpen;
     const sourceVisible = (object: THREE.Object3D) => {
       const id = object.userData.objectId as string | undefined;
       return !id || interaction.current.visibleIds.has(id);
@@ -375,7 +381,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
-      return buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint,
+      const layout=buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint,
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
@@ -385,7 +391,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           canTeleport:teleportSettings.current.teleportAvailable,
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
           elevatedView:!!elevatedReturn,walkSpeed,magnetic,multiSelect,selectedCount:groupIds().length,
+          budget:liveBudget.current.summary,budgetOpen,budgetPage,
         });
+      if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
+      return layout;
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
@@ -449,6 +458,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
         }
       } else if (choice.area === "quest") {
+        if(choice.action==="budget"){budgetOpen=!budgetOpen;budgetPage=0;return;}
+        if(choice.action==="budget-baseline"){liveBudget.current.onCapture();return;}
+        if(choice.action==="budget-clear"){liveBudget.current.onClear();return;}
+        if(choice.action==="budget-page"){budgetPage=(budgetPage+1)%Math.max(1,Math.ceil(liveBudget.current.summary.trades.length/4));return;}
         if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;return;}
         if(choice.action==="multi-select"){
           if(resize.current.enabled||resize.current.projection)return;
@@ -1020,7 +1033,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       buildOverlay.sizeMenu(layout);
       const menu = menuKey(layout);
       xrPress[index] = { context: pointerContext(), menu };
-      if (itemBrowser.open || stageMenuOpen || helpOpen || menu !== null) return;
+      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || menu !== null) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
         const gesture = draftGesture();
@@ -1063,7 +1076,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (menuChoice.action) menuAction(menuChoice.action);
         return;
       }
-      if (itemBrowser.open || stageMenuOpen || helpOpen || resize.current.enabled) return;
+      if (itemBrowser.open || stageMenuOpen || budgetOpen || helpOpen || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
         placeSelectedItem(item);
@@ -1131,7 +1144,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
-      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||stageMenuOpen||helpOpen||numberPad||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||stageMenuOpen||budgetOpen||helpOpen||numberPad||resize.current.enabled||teleportSettings.current.teleportMode)return;
       const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
       const move=standardThumbstick(left),turn=snapTurn(standardThumbstick(right)[0],turnArmed);
       turnArmed=turn.armed;
@@ -1204,7 +1217,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let activeGrip: { index:number; objectId:string; from:THREE.Vector3 } | null = null;
     const nativeGripSeen = [false,false], fallbackGripDown = [false,false];
     const beginGrip = (index:number) => {
-      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen || activeGrip) return;
+      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen || budgetOpen || activeGrip) return;
       const id = picked.current;
       const row = sourceById.get(id ?? "");
       if (!id || !row || row.objectType !== "wall" ||
@@ -1216,7 +1229,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const held=activeGrip;
       if (!held || held.index !== index) return;
       activeGrip=null;
-      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen) return;
+      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen || budgetOpen) return;
       const p=controllers[index].getWorldPosition(new THREE.Vector3());
       const dx=p.x-held.from.x,dz=p.z-held.from.z;
       if (Number.isFinite(dx)&&Number.isFinite(dz))
@@ -1271,6 +1284,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       report(true);
     };
     const onSessionEnd = () => {
+      budgetOpen=false;budgetPage=0;
       elevatedReturn=null;turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
@@ -1349,7 +1363,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       // Fallback xr-standard grips when SteamVR omits native squeeze events.
       // Native grip events always take precedence. Neither path changes source.
       const { buildState, buildLevel } = build.current;
-      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen) activeGrip=null;
+      if (interaction.current.mode !== "wall-move" || itemBrowser.open || stageMenuOpen || budgetOpen) activeGrip=null;
       if (renderer.xr.isPresenting) {
         for (let index=0;index<inputSources.length;index++) {
           const pressed=standardSqueezePressed(inputSources[index]);
@@ -1429,7 +1443,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (active >= 0) aimController(controllers[active]);
         const hover = active >= 0 ? buildOverlay.menuHit(raycaster, layout) : null;
         hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
-          !itemBrowser.open && !stageMenuOpen && !resize.current.enabled &&
+          !itemBrowser.open && !stageMenuOpen && !budgetOpen && !resize.current.enabled &&
           !resize.current.projection
           ? magneticDraftWalls(buildState,buildLevel,raycaster.ray,hoveredDraftId,magnetic ? 0.15 : 0)[0]?.proposalId ?? null : null;
         const heldResize = xrResize.findIndex(drag => drag !== null);
@@ -1439,7 +1453,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         const held = xrGestures.findIndex(gesture => gesture !== null);
         if (held >= 0) aimController(controllers[held]);
-        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen &&
+        const ready = active >= 0 && !hover && !itemBrowser.open && !stageMenuOpen && !budgetOpen &&
           !helpOpen && !resize.current.enabled;
         const itemPick = ready && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const drag = held >= 0 && xrPress[held] && samePointerContext(xrPress[held]!.context) ? xrGestures[held] : null;
@@ -1451,7 +1465,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM} : null);
         itemView.aim(itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (!itemBrowser.open && !stageMenuOpen && !helpOpen && !selectedDraftWall())
+        if (!itemBrowser.open && !stageMenuOpen && !budgetOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
         buildOverlay.drawMenu(layout, hover?.index ?? -1);
@@ -1497,7 +1511,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       // Never display this marker over an invented presentation floor.
       teleportMarker.visible=false;
       if(renderer.xr.isPresenting && interaction.current.mode === "teleport" &&
-          !itemBrowser.open && !stageMenuOpen && teleportSettings.current.teleportMode) {
+          !itemBrowser.open && !stageMenuOpen && !budgetOpen && teleportSettings.current.teleportMode) {
         for(let index=0;index<controllers.length;index++) {
           const source=inputSources[index];
           if(!source || source.targetRayMode!=="tracked-pointer")continue;
