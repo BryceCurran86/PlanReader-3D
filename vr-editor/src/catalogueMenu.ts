@@ -28,7 +28,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" }
   | {area:"layer";layer:ConstructionLayer}
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
