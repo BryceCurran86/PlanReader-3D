@@ -13,13 +13,14 @@ import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
 import type {LayerOverrides} from "./constructionLayers";
+import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
 import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
-import { isRoughIn, showConstructionItem } from "./constructionStages";
+import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
@@ -340,7 +341,8 @@ export function App() {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
       enterMode("place");
-      if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
+      if(layers[itemLayer(item)]==="hide")setLayers(current=>({...current,[itemLayer(item)]:"auto"}));
+      if (!itemLayerVisible(stage,item,layers)) setStage(isRoughIn(item) ? "rough-in" : "finished");
       setPanel("items");
       setLastEdit("place");
       changeCatalogue(current => ({ ...current, itemId: item.id, turn: 0 }));
@@ -426,7 +428,7 @@ export function App() {
 
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
-    if ((activeItem && !showConstructionItem(next, activeItem)) || next === "slab" ||
+    if ((activeItem && !itemLayerVisible(next,activeItem,layers)) || next === "slab" ||
         buildState.tool === "ceiling" && next !== "finished") enterMode("inspect");
     setStage(next);
   }
