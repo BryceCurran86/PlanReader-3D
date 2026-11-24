@@ -21,7 +21,8 @@ export type MenuAction =
   | { area: "level"; id: string }
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
-      "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" }
+      "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
+      "teleport" | "save" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "shift" | "width" | "height";
@@ -43,6 +44,7 @@ export type QuestMenuState = {
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
+  canTeleport?:boolean; teleport?:boolean;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
@@ -254,6 +256,9 @@ export function buildMenuLayout(
       {label:"Items",action:browse({kind:"groups"})},
       {label:"Next stage",action:questAction("next-stage")},
       {label:"Next level",action:questAction("next-floor")},
+      {label:quest.teleport?"Exit teleport":"Teleport",action:questAction("teleport"),
+        disabled:!quest.canTeleport},
+      {label:"Save draft",action:questAction("save")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:"Done",action:{area:"done"}},
@@ -268,6 +273,9 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      {label:quest.teleport?"Exit teleport":"Teleport",target:questAction("teleport"),
+        disabled:!quest.canTeleport},
+      {label:"Save draft",target:questAction("save")},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
