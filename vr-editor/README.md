@@ -526,3 +526,55 @@ Use **Open scene** for a saved scene file or **Open example** to try the editor.
 Choose a tool and use **Done** or **Esc** to finish it. **Alt + drag** orbits on desktop with a tool active. **Undo** and **Redo** use the active edit or the most recent edit when inspecting. The shortcuts are **Ctrl/Command + Z** and **Ctrl/Command + Shift + Z**. A footprint drag counts as one edit. Text fields retain normal text editing shortcuts.
 
 In VR, open **Items** to choose a category. The headset toolbar can cycle levels and uses the same editing history as the desktop. Source filters and levels keep the current 3D viewer mounted.
+
+### Quest 3 precision editing and local draft workflow
+
+The **Quick tools** compact palette starts in immersive WebXR. Choose **Build tools**
+for Wall, Door, Window, Open frame, Ceiling, Move, Stretch and Slide opening.
+Point the controller at a purple draft wall to select it. Repeated triggers
+cycle overlapping local draft walls; repeated selections of source objects
+cycle overlapping visible evidence without altering it.
+
+Selected-wall controls offer **Grab / Move**, **Stretch end**, four-way 50/100/250 mm
+nudges, 90° rotation, duplication, deletion with confirmation, **Exact length**,
+**Exact height**, and exact starting X/Z coordinates. Exact values are entered
+using the VR number keypad in **millimetres** and validated against the draft wall
+and its openings. For existing openings use **Edit openings** to cycle, move,
+change dimensions or **Slide by hand** along the local draft host.
+
+New walls snap to local draft corners and to **source endpoints only when the
+source wall is verified, has no outstanding issues, has a canonical object ID,
+has a source file witness and belongs to the visible level**. Ambiguous source
+guides are vetoed; this affects the draft preview only and is never a measured
+or approved source edit. During movement a green 3D outline indicates the
+candidate wall; release to commit a reversible local draft edit.
+
+Use **Next stage**, **Next level** and **Teleport** in quick tools. Teleport remains
+disabled without a verified original-source floor and authenticated workspace.
+The floating palette can be pinned or recentered. VR is tested with generic
+WebXR trigger input; individual Quest 3 controller ergonomics still require
+a real headset field test.
+
+Under **Review → VR draft quantities and backup**, view candidate wall/lining,
+skirting and ceiling quantities. These are *local unapproved geometry-only*
+calculations, not issued quantities or construction assembly specifications.
+Framing, bracing, material layers and services remain unpriced pending an
+authenticated assembly profile. An optional manually entered AUD/m² rate
+produces an explicitly **indicative lining-only** subtotal; it is not a
+rate-book price or customer amount.
+
+Use **Export local draft + undo history** to download a JSON file, and
+**Reopen saved draft file** to load it against *exactly* the same workspace,
+document, source SHA, revision, model revision and snapshot. The file can
+contain bounded local walls, ceilings, catalogue items and their undo histories;
+it cannot replace the original scene, approve a proposal or mutate customer
+quantity records. On incompatible revisions restore refuses the file. This is
+not automatic server/cloud saving and does not replace the authenticated
+PlanReader revision/approval flow.
+
+Local regression command: `npm.cmd test && npm.cmd run build` from
+`vr-editor`. Physical headset acceptance: select overlapping walls, grab and
+move, exact wall dimensions, corner snap, new and existing door/window
+placement, undo/redo, level/stage switch, verified-floor teleport (where
+authorized), explicit draft export/reopen and review-only costing. Confirm
+that original quantities are unchanged.
