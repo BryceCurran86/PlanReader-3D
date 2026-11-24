@@ -100,13 +100,14 @@ export function BuildTools({ state, sizes, levelId, layoutEnabled, onAction, onS
           <form key={JSON.stringify([wall.start,wall.end])} onSubmit={e=>{
             e.preventDefault();const data=new FormData(e.currentTarget);
             const angle=Number(data.get("angle")),pivot=data.get("pivot") as WallRotationPivot;
-            if(Number.isFinite(angle))onAction({kind:"rotate-local-wall",previous:wall,angleDeg:angle,pivot});
+            if(Number.isFinite(angle))onAction({kind:"rotate-local-wall",previous:wall,angleDeg:angle,pivot,connected:data.get("connected")==="on"});
           }}>
             <label>Wall angle (degrees, +X toward +Z)<input name="angle" type="number" step="0.1" min="0" max="360" defaultValue={Math.round(wallAngleDegrees(wall)*10)/10} required disabled={!layoutEnabled||!levelId||busy}/></label>
             <label>Fixed pivot<select name="pivot" defaultValue="start" disabled={!layoutEnabled||!levelId||busy}><option value="start">Start end</option><option value="centre">Centre</option><option value="end">Far end</option></select></label>
+            <label><input type="checkbox" name="connected" defaultChecked disabled={!layoutEnabled||!levelId||busy}/> Keep adjoining walls connected</label>
             <button type="submit" disabled={!layoutEnabled||!levelId||busy}>Apply wall angle</button>
           </form>
-          <p>Rotation retains length and openings. Adjacent walls may need reconnecting.</p>
+          <p>Connected rotation adjusts neighbouring endpoints and preserves opening sizes. Invalid or unsplit junctions are rejected. Uncheck to rotate independently.</p>
           <label>Assembly <select disabled={!layoutEnabled} value={wallAssembly(wall.assembly).profile} onChange={e=>onAction({kind:"set-wall-assembly",proposalId:wall.proposalId,assembly:defaultWallAssembly(e.currentTarget.value as WallProfileId)})}>{WALL_PROFILES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
         </li>)}</ul>
       </details>}
