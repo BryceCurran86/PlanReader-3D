@@ -56,6 +56,7 @@ import { drawReviewStamp, reviewStamp, safeCaptureSize } from "./reviewCapture";
 import type { CameraView, FocusTarget, InspectionSettings } from "./reviewInspection";
 import { sourceWallDimensions } from "./sourceDimensions";
 import {reviewDimensions} from "./vrDesignReview";
+import {reviewOpeningCorners} from "./sourceOpeningReview";
 
 type Props = {
   manifest: SceneManifest;
@@ -671,6 +672,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const geometry = row.geometry;
         if (geometry?.kind === "wallFace") {
           item.userData.originalHeight = geometry.heightM;
+          // Recorded opening outlines are review-only, not a verified wall cutout.
+          const preview=new THREE.Group();preview.userData.openingReview=true;
+          for(const o of row.openingReview?.positioned??[]){
+            const points=reviewOpeningCorners(geometry,o).map(p=>new THREE.Vector3(...p));
+            const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineDashedMaterial({color:0x58d9ef,dashSize:.08,gapSize:.04,depthWrite:false}));
+            line.computeLineDistances();preview.add(line);
+          }
+          if(preview.children.length)item.add(preview);
           if (row.objectType === "wall") sourceItemHosts.push(catalogueWallHost(
             row.objectId, item, geometry.start, geometry.end, geometry.heightM,
           ));
@@ -1559,6 +1568,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           obj.visible = displayed;
           obj.material.visible = visible;
           obj.material.wireframe = !kind && framing;
+          for(const child of obj.children)if(child.userData.openingReview)child.visible=visible&&!resize.current.projection&&layerVisible(construction.current.layers,"openings",currentStage!=="slab")&&!draftMap.current.get(obj.userData.objectId)?.heightM;
           if (kind === "roof") obj.castShadow = visible;
         } else obj.visible = displayed && visible;
       }
