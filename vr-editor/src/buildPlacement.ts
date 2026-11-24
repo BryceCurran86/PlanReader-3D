@@ -138,10 +138,10 @@ export function snappedPoint(point: PlanPoint): PlanPoint | null {
 
 // Magnetic alignment is strictly for LOCAL draft wall placement. It does not
 // alter source/verified geometry or override any source authority checks.
-export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified";
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified" | "wall-face";
   witness?: string };
 export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
-export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+export type WallSnapOptions = { magnetic?:boolean; wallSegments?:readonly {start:PlanPoint;end:PlanPoint;objectId:string}[]; gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
   verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
@@ -154,6 +154,7 @@ export function snapDraftWallPoint(
   const step = options.gridM ?? 0.05;
   const gridRound = (value: number) => Math.round(Math.round(value / step) * step * 100) / 100;
   const grid: PlanPoint = [gridRound(raw[0]), gridRound(raw[1])];
+  if(options.magnetic===false)return {point:anchor&&options.axis==="horizontal"?[grid[0],anchor[1]]:anchor&&options.axis==="vertical"?[anchor[0],grid[1]]:grid,kind:"grid"};
   let nearest: { point: PlanPoint; distance: number } | null = null;
   // Prefer exact junctions over ambiguous coordinate alignment.
   for (const wall of state.walls) {
@@ -190,6 +191,22 @@ export function snapDraftWallPoint(
   if (best && (!second ||
       planLength(raw,second.point) - planLength(raw,best.point) > 0.005)) {
     return { point: [...best.point], kind: "verified", witness: best.objectId };
+  }
+  // Snap to any point along a nearby wall, not just its endpoints.
+  const segments=[...state.walls.filter(w=>w.levelId===levelId).map(w=>({start:w.start,end:w.end,objectId:w.proposalId})),...(options.wallSegments??[])];
+  const along=segments.flatMap(s=>{
+    const dx=s.end[0]-s.start[0],dz=s.end[1]-s.start[1],length2=dx*dx+dz*dz;
+    if(length2<.0025)return [];
+    const t=Math.max(0,Math.min(1,((raw[0]-s.start[0])*dx+(raw[1]-s.start[1])*dz)/length2));
+    const p:PlanPoint=[s.start[0]+dx*t,s.start[1]+dz*t];
+    if(anchor&&options.axis==="horizontal"&&Math.abs(p[1]-anchor[1])>.001)return [];
+    if(anchor&&options.axis==="vertical"&&Math.abs(p[0]-anchor[0])>.001)return [];
+    if(anchor&&planLength(anchor,p)<.05)return [];
+    return [{point:p,distance:planLength(raw,p),id:s.objectId}];
+  }).filter(s=>s.distance<=.22).sort((a,b)=>a.distance-b.distance||a.id.localeCompare(b.id));
+  if(along.length){
+    const point=millimetrePoint(along[0].point);
+    if(point)return {point,kind:"wall-face"};
   }
   if (anchor && snappedPoint(anchor)) {
     const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
