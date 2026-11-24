@@ -161,8 +161,25 @@ function surfaceKey(entry: PlacedItem) {
   return JSON.stringify([entry.hostId, entry.target === "wall" || entry.target === "opening" ? entry.side : 1]);
 }
 
+import {MAX_PREVIEW_LIGHTS,nearestPreviewLights,previewLightingRole} from "./lightingPreview.ts";
+
 export function createCatalogueScene(scene: THREE.Scene) {
   const mounts: THREE.Object3D[] = [];
+  const previewFixtures: {id:string;node:THREE.Object3D}[]=[];
+  const previewSwitches: THREE.Object3D[]=[];
+  const previewPool=Array.from({length:MAX_PREVIEW_LIGHTS},()=>{
+    const light=new THREE.PointLight(0xffe5c4,0,8,2);light.castShadow=false;scene.add(light);return light;
+  });
+  const previewPoint=new THREE.Vector3();
+  function visibleInScene(node:THREE.Object3D){for(let p:THREE.Object3D|null=node;p;p=p.parent)if(!p.visible)return false;return !!node.parent;}
+  function updatePreviewLights(enabled:boolean,eye:THREE.Vector3){
+    const fixtures=enabled?previewFixtures.filter(f=>visibleInScene(f.node)).map(f=>{f.node.getWorldPosition(previewPoint);return {id:f.id,position:previewPoint.toArray()};}):[];
+    const nearest=nearestPreviewLights(fixtures,eye.toArray());
+    previewPool.forEach((light,i)=>{const f=nearest[i];light.intensity=f?18:0;if(f)light.position.set(...f.position);});
+  }
+  function previewSwitchDistance(ray:THREE.Raycaster){
+    const hit=ray.intersectObjects(previewSwitches.filter(visibleInScene),true)[0];return hit?.distance??Infinity;
+  }
   const coveredLeaves = new Map<THREE.Mesh, boolean>();
   const hosts = new Map<THREE.Object3D, CatalogueHost>();
   let meshes: THREE.Object3D[] = [];
@@ -184,7 +201,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
     coveredLeaves.clear();
     for (const root of mounts) root.removeFromParent();
     for (const root of mounts) dispose(root);
-    mounts.length = 0;
+    mounts.length = 0;previewFixtures.length=0;previewSwitches.length=0;
+    for(const light of previewPool)light.intensity=0;
     hosts.clear();
     meshes = [];
     sourceKey = draftKey = itemKey = null;
@@ -293,6 +311,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       host.mesh.add(node);
       node.updateWorldMatrix(true, true);
       mounts.push(node);
+      const lightingRole=previewLightingRole(item);
+      if(lightingRole==="light")previewFixtures.push({id:placement.id,node});
+      if(lightingRole==="switch")previewSwitches.push(node);
     }
     meshes = [...hosts.keys()];
   }
@@ -357,5 +378,5 @@ export function createCatalogueScene(scene: THREE.Scene) {
     marker.visible = true;
   }
 
-  return { sync, clear, candidate, aim };
+  return { sync, clear, candidate, aim, updatePreviewLights, previewSwitchDistance };
 }

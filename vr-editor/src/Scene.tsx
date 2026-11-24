@@ -75,6 +75,9 @@ type Props = {
   draftState: DraftHistory | null;
   onCycleStudy: (objectId: string) => void;
   mood: LightingMood;
+  onMood:(mood:LightingMood)=>void;
+  previewLights:boolean;
+  onPreviewLights:(enabled:boolean)=>void;
   quality: RenderQuality;
   detail: SurfaceDetail;
   moveMode: MoveMode;
@@ -227,7 +230,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -261,8 +264,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
-  const visualSettings = useRef({ mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
-  visualSettings.current = { mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
+  const visualSettings = useRef({ mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const draftMap = useRef<Map<string, WallDraft>>(new Map());
@@ -424,7 +427,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
-          elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,magnetic,multiSelect,selectedCount:groupIds().length,
+          elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
           wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,
           radial,layersOpen,layers:construction.current.layers,
@@ -531,6 +534,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (choice.action === "compact") compactMenu=!compactMenu;
         if (choice.action === "overview") overviewOpen=!overviewOpen;
         if(choice.action==="ghost"){ghostMode=!ghostMode;closeTools();reportTool(ghostMode?"Ghost mode: walk through walls.":"Solid wall collision restored.");return;}
+        if(choice.action==="lighting-night"){visualSettings.current.onMood(visualSettings.current.mood==="night"?"daylight":"night");closeTools();return;}
+        if(choice.action==="lighting-on"){visualSettings.current.onPreviewLights(!visualSettings.current.previewLights);closeTools();return;}
         if (choice.action === "walk-speed") walkSpeed=walkSpeed===.6?1.2:walkSpeed===1.2?2:.6;
         if (choice.action === "elevated-view") {toggleElevatedView();closeTools();}
         if (choice.action === "teleport") {
@@ -1256,6 +1261,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         return;
       }
       if(!teleportSettings.current.teleportMode){
+        const switchDistance=itemView.previewSwitchDistance(raycaster);
+        if(switchDistance<=3&&!multiSelect&&!elevatedReturn){
+          const hit=raycaster.intersectObjects(pickables.filter(o=>o.visible&&o instanceof THREE.Mesh&&sourceVisible(o)&&displaySurface(construction.current.stage,o.userData.surfaceKind)),false)[0];
+          if(!hit||hit.distance>=switchDistance-.02){visualSettings.current.onPreviewLights(!visualSettings.current.previewLights);reportTool("Local preview lights toggled (not electrical circuit wiring).");return;}
+        }
         if(!toggleAimedDoor())selectAtRay(press?.wallKey);return;
       }
       if(!renderer.xr.isPresenting){
@@ -1526,6 +1536,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let draftDimension:THREE.Sprite|null=null,draftDimensionKey="";
     let lastLabelId: string | null = null;
     let lastMood: LightingMood | null = null;
+    let lastPreviewLighting=-Infinity;
+    const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
@@ -1579,6 +1591,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         resizeDrag(startPointer.resize);
       }
       const currentStage = construction.current.stage;
+      if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in";
       for (const obj of pickables) {
         const kind = obj.userData.surfaceKind;
