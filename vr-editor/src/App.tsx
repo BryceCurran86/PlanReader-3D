@@ -409,6 +409,19 @@ export function App() {
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
     if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
+    if(action.kind==="rotate-local-wall"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      if(next===buildState){setToolMessage("Wall rotation rejected or unchanged. Check junctions, angle and opening clearance.");return;}
+      if(catalogue?.draft.items.length){
+        const collect=(walls:typeof buildState.walls)=>currentItemPlacements(catalogue.draft.items,manifest,
+          [...activeBatchSketches,...walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])],isDemo,buildState.ceilings);
+        const retained=new Set(collect(next.walls).map(i=>i.id));
+        if(collect(buildState.walls).some(i=>!retained.has(i.id))){
+          setToolMessage("Rotation blocked: a hosted item would no longer fit its wall. Move the item first.");return;
+        }
+      }
+      setLastEdit("draw");applyBuild(action);setToolMessage(action.connected?"Wall angle updated · adjoining walls retained.":"Wall angle updated · independent rotation.");return;
+    }
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
@@ -695,7 +708,7 @@ export function App() {
                 buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
-                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
