@@ -6,6 +6,7 @@ import {
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
@@ -98,9 +99,11 @@ export function displayCeilingDraft(draft: CeilingDraft) {
 
 type DragDraw = { mode: "wall" | "ceiling"; from: PlanPoint };
 type DragEdit = { mode: "move" | "stretch"; from: PlanPoint; anchor: PlanPoint; stretchStart?: boolean };
+type DragOpening = {kind:"opening";mode:"opening-move";from:PlanPoint;
+  previous:PlacedWall;openingId:string};
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-))) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
+)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -128,7 +131,8 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (!levelId || !state.tool) return null;
   // A level controller ray can hit a vertical wall but never the floor.
   // Recognise that direct wall contact as a valid draft manipulation target.
-  const directWall = state.tool === "move" || state.tool === "stretch"
+  const directWall = state.tool === "move" || state.tool === "stretch" ||
+    state.tool === "opening-move"
     ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
   const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
   if (!from) return null;
@@ -139,8 +143,19 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
     return activeStart(state, levelId) || !alignedStart ? null :
       { mode, from: alignedStart, levelId, precisionSource:aligned?.kind==="verified" };
   }
-  if (mode !== "move" && mode !== "stretch") return null;
+  if (mode !== "move" && mode !== "stretch" && mode !== "opening-move") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
+  if(mode==="opening-move"){
+    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor);
+    if(!host)return null;
+    const projection=projectOnWall(host.wall,host.point);
+    const opening=host.wall.openings.filter(item=>
+      Math.abs(item.offsetM+item.widthM/2-projection.offset)<item.widthM/2+0.12)
+      .sort((a,b)=>Math.abs(a.offsetM+a.widthM/2-projection.offset)-
+        Math.abs(b.offsetM+b.widthM/2-projection.offset))[0];
+    return opening?{kind:"opening",mode,from,levelId,previous:host.wall,
+      openingId:opening.openingId}:null;
+  }
   const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor);
   const ceiling = ceilingHost(state.ceilings, ray, levelId);
   const nearestWall = wall && (mode === "move" || Math.min(
@@ -190,6 +205,23 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     }
     action = { kind: "drag", levelId, from, to, id: "",
       precisionSource:gesture.precisionSource===true || aligned?.kind==="verified" };
+  } else if (gesture.kind === "opening") {
+    const {previous,openingId,from}=gesture;
+    const opening=previous.openings.find(item=>item.openingId===openingId);
+    if(!opening)return null;
+    const length=planLength(previous.start,previous.end);
+    if(length<0.05)return null;
+    const direction:[number,number]=[
+      (previous.end[0]-previous.start[0])/length,
+      (previous.end[1]-previous.start[1])/length];
+    const along=(to[0]-from[0])*direction[0]+(to[1]-from[1])*direction[1];
+    const offsetMm=Math.round((opening.offsetM+along)*20)*50;
+    const changed=exactDraftOpening(previous,openingId,"offset",offsetMm);
+    valid=!!changed;
+    const nextOpening=(changed??previous).openings.find(item=>item.openingId===openingId)!;
+    line=openingOutline(changed??previous,nextOpening);
+    action={kind:"exact-local-opening",proposalId:previous.proposalId,openingId,
+      field:"offset",valueMm:offsetMm};
   } else if (gesture.kind === "wall") {
     const { previous, mode, from, anchor, stretchStart } = gesture;
     const moving = stretchStart ? previous.start : previous.end;
@@ -218,6 +250,8 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
   const hint = !valid ? "Size is invalid or an opening would no longer fit."
+    : gesture.mode === "opening-move" ?
+      "Release to slide draft opening along its host wall."
     : gesture.mode === "wall" && !("previous" in gesture)
     ? "Release to place · " + Math.round(delta * 1000) + " mm" +
       (aligned?.kind === "corner" ? " · corner snap" :
@@ -280,11 +314,12 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   const guide = buildGuide(state, levelId);
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
-  if (state.tool === "move" || state.tool === "stretch") {
+  if (state.tool === "move" || state.tool === "stretch" || state.tool === "opening-move") {
     const edit = beginDraftGesture(state, levelId, ray);
     if (!edit || !("previous" in edit)) return { hit: null, hint: guide };
     const { previous } = edit;
-    const marker = state.tool === "move" ? edit.from : edit.kind === "wall" ?
+    const marker = state.tool === "move" || edit.kind === "opening" ?
+      edit.from : edit.kind === "wall" ?
       edit.stretchStart ? previous.start : previous.end : undefined;
     return { hit: null, marker, hint: guide };
   }
