@@ -375,6 +375,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function menuAction(choice: MenuAction) {
       reportTool("");
       if (choice.area === "number") {
+        if(resize.current.enabled || resize.current.projection) {
+          numberPad=null;openingTools=false;return;
+        }
         const wall=selectedDraftWall();
         if (choice.action === "start") {
           if (wall && choice.field && (!choice.field.startsWith("opening-") ||
@@ -407,6 +410,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           }
         }
       } else if (choice.area === "opening") {
+        if(resize.current.enabled || resize.current.projection) {
+          openingTools=false;return;
+        }
+        if(choice.action==="drag") {
+          const wall=selectedDraftWall();
+          const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
+          if(!opening)return;
+          selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
+          build.current.onBuildAction({kind:"tool",tool:"opening-move"});
+          reportTool("Aim at the door/window, hold trigger and slide along its draft wall.");
+          return;
+        }
         const wall=selectedDraftWall();
         const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
         if (wall && opening) {
