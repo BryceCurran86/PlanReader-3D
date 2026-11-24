@@ -83,7 +83,7 @@ export function buildMenuLayout(
         "Trigger: point, select, confirm or place.",
         "Choose Wall, pick start and end; a corner glows when snapped.",
         "Select a purple draft wall to open precision controls.",
-        "Move: hold trigger on a draft wall and move your hand.",
+        "Select wall, choose Grab / Move, hold trigger and move your hand.",
         "Use Nudge for 50/100/250 mm adjustments.",
         "Grid and Axis change the next draft wall's alignment.",
       ] };
