@@ -49,10 +49,12 @@ export function createVrPlanOverview(scene:THREE.Scene,manifest:SceneManifest){
    ctx.fillStyle="#102831";ctx.fillRect(0,0,800,800);
    ctx.font="bold 34px sans-serif";ctx.fillStyle="#e9fcfc";
    ctx.fillText("PLAN OVERVIEW · DRAFT",25,50,750);
-   const xs=segments.flatMap(s=>[s.start[0],s.end[0]]);
-   const zs=segments.flatMap(s=>[s.start[1],s.end[1]]);
-   const minX=Math.min(0,...xs),maxX=Math.max(1,...xs);
-   const minZ=Math.min(0,...zs),maxZ=Math.max(1,...zs);
+   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+   for(const item of segments)for(const point of [item.start,item.end]){
+     minX=Math.min(minX,point[0]);maxX=Math.max(maxX,point[0]);
+     minZ=Math.min(minZ,point[1]);maxZ=Math.max(maxZ,point[1]);
+   }
+   if(!Number.isFinite(minX)){minX=0;maxX=1;minZ=0;maxZ=1;}
    const scale=Math.min(690/Math.max(maxX-minX,0.001),
      660/Math.max(maxZ-minZ,0.001));
    const dx=(800-(maxX-minX)*scale)/2,dz=95+(650-(maxZ-minZ)*scale)/2;
