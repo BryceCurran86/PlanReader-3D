@@ -403,7 +403,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
     function snapOptions() {
-      return {gridM:snapGrid,axis:snapAxis,magnetic,
+      return {gridM:snapGrid,axis:snapAxis,magnetic,preferredDraftId:wallLock?.target.kind==="draft"?wallLock.target.id:null,
         wallSegments:resize.current.projection?[]:visibleWallTargets().filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})),
         verifiedAnchors: resize.current.projection ? [] :
           verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
@@ -905,7 +905,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(renderer.xr.isPresenting&&magnetic&&!resize.current.enabled){
         const target=pressedKey?visibleWallTargets().find(t=>t.key===pressedKey):null;
         const aimed=pressedKey?(target?wallAimWithin(raycaster.ray,target,MAGNET_RELEASE):null):pressedKey===null?null:targetWallAim();
-        if(pressedKey!==undefined&&!aimed){reportTool("Wall lock released · aim again.");return;}
+        if(pressedKey!==undefined&&!aimed){if(pressedKey===null&&!multiSelect){selectedDraftId=null;pick(true);}else reportTool("Wall lock released · aim again.");return;}
         if(aimed){
           wallLock=aimed;
           if(aimed.target.kind==="source"){
@@ -948,9 +948,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       deleteArmed=false;
       pick();
     }
-    function pick() {
+    function pick(excludeWalls=false) {
       const hits=raycaster.intersectObjects(pickables.filter(object =>
-        sourceVisible(object) && displaySurface(construction.current.stage, object.userData.surfaceKind)), false);
+        sourceVisible(object) && displaySurface(construction.current.stage, object.userData.surfaceKind)&&(!excludeWalls||sourceById.get(object.userData.objectId)?.objectType!=="wall")), false);
       const candidates=[...new Set(hits.map(hit=>hit.object.userData.objectId)
         .filter((id):id is string=>typeof id==="string"))];
       const current=candidates.indexOf(picked.current??"");
@@ -1577,11 +1577,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
         const hover = active >= 0 && layout ? buildOverlay.menuHit(raycaster, layout) : null;
-        const canLock=active>=0&&!hover&&!buildState.tool&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
+        const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
+        const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
         if(canLock&&magnetic){
           const held=xrPress[active]?.wallKey;
           const target=held?visibleWallTargets().find(t=>t.key===held):null;
-          wallLock=held?(target?wallAimWithin(raycaster.ray,target):null):targetWallAim();
+          wallLock=held?(target?wallAimWithin(raycaster.ray,target):null):hostTool?chooseWallAim(raycaster.ray,visibleWallTargets().filter(t=>t.kind==="draft"),wallLock?.target.key??null,true):targetWallAim();
         }else wallLock=null;
         hoveredSourceId=wallLock?.target.kind==="source"?wallLock.target.id:null;
         hoveredDraftId=wallLock?.target.kind==="draft"?wallLock.target.id:null;
