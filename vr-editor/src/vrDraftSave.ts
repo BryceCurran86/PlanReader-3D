@@ -70,13 +70,31 @@ function readItems(value:unknown,key:string):PlacedItem[] {
   const ids=new Set<string>();
   return value.map(x=>{
     if(!record(x)||!string(x.id)||ids.has(x.id)||!string(x.itemId)||
-      !getCatalogueItem(x.itemId as string)||!string(x.hostId)||
-      !["wall","floor","ceiling","roof","opening","worktop","site"].includes(String(x.target))||
+      !string(x.hostId)||!getCatalogueItem(x.itemId as string)?.targets.includes(x.target as never)||
       !vector(x.point,3)||!vector(x.normal,3)||![1,-1].includes(x.side as number)||
+      Math.abs(Math.hypot(...(x.normal as number[]))-1)>0.01||
       !Number.isInteger(x.turn)||Number(x.turn)<0||Number(x.turn)>3)
       throw Error("Invalid saved catalogue item");
+    const anchor=x.anchor;
+    if(anchor!==undefined && (!record(anchor) ||
+      (anchor.kind==="wall" ? !finite(anchor.offsetM) :
+       anchor.kind==="ceiling" ? ![anchor.xFraction,anchor.zFraction].every(
+          value=>typeof value==="number" && Number.isFinite(value) && value>=0 && value<=1) : true)))
+      throw Error("Invalid saved attachment coordinates");
+    const opening=x.opening;
+    if(opening!==undefined && (!record(opening)||
+      !finite(opening.widthM)||!finite(opening.heightM)||
+      opening.widthM<=0||opening.heightM<=0||typeof opening.door!=="boolean"||
+      (opening.window!==undefined&&typeof opening.window!=="boolean")))
+      throw Error("Invalid saved opening witness");
+    if(x.roofEdgeKey!==undefined&&!string(x.roofEdgeKey))
+      throw Error("Invalid saved roof edge");
     ids.add(x.id as string);
-    return x as unknown as PlacedItem;
+    return {id:x.id,itemId:x.itemId,hostId:x.hostId,target:x.target,
+      point:[...(x.point as number[])],normal:[...(x.normal as number[])],side:x.side,
+      turn:x.turn, ...(anchor?{anchor:{...anchor}}:{}),
+      ...(opening?{opening:{...opening}}:{}),
+      ...(x.roofEdgeKey?{roofEdgeKey:x.roofEdgeKey}:{})} as PlacedItem;
   });
 }
 export type RestoredVrDraft = {build:BuildState;itemDraft:ItemDraft};
