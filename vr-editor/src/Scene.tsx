@@ -236,7 +236,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
@@ -1637,6 +1637,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         resizeDrag(startPointer.resize);
       }
       const currentStage = construction.current.stage;
+      refreshDimensions();refreshShell();
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in";
       for (const obj of pickables) {
