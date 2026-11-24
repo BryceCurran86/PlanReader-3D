@@ -44,12 +44,15 @@ from pb_viewport_segmentation import (
 def _payload(
     *,
     detail_codes: tuple[str, ...] = ("FT1",),
+    plan_mark_baselines: tuple[float, ...] = (),
     schedule_lines: tuple[str, ...] = ("FT1 Porcelain floor tile",),
 ) -> bytes:
     doc = fitz.open()
     try:
         plan = doc.new_page(width=400.0, height=300.0)
         plan.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
+        for y in plan_mark_baselines:
+            plan.insert_text((165.0, y), "FT1", fontsize=9.0)
 
         detail = doc.new_page(width=400.0, height=300.0)
 
@@ -129,7 +132,7 @@ def _viewport(
     )
 
 
-def _patch_material_viewports(monkeypatch) -> None:
+def _patch_material_viewports(monkeypatch, *, plan_viewport_id: str = "vp-1") -> None:
     types = {1: "floor_plan", 2: "floor_plan", 3: "schedule"}
 
     def segment(_page, *, page_number):
@@ -139,7 +142,7 @@ def _patch_material_viewports(monkeypatch) -> None:
                     _viewport(
                         page_number,
                         types[page_number],
-                        f"vp-{page_number}",
+                        plan_viewport_id if page_number == 1 else f"vp-{page_number}",
                     )
                 ]
             )
@@ -281,6 +284,49 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert enriched.floors[0].finish_descriptor == "tile"
     assert enriched.floors[0].commercial_quantity_authority is False
     assert set(quantity.evidence_ids).issubset(enriched.floors[0].evidence_ids)
+
+
+@pytest.mark.parametrize(
+    ("plan_marks", "detail_marks", "plan_view", "support_page", "status"),
+    [
+        pytest.param((193.0,), (), "plan-vp", "1", EvidenceResolutionStatus.CORROBORATED,
+                     id="mark-on-room-plan-with-figures-on-detail"),
+        pytest.param((95.0,), (), "plan-vp", None, EvidenceResolutionStatus.ABSTAINED,
+                     id="detail-box-does-not-own-a-plan-mark"),
+        pytest.param((193.0,), (), "another-vp", None, EvidenceResolutionStatus.ABSTAINED,
+                     id="foreign-plan-viewport"),
+        pytest.param((165.0, 193.0), (), "plan-vp", None, EvidenceResolutionStatus.CONFLICT,
+                     id="competing-marks-on-room-plan"),
+        pytest.param((193.0,), ("FT1",), "plan-vp", "2", EvidenceResolutionStatus.CORROBORATED,
+                     id="preserve-established-detail-binding"),
+    ],
+)
+def test_floor_plan_finish_can_reuse_cross_sheet_measurement(
+    monkeypatch, plan_marks, detail_marks, plan_view, support_page, status,
+) -> None:
+    _patch_material_viewports(monkeypatch, plan_viewport_id=plan_view)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(detail_codes=detail_marks, plan_mark_baselines=plan_marks),
+    )
+    assert room_areas.records[0].source_dimension_page_id == "2"
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+
+    assert result.status is status
+    if support_page is None:
+        assert result.quantities == ()
+        assert result.unresolved_canonical_floor_ids == (floors.floors[0].canonical_floor_id,)
+        return
+
+    quantity, = result.quantities
+    assert quantity.value == floors.floors[0].metric_area_m2
+    assert quantity.metadata["source_dimension_page_id"] == "2"
+    assert quantity.metadata["support_page_id"] == support_page
+    assert quantity.metadata["finish_binding_mode"] == (
+        "finished_floor_polygon" if support_page == "1" else "dimension_box"
+    )
 
 
 def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
