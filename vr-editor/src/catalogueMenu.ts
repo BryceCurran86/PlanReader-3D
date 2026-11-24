@@ -28,7 +28,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "all-dimensions" }
   | {area:"layer";layer:ConstructionLayer}
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
@@ -55,7 +55,7 @@ export type QuestMenuState = {
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
   elevatedView?:boolean; walkSpeed?:number;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
-  wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean;
+  wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean; allDimensions?:boolean;
   layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
   budget?:ImmersiveBudget; budgetOpen?:boolean; budgetPage?:number;
   numeric?: {field:NumericDraftField;digits:string}|null;
@@ -235,6 +235,7 @@ export function buildMenuLayout(
       {label:"Wall construction",action:questAction("wall-profiles")},
       {label:"Layers",action:questAction("layers")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",action:questAction("dimensions")},
+      {label:quest.allDimensions?"All dimensions ON":"All dimensions OFF",action:questAction("all-dimensions")},
       {label:"Multi-select",action:questAction("multi-select")},
       {label:"Exact length",action:{area:"number",action:"start",field:"length"}},
       {label:"Exact height",action:{area:"number",action:"start",field:"height"}},
@@ -373,6 +374,7 @@ export function buildMenuLayout(
       {label:"Wall construction",target:questAction("wall-profiles")},
       {label:"Layers",target:questAction("layers")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",target:questAction("dimensions")},
+      {label:quest.allDimensions?"All dimensions ON":"All dimensions OFF",target:questAction("all-dimensions"),active:quest.allDimensions},
       ...(quest.budget?[{label:"Live budget",target:questAction("budget")}]:[]),
       {label:"Multi-select",target:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),target:questAction("magnetic")},
