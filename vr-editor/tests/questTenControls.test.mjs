@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Ray, Vector3 } from "three";
 import { EMPTY_BUILD, STARTING_SIZES, snapDraftWallPoint,
   translatedDraftWall, rotatedDraftWall, updateBuild, viewRelativeNudge } from "../src/buildPlacement.ts";
-import { pickDraftWall } from "../src/buildScene.ts";
+import { pickDraftWall, beginDraftGesture, draftGesturePreview } from "../src/buildScene.ts";
 import { buildMenuLayout, EMPTY_ITEM_BROWSER } from "../src/catalogueMenu.ts";
 
 const scope = "test-project-scope";
@@ -107,4 +107,50 @@ test("Quest nudge direction follows view orientation without diagonal drift",()=
   assert.deepEqual(viewRelativeNudge("left",[1,0.1],0.1),[0,-0.1]);
   assert.equal(viewRelativeNudge("forward",[0,0],0.05),null);
   assert.equal(viewRelativeNudge("forward",[1,1],Infinity),null);
+});
+
+test("selected draft wall exposes direct Grab, Stretch, Undo and Redo with guarded buttons",()=>{
+  const layout=menu(state,{...quest,selectedWall:wall});
+  const move=layout.buttons.find(b=>b.label==="Grab / Move");
+  const stretch=layout.buttons.find(b=>b.label==="Stretch end");
+  assert.deepEqual(move?.action,{area:"draft",action:"move",direction:undefined});
+  assert.deepEqual(stretch?.action,{area:"draft",action:"stretch",direction:undefined});
+  const undo=layout.buttons.find(b=>b.label==="Undo");
+  const redo=layout.buttons.find(b=>b.label==="Redo");
+  assert.deepEqual(undo?.action,{area:"history",action:"undo"});
+  assert.equal(undo?.disabled,false);
+  assert.equal(redo?.disabled,false);
+  const noHistory=buildMenuLayout(state,"ground",EMPTY_ITEM_BROWSER,
+    undefined,false,0,"","finished",false,
+    {available:false,enabled:false,changed:false},
+    {mode:"inspect",canUndo:false,canRedo:false}, {...quest,selectedWall:wall});
+  assert.equal(noHistory.buttons.find(b=>b.label==="Undo")?.disabled,true);
+  assert.equal(noHistory.buttons.find(b=>b.label==="Redo")?.disabled,true);
+});
+test("selected Grab tool activates the existing Quest wall-face trigger/hand-drag path",()=>{
+  const moved=act(state,{kind:"tool",tool:"move"});
+  const ray=new Ray(new Vector3(2,1.2,2),new Vector3(0,0,-1));
+  const gesture=beginDraftGesture(moved,"ground",ray);
+  assert.equal(gesture?.kind,"wall");
+  assert.equal(gesture?.previous?.proposalId,"local-1");
+  gesture.fromController=[2,2];
+  const preview=draftGesturePreview(gesture,STARTING_SIZES,ray,moved,[2.15,2]);
+  assert.equal(preview.action?.kind,"adjust");
+  assert.deepEqual(preview.action.wall.start,[0.15,0]);
+  assert.deepEqual(state.walls[0].start,[0,0]);
+});
+
+test("selected draft wall tools are hidden when footprint projection is active",()=>{
+  for (const footprint of [
+    {available:true,enabled:true,changed:false},
+    {available:true,enabled:false,changed:true},
+  ]) {
+    const layout=buildMenuLayout(state,"ground",EMPTY_ITEM_BROWSER,
+      undefined,false,0,"","finished",false,footprint,
+      {mode:"resize",canUndo:false,canRedo:false},
+      {...quest,selectedWall:wall});
+    assert.ok(!layout.buttons.some(b=>b.label==="Grab / Move"));
+    assert.ok(!layout.buttons.some(b=>b.label==="Stretch end"));
+    assert.ok(layout.buttons.some(b=>b.label==="Wall"&&b.disabled));
+  }
 });
