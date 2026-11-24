@@ -9,6 +9,7 @@ import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
+import {chooseWallAim} from "./wallMagnet.ts";
 import type {WallTextureLibrary} from "./wallTextures.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
@@ -236,7 +237,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   // Recognise that direct wall contact as a valid draft manipulation target.
   const directWall = state.tool === "move" || state.tool === "stretch" ||
     state.tool === "opening-move"
-    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
+    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null,options) : null;
   const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
   if (!from) return null;
   const mode = state.tool;
@@ -249,7 +250,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (mode !== "move" && mode !== "stretch" && mode !== "opening-move") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
   if(mode==="opening-move"){
-    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor);
+    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor,options);
     if(!host)return null;
     const projection=projectOnWall(host.wall,host.point);
     const opening=host.wall.openings.filter(item=>
@@ -259,7 +260,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
     return opening?{kind:"opening",mode,from,levelId,previous:host.wall,
       openingId:opening.openingId}:null;
   }
-  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor);
+  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor,options);
   const ceiling = ceilingHost(state.ceilings, ray, levelId);
   const nearestWall = wall && (mode === "move" || Math.min(
     planLength(wall.wall.start, wall.point), planLength(wall.wall.end, wall.point)) < .4);
@@ -366,7 +367,13 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   return { action: valid ? action : null, aim };
 }
 
-function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null) {
+function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null,options:WallSnapOptions={}) {
+  if(options.magnetic===true){
+    const targets=walls.map(w=>({key:"draft:"+w.proposalId,id:w.proposalId,kind:"draft" as const,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000}));
+    const aim=chooseWallAim(ray,targets,options.preferredDraftId?"draft:"+options.preferredDraftId:null,true);
+    const wall=aim&&walls.find(w=>w.proposalId===aim.target.id);
+    if(aim&&wall)return {wall,point:aim.point,distance:aim.distance*aim.distance};
+  }
   type HostHit = { wall: PlacedWall; point: PlanPoint; distance: number };
   let direct: HostHit | null = null;
   let fromAbove: HostHit | null = null;
@@ -447,7 +454,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   if (state.tool === "move" || state.tool === "stretch" || state.tool === "opening-move") {
-    const edit = beginDraftGesture(state, levelId, ray);
+    const edit = beginDraftGesture(state, levelId, ray,options);
     if (!edit || !("previous" in edit)) return { hit: null, hint: guide };
     const { previous } = edit;
     const marker = state.tool === "move" || edit.kind === "opening" ?
@@ -486,7 +493,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
         : "Wall length must be 50 mm to 200 m.",
     };
   }
-  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor);
+  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor,options);
   const result = host && aimOpening(host.wall, host.point, state.tool, sizes);
   if (!host || !result) return { hit: null, hint: guide };
   if (result.error) return { hit: null, hint: result.error };
