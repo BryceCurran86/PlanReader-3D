@@ -2,6 +2,7 @@ import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProt
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
+import {connectedWallEdit} from "./connectedWallEdit.ts";
 import type { OutlineEdit } from "./localOutline.ts";
 import {isWallAssembly,wallAssembly} from "./wallProfiles.ts";
 import type {WallAssembly} from "./wallProfiles.ts";
@@ -47,7 +48,7 @@ export type BuildAction =
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
   | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
-  | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean }
+  | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
@@ -361,7 +362,9 @@ export function updateBuild(
     if(!levelId||wall.scopeKey!==scopeKey||wall.levelId!==levelId||!state.walls.includes(wall))return state;
     const next=rotateDraftWallTo(wall,action.angleDeg+(action.relative?wallAngleDegrees(wall):0),action.pivot);
     if(!next||Math.hypot(next.start[0]-wall.start[0],next.start[1]-wall.start[1])<1e-8&&Math.hypot(next.end[0]-wall.end[0],next.end[1]-wall.end[1])<1e-8)return state;
-    return checkpoint(state,{walls:state.walls.map(w=>w===wall?next:w),ceilings:state.ceilings});
+    const walls=action.connected?connectedWallEdit(state.walls,wall,next):state.walls.map(w=>w===wall?next:w);
+    if(!walls||walls.some(w=>!validEditedWall(w)))return state;
+    return checkpoint(state,{walls,ceilings:state.ceilings});
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
