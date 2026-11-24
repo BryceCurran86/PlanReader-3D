@@ -1292,8 +1292,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           shape.material.visible = showConstructionSurface(currentStage, "ceiling");
         } else {
           for (const child of shape.children) {
-            if (child.userData.illustrativeFraming) child.visible = framing;
-            else if (child instanceof THREE.Mesh) child.visible = !framing;
+            if (child.userData.illustrativeFraming) child.visible = currentStage === "framing";
+            else if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial)
+              child.material.visible = !framing;
           }
         }
       }
