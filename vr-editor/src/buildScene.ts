@@ -11,6 +11,7 @@ import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
 import {chooseWallAim} from "./wallMagnet.ts";
 import type {WallTextureLibrary} from "./wallTextures.ts";
+import {menuButtonAt} from "./toolWheelInput.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -599,15 +600,15 @@ export function createBuildOverlay(scene: THREE.Scene) {
   function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
     camera.getWorldPosition(head);
     hand.getWorldPosition(menu.position);
-    menu.position.y+=.12;
+    menu.position.y+=.18;
     // Keep the tool wheel at a comfortable readable distance even if the hand is near the face.
     const offset=menu.position.clone().sub(head);
     const distance=offset.length();
-    if(distance<.35||distance>1.2){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.35,Math.min(1.2,distance))));}
+    if(distance<.65||distance>1.0){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.65,Math.min(1.0,distance))));}
     menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
   }
   function sizeMenu(layout: MenuLayout) {
-    const scale=layout.radial?1800:1450;
+    const scale=layout.radial?1050:1250;
     const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
@@ -618,9 +619,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
     const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
-    if(layout.radial&&Math.hypot(x-layout.width/2,y-layout.height/2)>layout.width/2)return null;
-    const index = layout.buttons.findIndex(button => !button.disabled &&
-      x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
+    const index=menuButtonAt(layout,x,y);
     return { action: layout.buttons[index]?.action ?? null, index };
   }
   function drawMenu(layout: MenuLayout, hover: number) {
@@ -637,7 +636,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     else context.fillRect(0, 0, canvas.width, canvas.height);
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    if(layout.radial){context.textAlign="center";context.fillText(layout.title,layout.width/2,285,300);context.textAlign="left";}
+    if(layout.radial){/* title is rendered in the centre below */}
     else context.fillText(layout.title, 20, 45, layout.width - 40);
     if (layout.subtitle) {
       context.fillStyle = "#ceeceb";
@@ -657,6 +656,24 @@ export function createBuildOverlay(scene: THREE.Scene) {
         context.fillStyle = index%2===0 ? "#f0fbfc" : "#b9d5d8";
         context.fillText(line, 28, 95+index*44, layout.width-56);
       });
+    }
+    if(layout.radial){
+      const cx=layout.width/2,cy=layout.height/2,outer=layout.width/2-4,inner=layout.width*.145;
+      for(let i=0;i<8;i++){
+        const button=layout.buttons[i],angle=i*Math.PI/4-Math.PI/2,half=Math.PI/8-.012;
+        const active=i===hover&&!button.disabled;
+        context.beginPath();context.arc(cx,cy,outer,angle-half,angle+half);
+        context.arc(cx,cy,inner,angle+half,angle-half,true);context.closePath();
+        context.fillStyle=button.disabled?"#203039":active?"#69dbca":"#355463";context.fill();
+        context.strokeStyle="#13242c";context.lineWidth=3;context.stroke();
+        context.font="bold 32px sans-serif";context.fillStyle=active?"#102421":button.disabled?"#8d9aa0":"#fff";context.textAlign="center";context.textBaseline="middle";
+        context.fillText(button.label,cx+Math.cos(angle)*218,cy+Math.sin(angle)*218,162);
+      }
+      context.beginPath();context.arc(cx,cy,inner-5,0,Math.PI*2);context.fillStyle=hover===8?"#69dbca":"#142a34";context.fill();
+      context.fillStyle=hover===8?"#102421":"#fff";context.font="bold 27px sans-serif";context.fillText("Close",cx,cy-12,140);
+      context.font="18px sans-serif";context.fillText("Grip / trigger",cx,cy+22,150);
+      context.textAlign="left";context.textBaseline="alphabetic";
+      texture.needsUpdate=true;return;
     }
     for (const [index, button] of layout.buttons.entries()) {
       const highlight = index === hover || button.active;
