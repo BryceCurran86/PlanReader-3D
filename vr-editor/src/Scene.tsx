@@ -13,7 +13,7 @@ import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
 import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
   translatedDraftWall, validWallLength, viewRelativeNudge } from "./buildPlacement";
-import type { WallAxis } from "./buildPlacement";
+import type { WallAxis, WallRotationPivot } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
@@ -396,6 +396,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
+    let rotationPivot:WallRotationPivot="start";
+    let connectedRotation=true;
     const nextStep = (value: 0.05 | 0.1 | 0.25): 0.05 | 0.1 | 0.25 =>
       value === 0.05 ? 0.1 : value === 0.1 ? 0.25 : 0.05;
     function selectedDraftWall() {
@@ -428,7 +430,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          selectedWall: selectedDraftWall(), gridM: snapGrid, axis: snapAxis,
+          selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
@@ -450,6 +452,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(wall)build.current.onBuildAction({kind:"set-wall-assembly",proposalId:wall.proposalId,assembly});
         else build.current.onBuildSizes({...build.current.buildSizes,wallAssembly:assembly});
         wallProfilesOpen=false;return;
+      }
+      if(choice.area==="wall-angle"){
+        if(resize.current.enabled||resize.current.projection||multiSelect)return;
+        const wall=selectedDraftWall();if(!wall)return;
+        if(choice.action==="connected"){connectedRotation=!connectedRotation;return;}
+        if(choice.action==="pivot"){rotationPivot=rotationPivot==="start"?"centre":rotationPivot==="centre"?"end":"start";return;}
+        if(choice.degrees!==undefined){
+          build.current.onBuildAction({kind:"rotate-local-wall",previous:wall,angleDeg:choice.degrees,relative:true,pivot:rotationPivot,connected:connectedRotation});
+          reportTool("Rotate draft wall "+choice.degrees+"° about "+rotationPivot+". Connected mode preserves exact junctions or rejects invalid edits.");
+        }
+        return;
       }
       if (choice.area === "number") {
         if(resize.current.enabled || resize.current.projection) {
@@ -474,16 +487,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           } else if (choice.action === "apply") {
             const number=Number(numberPad.digits), field=numberPad.field;
             if (wall && /^-?[0-9]+$/.test(numberPad.digits) && Number.isSafeInteger(number)) {
-              if (field.startsWith("opening-")) {
+              if(field==="angle"){
+                if(number<0||number>360){reportTool("Enter an angle from 0 to 360 degrees.");return;}
+                build.current.onBuildAction({kind:"rotate-local-wall",previous:wall,angleDeg:number,pivot:rotationPivot,connected:connectedRotation});
+              } else if (field.startsWith("opening-")) {
                 const opening=wall.openings[openingIndex%wall.openings.length];
                 if (opening) build.current.onBuildAction({kind:"exact-local-opening",
                   proposalId:wall.proposalId,openingId:opening.openingId,
                   field:field.slice(8) as "offset"|"width"|"height"|"sill",valueMm:number});
               } else build.current.onBuildAction({kind:"exact-local-wall",
                 proposalId:wall.proposalId,field:field as "length"|"height"|"x"|"z",valueMm:number});
-              reportTool("Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
+              reportTool(field==="angle"?"Applied draft angle request. Adjacent walls may need reconnecting.":"Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
               numberPad=null;
-            } else reportTool("Enter a whole millimetre value to apply.");
+            } else reportTool(field==="angle"?"Enter a whole degree value.":"Enter a whole millimetre value to apply.");
           }
         }
       } else if (choice.area === "opening") {
