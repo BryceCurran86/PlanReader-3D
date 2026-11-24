@@ -22,7 +22,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" }
+      "teleport" | "save" | "review" | "overview" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
@@ -44,7 +44,7 @@ export type QuestMenuState = {
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
-  canTeleport?:boolean; teleport?:boolean;
+  canTeleport?:boolean; teleport?:boolean; overview?:boolean;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
@@ -262,6 +262,7 @@ export function buildMenuLayout(
       {label:quest.teleport?"Exit teleport":"Teleport",action:questAction("teleport"),
         disabled:!quest.canTeleport},
       {label:"Save draft",action:questAction("save")},
+      {label:quest.overview?"Hide plan":"Plan view",action:questAction("overview")},
       {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
       {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:"Done",action:{area:"done"}},
@@ -280,6 +281,7 @@ export function buildMenuLayout(
       {label:quest.teleport?"Exit teleport":"Teleport",target:questAction("teleport"),
         disabled:!quest.canTeleport},
       {label:"Save draft",target:questAction("save")},
+      {label:quest.overview?"Hide plan":"Plan overview",target:questAction("overview")},
       {label:"Grid " + Math.round(quest.gridM*1000) + "mm",target:questAction("grid")},
       {label:"Axis " + quest.axis,target:questAction("axis")},
       {label:quest.pinned?"Unpin panel":"Pin panel",target:questAction("pin")},
