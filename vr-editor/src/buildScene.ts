@@ -100,7 +100,7 @@ type DragDraw = { mode: "wall" | "ceiling"; from: PlanPoint };
 type DragEdit = { mode: "move" | "stretch"; from: PlanPoint; anchor: PlanPoint; stretchStart?: boolean };
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-))) & { levelId: string; fromController?: PlanPoint };
+))) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -134,8 +134,10 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (!from) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
-    const alignedStart = mode === "wall" ? snapDraftWallPoint(state, levelId, from, null, options)?.point : from;
-    return activeStart(state, levelId) || !alignedStart ? null : { mode, from: alignedStart, levelId };
+    const aligned = mode === "wall" ? snapDraftWallPoint(state, levelId, from, null, options) : null;
+    const alignedStart = aligned?.point ?? from;
+    return activeStart(state, levelId) || !alignedStart ? null :
+      { mode, from: alignedStart, levelId, precisionSource:aligned?.kind==="verified" };
   }
   if (mode !== "move" && mode !== "stretch") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
@@ -186,7 +188,8 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
       line = rectangle(from, to, sizes.ceilingHeightM ?? sizes.wallHeightM);
       line.push(line[0]);
     }
-    action = { kind: "drag", levelId, from, to, id: "" };
+    action = { kind: "drag", levelId, from, to, id: "",
+      precisionSource:gesture.precisionSource===true || aligned?.kind==="verified" };
   } else if (gesture.kind === "wall") {
     const { previous, mode, from, anchor, stretchStart } = gesture;
     const moving = stretchStart ? previous.start : previous.end;
@@ -293,7 +296,8 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       ? snapDraftWallPoint(state, levelId, [floor.x, floor.z], start, options) : null;
     const point = snap?.point ?? (floor && snappedPoint([floor.x, floor.z]));
     if (!point) return { hit: null, hint: "Aim at the plan to place a point." };
-    const hit: BuildHit = { kind: state.tool, levelId, point };
+    const hit: BuildHit = { kind: state.tool, levelId, point,
+      precisionSource:snap?.kind==="verified" };
     if (!start) return { hit, marker: point,
       hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
         snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
