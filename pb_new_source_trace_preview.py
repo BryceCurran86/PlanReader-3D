@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 import fitz
@@ -16,6 +17,11 @@ import fitz
 from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_dark_painted_source_wall_strips,
     _source_wall_ink_candidate_drawings,
+)
+from pb_native_page_frame import (
+    NATIVE_PAGE_FRAME_UNRESOLVED,
+    NativePageFrameUnresolved,
+    native_page_frame,
 )
 from pb_new_exterior_wall_preflight import (
     SourceNativeOuterWallAttempt,
@@ -63,6 +69,22 @@ def _full_page_source_tiles(width: float, height: float, drawing_count: int):
         )
         for y in range(n) for x in range(n)
     )
+
+
+def _new_native_frame_canvas(preview, document, page_index, frame):
+    """A canvas drawn on in the page's NATIVE frame that renders in the displayed orientation.
+
+    Every row, strip, ring polygon and overlay coordinate of this preview is native, the frame of ``page.get_drawings()``.
+    The canvas has the native extent and carries the page's /Rotate, so those coordinates draw upright and aligned. The
+    background is the source page with its /Rotate reset on the in-memory copy (nothing is saved or written back), drawn
+    1:1 into the same native rectangle. An upright page gets exactly the plain canvas the preview always used.
+    """
+    canvas = preview.new_page(width=frame.native_width, height=frame.native_height)
+    if frame.rotation:
+        canvas.set_rotation(frame.rotation)
+        document[page_index].set_rotation(0)
+    canvas.show_pdf_page(fitz.Rect(0, 0, frame.native_width, frame.native_height), document, page_index)
+    return canvas
 
 
 def _draw_unsealed_source_ring_preview(canvas, outside_walk) -> bool:
@@ -113,6 +135,12 @@ def source_native_trace_preview(
     An optional callback receives bounded source-only stage updates, current
     page/total counts and progressive overlay PNGs. No source files are saved
     and callback errors cannot alter physical or commercial authority.
+
+    Frames: the page's NATIVE frame, the one ``page.get_drawings()`` and every summary or overlay coordinate
+    (including an optional ``viewport_pdf_pts``) use, comes from ``pb_native_page_frame.native_page_frame``. Tiles and
+    canvas cover that native extent; on a rotated page the PNG is rendered in the displayed orientation and the summary
+    carries a ``native_page_frame`` receipt. A /Rotate 180, 270 or unreadable frame is not promoted there, so the trace
+    fails closed with ``ValueError("new_trace_native_page_frame_unresolved")`` instead of running in the wrong frame.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
@@ -125,6 +153,10 @@ def source_native_trace_preview(
         if page_index >= len(document):
             raise ValueError("new_trace_original_page_index_invalid")
         page = document[page_index]
+        try:
+            frame = native_page_frame(page)
+        except NativePageFrameUnresolved as exc:
+            raise ValueError("new_trace_" + NATIVE_PAGE_FRAME_UNRESOLVED) from exc
         drawings = page.get_drawings()
         rect = page.rect
         page_count = len(document)
@@ -258,7 +290,7 @@ def source_native_trace_preview(
                 "numbered_source_key_reader_failed:" + type(exc).__name__,
                 page_index, sha,
             )
-        panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
+        panes = _full_page_source_tiles(frame.native_width, frame.native_height, len(drawings))
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
         _report("resolving_wall_and_room_topology", .44)
@@ -291,8 +323,7 @@ def source_native_trace_preview(
         )
         _report("wall_room_topology_ready", .56)
         preview = fitz.open()
-        canvas = preview.new_page(width=rect.width, height=rect.height)
-        canvas.show_pdf_page(canvas.rect, document, page_index)
+        canvas = _new_native_frame_canvas(preview, document, page_index, frame)
         native_wall_counts = {}
         seen = set()
         for pane_number, pane in enumerate(panes, start=1):
@@ -718,5 +749,9 @@ def source_native_trace_preview(
                 "green": "candidate room enclosure",
             },
         }
+        if frame.rotation:
+            # additive and on a rotated page only, so an upright page's summary is unchanged
+            summary["native_page_frame"] = asdict(frame)
+            summary["preview_png_orientation"] = "displayed"
         _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png
