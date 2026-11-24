@@ -563,6 +563,11 @@ authenticated assembly profile. An optional manually entered AUD/m² rate
 produces an explicitly **indicative lining-only** subtotal; it is not a
 rate-book price or customer amount.
 
+Choose **Review + cost** on a selected VR draft wall to leave the headset session
+and open the existing PlanReader wall assembly/cost review screen on desktop.
+That review uses the existing authenticated assembly and construction-impact
+contracts; it does not automatically approve or publish the draft.
+
 Use **Export local draft + undo history** to download a JSON file, and
 **Reopen saved draft file** to load it against *exactly* the same workspace,
 document, source SHA, revision, model revision and snapshot. The file can
