@@ -32,6 +32,8 @@ import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalo
 import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
 import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import { createVrPlanOverview } from "./vrPlanOverview";
+import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset } from "./vrStationaryNavigation";
+import type { NavigationWall } from "./vrStationaryNavigation";
 import type { CatalogueItem } from "./itemCatalogue";
 import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
@@ -336,6 +338,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let helpOpen = false;
     let compactMenu = true;
     let overviewOpen=false;
+    let elevatedReturn: XRReferenceSpace|null=null;
+    let walkSpeed=1.2, turnArmed=true, lastNavTime=0;
+    const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>
+      !(elevatedReturn && (kind==="ceiling"||kind==="roof")) && showConstructionSurface(stage,kind);
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
@@ -375,6 +381,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
+          elevatedView:!!elevatedReturn,walkSpeed,
         });
     }
     function menuAction(choice: MenuAction) {
@@ -447,6 +454,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         if (choice.action === "compact") compactMenu=!compactMenu;
         if (choice.action === "overview") overviewOpen=!overviewOpen;
+        if (choice.action === "walk-speed") walkSpeed=walkSpeed===.6?1.2:walkSpeed===1.2?2:.6;
+        if (choice.action === "elevated-view") toggleElevatedView();
         if (choice.action === "teleport") {
           if(teleportSettings.current.teleportAvailable)
             teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
@@ -786,7 +795,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function pick() {
       const hits=raycaster.intersectObjects(pickables.filter(object =>
-        sourceVisible(object) && showConstructionSurface(construction.current.stage, object.userData.surfaceKind)), false);
+        sourceVisible(object) && displaySurface(construction.current.stage, object.userData.surfaceKind)), false);
       const candidates=[...new Set(hits.map(hit=>hit.object.userData.objectId)
         .filter((id):id is string=>typeof id==="string"))];
       const current=candidates.indexOf(picked.current??"");
@@ -1067,6 +1076,74 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         );
       }
     };
+    function toggleElevatedView(){
+      const space=renderer.xr.getReferenceSpace();
+      if(!renderer.xr.isPresenting||!space||typeof XRRigidTransform==="undefined")return;
+      try{
+        if(elevatedReturn){renderer.xr.setReferenceSpace(elevatedReturn);elevatedReturn=null;reportTool("Returned to walkthrough position.");return;}
+        const box=resize.current.box;
+        if(!box){reportTool("Open a bounded building scene to use 3D bird’s-eye.");return;}
+        const width=box.maxX-box.minX,depth=box.maxZ-box.minZ;
+        const head=renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+        const height=Math.min(100,Math.max(5,Math.hypot(width,depth)*.65+3));
+        const target={x:(box.minX+box.maxX)/2,y:height,z:(box.minZ+box.maxZ)/2};
+        const offset=navigationOffset(head,{x:target.x-head.x,y:target.y-head.y,z:target.z-head.z},0);
+        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+        elevatedReturn=space;
+        reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
+      }catch{reportTool("The XR runtime declined the view change.");}
+    }
+    function stationaryNavigation(now:number){
+      const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
+      lastNavTime=now;
+      if(!renderer.xr.isPresenting||!dt||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||stageMenuOpen||helpOpen||numberPad||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
+      const move=standardThumbstick(left),turn=snapTurn(standardThumbstick(right)[0],turnArmed);
+      turnArmed=turn.armed;
+      if(!move[0]&&!move[1]&&!turn.angle)return;
+      const space=renderer.xr.getReferenceSpace();
+      if(!space||typeof XRRigidTransform==="undefined")return;
+      const headCamera=renderer.xr.getCamera(),head=headCamera.getWorldPosition(new THREE.Vector3());
+      const direction=headCamera.getWorldDirection(new THREE.Vector3());
+      const forward:[number,number]=Math.hypot(direction.x,direction.z)>.05?[direction.x,direction.z]:[0,-1];
+      let delta=walkDelta(move,forward,walkSpeed,dt);
+      const box=resize.current.box;
+      if(!box)return;
+      // Local navigation only: stay within the displayed building plus a 3m perimeter.
+      delta=[Math.max(box.minX-3,Math.min(box.maxX+3,head.x+delta[0]))-head.x,
+        Math.max(box.minZ-3,Math.min(box.maxZ+3,head.z+delta[1]))-head.z];
+      if(!elevatedReturn){
+        const walls:NavigationWall[]=[];
+        for(const row of manifest.objects){
+          const g=row.geometry;
+          if(row.objectType!=="wall"||!g||!point2(g.start)||!point2(g.end)||!interaction.current.visibleIds.has(row.objectId))continue;
+          const w=resize.current.projection?projectWall({start:g.start,end:g.end,heightM:g.heightM??2.4} as WallVisual,resize.current.projection):g;
+          const obj=pickables.find(o=>o.userData.objectId===row.objectId);
+          const dx=obj?.position.x??0,dz=obj?.position.z??0;
+          walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
+        }
+        for(const raw of build.current.buildState.walls){
+          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
+          const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
+          const length=Math.hypot(w.end[0]-w.start[0],w.end[1]-w.start[1]);
+          if(length<.05)continue;
+          const at=(d:number):[number,number]=>[w.start[0]+(w.end[0]-w.start[0])*d/length,w.start[1]+(w.end[1]-w.start[1])*d/length];
+          let end=0;
+          for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
+            if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
+            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM)});
+            end=Math.max(end,o.offsetM+o.widthM);
+          }
+          if(end<length)walls.push({start:at(end),end:w.end});
+        }
+        delta=collisionLimitedStep([head.x,head.z],delta,walls);
+      }
+      if(!delta[0]&&!delta[1]&&!turn.angle)return;
+      try{
+        const offset=navigationOffset(head,{x:delta[0],y:0,z:delta[1]},turn.angle);
+        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+      }catch{lastNavTime=0;}
+    }
     const select0 = () => trigger(0);
     const select1 = () => trigger(1);
     // SteamVR presents Sony Sense controllers as standard XR input sources.
@@ -1148,6 +1225,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
+      elevatedReturn=null;turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
       squeezeTracker.clear();
@@ -1157,6 +1235,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       report(true);
     };
     const onSessionEnd = () => {
+      elevatedReturn=null;turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
       stageMenuOpen = false;
@@ -1227,7 +1306,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastCameraSerial: number | null = null;
     let lastCaptureSerial = visualSettings.current.captureSerial;
     let disposed = false;
-    renderer.setAnimationLoop(() => {
+    renderer.setAnimationLoop((now) => {
+      stationaryNavigation(now);
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
       // Fallback xr-standard grips when SteamVR omits native squeeze events.
@@ -1278,7 +1358,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       for (const obj of pickables) {
         const kind = obj.userData.surfaceKind;
         const displayed = sourceVisible(obj);
-        const visible = showConstructionSurface(currentStage, kind);
+        const visible = displaySurface(currentStage, kind);
         if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
           obj.visible = displayed;
           obj.material.visible = visible;
@@ -1289,7 +1369,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       for (const shape of wallAdditionLayer.children) {
         shape.visible = currentStage !== "slab";
         if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
-          shape.material.visible = showConstructionSurface(currentStage, "ceiling");
+          shape.material.visible = displaySurface(currentStage, "ceiling");
         } else {
           for (const child of shape.children) {
             if (child.userData.illustrativeFraming) child.visible = currentStage === "framing";
@@ -1444,7 +1524,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           pickables.find(obj => sourceVisible(obj) && obj.userData.objectId === picked.current) : null;
         const bounds = new THREE.Box3();
         const displayed = pickables.filter(object => sourceVisible(object) &&
-          showConstructionSurface(currentStage, object.userData.surfaceKind));
+          displaySurface(currentStage, object.userData.surfaceKind));
         for (const object of focus ? [focus] : [...displayed, ...wallAdditionLayer.children.filter(object => object.visible)])
           bounds.expandByObject(object);
         if (!bounds.isEmpty()) {
@@ -1505,7 +1585,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       const labelVisible = picked.current && pickables.some(object => sourceVisible(object) && object.userData.objectId === picked.current &&
-        showConstructionSurface(currentStage, object.userData.surfaceKind));
+        displaySurface(currentStage, object.userData.surfaceKind));
       const labelKey = labelVisible && activeInspection.showLabels && !appliedProjection
         ? `${picked.current}|${activeInspection.showDimensions}` : null;
       if (labelKey !== lastLabelId) {
