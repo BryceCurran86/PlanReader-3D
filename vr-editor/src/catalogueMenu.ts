@@ -228,7 +228,8 @@ export function buildMenuLayout(
       target: { area: "build", action: { kind: "tool", tool: id } },
       active: build.tool === id, disabled: !levelId || footprint.enabled || footprint.changed ||
         ((id === "door" || id === "window" || id === "frame") && !hasWall) ||
-        ((id === "stretch" || id === "move") && !canMove) }));
+        ((id === "stretch" || id === "move") && !canMove) ||
+        (id==="opening-move" && !build.walls.some(wall=>wall.levelId===levelId&&wall.openings.length>0)) }));
   actions.push(
     { label: "Items", target: browse({ kind: "groups" }), active: !!item },
     { label: "View", target: { area: "view" } },
