@@ -33,6 +33,8 @@ import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
+import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -69,6 +71,7 @@ export function App() {
   const [vrDraftStatus,setVrDraftStatus]=useState("");
   const [alternativeStore,setAlternativeStore]=useState<{scene:SceneManifest;entries:DesignAlternative[]}|null>(null);
   const [allDimensions,setAllDimensions]=useState(false);
+  const [shellStore,setShellStore]=useState<{scene:SceneManifest;settings:ShellSettings}|null>(null);
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
@@ -262,6 +265,8 @@ export function App() {
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
   const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
+  const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
+  const shell=useMemo(()=>manifest&&buildLevel&&!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -657,6 +662,13 @@ export function App() {
             walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
             blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
             onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
+          {buildLevel&&<details className="footprint-tools"><summary>Connected draft building shell</summary>
+            <p>Preview only. Uses one closed, equal-height local wall ring. Flat roof accepts irregular rings; gable needs a rectangle. No existing local ceilings on the level. Does not replace source surfaces or save roof settings in draft exports.</p>
+            <label>Shell roof <select value={shellSettings.roof} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,roof:e.currentTarget.value as ShellSettings["roof"]}})}><option value="off">Off</option><option value="flat">Flat</option><option value="gable">Gable</option></select></label>
+            <label>Roof pitch (degrees) <input type="number" min="5" max="60" step=".5" value={shellSettings.pitchDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=5&&n<=60)setShellStore({scene:manifest,settings:{...shellSettings,pitchDeg:n}});}}/></label>
+            <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
+            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
+          </details>}
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
@@ -675,7 +687,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
