@@ -5,6 +5,8 @@ import type { CatalogueItem } from "./itemCatalogue.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
 import type { ControlMode, HistoryAction } from "./editorControls.ts";
+import { budgetMoney,budgetHeadline } from "./vrAssemblyStudy.ts";
+import type { ImmersiveBudget } from "./vrAssemblyStudy.ts";
 
 export type ItemAction =
   | { kind: "choose"; itemId: string }
@@ -22,7 +24,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "opening"; action: "drag" | "shift" | "width" | "height";
@@ -47,6 +49,7 @@ export type QuestMenuState = {
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
   elevatedView?:boolean; walkSpeed?:number;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
+  budget?:ImmersiveBudget; budgetOpen?:boolean; budgetPage?:number;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
 type BrowserState = { open: boolean; category: number; page: number; groups?: boolean; groupPage?: number };
@@ -88,6 +91,20 @@ export function buildMenuLayout(
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
   const questAction = (action: Extract<MenuAction, {area:"quest"}>["action"]): MenuAction =>
     ({ area: "quest", action });
+  if(quest?.budgetOpen&&quest.budget){
+    const b=quest.budget;
+    const pages=Math.max(1,Math.ceil(b.trades.length/4)),page=Math.min(pages-1,Math.max(0,quest.budgetPage??0));
+    const lines=[budgetHeadline(b),"Local draft only · excludes original source and unpriced work",
+      b.walls+" walls · "+b.ceilings+" ceilings",
+      "Materials: "+budgetMoney(b.material)+"   Labour: "+budgetMoney(b.labour),
+      "Change vs baseline: "+(b.delta===null?"Not available":budgetMoney(b.delta)),
+      ...b.trades.slice(page*4,page*4+4).map(t=>t.trade+": "+budgetMoney(t.cents)+(t.partial?" (partial)":""))];
+    add("Back to tools",20,520,225,62,questAction("budget"));
+    add("Capture baseline",256,520,225,62,questAction("budget-baseline"),{disabled:b.status==="disabled"||b.status==="invalid"});
+    add("Clear baseline",492,520,225,62,questAction("budget-clear"),{disabled:!b.hasBaseline});
+    add("Next trades "+(page+1)+"/"+pages,728,520,225,62,questAction("budget-page"),{disabled:pages===1});
+    return {buttons,title:"LIVE CONSTRUCTION BUDGET",width:WIDTH,height:650,helpLines:lines,note:"Rates and assumptions are entered in desktop review. Not a customer quote."};
+  }
   if (quest?.numeric && quest.selectedWall) {
     const { field, digits } = quest.numeric;
     const number = (action: Extract<MenuAction,{area:"number"}>["action"],digit?:string): MenuAction =>
@@ -123,6 +140,7 @@ export function buildMenuLayout(
     const edit=(action:Extract<MenuAction,{area:"draft"}>["action"],direction?:Extract<MenuAction,{area:"draft"}>["direction"]):MenuAction=>({area:"draft",action,direction});
     const controls:{label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Single select",action:questAction("multi-select")},
+      ...(quest.budget?[{label:"Live budget",action:questAction("budget")}]:[]),
       {label:"Clear selection",action:questAction("clear-group"),disabled:!count},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),action:questAction("magnetic")},
       {label:"Step "+Math.round(quest.nudgeM*1000)+"mm",action:questAction("nudge-size")},
@@ -180,6 +198,7 @@ export function buildMenuLayout(
       {label:"Set Z (start)",action:{area:"number",action:"start",field:"z"}},
       {label:"Edit openings",action:questAction("openings"),disabled:!wall.openings.length},
       {label:"Review + cost",action:questAction("review")},
+      ...(quest.budget?[{label:"Live budget",action:questAction("budget")}]:[]),
       {label:"Stretch end",action:edit("stretch")},
       {label:"Nudge left",action:edit("nudge","left")},
       {label:"Nudge right",action:edit("nudge","right")},
@@ -278,6 +297,7 @@ export function buildMenuLayout(
   if (quest?.compact) {
     const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Build tools",action:questAction("compact")},
+      ...(quest.budget?[{label:"Live budget",action:questAction("budget")}]:[]),
       {label:"Multi-select",action:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),action:questAction("magnetic")},
       {label:"Items",action:browse({kind:"groups"})},
@@ -304,6 +324,7 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      ...(quest.budget?[{label:"Live budget",target:questAction("budget")}]:[]),
       {label:"Multi-select",target:questAction("multi-select"),disabled:!hasWall||footprint.enabled||footprint.changed},
       {label:"Magnetic "+(quest.magnetic===false?"off":"on"),target:questAction("magnetic")},
       {label:quest.teleport?"Exit teleport":"Teleport",target:questAction("teleport"),

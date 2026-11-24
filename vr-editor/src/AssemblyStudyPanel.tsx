@@ -1,44 +1,30 @@
-import {useState} from "react";
-import type {BuildState} from "./buildPlacement.ts";
-import {draftAssembly,draftAssemblyCost,STUDY_PROFILE} from "./vrDraftAssembly.ts";
-import type {AssemblyProfile,AssemblyRates} from "./vrDraftAssembly.ts";
+import {useState,useMemo} from "react";
+import {assemblyFields as fields,nullableAssemblyFields as nullable,budgetMoney as money,newAssemblyStudy,evaluateAssemblyStudy,immersiveBudget,hasPricedWork} from "./vrAssemblyStudy.ts";
+import type {AssemblyStudyConfig,StudyGeometry} from "./vrAssemblyStudy.ts";
 
-type Props={build:BuildState;scope:string};
-const fields:readonly [keyof AssemblyProfile,string,number][]=[
- ["spacingMm","Stud spacing (mm)",1],["nogginRows","Noggin rows",1],
- ["wastePct","Material waste (%)",0.1],["sheetM2","Board sheet area (m²)",0.01],
- ["paintCoverage","Paint coverage (m²/L/coat)",0.1],["paintCoats","Paint coats",1],
- ["paintPackL","Paint container (L)",0.1],["floorM2","Floor area allowance (m²)",0.01],
- ["floorPackM2","Floor carton coverage (m²)",0.01],["slabMm","Slab thickness (mm)",1],
- ["roofPlanM2","Roof horizontal projected area (m²)",0.01],["roofPitchDeg","Roof pitch (degrees)",0.1],
- ["electricalPoints","Electrical points allowance",1],["plumbingPoints","Plumbing points allowance",1],
-];
-const nullable=new Set<keyof AssemblyProfile>(["floorM2","roofPlanM2","electricalPoints","plumbingPoints"]);
-const money=(c:number|null)=>c===null?"Unpriced":new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD"}).format(c/100);
-const qty=(n:number|null)=>n===null?"Not specified":n.toLocaleString("en-AU",{maximumFractionDigits:3});
-export function AssemblyStudyPanel({build,scope}:Props){
- return <AssemblyStudy key={scope} build={build}/>;
+export function useAssemblyStudy(build:StudyGeometry,scope:string|null){
+ const [stored,setStored]=useState(()=>({scope,study:newAssemblyStudy()}));
+ const study=stored.scope===scope?stored.study:newAssemblyStudy();
+ if(stored.scope!==scope)setStored({scope,study});
+ const change=(update:(previous:AssemblyStudyConfig)=>AssemblyStudyConfig)=>setStored(previous=>previous.scope===scope?{scope,study:update(previous.study)}:previous);
+ const evaluation=useMemo(()=>evaluateAssemblyStudy(build,study),[build,study]);
+ const summary=useMemo(()=>immersiveBudget(build,study,evaluation),[build,study,evaluation]);
+ const capture=()=>change(s=>s.enabled&&evaluation.result?{...s,baseline:structuredClone({walls:build.walls,ceilings:build.ceilings})}:s);
+ const clear=()=>change(s=>({...s,baseline:null}));
+ return {study,change,evaluation,summary,capture,clear};
 }
-function AssemblyStudy({build}:{build:BuildState}){
- const [enabled,setEnabled]=useState(false);
- const [inputs,setInputs]=useState(()=>Object.fromEntries(fields.map(([key])=>[key,STUDY_PROFILE[key]===null?"":String(STUDY_PROFILE[key])])));
- const [rates,setRates]=useState<AssemblyRates>({});
- const [mode,setMode]=useState<"margin"|"markup">("margin");
- const [margin,setMargin]=useState("0"),[gst,setGst]=useState("10");
- const [baseline,setBaseline]=useState<BuildState|null>(null);
- let result:ReturnType<typeof draftAssemblyCost>|null=null, prior:ReturnType<typeof draftAssemblyCost>|null=null,error="";
- if(enabled)try{
-  const p={...STUDY_PROFILE};
-  for(const [key] of fields){
-   const value=inputs[key]?.trim()??"";
-   if(!value&&!nullable.has(key))throw Error("Enter all required study assumptions.");
-   if(value&&!/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(value))throw Error("Enter positive numbers or zero.");
-   Object.assign(p,{[key]:value?Number(value):null});
-  }
-  if(!margin.trim()||!gst.trim())throw Error("Enter margin/markup and GST, including zero if not applicable.");
-  result=draftAssemblyCost(draftAssembly(build,p),rates,Number(margin),Number(gst),mode);
-  if(baseline)prior=draftAssemblyCost(draftAssembly(baseline,p),rates,Number(margin),Number(gst),mode);
- }catch(e){error=e instanceof Error?e.message:"Invalid study inputs";}
+type Props={controller:ReturnType<typeof useAssemblyStudy>};
+const qty=(n:number|null)=>n===null?"Not specified":n.toLocaleString("en-AU",{maximumFractionDigits:3});
+export function AssemblyStudyPanel({controller}:Props){
+ const {study,change,evaluation,summary,capture,clear}=controller;
+ const {enabled,inputs,rates,mode,margin,gst,baseline}=study;
+ const {result,prior,error,baselineError}=evaluation;
+ const setEnabled=(enabled:boolean)=>change(s=>({...s,enabled}));
+ const setInputs=(update:(old:typeof inputs)=>typeof inputs)=>change(s=>({...s,inputs:update(s.inputs)}));
+ const setRates=(update:(old:typeof rates)=>typeof rates)=>change(s=>({...s,rates:update(s.rates)}));
+ const setMode=(mode:typeof study.mode)=>change(s=>({...s,mode}));
+ const setMargin=(margin:string)=>change(s=>({...s,margin}));
+ const setGst=(gst:string)=>change(s=>({...s,gst}));
  return <details className="section-block">
   <summary>Construction assembly budget · local study</summary>
   <p className="muted">Opt-in estimating allowances only. Not engineered framing, a certified takeoff, or a customer quote. Existing source geometry, catalogue prices and approved costs are excluded. Do not add the separate lining-only illustration to this subtotal.</p>
@@ -55,19 +41,20 @@ function AssemblyStudy({build}:{build:BuildState}){
    {result&&<>
     <p role="status"><strong>{result.partial?"PARTIAL — unpriced or unspecified work excluded":"Indicative study only"}</strong> · updates from current draft geometry.</p>
     <div className="scope-info">
-     <div><span>Material subtotal</span><strong>{money(result.material)}</strong></div>
-     <div><span>Labour subtotal</span><strong>{money(result.labour)}</strong></div>
-     <div><span>Subtotal</span><strong>{money(result.subtotal)}</strong></div>
-     <div><span>After {mode}</span><strong>{money(result.sell)}</strong></div>
-     <div><span>GST</span><strong>{money(result.gst)}</strong></div>
-     <div><span>Indicative priced portion</span><strong>{money(result.total)}</strong></div>
+     <div><span>Material subtotal</span><strong>{money(summary.material)}</strong></div>
+     <div><span>Labour subtotal</span><strong>{money(summary.labour)}</strong></div>
+     <div><span>Subtotal</span><strong>{money(summary.total===null?null:result.subtotal)}</strong></div>
+     <div><span>After {mode}</span><strong>{money(summary.total===null?null:result.sell)}</strong></div>
+     <div><span>GST</span><strong>{money(summary.total===null?null:result.gst)}</strong></div>
+     <div><span>Indicative priced portion</span><strong>{money(summary.total)}</strong></div>
     </div>
     <div className="tool-group">
-     <button type="button" onClick={()=>setBaseline(structuredClone(build))}>Capture comparison baseline</button>
-     {baseline&&<button type="button" onClick={()=>setBaseline(null)}>Clear baseline</button>}
+     <button type="button" onClick={capture}>Capture comparison baseline</button>
+     {baseline&&<button type="button" onClick={clear}>Clear baseline</button>}
     </div>
-    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(prior.total)} → {money(result.total)} · change {money(result.total-prior.total)}. Both totals may be partial; manual allowances remain fixed.</p>}
-    <details><summary>Trade breakdown</summary><ul>{result.trades.map(t=><li key={t.trade}>{t.trade}: {money(t.cents)}{t.partial?" (partial)":""}</li>)}</ul></details>
+    {baselineError&&<p role="alert">{baselineError}</p>}
+    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(hasPricedWork(prior)?prior.total:null)} → {money(summary.total)} · change {money(summary.delta)}. Both totals may be partial; manual allowances remain fixed.</p>}
+    <details><summary>Trade breakdown</summary><ul>{summary.trades.map(t=><li key={t.trade}>{t.trade}: {money(t.cents)}{t.partial?" (partial)":""}</li>)}</ul></details>
     <details><summary>Quantities and separate rates</summary>
      <p>Enter local AUD ex-GST component rates, not bundled supply/install rates. Material rates apply to purchase quantities; labour rates apply to net quantities. Blank means unpriced; zero is an explicit zero allowance.</p>
      {result.rows.map(row=><fieldset key={row.id}>
