@@ -34,7 +34,7 @@ export type BuildState = DraftGeometry & {
 };
 export const EMPTY_BUILD: BuildState = { tool: null, start: null, walls: [], ceilings: [], history: [] };
 export type BuildHit =
-  | { kind: "wall" | "ceiling"; levelId: string; point: PlanPoint }
+  | { kind: "wall" | "ceiling"; levelId: string; point: PlanPoint; precisionSource?:boolean }
   | { kind: "opening"; levelId: string; proposalId: string; point: PlanPoint };
 export type BuildAction =
   | { kind: "tool"; tool: BuildTool }
@@ -43,7 +43,8 @@ export type BuildAction =
   | { kind: "saved"; proposalId: string }
   | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
-  | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string }
+  | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
+      precisionSource?:boolean }
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
   | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
@@ -372,8 +373,11 @@ export function updateBuild(
     if (tool !== "wall" && tool !== "ceiling") return state;
     const hitLevel = action.kind === "drag" ? action.levelId : action.hit.levelId;
     if (hitLevel !== levelId || (action.kind === "place" && action.hit.kind !== tool)) return state;
-    const point = millimetrePoint(action.kind === "drag" ? action.to : action.hit.point);
-    const start = action.kind === "drag" ? millimetrePoint(action.from) : activeStart(state, levelId);
+    const precisionSource=action.kind==="drag" ? action.precisionSource===true :
+      action.hit.precisionSource===true;
+    const roundPoint=precisionSource ? millimetrePoint : snappedPoint;
+    const point = roundPoint(action.kind === "drag" ? action.to : action.hit.point);
+    const start = action.kind === "drag" ? roundPoint(action.from) : activeStart(state, levelId);
     if (!point || (action.kind === "drag" && !start)) return state;
     if (!start) return { ...state, start: { levelId, point } };
     const heightM = tool === "wall" ? sizes.wallHeightM : sizes.ceilingHeightM ?? STARTING_SIZES.wallHeightM;
