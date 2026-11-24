@@ -73,6 +73,8 @@ test("headset compact panel, full tools, exact millimetre keypad, and opening ed
  const selected=layout(quest);
  assert.ok(selected.buttons.some(b=>b.label==="Exact length"));
  assert.ok(selected.buttons.some(b=>b.label==="Edit openings"));
+ assert.deepEqual(selected.buttons.find(b=>b.label==="Review + cost")?.action,
+   {area:"quest",action:"review"});
  const numeric=layout({...quest,numeric:{field:"length",digits:"4200"}});
  assert.ok(numeric.buttons.some(b=>b.label==="Apply exact mm"));
  assert.ok(numeric.buttons.some(b=>b.label==="4"));
