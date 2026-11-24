@@ -25,7 +25,7 @@ export type MenuAction =
       "teleport" | "save" }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
-  | { area: "opening"; action: "shift" | "width" | "height";
+  | { area: "opening"; action: "drag" | "shift" | "width" | "height";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
       direction?: "left" | "right" | "forward" | "back" };
@@ -125,6 +125,7 @@ export function buildMenuLayout(
         ({area:"opening",action,deltaMm});
       const controls: {label:string;action:MenuAction}[]=[
         {label:"Next opening",action:questAction("next-opening")},
+        {label:"Slide by hand",action:adjust("drag",0)},
         {label:"Slide -50mm",action:adjust("shift",-50)},
         {label:"Slide +50mm",action:adjust("shift",50)},
         {label:"Width -50mm",action:adjust("width",-50)},
