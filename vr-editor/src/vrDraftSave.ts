@@ -13,8 +13,8 @@ import type { SceneManifest } from "./types.ts";
 
 const record=(v:unknown):v is Record<string,unknown> =>
   typeof v==="object" && v!==null && !Array.isArray(v);
-const string=(v:unknown) => typeof v==="string" && v.length>0 && v.length<250;
-const finite=(v:unknown) => typeof v==="number" && Number.isFinite(v) && Math.abs(v)<=10000;
+const string=(v:unknown):v is string => typeof v==="string" && v.length>0 && v.length<250;
+const finite=(v:unknown):v is number => typeof v==="number" && Number.isFinite(v) && Math.abs(v)<=10000;
 const vector=(v:unknown,n:number) => Array.isArray(v) && v.length===n && v.every(finite);
 const identity=(s:SceneManifest)=>({ ...s.scope });
 const scopeKeys=["workspaceId","projectId","documentId","revisionId","snapshotId",
@@ -112,9 +112,11 @@ export function saveVrReview(scene:SceneManifest,build:BuildState,items:ItemDraf
 export function restoreVrReview(scene:SceneManifest,data:unknown):RestoredVrDraft {
   if(!record(data)||data.format!=="planreader-local-vr-review"||data.schema!==1||
     data.previewOnly!==true||data.commercialPublicationAllowed!==false||
-    data.sourceKey!==scopeKey(scene)||!record(data.source)||
-    scopeKeys.some(field=>data.source[field]!==scene.scope[field]))
+    data.sourceKey!==scopeKey(scene)||!record(data.source))
     throw Error("Draft file belongs to a different source revision or is not a review-only file");
+  const savedScope=data.source;
+  if(scopeKeys.some(field=>savedScope[field]!==scene.scope[field]))
+    throw Error("Draft source identity does not match the current revision");
   const levels=new Set(scene.objects.map(x=>x.levelId).filter((x):x is string=>!!x));
   const geometry=readGeometry(data.geometry,scopeKey(scene),levels);
   const history=(data.history??[]),future=(data.future??[]);
