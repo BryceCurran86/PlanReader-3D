@@ -21,7 +21,7 @@ export type MenuAction =
   | { area: "level"; id: string }
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" }
-  | { area: "draft"; action: "nudge" | "rotate" | "duplicate" | "delete";
+  | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
       direction?: "left" | "right" | "forward" | "back" };
 
 export type MenuButton = {
@@ -95,23 +95,29 @@ export function buildMenuLayout(
     const edit = (action: Extract<MenuAction,{area:"draft"}>["action"],
       direction?: Extract<MenuAction,{area:"draft"}>["direction"]): MenuAction =>
       ({area:"draft",action,direction});
-    const controls: {label:string; action:MenuAction}[] = [
+    const controls: {label:string; action:MenuAction; disabled?:boolean}[] = [
+      {label:"Grab / Move",action:edit("move")},
+      {label:"Stretch end",action:edit("stretch")},
       {label:"Nudge left",action:edit("nudge","left")},
       {label:"Nudge right",action:edit("nudge","right")},
       {label:"Nudge forward",action:edit("nudge","forward")},
       {label:"Nudge back",action:edit("nudge","back")},
+      {label:"Step " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
       {label:"Rotate 90°",action:edit("rotate")},
       {label:"Duplicate",action:edit("duplicate")},
-      {label:"Nudge " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
+      {label:"Undo",action:{area:"history",action:"undo"},disabled:!interaction?.canUndo},
+      {label:"Redo",action:{area:"history",action:"redo"},disabled:!interaction?.canRedo},
       {label:quest.deleteArmed?"Confirm delete":"Delete…",action:edit("delete")},
       {label:"Back to tools",action:questAction("back")},
     ];
+    const columns=4, stride=(WIDTH-40)/columns, height=110+Math.ceil(controls.length/columns)*84+56;
     for (const [i,c] of controls.entries()) add(c.label,
-      20+(i%3)*320, 105+Math.floor(i/3)*86, 302, 72, c.action);
+      20+(i%columns)*stride, 110+Math.floor(i/columns)*84, stride-13, 70, c.action,
+      {disabled:c.disabled});
     return { buttons, title: "EDIT DRAFT WALL · " + length + " mm",
-      width: WIDTH, height: 445,
-      note: quest.deleteArmed?"Confirm delete or Back to cancel. Undo will restore.":"Draft only · Select a different wall to change target.",
-      sections: [{label:"PRECISE POSITION & OBJECT ACTIONS",y:90}] };
+      width: WIDTH, height,
+      note: quest.deleteArmed?"Confirm delete or Back to cancel. Undo restores.":"Trigger & hold to move a draft wall; source stays unchanged.",
+      sections: [{label:"SELECT · GRAB · MOVE · RELEASE",y:93}] };
   }
   if (viewsOpen) {
     for (const [index, option] of CONSTRUCTION_STAGES.entries()) {
