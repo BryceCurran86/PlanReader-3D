@@ -1,4 +1,6 @@
 import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
+import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
+import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -43,7 +45,10 @@ export type BuildAction =
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string }
   | { kind: "delete-local-wall"; proposalId: string }
-  | { kind: "duplicate-local-wall"; proposalId: string; id: string };
+  | { kind: "duplicate-local-wall"; proposalId: string; id: string }
+  | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
+  | { kind: "exact-local-opening"; proposalId: string; openingId: string;
+      field: OpeningField; valueMm: number };
 
 const EPSILON = 0.000001;
 const HOST_TOLERANCE_M = 0.22;
@@ -296,6 +301,17 @@ export function updateBuild(
         !validCeiling(ceiling.start, ceiling.end) || !validHeight(ceiling.heightM)) return state;
     return checkpoint(state, { walls: state.walls,
       ceilings: state.ceilings.map(item => item === previous ? ceiling : item) });
+  }
+  if (action.kind === "exact-local-wall" || action.kind === "exact-local-opening") {
+    const previous = state.walls.find(wall => wall.proposalId === action.proposalId &&
+      wall.scopeKey === scopeKey && wall.levelId === levelId);
+    if (!previous) return state;
+    const next = action.kind === "exact-local-wall"
+      ? exactDraftWall(previous, action.field, action.valueMm)
+      : exactDraftOpening(previous, action.openingId, action.field, action.valueMm);
+    if (!next || JSON.stringify(next) === JSON.stringify(previous)) return state;
+    return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
+      ceilings: state.ceilings });
   }
   if (action.kind === "delete-local-wall") {
     const wall = state.walls.find(item => item.proposalId === action.proposalId &&
