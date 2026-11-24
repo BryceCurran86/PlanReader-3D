@@ -16,7 +16,7 @@ import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
 import type { WallAxis } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
-  displayWallDraft, draftGesturePreview, pickDraftWall, pickDraftWalls } from "./buildScene";
+  displayWallDraft, draftGesturePreview, pickDraftWall, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
@@ -330,6 +330,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // The authenticated original scene and signed quantities never change.
     let selectedDraftId: string | null = null;
     let hoveredDraftId: string | null = null;
+    let magnetic=true, multiSelect=false;
+    const selectedGroup=new Set<string>();
+    function groupIds(){return build.current.buildState.walls.filter(w=>w.levelId===build.current.buildLevel&&selectedGroup.has(w.proposalId)).map(w=>w.proposalId);}
     let deleteArmed = false;
     let snapGrid: 0.05 | 0.1 | 0.25 = 0.05;
     let snapAxis: WallAxis = "auto";
@@ -381,7 +384,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
-          elevatedView:!!elevatedReturn,walkSpeed,
+          elevatedView:!!elevatedReturn,walkSpeed,magnetic,multiSelect,selectedCount:groupIds().length,
         });
     }
     function menuAction(choice: MenuAction) {
@@ -446,6 +449,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           reportTool("Opening draft adjustment requested; collisions and invalid sizes are rejected.");
         }
       } else if (choice.area === "quest") {
+        if(choice.action==="magnetic"){magnetic=!magnetic;hoveredDraftId=null;return;}
+        if(choice.action==="multi-select"){
+          if(resize.current.enabled||resize.current.projection)return;
+          multiSelect=!multiSelect;selectedGroup.clear();
+          if(multiSelect&&selectedDraftId)selectedGroup.add(selectedDraftId);
+          selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
+          if(multiSelect){build.current.onBuildAction({kind:"cancel"} as BuildAction);select(null);}
+          return;
+        }
+        if(choice.action==="clear-group"){selectedGroup.clear();deleteArmed=false;return;}
         if (choice.action === "grid") snapGrid = nextStep(snapGrid);
         if (choice.action === "nudge-size") nudgeStep = nextStep(nudgeStep);
         if (choice.action === "axis") {
@@ -480,7 +493,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const levels=["all",...interaction.current.levels];
           const index=levels.indexOf(interaction.current.level);
           interaction.current.onLevel(levels[(index+1)%levels.length]);
-          selectedDraftId=null;openingTools=false;numberPad=null;
+          selectedDraftId=null;selectedGroup.clear();multiSelect=false;openingTools=false;numberPad=null;
         }
         if (choice.action === "openings") {
           openingTools=!openingTools;openingIndex=0;numberPad=null;
@@ -501,6 +514,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (resize.current.enabled || resize.current.projection) {
           selectedDraftId=null; deleteArmed=false;
           reportTool("Finish or reset footprint resizing before editing draft walls.");
+          return;
+        }
+        if(multiSelect){
+          const proposalIds=groupIds();
+          if(!proposalIds.length)return;
+          if(choice.action==="delete"&&!deleteArmed){deleteArmed=true;reportTool("Confirm delete group. Undo restores all walls.");return;}
+          deleteArmed=false;
+          const facing=renderer.xr.getCamera().getWorldDirection(new THREE.Vector3());
+          const delta=choice.direction?viewRelativeNudge(choice.direction,[facing.x,facing.z],nudgeStep):null;
+          if(choice.action==="nudge"&&delta)build.current.onBuildAction({kind:"group-local-walls",proposalIds,operation:"translate",delta});
+          else if(choice.action==="rotate")build.current.onBuildAction({kind:"group-local-walls",proposalIds,operation:"rotate"});
+          else if(choice.action==="duplicate")build.current.onBuildAction({kind:"group-local-walls",proposalIds,operation:"duplicate",copyIds:proposalIds.map(()=>newPlacementId("wall-copy"))});
+          else if(choice.action==="delete"){build.current.onBuildAction({kind:"group-local-walls",proposalIds,operation:"delete"});selectedGroup.clear();}
           return;
         }
         const wall = selectedDraftWall();
@@ -778,7 +804,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function selectAtRay() {
       const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
-        pickDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray) : [];
+        magneticDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray, hoveredDraftId, magnetic?.15:0) : [];
+      if(multiSelect){
+        const wall=walls[0];
+        if(wall&&!itemBrowser.open&&!stageMenuOpen){
+          if(selectedGroup.has(wall.proposalId))selectedGroup.delete(wall.proposalId);
+          else selectedGroup.add(wall.proposalId);
+          deleteArmed=false;select(null);reportTool(groupIds().length+" draft walls selected.");
+        }
+        return;
+      }
       const index=walls.findIndex(wall=>wall.proposalId===selectedDraftId);
       const wall=walls.length?walls[(index+1)%walls.length]:null;
       if (wall && !itemBrowser.open && !stageMenuOpen) {
@@ -1442,7 +1477,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       for (const group of wallAdditionLayer.children) {
         if (!group.userData.reviewOnlyWallProposal) continue;
         const id = group.userData.proposalId as string;
-        const selected = id === selectedDraftId;
+        const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id));
         const hovered = id === hoveredDraftId;
         for (const part of group.children) {
           if (!(part instanceof THREE.Mesh || part instanceof THREE.Line)) continue;
