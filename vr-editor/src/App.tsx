@@ -11,6 +11,9 @@ import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
 import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
+import {DesignReviewPanel} from "./DesignReviewPanel";
+import {captureAlternative,restoreAlternative} from "./vrDesignReview";
+import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
@@ -64,6 +67,8 @@ export function App() {
   const [buildHint, setBuildHint] = useState("");
   const [vrRate,setVrRate]=useState("");
   const [vrDraftStatus,setVrDraftStatus]=useState("");
+  const [alternativeStore,setAlternativeStore]=useState<{scene:SceneManifest;entries:DesignAlternative[]}|null>(null);
+  const [allDimensions,setAllDimensions]=useState(false);
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
@@ -270,6 +275,25 @@ export function App() {
     setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
+  }
+  const alternatives=alternativeStore?.scene===manifest?alternativeStore.entries:[];
+  function saveAlternative(name:string){
+    if(!manifest||projection||resizeEnabled)return;
+    if(alternatives.length>=8){setVrDraftStatus("Maximum eight alternatives per open scene.");return;}
+    try{
+      const entry=captureAlternative(manifest,buildState,catalogue?.draft??null,name,newPlacementId("alternative"));
+      setAlternativeStore({scene:manifest,entries:[...alternatives,entry]});
+      setVrDraftStatus("Alternative captured. Local geometry and catalogue placements only.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot capture alternative.");}
+  }
+  function loadAlternative(entry:DesignAlternative){
+    if(!manifest||projection||resizeEnabled)return;
+    try{
+      const restored=restoreAlternative(manifest,entry);
+      enterMode("inspect");setPlaced({scene:manifest,build:restored.build});
+      setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");setVrDraftStatus("Restored "+entry.name+" · original source unchanged.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot restore alternative.");}
   }
   function exportLocalVrDraft() {
     if(!manifest)return;
@@ -602,6 +626,7 @@ export function App() {
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
+            <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions</label>
             {levels.length > 1 && <label>Level
               <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
                 <option value="all">All levels</option>
@@ -650,7 +675,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} onToolMessage={setToolMessage}
@@ -722,6 +747,7 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
+          <DesignReviewPanel scene={manifest} build={buildState} items={catalogue?.draft.items.length??0} alternatives={alternatives} blocked={!!projection||resizeEnabled} onSave={saveAlternative} onRestore={loadAlternative} onRemove={id=>setAlternativeStore({scene:manifest,entries:alternatives.filter(a=>a.id!==id)})} study={assemblyStudy.study} status={vrDraftStatus}/>
           <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
             <h2>Review source objects</h2>
