@@ -72,6 +72,7 @@ type Props = {
   canRedo: boolean;
   onHistory: (action: HistoryAction) => void;
   onDone: () => void;
+  toolFeedback?:string;
   onToolMessage: (message: string) => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -236,11 +237,11 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
-  interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage };
+  const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
+  interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback };
   const [renderError, setRenderError] = useState<string | null>(null);
   const callback = useRef(onSelect);
   callback.current = onSelect;
@@ -370,11 +371,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
     let lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     let stickNeedsNeutral=false;
-    const closeTools=()=>{toolsOpen=false;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    const closeTools=()=>{toolsOpen=false;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
-      if(toolsOpen){radial=true;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
+      if(toolsOpen){
+        for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
+        activeGrip=null;radial=true;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);
+      }
       else closeTools();
     }
     let budgetOpen=false,budgetPage=0;
@@ -397,7 +401,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
     let rotationPivot:WallRotationPivot="start";
-    let connectedRotation=true;
+    let connectedRotation=true,angleTools=false;
     const nextStep = (value: 0.05 | 0.1 | 0.25): 0.05 | 0.1 | 0.25 =>
       value === 0.05 ? 0.1 : value === 0.1 ? 0.25 : 0.05;
     function selectedDraftWall() {
@@ -430,7 +434,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, gridM: snapGrid, axis: snapAxis,
+          selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
@@ -440,7 +444,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
           radial,layersOpen,layers:construction.current.layers,
         });
-      if(!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
+      if(!layout.radial&&!angleTools&&!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
       return layout;
     }
     function menuAction(choice: MenuAction) {
@@ -456,11 +460,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(choice.area==="wall-angle"){
         if(resize.current.enabled||resize.current.projection||multiSelect)return;
         const wall=selectedDraftWall();if(!wall)return;
+        if(choice.action==="panel"){angleTools=!angleTools;radial=!angleTools;openingTools=false;numberPad=null;deleteArmed=false;return;}
         if(choice.action==="connected"){connectedRotation=!connectedRotation;return;}
         if(choice.action==="pivot"){rotationPivot=rotationPivot==="start"?"centre":rotationPivot==="centre"?"end":"start";return;}
         if(choice.degrees!==undefined){
           build.current.onBuildAction({kind:"rotate-local-wall",previous:wall,angleDeg:choice.degrees,relative:true,pivot:rotationPivot,connected:connectedRotation});
-          reportTool("Rotate draft wall "+choice.degrees+"° about "+rotationPivot+". Connected mode preserves exact junctions or rejects invalid edits.");
+          // App reports the validated result, not an optimistic success message.
         }
         return;
       }
@@ -497,7 +502,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
                   field:field.slice(8) as "offset"|"width"|"height"|"sill",valueMm:number});
               } else build.current.onBuildAction({kind:"exact-local-wall",
                 proposalId:wall.proposalId,field:field as "length"|"height"|"x"|"z",valueMm:number});
-              reportTool(field==="angle"?"Applied draft angle request. Adjacent walls may need reconnecting.":"Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
+              if(field!=="angle")reportTool("Applied exact draft mm request. Invalid or conflicting geometry is rejected.");
               numberPad=null;
             } else reportTool(field==="angle"?"Enter a whole degree value.":"Enter a whole millimetre value to apply.");
           }
@@ -588,7 +593,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           selectedDraftId=null;selectedGroup.clear();multiSelect=false;openingTools=false;numberPad=null;
         }
         if (choice.action === "openings") {
-          openingTools=!openingTools;openingIndex=0;numberPad=null;
+          openingTools=!openingTools;angleTools=false;openingIndex=0;numberPad=null;radial=!openingTools;
         }
         if (choice.action === "next-opening") {
           const count=selectedDraftWall()?.openings.length??0;
@@ -599,7 +604,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned,true);
         if (choice.action === "help") { helpOpen = !helpOpen; numberPad=null; openingTools=false;
           selectedDraftId = null; deleteArmed=false; }
-        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; }
+        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; angleTools=false;radial=true; }
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
