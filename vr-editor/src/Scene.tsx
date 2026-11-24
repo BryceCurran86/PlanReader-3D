@@ -96,6 +96,7 @@ type Props = {
   teleportAvailable:boolean;
   onTeleportToggle:(enabled:boolean)=>void;
   onExportLocalDraft:()=>void;
+  onReviewLocalWall:(proposalId:string)=>void;
   onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
@@ -210,7 +211,7 @@ function labelSprite(value: string): THREE.Sprite {
 }
 
 export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
-  onExportLocalDraft, onTeleportMessage }: Props) {
+  onExportLocalDraft, onReviewLocalWall, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage };
@@ -223,6 +224,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   teleportSettings.current = {teleportMode,teleportAvailable,onTeleportToggle,onTeleportMessage};
   const exportDraftCallback=useRef(onExportLocalDraft);
   exportDraftCallback.current=onExportLocalDraft;
+  const reviewDraftCallback=useRef(onReviewLocalWall);
+  reviewDraftCallback.current=onReviewLocalWall;
   const addedWallRef = useRef(addedWallSketch);
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
@@ -447,6 +450,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           else reportTool("Teleport requires a verified source-backed floor.");
         }
         if (choice.action === "save") exportDraftCallback.current();
+        if (choice.action === "review") {
+          const wall=selectedDraftWall();
+          if(!wall)return;
+          selectedDraftId=null;openingTools=false;numberPad=null;
+          const session=renderer.xr.getSession();
+          if(session) {
+            void session.end().then(()=>reviewDraftCallback.current(wall.proposalId))
+              .catch(()=>reportTool("Exit VR before starting authenticated assembly review."));
+          } else reviewDraftCallback.current(wall.proposalId);
+        }
         if (choice.action === "next-stage") {
           const current=CONSTRUCTION_STAGES.findIndex(entry=>entry.id===construction.current.stage);
           construction.current.onStage(CONSTRUCTION_STAGES[(current+1)%CONSTRUCTION_STAGES.length].id);
