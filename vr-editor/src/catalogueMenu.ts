@@ -266,7 +266,8 @@ export function buildMenuLayout(
     ];
     for(const [i,entry] of compact.entries()) add(entry.label,
       20+(i%4)*235,105+Math.floor(i/4)*82,221,69,entry.action,{disabled:entry.disabled});
-    return {buttons,title:"QUEST QUICK TOOLS",width:WIDTH,height:335,
+    return {buttons,title:"QUEST QUICK TOOLS",width:WIDTH,
+      height:105+Math.ceil(compact.length/4)*82+68,
       note:"Compact palette · Build tools opens the full tool selection.",
       sections:[{label:"NAVIGATE · EDIT · UNDO",y:88}]};
   }
