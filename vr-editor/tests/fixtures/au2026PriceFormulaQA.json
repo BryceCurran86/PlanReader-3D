@@ -1,0 +1,293 @@
+{
+  "schema": "planreader-au-price-formula-qa-v1",
+  "asOf": "2026-11-24",
+  "currency": "AUD",
+  "country": "Australia",
+  "isProductionPricebook": false,
+  "previewOnly": true,
+  "commercialPublicationAllowed": false,
+  "gstAssumption": "All fixture values treated as ex GST solely to test arithmetic. Original published prices may differ.",
+  "evidenceNotice": "Modelled-healthy is a derived 2026 national trade-rate card, not a surveyed quote. Synthetic amounts are not market observations.",
+  "sourceForModelledHealthy": "https://www.sumitt.com.au/trade-rates",
+  "testRates": [
+    {
+      "group": "paint",
+      "unit": "m²",
+      "amountExGstTest": 40,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "boards",
+      "unit": "m²",
+      "amountExGstTest": 77,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "skirting",
+      "unit": "lm",
+      "amountExGstTest": 10,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "architraves",
+      "unit": "lm",
+      "amountExGstTest": 9,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "floors",
+      "unit": "m²",
+      "amountExGstTest": 134,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "walls",
+      "unit": "m²",
+      "amountExGstTest": 42,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "tapware",
+      "unit": "each",
+      "amountExGstTest": 180,
+      "origin": "synthetic",
+      "basis": "material",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "electrical",
+      "unit": "job",
+      "amountExGstTest": 1741,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "lights",
+      "unit": "each",
+      "amountExGstTest": 80,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "bathroom",
+      "unit": "each",
+      "amountExGstTest": 900,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "cabinets",
+      "unit": "lm",
+      "amountExGstTest": 600,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "doors",
+      "unit": "each",
+      "amountExGstTest": 220,
+      "origin": "synthetic",
+      "basis": "material",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "timber",
+      "unit": "m²",
+      "amountExGstTest": 120,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "entry",
+      "unit": "each",
+      "amountExGstTest": 1750,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "substrates",
+      "unit": "m²",
+      "amountExGstTest": 203,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "facades",
+      "unit": "m²",
+      "amountExGstTest": 104,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "decking",
+      "unit": "m²",
+      "amountExGstTest": 410,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "soffits",
+      "unit": "m²",
+      "amountExGstTest": 75,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "roofing",
+      "unit": "m²",
+      "amountExGstTest": 126,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    },
+    {
+      "group": "roof-components",
+      "unit": "lm",
+      "amountExGstTest": 60,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "plumbing-rough-in",
+      "unit": "each",
+      "amountExGstTest": 130,
+      "origin": "synthetic",
+      "basis": "labour-material-allowance",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "electrical-rough-in",
+      "unit": "each",
+      "amountExGstTest": 110,
+      "origin": "synthetic",
+      "basis": "labour-material-allowance",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "air-conditioning",
+      "unit": "each",
+      "amountExGstTest": 2400,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "stairs",
+      "unit": "step",
+      "amountExGstTest": 500,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "balustrading",
+      "unit": "lm",
+      "amountExGstTest": 400,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "sliding-doors",
+      "unit": "each",
+      "amountExGstTest": 1200,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "windows",
+      "unit": "each",
+      "amountExGstTest": 700,
+      "origin": "synthetic",
+      "basis": "material",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "window-coverings",
+      "unit": "window",
+      "amountExGstTest": 160,
+      "origin": "synthetic",
+      "basis": "material",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "flyovers",
+      "unit": "m²",
+      "amountExGstTest": 220,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "pools",
+      "unit": "job",
+      "amountExGstTest": 60000,
+      "origin": "synthetic",
+      "basis": "supply-install",
+      "sourceUrl": null,
+      "commercialUse": false
+    },
+    {
+      "group": "landscaping",
+      "unit": "m²",
+      "amountExGstTest": 50,
+      "origin": "modelled-healthy",
+      "basis": "supply-install",
+      "sourceUrl": "https://www.sumitt.com.au/trade-rates",
+      "commercialUse": false
+    }
+  ]
+}

@@ -66,6 +66,7 @@ export interface PcVrInputSource {
   gripSpace?: unknown | null;
   gamepad?: {
     mapping?: string;
+    axes?: readonly number[];
     buttons?: ReadonlyArray<{pressed?: boolean; value?: number} | null>;
   } | null;
 }

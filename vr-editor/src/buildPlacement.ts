@@ -1,6 +1,8 @@
 import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
+import { editLocalOutline } from "./localOutline.ts";
+import type { OutlineEdit } from "./localOutline.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -46,6 +48,8 @@ export type BuildAction =
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
+  | { kind: "edit-local-outline"; expected: string; edit: OutlineEdit }
+  | { kind: "group-local-walls"; proposalIds: string[]; operation: "translate" | "rotate" | "delete" | "duplicate" | "height"; delta?: PlanPoint; copyIds?: string[]; heightMm?: number }
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
   | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
@@ -342,6 +346,54 @@ export function updateBuild(
     if (!next || JSON.stringify(next) === JSON.stringify(previous)) return state;
     return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
       ceilings: state.ceilings });
+  }
+  if(action.kind==="edit-local-outline"){
+    if(!levelId)return state;
+    const walls=state.walls.filter(w=>w.levelId===levelId&&w.scopeKey===scopeKey);
+    if(JSON.stringify(walls)!==action.expected)return state;
+    const next=editLocalOutline(walls,action.edit);
+    if(!next||state.walls.length-walls.length+next.length>MAX_DRAFT_WALLS||next.some(w=>!validEditedWall(w)))return state;
+    const other=state.walls.filter(w=>!walls.includes(w));
+    if(next.some(w=>other.some(o=>o.proposalId===w.proposalId)))return state;
+    return checkpoint(state,{walls:[...other,...next],ceilings:state.ceilings});
+  }
+  if(action.kind==="group-local-walls"){
+    const ids=new Set(action.proposalIds);
+    if(!levelId||ids.size===0||ids.size!==action.proposalIds.length||ids.size>MAX_DRAFT_WALLS)return state;
+    const selected=state.walls.filter(w=>ids.has(w.proposalId)&&w.levelId===levelId&&w.scopeKey===scopeKey);
+    if(selected.length!==ids.size)return state;
+    if(action.operation==="delete")return checkpoint(state,{walls:state.walls.filter(w=>!ids.has(w.proposalId)),ceilings:state.ceilings});
+    if(action.operation==="duplicate"){
+      const copyIds=action.copyIds??[];
+      if(copyIds.length!==selected.length||state.walls.length+selected.length>MAX_DRAFT_WALLS||
+        new Set(copyIds).size!==copyIds.length||copyIds.some(id=>!id||state.walls.some(w=>w.proposalId===id)))return state;
+      const copies=selected.map((w,i)=>{
+        const shifted=translatedDraftWall(w,.5,0),id=copyIds[i];
+        return shifted?{...shifted,proposalId:id,openings:shifted.openings.map((o,j)=>({...o,openingId:id+"-opening-"+j}))}:null;
+      });
+      if(copies.some(w=>!w))return state;
+      return checkpoint(state,{walls:[...state.walls,...copies as PlacedWall[]],ceilings:state.ceilings});
+    }
+    const points=selected.flatMap(w=>[w.start,w.end]);
+    const cx=(Math.min(...points.map(p=>p[0]))+Math.max(...points.map(p=>p[0])))/2;
+    const cz=(Math.min(...points.map(p=>p[1]))+Math.max(...points.map(p=>p[1])))/2;
+    const rotate=(p:PlanPoint)=>millimetrePoint([cx-(p[1]-cz),cz+(p[0]-cx)]);
+    const changed=selected.map(w=>{
+      if(action.operation==="translate"&&action.delta){
+        const start=millimetrePoint([w.start[0]+action.delta[0],w.start[1]+action.delta[1]]);
+        const end=millimetrePoint([w.end[0]+action.delta[0],w.end[1]+action.delta[1]]);
+        return start&&end?{...w,start,end}:null;
+      }
+      if(action.operation==="height"&&action.heightMm!==undefined)return exactDraftWall(w,"height",action.heightMm);
+      if(action.operation==="rotate"){
+        const start=rotate(w.start),end=rotate(w.end);
+        return start&&end?{...w,start,end}:null;
+      }
+      return null;
+    });
+    if(changed.some(w=>!w||!validEditedWall(w)))return state;
+    const byId=new Map((changed as PlacedWall[]).map(w=>[w.proposalId,w]));
+    return checkpoint(state,{walls:state.walls.map(w=>byId.get(w.proposalId)??w),ceilings:state.ceilings});
   }
   if (action.kind === "delete-local-wall") {
     const wall = state.walls.find(item => item.proposalId === action.proposalId &&

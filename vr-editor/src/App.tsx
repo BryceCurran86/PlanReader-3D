@@ -9,12 +9,13 @@ import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
 import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
+import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
 import { saveVrReview, restoreVrReview } from "./vrDraftSave";
 import { ConstructionView, StandardsPanel } from "./ConstructionView";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
-import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint } from "./footprintResize";
+import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
 import { isRoughIn, showConstructionItem } from "./constructionStages";
@@ -26,6 +27,7 @@ import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
+import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -250,6 +252,8 @@ export function App() {
   const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
+  const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
+  const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -369,6 +373,7 @@ export function App() {
 
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
+    if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
@@ -618,6 +623,10 @@ export function App() {
             {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
           </p>}
 
+          {buildLevel && <LocalOutlinePanel key={scopeKey(manifest)+":"+buildLevel}
+            walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
+            blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
+            onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
@@ -647,7 +656,7 @@ export function App() {
                 teleportAvailable={canTeleport} onTeleportToggle={toggleTeleport}
                 onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
-                onReviewLocalWall={reviewWall} />
+                onReviewLocalWall={reviewWall} budget={{summary:assemblyStudy.summary,onCapture:assemblyStudy.capture,onClear:assemblyStudy.clear}} />
             </Suspense>
           </div>
           <div className="viewer-footer">
@@ -708,6 +717,7 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
+          <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
             <h2>Review source objects</h2>
             <label htmlFor="review-search">Find an object</label>
