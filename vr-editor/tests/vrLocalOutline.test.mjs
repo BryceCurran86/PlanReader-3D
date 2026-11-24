@@ -18,7 +18,7 @@ test("moving a corner or edge retains joined walls and rejects crossing",()=>{
  assert.equal(localOutline(moved).areaM2,54);
  const side=editLocalOutline(ring,{kind:"move-edge",index:1,delta:[2,0]});
  assert.equal(localOutline(side).areaM2,60);
- assert.equal(editLocalOutline(ring,{kind:"move-point",index:1,point:[-1,7]}),null);
+ assert.equal(editLocalOutline(ring,{kind:"move-point",index:1,point:[4,7]}),null);
 });
 test("insertion creates a genuine concave point; removal restores area",()=>{
  const extra=editLocalOutline(ring,{kind:"insert-point",index:0,point:[4,2],newId:"e"});
