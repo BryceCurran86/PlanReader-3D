@@ -22,7 +22,9 @@ export function DesignReviewPanel({scene,build,items,alternatives,blocked,onSave
  <div><span>Verified wall faces</span><strong>{coverage.verifiedWalls}</strong></div>
  <div><span>Unknown-height guides / missing geometry</span><strong>{coverage.guideLines} / {coverage.missingWalls}</strong></div>
  <div><span>Floor / ceiling / roof surfaces</span><strong>{coverage.floors} / {coverage.ceilings} / {coverage.roofs}</strong></div>
- <div><span>Imported openings / wall assemblies</span><strong>Not supplied by scene contract</strong></div>
+ <div><span>Positioned opening candidates / recorded openings</span><strong>{coverage.positionedOpenings} / {coverage.openingRecords}</strong></div>
+ <div><span>Imported wall assemblies</span><strong>Not supplied by scene contract</strong></div>
+ <p>Cyan dashed openings are review guides, not verified apertures. Missing positions and conflicting records are withheld.</p>
  </div>
  <h3>Compare local alternatives</h3>
  <p>Capture up to eight designs in this open scene. Restoring replaces the local walls, ceilings and catalogue items, not the original plan. Save the current design before restoring another. These alternatives are session-only; use the existing draft export for durable copies. Costs use the same current assumptions and rates, exclude catalogue prices, and may be partial.</p>
