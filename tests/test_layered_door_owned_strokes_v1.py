@@ -151,6 +151,21 @@ def test_unrelated_rows_before_the_door_shift_its_indices_but_not_its_chord():
     assert set(cb["source_swing_native_path_indices"]) == shifted.owned and shifted.owned != plain.owned
 
 
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_the_order_of_the_wall_faces_and_jambs_does_not_change_the_chord(seed):
+    # the four wall faces and the two jambs come before the door's own chain and leaf; permute that block only (the chain stays contiguous,
+    # as a source swing's strokes are), so every native index of the wall rows moves while the door does not
+    scene = Scene()
+    head, tail = scene.rows[:6], scene.rows[6:]
+    shuffled = list(head)
+    random.Random(seed).shuffle(shuffled)
+    got = _build(shuffled + tail)
+    base = _build(scene.rows)
+    (chord,), (expected,) = got.source_owned_doorway_chords, base.source_owned_doorway_chords
+    assert chord["door_interval_pdf_pts"] == pytest.approx(expected["door_interval_pdf_pts"], abs=1e-6)
+    assert got.wall_gap_count == base.wall_gap_count
+
+
 def test_building_never_mutates_the_rows_and_replays_deterministically():
     scene = Scene()
     before = copy.deepcopy(scene.rows)
