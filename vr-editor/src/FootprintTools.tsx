@@ -29,6 +29,6 @@ export function FootprintTools({ box, changed, hint, onApply, onReset, onDone }:
       <button type="button" disabled={!changed} onClick={onReset}>Reset footprint</button>
       <button type="button" onClick={onDone}>Done</button>
     </form>
-    <p role="status">{hint || "Drag a corner or enter a size. The opposite corner stays fixed during a drag."}</p>
+    <p role="status">{hint || "Drag one of four green corners or four gold edge handles, or enter dimensions. Edge handles move one side only."}</p>
   </section>;
 }
