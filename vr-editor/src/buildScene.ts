@@ -24,6 +24,46 @@ function openingOutline(wall: WallVisual, opening: WallAdditionOpening) {
     atOffset(wall, b, top), atOffset(wall, b, bottom)];
 }
 
+/** Visual-only nominal timber members, not an engineered or priced assembly. */
+export function illustrativeTimberFrame(wall: WallVisual) {
+  const group = new THREE.Group();
+  group.userData.illustrativeFraming = true;
+  group.visible = false;
+  const length = planLength(wall.start, wall.end);
+  if (!Number.isFinite(length) || length < .05 || length > 200 || !Number.isFinite(wall.heightM) || wall.heightM < .1 || wall.heightM > 20) return group;
+  const openings = (wall.openings ?? []).filter(o => openingFits(wall,o));
+  const thickness = .045, depth = .09;
+  const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+  function member(from:number,to:number,bottom:number,top:number) {
+    from=Math.max(0,from);to=Math.min(length,to);bottom=Math.max(0,bottom);top=Math.min(wall.heightM,top);
+    if(to-from<.001||top-bottom<.001)return;
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,depth),new THREE.MeshStandardMaterial({color:0xc99c65,roughness:.88}));
+    mesh.position.copy(atOffset(wall,(from+to)/2,(bottom+top)/2));
+    mesh.rotation.y=angle;mesh.userData.illustrativeFraming=true;
+    group.add(mesh);
+  }
+  function horizontal(y:number) {
+    const cuts=openings.filter(o=>o.sillHeightM<y+thickness&&o.sillHeightM+o.heightM>y).sort((a,b)=>a.offsetM-b.offsetM);
+    let cursor=0;
+    for(const o of cuts){member(cursor,o.offsetM,y,y+thickness);cursor=Math.max(cursor,o.offsetM+o.widthM);}
+    member(cursor,length,y,y+thickness);
+  }
+  horizontal(0);horizontal(wall.heightM-thickness);horizontal(wall.heightM/2);
+  const count=Math.ceil(length/.45);
+  for(let i=0;i<=count;i++){
+    const x=i===count?length-thickness/2:Math.max(thickness/2,i*.45);
+    const cut=openings.filter(o=>o.offsetM<x+thickness/2&&o.offsetM+o.widthM>x-thickness/2);
+    if(!cut.length)member(x-thickness/2,x+thickness/2,thickness,wall.heightM-thickness);
+  }
+  for(const o of openings){
+    member(o.offsetM-thickness,o.offsetM,thickness,wall.heightM-thickness);
+    member(o.offsetM+o.widthM,o.offsetM+o.widthM+thickness,thickness,wall.heightM-thickness);
+    member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM+o.heightM,o.sillHeightM+o.heightM+thickness);
+    if(o.sillHeightM>thickness)member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM-thickness,o.sillHeightM);
+  }
+  return group;
+}
+
 export function displayWallDraft(wall: WallVisual) {
   const group = new THREE.Group();
   const faces: number[] = [];
@@ -40,8 +80,8 @@ export function displayWallDraft(wall: WallVisual) {
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
     geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-      color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false,
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      color, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
@@ -62,11 +102,12 @@ export function displayWallDraft(wall: WallVisual) {
     if (opening.openingKind === "door") {
       const leaf: number[] = [];
       panel(points, leaf);
-      addMesh(leaf, 0xe9bb75, 0.55, false, opening.openingId);
+      addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
-  addMesh(faces, 0xa589e4, 0.48, true);
+  addMesh(faces, 0xeeeae1, 1, true);
+  group.add(illustrativeTimberFrame(wall));
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
     atOffset(wall, 0, 0.018), atOffset(wall, 0, wall.heightM),
@@ -92,8 +133,8 @@ export function displayCeilingDraft(draft: CeilingDraft) {
   const geometry = new THREE.BufferGeometry().setFromPoints([corners[0], corners[1], corners[2],
     corners[0], corners[2], corners[3]]);
   geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x9589df,
-    side: THREE.DoubleSide, transparent: true, opacity: 0.35, depthWrite: false }));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xf5f2eb,
+    side: THREE.DoubleSide, roughness: 0.88 }));
   return mesh;
 }
 
