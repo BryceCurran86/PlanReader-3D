@@ -376,7 +376,7 @@ export function updateBuild(
     const hitLevel = action.kind === "drag" ? action.levelId : action.hit.levelId;
     if (hitLevel !== levelId || (action.kind === "place" && action.hit.kind !== tool)) return state;
     const precisionSource=action.kind==="drag" ? action.precisionSource===true :
-      action.hit.precisionSource===true;
+      ("precisionSource" in action.hit && action.hit.precisionSource===true);
     const roundPoint=precisionSource ? millimetrePoint : snappedPoint;
     const point = roundPoint(action.kind === "drag" ? action.to : action.hit.point);
     const start = action.kind === "drag" ? roundPoint(action.from) : activeStart(state, levelId);
