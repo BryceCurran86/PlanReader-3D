@@ -466,7 +466,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     const hit: BuildHit = { kind: state.tool, levelId, point,
       precisionSource:snap?.kind==="verified" };
     if (!start) return { hit, marker: point,
-      hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
+      hint: snap?.kind === "wall-face" ? "Place wall start · magnetic wall snap" : snap?.kind === "corner" ? "Place wall start · corner snap" :
         snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
@@ -480,7 +480,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
       hint: valid
         ? "Place wall end · " + Math.round(length * 1000) + " mm" +
-          (snap?.kind === "corner" ? " · corner snap" :
+          (snap?.kind === "wall-face" ? " · magnetic wall snap" : snap?.kind === "corner" ? " · corner snap" :
            snap?.kind === "verified" ? " · verified source guide (draft only)" :
            snap?.kind === "straight" ? " · straight" : "")
         : "Wall length must be 50 mm to 200 m.",
