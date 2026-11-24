@@ -32,8 +32,8 @@ import { buildMenuLayout, EMPTY_ITEM_BROWSER, updateItemBrowser } from "./catalo
 import type { ItemAction, MenuAction, NumericDraftField } from "./catalogueMenu";
 import { verifiedSourceWallAnchors } from "./vrDraftSourceSnaps";
 import { createVrPlanOverview } from "./vrPlanOverview";
-import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset } from "./vrStationaryNavigation";
-import type { NavigationWall } from "./vrStationaryNavigation";
+import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset } from "./vrStationaryNavigation";
+import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
@@ -359,7 +359,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let budgetOpen=false,budgetPage=0;
     let compactMenu = true;
     let overviewOpen=false;
-    let elevatedReturn: XRReferenceSpace|null=null;
+    let elevatedReturn: NavOffset|null=null;
+    let navBase:XRReferenceSpace|null=null,navOffset=identityNavOffset();
+    function setNavOffset(offset:NavOffset){
+      navBase??=renderer.xr.getReferenceSpace();
+      if(!navBase)throw Error("No XR reference space");
+      renderer.xr.setReferenceSpace(navBase.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+      navOffset=offset;
+    }
+    function moveNavOffset(offset:NavOffset){setNavOffset(composeNavigationOffset(navOffset,offset));}
     let walkSpeed=1.2, turnArmed=true, lastNavTime=0;
     const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>
       !(elevatedReturn && (kind==="ceiling"||kind==="roof")) && showConstructionSurface(stage,kind);
@@ -1146,10 +1154,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       try {
         // An incremental XR reference-space offset moves the virtual
         // observer without modifying any PlanReader source geometry.
-        const offset=new XRRigidTransform(
-          {x,y:0,z},{x:0,y:0,z:0,w:1},
-        );
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(offset));
+        moveNavOffset({position:{x,y:0,z},orientation:{x:0,y:0,z:0,w:1}});
         teleportSettings.current.onTeleportMessage(
           `Moved ${(target.distanceM??0).toFixed(1)}m on verified floor (review navigation only)`,
         );
@@ -1163,7 +1168,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const space=renderer.xr.getReferenceSpace();
       if(!renderer.xr.isPresenting||!space||typeof XRRigidTransform==="undefined")return;
       try{
-        if(elevatedReturn){renderer.xr.setReferenceSpace(elevatedReturn);elevatedReturn=null;reportTool("Returned to walkthrough position.");return;}
+        if(elevatedReturn){setNavOffset(elevatedReturn);elevatedReturn=null;reportTool("Returned to walkthrough position.");return;}
         const box=resize.current.box;
         if(!box){reportTool("Open a bounded building scene to use 3D bird’s-eye.");return;}
         const width=box.maxX-box.minX,depth=box.maxZ-box.minZ;
@@ -1171,8 +1176,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const height=Math.min(100,Math.max(5,Math.hypot(width,depth)*.65+3));
         const target={x:(box.minX+box.maxX)/2,y:height,z:(box.minZ+box.maxZ)/2};
         const offset=navigationOffset(head,{x:target.x-head.x,y:target.y-head.y,z:target.z-head.z},0);
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
-        elevatedReturn=space;
+        const previous=navOffset;
+        moveNavOffset(offset);
+        elevatedReturn=previous;
         reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
       }catch{reportTool("The XR runtime declined the view change.");}
     }
@@ -1216,17 +1222,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           let end=0;
           for(const o of [...w.openings].sort((a,b)=>a.offsetM-b.offsetM)){
             if(o.sillHeightM>.01||o.heightM<1.9||o.openingKind!=="passage")continue;
-            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM)});
+            if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
             end=Math.max(end,o.offsetM+o.widthM);
           }
-          if(end<length)walls.push({start:at(end),end:w.end});
+          if(end<length)walls.push({start:at(end),end:w.end,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
         }
         delta=collisionLimitedStep([head.x,head.z],delta,walls);
       }
       if(!delta[0]&&!delta[1]&&!turn.angle)return;
       try{
         const offset=navigationOffset(head,{x:delta[0],y:0,z:delta[1]},turn.angle);
-        renderer.xr.setReferenceSpace(space.getOffsetReferenceSpace(new XRRigidTransform(offset.position,offset.orientation)));
+        moveNavOffset(offset);
       }catch{lastNavTime=0;}
     }
     const select0 = () => trigger(0);
@@ -1314,7 +1320,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const onSessionStart = () => {
       toolsOpen=false;renderer.shadowMap.enabled=false;
       reportTool("Left grip opens or hides tools. Right trigger edits. Left stick walks.");
-      elevatedReturn=null;turnArmed=true;lastNavTime=0;
+      elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
       squeezeTracker.clear();
@@ -1326,7 +1332,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const onSessionEnd = () => {
       closeTools();renderer.shadowMap.enabled=true;
       budgetOpen=false;budgetPage=0;
-      elevatedReturn=null;turnArmed=true;lastNavTime=0;
+      elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
       stageMenuOpen = false;
@@ -1394,6 +1400,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastLabelId: string | null = null;
     let lastMood: LightingMood | null = null;
     let lastQuality: RenderQuality | null = null;
+    let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
     let lastCameraSerial: number | null = null;
     let lastCaptureSerial = visualSettings.current.captureSerial;
@@ -1590,8 +1597,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       grid.visible = activeInspection.showGrid;
-      sunlight.castShadow = activeInspection.showShadows;
-      presentationFloor.visible = activeInspection.showShadows;
+      sunlight.castShadow = activeInspection.showShadows&&!renderer.xr.isPresenting;
+      presentationFloor.visible = activeInspection.showShadows&&!renderer.xr.isPresenting;
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -1622,7 +1629,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         lastDetail = activeDetail;
       }
-      if (lastQuality !== activeQuality) {
+      if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -1633,6 +1640,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           maxRenderPixelRatio(activeQuality, renderer.xr.isPresenting)));
         onResize();
         lastQuality = activeQuality;
+        lastPresenting=renderer.xr.isPresenting;
       }
       if (requestedCamera.serial !== lastCameraSerial && !renderer.xr.isPresenting) {
         const focus = requestedCamera.focus === "selected" ?
