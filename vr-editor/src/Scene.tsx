@@ -19,7 +19,7 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -37,7 +37,7 @@ import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {createWallTextureLibrary} from "./wallTextures";
-import {layerVisible,surfaceLayerVisible,cycleLayer} from "./constructionLayers";
+import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
@@ -495,8 +495,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       } else if (choice.area === "quest") {
         if(choice.action==="hide-tools"){closeTools();return;}
-        if(choice.action==="more-tools"){radial=false;compactMenu=true;return;}
-        if(choice.action==="layers"){layersOpen=!layersOpen;return;}
+        if(choice.action==="more-tools"){radial=false;compactMenu=true;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);return;}
+        if(choice.action==="layers"){layersOpen=!layersOpen;buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);return;}
         if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
         if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
         if(choice.action==="dimensions"){dimensions=!dimensions;return;}
@@ -523,7 +523,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (choice.action === "compact") compactMenu=!compactMenu;
         if (choice.action === "overview") overviewOpen=!overviewOpen;
         if (choice.action === "walk-speed") walkSpeed=walkSpeed===.6?1.2:walkSpeed===1.2?2:.6;
-        if (choice.action === "elevated-view") toggleElevatedView();
+        if (choice.action === "elevated-view") {toggleElevatedView();closeTools();}
         if (choice.action === "teleport") {
           if(teleportSettings.current.teleportAvailable)
             teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
@@ -1025,7 +1025,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const item = getCatalogueItem(event.dataTransfer?.getData(CATALOGUE_DRAG_TYPE) ?? null);
       if (!item || itemControls.current.active?.id !== item.id ||
-          !showConstructionItem(construction.current.stage, item)) return;
+          !itemLayerVisible(construction.current.stage,item,construction.current.layers)) return;
       event.preventDefault();
       placeSelectedItem(item);
     }
@@ -1493,6 +1493,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         } else {
           for (const child of shape.children) {
             if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing");
+            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",false);
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
               const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true));
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
