@@ -54,6 +54,12 @@ from pb_source_internal_door_completeness_shadow import inspect_source_internal_
 from pb_source_native_figured_window_bridge_review import (
     inspect_original_window_figured_bridge_review,
 )
+from pb_source_owned_doorway_chord_preview_shadow import (
+    source_owned_doorway_chord_shadow as _source_owned_doorway_chord_shadow_block,
+)
+
+# The summary key of the opt-in shadow block of source-owned doorway chords (read-only evidence, never applied to the rings).
+_CHORD_SHADOW_KEY = "source_owned_doorway_chord_shadow"
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -125,6 +131,7 @@ def source_native_trace_preview(
     *,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    source_owned_doorway_chord_shadow: bool = False,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
@@ -141,12 +148,19 @@ def source_native_trace_preview(
     canvas cover that native extent; on a rotated page the PNG is rendered in the displayed orientation and the summary
     carries a ``native_page_frame`` receipt. A /Rotate 180, 270 or unreadable frame is not promoted there, so the trace
     fails closed with ``ValueError("new_trace_native_page_frame_unresolved")`` instead of running in the wrong frame.
+
+    ``source_owned_doorway_chord_shadow`` (default False, an explicit boolean) additionally reports the source-owned doorway chords
+    that the layered dark-painted builder recovers on the rows this preview scoped, as ONE additive summary key of counts and
+    topology-only receipts. It is read-only evidence: the rings, closures, strips, overlay and PNG are identical with it on or
+    off, and with it off the whole output is byte-identical to what this function always returned.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
         raise ValueError("new_trace_original_pdf_required_no_legacy_fallback")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("new_trace_page_index_invalid")
+    if type(source_owned_doorway_chord_shadow) is not bool:
+        raise ValueError("new_trace_source_owned_doorway_chord_shadow_must_be_bool")
     source_bytes = pdf_path.read_bytes()
     sha = hashlib.sha256(source_bytes).hexdigest()
     with fitz.open(stream=source_bytes, filetype="pdf") as document:
@@ -321,6 +335,17 @@ def source_native_trace_preview(
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
         )
+        doorway_chord_shadow = None
+        if source_owned_doorway_chord_shadow:
+            # Read-only: nothing below reads this block, so the rings, closures, strips and overlay cannot depend on it. The rows
+            # are the ones the preview's own selector received; a raster underlay page never reaches the layered builder.
+            doorway_chord_shadow = _source_owned_doorway_chord_shadow_block(
+                vector_scope.drawings,
+                source_sha256=sha,
+                page_index=page_index,
+                viewport_pdf_pts=outer_wall.viewport_pdf_pts,
+                native_vector_rows_architectural=source_modality.route != "tiled_raster_underlay",
+            )
         _report("wall_room_topology_ready", .56)
         preview = fitz.open()
         canvas = _new_native_frame_canvas(preview, document, page_index, frame)
@@ -753,5 +778,8 @@ def source_native_trace_preview(
             # additive and on a rotated page only, so an upright page's summary is unchanged
             summary["native_page_frame"] = asdict(frame)
             summary["preview_png_orientation"] = "displayed"
+        if doorway_chord_shadow is not None:
+            # additive and only when explicitly requested, so a default summary is unchanged
+            summary[_CHORD_SHADOW_KEY] = doorway_chord_shadow
         _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png
