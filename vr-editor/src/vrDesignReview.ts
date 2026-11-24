@@ -12,7 +12,7 @@ export function sceneCoverage(scene:SceneManifest){
  const surfaces=(kind:string)=>(scene.sourceSurfaces??[]).filter(s=>s.kind===kind).length;
  return {wallRecords:walls.length,wallFaces:faces.length,verifiedWalls:verified.length,guideLines:walls.filter(o=>o.geometry?.kind==="wallLine").length,
   missingWalls:walls.filter(o=>!o.geometry).length,floors:surfaces("floor"),ceilings:surfaces("ceiling"),roofs:surfaces("roof"),
-  openingGeometry:"not supplied",wallAssemblies:"not supplied"};
+  openingGeometry:"review only",openingRecords:walls.reduce((n,w)=>n+(w.openingReview?.recordCount??0),0),positionedOpenings:walls.reduce((n,w)=>n+(w.openingReview?.positioned.length??0),0),wallAssemblies:"not supplied"};
 }
 export type DimensionEntry={key:string;label:string;position:[number,number,number];kind:"wall"|"ceiling"|"floor";source:boolean};
 export function reviewDimensions(scene:SceneManifest,build:Pick<BuildState,"walls"|"ceilings">,level:string,visible:ReadonlySet<string>):DimensionEntry[]{
