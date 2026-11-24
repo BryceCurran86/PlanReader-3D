@@ -89,7 +89,7 @@ export function buildMenuLayout(
       ] };
   }
   // A selected local wall replaces the crowded toolbox with direct manipulation.
-  if (quest?.selectedWall && !viewsOpen && !browser.open) {
+  if (quest?.selectedWall && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
     const wall = quest.selectedWall;
     const length = Math.round(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1])*1000);
     const edit = (action: Extract<MenuAction,{area:"draft"}>["action"],
