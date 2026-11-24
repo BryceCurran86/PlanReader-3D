@@ -16,7 +16,7 @@ import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
 import type { WallAxis } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
-  displayWallDraft, draftGesturePreview, pickDraftWall, magneticDraftWalls } from "./buildScene";
+  displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, showConstructionItem, showConstructionSurface } from "./constructionStages";
@@ -455,7 +455,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           multiSelect=!multiSelect;selectedGroup.clear();
           if(multiSelect&&selectedDraftId)selectedGroup.add(selectedDraftId);
           selectedDraftId=null;openingTools=false;numberPad=null;deleteArmed=false;
-          if(multiSelect){build.current.onBuildAction({kind:"cancel"} as BuildAction);select(null);}
+          if(multiSelect){build.current.onBuildAction({kind:"done"});select(null);}
           return;
         }
         if(choice.action==="clear-group"){selectedGroup.clear();deleteArmed=false;return;}
@@ -804,7 +804,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function selectAtRay() {
       const walls = renderer.xr.isPresenting && !resize.current.enabled &&
         !resize.current.projection ?
-        magneticDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray, hoveredDraftId, magnetic?.15:0) : [];
+        magneticDraftWalls(build.current.buildState, build.current.buildLevel, raycaster.ray, hoveredDraftId, magnetic ? 0.15 : 0) : [];
       if(multiSelect){
         const wall=walls[0];
         if(wall&&!itemBrowser.open&&!stageMenuOpen){
@@ -1431,7 +1431,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         hoveredDraftId = active >= 0 && !hover && !buildState.tool &&
           !itemBrowser.open && !stageMenuOpen && !resize.current.enabled &&
           !resize.current.projection
-          ? pickDraftWall(buildState,buildLevel,raycaster.ray)?.proposalId ?? null : null;
+          ? magneticDraftWalls(buildState,buildLevel,raycaster.ray,hoveredDraftId,magnetic ? 0.15 : 0)[0]?.proposalId ?? null : null;
         const heldResize = xrResize.findIndex(drag => drag !== null);
         if (heldResize >= 0 && xrPress[heldResize] && samePointerContext(xrPress[heldResize]!.context)) {
           aimController(controllers[heldResize]);
