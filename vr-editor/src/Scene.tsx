@@ -737,6 +737,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         group.userData.proposalId = wall.proposalId;
         group.userData.wallDimensions=wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly);
         group.userData.wallProfile=profileDetails(wall.assembly).label;
+        group.userData.masonryAssembly=profileDetails(wall.assembly).core==="masonry";
         wallAdditionLayer.add(group);
         draftItemHosts.push(...draftCatalogueHosts(wall, group));
       }
@@ -1464,7 +1465,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           for (const child of shape.children) {
             if (child.userData.illustrativeFraming) child.visible = currentStage === "framing";
             else if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial)
-              child.material.visible = !framing;
+              child.material.visible = !framing || (child.userData.catalogueWallFace && shape.userData.masonryAssembly === true);
           }
         }
       }
