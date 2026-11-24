@@ -276,7 +276,7 @@ export function App() {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
   }
-  const alternatives=alternativeStore?.scene===manifest?alternativeStore.entries:[];
+  const alternatives=alternativeStore&&alternativeStore.scene===manifest?alternativeStore.entries:[];
   function saveAlternative(name:string){
     if(!manifest||projection||resizeEnabled)return;
     if(alternatives.length>=8){setVrDraftStatus("Maximum eight alternatives per open scene.");return;}
@@ -626,7 +626,7 @@ export function App() {
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
-            <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions</label>
+            <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
             {levels.length > 1 && <label>Level
               <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
                 <option value="all">All levels</option>
