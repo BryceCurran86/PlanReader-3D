@@ -403,7 +403,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
     function snapOptions() {
-      return {gridM:snapGrid,axis:snapAxis,
+      return {gridM:snapGrid,axis:snapAxis,magnetic,
+        wallSegments:resize.current.projection?[]:visibleWallTargets().filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})),
         verifiedAnchors: resize.current.projection ? [] :
           verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
     }
@@ -903,8 +904,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function selectAtRay(pressedKey?:string|null) {
       if(renderer.xr.isPresenting&&magnetic&&!resize.current.enabled){
         const target=pressedKey?visibleWallTargets().find(t=>t.key===pressedKey):null;
-        const aimed=pressedKey?(target?wallAimWithin(raycaster.ray,target,MAGNET_RELEASE):null):targetWallAim();
-        if(pressedKey&&!aimed){reportTool("Wall lock released · aim again.");return;}
+        const aimed=pressedKey?(target?wallAimWithin(raycaster.ray,target,MAGNET_RELEASE):null):pressedKey===null?null:targetWallAim();
+        if(pressedKey!==undefined&&!aimed){reportTool("Wall lock released · aim again.");return;}
         if(aimed){
           wallLock=aimed;
           if(aimed.target.kind==="source"){
