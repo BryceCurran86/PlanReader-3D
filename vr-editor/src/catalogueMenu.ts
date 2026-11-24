@@ -254,7 +254,7 @@ export function buildMenuLayout(
       {label:"Step " + Math.round(quest.nudgeM*1000) + "mm",action:questAction("nudge-size")},
       {label:"Angle "+wallAngleDegrees(wall).toFixed(1)+"°",action:{area:"number",action:"start",field:"angle"}},
       {label:"Pivot "+(quest.rotationPivot??"start"),action:{area:"wall-angle",action:"pivot"}},
-      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"},active:quest.connectedRotation!==false},
+      {label:quest.connectedRotation===false?"Junctions OFF":"Junctions ON",action:{area:"wall-angle",action:"connected"}},
       ...[-15,-5,-1,1,5,15].map(degrees=>({label:(degrees>0?"+":"")+degrees+"°",action:{area:"wall-angle",action:"step",degrees} as MenuAction})),
       {label:"Rotate 90°",action:{area:"wall-angle",action:"step",degrees:90}},
       {label:"Duplicate",action:edit("duplicate")},
