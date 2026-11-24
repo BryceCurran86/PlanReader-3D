@@ -93,6 +93,9 @@ type Props = {
     onPlace: (itemId: string, hit: ItemHit) => void;
   };
   teleportMode: boolean;
+  teleportAvailable:boolean;
+  onTeleportToggle:(enabled:boolean)=>void;
+  onExportLocalDraft:()=>void;
   onTeleportMessage: (message: string) => void;
   wallMoveState: WallMoveHistory | null;
   onMoveDelta: (objectId: string, dx: number, dz: number) => void;
@@ -206,7 +209,8 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, onTeleportMessage }: Props) {
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, selectedId, onSelect, draftState, onCycleStudy, mood, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, footprint, onBuildAction, onBuildHint, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+  onExportLocalDraft, onTeleportMessage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage };
@@ -215,8 +219,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
   cycleCallback.current = onCycleStudy;
-  const teleportSettings = useRef({teleportMode,onTeleportMessage});
-  teleportSettings.current = {teleportMode,onTeleportMessage};
+  const teleportSettings = useRef({teleportMode,teleportAvailable,onTeleportToggle,onTeleportMessage});
+  teleportSettings.current = {teleportMode,teleportAvailable,onTeleportToggle,onTeleportMessage};
+  const exportDraftCallback=useRef(onExportLocalDraft);
+  exportDraftCallback.current=onExportLocalDraft;
   const addedWallRef = useRef(addedWallSketch);
   addedWallRef.current = addedWallSketch;
   const addedWallsRef = useRef(addedWallSketches);
@@ -362,6 +368,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           selectedWall: selectedDraftWall(), gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
+          canTeleport:teleportSettings.current.teleportAvailable,
+          teleport:teleportSettings.current.teleportMode,
         });
     }
     function menuAction(choice: MenuAction) {
@@ -418,6 +426,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           snapAxis = axes[(axes.indexOf(snapAxis)+1)%axes.length];
         }
         if (choice.action === "compact") compactMenu=!compactMenu;
+        if (choice.action === "teleport") {
+          if(teleportSettings.current.teleportAvailable)
+            teleportSettings.current.onTeleportToggle(!teleportSettings.current.teleportMode);
+          else reportTool("Teleport requires a verified source-backed floor.");
+        }
+        if (choice.action === "save") exportDraftCallback.current();
         if (choice.action === "next-stage") {
           const current=CONSTRUCTION_STAGES.findIndex(entry=>entry.id===construction.current.stage);
           construction.current.onStage(CONSTRUCTION_STAGES[(current+1)%CONSTRUCTION_STAGES.length].id);
