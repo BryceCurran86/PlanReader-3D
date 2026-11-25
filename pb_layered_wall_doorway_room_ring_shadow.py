@@ -62,7 +62,7 @@ _STROKE_PAIR_THICK_MAX = 8.0
 _STROKE_PAIR_MIN_SPAN = 8.0
 _STROKE_PAIR_FACE_PT = 0.35
 # One wall stub (shorter than the wall is thick) plus the thickness of the wall it meets: how far a raw gap of one aperture may reach past the
-# evidence-closed gap of that aperture and still inherit its evidence (``aperture_complete_closures``). Relative to the seed's own band thickness.
+# evidence-closed gap of that aperture and still be completed by it (``aperture_complete_closures``). Relative to the seed's own band thickness.
 _APERTURE_WIDEN_BAND_FACTOR = 2.0
 _STROKE_PAIR_CLUSTER_PT = 0.8
 _DARK_FILL_THICK_MAX = 14.0
