@@ -20,9 +20,9 @@ on:
           - focused
           - readiness
       workers:
-        description: "Full suite workers: serial baseline, 2 (default), or 4 for profiling"
+        description: "Full suite workers: serial (default), 2 or 4 for experimental profiling"
         required: true
-        default: '2'
+        default: '0'
         type: choice
         options: ['0', '2', '4']
 
@@ -162,7 +162,7 @@ jobs:
           # Same complete collection on both Python versions; xdist verifies
           # collection parity across workers. File grouping retains fixtures.
           # Bounded worker count avoids oversubscribing BLAS/native libraries.
-          PYTEST_ADDOPTS: ${{ format('-n {0} --dist loadfile --durations=30', (github.event_name == 'workflow_dispatch' && inputs.workers) || '2') }}
+          PYTEST_ADDOPTS: ${{ format('-n {0} --dist loadfile --durations=30', (github.event_name == 'workflow_dispatch' && inputs.workers) || '0') }}
         run: PYTHONPATH=. pytest -q -rs tests/
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
