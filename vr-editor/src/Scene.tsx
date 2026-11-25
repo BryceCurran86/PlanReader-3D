@@ -40,6 +40,8 @@ import { createVrPlanOverview } from "./vrPlanOverview";
 import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset, navigationWallFace } from "./vrStationaryNavigation";
 import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import {doorKey,localNavigationWalls} from "./walkthroughDoors";
+import {nextDoorMechanism} from "./localDoorMotion";
+import type {LocalDoorMotion} from "./localDoorMotion";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
@@ -562,6 +564,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const wall=selectedDraftWall();
         const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
         if (wall && opening) {
+          if(choice.action==="mechanism"){
+            if(opening.openingKind==="door")build.current.onBuildAction({kind:"set-door-mechanism",proposalId:wall.proposalId,openingId:opening.openingId,mechanism:nextDoorMechanism(opening.doorMechanism)});
+            return;
+          }
+          if(choice.action==="toggle"){
+            const leaf=wallAdditionLayer.children.find(g=>g.visible&&g.userData.proposalId===wall.proposalId)?.children.find(c=>c instanceof THREE.Mesh&&c.visible&&c.userData.catalogueDoorLeaf===opening.openingId&&c.userData.localDoorMotion&&c.material instanceof THREE.MeshStandardMaterial&&c.material.visible);
+            if(leaf instanceof THREE.Mesh)toggleLocalDoorLeaf(leaf);
+            return;
+          }
           const field=choice.action==="shift"?"offset":choice.action;
           const value=opening[choice.action==="shift"?"offsetM":
             choice.action==="width"?"widthM":"heightM"]*1000+choice.deltaMm;
@@ -1083,7 +1094,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(!group.visible)continue;
         for(const child of group.children){
           if(child instanceof THREE.Mesh&&child.visible&&child.material instanceof THREE.MeshStandardMaterial&&child.material.visible){
-            if(child.userData.catalogueDoorLeaf&&child.userData.doorHinge)leaves.push(child);
+            if(child.userData.catalogueDoorLeaf&&child.userData.localDoorMotion)leaves.push(child);
             else if(child.userData.catalogueWallFace)blockers.push(child);
           }
         }
@@ -1092,14 +1103,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!hit||hit.distance>3)return false;
       const blocked=raycaster.intersectObjects([...blockers,...pickables.filter(o=>o instanceof THREE.Mesh&&sourceVisible(o)&&displaySurface(construction.current.stage,o.userData.surfaceKind)&&!o.userData.surfaceKind)],false)[0];
       if(blocked&&blocked.distance<hit.distance-.015)return false;
-      const leaf=hit.object as THREE.Mesh;
-      const key=doorKey(leaf.parent!.userData.proposalId,leaf.userData.catalogueDoorLeaf);
+      return toggleLocalDoorLeaf(hit.object as THREE.Mesh);
+    }
+    function toggleLocalDoorLeaf(leaf:THREE.Mesh){
+      if(multiSelect||resize.current.projection||elevatedReturn||!leaf.parent||!leaf.userData.localDoorMotion)return false;
+      const key=doorKey(leaf.parent.userData.proposalId,leaf.userData.catalogueDoorLeaf);
       const opening=!openDoors.has(key);
-      const hinge=leaf.userData.doorHinge as THREE.Vector3;
-      const angle=opening?Math.PI/2:0;
-      // Rigid rotation around the original hinge while retaining the original mesh coordinates.
-      leaf.rotation.y=angle;
-      leaf.position.copy(hinge).sub(hinge.clone().applyAxisAngle(new THREE.Vector3(0,1,0),angle));
+      const motion=leaf.userData.localDoorMotion as LocalDoorMotion;
+      const pivot=new THREE.Vector3(...motion.pivot);
+      leaf.quaternion.setFromAxisAngle(new THREE.Vector3(...motion.axis),opening?motion.angle:0);
+      leaf.position.copy(pivot).sub(pivot.clone().applyQuaternion(leaf.quaternion));
+      if(opening)leaf.position.add(new THREE.Vector3(...motion.translation));
       leaf.updateMatrixWorld(true);
       const next=new Set(openDoors);
       if(opening)next.add(key);else next.delete(key);
