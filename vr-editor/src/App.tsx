@@ -324,9 +324,13 @@ export function App() {
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
-  const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
   const shell=useMemo(()=>manifest&&buildLevel?(isStarter?starterShell(studyGeometry.walls,shellSettings):!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null):null,[manifest,buildLevel,studyGeometry,shellSettings,isStarter]);
+  const pricedStudyGeometry=useMemo(()=>{
+    if(!shell||!manifest||!buildLevel||[...studyGeometry.walls,...studyGeometry.ceilings].some(o=>o.scopeKey!==scopeKey(manifest)||o.levelId!==buildLevel))return studyGeometry;
+    return {...studyGeometry,shellMetrics:{floorM2:shell.floorM2,roofM2:shell.roofM2,slabM3:shell.slabM3,ceilingM2:shell.surfaces.some(s=>s.kind==="ceiling")?shell.floorM2:0}};
+  },[shell,manifest,buildLevel,studyGeometry]);
+  const assemblyStudy=useAssemblyStudy(pricedStudyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
