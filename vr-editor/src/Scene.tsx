@@ -503,6 +503,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="close"){closeTools();return;}
         if(choice.action==="back"){if(finishGroup){finishGroup=null;finishPage=0;}else finishContext=null;return;}
         if(!finishContext)return;
+        if(choice.action==="hardware"&&choice.hardware){
+          const hit=finishContext.hit;
+          if(hit.target!=="opening"||!hit.opening?.door||!hit.hostId.startsWith("opening:"))return;
+          try{const ids=JSON.parse(hit.hostId.slice(8));if(Array.isArray(ids)&&ids.length===2&&ids.every(id=>typeof id==="string"))build.current.onBuildAction({kind:"set-door-hardware",proposalId:ids[0],openingId:ids[1],finish:choice.hardware});}catch{/* invalid host ignored */}
+          closeTools();return;
+        }
         if(choice.action==="group"&&choice.group&&contextGroups(finishContext).includes(choice.group)){finishGroup=choice.group;finishPage=0;return;}
         if(choice.action==="page"){const n=finishGroup?contextChoices(finishContext,finishGroup).length:contextGroups(finishContext).length;finishPage=Math.max(0,Math.min(Math.ceil(n/(finishGroup?6:8))-1,finishPage+(choice.step??0)));return;}
         if(choice.action==="apply"&&finishGroup&&choice.itemId&&contextChoices(finishContext,finishGroup).some(i=>i.id===choice.itemId)){
@@ -683,7 +689,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned,true);
         if (choice.action === "help") { helpOpen = !helpOpen; numberPad=null; openingTools=false;
           selectedDraftId = null; deleteArmed=false; }
-        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; angleTools=false;radial=true; }
+        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; angleTools=false;radial=false;simpleHome=true; }
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
