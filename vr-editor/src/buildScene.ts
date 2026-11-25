@@ -73,7 +73,7 @@ export function illustrativeTimberFrame(wall: WallVisual) {
 
 export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,joins:WallCornerJoins={}) {
   const group = new THREE.Group();
-  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[];
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[],leftFinish:number[]=[],rightFinish:number[]=[];
   const texture=textures?.get(wallAssembly(wall.assembly).profile);
   const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
   const length=planLength(wall.start,wall.end);
@@ -97,6 +97,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     const a=p.map((v,i)=>facePoint(v,i,"left")),b=p.map((v,i)=>facePoint(v,i,"right"));
     function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
     face([...a].reverse(),left);face(b,rightColor);
+    panel([...a].reverse(),leftFinish);panel(b,rightFinish);
     if(texture&&profile.role==="external"){
       const side=assembly.exteriorSide==="left"?1:-1;
       const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
@@ -186,6 +187,14 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     const mount=new THREE.Mesh(mountGeometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));
     mount.userData.catalogueMountFace=true;
     group.add(mount);
+    // Finish hosts follow the actual solid-face perimeter and opening cuts,
+    // including the miter. The original centre-plane remains the pick anchor.
+    for(const [side,vertices] of [["left",leftFinish],["right",rightFinish]] as const){
+      const geometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
+      geometry.computeVertexNormals();
+      const face=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({visible:false,side:THREE.DoubleSide}));
+      face.userData.draftFinishFace=side;group.add(face);
+    }
   }
   const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
   group.add(illustrativeTimberFrame(wall));
