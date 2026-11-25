@@ -859,7 +859,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         byId.set(wall.proposalId, wall);
       }
       const active = [...byId.values()].map(wall => appliedProjection ? projectWall(wall, appliedProjection) : wall);
-      const ceilings = buildState.ceilings.filter(ceiling => !buildLevel || ceiling.levelId === buildLevel)
+      const ceilings = buildState.ceilings.filter(ceiling => ceiling.scopeKey===sceneScope&&(!buildLevel || ceiling.levelId === buildLevel))
         .map(ceiling => appliedProjection ? projectCeiling(ceiling, appliedProjection) : ceiling);
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
@@ -1193,7 +1193,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const kind=directSelection.current.kind;
         const stage=construction.current.stage;
         const layers=construction.current.layers;
-        const allowed={...buildState,walls:buildState.walls.filter(w=>w.scopeKey===sceneScope&&w.levelId===buildLevel&&draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry")),ceilings:displaySurface(stage,"ceiling")?buildState.ceilings:[]};
+        const allowed={...buildState,walls:buildState.walls.filter(w=>w.scopeKey===sceneScope&&w.levelId===buildLevel&&draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry")),ceilings:displaySurface(stage,"ceiling")?buildState.ceilings.filter(c=>c.scopeKey===sceneScope&&c.levelId===buildLevel):[]};
         return directDraftGesture(allowed,buildLevel,raycaster.ray,kind,topEditing(),snapOptions());
       }
       if(interaction.current.mode!=="draw")return null;
@@ -1519,8 +1519,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
         }
         for(const raw of build.current.buildState.walls){
-          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
+          if(raw.scopeKey!==sceneScope||(build.current.buildLevel&&raw.levelId!==build.current.buildLevel))continue;
+          if(!draftWallLayerVisible(stage,layers,profileDetails(raw.assembly).core==="masonry"))continue;
           const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
           const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation");
           walls.push(...localNavigationWalls(w,openDoors,showDoors));
@@ -1757,6 +1757,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let indexedMoveState: WallMoveHistory | null | undefined;
     const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
     let planMoves:ReturnType<typeof safeWallMoves>=[];
+    let appliedMovementKey:readonly unknown[]=[];
     let planExtra:WallVisual[]=[];let planExtraBatch:WallVisual[]|undefined;let planExtraSingle:WallVisual|null|undefined;
     let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
     let sourceAppearanceKey: readonly unknown[] = [];
@@ -1797,6 +1798,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const projectionX=resize.current.projection?.scaleX ?? 1;
       const projectionZ=resize.current.projection?.scaleZ ?? 1;
+      // Imported object transforms change only on a move revision, projection,
+      // or live grip delta. Avoid traversing all source objects on idle XR frames.
+      const movementKey=[moveState,projectionX,projectionZ,activeGrip?.objectId,dragX,dragZ];
+      if(!movementKey.every((v,i)=>v===appliedMovementKey[i])){
+      appliedMovementKey=movementKey;
       for (const obj of pickables) {
         const id=obj.userData.objectId as string|undefined;
         const move=id === undefined ? undefined : movesById.get(id);
@@ -1807,6 +1813,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const x=dx*projectionX,z=dz*projectionZ;
           if(obj.position.x!==x||obj.position.y!==0||obj.position.z!==z)obj.position.set(x,0,z);
         }
+      }
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
@@ -1957,9 +1964,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(layout){
+        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=80)){
           const signature=JSON.stringify(layout);
-          if((signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover)&&(!displayedMenuLayout||now-lastMenuDraw>=80)){
+          if(signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover){
             buildOverlay.sizeMenu(layout);
             buildOverlay.drawMenu(layout,hover?.index??-1);
             lastMenuSignature=signature;displayedMenuLayout=layout;
