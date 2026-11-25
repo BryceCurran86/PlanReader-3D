@@ -2174,13 +2174,21 @@ def build_layered_wall_doorway_room_rings(
     # On Maryborough p7 the owner-green exclusion reduces 109k PDF paths
     # substantially and black/dark source ink is beneath the 20k cap.
     if dark_painted_wall_source:
+        _all_rows = drawings
         drawings, source_candidates, _green_excluded = (
             _source_wall_ink_candidate_drawings(drawings)
         )
-        # The frozen limit counts native PRIMITIVES, not PDF path
-        # containers; a path may own multiple line/arc/rect operations.
+        def _structural(row):
+            if not isinstance(row, Mapping):
+                return False
+            f, s = row.get("fill"), row.get("color")
+            if _owner_excluded_green_ink(f) or _owner_excluded_green_ink(s):
+                return False
+            if _is_source_wall_support_row(row):
+                return True
+            return row.get("fill") is not None and _opaque(row)
         selected_native_primitives = sum(
-            len(row.get("items", ())) for row in drawings
+            len(row.get("items", ())) for row in _all_rows if _structural(row)
         )
         if selected_native_primitives > 20_000:
             return LayeredRoomRingResult(

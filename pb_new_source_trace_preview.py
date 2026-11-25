@@ -258,7 +258,12 @@ def source_native_trace_preview(
                 "numbered_source_key_reader_failed:" + type(exc).__name__,
                 page_index, sha,
             )
-        panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
+        _native_rect = fitz.Rect(page.rect) * page.derotation_matrix
+        _native_rect.normalize()
+        panes = tuple(
+            (b[0] + _native_rect.x0, b[1] + _native_rect.y0, b[2] + _native_rect.x0, b[3] + _native_rect.y0)
+            for b in _full_page_source_tiles(_native_rect.width, _native_rect.height, len(drawings))
+        )
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
         _report("resolving_wall_and_room_topology", .44)
