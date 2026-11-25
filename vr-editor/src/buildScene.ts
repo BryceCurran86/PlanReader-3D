@@ -672,6 +672,17 @@ export function createBuildOverlay(scene: THREE.Scene) {
     menu.updateMatrixWorld();
     menu.visible = true;
   }
+  function positionContextMenu(camera:THREE.Camera,point:THREE.Vector3){
+    camera.getWorldPosition(head);
+    const ray=point.clone().sub(head);
+    // Offset beside the target, within comfortable reach and sight. Position
+    // once on explicit selection; no controller- or gaze-following jitter.
+    const distance=ray.length();if(!Number.isFinite(distance)||distance<.05){positionMenu(camera,true,true);return;}
+    ray.normalize();const lateral=new THREE.Vector3(-ray.z,0,ray.x).normalize();
+    menu.position.copy(head).addScaledVector(ray,Math.min(1.25,Math.max(.65,distance-.25))).addScaledVector(lateral,-.35);
+    menu.position.y=Math.max(head.y-.63,Math.min(head.y+.18,menu.position.y));
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
   function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
     camera.getWorldPosition(head);
     hand.getWorldPosition(menu.position);
@@ -814,7 +825,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
+  return { positionMenu, positionContextMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { tray.dispose();texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }
