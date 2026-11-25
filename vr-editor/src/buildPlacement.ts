@@ -1,4 +1,5 @@
-import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
+import {validLocalDoorMechanisms} from "./localDoorMotion.ts";
+import type { DoorMechanism, WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
@@ -58,6 +59,7 @@ export type BuildAction =
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
   | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
+  | { kind: "set-door-mechanism"; proposalId:string; openingId:string; mechanism:DoorMechanism }
   | { kind: "exact-local-opening"; proposalId: string; openingId: string;
       field: OpeningField; valueMm: number };
 
@@ -272,7 +274,7 @@ export function draftShape<T extends CeilingDraft>(
 
 export function validEditedWall(wall: PlacedWall) {
   return validWallLength(planLength(wall.start, wall.end)) && validHeight(wall.heightM) &&
-    wall.openings.every(opening => openingFits(wall, opening));
+    wall.openings.every(opening => openingFits(wall, opening)) && validLocalDoorMechanisms(wall);
 }
 
 // Reversible draft-only edits: callers must dispatch an "adjust" action with
@@ -418,6 +420,14 @@ export function updateBuild(
         !validCeiling(ceiling.start, ceiling.end) || !validHeight(ceiling.heightM)) return state;
     return checkpoint(state, { walls: state.walls,
       ceilings: state.ceilings.map(item => item === previous ? ceiling : item) });
+  }
+  if(action.kind==="set-door-mechanism"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    const opening=wall?.openings.find(o=>o.openingId===action.openingId);
+    if(!wall||!opening||opening.openingKind!=="door"||(opening.doorMechanism??"swing")===action.mechanism)return state;
+    const next={...wall,openings:wall.openings.map(o=>o===opening?{...o,doorMechanism:action.mechanism}:o)};
+    if(!validEditedWall(next))return state;
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?next:w),ceilings:state.ceilings});
   }
   if (action.kind === "exact-local-wall" || action.kind === "exact-local-opening") {
     const previous = state.walls.find(wall => wall.proposalId === action.proposalId &&

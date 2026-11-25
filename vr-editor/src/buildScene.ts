@@ -6,6 +6,7 @@ import {
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import {localDoorMotion} from "./localDoorMotion.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import { connectedWallEdit } from "./connectedWallEdit.ts";
 import type { MenuLayout } from "./catalogueMenu";
@@ -16,6 +17,7 @@ import {menuButtonAt} from "./toolWheelInput.ts";
 import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
+import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -136,6 +138,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
+      door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
@@ -160,6 +163,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     mount.userData.catalogueMountFace=true;
     group.add(mount);
   }
+  const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
   group.add(illustrativeTimberFrame(wall));
   for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
   if(profile.core!=="masonry"){
