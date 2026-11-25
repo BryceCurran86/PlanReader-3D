@@ -18,6 +18,7 @@ export function ConstructionLayerPanel({layers,onLayers}:{layers:LayerOverrides;
  return <details className="construction-standards">
  <summary>Construction layers</summary>
  <p>Auto follows the stage. Show or hide a layer independently; bird’s-eye cutaway still hides roof and ceilings.</p>
+ <p>Plasterboard stages show nominal finishes on eligible verified source faces and ceilings (bounded preview), not verified material specifications. Framing is shown for editable draft assemblies; a source wall face alone does not identify framing. Source opening markers are review evidence, not wall cutouts.</p>
  <button type="button" onClick={()=>onLayers({})}>Reset to stage defaults</button>
  {CONSTRUCTION_LAYERS.map(([id,label])=><label key={id}>{label}
  <select value={layers[id]??"auto"} onChange={e=>onLayers({...layers,[id]:e.currentTarget.value as LayerMode})}>
