@@ -405,14 +405,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false;
     const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
-    function toggleTools(){
+    function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
       if(toolsOpen){
         for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
         activeGrip=null;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
         const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
-        if(right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);}
+        if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
+          aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
+          if(finishContext){const groups=contextGroups(finishContext);if(groups.length===1&&finishContext.hit.target!=="opening")finishGroup=groups[0];}
+          else{closeTools();reportTool("Aim at a wall, floor, door or fitting, then squeeze right grip.");return;}
+        }
         displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
       }
       else closeTools();
@@ -1455,14 +1459,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function beginXrGesture(index: number) {
       menuConsumed[index]=false;
       aimController(controllers[index]);
-      const layout = menuLayout("");
       if(toolsOpen){
+        const layout = menuLayout("");
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
         activateDisplayedMenu(layout);
         return;
       }
-      const menu = menuKey(layout);
+      const menu = null;
       xrPress[index] = { context: pointerContext(), menu,wallKey:!menu&&magnetic&&!build.current.buildState.tool&&!itemControls.current.active&&!resize.current.enabled&&!teleportSettings.current.teleportMode?targetWallAim()?.target.key??null:undefined };
       if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
@@ -1486,9 +1490,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(menuConsumed[index]){menuConsumed[index]=false;return;}
       lastController = index;
       aimController(controllers[index]);
-      const layout = menuLayout("");
+      const layout = toolsOpen?menuLayout(""):null;
       const press = xrPress[index];
-      if (press && (!samePointerContext(press.context) || press.menu !== menuKey(layout))) {
+      if (press && (!samePointerContext(press.context) || press.menu !== (layout?menuKey(layout):null))) {
         selectEnd(index);
         return;
       }
@@ -1674,6 +1678,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function handleGripAction(index:number){
       if(inputSources[index]?.handedness==="left"){toggleTools();return;}
+      if(inputSources[index]?.handedness==="right"&&interaction.current.mode==="inspect"&&!resize.current.enabled&&!resize.current.projection&&!build.current.buildState.tool&&!itemControls.current.active){toggleTools(true);return;}
       if(moveSettings.current.moveMode!=="move")applyFinishSqueeze();
     }
     const nativeStart0 = () => {
