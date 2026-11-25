@@ -106,7 +106,7 @@ export function App() {
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
-  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
+  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("subtle");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
   const [sourceSheet, setSourceSheet] = useState("");
   const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
@@ -1027,7 +1027,7 @@ export function App() {
             <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
-                <option value="balanced">Balanced</option><option value="high">High fidelity</option>
+                <option value="performance">Performance · lightest</option><option value="balanced">Realistic · recommended</option><option value="high">Ultra · PC VR</option>
               </select>
             </label>
             <label htmlFor="surface-detail">Wall surface detail
