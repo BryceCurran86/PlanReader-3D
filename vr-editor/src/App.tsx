@@ -70,6 +70,7 @@ export function App() {
   const [buildHint, setBuildHint] = useState("");
   const [vrRate,setVrRate]=useState("");
   const [vrDraftStatus,setVrDraftStatus]=useState("");
+  const [recoveryScene,setRecoveryScene]=useState<SceneManifest|null>(null);
   const [alternativeStore,setAlternativeStore]=useState<{scene:SceneManifest;entries:DesignAlternative[]}|null>(null);
   const [allDimensions,setAllDimensions]=useState(false);
   const [shellStore,setShellStore]=useState<{scene:SceneManifest;settings:ShellSettings}|null>(null);
@@ -260,6 +261,47 @@ export function App() {
     levels.includes(level) ? level : null;
   const buildState = placed && placed.scene === manifest ? placed.build : EMPTY_BUILD;
   const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
+  const recoveryKey=manifest?"planreader-vr-recovery:"+scopeKey(manifest):null;
+  const recoveryDraft=catalogue?.draft??null;
+  useEffect(()=>{
+    if(!manifest||recoveryScene!==manifest||!recoveryKey)return;
+    const timer=window.setTimeout(()=>{
+      try{
+        const saved=saveVrReview(manifest,buildState,recoveryDraft);
+        if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery limit exceeded");
+        localStorage.setItem(recoveryKey,saved);
+      }catch{setVrDraftStatus("Automatic local recovery could not save; export a draft manually.");}
+    },750);
+    return ()=>window.clearTimeout(timer);
+  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft]);
+  function restoreRecovery(){
+    if(!manifest||!recoveryKey)return;
+    try{
+      const saved=localStorage.getItem(recoveryKey);
+      if(!saved)throw Error("No local recovery saved for this source snapshot.");
+      if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery file exceeds the safe limit.");
+      const restored=restoreVrReview(manifest,JSON.parse(saved));
+      setPlaced({scene:manifest,build:restored.build});
+      setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");setRecoveryScene(manifest);
+      setVrDraftStatus("Recovered local draft. Automatic local recovery enabled.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Local recovery unavailable.");}
+  }
+  function toggleRecovery(){
+    if(!manifest||!recoveryKey)return;
+    if(recoveryScene===manifest){setRecoveryScene(null);return;}
+    try{
+      if(localStorage.getItem(recoveryKey)){
+        setVrDraftStatus("A recovery already exists. Restore it or discard it before enabling a new one.");return;
+      }
+      setRecoveryScene(manifest);
+    }catch{setVrDraftStatus("Browser local storage unavailable.");}
+  }
+  function discardRecovery(){
+    if(!recoveryKey)return;
+    try{setRecoveryScene(null);localStorage.removeItem(recoveryKey);setVrDraftStatus("Local recovery discarded.");}
+    catch{setVrDraftStatus("Could not discard local recovery.");}
+  }
   const activeItem = getCatalogueItem(catalogue?.itemId ?? null);
   const isDemo = manifest !== null && manifest === demoScene;
   const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
@@ -777,6 +819,13 @@ export function App() {
           <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
             onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
             status={vrDraftStatus}/>
+          <div className="section-block">
+            <h2>Local draft recovery</h2>
+            <p className="muted">Optional browser-only autosave of draft walls, ceilings and catalogue items. No original PDFs or customer quantities are saved. Restore only against the same source snapshot.</p>
+            <button type="button" onClick={toggleRecovery}>{recoveryScene===manifest?"Pause automatic recovery":"Enable automatic recovery"}</button>
+            <button type="button" onClick={restoreRecovery}>Restore saved draft</button>
+            <button type="button" onClick={discardRecovery}>Discard recovery</button>
+          </div>
           <DesignReviewPanel scene={manifest} build={buildState} items={catalogue?.draft.items.length??0} alternatives={alternatives} blocked={!!projection||resizeEnabled} onSave={saveAlternative} onRestore={loadAlternative} onRemove={id=>setAlternativeStore({scene:manifest,entries:alternatives.filter(a=>a.id!==id)})} study={assemblyStudy.study} status={vrDraftStatus}/>
           <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
