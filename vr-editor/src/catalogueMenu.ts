@@ -302,11 +302,11 @@ export function buildMenuLayout(
   }
   if (viewsOpen) {
     for (const [index, option] of CONSTRUCTION_STAGES.entries()) {
-      add(option.label, 20 + 158 * index, 69, 147, 65,
+      add(option.label, 20 + 235 * (index % 4), 69 + 78 * Math.floor(index / 4), 222, 65,
         { area: "view", stage: option.id }, { active: stage === option.id });
     }
-    add("Back", 810, 69, 150, 65, { area: "view" });
-    return { buttons, title: "Construction view", width: WIDTH, height: 228,
+    add("Back", 20 + 235 * (CONSTRUCTION_STAGES.length % 4), 69 + 78 * Math.floor(CONSTRUCTION_STAGES.length / 4), 222, 65, { area: "view" });
+    return { buttons, title: "Construction view", width: WIDTH, height: 110 + 78 * Math.ceil((CONSTRUCTION_STAGES.length+1)/4),
       note: stageDetails(stage).description };
   }
   if (browser.open && browser.groups) {
