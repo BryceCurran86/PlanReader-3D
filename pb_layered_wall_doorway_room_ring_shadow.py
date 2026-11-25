@@ -1458,6 +1458,7 @@ def _stroke_closed(
 
 def _jamb_cap_closed(
     drawings: Sequence[Mapping[str, Any] | None], gap: _Gap, *, all_ink: bool = False,
+    wall_depth: Optional[tuple[float, float]] = None,
 ) -> Optional[tuple[int, ...]]:
     """Unique perpendicular caps at both opening-sized gap ends spanning the wall band.
 
@@ -1468,6 +1469,10 @@ def _jamb_cap_closed(
     accepted when they still cover the host band. Continuous jamb walls that
     continue past the host are allowed up to ``_WALL_END_SUPPORT_SPAN``.
     Colinear split jamb strokes at one station may union to cover the band.
+
+    ``wall_depth`` (default None: the reading above) is the strict reading: a cap
+    stroke must be wall ink and must end within this depth across the wall
+    (``_STROKE_PAIR_CLUSTER_PT``), so a line running past the wall is no wall end.
     """
     thickness = gap.band[1] - gap.band[0]
     span = gap.hi - gap.lo
@@ -1481,6 +1486,8 @@ def _jamb_cap_closed(
         pieces: list[tuple[int, float, float, float]] = []
         for index, row in _source_rows(drawings, all_ink=all_ink):
             if row.get("fill") is not None or not _visible_source_stroke_paint(row):
+                continue
+            if wall_depth is not None and _source_wall_ink_role(row) != _ROLE_WALL_SUPPORT:
                 continue
             for item in row.get("items", ()):
                 if item[0] != "l":
@@ -1500,7 +1507,10 @@ def _jamb_cap_closed(
                     if abs(perp - station) > station_tol:
                         continue
                     lo, hi = sorted((ax, bx))
-                if (hi - lo) > max_cap_extent:
+                if wall_depth is None:
+                    if (hi - lo) > max_cap_extent:
+                        continue
+                elif lo < wall_depth[0] - _STROKE_PAIR_CLUSTER_PT or hi > wall_depth[1] + _STROKE_PAIR_CLUSTER_PT:
                     continue
                 # Keep pieces that overlap the host band; union may finish coverage.
                 if hi < gap.band[0] - _STROKE_PAIR_FACE_PT or lo > gap.band[1] + _STROKE_PAIR_FACE_PT:
@@ -2338,6 +2348,29 @@ def _collect_door_jamb_return_strips(
     return found
 
 
+def _wall_end_depth(gap: _Gap, gaps: Sequence[_Gap], swing_gaps: Iterable[int]) -> tuple[float, float]:
+    """The wall's depth for a strict jamb cap: this band, widened to a far face line of the same doorway.
+
+    A far line counts only where a door swing is already placed, in a parallel interruption lying inside this
+    one (``_STROKE_PAIR_FACE_PT``). The depth stays at most one part in ``_JAMB_THICK_WALL_DOOR_RATIO`` of this
+    interruption's width, else it is the band alone. Every such line is used; none is chosen as nearest.
+    """
+    low, high = gap.band
+    limit = (gap.hi - gap.lo) / _JAMB_THICK_WALL_DOOR_RATIO
+    for index in swing_gaps:
+        far = gaps[index]
+        if far.horizontal != gap.horizontal:
+            continue
+        if far.lo < gap.lo - _STROKE_PAIR_FACE_PT or far.hi > gap.hi + _STROKE_PAIR_FACE_PT:
+            continue
+        near_edge, far_edge = min(gap.band[0], far.band[0]), max(gap.band[1], far.band[1])
+        if far_edge - near_edge <= limit:
+            low, high = min(low, near_edge), max(high, far_edge)
+    if high - low > limit:  # far lines on both sides that together are too deep (or a band already deeper)
+        return gap.band
+    return low, high
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2346,6 +2379,7 @@ def build_layered_wall_doorway_room_rings(
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     door_jamb_returns: bool = False,
+    jamb_caps_must_be_wall_ends: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
@@ -2356,6 +2390,8 @@ def build_layered_wall_doorway_room_rings(
     ``door_jamb_returns`` (default False, dark-painted only) adds the short wall
     pieces bound to a segmented swing's own jamb (``_collect_door_jamb_return_strips``),
     as topology-only candidate ink.
+    ``jamb_caps_must_be_wall_ends`` (default False, dark-painted only) makes the jamb-cap closure
+    strict: only wall ink that ends at the wall faces may cap an interruption (``_wall_end_depth``).
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
@@ -2378,6 +2414,10 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("door_jamb_returns must be an explicit boolean")
     if door_jamb_returns and not dark_painted_wall_source:
         raise ValueError("door_jamb_returns requires dark_painted_wall_source")
+    if type(jamb_caps_must_be_wall_ends) is not bool:
+        raise ValueError("jamb_caps_must_be_wall_ends must be an explicit boolean")
+    if jamb_caps_must_be_wall_ends and not dark_painted_wall_source:
+        raise ValueError("jamb_caps_must_be_wall_ends requires dark_painted_wall_source")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -2562,7 +2602,10 @@ def build_layered_wall_doorway_room_rings(
                 drawings, gap, all_ink=dark_painted_wall_source,
             )
         if stroke is None and swing is None and host_wall and dark_painted_wall_source:
-            stroke = _jamb_cap_closed(drawings, gap, all_ink=True)
+            stroke = _jamb_cap_closed(
+                drawings, gap, all_ink=True,
+                wall_depth=_wall_end_depth(gap, gaps, swing_by_gap) if jamb_caps_must_be_wall_ends else None,
+            )
         if (
             stroke is None and swing is None and host_wall
             and dark_painted_wall_source and not sliding_leaf_frame_closure
@@ -2746,6 +2789,7 @@ def build_from_pdf_bytes(
     source_bytes: bytes, *,     source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
     door_jamb_returns: bool = False,
+    jamb_caps_must_be_wall_ends: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
 ) -> LayeredRoomRingResult:
@@ -2764,6 +2808,7 @@ def build_from_pdf_bytes(
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
         door_jamb_returns=door_jamb_returns,
+        jamb_caps_must_be_wall_ends=jamb_caps_must_be_wall_ends,
         wall_end_stroke_closures=wall_end_stroke_closures,
         source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
     )
