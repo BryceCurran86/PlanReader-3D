@@ -9,7 +9,8 @@ import type {LayerOverrides} from "./constructionLayers.ts";
 import type { CeilingDraft } from "./buildPlacement.ts";
 import { openingFits, planLength } from "./buildPlacement.ts";
 import type { PlanPoint, WallVisual } from "./buildPlacement.ts";
-import { getCatalogueItem } from "./itemCatalogue.ts";
+import { getCatalogueItem,ITEM_CATALOGUE } from "./itemCatalogue.ts";
+import type {FinishContext} from "./contextFinishes.ts";
 import type { CatalogueItem, ItemTarget, ItemVisual } from "./itemCatalogue.ts";
 import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, worktopId } from "./itemPlacement.ts";
 import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
@@ -165,6 +166,7 @@ import {MAX_PREVIEW_LIGHTS,nearestPreviewLights,previewLightingRole} from "./lig
 
 export function createCatalogueScene(scene: THREE.Scene) {
   const mounts: THREE.Object3D[] = [];
+  const mountedEntries=new Map<THREE.Object3D,PlacedItem>();
   const previewFixtures: {id:string;node:THREE.Object3D}[]=[];
   const previewSwitches: THREE.Object3D[]=[];
   const previewPool=Array.from({length:MAX_PREVIEW_LIGHTS},()=>{
@@ -201,7 +203,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
     coveredLeaves.clear();
     for (const root of mounts) root.removeFromParent();
     for (const root of mounts) dispose(root);
-    mounts.length = 0;previewFixtures.length=0;previewSwitches.length=0;
+    mounts.length = 0;mountedEntries.clear();previewFixtures.length=0;previewSwitches.length=0;
     for(const light of previewPool)light.intensity=0;
     hosts.clear();
     meshes = [];
@@ -308,9 +310,11 @@ export function createCatalogueScene(scene: THREE.Scene) {
       }
       // Stored wall anchors remain on the design centreline. Mount to the selected physical face.
       if(host.target==="wall"&&host.halfThickness)node.position.addScaledVector(normal,host.halfThickness);
-      host.mesh.add(node);
+      // A local leaf finish must follow its swing/slide/overhead transform.
+      const parent=visual.kind==="surface"&&item.group==="doors"&&host.opening?.reviewLeaf&&!designedDoors.has(host.id)?host.opening.reviewLeaf:host.mesh;
+      parent.add(node);
       node.updateWorldMatrix(true, true);
-      mounts.push(node);
+      mounts.push(node);mountedEntries.set(node,placement);
       const lightingRole=previewLightingRole(item);
       if(lightingRole==="light")previewFixtures.push({id:placement.id,node});
       if(lightingRole==="switch")previewSwitches.push(node);
@@ -367,6 +371,34 @@ export function createCatalogueScene(scene: THREE.Scene) {
     return { hit: null };
   }
 
+  function contextAt(ray:THREE.Raycaster):FinishContext|null{
+    // One explicit controller action, never per-frame catalogue traversal.
+    const hostHits=ray.intersectObjects(meshes,false).filter(h=>{
+      const host=hosts.get(h.object);
+      if(!host||host.target==="site"||!visibleInScene(h.object))return false;
+      if(host.target==="ceiling"||host.target==="roof")return !cutawayKey&&showConstructionSurface(stageKey,host.target);
+      if(host.target==="floor")return showConstructionSurface(stageKey,"floor");
+      return stageKey!=="slab";
+    });
+    const picked=ray.intersectObjects(mounts.filter(visibleInScene),true).find(h=>visibleInScene(h.object)&&h.distance<=4);
+    if(picked&&picked.distance<=(hostHits[0]?.distance??Infinity)+.10){
+      for(let p:THREE.Object3D|null=picked.object;p;p=p.parent){
+        const entry=mountedEntries.get(p);
+        if(entry)return {hit:entry,entry};
+      }
+    }
+    const first=hostHits[0];
+    if(!first||first.distance>4)return null;
+    const host=hosts.get(first.object)!;
+    const probe=ITEM_CATALOGUE.find(i=>i.targets.includes(host.target)&&
+      (host.target==="opening"?i.group===(host.opening?.size.door?"doors":"windows"):
+        host.target==="wall"||host.target==="ceiling"?i.group==="paint":
+        host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":i.group==="tapware"));
+    if(!probe)return null;
+    const result=candidate(ray,probe);
+    return result.hit&&result.hit.hostId===host.id?{hit:result.hit}:null;
+  }
+
   function aim(hit: ItemHit | null) {
     marker.visible = false;
     if (!hit) return;
@@ -378,5 +410,5 @@ export function createCatalogueScene(scene: THREE.Scene) {
     marker.visible = true;
   }
 
-  return { sync, clear, candidate, aim, updatePreviewLights, previewSwitchDistance };
+  return { sync, clear, candidate, aim, contextAt, updatePreviewLights, previewSwitchDistance };
 }
