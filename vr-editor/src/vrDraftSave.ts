@@ -33,7 +33,7 @@ function readWall(value:unknown,key:string,levels:ReadonlySet<string>):PlacedWal
   for(const opening of wall.openings){
     if(!record(opening)||!string(opening.openingId)||ids.has(opening.openingId)||
       !["door","window","passage"].includes(String(opening.openingKind))||
-      !openingFits(wall,opening))throw Error("Invalid draft opening");
+      !openingFits(wall,opening)||(opening.doorHardware!==undefined&&(opening.openingKind!=="door"||!["chrome","matte-black","brushed-brass","brushed-nickel"].includes(opening.doorHardware))))throw Error("Invalid draft opening");
     ids.add(opening.openingId);
   }
   for(let i=0;i<wall.openings.length;i++)for(let j=i+1;j<wall.openings.length;j++){
@@ -46,7 +46,7 @@ function readWall(value:unknown,key:string,levels:ReadonlySet<string>):PlacedWal
     ...(wall.assembly?{assembly:{...wall.assembly}}:{}),
     openings:wall.openings.map(x=>({openingId:x.openingId,openingKind:x.openingKind,
       offsetM:x.offsetM,widthM:x.widthM,heightM:x.heightM,sillHeightM:x.sillHeightM,
-      ...(x.doorMechanism!==undefined?{doorMechanism:x.doorMechanism}:{})}))};
+      ...(x.doorMechanism!==undefined?{doorMechanism:x.doorMechanism}:{}),...(x.doorHardware!==undefined?{doorHardware:x.doorHardware}:{})}))};
 }
 function readCeiling(value:unknown,key:string,levels:ReadonlySet<string>):CeilingDraft {
   if(!record(value)||value.scopeKey!==key||!string(value.proposalId)||
