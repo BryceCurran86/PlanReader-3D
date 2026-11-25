@@ -8,6 +8,22 @@ export const LINING_BOARDS=["standard","wet-area","fire-rated"] as const;
 const finishes:LiningFinish[]=["sheeted","set","sanded","undercoat"];
 const parts=["paper","edge","compound","screw"] as const;
 type Project=(x:number,y:number,offset:number)=>THREE.Vector3;
+type Point2=[number,number];
+type Triangle2=[Point2,Point2,Point2];
+const cross=(a:Point2,b:Point2,p:Point2)=>(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);
+function clipTriangle(poly:Point2[],tri:Triangle2){
+ const sign=Math.sign(cross(tri[0],tri[1],tri[2]));if(!sign)return [];
+ for(let i=0;i<3;i++){
+  const a=tri[i],b=tri[(i+1)%3],next:Point2[]=[];
+  for(let j=0;j<poly.length;j++){
+   const p=poly[j],q=poly[(j+1)%poly.length],u=sign*cross(a,b,p),v=sign*cross(a,b,q);
+   if(u>=-1e-9)next.push(p);
+   if((u< -1e-9)!==(v< -1e-9)){const t=u/(u-v);next.push([p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t]);}
+  }
+  poly=next;if(poly.length<3)return [];
+ }
+ return poly;
+}
 const palette=(board:LiningBoard,part:"paper"|"edge"|"compound"|"screw",strength:number)=>{
  const base=new THREE.Color(paper[board]);
  const white=new THREE.Color(0xf2eee6);
@@ -19,16 +35,18 @@ const palette=(board:LiningBoard,part:"paper"|"edge"|"compound"|"screw",strength
  });
 };
 /** Batched metric geometry, no canvas, no per-frame texture uploads. Only local review surfaces. */
-export function makeLiningVisual(width:number,height:number,holes:readonly Rect[],project:Project,board:LiningBoard="standard"){
+export function makeLiningVisual(width:number,height:number,holes:readonly Rect[],project:Project,board:LiningBoard="standard",triangles?:readonly Triangle2[]){
  let layout:ReturnType<typeof nominalLiningLayout>;
  try{layout=nominalLiningLayout(width,height,holes);}catch{return null;}
  const positions:number[]=[],samples:number[]=[];
  function quad(r:Rect,offset:number,part:"paper"|"edge"|"compound"|"screw",strength:number){
   if(r.x1-r.x0<1e-7||r.y1-r.y0<1e-7)return;
-  const pts=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1]];
+  const pts:Point2[]=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1]];
   const sample=parts.indexOf(part)*256+Math.round(strength*100);
-  for(const i of [0,1,2,0,2,3]){
-   positions.push(...project(pts[i][0],pts[i][1],offset).toArray());samples.push(sample);
+  const polygons=triangles?triangles.filter(t=>Math.max(...t.map(p=>p[0]))>=r.x0&&Math.min(...t.map(p=>p[0]))<=r.x1&&Math.max(...t.map(p=>p[1]))>=r.y0&&Math.min(...t.map(p=>p[1]))<=r.y1).map(t=>clipTriangle(pts,t)):[pts];
+  for(const poly of polygons)for(let i=1;i+1<poly.length;i++){
+   if(Math.abs(cross(poly[0],poly[i],poly[i+1]))<1e-10)continue;
+   for(const p of [poly[0],poly[i],poly[i+1]]){positions.push(...project(p[0],p[1],offset).toArray());samples.push(sample);}
   }
  }
  // Clip every detail band to the original solid board pieces, including apertures.
@@ -78,4 +96,16 @@ export function setLiningAppearance(mesh:THREE.Mesh,finish:LiningFinish,board:Li
 }
 export function setLiningFinish(mesh:THREE.Mesh,finish:LiningFinish){
  setLiningAppearance(mesh,finish,mesh.userData.liningBoard??"standard");
+}
+
+// Generated flat ceiling only: clip every sheet, seam and screw patch to the actual footprint.
+export function makeShellCeilingLining(vertices:readonly [number,number,number][]){
+ if(vertices.length<3||vertices.length%3!==0||vertices.length>600||!vertices.every(p=>p.every(Number.isFinite)))return null;
+ const y=vertices[0][1];if(vertices.some(p=>Math.abs(p[1]-y)>1e-5))return null;
+ const x0=Math.min(...vertices.map(p=>p[0])),x1=Math.max(...vertices.map(p=>p[0]));
+ const z0=Math.min(...vertices.map(p=>p[2])),z1=Math.max(...vertices.map(p=>p[2]));
+ if(x1-x0>20||z1-z0>20)return null;
+ const triangles:Triangle2[]=[];
+ for(let i=0;i<vertices.length;i+=3)triangles.push(vertices.slice(i,i+3).map(p=>[p[0]-x0,p[2]-z0] as Point2) as Triangle2);
+ return makeLiningVisual(x1-x0,z1-z0,[],(x,z,offset)=>new THREE.Vector3(x+x0,y-offset,z+z0),"standard",triangles);
 }
