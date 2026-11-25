@@ -105,6 +105,7 @@ class Scene:
         if leaf:
             add("leaf", (HI, chord), (HI, chord + width), width=0.96)
         self.named = named
+        self.stub_end = stub_end
         self.rows = [r for i, r in enumerate(rows) if i not in {j for n in drop for j in named.get(n, ())}]
         self.chord = chord
 
@@ -124,7 +125,7 @@ class Scene:
         return self.rect(NIB_END, LO, self.far, self.near)
 
     def stub_rect(self):
-        return self.rect(HI, STUB_END, self.far, self.near)
+        return self.rect(HI, self.stub_end, self.far, self.near)
 
 
 def _build(rows, **kw):
@@ -337,8 +338,8 @@ def test_an_invisible_stroke_is_not_wall_ink(monkeypatch):
     assert _boxes(ring._collect_door_jamb_return_strips(rows, seen["witnesses"], seen["strips"])) == _rounded(scene.stub_rect())
 
 
-@pytest.mark.parametrize("thickness", [1.0, 12.0])
-def test_a_band_outside_the_wall_thickness_window_abstains(thickness, monkeypatch):
+def test_a_band_thinner_than_a_wall_abstains(monkeypatch):
+    thickness = 1.0
     scene = Scene(thickness=thickness)
     for name, end in (("jamb_lo", LO), ("jamb_hi", HI)):             # one cross stroke that fits the band exactly
         first, *rest = scene.named[name]
@@ -403,6 +404,96 @@ def test_without_a_swing_there_is_nothing_to_bind_to(monkeypatch):
     assert seg.collect_source_black_segmented_door_swings(scene.rows) == ()
     assert _pieces(scene.rows, monkeypatch) == []
     assert _signature(_build(scene.rows)) == _signature(_build(scene.rows, door_jamb_returns=False))
+
+
+# ------------------------------------------------------------------------------------------------ thick walls (enlarged views)
+
+THICK = 12.7                        # over the 8 pt paper-space window, under a third of the 52 pt door (17.33)
+LONG_STUB = 270.0                   # a thick cap is over 8 pt long: nearer than 8 pt to the far wall it would pair with that face
+
+
+def _thick(**kwargs):
+    kwargs.setdefault("thickness", THICK)
+    kwargs.setdefault("stub_end", LONG_STUB)
+    return Scene(**kwargs)
+
+
+def _cap_row(scene, name, end, across0, across1):
+    """Move one named cap row to run across [across0, across1] at an along position."""
+    (index,) = scene.named[name]
+    scene.rows[index] = _stroke(scene.map(end, across0), scene.map(end, across1), width=0.96)
+
+
+@pytest.mark.parametrize("transform", TRANSFORMS, ids=lambda t: "+".join(f"{k}" for k in t) or "plain")
+def test_a_cap_spanning_both_faces_states_a_thicker_wall(transform, monkeypatch):
+    scene = _thick(**transform)
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
+
+
+@pytest.mark.parametrize("transform", TRANSFORMS[:4], ids=lambda t: "+".join(f"{k}" for k in t) or "plain")
+def test_a_thick_walled_door_closes_and_its_room_becomes_a_candidate(transform):
+    scene = _thick(**transform)
+    without = _build(scene.rows, door_jamb_returns=False)
+    result = _build(scene.rows)
+    assert not _door_closed(without, scene) and _door_closed(result, scene)
+    room = _room(result, scene)
+    assert room is not None and room.status.value == "candidate" and room.takeoff_eligible is False
+
+
+def test_a_thick_band_without_a_cap_abstains(monkeypatch):
+    assert _pieces(_thick(drop=("cap_lo", "cap_hi")).rows, monkeypatch) == []
+
+
+@pytest.mark.parametrize("across", [(FAR + 0.5, FAR + THICK), (FAR - 2.0, FAR + THICK), (FAR, FAR + THICK - 0.3), (FAR, FAR + THICK + 1.0)],
+                         ids=["short of the far face", "past the far face", "short of the chord face", "past the chord face"])
+def test_a_cap_must_end_on_both_faces(across, monkeypatch):
+    scene = _thick()
+    _cap_row(scene, "cap_lo", LO - 2.2, across[1], across[0])         # drawn from the chord side, away from the swing chain
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect())
+
+
+@pytest.mark.parametrize("offset,made", [(0.1, True), (0.3, False)])
+def test_a_cap_may_miss_a_face_only_by_the_face_tolerance(offset, made, monkeypatch):
+    scene = _thick()
+    _cap_row(scene, "cap_lo", LO - 2.2, FAR + THICK, FAR + offset)
+    expected = [scene.nib_rect()] if made else []
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect(), *expected)
+
+
+@pytest.mark.parametrize("position,made", [(LO - 1.0, True), (LO - 2.2, True), (LO - 4.0, False), (LO + 1.0, False)],
+                         ids=["inside the frame", "at the frame's far end", "past the frame", "in the doorway"])
+def test_a_cap_must_stand_within_the_frame(position, made, monkeypatch):
+    scene = _thick()
+    _cap_row(scene, "cap_lo", position, FAR + THICK, FAR)
+    expected = [scene.nib_rect()] if made else []
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect(), *expected)
+
+
+@pytest.mark.parametrize("thickness,made", [(17.0, True), (17.6, False), (30.0, False)])
+def test_a_thick_wall_is_at_most_a_third_of_the_door(thickness, made, monkeypatch):
+    assert ring._JAMB_THICK_WALL_DOOR_RATIO == 3.0
+    scene = _thick(thickness=thickness)
+    expected = [scene.nib_rect(), scene.stub_rect()] if made else []
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(*expected)
+
+
+@pytest.mark.parametrize("second", [FAR + THICK - 10.0, FAR + THICK - 6.5], ids=["another thick face", "a thin face"])
+def test_a_thick_face_beside_another_candidate_abstains(second, monkeypatch):
+    near = FAR + THICK
+    extra = [((LO, second), (NIB_END, second), {}), ((LO - 2.2, near), (LO - 2.2, second), {"width": 0.96})]
+    scene = _thick(extra=extra)
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect())
+
+
+def test_the_longest_first_stroke_marks_the_frame(monkeypatch):
+    near = FAR + THICK
+    scene = _thick(extra=[((LO, near), (LO - 1.5, near), {})])       # a shorter second print of the chord face
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
+
+
+def test_a_thin_wall_needs_no_cap(monkeypatch):
+    scene = Scene(drop=("cap_lo", "cap_hi"))
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
 
 
 # ------------------------------------------------------------------------------------------------ the reused tolerances
