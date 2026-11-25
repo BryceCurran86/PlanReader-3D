@@ -2189,6 +2189,136 @@ def _without_door_owned_paths(
     return [inert if index in owned else row for index, row in enumerate(drawings)]
 
 
+# The source doorway-chord proposer's own representation tolerances, reused to read the door's own jamb.
+_JAMB_CHORD_AXIS_PT = 0.12
+_JAMB_FACE_PT = 0.18
+_JAMB_FACE_MIN_RUN_PT = 1.0
+
+
+def _jamb_return_extent(
+    end: float, direction: float, chord: float,
+    faces: Sequence[tuple[float, float, float, int]], crosses: Sequence[tuple[float, float, float, int]],
+) -> Optional[tuple[float, tuple[float, float], tuple[int, ...]]]:
+    """(far end, wall band, source path ids) of the wall that starts at one chord end, or None when it is not unique."""
+
+    def starts(lo: float, hi: float) -> bool:  # begins at the chord end and runs away from the door
+        near, far = (hi, lo) if direction < 0 else (lo, hi)
+        return abs(near - end) <= _JAMB_FACE_PT and direction * (far - end) > _JAMB_FACE_MIN_RUN_PT
+
+    if not any(abs(perp - chord) <= _JAMB_FACE_PT and starts(lo, hi) for perp, lo, hi, _index in faces):
+        return None
+    seconds: list[float] = []
+    for perp in sorted(p for p, lo, hi, _index in faces
+                       if _STROKE_PAIR_THICK_MIN <= abs(p - chord) <= _STROKE_PAIR_THICK_MAX and starts(lo, hi)):
+        if not seconds or perp - seconds[-1] > _JAMB_FACE_PT:
+            seconds.append(perp)
+    candidates = []
+    for perp in seconds:
+        low, high = min(perp, chord), max(perp, chord)
+        jamb = [index for pos, lo, hi, index in crosses
+                if abs(pos - end) <= _JAMB_FACE_PT and lo >= low - _JAMB_FACE_PT and hi <= high + _JAMB_FACE_PT
+                and (abs(lo - low) <= _JAMB_FACE_PT or abs(hi - high) <= _JAMB_FACE_PT)]
+        if jamb:
+            candidates.append((perp, jamb))
+    if len(candidates) != 1:
+        return None
+    other, jamb = candidates[0]
+
+    def reach(face: float) -> tuple[float, list[int]]:
+        """How far this face runs from the chord end without a break."""
+        spans = sorted(((lo, hi, index) for perp, lo, hi, index in faces if abs(perp - face) <= _JAMB_FACE_PT),
+                       key=lambda span: (-span[1], span[0]) if direction < 0 else (span[0], -span[1]))
+        edge, used = end, []
+        for lo, hi, index in spans:
+            near, far = (hi, lo) if direction < 0 else (lo, hi)
+            if direction * (near - edge) <= _JAMB_FACE_PT and direction * (far - edge) > 0:
+                edge = far
+                used.append(index)
+        return edge, used
+
+    chord_far, chord_ids = reach(chord)
+    other_far, other_ids = reach(other)
+    far_end = end + direction * min(direction * (chord_far - end), direction * (other_far - end))
+    return far_end, (min(chord, other), max(chord, other)), tuple(sorted(set(chord_ids + other_ids + jamb)))
+
+
+def _collect_door_jamb_return_strips(
+    drawings: Sequence[Any], witnesses: Sequence[Mapping[str, Any]], strips: Sequence[_Strip],
+) -> list[_Strip]:
+    """Short wall pieces bound to a segmented source swing's own jamb (opt-in ``door_jamb_returns``).
+
+    The long-wall collectors need 40 pt (merged faces) or exactly one partner face line (stroke pairs), so the short wall
+    left between a door and the next wall is often never collected, and the doorway then has no wall gap to close. The
+    door says where that wall starts. At each end of a witness's closed chord one strip is made only when all hold:
+
+    * the chord is axis-aligned;
+    * black visible face lines start at that end and run away from the door: one on the chord line, and exactly one other
+      1.2 to 8 pt from it that has a black cross stroke at the end between the two (zero or several candidates abstain);
+    * both faces run on without a break; the piece ends where the shorter one stops;
+    * a strip already collected in the other direction touches that far end, within the face-cluster tolerance;
+    * the piece is shorter than the merged-face minimum (longer walls stay with the existing collectors).
+
+    Every witness's own arc and leaf are door symbol ink and are never read. Topology-only candidate ink: it
+    authenticates no wall, closes no doorway by itself and issues no quantity.
+    """
+    if not witnesses:
+        return []
+    owned = {int(index) for witness in witnesses for index in witness.get("native_source_path_indices", ())}
+    lines: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
+    for index, row in enumerate(drawings):
+        if index in owned or not isinstance(row, Mapping) or row.get("fill") is not None:
+            continue
+        if not _is_black(row.get("color")) or not _visible_source_stroke_paint(row):
+            continue
+        for item in row.get("items") or ():
+            if item and item[0] == "l":
+                a, b = _xy(item[1]), _xy(item[2])
+                if all(math.isfinite(v) for v in (*a, *b)):
+                    lines.append((index, a, b))
+    found: list[_Strip] = []
+    seen: set[tuple[bool, float, float, float, float]] = set()
+    for witness in witnesses:
+        hinge, tip = witness["source_hinge_point_pdf_pts"], witness["source_closed_leaf_tip_pdf_pts"]
+        dx, dy = abs(hinge[0] - tip[0]), abs(hinge[1] - tip[1])
+        horizontal = dy <= _JAMB_CHORD_AXIS_PT and dx > _JAMB_FACE_MIN_RUN_PT
+        if horizontal == (dx <= _JAMB_CHORD_AXIS_PT and dy > _JAMB_FACE_MIN_RUN_PT):
+            continue
+        axis, across = (0, 1) if horizontal else (1, 0)
+        chord = (hinge[across] + tip[across]) / 2.0
+        faces: list[tuple[float, float, float, int]] = []    # (perpendicular position, along lo, along hi, path id)
+        crosses: list[tuple[float, float, float, int]] = []  # (along position, perpendicular lo, perpendicular hi, path id)
+        for index, a, b in lines:
+            if abs(a[across] - b[across]) < _JAMB_CHORD_AXIS_PT and abs(a[axis] - b[axis]) > NOISE_PT:
+                faces.append(((a[across] + b[across]) / 2.0, min(a[axis], b[axis]), max(a[axis], b[axis]), index))
+            elif abs(a[axis] - b[axis]) < _JAMB_CHORD_AXIS_PT and abs(a[across] - b[across]) > NOISE_PT:
+                crosses.append(((a[axis] + b[axis]) / 2.0, min(a[across], b[across]), max(a[across], b[across]), index))
+        low_end, high_end = sorted((hinge[axis], tip[axis]))
+        for end, direction in ((low_end, -1.0), (high_end, 1.0)):
+            extent = _jamb_return_extent(end, direction, chord, faces, crosses)
+            if extent is None:
+                continue
+            far_end, band, ids = extent
+            if not NOISE_PT < direction * (far_end - end) < _MERGED_FACE_MIN_SPAN:
+                continue
+            far_edge = (
+                LineString([(far_end, band[0]), (far_end, band[1])]) if horizontal
+                else LineString([(band[0], far_end), (band[1], far_end)])
+            )
+            if not any((strip.vertical if horizontal else strip.horizontal)
+                       and strip.polygon.distance(far_edge) <= _STROKE_PAIR_CLUSTER_PT for strip in strips):
+                continue
+            lo, hi = sorted((far_end, end))
+            x0, y0, x1, y1 = (lo, band[0], hi, band[1]) if horizontal else (band[0], lo, band[1], hi)
+            key = (horizontal, round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(_Strip(
+                ids[0], x0, y0, x1, y1, box(x0, y0, x1, y1), forced="h" if horizontal else "v", path_indices=ids,
+            ))
+    return found
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2198,6 +2328,7 @@ def build_layered_wall_doorway_room_rings(
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    door_jamb_returns: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -2221,6 +2352,10 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("source_heavy_stroke_wall_bands must be an explicit boolean")
     if wall_end_stroke_closures and not dark_painted_wall_source:
         raise ValueError("wall_end_stroke_closures requires dark_painted_wall_source")
+    if type(door_jamb_returns) is not bool:
+        raise ValueError("door_jamb_returns must be an explicit boolean")
+    if door_jamb_returns and not dark_painted_wall_source:
+        raise ValueError("door_jamb_returns requires dark_painted_wall_source")
     if type(source_sha256) is not str or len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("source_sha256 must be a 64-char lowercase hex digest")
     if type(page_index) is not int or page_index < 0:
@@ -2274,6 +2409,8 @@ def build_layered_wall_doorway_room_rings(
             strips = strips + _collect_wall_end_closing_strips(wall_ink, strips)
     if source_heavy_stroke_wall_bands:
         strips = strips + _collect_source_heavy_stroke_strips(wall_ink)
+    if door_jamb_returns:
+        strips = strips + _collect_door_jamb_return_strips(drawings, segmented_witnesses, strips)
     unsupported = len(other_fills)
     if not strips:
         return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
@@ -2588,6 +2725,7 @@ def build_from_pdf_bytes(
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    door_jamb_returns: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -2605,6 +2743,7 @@ def build_from_pdf_bytes(
         dark_painted_wall_source=dark_painted_wall_source,
         wall_end_stroke_closures=wall_end_stroke_closures,
         source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
+        door_jamb_returns=door_jamb_returns,
     )
 
 
