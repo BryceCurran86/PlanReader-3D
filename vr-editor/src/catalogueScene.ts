@@ -318,6 +318,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
       if(host.target==="wall"&&host.halfThickness&&!actualFinishFace)node.position.addScaledVector(normal,host.halfThickness);
       // A local leaf finish must follow its swing/slide/overhead transform.
       const parent=visual.kind==="surface"&&item.group==="doors"&&host.opening?.reviewLeaf&&!designedDoors.has(host.id)?host.opening.reviewLeaf:host.mesh;
+      if(parent.userData.nominalDoorSlab&&visual.kind==="surface")node.position.addScaledVector(normal,.019);
       parent.add(node);
       node.updateWorldMatrix(true, true);
       mounts.push(node);mountedEntries.set(node,placement);
