@@ -2328,9 +2328,9 @@ def build_layered_wall_doorway_room_rings(
     page_index: int,
     sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
+    door_jamb_returns: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
-    door_jamb_returns: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -2725,9 +2725,9 @@ def build_layered_wall_doorway_room_rings(
 def build_from_pdf_bytes(
     source_bytes: bytes, *,     source_sha256: str, page_index: int, sliding_leaf_frame_closure: bool = False,
     dark_painted_wall_source: bool = False,
+    door_jamb_returns: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
-    door_jamb_returns: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -2743,9 +2743,9 @@ def build_from_pdf_bytes(
         drawings, source_sha256=source_sha256, page_index=page_index,
         sliding_leaf_frame_closure=sliding_leaf_frame_closure,
         dark_painted_wall_source=dark_painted_wall_source,
+        door_jamb_returns=door_jamb_returns,
         wall_end_stroke_closures=wall_end_stroke_closures,
         source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
-        door_jamb_returns=door_jamb_returns,
     )
 
 
