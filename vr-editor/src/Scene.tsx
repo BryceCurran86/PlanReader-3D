@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -275,9 +275,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   visualSettings.current = { mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
-  const draftMap = useRef<Map<string, WallDraft>>(new Map());
-  draftMap.current = new Map((draftState ? safeDrafts(draftState, manifest) : [])
-    .map(d => [d.objectId, d]));
+  const mappedDrafts=useMemo(()=>new Map<string,WallDraft>((draftState?safeDrafts(draftState,manifest):[])
+    .map(d=>[d.objectId,d])),[draftState,manifest]);
+  const draftMap=useRef(mappedDrafts);
+  draftMap.current=mappedDrafts;
 
   useEffect(() => {
     const parent = host.current;
@@ -1612,6 +1613,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     parent.append(vrButton);
 
     function onResize() {
+      // The compositor owns the immersive framebuffer; desktop ResizeObserver
+      // events must not resize the renderer while the headset is presenting.
+      if(renderer.xr.isPresenting)return;
       const width = Math.max(parent?.clientWidth || 1, 1);
       const height = Math.max(parent?.clientHeight || 1, 1);
       camera.aspect = width / height;
@@ -1932,9 +1936,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           sunlight.shadow.map.dispose();
           sunlight.shadow.map = null;
         }
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
-          maxRenderPixelRatio(activeQuality, renderer.xr.isPresenting)));
-        onResize();
+        if(!renderer.xr.isPresenting){
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
+            maxRenderPixelRatio(activeQuality,false)));
+          onResize();
+        }
         lastQuality = activeQuality;
         lastPresenting=renderer.xr.isPresenting;
       }
