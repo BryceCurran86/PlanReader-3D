@@ -18,6 +18,7 @@ import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
 import {nominalTrimMesh} from "./constructionTrimVisual.ts";
+import type {WallCornerJoins} from "./wallCornerJoin.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -69,7 +70,7 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   return group;
 }
 
-export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) {
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,joins:WallCornerJoins={}) {
   const group = new THREE.Group();
   const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[];
   const texture=textures?.get(wallAssembly(wall.assembly).profile);
@@ -87,7 +88,12 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     if (to <= from || top <= bottom) return;
     const p=[atOffset(wall,from,bottom),atOffset(wall,from,top),atOffset(wall,to,top),atOffset(wall,to,bottom)];
     panel(p,mountFaces);
-    const a=p.map(v=>v.clone().addScaledVector(normal,half)),b=p.map(v=>v.clone().addScaledVector(normal,-half));
+    const startJoin=Math.abs(from)<1e-7?joins.start:undefined,endJoin=Math.abs(to-length)<1e-7?joins.end:undefined;
+    const facePoint=(v:THREE.Vector3,i:number,side:"left"|"right")=>{
+      const join=i<2?startJoin:endJoin,point=join?.[side];
+      return point?new THREE.Vector3(point[0],v.y,point[1]):v.clone().addScaledVector(normal,side==="left"?half:-half);
+    };
+    const a=p.map((v,i)=>facePoint(v,i,"left")),b=p.map((v,i)=>facePoint(v,i,"right"));
     function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
     face([...a].reverse(),left);face(b,rightColor);
     if(texture&&profile.role==="external"){
@@ -100,7 +106,12 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
         exteriorUV.push(along/texture.repeat[0],v.y/texture.repeat[1]);
       }
     }
-    for(let i=0;i<4;i++){const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);}
+    for(let i=0;i<4;i++){
+      // The adjacent wall owns the matching miter plane: omit buried end
+      // faces instead of overlapping them. Unjoined ends retain a full cap.
+      if((i===0&&startJoin)||(i===2&&endJoin))continue;
+      const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);
+    }
 
   }
   function addMesh(vertices: number[], color: number, opacity: number, wallFace = false, doorId?: string) {
