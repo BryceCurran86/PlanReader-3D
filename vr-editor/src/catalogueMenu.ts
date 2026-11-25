@@ -37,7 +37,7 @@ export type MenuAction =
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "wall-angle"; action:"step"|"pivot"|"connected"|"panel"; degrees?:number }
-  | { area: "opening"; action: "drag" | "shift" | "width" | "height";
+  | { area: "opening"; action: "drag" | "shift" | "width" | "height" | "mechanism" | "toggle";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
       direction?: "left" | "right" | "forward" | "back" };
@@ -250,6 +250,7 @@ export function buildMenuLayout(
         {label:"Exact width",action:field("opening-width")},
         {label:"Exact height",action:field("opening-height")},
         {label:"Exact sill",action:field("opening-sill")},
+        ...(opening.openingKind==="door"?[{label:"Type: "+(opening.doorMechanism??"swing"),action:adjust("mechanism",0)},{label:"Open / close",action:adjust("toggle",0)}]:[]),
         {label:"Back to wall",action:questAction("openings")},
       ];
       for(const [i,entry] of controls.entries()) add(entry.label,
