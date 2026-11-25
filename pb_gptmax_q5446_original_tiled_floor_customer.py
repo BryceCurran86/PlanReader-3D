@@ -170,6 +170,8 @@ def _issue_original_q5446_native_tiled_floor(
     viewport_id: str = "original_ground_floor_vector_plan",
     element: str = "Ground-floor ensuite floor tiles",
     location: str = "Ground-floor ensuite",
+    finish_code: str = "tile",
+    finish_system: str = "tile",
 ) -> OriginalQ5446TiledFloorCustomerResult:
     if type(workspace_id) is not int or workspace_id <= 0:
         return _blocked("authenticated_workspace_unavailable")
@@ -343,8 +345,8 @@ def _issue_original_q5446_native_tiled_floor(
             "source_face_boundary_path_ids": list(boundary_ids),
             "original_scale_source_path_ids": list(scale_ids),
             "finish_scope_source_sha256s": list(finish.source_sha256s),
-            "finish_code": "tile",
-            "semantic_finish": "tile",
+            "finish_code": finish_code,
+            "semantic_finish": finish_system,
             "commercial_projection_allowed": True,
             "takeoff_eligible": True,
             "quantity_handoff_only": False,
@@ -356,7 +358,7 @@ def _issue_original_q5446_native_tiled_floor(
             "element": element,
             "location": location,
             "substrate": "Unspecified",
-            "finish_system": "tile",
+            "finish_system": finish_system,
             "row_role": "floor_area",
             "original_dimension_source": "independent_alfresco_figured_scale",
             "source_label_method": "two_render_ocr_with_source_native_closed_face",
@@ -492,4 +494,60 @@ def issue_original_q5446_first_ensuite_tiled_floor(
         viewport_id="original_first_floor_vector_plan",
         element="First-floor ensuite floor tiles",
         location="First-floor ensuite",
+    )
+
+
+def issue_original_q5446_first_bathroom_tiled_floor(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalQ5446TiledFloorCustomerResult:
+    """First-floor bathroom: only its own unique painted finished face may issue.
+
+    The existing source-bound metric, material, seal and customer gates remain
+    mandatory. An unrecognized BATH label, unclosed face or wrong page abstains.
+    """
+    return _issue_original_q5446_native_tiled_floor(
+        original_plan, original_inclusions, original_sales_advice,
+        workspace_id=workspace_id,
+        page_number=2,
+        room_label="BATH",
+        required_material_scope="bathroom_and_ensuite_floor_tiles",
+        missing_material_reason="authentic_bathroom_tiled_material_scope_unavailable",
+        missing_face_reason="source_tiled_bathroom_finished_face_unavailable",
+        page_role="first_floor_plan",
+        viewport_id="original_first_floor_vector_plan",
+        element="First-floor bathroom floor tiles",
+        location="First-floor bathroom",
+    )
+
+
+def issue_original_q5446_ground_living_porcelain_floor(
+    original_plan: str | Path,
+    original_inclusions: str | Path,
+    original_sales_advice: str | Path,
+    *,
+    workspace_id: int = 1,
+) -> OriginalQ5446TiledFloorCustomerResult:
+    """Living porcelain floor, distinct from wet-area tiling and other rooms.
+
+    Reuses the original finished-face and calibrated metric issuer. The
+    porcelain scope does not confer a physical ring or permission by itself.
+    """
+    return _issue_original_q5446_native_tiled_floor(
+        original_plan, original_inclusions, original_sales_advice,
+        workspace_id=workspace_id,
+        page_number=1,
+        room_label="LIVING",
+        required_material_scope="entry_kitchen_living_porcelain_tiles",
+        missing_material_reason="authentic_living_porcelain_material_scope_unavailable",
+        missing_face_reason="source_living_finished_face_unavailable",
+        page_role="ground_floor_plan",
+        viewport_id="original_ground_floor_vector_plan",
+        element="Ground-floor Living porcelain floor",
+        location="Ground-floor Living",
+        finish_code="porcelain_tile",
+        finish_system="porcelain_tile",
     )
