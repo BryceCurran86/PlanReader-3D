@@ -2343,6 +2343,9 @@ def build_layered_wall_doorway_room_rings(
     black axis-aligned stroke as a topology-only wall band, and also a long
     (≥80 pt) medium-width (0.45–1.2) black face. It is not a pair, not a raster
     hull, and not a billed wall.
+    ``door_jamb_returns`` (default False, dark-painted only) adds the short wall
+    pieces bound to a segmented swing's own jamb (``_collect_door_jamb_return_strips``),
+    as topology-only candidate ink.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
