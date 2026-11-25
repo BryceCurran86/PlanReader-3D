@@ -56,34 +56,65 @@ export function nominalCeilingFraming(ceiling:Pick<CeilingDraft,"start"|"end"|"h
  }
  return memberMesh(members,0xc99c65,"ceiling-frame");
 }
-/** Explicit closed axis-aligned rectangular shell only. Never infer a roof
- * truss from imported geometry. Use the actual generated roof's section. */
+/** Nominal parallel members clipped to explicit draft surface triangles.
+ * Vertical roof closures are excluded. Never bridge a recess or imply a designed truss. */
+export function clippedSurfaceMembers(vertices:readonly Point[],direction:[number,number],spacing=.6,verticalOffset=0):Member[]{
+ if(vertices.length<3||vertices.length%3!==0||vertices.length>6000||!Number.isFinite(spacing)||spacing<.2||spacing>1||!Number.isFinite(verticalOffset))return [];
+ const d=Math.hypot(...direction);if(!Number.isFinite(d)||d<1e-7)return [];
+ const ux=direction[0]/d,uz=direction[1]/d;
+ const along=(p:Point)=>p[0]*ux+p[2]*uz,across=(p:Point)=>-p[0]*uz+p[2]*ux;
+ const triangles:Point[][]=[];
+ for(let i=0;i<vertices.length;i+=3){
+  const [a,b,c]=vertices.slice(i,i+3);
+  if(![...a,...b,...c].every(Number.isFinite))return [];
+  if(Math.abs((b[0]-a[0])*(c[2]-a[2])-(b[2]-a[2])*(c[0]-a[0]))>1e-8)triangles.push([a,b,c]);
+ }
+ if(!triangles.length)return [];
+ const points=triangles.flat(),min=Math.min(...points.map(across)),max=Math.max(...points.map(across));
+ if(max-min<.05||max-min>100||Math.max(...points.map(along))-Math.min(...points.map(along))>100)return [];
+ const count=Math.ceil((max-min)/spacing),result:Member[]=[];
+ for(let i=0;i<=count;i++){
+  const cross=min+Math.min(max-min-.015,Math.max(.015,i*(max-min)/count));
+  const sections:{lo:number;hi:number;y0:number;y1:number}[]=[];
+  for(const tri of triangles){
+   const hits:Point[]=[];
+   for(let j=0;j<3;j++){
+    const a=tri[j],b=tri[(j+1)%3],da=across(a)-cross,db=across(b)-cross;
+    if(Math.abs(da)<1e-8)hits.push(a);
+    if(da*db< -1e-16){const t=da/(da-db);hits.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]);}
+   }
+   hits.sort((a,b)=>along(a)-along(b));
+   if(hits.length<2)continue;
+   const a=hits[0],b=hits[hits.length-1],lo=along(a),hi=along(b);
+   if(hi-lo>1e-6)sections.push({lo,hi,y0:a[1],y1:b[1]});
+  }
+  sections.sort((a,b)=>a.lo-b.lo);
+  const joined:typeof sections=[];
+  for(const s of sections){
+   const prev=joined[joined.length-1];
+   if(prev&&Math.abs(prev.hi-s.lo)<1e-6&&Math.abs(prev.y1-s.y0)<1e-6&&Math.abs((prev.y1-prev.y0)/(prev.hi-prev.lo)-(s.y1-s.y0)/(s.hi-s.lo))<1e-6){prev.hi=s.hi;prev.y1=s.y1;}
+   else if(!prev||s.hi>prev.hi+1e-6)joined.push({...s});
+  }
+  const point=(a:number,y:number):Point=>[a*ux-cross*uz,y+verticalOffset,a*uz+cross*ux];
+  for(const s of joined)if(s.hi-s.lo>.025)result.push({a:point(s.lo,s.y0),b:point(s.hi,s.y1),width:.045,depth:.14});
+ }
+ return result;
+}
 export function nominalShellFraming(shell:DraftShell){
- const group=new THREE.Group(),floor=shell.surfaces.find(s=>s.kind==="ceiling"),roof=shell.surfaces.find(s=>s.kind==="roof");
- if(!floor||!roof||!floor.vertices.length||!roof.vertices.length)return group;
- const x0=Math.min(...floor.vertices.map(p=>p[0])),x1=Math.max(...floor.vertices.map(p=>p[0]));
- const z0=Math.min(...floor.vertices.map(p=>p[2])),z1=Math.max(...floor.vertices.map(p=>p[2]));
- if(Math.abs((x1-x0)*(z1-z0)-shell.floorM2)>1e-6||x1-x0<.1||z1-z0<.1||x1-x0>20||z1-z0>20)return group;
- const ceiling=nominalCeilingFraming({start:[x0,z0],end:[x1,z1],heightM:shell.heightM-.012});
- if(ceiling)group.add(ceiling);
- const peak=Math.max(...roof.vertices.map(v=>v[1])),min=Math.min(...roof.vertices.map(v=>v[1]));
- if(peak-min<1e-5){
-  const flat=nominalCeilingFraming({start:[x0,z0],end:[x1,z1],heightM:peak-.15});
-  if(flat){flat.userData.constructionAccessory="roof-frame";group.add(flat);}return group;
+ const group=new THREE.Group(),ceiling=shell.surfaces.find(s=>s.kind==="ceiling"),roof=shell.surfaces.find(s=>s.kind==="roof");
+ if(!ceiling||!roof||!ceiling.vertices.length||!roof.vertices.length)return group;
+ const xs=ceiling.vertices.map(p=>p[0]),zs=ceiling.vertices.map(p=>p[2]);
+ const xSpan=Math.max(...xs)-Math.min(...xs),zSpan=Math.max(...zs)-Math.min(...zs);
+ const direction:[number,number]=xSpan<=zSpan?[1,0]:[0,1];
+ let roofDirection=direction;
+ for(let i=0;i<roof.vertices.length;i+=3){
+  const [a,b,c]=roof.vertices.slice(i,i+3);
+  const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+  const ny=uz*vx-ux*vz,nx=uy*vz-uz*vy,nz=ux*vy-uy*vx;
+  if(Math.abs(ny)>1e-8&&Math.hypot(nx,nz)>1e-8){roofDirection=[nx,nz];break;}
  }
- const high=roof.vertices.filter(v=>Math.abs(v[1]-peak)<1e-6);
- const hx=Math.max(...high.map(v=>v[0]))-Math.min(...high.map(v=>v[0]));
- const hz=Math.max(...high.map(v=>v[2]))-Math.min(...high.map(v=>v[2]));
- const alongX=hz<1e-6&&Math.abs(hx-(x1-x0))<1e-6,alongZ=hx<1e-6&&Math.abs(hz-(z1-z0))<1e-6;
- if(!alongX&&!alongZ)return group;
- const length=alongX?x1-x0:z1-z0,rows=Math.ceil(length/.6),members:Member[]=[];
- for(let i=0;i<=rows;i++){
-  const offset=Math.max(.025,Math.min(length-.025,i*length/rows));
-  const a:Point=alongX?[x0+offset,min,z0]:[x0,min,z0+offset];
-  const b:Point=alongX?[x0+offset,min,z1]:[x1,min,z0+offset];
-  const top:Point=alongX?[x0+offset,peak,(z0+z1)/2]:[(x0+x1)/2,peak,z0+offset];
-  for(const [start,end] of [[a,top],[top,b],[a,b]])members.push({a:start,b:end,width:.045,depth:.14});
- }
- const frame=memberMesh(members,0xc99c65,"roof-frame");if(frame)group.add(frame);
+ const frame=memberMesh(clippedSurfaceMembers(ceiling.vertices,direction,.6,.07),0xc99c65,"ceiling-frame");
+ const rafters=memberMesh(clippedSurfaceMembers(roof.vertices,roofDirection,.6,-.07),0xc99c65,"roof-frame");
+ if(frame)group.add(frame);if(rafters)group.add(rafters);
  return group;
 }
