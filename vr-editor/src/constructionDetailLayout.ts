@@ -4,7 +4,7 @@
  * Defaults below are editable illustrative geometry, never certified minimums.
  */
 export type Rect = { x0:number; x1:number; y0:number; y1:number };
-export type FrameRole = "bottom-plate"|"top-plate"|"stud"|"king"|"trimmer"|"lintel"|"sill"|"cripple"|"nogging";
+export type FrameRole = "bottom-plate"|"top-plate"|"stud"|"king"|"trimmer"|"lintel"|"sill"|"cripple"|"nogging"|"end-backing";
 export type FrameMember = Rect & { role:FrameRole };
 export type FramePreset = { memberWidth:number; studSpacing:number; noggingSpacing:number; lintelDepth:number; topPlates:1|2 };
 export const NOMINAL_TIMBER:FramePreset={memberWidth:.045,studSpacing:.45,noggingSpacing:1.2,lintelDepth:.14,topPlates:2};
@@ -60,7 +60,12 @@ export function nominalFrameLayout(width:number,height:number,holes:readonly Rec
    put(piece.y0>t+EPS||piece.y1<top-EPS?"cripple":"stud",piece,[]);
   }
  }
- const verticals=members.filter(m=>["stud","king","trimmer","cripple"].includes(m.role));
+ // Nominal double end backing only in free solid strips; not a certified junction detail.
+ for(const x of [t,width-2*t]){
+  const r={x0:x,x1:x+t,y0:t,y1:top};
+  if(valid(r)&&r.x0>=0&&r.x1<=width&&!members.some(m=>intersects(m,r))&&!holes.some(h=>intersects(h,r)))put("end-backing",r,[]);
+ }
+ const verticals=members.filter(m=>["stud","king","trimmer","cripple","end-backing"].includes(m.role));
  const blocked=[...holes,...verticals,...openingMembers];
  for(let y=t+p.noggingSpacing;y+t<top;y+=p.noggingSpacing)put("nogging",{x0:0,x1:width,y0:y,y1:y+t},blocked);
  return members;
