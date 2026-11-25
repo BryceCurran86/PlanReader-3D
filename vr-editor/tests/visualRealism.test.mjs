@@ -5,8 +5,8 @@ import {
   shadowMapSize, VISUAL_PRESETS,
 } from "../src/visualRealism.ts";
 
-test("three bounded illumination presets provide finite plausible values", () => {
-  assert.deepEqual(Object.keys(VISUAL_PRESETS).sort(), ["daylight","dusk","studio"]);
+test("four bounded illumination presets provide finite plausible values", () => {
+  assert.deepEqual(Object.keys(VISUAL_PRESETS).sort(), ["daylight","dusk","night","studio"]);
   for (const [id, preset] of Object.entries(VISUAL_PRESETS)) {
     assert.equal(isLightingMood(id), true);
     assert.match(preset.label, /illustrative/);

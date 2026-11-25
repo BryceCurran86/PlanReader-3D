@@ -72,7 +72,8 @@ def test_nearby_or_touching_coarse_render_never_suppresses_new_original_span():
     assert not band_segment_exactly_observed(candidate,(segment((0.,4.,9.99,4.)),),dpi=300,ordinary_dpi=300)
 
 
-@pytest.mark.parametrize("family",OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS)
+# The registry is unordered; preserve every case with deterministic collection for xdist.
+@pytest.mark.parametrize("family",sorted(OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS))
 def test_registered_source_families_stay_out_of_canonical_page_and_viewport_w4(family):
     assert _is_opening_local_supplemental_segment({
         "id":f"raster_segment:{'a'*64}:{family}:{'b'*64}:0",

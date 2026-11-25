@@ -2,7 +2,10 @@ import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProt
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
+import {connectedWallEdit} from "./connectedWallEdit.ts";
 import type { OutlineEdit } from "./localOutline.ts";
+import {isWallAssembly,wallAssembly} from "./wallProfiles.ts";
+import type {WallAssembly} from "./wallProfiles.ts";
 
 export const BUILD_TOOLS = [
   { id: "wall", label: "Wall" },
@@ -16,13 +19,13 @@ export const BUILD_TOOLS = [
 ] as const;
 export type BuildTool = typeof BUILD_TOOLS[number]["id"];
 export type PlanPoint = [number, number];
-export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number };
+export type BuildSizes = { wallHeightM: number; widthM: number; heightM: number; ceilingHeightM?: number; windowWidthM?: number; windowHeightM?: number; windowSillM?: number; wallAssembly?:WallAssembly };
 export const STARTING_SIZES: BuildSizes = { wallHeightM: 2.4, widthM: 0.9, heightM: 2.1, ceilingHeightM: 2.4,
   windowWidthM: 1.2, windowHeightM: 1.05, windowSillM: 0.9 };
 export const MAX_DRAFT_WALLS = 25;
 
-export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[] };
-export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[] };
+export type PlacedWall = WallAdditionSketch & { openings: WallAdditionOpening[]; assembly?:WallAssembly };
+export type WallVisual = WallAdditionSketch & { openings?: WallAdditionOpening[]; assembly?:WallAssembly };
 export type CeilingDraft = {
   proposalId: string; scopeKey: string; levelId: string;
   start: PlanPoint; end: PlanPoint; heightM: number;
@@ -44,10 +47,12 @@ export type BuildAction =
   | { kind: "done" | "undo" | "redo" }
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
-  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
+  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall; connected?: boolean; allowTJunctions?: boolean }
+  | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
       precisionSource?:boolean }
+  | { kind: "set-wall-assembly"; proposalId:string; assembly:WallAssembly }
   | { kind: "edit-local-outline"; expected: string; edit: OutlineEdit }
   | { kind: "group-local-walls"; proposalIds: string[]; operation: "translate" | "rotate" | "delete" | "duplicate" | "height"; delta?: PlanPoint; copyIds?: string[]; heightMm?: number }
   | { kind: "delete-local-wall"; proposalId: string }
@@ -135,10 +140,10 @@ export function snappedPoint(point: PlanPoint): PlanPoint | null {
 
 // Magnetic alignment is strictly for LOCAL draft wall placement. It does not
 // alter source/verified geometry or override any source authority checks.
-export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified";
+export type DraftWallSnap = { point: PlanPoint; kind: "corner" | "straight" | "grid" | "verified" | "wall-face";
   witness?: string };
 export type WallAxis = "auto" | "free" | "horizontal" | "vertical";
-export type WallSnapOptions = { gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
+export type WallSnapOptions = { magnetic?:boolean; preferredDraftId?:string|null; wallSegments?:readonly {start:PlanPoint;end:PlanPoint;objectId:string}[]; gridM?: 0.05 | 0.1 | 0.25; axis?: WallAxis;
   verifiedAnchors?: readonly {point: PlanPoint; objectId: string}[] };
 export function snapDraftWallPoint(
   state: Pick<BuildState, "walls">,
@@ -151,6 +156,7 @@ export function snapDraftWallPoint(
   const step = options.gridM ?? 0.05;
   const gridRound = (value: number) => Math.round(Math.round(value / step) * step * 100) / 100;
   const grid: PlanPoint = [gridRound(raw[0]), gridRound(raw[1])];
+  if(options.magnetic===false)return {point:anchor&&options.axis==="horizontal"?[grid[0],anchor[1]]:anchor&&options.axis==="vertical"?[anchor[0],grid[1]]:grid,kind:"grid"};
   let nearest: { point: PlanPoint; distance: number } | null = null;
   // Prefer exact junctions over ambiguous coordinate alignment.
   for (const wall of state.walls) {
@@ -187,6 +193,22 @@ export function snapDraftWallPoint(
   if (best && (!second ||
       planLength(raw,second.point) - planLength(raw,best.point) > 0.005)) {
     return { point: [...best.point], kind: "verified", witness: best.objectId };
+  }
+  // Snap to any point along a nearby wall, not just its endpoints.
+  const segments=[...state.walls.filter(w=>w.levelId===levelId).map(w=>({start:w.start,end:w.end,objectId:w.proposalId})),...(options.wallSegments??[])];
+  const along=segments.flatMap(s=>{
+    const dx=s.end[0]-s.start[0],dz=s.end[1]-s.start[1],length2=dx*dx+dz*dz;
+    if(length2<.0025)return [];
+    const t=Math.max(0,Math.min(1,((raw[0]-s.start[0])*dx+(raw[1]-s.start[1])*dz)/length2));
+    const p:PlanPoint=[s.start[0]+dx*t,s.start[1]+dz*t];
+    if(anchor&&options.axis==="horizontal"&&Math.abs(p[1]-anchor[1])>.001)return [];
+    if(anchor&&options.axis==="vertical"&&Math.abs(p[0]-anchor[0])>.001)return [];
+    if(anchor&&planLength(anchor,p)<.05)return [];
+    return [{point:p,distance:planLength(raw,p),id:s.objectId}];
+  }).filter(s=>s.distance<=.22).sort((a,b)=>a.distance-b.distance||a.id.localeCompare(b.id));
+  if(options.magnetic===true&&along.length){
+    const point=millimetrePoint(along[0].point);
+    if(point)return {point,kind:"wall-face"};
   }
   if (anchor && snappedPoint(anchor)) {
     const dx = raw[0] - anchor[0], dz = raw[1] - anchor[1];
@@ -280,15 +302,31 @@ export function viewRelativeNudge(
   return [delta[0] * stepM, delta[1] * stepM];
 }
 
+export type WallRotationPivot="start"|"centre"|"end";
+export function wallAngleDegrees(wall: Pick<PlacedWall,"start"|"end">):number{
+  const angle=Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0])*180/Math.PI;
+  return (angle+360)%360;
+}
+/** Rotate in plan around a fixed pivot; never grid-snap the endpoints,
+ * which would change physical length or shrink a full-width opening. */
+export function rotateDraftWallTo(wall:PlacedWall,angleDeg:number,pivot:WallRotationPivot="centre"):PlacedWall|null{
+  if(!Number.isFinite(angleDeg)||Math.abs(angleDeg)>3600||!["start","centre","end"].includes(pivot))return null;
+  const length=planLength(wall.start,wall.end);
+  if(!validWallLength(length))return null;
+  const ratio=pivot==="start"?0:pivot==="end"?1:.5;
+  const anchor:PlanPoint=[wall.start[0]+(wall.end[0]-wall.start[0])*ratio,wall.start[1]+(wall.end[1]-wall.start[1])*ratio];
+  const radians=((angleDeg%360)+360)%360*Math.PI/180;
+  const cardinal=(n:number)=>Math.abs(n)<1e-14?0:Math.abs(Math.abs(n)-1)<1e-14?Math.sign(n):n;
+  const dx=cardinal(Math.cos(radians))*length,dz=cardinal(Math.sin(radians))*length;
+  const start:PlanPoint=ratio===0?[...wall.start]:[anchor[0]-dx*ratio,anchor[1]-dz*ratio];
+  const end:PlanPoint=ratio===1?[...wall.end]:[anchor[0]+dx*(1-ratio),anchor[1]+dz*(1-ratio)];
+  if(![...start,...end].every(v=>Number.isFinite(v)&&Math.abs(v)<=10000))return null;
+  const next={...wall,start,end};
+  if(!validEditedWall(next)||Math.abs(planLength(start,end)-length)>1e-7)return null;
+  return next;
+}
 export function rotatedDraftWall(wall: PlacedWall): PlacedWall | null {
-  const cx = (wall.start[0] + wall.end[0]) / 2;
-  const cz = (wall.start[1] + wall.end[1]) / 2;
-  const rotate = (point: PlanPoint): PlanPoint | null =>
-    snappedPoint([cx - (point[1] - cz), cz + (point[0] - cx)]);
-  const start = rotate(wall.start), end = rotate(wall.end);
-  if (!start || !end) return null;
-  const edited = { ...wall, start, end };
-  return validEditedWall(edited) ? edited : null;
+  return rotateDraftWallTo(wall,wallAngleDegrees(wall)+90,"centre");
 }
 
 function sameShape(a: CeilingDraft, b: CeilingDraft) {
@@ -299,6 +337,35 @@ function sameShape(a: CeilingDraft, b: CeilingDraft) {
 function checkpoint(state: BuildState, geometry: DraftGeometry): BuildState {
   return { ...state, ...geometry, start: null,
     history: [...state.history, { walls: state.walls, ceilings: state.ceilings }].slice(-50), future: [] };
+}
+
+/** Follow a directly translated axis-aligned wall edge only for same-scope
+ * rectangular ceilings whose entire edge was hosted on that wall. No guessed
+ * ceiling ownership, arbitrary polygon reshape or source quantities. */
+export function followDraftCeilingEdges(ceilings:CeilingDraft[],before:PlacedWall,after:PlacedWall):CeilingDraft[]|null{
+ const eps=1e-7;
+ const axis=Math.abs(before.start[0]-before.end[0])<=eps?0:
+   Math.abs(before.start[1]-before.end[1])<=eps?1:null;
+ if(axis===null)return ceilings;
+ const span=axis===0?1:0,old=before.start[axis],next=after.start[axis];
+ if(Math.abs(after.end[axis]-next)>eps||Math.abs(next-old)<=eps||
+   Math.abs(after.start[span]-before.start[span])>eps||Math.abs(after.end[span]-before.end[span])>eps)return ceilings;
+ const lo=Math.min(before.start[span],before.end[span]),hi=Math.max(before.start[span],before.end[span]);
+ const result:CeilingDraft[]=[];
+ let changed=false;
+ for(const c of ceilings){
+  if(c.scopeKey!==before.scopeKey||c.levelId!==before.levelId||
+   Math.min(c.start[span],c.end[span])<lo-eps||Math.max(c.start[span],c.end[span])>hi+eps){
+   result.push(c);continue;
+  }
+  const isStart=Math.abs(c.start[axis]-old)<=eps,isEnd=Math.abs(c.end[axis]-old)<=eps;
+  if(isStart===isEnd){result.push(c);continue;}
+  const start:PlanPoint=[...c.start],end:PlanPoint=[...c.end];
+  if(isStart)start[axis]=next;else end[axis]=next;
+  if((c.end[axis]-c.start[axis])*(end[axis]-start[axis])<=0||!validCeiling(start,end))return null;
+  result.push({...c,start,end});changed=true;
+ }
+ return changed?result:ceilings;
 }
 
 export function updateBuild(
@@ -319,13 +386,29 @@ export function updateBuild(
     if (!next) return state;
     return { ...checkpoint(state, next), future: state.future!.slice(0, -1) };
   }
+  if(action.kind==="rotate-local-wall"){
+    const wall=action.previous;
+    if(!levelId||wall.scopeKey!==scopeKey||wall.levelId!==levelId||!state.walls.includes(wall))return state;
+    const next=rotateDraftWallTo(wall,action.angleDeg+(action.relative?wallAngleDegrees(wall):0),action.pivot);
+    if(!next||Math.hypot(next.start[0]-wall.start[0],next.start[1]-wall.start[1])<1e-8&&Math.hypot(next.end[0]-wall.end[0],next.end[1]-wall.end[1])<1e-8)return state;
+    const walls=action.connected?connectedWallEdit(state.walls,wall,next):state.walls.map(w=>w===wall?next:w);
+    if(!walls||walls.some(w=>!validEditedWall(w)))return state;
+    return checkpoint(state,{walls,ceilings:state.ceilings});
+  }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
-    if (wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
+    if (!levelId || previous.levelId !== levelId || previous.scopeKey !== scopeKey ||
+        wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
         wall.levelId !== previous.levelId || !state.walls.includes(previous) ||
         !validEditedWall(wall)) return state;
-    return checkpoint(state, { walls: state.walls.map(item => item === previous ? wall : item),
-      ceilings: state.ceilings });
+    const walls = action.connected
+      ? connectedWallEdit(state.walls,previous,wall,action.allowTJunctions)
+      : state.walls.map(item => item === previous ? wall : item);
+    if (!walls || walls.some(w => !validEditedWall(w))) return state;
+    const ceilings = action.connected && action.allowTJunctions
+      ? followDraftCeilingEdges(state.ceilings,previous,wall) : state.ceilings;
+    if (!ceilings) return state;
+    return checkpoint(state, { walls, ceilings });
   }
   if (action.kind === "adjust-ceiling") {
     const { previous, ceiling } = action;
@@ -346,6 +429,11 @@ export function updateBuild(
     if (!next || JSON.stringify(next) === JSON.stringify(previous)) return state;
     return checkpoint(state, { walls: state.walls.map(wall => wall === previous ? next : wall),
       ceilings: state.ceilings });
+  }
+  if(action.kind==="set-wall-assembly"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    if(!wall||!isWallAssembly(action.assembly))return state;
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?{...w,assembly:{...action.assembly}}:w),ceilings:state.ceilings});
   }
   if(action.kind==="edit-local-outline"){
     if(!levelId)return state;
@@ -438,7 +526,7 @@ export function updateBuild(
     if (!validHeight(heightM)) return state;
     const shape = { scopeKey, proposalId: action.id, levelId, start, end: point, heightM };
     if (tool === "wall" && state.walls.length < MAX_DRAFT_WALLS && validWallLength(planLength(start, point))) {
-      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [] }] });
+      return checkpoint(state, { ceilings: state.ceilings, walls: [...state.walls, { ...shape, openings: [], ...(sizes.wallAssembly?{assembly:wallAssembly(sizes.wallAssembly)}:{}) }] });
     }
     if (tool === "ceiling" && state.ceilings.length < MAX_DRAFT_WALLS && validCeiling(start, point)) {
       return checkpoint(state, { walls: state.walls, ceilings: [...state.ceilings, shape] });

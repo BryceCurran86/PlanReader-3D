@@ -260,6 +260,27 @@ def test_a_viewport_union_over_budget_by_wall_primitives_still_tiles(monkeypatch
     assert calls == [left, right], "the union is over budget, so each viewport is built on its own"
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_partial_room_trace_preserves_the_primitive_budget_rejection(monkeypatch, reverse):
+    monkeypatch.setattr(nxt, "_PRIMITIVE_CAP", 16)
+    room_view = (-10.0, -10.0, 110.0, 110.0)
+    crowded_view = (1900.0, -10.0, 2100.0, 110.0)
+    rows = _room() + _evidence_rows(17, x0=2000.0, y0=10.0, color=None)
+    viewports = [room_view, crowded_view]
+    if reverse:
+        viewports.reverse()
+
+    room_only = _build(rows, stroke_pair_wall_faces=True, viewport_pdf_pts=room_view)
+    skipped = _build(rows, stroke_pair_wall_faces=True, viewport_pdf_pts=crowded_view)
+    combined = _build(rows, stroke_pair_wall_faces=True, viewport_pdf_pts=viewports)
+
+    assert len(_candidates(room_only)) == 1
+    assert skipped.reason_codes == (REASON_PRIMITIVE_CAP,)
+    assert combined.status is EvidenceResolutionStatus.CANDIDATE
+    assert combined.rings == room_only.rings
+    assert combined.reason_codes.count(REASON_PRIMITIVE_CAP) == 1
+
+
 # ---------------------------------------------------------------- invariances
 
 def _signature(result):

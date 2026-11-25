@@ -13,7 +13,7 @@ import json
 import math
 import re
 import sqlite3
-from typing import Mapping
+from typing import Callable, Mapping
 
 import fitz
 
@@ -260,6 +260,7 @@ def create_wall_and_related_page_revision(
     assembly: WallAssemblySpecification, routes: tuple[KnownServiceRoute, ...],
     coverage: VerifiedWallDrawingCoverage, original_pdf: bytes,
     idempotency_key: str, command_identity: Mapping[str, object],
+    unified_head_verifier: Callable[[EditorPrincipal, AuthorizedSceneWorkspace, sqlite3.Connection], bool],
 ) -> dict:
     """Commit a working-design wall, all verified page vectors and event atomically.
 
@@ -269,6 +270,8 @@ def create_wall_and_related_page_revision(
     _assert_scope(principal, workspace, wall, coverage)
     if not isinstance(db, sqlite3.Connection) or db.in_transaction:
         raise ValueError("wall_create_requires_idle_sqlite_transaction")
+    if not callable(unified_head_verifier):
+        raise ValueError("wall_create_requires_transactional_unified_head_verifier")
     if type(assembly) is not WallAssemblySpecification or type(routes) is not tuple or any(
         type(x) is not KnownServiceRoute for x in routes
     ):
@@ -293,6 +296,12 @@ def create_wall_and_related_page_revision(
     # a partial wall/head/PDF, even when the PDF writer fails midway.
     db.execute("BEGIN IMMEDIATE")
     try:
+        # Compare every editor's document/model/revision head AFTER obtaining
+        # the write lock, and retain that lock until wall + PDF + head commit.
+        # Checking before BEGIN IMMEDIATE permits a competing writer between
+        # verification and the write (a time-of-check/time-of-use race).
+        if unified_head_verifier(principal, workspace, db) is not True:
+            raise WallCreateConflict("another_editor_or_document_revision_unresolved")
         previous = db.execute("""
             SELECT revision_id, command_sha256, canonical_wall_id,
                    revision_number, updated_model_revision, pdf_sha256,

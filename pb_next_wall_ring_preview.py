@@ -2159,7 +2159,7 @@ def _split_at_closures(
 
 
 def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRingResult:
-    """Keep per-neighbourhood topology when the union of clips exceeds the 20k cap."""
+    """Keep the rings and failure reasons from separately traced viewports."""
     if not parts:
         return LayeredRoomRingResult(
             EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
@@ -2173,8 +2173,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
     any_strips = any(part.wall_strip_count for part in parts)
     for part in parts:
         for reason in part.reason_codes:
-            if reason == REASON_PRIMITIVE_CAP:
-                continue
             if reason == REASON_NO_WALL_INK and any_strips:
                 continue
             if reason not in reasons:
@@ -2183,9 +2181,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
         status = EvidenceResolutionStatus.CANDIDATE
         if REASON_RING_CLOSED not in reasons:
             reasons.insert(0, REASON_RING_CLOSED)
-    elif all(part.reason_codes == (REASON_PRIMITIVE_CAP,) for part in parts):
-        status = EvidenceResolutionStatus.ABSTAINED
-        reasons = [REASON_PRIMITIVE_CAP]
     else:
         status = EvidenceResolutionStatus.ABSTAINED
         if not reasons:

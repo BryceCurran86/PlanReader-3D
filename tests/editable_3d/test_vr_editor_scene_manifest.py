@@ -180,3 +180,50 @@ def test_source_receipt_cannot_override_nonfirm_geometry_authority():
     )["objects"][0]
     assert obj["renderState"] == "review"
     assert obj["unresolvedIssues"] == []
+
+
+def test_positioned_openings_are_review_only_and_do_not_change_wall_authority():
+    base = _wall(authority_status="firm")
+    opening = dict(opening_id="d", wall_id="wall-1", opening_type="door",
+                   width_m=0.9, height_m=2.1, area_m2=1.89,
+                   offset_x_m=1.0, offset_z_m=0.0,
+                   source_sheet_label="A101", source_page_no=3)
+    wall = _wall(authority_status="firm", coordinates_or_measurements={
+        **base.coordinates_or_measurements, "openings": [opening]})
+    kwargs = dict(canonical_object_ids={"wall-1": "canonical-wall-1"},
+                  source_witnesses={"wall-1": _source_witness()})
+    original = compile_editor_scene(_scope(), [base], **kwargs)["objects"][0]
+    actual = compile_editor_scene(_scope(), [wall], **kwargs)["objects"][0]
+    preview = actual.pop("openingReview")
+    assert actual == original
+    assert preview == {"recordCount": 1, "status": "review_only", "positioned": [{
+        "openingId": "d", "kind": "door", "offsetM": 1.0, "sillM": 0.0,
+        "widthM": 0.9, "heightM": 2.1, "sheet": "A101", "page": 3}]}
+
+
+@pytest.mark.parametrize("change", [
+    {"offset_x_m": None}, {"offset_z_m": None}, {"area_m2": 3.78},
+    {"offset_x_m": 3.5}, {"wall_id": "another-wall"}, {"offset_z_m": 0.4},
+])
+def test_missing_or_invalid_opening_positions_are_not_invented(change):
+    base = _wall()
+    opening = dict(opening_id="d", wall_id="wall-1", opening_type="door",
+                   width_m=0.9, height_m=2.1, area_m2=1.89,
+                   offset_x_m=1.0, offset_z_m=0.0)
+    opening.update(change)
+    wall = _wall(coordinates_or_measurements={
+        **base.coordinates_or_measurements, "openings": [opening]})
+    review = compile_editor_scene(_scope(), [wall])["objects"][0]["openingReview"]
+    assert review["recordCount"] == 1
+    assert review["positioned"] == []
+
+
+def test_overlapping_openings_are_both_withheld():
+    base = _wall()
+    opening = dict(opening_id="d", wall_id="wall-1", opening_type="door",
+                   width_m=0.9, height_m=2.1, area_m2=1.89,
+                   offset_x_m=1.0, offset_z_m=0.0)
+    wall = _wall(coordinates_or_measurements={
+        **base.coordinates_or_measurements,
+        "openings": [opening, {**opening, "opening_id": "d2", "offset_x_m": 1.2}]})
+    assert compile_editor_scene(_scope(), [wall])["objects"][0]["openingReview"]["positioned"] == []
