@@ -783,6 +783,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const planOverview=createVrPlanOverview(scene,manifest);
     const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
+    let draftMeshes = new Map<string,{signature:string;object:THREE.Object3D}>();
     let lastBuildWalls = build.current.buildState.walls;
     let lastBuildCeilings = build.current.buildState.ceilings;
     let lastBuildLevel = build.current.buildLevel;
@@ -817,36 +818,56 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
       lastAddedWall = signature;
-      openDoors=new Set<string>();
       itemView.clear();
       draftItemHosts = [];
-      for (const child of [...wallAdditionLayer.children]) {
-        wallAdditionLayer.remove(child);
-        child.traverse(item => {
-          if (item instanceof THREE.Mesh || item instanceof THREE.Line) {
-            item.geometry.dispose();
-            const materials = Array.isArray(item.material) ? item.material : [item.material];
-            materials.forEach(material => material.dispose());
-          }
-        });
-      }
+      const nextMeshes=new Map<string,{signature:string;object:THREE.Object3D}>();
+      const nextOpenDoors=new Set<string>();
       for (const wall of active) {
-        const group = displayWallDraft(wall,wallTextures);
-        group.userData.reviewOnlyWallProposal = true;
-        group.userData.proposalId = wall.proposalId;
-        group.userData.wallDimensions=wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly);
-        group.userData.wallProfile=profileDetails(wall.assembly).label;
-        group.userData.masonryAssembly=profileDetails(wall.assembly).core==="masonry";
-        wallAdditionLayer.add(group);
+        const key="wall:"+wall.proposalId,signature=JSON.stringify(wall);
+        const previous=draftMeshes.get(key);
+        const reused=previous?.signature===signature;
+        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures);
+        if(!reused){
+          group.userData.reviewOnlyWallProposal = true;
+          group.userData.proposalId = wall.proposalId;
+          group.userData.wallDimensions=wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly);
+          group.userData.wallProfile=profileDetails(wall.assembly).label;
+          group.userData.masonryAssembly=profileDetails(wall.assembly).core==="masonry";
+          wallAdditionLayer.add(group);
+        }else for(const opening of wall.openings??[]){
+          const id=doorKey(wall.proposalId,opening.openingId);
+          if(openDoors.has(id))nextOpenDoors.add(id);
+        }
+        nextMeshes.set(key,{signature,object:group});
         draftItemHosts.push(...draftCatalogueHosts(wall, group));
       }
       for (const ceiling of ceilings) {
-        const mesh = displayCeilingDraft(ceiling);
-        mesh.userData.surfaceKind = "ceiling";
-        mesh.userData.ceilingDimensions=`${Math.round(Math.abs(ceiling.end[0]-ceiling.start[0])*1000)} × ${Math.round(Math.abs(ceiling.end[1]-ceiling.start[1])*1000)} mm · H ${Math.round(ceiling.heightM*1000)}`;
-        wallAdditionLayer.add(mesh);
+        const key="ceiling:"+ceiling.proposalId,signature=JSON.stringify(ceiling);
+        const previous=draftMeshes.get(key);
+        // Only ceiling entries are meshes; check before narrowing for the host.
+        const mesh=previous?.signature===signature && previous.object instanceof THREE.Mesh
+          ? previous.object : displayCeilingDraft(ceiling);
+        if(mesh!==previous?.object){
+          mesh.userData.surfaceKind = "ceiling";
+          mesh.userData.ceilingDimensions=`${Math.round(Math.abs(ceiling.end[0]-ceiling.start[0])*1000)} × ${Math.round(Math.abs(ceiling.end[1]-ceiling.start[1])*1000)} mm · H ${Math.round(ceiling.heightM*1000)}`;
+          wallAdditionLayer.add(mesh);
+        }
+        nextMeshes.set(key,{signature,object:mesh});
         draftItemHosts.push({ id: ceilingDraftHostId(ceiling.proposalId), target: "ceiling", mesh, ceilingDraft: ceiling });
       }
+      for(const [key,entry] of draftMeshes){
+        if(nextMeshes.get(key)?.object===entry.object)continue;
+        wallAdditionLayer.remove(entry.object);
+        entry.object.traverse(item=>{
+          if(item instanceof THREE.Mesh || item instanceof THREE.Line){
+            item.geometry.dispose();
+            const materials=Array.isArray(item.material)?item.material:[item.material];
+            materials.forEach(material=>material.dispose());
+          }
+        });
+      }
+      draftMeshes=nextMeshes;
+      openDoors=nextOpenDoors;
     }
 
     // Presentation-only shadow-catching floor; never a sourced slab, floor finish or quantity.
