@@ -1682,6 +1682,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const gripPosition = new THREE.Vector3();
     let indexedMoveState: WallMoveHistory | null | undefined;
     const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
+    let planMoves:ReturnType<typeof safeWallMoves>=[];
+    let planExtra:WallVisual[]=[];let planExtraBatch:WallVisual[]|undefined;let planExtraSingle:WallVisual|null|undefined;
     let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
@@ -1709,7 +1711,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (moveState !== indexedMoveState) {
         indexedMoveState = moveState;
         movesById.clear();
-        for (const move of moveState ? safeWallMoves(moveState, manifest) : []) {
+        planMoves=moveState?safeWallMoves(moveState,manifest):[];
+        for (const move of planMoves) {
           if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
         }
       }
@@ -1733,9 +1736,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
+      if(overviewOpen&&(planExtraBatch!==addedWallsRef.current||planExtraSingle!==addedWallRef.current)){
+        planExtraBatch=addedWallsRef.current;planExtraSingle=addedWallRef.current;
+        planExtra=[...planExtraBatch,...(planExtraSingle?[planExtraSingle]:[])];
+      }
       planOverview.update(build.current.buildState,interaction.current.level,
         interaction.current.visibleIds,renderer.xr.isPresenting?renderer.xr.getCamera():camera,
-        renderer.xr.isPresenting&&overviewOpen);
+        renderer.xr.isPresenting&&overviewOpen,resize.current.projection,planMoves,planExtra);
       gizmo.show(resize.current.enabled ? resize.current.box : null);
       if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
         raycaster.setFromCamera(mouse, camera);
