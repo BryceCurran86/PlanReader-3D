@@ -227,6 +227,7 @@ def test_ambiguous_discovery_fails_closed(tmp_path):
 def test_linux_network_denial_inherited_by_child():
     import subprocess
     import sys
+    import os
     import ctypes.util
     if sys.platform != 'linux' or not ctypes.util.find_library('seccomp'):
         pytest.skip('Linux libseccomp required')
@@ -236,4 +237,16 @@ import sys, subprocess
 install_network_denial()
 subprocess.run([sys.executable, '-B', '-c', 'from tools.benchmark_process_isolation import verify_network_denial; verify_network_denial()'], check=True)
 '''
-    subprocess.run([sys.executable, '-B', '-c', code], check=True)
+    # This subprocess uses no originals or benchmark execution. Exercise the
+    # kernel mechanism independently of the hosted-run refusal (tested below).
+    env = dict(os.environ)
+    env.pop('GITHUB_ACTIONS', None)
+    subprocess.run([sys.executable, '-B', '-c', code], check=True, env=env)
+
+
+def test_linux_isolation_refuses_hosted_execution(monkeypatch):
+    from tools import benchmark_process_isolation as isolation
+    monkeypatch.setattr(isolation.sys, 'platform', 'linux')
+    monkeypatch.setenv('GITHUB_ACTIONS', 'true')
+    with pytest.raises(ValueError, match='local only'):
+        isolation.install_network_denial()
