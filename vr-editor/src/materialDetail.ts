@@ -37,10 +37,11 @@ function texture(bytes:Uint8Array,colorSpace:THREE.ColorSpace){
  t.wrapS=t.wrapT=THREE.RepeatWrapping;t.magFilter=THREE.LinearFilter;
  t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;t.anisotropy=2;t.needsUpdate=true;return t;
 }
+export function materialDetailMaps(pattern:DetailPattern){const p=detailPixels(pattern);return {map:texture(p.albedo,THREE.SRGBColorSpace),bumpMap:texture(p.relief,THREE.NoColorSpace)};}
 export function createMaterialDetailLibrary(){
  const cache=new Map<DetailPattern,{map:THREE.DataTexture;bumpMap:THREE.DataTexture}>();
  function get(pattern:DetailPattern){
-  let pair=cache.get(pattern);if(!pair){const p=detailPixels(pattern);pair={map:texture(p.albedo,THREE.SRGBColorSpace),bumpMap:texture(p.relief,THREE.NoColorSpace)};cache.set(pattern,pair);}return pair;
+  let pair=cache.get(pattern);if(!pair){pair=materialDetailMaps(pattern);cache.set(pattern,pair);}return pair;
  }
  return {get,dispose(){for(const t of cache.values()){t.map.dispose();t.bumpMap.dispose();}cache.clear();}};
 }
