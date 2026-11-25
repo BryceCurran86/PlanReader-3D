@@ -278,3 +278,75 @@ def test_numeric_epsilon_never_allows_a_real_source_ring_overshoot():
               (112, 75), (112, 80), (110, 80), (110, 120.0),
               (50, 120.0), (50, 60.0004)]
     assert a._candidate_ring(_path(points)) is None
+
+
+def test_wired_three_wall_plus_coincident_fixture_boundary_and_off_mode_parity(ocr):
+    """Live find_unique_native_tiled_room_face wires bounded 3-wall + exact coincident fixture edge."""
+    drawings = _fixture(include_wall=False)
+    # 3 structural walls (L, R, T) + exact 0.48pt coincident bottom fixture edge + exterior backing wall at y=125
+    drawings += [
+        _path([(50, 50), (50, 100)], width=0.96),
+        _path([(110, 50), (110, 100)], width=0.96),
+        _path([(50, 50), (110, 50)], width=0.96),
+        _path([(50, 100), (110, 100)], width=0.48),
+        _path([(50, 125), (110, 125)], width=0.96),
+    ]
+    page = _Page(drawings)
+    try:
+        # Off mode preserves strict 4-wall-only behavior
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+            allow_coincident_fixture_boundary=False,
+        ) is None
+        # Default wired mode recovers exact coincident fixture edge (still non-commercial)
+        face = a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+        )
+        assert isinstance(face, a.NativeTiledRoomFace)
+        assert face.commercial_permission is False
+        assert face.finished_width_pts == 60.0
+        assert face.finished_depth_pts == 50.0
+    finally:
+        page.close()
+
+
+def test_wired_offset_fixture_line_remains_rejected(ocr):
+    """Nearby 0.48pt line offset by 1.5pt (>0.25pt) MUST still abstain."""
+    drawings = _fixture(include_wall=False)
+    drawings += [
+        _path([(50, 50), (50, 100)], width=0.96),
+        _path([(110, 50), (110, 100)], width=0.96),
+        _path([(50, 50), (110, 50)], width=0.96),
+        _path([(50, 101.5), (110, 101.5)], width=0.48),
+        _path([(50, 125), (110, 125)], width=0.96),
+    ]
+    page = _Page(drawings)
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_wired_multi_wall_open_room_face_consumer_entrypoint():
+    from pb_source_multi_wall_open_room_face_shadow import (
+        MarkedOpeningOrFinishThresholdInput,
+        SourceWallSegmentInput,
+    )
+    sha = "a" * 64
+    walls = (
+        SourceWallSegmentInput("w1", (0, 0), (80, 0), 1.2, sha, "1", "vp1"),
+        SourceWallSegmentInput("w2", (80, 0), (80, 60), 1.2, sha, "1", "vp1"),
+        SourceWallSegmentInput("w3", (80, 60), (0, 60), 1.2, sha, "1", "vp1"),
+    )
+    thresh = (
+        MarkedOpeningOrFinishThresholdInput("t1", "finish_transition", (0, 60), (0, 0), "wit1", sha, "1", "vp1"),
+    )
+    res = a.compose_multi_wall_open_room_face_evidence(
+        wall_segments=walls, thresholds=thresh, room_label="OPEN_PLAN",
+        room_label_anchor_pts=(40.0, 30.0), source_sha256=sha, page_id="1", viewport_id="vp1",
+    )
+    assert res.resolved is True
+    assert res.commercial_projection_allowed is False
+    assert abs((res.area_pts2 or 0.0) - 4800.0) < 1e-2
