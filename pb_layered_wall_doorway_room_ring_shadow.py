@@ -1386,6 +1386,34 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
+def _aperture_complete_evidence(
+    gap: _Gap,
+    seeds: Sequence[tuple[_Gap, LayeredDoorwayClosure]],
+) -> tuple[str, tuple[int, ...]] | None:
+    """The one closure evidence an unresolved gap may inherit from the evidence-closed gaps of its own aperture, else None.
+
+    An aperture is one physical opening that several raw gaps describe at once (a wall's body band and its face lines): same orientation,
+    band and interval both overlapping by more than representation noise. A closed ``seed`` completes the gap only when the gap lies within
+    the seed's interval widened at each end by ``_APERTURE_WIDEN_BAND_FACTOR`` of the seed's own band thickness. Qualifying seeds whose
+    evidence differs are competing evidence: nothing is inherited.
+    """
+    evidence: set[tuple[str, tuple[int, ...]]] = set()
+    for closed, closure in seeds:
+        if closed.horizontal != gap.horizontal:
+            continue
+        if min(closed.band[1], gap.band[1]) - max(closed.band[0], gap.band[0]) <= NOISE_PT:
+            continue
+        if min(closed.hi, gap.hi) - max(closed.lo, gap.lo) <= NOISE_PT:
+            continue
+        reach = _APERTURE_WIDEN_BAND_FACTOR * (closed.band[1] - closed.band[0])
+        if gap.lo < closed.lo - reach - NOISE_PT or gap.hi > closed.hi + reach + NOISE_PT:
+            continue
+        evidence.add((closure.kind, tuple(sorted(closure.native_path_indices))))
+    if len(evidence) != 1:
+        return None
+    return next(iter(evidence))
+
+
 def _lining_face_wall_strips(
     drawings: Sequence[Mapping[str, Any]],
     gaps: Sequence[_Gap],
@@ -2171,34 +2199,6 @@ def _source_unresolved_gap_witnesses(
         }
     ordered = tuple(unique[key] for key in sorted(unique))
     return ordered[:limit], len(ordered)
-
-
-def _aperture_complete_evidence(
-    gap: _Gap,
-    seeds: Sequence[tuple[_Gap, LayeredDoorwayClosure]],
-) -> tuple[str, tuple[int, ...]] | None:
-    """The one closure evidence an unresolved gap may inherit from the evidence-closed gaps of its own aperture, else None.
-
-    An aperture is one physical opening that several raw gaps describe at once (a wall's body band and its face lines): same orientation,
-    band and interval both overlapping by more than representation noise. A closed ``seed`` completes the gap only when the gap lies within
-    the seed's interval widened at each end by ``_APERTURE_WIDEN_BAND_FACTOR`` of the seed's own band thickness. Qualifying seeds whose
-    evidence differs are competing evidence: nothing is inherited.
-    """
-    evidence: set[tuple[str, tuple[int, ...]]] = set()
-    for closed, closure in seeds:
-        if closed.horizontal != gap.horizontal:
-            continue
-        if min(closed.band[1], gap.band[1]) - max(closed.band[0], gap.band[0]) <= NOISE_PT:
-            continue
-        if min(closed.hi, gap.hi) - max(closed.lo, gap.lo) <= NOISE_PT:
-            continue
-        reach = _APERTURE_WIDEN_BAND_FACTOR * (closed.band[1] - closed.band[0])
-        if gap.lo < closed.lo - reach - NOISE_PT or gap.hi > closed.hi + reach + NOISE_PT:
-            continue
-        evidence.add((closure.kind, tuple(sorted(closure.native_path_indices))))
-    if len(evidence) != 1:
-        return None
-    return next(iter(evidence))
 
 
 def build_layered_wall_doorway_room_rings(

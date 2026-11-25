@@ -307,14 +307,27 @@ def test_helper_needs_the_bands_to_overlap_by_more_than_the_noise(band, found):
 
 
 @pytest.mark.parametrize("lo,hi,found", [
-    (58.0, 80.0, False),              # touching only
-    (58.0 - 0.03, 80.0, False),       # under the noise
-    (58.0 - 0.07, 70.0, True),        # more than the noise
-    (70.0, 90.0, False),              # disjoint
+    (58.0, 65.0, False),              # touching only (and inside the reach, so only the overlap rule can refuse it)
+    (58.0 - 0.03, 65.0, False),       # under the noise
+    (58.0 - 0.07, 65.0, True),        # more than the noise
+    (58.5, 66.0, False),              # disjoint
     (20.0, 30.0, True),               # inside the opening
 ])
 def test_helper_needs_the_intervals_to_overlap_by_more_than_the_noise(lo, hi, found):
     assert (_aperture_complete_evidence(_twin(lo=lo, hi=hi), [_seed()]) is not None) is found
+
+
+def test_helper_overlaps_of_exactly_the_noise_are_no_overlap():
+    seed = _seed(band=(-6.0, 0.0), interval=(-48.0, 0.0))  # exact binary-friendly numbers: the overlaps below are exactly 0.05
+    assert _aperture_complete_evidence(_twin(lo=-5.0, hi=5.0, band=(-NOISE, 1.2)), [seed]) is None
+    assert _aperture_complete_evidence(_twin(lo=-5.0, hi=5.0, band=(-NOISE - 0.01, 1.2)), [seed]) is not None
+    assert _aperture_complete_evidence(_twin(lo=-NOISE, hi=5.0, band=(-1.0, 1.2)), [seed]) is None
+    assert _aperture_complete_evidence(_twin(lo=-NOISE - 0.01, hi=5.0, band=(-1.0, 1.2)), [seed]) is not None
+
+
+def test_helper_widening_is_inclusive_at_exactly_the_reach_plus_the_noise():
+    assert _aperture_complete_evidence(_twin(lo=OPENING[0] - REACH - NOISE, hi=OPENING[1]), [_seed()]) is not None
+    assert _aperture_complete_evidence(_twin(lo=OPENING[0], hi=OPENING[1] + REACH + NOISE), [_seed()]) is not None
 
 
 @pytest.mark.parametrize("lo,hi,found", [
