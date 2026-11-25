@@ -4,10 +4,19 @@ on:
     paths:
       - "vr-editor/**"
       - ".github/workflows/vr-editor-typescript.yml"
+  push:
+    branches: ['vr/**']
+    paths:
+      - "vr-editor/**"
+      - ".github/workflows/vr-editor-typescript.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: vr-web-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   web-viewer:
@@ -20,6 +29,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: vr-editor/package-lock.json
       - name: Install editor dependencies
         working-directory: vr-editor
         run: npm ci --no-audit --no-fund

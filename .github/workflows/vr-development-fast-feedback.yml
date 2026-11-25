@@ -1,0 +1,72 @@
+name: VR development feedback (not release CI)
+
+on:
+  push:
+    branches: ['vr/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vr-dev-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify complete branch diff against main
+        id: scope
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          base=$(git merge-base HEAD FETCH_HEAD)
+          scope=$(git diff --no-renames --name-only -z "$base" HEAD | python scripts/ci_vr_dev_scope.py)
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "Development feedback only: $scope. Required full PR/main CI is unchanged." >> "$GITHUB_STEP_SUMMARY"
+  protocol-feedback:
+    needs: scope
+    if: needs.scope.outputs.scope == 'vr-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci-v1228.txt
+      - name: Install test dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run VR integration and source-safety checks
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+        run: |
+          python scripts/check_canonical_trace_route.py
+          python scripts/check_full_plan_v2_integrity.py
+          python -m pytest -q -rs --durations=10 tests/editable_3d/ tests/test_verified_private_sources.py tests/test_canonical_trace_route_guard.py
+      - name: Report scope
+        run: echo 'Development feedback only; not full regression, benchmark, or release acceptance.' >> "$GITHUB_STEP_SUMMARY"
+  full-required:
+    needs: scope
+    if: needs.scope.outputs.scope != 'vr-only'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Mixed, empty or unknown changes. Full PR/main CI is required; no scoped pass claimed.' >> "$GITHUB_STEP_SUMMARY"
