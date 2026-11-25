@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {Matrix4} from "three";
-import {nominalWallConnections,nominalCeilingFraming,nominalShellFraming} from "../src/constructionFrameVisual.ts";
+import {nominalWallConnections,nominalCeilingFraming,nominalShellFraming,clippedSurfaceMembers} from "../src/constructionFrameVisual.ts";
 import {connectedDraftShell} from "../src/connectedDraftShell.ts";
 import {CONSTRUCTION_LAYERS,layerVisible} from "../src/constructionLayers.ts";
 import {buildMenuLayout,EMPTY_ITEM_BROWSER} from "../src/catalogueMenu.ts";
@@ -21,7 +21,7 @@ test("nominal braces avoid apertures and unsupported masonry/steel assemblies",(
  assert.equal(nominalWallConnections({...wall,assembly:{profile:"internal-steel",thicknessMm:116,exteriorSide:"left"}}).children.length,0);
 });
 const ring=pts=>pts.map((p,i)=>({...wall,proposalId:"w"+i,start:p,end:pts[(i+1)%pts.length],openings:[]}));
-test("explicit rectangular ceiling and shell display bounded nominal members; complex roof abstains",()=>{
+test("rectangular and irregular shell framing remains clipped to supported surfaces",()=>{
  const ceiling=nominalCeilingFraming({start:[0,0],end:[6,4],heightM:2.7});
  assert.ok(ceiling&&ceiling.count>2);
  const settings={roof:"gable",pitchDeg:30,slabMm:100};
@@ -29,7 +29,11 @@ test("explicit rectangular ceiling and shell display bounded nominal members; co
  const group=nominalShellFraming(shell);
  for(const kind of ["roof-frame","ceiling-frame"])assert.ok(group.children.some(x=>x.userData.constructionAccessory===kind));
  const irregular=connectedDraftShell(ring([[0,0],[6,0],[6,2],[3,2],[3,4],[0,4]]),settings);
- assert.equal(nominalShellFraming(irregular).children.length,0);
+ assert.equal(nominalShellFraming(irregular).children.length,2);
+ const surface=irregular.surfaces.find(s=>s.kind==="ceiling");
+ const members=clippedSurfaceMembers(surface.vertices,[1,0]);assert.ok(members.length>2);
+ for(const m of members){const x=(m.a[0]+m.b[0])/2,z=(m.a[2]+m.b[2])/2;assert.ok(!(x>3+1e-6&&z>2+1e-6));if(z>2+1e-6)assert.ok(Math.max(m.a[0],m.b[0])<=3+1e-6);}
+ const rotated=connectedDraftShell(ring([[0,0],[4,1],[3,5],[-1,4]]),settings);assert.ok(rotated);assert.equal(nominalShellFraming(rotated).children.length,2);
  assert.equal(nominalCeilingFraming({start:[0,0],end:[0,4],heightM:2.7}),null);
 });
 test("new independent layers and accessible board controls fit menu bounds",()=>{
