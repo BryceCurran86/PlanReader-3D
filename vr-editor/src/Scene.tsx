@@ -20,7 +20,8 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
-import {setLiningFinish} from "./constructionLiningVisual";
+import {setLiningAppearance,LINING_BOARDS} from "./constructionLiningVisual";
+import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -93,6 +94,8 @@ type Props = {
   buildSizes: BuildSizes;
   stage: ConstructionStage;
   onStage: (stage: ConstructionStage) => void;
+  liningBoard:LiningBoard;
+  onLiningBoard:(board:LiningBoard)=>void;
   layers:LayerOverrides;
   onLayers:(layers:LayerOverrides)=>void;
   allDimensions:boolean;
@@ -238,7 +241,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
@@ -262,8 +265,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell });
-  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell };
+  const construction = useRef({ stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell });
+  construction.current = { stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -359,6 +362,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // All headset UX state is local to this viewer and resets on scene change.
     // The authenticated original scene and signed quantities never change.
     let selectedDraftId: string | null = null;
+    let inspectedWall:string|null=null;
     let hoveredDraftId: string | null = null;
     let magnetic=true, multiSelect=false;
     let wallLock:WallAim|null=null;let hoveredSourceId:string|null=null;
@@ -459,13 +463,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
           wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
-          radial,layersOpen,layers:construction.current.layers,
+          radial,layersOpen,layers:construction.current.layers,liningBoard:construction.current.liningBoard,liningHidden:!!selectedDraftId&&inspectedWall===selectedDraftId,
         });
       if(!layout.radial&&!angleTools&&!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
       return layout;
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="lining"){
+        if(choice.action==="board"){const i=LINING_BOARDS.indexOf(construction.current.liningBoard);construction.current.onLiningBoard(LINING_BOARDS[(i+1)%LINING_BOARDS.length]);}
+        else{const wall=selectedDraftWall();if(wall){inspectedWall=inspectedWall===wall.proposalId?null:wall.proposalId;}}
+        return;
+      }
       if(choice.area==="layer"){construction.current.onLayers(cycleLayer(construction.current.layers,choice.layer));return;}
       if(choice.area==="wall-profile"){
         if(resize.current.enabled||resize.current.projection)return;
@@ -1733,7 +1742,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
       const liningStage=isLiningStage(currentStage)?currentStage:null;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
-        resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall];
+        resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall,construction.current.liningBoard,inspectedWall];
       if(!visibilityKey.every((v,i)=>v===surfaceVisibilityKey[i])){
       surfaceVisibilityKey=visibilityKey;
       for (const obj of pickables) {
@@ -1754,18 +1763,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           shape.material.visible = displaySurface(currentStage, "ceiling");
           for(const child of shape.children)if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
             child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);
-            if(liningStage)setLiningFinish(child,liningStage);
+            if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
           }
         } else {
+          const inspect=inspectedWall!==null&&shape.userData.proposalId===inspectedWall&&!shape.userData.masonryAssembly&&currentStage!=="slab";
           for (const child of shape.children) {
-            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
+            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
             else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
             else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
-              child.visible=!!liningStage&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
-              if(liningStage)setLiningFinish(child,liningStage);
+              child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
+              if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
             }
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
-              const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true));
+              const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true)&&!inspect);
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
                 child.userData.catalogueDoorLeaf?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
             } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
