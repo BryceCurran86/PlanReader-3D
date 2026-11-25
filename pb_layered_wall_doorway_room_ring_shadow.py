@@ -2387,8 +2387,9 @@ def build_layered_wall_doorway_room_rings(
 
     ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
-    ``door_jamb_returns`` (default False, dark-painted only) adds the short wall
-    pieces bound to a segmented swing's own jamb (``_collect_door_jamb_return_strips``),
+    ``door_jamb_returns`` (default False, dark-painted only) is one paired change: it keeps a
+    segmented swing's own strokes out of the line-based wall strips (``_without_door_owned_paths``)
+    and adds the short wall pieces bound to that swing's jamb (``_collect_door_jamb_return_strips``),
     as topology-only candidate ink.
     ``jamb_caps_must_be_wall_ends`` (default False, dark-painted only) makes the jamb-cap closure
     strict: only wall ink that ends at the wall faces may cap an interruption (``_wall_end_depth``).
@@ -2452,10 +2453,13 @@ def build_layered_wall_doorway_room_rings(
         from pb_source_segmented_door_swing_shadow import (
             collect_source_black_segmented_door_swings,
         )
-        # A source door swing's own strokes are door symbol ink, not wall ink. Find the swings once, here, and
-        # give the line-based wall-strip collectors rows in which their native paths are inert (same indices).
+        # Find the source door swings once, here.
         segmented_witnesses = collect_source_black_segmented_door_swings(drawings)
-        wall_ink = _without_door_owned_paths(drawings, segmented_witnesses)
+        # With the jamb returns on, a swing's own strokes are door symbol ink, not wall ink: the line-based
+        # wall-strip collectors get rows in which its native paths are inert (same indices). One paired change:
+        # alone it loses doorways whose jamb reached the wall minimum only together with the open leaf.
+        if door_jamb_returns:
+            wall_ink = _without_door_owned_paths(drawings, segmented_witnesses)
         # Owner: black paired-line walls, dark filled wall strips and true
         # named wall ink are the structural wall hypothesis sources.
         # Unqualified green aisle/equipment/cold-room graphics are excluded

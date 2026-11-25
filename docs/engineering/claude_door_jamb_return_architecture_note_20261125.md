@@ -1,6 +1,7 @@
 # Short door-jamb returns in the dark-painted layered ring (25 November 2026)
 
-Default off (`door_jamb_returns`). Stacked on #4683, which is held (#4135 comment 7156845089). Claim: #4135 comment 7158215641.
+Default off (`door_jamb_returns`). First built stacked on #4683, which was held (#4135 comment 7156845089); claim 7158215641.
+**Superseded arrangement:** section 9. The door-stroke exclusion of #4683 now ships only paired with these returns.
 
 ## 1. Observed
 

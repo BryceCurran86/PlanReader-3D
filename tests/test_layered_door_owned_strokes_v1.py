@@ -4,9 +4,10 @@ Synthetic only; no private source. A source door swing (a quarter-turn chain of 
 leaf) is detected by ``collect_source_black_segmented_door_swings``. The leaf is collinear with the hinge-side jamb line, so the
 line-based wall-strip collectors (merged collinear dark face, stroke pair, wall-end closure, heavy stroke) read it as a thin wall
 face. That strip reaches into the doorway, the raw wall gap stops short of the door's far end, and the chord proposer's 0.18 pt
-containment test finds no parent gap. The builder now gives those collectors a view of the rows in which the witness-owned native
-paths are inert (same indices, same length); the door detection, the proposer and every other consumer keep reading the full rows.
-A page without a witness is untouched. Nothing here is a wall, an opening or a quantity.
+containment test finds no parent gap. With ``door_jamb_returns`` on (default off; the exclusion ships only paired with the jamb
+returns), the builder gives those collectors a view of the rows in which the witness-owned native paths are inert (same indices, same
+length); the door detection, the proposer and every other consumer keep reading the full rows. A page without a witness is
+untouched. Nothing here is a wall, an opening or a quantity.
 """
 from __future__ import annotations
 
@@ -74,6 +75,7 @@ class Scene:
 
 
 def _build(rows, **kw):
+    kw.setdefault("door_jamb_returns", True)   # the exclusion ships only paired with the jamb returns
     return build_layered_wall_doorway_room_rings(rows, source_sha256=SHA, page_index=0, dark_painted_wall_source=True, **kw)
 
 
@@ -111,6 +113,19 @@ def test_the_scene_reproduces_the_failure_condition():
     strips = ring._collect_merged_collinear_dark_face_strips(scene.rows)
     owning = [s for s in strips if scene.leaf in s.native_path_indices()]
     assert len(owning) == 1 and scene.jamb_hi in owning[0].native_path_indices()
+
+
+# ------------------------------------------------------------------------------------------------ paired and off by default
+
+def test_without_the_paired_switch_the_door_s_strokes_are_read_exactly_as_before(monkeypatch):
+    scene = Scene()
+    calls = []
+    real = ring._without_door_owned_paths
+    monkeypatch.setattr(ring, "_without_door_owned_paths", lambda *a: calls.append(1) or real(*a))
+    off = _build(scene.rows, door_jamb_returns=False)
+    assert calls == [] and off.source_owned_doorway_chords == ()   # the failure the exclusion repairs is still there
+    on = _build(scene.rows)
+    assert calls == [1] and len(on.source_owned_doorway_chords) == 1
 
 
 # ------------------------------------------------------------------------------------------------ the effect

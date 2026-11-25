@@ -64,6 +64,10 @@ D1 order and split: P3b first as its own small PR, then P3a, then P2c (recommend
 
 The owner-local release path (signed Lot16 and Maryborough retention) and the frozen four-project score were not run, and nothing here is a score. The experiments in section 1 are monkeypatches in scratch processes. The counterfactual covers 6 pages with witnesses; no page without a witness was run there (unchanged by construction; section 8 then measured 28 such rows). Rings and closure counts are not an accuracy score and no ground truth is used.
 
+**26 November 2026:** the exclusion below ships only paired with the jamb returns, behind the default-off
+`door_jamb_returns` (see `claude_door_jamb_return_architecture_note_20261125.md` section 9); with the switch off the
+builder behaves as main.
+
 ## 8. P3b as built (2026-11-24; owner: "Yes, build P3b"; claim #4135 comment 7132654445)
 
 **8.1 The change.** One helper and one hunk in `pb_layered_wall_doorway_room_ring_shadow.py` (+33/-7). `_without_door_owned_paths(drawings, witnesses)` returns the rows with every native path a segmented swing witness owns replaced by an inert row (`{"layer": "", "fill": None, "color": None, "items": ()}`), same indices and same length; with no witness it returns the input list itself. In the dark-painted strip assembly the witnesses are found once, before the collectors, and that view feeds the four line-based collectors (merged collinear dark face, stroke pair, wall-end closure, heavy stroke). The filled-strip collectors, the arc finder (`_swing_arcs`) and the chord proposer keep reading the full rows, and the chord block no longer recomputes the witnesses. No tolerance, vocabulary, `_gaps` or proposer change; the proposer's 0.18 pt rule stands.
