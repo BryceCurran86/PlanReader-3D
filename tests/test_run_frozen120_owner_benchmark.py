@@ -178,3 +178,62 @@ def test_hosted_run_fails_before_opening_any_original(tmp_path, monkeypatch, cap
     assert stopped.value.code == 2
     assert "local only" in capsys.readouterr().err
     assert not (tmp_path / "attempt").exists()
+
+
+def test_portable_input_bundle(tmp_path, monkeypatch, capsys):
+    bundle = tmp_path / 'bundle'
+    (bundle / 'sources').mkdir(parents=True)
+    (bundle / 'identity-maps').mkdir()
+    def verified(source, maps):
+        assert source == bundle / 'sources'
+        assert maps == bundle / 'identity-maps'
+        return {'source_files_verified': 10, 'identity_maps_present': 4}
+    monkeypatch.setattr(runner, '_check_local_inputs', verified)
+    assert runner.main(['--input-bundle', str(bundle), '--check-only']) == 0
+
+
+def test_archive_identity_rejects_modified_or_extra_files(tmp_path, monkeypatch):
+    import hashlib
+    import zipfile
+    root = tmp_path / 'app'
+    root.mkdir()
+    script = root / 'app.py'
+    script.write_bytes(b'original')
+    archive = tmp_path / 'app.zip'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.write(script, 'app/app.py')
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    monkeypatch.setattr(runner, '_REPO', root)
+    assert runner._archive_identity(archive, digest) == 'archive-sha256:' + digest
+    with pytest.raises(ValueError, match='SHA-256 mismatch'):
+        runner._archive_identity(archive, '0' * 64)
+    script.write_bytes(b'changed')
+    with pytest.raises(ValueError, match='differs'):
+        runner._archive_identity(archive, digest)
+    script.write_bytes(b'original')
+    (root / 'extra.py').write_bytes(b'extra')
+    with pytest.raises(ValueError, match='unexpected files'):
+        runner._archive_identity(archive, digest)
+
+
+def test_ambiguous_discovery_fails_closed(tmp_path):
+    a, b = tmp_path / 'a', tmp_path / 'b'
+    a.mkdir()
+    b.mkdir()
+    with pytest.raises(ValueError, match='multiple directories'):
+        runner._discover_directory(None, [a, b], 'inputs')
+
+
+def test_linux_network_denial_inherited_by_child():
+    import subprocess
+    import sys
+    import ctypes.util
+    if sys.platform != 'linux' or not ctypes.util.find_library('seccomp'):
+        pytest.skip('Linux libseccomp required')
+    code = '''
+from tools.benchmark_process_isolation import install_network_denial
+import sys, subprocess
+install_network_denial()
+subprocess.run([sys.executable, '-B', '-c', 'from tools.benchmark_process_isolation import verify_network_denial; verify_network_denial()'], check=True)
+'''
+    subprocess.run([sys.executable, '-B', '-c', code], check=True)
