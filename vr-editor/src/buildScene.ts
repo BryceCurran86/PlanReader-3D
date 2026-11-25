@@ -139,6 +139,18 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       const door=group.children[group.children.length-1];
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
+      if(opening.doorMechanism!=="garage"&&opening.widthM>=.4&&opening.heightM>=1.2){
+        const colours={chrome:0xc4ced4,"matte-black":0x292c2e,"brushed-brass":0xb99b63,"brushed-nickel":0xaaa9a4};
+        const material=new THREE.MeshStandardMaterial({color:colours[opening.doorHardware??"chrome"],metalness:opening.doorHardware==="matte-black"?.12:.7,roughness:.36});
+        const angle=-Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+        for(const side of [-1,1]){
+          const position=atOffset(wall,opening.offsetM+opening.widthM-.10,opening.sillHeightM+Math.min(1.02,opening.heightM*.6)).addScaledVector(normal,side*.04);
+          const plate=new THREE.Mesh(new THREE.BoxGeometry(.035,.095,.018),material);
+          plate.position.copy(position);plate.rotation.y=angle;door.add(plate);
+          const lever=new THREE.Mesh(new THREE.BoxGeometry(.105,.024,.035),material);
+          lever.position.copy(position).addScaledVector(normal,side*.025);lever.rotation.y=angle;door.add(lever);
+        }
+      }
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
