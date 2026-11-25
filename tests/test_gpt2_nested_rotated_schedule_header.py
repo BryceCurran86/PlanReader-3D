@@ -407,3 +407,314 @@ def test_strict_combined_dims_and_separate_cells_reject_arbitrary_prose_with_num
         ("D01", None, None),
         ("D02", 920, 2040),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Item 10: Rotated schedule coordinates across 0/90/180/270 degrees + fail-closed
+# ---------------------------------------------------------------------------
+
+def _make_rotated_words_page(
+    display_words,
+    *,
+    rotation: int,
+    width: float = 500.0,
+    height: float = 400.0,
+    matrix_override=None,
+):
+    """Build a synthetic PDF page whose native words map via rotation_matrix to display_words."""
+    norm = rotation % 360 if isinstance(rotation, int) and not isinstance(rotation, bool) and rotation % 90 == 0 else None
+    if norm == 90:
+        mat = _Matrix(a=0.0, b=1.0, c=-1.0, d=0.0, e=height, f=0.0)
+        # Inverse of (x' = -y + H, y' = x) is (x = y', y = H - x')
+        inv = lambda dx0, dy0, dx1, dy1: (dy0, height - dx1, dy1, height - dx0)
+    elif norm == 180:
+        mat = _Matrix(a=-1.0, b=0.0, c=0.0, d=-1.0, e=width, f=height)
+        # Inverse of (x' = W - x, y' = H - y) is (x = W - x', y = H - y')
+        inv = lambda dx0, dy0, dx1, dy1: (width - dx1, height - dy1, width - dx0, height - dy0)
+    elif norm == 270:
+        mat = _Matrix(a=0.0, b=-1.0, c=1.0, d=0.0, e=0.0, f=width)
+        # Inverse of (x' = y, y' = W - x) is (x = W - y', y = x')
+        inv = lambda dx0, dy0, dx1, dy1: (width - dy1, dx0, width - dy0, dx1)
+    else:
+        mat = _Matrix(a=1.0, b=0.0, c=0.0, d=1.0, e=0.0, f=0.0)
+        inv = lambda dx0, dy0, dx1, dy1: (dx0, dy0, dx1, dy1)
+
+    native_words = []
+    for idx, (dx0, dy0, dx1, dy1, text) in enumerate(display_words):
+        nx0, ny0, nx1, ny1 = inv(dx0, dy0, dx1, dy1)
+        native_words.append((nx0, ny0, nx1, ny1, text, idx, 0, 0))
+
+    class _DynamicRotatedPage:
+        pass
+
+    page = _DynamicRotatedPage()
+    page.rotation = rotation
+    page.rotation_matrix = mat if matrix_override is None else matrix_override
+    page.get_text = lambda kind: list(native_words) if kind == "words" else ""
+    return page
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270, -90, 360, 450])
+def test_metamorphic_rotation_invariance_across_all_quadrants(rotation):
+    """Identical display-space schedule yields identical entries across 0/90/180/270 deg."""
+    display_words = [
+        # Row 0: split mark top + centered spanning DOOR LEAF + NOTES
+        (10.0, 10.0, 42.0, 20.0, "DOOR"),
+        (125.0, 10.0, 160.0, 20.0, "DOOR"),
+        (165.0, 10.0, 205.0, 20.0, "LEAF"),
+        (280.0, 10.0, 325.0, 20.0, "NOTES"),
+        # Row 1: split mark bottom + WIDTH + HEIGHT
+        (10.0, 26.0, 35.0, 36.0, "NO."),
+        (100.0, 26.0, 145.0, 36.0, "WIDTH"),
+        (190.0, 26.0, 240.0, 36.0, "HEIGHT"),
+        # Row 2: pure unit continuation row
+        (105.0, 42.0, 138.0, 52.0, "(mm)"),
+        (195.0, 42.0, 228.0, 52.0, "(mm)"),
+        # Data rows + wrapped notes continuation line (must NOT shift left!)
+        (10.0, 62.0, 36.0, 72.0, "D01"),
+        (105.0, 62.0, 130.0, 72.0, "920"),
+        (195.0, 62.0, 228.0, 72.0, "2040"),
+        (280.0, 62.0, 320.0, 72.0, "Solid"),
+        (324.0, 62.0, 355.0, 72.0, "core"),
+        # Wrapped notes line containing a door mark token strictly in NOTES column
+        (280.0, 78.0, 310.0, 88.0, "D99"),
+        (10.0, 98.0, 58.0, 108.0, "D02-D03"),
+        (105.0, 98.0, 130.0, 108.0, "820"),
+        (195.0, 98.0, 228.0, 108.0, "2100"),
+        (280.0, 98.0, 330.0, 108.0, "Hollow"),
+    ]
+    page = _make_rotated_words_page(display_words, rotation=rotation)
+    out = parse_schedule_page(page, page_no=5, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out] == [
+        ("D01", 920, 2040, "leaf"),
+        ("D02", 820, 2100, "leaf"),
+        ("D03", 820, 2100, "leaf"),
+    ]
+
+
+@pytest.mark.parametrize("bad_rotation", [45, 135, -45, True, "90", 90.5])
+def test_invalid_page_rotation_values_fail_closed(bad_rotation):
+    display_words = [
+        (10.0, 10.0, 60.0, 20.0, "DOOR NO"),
+        (100.0, 10.0, 150.0, 20.0, "LEAF WIDTH"),
+        (190.0, 10.0, 240.0, 20.0, "LEAF HEIGHT"),
+        (10.0, 40.0, 40.0, 50.0, "D01"),
+        (100.0, 40.0, 130.0, 50.0, "920"),
+        (190.0, 40.0, 220.0, 50.0, "2040"),
+    ]
+    page = _make_rotated_words_page(display_words, rotation=bad_rotation)
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+@pytest.mark.parametrize(
+    "rotation,bad_matrix",
+    [
+        # Identity matrix mismatched with rotation=90
+        (90, _Matrix(a=1.0, b=0.0, c=0.0, d=1.0, e=0.0, f=0.0)),
+        # 270 matrix mismatched with rotation=90
+        (90, _Matrix(a=0.0, b=-1.0, c=1.0, d=0.0, e=0.0, f=500.0)),
+        # Reflected matrix (negative determinant)
+        (180, _Matrix(a=-1.0, b=0.0, c=0.0, d=1.0, e=500.0, f=0.0)),
+        # Skewed non-orthogonal matrix
+        (90, _Matrix(a=0.2, b=1.0, c=-1.0, d=0.0, e=400.0, f=0.0)),
+        # Singular zero-determinant matrix
+        (270, _Matrix(a=0.0, b=0.0, c=0.0, d=0.0, e=0.0, f=0.0)),
+        # Non-finite translation
+        (180, _Matrix(a=-1.0, b=0.0, c=0.0, d=-1.0, e=float("nan"), f=400.0)),
+    ],
+)
+def test_corrupt_or_mismatched_rotation_matrix_fails_closed(rotation, bad_matrix):
+    display_words = [
+        (10.0, 10.0, 60.0, 20.0, "DOOR NO"),
+        (100.0, 10.0, 150.0, 20.0, "LEAF WIDTH"),
+        (190.0, 10.0, 240.0, 20.0, "LEAF HEIGHT"),
+        (10.0, 40.0, 40.0, 50.0, "D01"),
+        (100.0, 40.0, 130.0, 50.0, "920"),
+        (190.0, 40.0, 220.0, 50.0, "2040"),
+    ]
+    page = _make_rotated_words_page(display_words, rotation=rotation, matrix_override=bad_matrix)
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+def test_inverted_word_bbox_on_rotated_page_fails_closed():
+    page = _make_rotated_words_page([], rotation=270)
+    page.get_text = lambda kind: [
+        (50.0, 10.0, 20.0, 20.0, "DOOR", 0, 0, 0),  # inverted x1 < x0
+    ]
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+# ---------------------------------------------------------------------------
+# Item 11: Multi-line wrapped headers & cells WITHOUT crossing column ownership
+# ---------------------------------------------------------------------------
+
+def test_grid_parent_span_stops_at_unrelated_neighbor_column_without_crossing():
+    """DOOR LEAF span MUST NOT cross VISION PANEL to steal its HEIGHT column."""
+    rows = [
+        ["DOOR NO.", "DOOR LEAF", None, "VISION PANEL", None],
+        [None, "WIDTH", "THICKNESS", "HEIGHT", "GLAZING"],
+        ["D01", "920", "40", "1200", "Toughened"],
+    ]
+    # Grid has no valid complete DOOR LEAF pair (HEIGHT belongs to VISION PANEL);
+    # with an empty non-grid page it MUST abstain instead of pairing 920 x 1200.
+    page = _PageWithGrid([rows])
+    page.get_text = lambda kind: []
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+def test_grid_multiline_split_mark_wrapped_units_3row_headers_and_wrapped_cells():
+    # 1. 2-row vertically split mark header ("DOOR" / "NO."), wrapped "(mm)" child headers,
+    #    and wrapped multi-line mark/dimension cells ("D01\nD02", "D03 -\nD04", "920\nmm").
+    rows_2 = [
+        ["DOOR", "ROUGH\nOPENING", None, "NOTES"],
+        ["NO.", "WIDTH\n(mm)", "HEIGHT\n(MM)", None],
+        ["D01\nD02", "920\nmm", "2040\nmm", "Line 1\nLine 2"],
+        ["D03 -\nD04", "820", "2040", "Wrapped hyphen range"],
+    ]
+    out_2 = parse_schedule_page(_PageWithGrid([rows_2]), page_no=3, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out_2] == [
+        ("D01", 920, 2040, "rough_opening"),
+        ("D02", 920, 2040, "rough_opening"),
+        ("D03", 820, 2040, "rough_opening"),
+        ("D04", 820, 2040, "rough_opening"),
+    ]
+
+    # 2. 3-row stacked parent header ("DOOR" + "LEAF" over "WIDTH"/"HEIGHT").
+    rows_3p = [
+        ["DOOR", "DOOR", None],
+        ["MARK", "LEAF", None],
+        [None, "WIDTH (mm)", "HEIGHT (mm)"],
+        ["D10", "900", "2100"],
+    ]
+    out_3p = parse_schedule_page(_PageWithGrid([rows_3p]), page_no=4, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out_3p] == [
+        ("D10", 900, 2100, "leaf"),
+    ]
+
+    # 3. 3-row header with separate unit continuation row ("(mm)").
+    rows_3u = [
+        ["WINDOW\nMARK", "CLEAR\nOPENING", None],
+        [None, "WIDTH", "HEIGHT"],
+        [None, "(mm)", "(mm)"],
+        ["W01,\nW02", "1200", "1500"],
+    ]
+    out_3u = parse_schedule_page(_PageWithGrid([rows_3u]), page_no=6, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out_3u] == [
+        ("W01", 1200, 1500, "clear_opening"),
+        ("W02", 1200, 1500, "clear_opening"),
+    ]
+
+    # 4. Single-row wrapped native grid header (both separate and combined).
+    rows_1 = [
+        ["DOOR\nMARK", "DOOR FRAME\nWIDTH\n(mm)", "DOOR FRAME\nHEIGHT\n(mm)"],
+        ["D05", "960", "2080"],
+    ]
+    out_1 = parse_schedule_page(_PageWithGrid([rows_1]), page_no=7, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out_1] == [
+        ("D05", 960, 2080, "frame"),
+    ]
+
+
+def test_grid_conflicting_child_basis_under_parent_span_fails_closed():
+    rows = [
+        ["DOOR NO.", "DOOR LEAF", None],
+        [None, "FRAME WIDTH", "HEIGHT"],
+        ["D01", "920", "2040"],
+    ]
+    assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
+
+
+def test_rough_and_clear_opening_nested_text_headers_preserve_basis():
+    rows = [
+        row("DOOR NO", "ROUGH OPENING", "ROUGH OPENING"),
+        row("NO", "WIDTH (mm)", "HEIGHT (mm)"),
+        row("D01", "950", "2070"),
+    ]
+    out = parse_schedule_rows(rows, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out] == [
+        ("D01", 950, 2070, "rough_opening"),
+    ]
+
+
+def test_borderless_data_phrase_crossing_two_columns_fails_closed():
+    """A value physically bridging WIDTH and HEIGHT columns must fail closed."""
+    display_words = [
+        (10.0, 10.0, 60.0, 20.0, "DOOR NO"),
+        (125.0, 10.0, 205.0, 20.0, "DOOR LEAF"),
+        (100.0, 26.0, 145.0, 36.0, "WIDTH"),
+        (190.0, 26.0, 240.0, 36.0, "HEIGHT"),
+        (10.0, 50.0, 36.0, 60.0, "D01"),
+        # Single wide phrase physically overlapping BOTH WIDTH [100,145] and HEIGHT [190,240]
+        (115.0, 50.0, 215.0, 60.0, "920x2040"),
+    ]
+    page = _make_rotated_words_page(display_words, rotation=90)
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+def test_borderless_spanning_parent_bleeding_into_unrelated_column_fails_closed():
+    """Two parent phrases overlapping the same child column must fail closed."""
+    display_words = [
+        (10.0, 10.0, 60.0, 20.0, "DOOR NO"),
+        (95.0, 10.0, 165.0, 20.0, "DOOR LEAF"),
+        (140.0, 10.0, 245.0, 20.0, "DOOR FRAME"),
+        (100.0, 26.0, 145.0, 36.0, "WIDTH"),
+        (190.0, 26.0, 240.0, 36.0, "HEIGHT"),
+        (10.0, 50.0, 36.0, 60.0, "D01"),
+        (105.0, 50.0, 130.0, 60.0, "920"),
+        (195.0, 50.0, 228.0, 60.0, "2040"),
+    ]
+    page = _make_rotated_words_page(display_words, rotation=0)
+    assert parse_schedule_page(page, two_level_header=True) == []
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_real_pymupdf_rotated_page_extracts_identical_schedule(rotation):
+    """End-to-end PyMuPDF page with real /Rotate 0/90/180/270 and display-upright text."""
+    import fitz
+
+    doc = fitz.open()
+    # Mediabox dimensions chosen so display page is always 500 x 350.
+    w_disp, h_disp = 500.0, 350.0
+    if rotation in (90, 270):
+        page = doc.new_page(width=h_disp, height=w_disp)
+    else:
+        page = doc.new_page(width=w_disp, height=h_disp)
+    page.set_rotation(rotation)
+
+    # Place words in display-space coordinates, transformed back into native
+    # mediabox space via derotation_matrix. PDF /Rotate is clockwise while
+    # PyMuPDF insert_text(rotate=) is counter-clockwise, so equal angles render
+    # visually upright in display space (matching rotated CAD/Revit sheets).
+    derot = page.derotation_matrix
+    items = [
+        (30.0, 40.0, "DOOR"),
+        (140.0, 40.0, "DOOR LEAF SIZE"),
+        (30.0, 62.0, "NO."),
+        (140.0, 62.0, "WIDTH"),
+        (210.0, 62.0, "HEIGHT"),
+        (30.0, 95.0, "D01"),
+        (145.0, 95.0, "920"),
+        (215.0, 95.0, "2040"),
+        (30.0, 125.0, "D02-D03"),
+        (145.0, 125.0, "820"),
+        (215.0, 125.0, "2100"),
+    ]
+    for dx, dy, text in items:
+        pt = fitz.Point(dx, dy) * derot
+        page.insert_text(pt, text, fontsize=9, rotate=rotation)
+
+    raw = doc.tobytes()
+    doc.close()
+
+    reopened = fitz.open(stream=raw, filetype="pdf")
+    try:
+        out = parse_schedule_page(reopened[0], page_no=1, two_level_header=True)
+    finally:
+        reopened.close()
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out] == [
+        ("D01", 920, 2040, "leaf"),
+        ("D02", 820, 2100, "leaf"),
+        ("D03", 820, 2100, "leaf"),
+    ]
+
+
