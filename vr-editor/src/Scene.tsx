@@ -369,7 +369,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let panelPinned = false;
     let helpOpen = false;
     let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
-    let lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
+    let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     let stickNeedsNeutral=false;
     const closeTools=()=>{toolsOpen=false;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(){
@@ -421,11 +421,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const samePointerContext = (expected: PointerContext) =>
       pointerContext().every((value, index) => value === expected[index]);
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
+    let anchorKey: readonly unknown[] = [];
+    let cachedAnchors: ReturnType<typeof verifiedSourceWallAnchors> = [];
     function snapOptions() {
+      const key = [build.current.buildLevel, interaction.current.visibleIds, resize.current.projection];
+      if (!key.every((v,i)=>v===anchorKey[i])) {
+        anchorKey=key;
+        cachedAnchors=resize.current.projection ? [] : verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds);
+      }
       return {gridM:snapGrid,axis:snapAxis,magnetic,preferredDraftId:wallLock?.target.kind==="draft"?wallLock.target.id:null,
         wallSegments:resize.current.projection?[]:visibleWallTargets().filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})),
-        verifiedAnchors: resize.current.projection ? [] :
-          verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds)};
+        verifiedAnchors: cachedAnchors};
     }
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
@@ -1644,14 +1650,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       for (const move of activeMoves) {
         if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
       }
+      const projectionX=resize.current.projection?.scaleX ?? 1;
+      const projectionZ=resize.current.projection?.scaleZ ?? 1;
       for (const obj of pickables) {
         const id=obj.userData.objectId as string|undefined;
         const move=id === undefined ? undefined : movesById.get(id);
         const held=activeGrip?.objectId===id;
         const dx=(move?.dx??0)+(held?dragX:0);
         const dz=(move?.dz??0)+(held?dragZ:0);
-        if (Number.isFinite(dx)&&Number.isFinite(dz))
-          obj.position.set(dx * (resize.current.projection?.scaleX ?? 1), 0, dz * (resize.current.projection?.scaleZ ?? 1));
+        if (Number.isFinite(dx)&&Number.isFinite(dz)) {
+          const x=dx*projectionX,z=dz*projectionZ;
+          if(obj.position.x!==x||obj.position.y!==0||obj.position.z!==z)obj.position.set(x,0,z);
+        }
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
@@ -1751,7 +1761,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
         if(layout&&(hover?.index??-1)!==lastMenuHover||layout&&now-lastMenuDraw>=100){
-          buildOverlay.drawMenu(layout,hover?.index??-1);lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+          const signature=JSON.stringify(layout);
+          if(signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover){
+            buildOverlay.drawMenu(layout,hover?.index??-1);
+            lastMenuSignature=signature;
+          }
+          lastMenuDraw=now;lastMenuHover=hover?.index??-1;
         }
       } else {
         hoveredDraftId=null;hoveredSourceId=null;wallLock=null;
@@ -1777,6 +1792,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const id = group.userData.proposalId as string;
         const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id));
         const hovered = id === hoveredDraftId;
+        const highlightState=selected ? 2 : hovered ? 1 : 0;
+        if(group.userData.lastDraftHighlight===highlightState)continue;
+        group.userData.lastDraftHighlight=highlightState;
         for (const part of group.children) {
           if (!(part instanceof THREE.Mesh || part instanceof THREE.Line)) continue;
           const material = part.material;
