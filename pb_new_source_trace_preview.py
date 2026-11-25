@@ -258,7 +258,8 @@ def source_native_trace_preview(
                 "numbered_source_key_reader_failed:" + type(exc).__name__,
                 page_index, sha,
             )
-        panes = _full_page_source_tiles(rect.width, rect.height, len(drawings))
+        _nw, _nh = (rect.height, rect.width) if page.rotation in (90, 270) else (rect.width, rect.height)
+        panes = _full_page_source_tiles(_nw, _nh, len(drawings))
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
         _report("resolving_wall_and_room_topology", .44)
@@ -291,7 +292,9 @@ def source_native_trace_preview(
         )
         _report("wall_room_topology_ready", .56)
         preview = fitz.open()
-        canvas = preview.new_page(width=rect.width, height=rect.height)
+        canvas = preview.new_page(width=_nw, height=_nh)
+        if page.rotation:
+            document[page_index].set_rotation(0)  # in-memory only: draw the native-frame page under native overlays
         canvas.show_pdf_page(canvas.rect, document, page_index)
         native_wall_counts = {}
         seen = set()
