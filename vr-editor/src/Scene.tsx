@@ -1894,6 +1894,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
             else if(child.userData.constructionAccessory==="bracing"||child.userData.constructionAccessory==="tie-down")child.visible=layerVisible(construction.current.layers,child.userData.constructionAccessory,inspect||currentStage==="framing");
             else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
+            else if(child.userData.illustrativeTrim)child.visible=!inspect&&currentStage!=="slab"&&layerVisible(construction.current.layers,"wall",!framing)&&layerVisible(construction.current.layers,"finishes",currentStage==="finished");
             else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
               child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
               if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
