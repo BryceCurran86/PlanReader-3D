@@ -39,7 +39,7 @@ import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
-import {thumbstickSector} from "./toolWheelInput";
+import {displayedMenuAction,thumbstickSector} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -371,14 +371,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let helpOpen = false;
     let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
     let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
+    // Only a layout actually displayed can authorize a menu action.
+    let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false;
-    const closeTools=()=>{toolsOpen=false;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
       if(toolsOpen){
         for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
-        activeGrip=null;radial=true;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
+        activeGrip=null;radial=true;displayedMenuLayout=null;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
       }
       else closeTools();
     }
@@ -1272,8 +1274,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       return buildOverlay.menuHit(raycaster,layout);
     }
     function activateMenu(choice:MenuAction){
+      displayedMenuLayout=null;
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
+    }
+    function activateDisplayedMenu(current: ReturnType<typeof menuLayout>) {
+      const shown=displayedMenuLayout;
+      if(!shown)return;
+      const hit=menuTarget(shown);
+      if(!hit?.action)return;
+      const action=displayedMenuAction(shown,current,hit.index);
+      if(action)activateMenu(action);
     }
     function menuKey(layout: ReturnType<typeof menuLayout>) {
       const hit=menuTarget(layout);
@@ -1283,12 +1294,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       menuConsumed[index]=false;
       aimController(controllers[index]);
       const layout = menuLayout("");
-      buildOverlay.sizeMenu(layout);
       if(toolsOpen){
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
         if(inputSources[index]?.handedness!=="left"||!inputSources.some(s=>s?.handedness==="right")){
-          const hit=menuTarget(layout);if(hit?.action)activateMenu(hit.action);
+          activateDisplayedMenu(layout);
         }
         return;
       }
@@ -1316,7 +1326,6 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       lastController = index;
       aimController(controllers[index]);
       const layout = menuLayout("");
-      buildOverlay.sizeMenu(layout);
       const press = xrPress[index];
       if (press && (!samePointerContext(press.context) || press.menu !== menuKey(layout))) {
         selectEnd(index);
@@ -1333,7 +1342,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
-      if(toolsOpen){const hit=menuTarget(layout);if(hit?.action)activateMenu(hit.action);return;}
+      // Menu actions dispatch exclusively on selectstart.
+      if(toolsOpen)return;
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
@@ -1546,7 +1556,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
-      toolsOpen=false;ghostMode=false;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
+      toolsOpen=false;ghostMode=false;displayedMenuLayout=null;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
       reportTool("Left grip opens tools. Aim or use right stick, then trigger. Left stick walks when tools are closed.");
       elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
@@ -1807,12 +1817,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(layout&&(hover?.index??-1)!==lastMenuHover||layout&&now-lastMenuDraw>=100){
+        if(layout){
           const signature=JSON.stringify(layout);
           if(signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover){
             buildOverlay.drawMenu(layout,hover?.index??-1);
             lastMenuSignature=signature;
           }
+          displayedMenuLayout=layout;
           lastMenuDraw=now;lastMenuHover=hover?.index??-1;
         }
       } else {

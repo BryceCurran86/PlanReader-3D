@@ -29,3 +29,11 @@ export function menuButtonAt(layout:MenuLayout,x:number,y:number):number {
  }
  return distance<=12&&best>=0&&!layout.buttons[best].disabled?best:-1;
 }
+
+/** A button may dispatch only if the rendered and current targets still agree. */
+export function displayedMenuAction(shown:MenuLayout|null,current:MenuLayout,index:number):MenuLayout["buttons"][number]["action"]|null {
+ if(!shown||shown.width!==current.width||shown.height!==current.height||shown.radial!==current.radial||!Number.isInteger(index)||index<0)return null;
+ const before=shown.buttons[index],after=current.buttons[index];
+ if(!before||!after||before.disabled||after.disabled||JSON.stringify(before)!==JSON.stringify(after))return null;
+ return before.action;
+}
