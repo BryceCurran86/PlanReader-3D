@@ -639,8 +639,10 @@ def _ring_scene(width=52.0, lo=1234.5, y0=43.0):
     return rows
 
 
-def test_the_tool_names_the_gate_and_the_strip_that_owns_the_door_ink():
-    report = tool.page_report(_ring_scene(), page_index=0)
+@pytest.mark.parametrize("door_jamb_returns", [False, True])
+def test_the_tool_names_the_gate_and_the_strip_that_owns_the_door_ink(door_jamb_returns):
+    report = tool.page_report(_ring_scene(), page_index=0, door_jamb_returns=door_jamb_returns)
+    assert report["builder_keeps_door_owned_strokes_out_of_the_strips"] is door_jamb_returns
     assert report["proposal_called"] is True and report["witness_count"] == 1 and report["raw_gap_count"] >= 1
     assert report["all_receipts_agree_with_the_proposer"] is True
     (w,) = report["witnesses"]
@@ -650,7 +652,7 @@ def test_the_tool_names_the_gate_and_the_strip_that_owns_the_door_ink():
     assert merged[0]["strip_runs_along_the_door_axis"] is False                   # a thin strip standing across the doorway
     assert 0.3 < merged[0]["reach_into_door_interval_pdf_pts"] < 1.0              # at its hinge end (the finding of the P3a note)
     assert report["witnesses_with_strips_from_their_own_paths"] == 1
-    if report["builder_keeps_door_owned_strokes_out_of_the_strips"]:              # a tree that already carries the door-ink exclusion
+    if report["builder_keeps_door_owned_strokes_out_of_the_strips"]:              # the builder run with the door-ink exclusion
         assert w["first_failing_gate"] == "chord_proposed" and report["chord_count"] == 1
     else:
         assert w["first_failing_gate"] == G2 and report["chord_count"] == 0

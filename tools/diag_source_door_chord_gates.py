@@ -9,7 +9,8 @@ swing witness: the first failing gate (G0 axis, G1 four supports, G2 no parent r
 door interval, or a proposed chord), the support counts, and for every same-axis raw gap on the door's wall line the signed miss at
 each end of the door interval (positive = the gap STOPS SHORT of that end). It adds which strip collector minted a strip from each
 witness's native paths and how far that strip reaches into the doorway; that attribution runs the collectors on the FULL rows, so it
-shows what door symbol ink would mint even where the builder already keeps it out of the strips.
+shows what door symbol ink would mint even where the builder already keeps it out of the strips. The builder keeps it out only with
+its ``door_jamb_returns`` switch (``--door-jamb-returns`` here; off, as by default, reports the builder as it normally runs).
 
 This module changes no production behaviour and grants no authority. Every figure is a topology diagnostic; nothing here is a wall,
 an opening, a closure, a quantity or a score.
@@ -39,6 +40,7 @@ def capture_proposer_call(
     page_index: int,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    door_jamb_returns: bool = False,
 ) -> tuple[Any, tuple[Any, tuple[Mapping[str, Any], ...], tuple[Any, ...]] | None]:
     """Build the dark-painted layered ring and capture ``(drawings, witnesses, gaps)`` as the chord proposer received them.
 
@@ -60,6 +62,7 @@ def capture_proposer_call(
             dark_painted_wall_source=True,
             wall_end_stroke_closures=wall_end_stroke_closures,
             source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
+            door_jamb_returns=door_jamb_returns,
         )
     finally:
         swing.propose_source_owned_doorway_chords = real
@@ -150,19 +153,20 @@ def page_report(
     page_index: int,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    door_jamb_returns: bool = False,
     detail: bool = True,
 ) -> dict[str, Any]:
     """One page's counts-only chord-gate report (see the module docstring)."""
     result, captured = capture_proposer_call(
         rows, page_index=page_index, wall_end_stroke_closures=wall_end_stroke_closures,
-        source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
+        source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands, door_jamb_returns=door_jamb_returns,
     )
     report: dict[str, Any] = {
         "page_index": page_index,
         "rows": len(rows),
         "builder_status": result.status.value,
         "builder_reason_codes": list(result.reason_codes),
-        "builder_keeps_door_owned_strokes_out_of_the_strips": hasattr(layered, "_without_door_owned_paths"),
+        "builder_keeps_door_owned_strokes_out_of_the_strips": door_jamb_returns,
         "proposal_called": captured is not None,
         "witness_count": 0,
         "chord_count": 0,
@@ -193,7 +197,7 @@ def page_report(
 
 
 def build_report(
-    pdf: Path, page_indices: Sequence[int] | None, *, opt_ins: bool = False, detail: bool = True,
+    pdf: Path, page_indices: Sequence[int] | None, *, opt_ins: bool = False, door_jamb_returns: bool = False, detail: bool = True,
 ) -> dict[str, Any]:
     payload = pdf.read_bytes()
     sha = hashlib.sha256(payload).hexdigest()
@@ -207,7 +211,8 @@ def build_report(
         for index in indices:
             rows = document[index].get_drawings()
             pages.append(page_report(
-                rows, page_index=index, wall_end_stroke_closures=opt_ins, source_heavy_stroke_wall_bands=opt_ins, detail=detail,
+                rows, page_index=index, wall_end_stroke_closures=opt_ins, source_heavy_stroke_wall_bands=opt_ins,
+                door_jamb_returns=door_jamb_returns, detail=detail,
             ))
     finally:
         document.close()
@@ -218,6 +223,7 @@ def build_report(
         "note": _NO_ABSOLUTE_COORDINATES,
         "source_sha256_prefix": sha[:16],
         "opt_in_flags": bool(opt_ins),
+        "door_jamb_returns": bool(door_jamb_returns),
         "pages": pages,
         "totals": {
             "pages": len(pages),
@@ -236,13 +242,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--all-pages", action="store_true", help="every page of the document (slow on large vector sheets)")
     parser.add_argument("--opt-ins", action="store_true",
                         help="also run the builder with wall_end_stroke_closures and source_heavy_stroke_wall_bands")
+    parser.add_argument("--door-jamb-returns", action="store_true",
+                        help="run the builder with its door_jamb_returns switch (door strokes out of the wall strips, jamb returns in)")
     parser.add_argument("--summary-only", action="store_true", help="drop the per-witness records")
     parser.add_argument("--json-out", type=Path, help="write the report here instead of printing it (keep it outside the repository)")
     args = parser.parse_args(argv)
     if bool(args.page_index) == bool(args.all_pages):
         parser.error("give --page-index (repeatable) or --all-pages, not both and not neither")
     report = build_report(
-        args.pdf, None if args.all_pages else args.page_index, opt_ins=args.opt_ins, detail=not args.summary_only,
+        args.pdf, None if args.all_pages else args.page_index, opt_ins=args.opt_ins, door_jamb_returns=args.door_jamb_returns,
+        detail=not args.summary_only,
     )
     text = json.dumps(report, indent=1, sort_keys=True)
     if args.json_out is not None:
