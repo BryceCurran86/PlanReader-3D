@@ -6,6 +6,7 @@ import {
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import {localDoorMotion} from "./localDoorMotion.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
@@ -134,7 +135,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       panel(points, leaf);
       addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
-      door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
+      door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
