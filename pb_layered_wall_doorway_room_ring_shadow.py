@@ -61,6 +61,9 @@ _STROKE_PAIR_THICK_MIN = 1.2
 _STROKE_PAIR_THICK_MAX = 8.0
 _STROKE_PAIR_MIN_SPAN = 8.0
 _STROKE_PAIR_FACE_PT = 0.35
+# One wall stub (shorter than the wall is thick) plus the thickness of the wall it meets: how far a raw gap of one aperture may reach past the
+# evidence-closed gap of that aperture and still inherit its evidence (``aperture_complete_closures``). Relative to the seed's own band thickness.
+_APERTURE_WIDEN_BAND_FACTOR = 2.0
 _STROKE_PAIR_CLUSTER_PT = 0.8
 _DARK_FILL_THICK_MAX = 14.0
 # PDF-point candidate heuristic only. Not a physical wall identity or scale rule.
@@ -88,6 +91,9 @@ REASON_UNLABELLED_SOURCE_PRIMITIVE_CAP = (
 KIND_SWING = "swing_doorway"
 KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
+# A barrier that completes an evidence-closed opening on another raw gap of the same aperture (``aperture_complete_closures``). It carries the
+# native paths of the closures it completes and is never a doorway chord or a threshold itself.
+KIND_APERTURE_MEMBER = "aperture_member_closure"
 
 _RECORD_SEAL = object()
 
@@ -1383,6 +1389,36 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
+def _aperture_complete_evidence(
+    gap: _Gap,
+    seeds: Sequence[tuple[_Gap, LayeredDoorwayClosure]],
+) -> tuple[int, ...] | None:
+    """The native paths of every evidence-closed gap of this gap's own aperture, sorted and merged, else None.
+
+    An aperture is one physical opening that several raw gaps describe at once (a wall's body band and its face lines): same orientation,
+    band and interval both overlapping by more than representation noise. A closed ``seed`` qualifies only when the gap is no thicker than
+    the seed's band (it is a face or body line of the same wall, never a thicker structure) and lies within the seed's interval widened at
+    each end by ``_APERTURE_WIDEN_BAND_FACTOR`` of the seed's band thickness. Every qualifying seed is kept; none is chosen over another.
+    """
+    natives: set[int] = set()
+    thickness = gap.band[1] - gap.band[0]
+    for closed, closure in seeds:
+        if closed.horizontal != gap.horizontal:
+            continue
+        seed_thickness = closed.band[1] - closed.band[0]
+        if thickness > seed_thickness + NOISE_PT:
+            continue
+        if min(closed.band[1], gap.band[1]) - max(closed.band[0], gap.band[0]) <= NOISE_PT:
+            continue
+        if min(closed.hi, gap.hi) - max(closed.lo, gap.lo) <= NOISE_PT:
+            continue
+        reach = _APERTURE_WIDEN_BAND_FACTOR * seed_thickness
+        if gap.lo < closed.lo - reach - NOISE_PT or gap.hi > closed.hi + reach + NOISE_PT:
+            continue
+        natives.update(closure.native_path_indices)
+    return tuple(sorted(natives)) if natives else None
+
+
 def _lining_face_wall_strips(
     drawings: Sequence[Mapping[str, Any]],
     gaps: Sequence[_Gap],
@@ -2179,6 +2215,7 @@ def build_layered_wall_doorway_room_rings(
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    aperture_complete_closures: bool = False,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -2191,7 +2228,14 @@ def build_layered_wall_doorway_room_rings(
     black axis-aligned stroke as a topology-only wall band, and also a long
     (≥80 pt) medium-width (0.45–1.2) black face. It is not a pair, not a raster
     hull, and not a billed wall.
+    ``aperture_complete_closures`` (default False) lets the sibling-face step also resolve an unresolved raw gap that belongs to the same
+    aperture as a gap already closed by door evidence (same orientation, overlapping band and interval), is no thicker than that gap's band
+    and lies within its interval widened by two band thicknesses: one wall stub plus the wall it meets. It is closed as a
+    ``KIND_APERTURE_MEMBER`` barrier carrying the native paths of every qualifying closed gap (none is chosen over another). A gap that
+    already carries competing evidence of its own stays unresolved, and a member never seeds another gap.
     """
+    if type(aperture_complete_closures) is not bool:
+        raise ValueError("aperture_complete_closures must be an explicit boolean")
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(dark_painted_wall_source) is not bool:
@@ -2328,6 +2372,7 @@ def build_layered_wall_doorway_room_rings(
     closures: list[LayeredDoorwayClosure] = []
     closed_gaps: list[_Gap] = []
     unresolved: list[_Gap] = []
+    competing_gap_ids: set[int] = set()  # gaps left open because their OWN evidence conflicts
     closure_rects: list[tuple[str, Polygon]] = []
     sliding_by_gap: dict[int, tuple[int, ...]] = {}
     if sliding_leaf_frame_closure:
@@ -2388,6 +2433,7 @@ def build_layered_wall_doorway_room_rings(
         sliding = sliding_by_gap.get(gap_index)
         if sliding is not None and (swing is not None or stroke is not None):
             unresolved.append(gap)  # competing doorway evidence in one interruption: neither is chosen
+            competing_gap_ids.add(id(gap))
             continue
         if swing is None and stroke is None and sliding is None:
             unresolved.append(gap)
@@ -2427,6 +2473,13 @@ def build_layered_wall_doorway_room_rings(
             sibling_native = tuple(closure.native_path_indices)
             sibling_kind = closure.kind
             break
+        if sibling_native is None and aperture_complete_closures and id(gap) not in competing_gap_ids:
+            # One physical opening is often several raw gaps (a wall's body band and its face lines). A gap of the same aperture as an
+            # evidence-closed one, no thicker than it and reaching past it by at most one wall stub plus the wall it meets, is closed as an
+            # aperture member carrying every qualifying seed's native paths. Only the primary closures are seeds: a member never seeds another gap.
+            inherited = _aperture_complete_evidence(gap, seed_faces)
+            if inherited is not None:
+                sibling_kind, sibling_native = KIND_APERTURE_MEMBER, inherited
         if sibling_native is None:
             still_unresolved.append(gap)
             continue
@@ -2562,6 +2615,7 @@ def build_from_pdf_bytes(
     dark_painted_wall_source: bool = False,
     wall_end_stroke_closures: bool = False,
     source_heavy_stroke_wall_bands: bool = False,
+    aperture_complete_closures: bool = False,
 ) -> LayeredRoomRingResult:
     """Convenience: verify the declared digest against the bytes, then read the page's native drawings."""
     if hashlib.sha256(source_bytes).hexdigest() != source_sha256:
@@ -2579,10 +2633,12 @@ def build_from_pdf_bytes(
         dark_painted_wall_source=dark_painted_wall_source,
         wall_end_stroke_closures=wall_end_stroke_closures,
         source_heavy_stroke_wall_bands=source_heavy_stroke_wall_bands,
+        aperture_complete_closures=aperture_complete_closures,
     )
 
 
 __all__ = [
+    "KIND_APERTURE_MEMBER",
     "KIND_STROKE",
     "KIND_SLIDING_LEAF",
     "KIND_SWING",
