@@ -47,7 +47,7 @@ export type BuildAction =
   | { kind: "done" | "undo" | "redo" }
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
-  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
+  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall; connected?: boolean }
   | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
@@ -368,11 +368,15 @@ export function updateBuild(
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
-    if (wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
+    if (!levelId || previous.levelId !== levelId || previous.scopeKey !== scopeKey ||
+        wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
         wall.levelId !== previous.levelId || !state.walls.includes(previous) ||
         !validEditedWall(wall)) return state;
-    return checkpoint(state, { walls: state.walls.map(item => item === previous ? wall : item),
-      ceilings: state.ceilings });
+    const walls = action.connected
+      ? connectedWallEdit(state.walls,previous,wall)
+      : state.walls.map(item => item === previous ? wall : item);
+    if (!walls || walls.some(w => !validEditedWall(w))) return state;
+    return checkpoint(state, { walls, ceilings: state.ceilings });
   }
   if (action.kind === "adjust-ceiling") {
     const { previous, ceiling } = action;
