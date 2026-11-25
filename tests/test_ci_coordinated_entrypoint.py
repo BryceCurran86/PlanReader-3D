@@ -32,6 +32,10 @@ def test_public_required_ci_trigger_and_check_context_stay_unchanged():
     full = job("test")
     assert "python-version: [\"3.13\", \"3.14\"]" in full
     assert "github.event_name != 'workflow_dispatch'" in full
+    assert "needs: shard" in full
+    assert "always()" in full
+    assert 'run: test "$SHARD_RESULT" = success' in full
+    assert "Verify every collected test executed exactly once across four shards" in full
     # The full suite still runs the whole tests/ tree; "-rs" (list skipped tests) was added with the public-CI
     # private-original policy (#2989), so allow it without allowing a narrower selection.
     assert re.search(r"PYTHONPATH=\. pytest -q(?: -rs)? tests/(?:\s|$)", full)
@@ -65,7 +69,9 @@ def test_source_neutral_readiness_has_no_client_secrets_or_score_claim():
         assert "permissions:\n      contents: read" in section
     assert "ORIGINAL_SOURCES_TOKEN" not in text
     assert "pull_request_target" not in text
-    assert "upload-artifact" not in text
+    assert "upload-artifact" not in job("focused") + job("readiness")
+    assert text.count("uses: actions/upload-artifact@v4") == 1
+    assert "path: ${{ runner.temp }}/receipt.json" in job("shard")
     assert "UNPUBLISHED" in text
     assert "coverage_accuracy" in text
     assert "precision_adjusted_accuracy" in text
@@ -124,7 +130,7 @@ def test_parallel_full_ci_keeps_all_tests_and_nightly_release_guard():
     assert "  schedule:\n" in text
     assert "--dist loadfile --durations=30" in full
     assert "PYTEST_ADDOPTS:" in full
-    assert "options: ['0', '2', '4']" in text
+    assert "options: ['0', '2', '4', '8']" in text
     assert "PYTHONPATH=. pytest -q -rs tests/" in full
     assert "requirements-ci-v1228.txt" in full
     assert "fail-fast: false" in full
@@ -140,3 +146,20 @@ def test_scoped_development_workflow_cannot_replace_required_ci():
     assert "pull_request:" not in dev
     assert "needs.scope.outputs.scope == 'vr-only'" in dev
     assert "not full regression" in dev
+
+def test_automatic_full_release_requires_complete_isolated_shards():
+    full, shard = job("test"), job("shard")
+    assert "if: ${{ github.event_name != 'workflow_dispatch' }}" in shard
+    assert "python-version: ['3.13', '3.14']" in shard
+    assert "index: [0, 1, 2, 3]" in shard
+    assert "fail-fast: false" in shard
+    assert "python -m pytest -p scripts.ci_pytest_shard -q -rs --durations=20 tests/" in shard
+    assert "check_private_original_source_additions.py" in shard
+    assert "check_v2_truth_separation.py" in shard
+    assert "if-no-files-found: error" in shard
+    assert 'PLANREADER_CI_SHARDS: \'4\'' in shard
+    assert 'pattern: shard-${{ matrix.python-version }}-*' in full
+    assert 'python scripts/ci_pytest_shard.py "$RUNNER_TEMP/shards" 4' in full
+    assert full.index("Require every automatic shard to succeed") < full.index("Download only full-suite shard receipts")
+    assert full.index("Verify every collected test executed exactly once across four shards") < full.index("Smoke test (envelope")
+    assert "if: github.event_name == 'workflow_dispatch'" in full
