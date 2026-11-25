@@ -139,6 +139,18 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       const door=group.children[group.children.length-1];
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
+      if(opening.doorMechanism!=="garage"&&opening.widthM>=.4&&opening.heightM>=1.2){
+        const colours={chrome:0xc4ced4,"matte-black":0x292c2e,"brushed-brass":0xb99b63,"brushed-nickel":0xaaa9a4};
+        const material=new THREE.MeshStandardMaterial({color:colours[opening.doorHardware??"chrome"],metalness:opening.doorHardware==="matte-black"?.12:.7,roughness:.36});
+        const angle=-Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+        for(const side of [-1,1]){
+          const position=atOffset(wall,opening.offsetM+opening.widthM-.10,opening.sillHeightM+Math.min(1.02,opening.heightM*.6)).addScaledVector(normal,side*.04);
+          const plate=new THREE.Mesh(new THREE.BoxGeometry(.035,.095,.018),material);
+          plate.position.copy(position);plate.rotation.y=angle;door.add(plate);
+          const lever=new THREE.Mesh(new THREE.BoxGeometry(.105,.024,.035),material);
+          lever.position.copy(position).addScaledVector(normal,side*.025);lever.rotation.y=angle;door.add(lever);
+        }
+      }
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
@@ -538,6 +550,16 @@ export function createBuildOverlay(scene: THREE.Scene) {
   menu.renderOrder = 20;
   menu.visible = false;
   scene.add(menu);
+  // Hover is a tiny untextured overlay, not a full canvas redraw/upload.
+  const hoverMesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({color:0x91e8d2,transparent:true,opacity:.20,depthTest:false,depthWrite:false,toneMapped:false}));
+  hoverMesh.renderOrder=21;hoverMesh.visible=false;menu.add(hoverMesh);
+  function highlightMenu(layout:MenuLayout,index:number){
+    const button=layout.buttons[index];
+    hoverMesh.visible=!layout.radial&&!!button&&!button.disabled;
+    if(!hoverMesh.visible)return;
+    hoverMesh.position.set((button.x+button.w/2)/layout.width-.5,.5-(button.y+button.h/2)/layout.height,.002);
+    hoverMesh.scale.set(button.w/layout.width,button.h/layout.height,1);
+  }
   const mark = new THREE.Mesh(new THREE.RingGeometry(0.037, 0.057, 24),
     new THREE.MeshBasicMaterial({ color: 0x71f7dc, side: THREE.DoubleSide }));
   mark.rotation.x = -Math.PI / 2;
@@ -616,8 +638,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
-    menu.position.copy(head).addScaledVector(facing, 1.0).addScaledVector(right, -0.58);
-    menu.position.y -= 0.62;
+    menu.position.copy(head).addScaledVector(facing, 1.30);
+    menu.position.y -= 0.30;
     menu.lookAt(head);
     menu.updateMatrixWorld();
     menu.visible = true;
@@ -634,7 +656,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   function sizeMenu(layout: MenuLayout) {
     // Larger angular hit targets without changing the menu action mapping.
-    const scale=layout.radial?950:1100;
+    const scale=layout.radial?950:Math.max(800,layout.height/.85,layout.width/1.12);
     const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
@@ -649,7 +671,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     return { action: layout.buttons[index]?.action ?? null, index };
   }
   function drawMenu(layout: MenuLayout, hover: number) {
-    const key = JSON.stringify([layout, hover]);
+    highlightMenu(layout,hover);
+    const key = JSON.stringify([layout, layout.radial?hover:-1]);
     if (!context || drawn === key) return;
     drawn = key;
     if (canvas.width !== layout.width || canvas.height !== layout.height) {
@@ -702,7 +725,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       texture.needsUpdate=true;return;
     }
     for (const [index, button] of layout.buttons.entries()) {
-      const highlight = index === hover || button.active;
+      const highlight = button.active;
       context.fillStyle = highlight ? "#69dbca" : "#2a4651";
       context.fillRect(button.x, button.y, button.w, button.h);
       const middle = button.y + button.h / 2;
@@ -764,7 +787,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+  return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
     dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

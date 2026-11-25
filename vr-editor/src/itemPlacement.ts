@@ -1,3 +1,6 @@
+import {sameFixtureFamily} from "./contextFinishes.ts";
+import {localOutline} from "./localOutline.ts";
+import {profileDetails} from "./wallProfiles.ts";
 import { catalogueGroupLabel, getCatalogueItem } from "./itemCatalogue.ts";
 import type { CatalogueItem, ItemTarget, TimberVisual } from "./itemCatalogue.ts";
 import { openingFits, planLength, validWallLength } from "./buildPlacement.ts";
@@ -153,6 +156,25 @@ export function placeItem(
   return checkpoint(draft, [...items, entry]);
 }
 
+/** Replace only the selected placed fixture colourway, preserving position,
+ * dimensions, identity and dependent worktop anchors. */
+export function replaceItemFinish(draft:ItemDraft,sourceKey:string,id:string,itemId:string):ItemDraft{
+ if(draft.sourceKey!==sourceKey)return draft;
+ const entry=draft.items.find(i=>i.id===id),next=getCatalogueItem(itemId),old=entry&&getCatalogueItem(entry.itemId);
+ if(!entry||!old||!next||entry.itemId===itemId||!next.targets.includes(entry.target))return draft;
+ if(!sameFixtureFamily(old,next))return draft;
+ return checkpoint(draft,draft.items.map(i=>i===entry?{...i,itemId}:i));
+}
+export const localFloorHostId=(levelId:string)=>makeItemHostId("draft-floor",levelId);
+function pointInsideLocalFloor(p:Vector,points:readonly [number,number][]){
+ let inside=false;
+ for(let i=0,j=points.length-1;i<points.length;j=i++){
+  const a=points[i],b=points[j];
+  if((a[1]>p[2])!==(b[1]>p[2])&&p[0]<(b[0]-a[0])*(p[2]-a[1])/(b[1]-a[1])+a[0])inside=!inside;
+ }
+ return inside&&Math.abs(p[1]-.002)<.03;
+}
+
 export function removeItem(draft: ItemDraft, id: string) {
   if (!draft.items.some(item => item.id === id)) return draft;
   return checkpoint(draft, draft.items.filter(item => item.id !== id && item.hostId !== worktopId(id)));
@@ -216,10 +238,19 @@ export function currentItemPlacements(
         door: opening.openingKind === "door", window: opening.openingKind === "window" });
     }
   }
+  const localFloors=new Map<string,ReturnType<typeof localOutline>>();
+  for(const levelId of new Set(walls.map(w=>w.levelId))){
+    const peers=walls.filter(w=>w.levelId===levelId) as import("./buildPlacement.ts").PlacedWall[];
+    const external=peers.filter(w=>profileDetails(w.assembly).role==="external");
+    const ring=localOutline(external.length?external:peers);
+    if(ring){const id=localFloorHostId(levelId);hosts.set(id,"floor");localFloors.set(id,ring);}
+  }
   return items.flatMap(entry => {
     let placement = entry;
     // Saved drafts cannot bypass surface compatibility or source-host binding.
     if (hosts.get(entry.hostId) !== entry.target) return [];
+    const localFloor=localFloors.get(entry.hostId);
+    if(localFloor&&!pointInsideLocalFloor(entry.point,localFloor.points))return [];
     const item = getCatalogueItem(entry.itemId);
     if (!item || !item.targets.includes(entry.target) ||
         (entry.target === "opening" && openingFitMessage(item, openingSizes.get(entry.hostId)))) return [];
