@@ -15,6 +15,7 @@ import {menuButtonAt} from "./toolWheelInput.ts";
 import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
+import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -159,6 +160,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     mount.userData.catalogueMountFace=true;
     group.add(mount);
   }
+  const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
   group.add(illustrativeTimberFrame(wall));
   for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
   if(profile.core!=="masonry"){
