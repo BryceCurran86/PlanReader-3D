@@ -5,7 +5,7 @@ import {wallAssembly} from "./wallProfiles.ts";
 import {projectPlan,projectWall} from "./footprintResize.ts";
 import type {FootprintProjection} from "./footprintResize.ts";
 
-type PlanLine={a:PlanPoint;b:PlanPoint;kind:"wall"|"source"|"review"|"opening"|"window"|"door"|"dimension";weight:number};
+type PlanLine={a:PlanPoint;b:PlanPoint;kind:"wall"|"source"|"review"|"opening"|"window"|"door"|"dimension"|"floor";weight:number};
 type PlanText={at:PlanPoint;text:string};
 export type PlanDrawing={lines:PlanLine[];labels:PlanText[];bounds:[number,number,number,number];level:string;unlocated:number};
 type Move={objectId:string;dx:number;dz:number};
@@ -34,6 +34,24 @@ export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"wal
    const p=point(o.offsetM),q=point(o.offsetM+o.widthM);
    line(p,q,o.kind==="window"?"window":"opening",2);
   }
+ }
+ // Only authenticated floor triangles: cancel shared triangulation edges, not
+ // actual room/slab perimeter edges. Never reconstruct a floor from wall guesses.
+ const rows=new Map(scene.objects.map(row=>[row.objectId,row]));
+ for(const surface of scene.sourceSurfaces??[]){
+  const row=rows.get(surface.objectId);
+  if(surface.kind!=="floor"||surface.renderState!=="verified"||!row||(level!=="all"&&row.levelId!==level)||(visible&&!visible.has(row.objectId)))continue;
+  const edges=new Map<string,{a:PlanPoint;b:PlanPoint;count:number}>();
+  const key=(p:PlanPoint)=>p.map(x=>Math.round(x*1e7)).join(",");
+  for(let i=0;i<surface.vertices.length;i+=3){
+   const tri=surface.vertices.slice(i,i+3).map(v=>[v[0],v[2]] as PlanPoint);
+   if(tri.length!==3)continue;
+   for(let j=0;j<3;j++){
+    const a=tri[j],b=tri[(j+1)%3],k=[key(a),key(b)].sort().join("|"),prev=edges.get(k);
+    if(prev)prev.count++;else edges.set(k,{a,b,count:1});
+   }
+  }
+  for(const e of edges.values())if(e.count===1)line(projection?projectPlan(e.a,projection):e.a,projection?projectPlan(e.b,projection):e.b,"floor",.75);
  }
  const unique=new Map<string,WallVisual>([...extra,...build.walls].map(w=>[w.proposalId,w]));
  for(const raw of unique.values()){
@@ -85,9 +103,9 @@ export function paintArchitecturalPlan(ctx:CanvasRenderingContext2D,plan:PlanDra
  const scale=Math.min((width-2*pad)/Math.max(x1-x0,.1),(height-top-bottom)/Math.max(z1-z0,.1));
  const ox=(width-(x1-x0)*scale)/2,oz=top+(height-top-bottom-(z1-z0)*scale)/2;
  const pos=(p:PlanPoint):PlanPoint=>[ox+(p[0]-x0)*scale,oz+(p[1]-z0)*scale];
- const colors={wall:"#25313a",source:"#505a64",review:"#99703f",opening:"#99703f",window:"#397b99",door:"#496272",dimension:"#78818a"};
+ const colors={wall:"#25313a",source:"#505a64",review:"#99703f",opening:"#99703f",window:"#397b99",door:"#496272",dimension:"#78818a",floor:"#b1aaa0"};
  ctx.lineCap="butt";
- for(const l of plan.lines){
+ for(const l of [...plan.lines.filter(l=>l.kind==="floor"),...plan.lines.filter(l=>l.kind!=="floor")]){
   const a=pos(l.a),b=pos(l.b);
   ctx.strokeStyle=colors[l.kind];ctx.lineWidth=Math.max(1,width/1000*l.weight*1.6);
   ctx.setLineDash(l.kind==="review"||l.kind==="opening"?[5,4]:[]);
