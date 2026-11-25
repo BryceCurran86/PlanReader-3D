@@ -436,7 +436,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection,connectedRotation] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
@@ -1205,7 +1205,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const hand = controllerIndex === undefined ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
-        hand ? [hand.x, hand.z] : undefined,snapOptions());
+        hand ? [hand.x, hand.z] : undefined,snapOptions(),connectedRotation);
     }
     function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
       const preview = previewDrag(gesture, controllerIndex);

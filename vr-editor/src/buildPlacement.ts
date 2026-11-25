@@ -47,7 +47,7 @@ export type BuildAction =
   | { kind: "done" | "undo" | "redo" }
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
-  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
+  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall; connected?: boolean; allowTJunctions?: boolean }
   | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
@@ -339,6 +339,35 @@ function checkpoint(state: BuildState, geometry: DraftGeometry): BuildState {
     history: [...state.history, { walls: state.walls, ceilings: state.ceilings }].slice(-50), future: [] };
 }
 
+/** Follow a directly translated axis-aligned wall edge only for same-scope
+ * rectangular ceilings whose entire edge was hosted on that wall. No guessed
+ * ceiling ownership, arbitrary polygon reshape or source quantities. */
+export function followDraftCeilingEdges(ceilings:CeilingDraft[],before:PlacedWall,after:PlacedWall):CeilingDraft[]|null{
+ const eps=1e-7;
+ const axis=Math.abs(before.start[0]-before.end[0])<=eps?0:
+   Math.abs(before.start[1]-before.end[1])<=eps?1:null;
+ if(axis===null)return ceilings;
+ const span=axis===0?1:0,old=before.start[axis],next=after.start[axis];
+ if(Math.abs(after.end[axis]-next)>eps||Math.abs(next-old)<=eps||
+   Math.abs(after.start[span]-before.start[span])>eps||Math.abs(after.end[span]-before.end[span])>eps)return ceilings;
+ const lo=Math.min(before.start[span],before.end[span]),hi=Math.max(before.start[span],before.end[span]);
+ const result:CeilingDraft[]=[];
+ let changed=false;
+ for(const c of ceilings){
+  if(c.scopeKey!==before.scopeKey||c.levelId!==before.levelId||
+   Math.min(c.start[span],c.end[span])<lo-eps||Math.max(c.start[span],c.end[span])>hi+eps){
+   result.push(c);continue;
+  }
+  const isStart=Math.abs(c.start[axis]-old)<=eps,isEnd=Math.abs(c.end[axis]-old)<=eps;
+  if(isStart===isEnd){result.push(c);continue;}
+  const start:PlanPoint=[...c.start],end:PlanPoint=[...c.end];
+  if(isStart)start[axis]=next;else end[axis]=next;
+  if((c.end[axis]-c.start[axis])*(end[axis]-start[axis])<=0||!validCeiling(start,end))return null;
+  result.push({...c,start,end});changed=true;
+ }
+ return changed?result:ceilings;
+}
+
 export function updateBuild(
   state: BuildState, action: BuildAction, scopeKey: string,
   levelId: string | null, sizes: BuildSizes,
@@ -368,11 +397,18 @@ export function updateBuild(
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
-    if (wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
+    if (!levelId || previous.levelId !== levelId || previous.scopeKey !== scopeKey ||
+        wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
         wall.levelId !== previous.levelId || !state.walls.includes(previous) ||
         !validEditedWall(wall)) return state;
-    return checkpoint(state, { walls: state.walls.map(item => item === previous ? wall : item),
-      ceilings: state.ceilings });
+    const walls = action.connected
+      ? connectedWallEdit(state.walls,previous,wall,action.allowTJunctions)
+      : state.walls.map(item => item === previous ? wall : item);
+    if (!walls || walls.some(w => !validEditedWall(w))) return state;
+    const ceilings = action.connected && action.allowTJunctions
+      ? followDraftCeilingEdges(state.ceilings,previous,wall) : state.ceilings;
+    if (!ceilings) return state;
+    return checkpoint(state, { walls, ceilings });
   }
   if (action.kind === "adjust-ceiling") {
     const { previous, ceiling } = action;
