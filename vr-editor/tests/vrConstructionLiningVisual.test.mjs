@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Mesh,Vector3} from "three";
 import {displayWallDraft,displayCeilingDraft,illustrativeTimberFrame} from "../src/buildScene.ts";
-import {makeLiningVisual,setLiningFinish,setLiningAppearance} from "../src/constructionLiningVisual.ts";
+import {makeLiningVisual,setLiningFinish,setLiningAppearance,makeShellCeilingLining} from "../src/constructionLiningVisual.ts";
 const wall={proposalId:"test",scopeKey:"test",levelId:"ground",start:[1,2],end:[5,5],heightM:3,openings:[{openingId:"d",openingKind:"door",offsetM:1,widthM:.9,heightM:2.04,sillHeightM:0}]};
 test("actual draft renderer has two interior lining faces, clipped to openings",()=>{
  const group=displayWallDraft(wall);
@@ -35,6 +35,13 @@ test("ceiling has underside sheet geometry and frame roles are rendered",()=>{
  const frame=illustrativeTimberFrame(wall).children[0];
  assert.equal(frame.count,frame.userData.nominalFrameRoles.length);
  for(const role of ["king","trimmer","lintel","cripple","nogging","top-plate"])assert.ok(frame.userData.nominalFrameRoles.includes(role),role);
+});
+test("generated ceiling lining preserves a concave recess",()=>{
+ const vertices=[[0,2.7,0],[6,2.7,0],[6,2.7,2],[0,2.7,0],[6,2.7,2],[0,2.7,2],[0,2.7,2],[3,2.7,2],[3,2.7,4],[0,2.7,2],[3,2.7,4],[0,2.7,4]];
+ const mesh=makeShellCeilingLining(vertices);assert.ok(mesh);
+ const p=mesh.geometry.attributes.position;
+ for(let i=0;i<p.count;i++)assert.ok(!(p.getX(i)>3+1e-5&&p.getZ(i)>2+1e-5));
+ assert.equal(makeShellCeilingLining([[0,2.7,0],[1,3,0],[0,2.7,1]]),null);
 });
 test("board type palette distinct; finish changes reuse the same geometry",()=>{
  const project=(x,y,offset)=>new Vector3(x,y,offset);
