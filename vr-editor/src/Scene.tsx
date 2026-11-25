@@ -105,6 +105,7 @@ type Props = {
   previewLights:boolean;
   onPreviewLights:(enabled:boolean)=>void;
   quality: RenderQuality;
+  onQuality:(quality:RenderQuality)=>void;
   detail: SurfaceDetail;
   moveMode: MoveMode;
   addedWallSketch: WallVisual | null;
@@ -261,7 +262,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
@@ -297,8 +298,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
-  const visualSettings = useRef({ outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
-  visualSettings.current = { outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
+  const visualSettings = useRef({ outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const mappedDrafts=useMemo(()=>new Map<string,WallDraft>((draftState?safeDrafts(draftState,manifest):[])
@@ -501,7 +502,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,finishContext,finishGroup,finishPage,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext,finishGroup,finishPage,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -636,6 +637,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="hide-tools"){closeTools();return;}
         if(choice.action==="more-tools"){radial=false;simpleHome=false;compactMenu=true;return;}
         if(choice.action==="home"){simpleHome=true;radial=false;finishContext=null;finishGroup=null;selectedDraftId=null;return;}
+        if(choice.action==="quality"){const modes:RenderQuality[]=["performance","balanced","high"];visualSettings.current.onQuality(modes[(modes.indexOf(visualSettings.current.quality)+1)%modes.length]);return;}
         if(choice.action==="environment"){visualSettings.current.onOutdoor(!visualSettings.current.outdoor);return;}
         if(choice.action==="layers"){layersOpen=!layersOpen;return;}
         if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
@@ -2000,7 +2002,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
               const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true)&&!inspect);
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
                 (child.userData.catalogueDoorLeaf||child.userData.nominalOpeningFrame||child.userData.catalogueWindow)?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
-            } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
+            } else if(child instanceof THREE.Line&&!child.userData.selectionEdge)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab")&&(topEditing()||currentStage!=="finished"||!child.userData.draftGuide);
           }
         }
       }
@@ -2020,7 +2022,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const pose=hitLayout.radial?"radial":"panel";
           // Keep one world-space anchor through submenu transitions. Never
           // attach the tool surface to a moving controller during selection.
-          if(menuPose===null)buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);
+          if(menuPose===null){if(finishContext?.worldPoint)buildOverlay.positionContextMenu(renderer.xr.getCamera(),new THREE.Vector3(...finishContext.worldPoint));else buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
           // Stay world-locked until explicitly reopened or recentered.
           if(menuPose!==pose){menuPose=pose;lastMenuHover=-2;}
         }
@@ -2057,7 +2059,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
-        itemView.aim(itemPick?.hit ?? null);
+        itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (layout && !simpleHome && !finishContext && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
@@ -2085,7 +2087,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
-        itemView.aim(itemPick?.hit ?? null);
+        itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
           itemPick?.reason ?? itemGuide(item)) : buildTarget?.hint ?? "");
@@ -2096,7 +2098,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(group instanceof THREE.Mesh&&group.userData.surfaceKind==="ceiling"&&group.material instanceof THREE.MeshStandardMaterial){group.material.emissive.setHex(group.userData.proposalId===selectedDraftId?0x16ad83:0);group.material.emissiveIntensity=group.userData.proposalId===selectedDraftId?.65:0;continue;}
         if (!group.userData.reviewOnlyWallProposal) continue;
         const id = group.userData.proposalId as string;
-        const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id));
+        const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id))||finishContext?.hit.hostId==="draft-wall:"+id;
         const hovered = id === hoveredDraftId;
         const highlightState=selected ? 2 : hovered ? 1 : 0;
         if(group.userData.lastDraftHighlight===highlightState)continue;
@@ -2109,9 +2111,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if (part.userData.originalDraftColor === undefined)
             part.userData.originalDraftColor=material.color.getHex();
           const base = part.userData.originalDraftColor as number;
+          if(part.userData.selectionEdge){part.visible=selected||hovered;material.color.setHex(0x85dce8);continue;}
           if (material instanceof THREE.MeshStandardMaterial) {
-            material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
-            material.emissiveIntensity=selected||hovered ? .65 : 0;
+            material.emissive.setHex(selected ? 0x208b9e : 0);
+            material.emissiveIntensity=selected ? .055 : 0;
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
         }
       }
@@ -2169,7 +2172,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const useShadows=activeInspection.showShadows&&budget.shadows;
       sunlight.castShadow=useShadows;renderer.shadowMap.enabled=useShadows;
       presentationFloor.visible=useShadows&&!outdoor;
-      const nextShadowKey=[activeMood,activeQuality,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,interaction.current.visibleIds,resize.current.projection,draftMap.current,moveSettings.current.wallMoveState];
+      const nextShadowKey=[activeMood,activeQuality,useShadows,renderer.xr.isPresenting,openDoors,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,interaction.current.visibleIds,resize.current.projection,draftMap.current,moveSettings.current.wallMoveState];
       if(useShadows&&now-lastShadowRefresh>=budget.shadowRefreshMs&&(!nextShadowKey.every((v,i)=>v===shadowKey[i])||renderer.xr.isPresenting!==lastPresenting)){
         shadowKey=nextShadowKey;lastShadowRefresh=now;renderer.shadowMap.needsUpdate=true;
       }
