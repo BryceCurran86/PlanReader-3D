@@ -328,15 +328,24 @@ def test_a_grey_face_is_not_wall_ink(face, monkeypatch):
 
 
 def test_an_invisible_stroke_is_not_wall_ink(monkeypatch):
+    # given straight to the helper: the builder's own ink filter would otherwise have removed it already
+    seen = _existing_strips(Scene().rows, monkeypatch)
+    rows = list(seen["drawings"])
     scene = Scene()
     for index in scene.named["frame_far_lo"]:
-        scene.rows[index] = {**scene.rows[index], "stroke_opacity": 0.0}
-    _only_stub(scene, monkeypatch)
+        rows[index] = {**rows[index], "stroke_opacity": 0.0}
+    assert _boxes(ring._collect_door_jamb_return_strips(rows, seen["witnesses"], seen["strips"])) == _rounded(scene.stub_rect())
 
 
 @pytest.mark.parametrize("thickness", [1.0, 12.0])
 def test_a_band_outside_the_wall_thickness_window_abstains(thickness, monkeypatch):
-    assert _pieces(Scene(thickness=thickness).rows, monkeypatch) == []
+    scene = Scene(thickness=thickness)
+    for name, end in (("jamb_lo", LO), ("jamb_hi", HI)):             # one cross stroke that fits the band exactly
+        first, *rest = scene.named[name]
+        scene.rows[first] = _stroke(scene.map(end, FAR + thickness), scene.map(end, FAR), width=0.96)
+        for index in rest:
+            scene.rows[index] = {"layer": "", "fill": None, "color": None, "items": ()}
+    assert _pieces(scene.rows, monkeypatch) == []
 
 
 @pytest.mark.parametrize("length,made", [(39.5, True), (40.0, False), (55.0, False)])
@@ -361,6 +370,26 @@ def test_a_wall_of_the_same_direction_at_the_far_end_is_not_a_far_wall(monkeypat
 
 def test_a_chord_that_is_not_on_a_face_line_abstains(monkeypatch):
     assert _pieces(Scene(chord_inset=3.25).rows, monkeypatch) == []
+
+
+def test_a_line_running_from_the_jamb_into_the_doorway_is_not_a_face(monkeypatch):
+    inward = FAR + 3.0
+    scene = Scene(extra=[((LO, inward), (LO + 5.0, inward), {})])
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
+
+
+def test_a_face_a_point_off_the_chord_is_not_the_chord_face(monkeypatch):
+    off = FAR + 6.5 - 1.0
+    scene = Scene(drop=("frame_near_lo",), extra=[((LO, off), (LO - 2.2, off), {})])
+    _only_stub(scene, monkeypatch)
+
+
+def test_a_diagonal_chord_is_never_processed(monkeypatch):
+    scene = Scene(vertical=True)
+    seen = _existing_strips(scene.rows, monkeypatch)
+    near = FAR + 6.5
+    diagonal = {**seen["witnesses"][0], "source_hinge_point_pdf_pts": (near - 3.0, HI), "source_closed_leaf_tip_pdf_pts": (near + 3.0, LO)}
+    assert ring._collect_door_jamb_return_strips(seen["drawings"], (diagonal,), seen["strips"]) == []
 
 
 def test_without_a_swing_there_is_nothing_to_bind_to(monkeypatch):
@@ -390,13 +419,7 @@ def test_a_closed_tip_just_off_the_face_keeps_the_band_on_the_drawn_faces(monkey
     assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
 
 
-def test_a_chord_that_is_not_axis_aligned_is_skipped(monkeypatch):
-    seen = _existing_strips(Scene().rows, monkeypatch)
-    diagonal = {**seen["witnesses"][0], "source_closed_leaf_tip_pdf_pts": (LO, FAR + 6.5 + 5.0)}
-    assert ring._collect_door_jamb_return_strips(seen["drawings"], (diagonal,), seen["strips"]) == []
-
-
-@pytest.mark.parametrize("tilt,made", [(0.05, True), (0.5, False)])
+@pytest.mark.parametrize("tilt,made", [(0.05, True), (0.3, False)])
 def test_a_face_line_must_run_along_the_wall(tilt, made, monkeypatch):
     scene = Scene()
     _replace(scene, "frame_far_lo", [((LO, FAR), (LO - 2.2, FAR + tilt))])
