@@ -8,10 +8,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from tempfile import NamedTemporaryFile
 from time import perf_counter
 from typing import Callable
 
-from tools.gpt3_safe_original_report_output import preflight_new_diagnostic
+from tools.gpt3_safe_original_report_output import preflight_new_diagnostic, publish_staged_file
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, main as report_evidence
 
 
@@ -116,6 +117,42 @@ def _score_run(source_dir: Path, identity_map_dir: Path, evidence_dir: Path, out
     ])
 
 
+def _publish_project_evidence(role_dir: Path, sealed_path: Path, customer_path: Path) -> None:
+    """Stage both receipts before exposing complete copies to the scorer."""
+    copies = (
+        (role_dir / "ALL_SOURCE_ROLES.sealed.json", sealed_path),
+        (role_dir / "ALL_SOURCE_ROLES.customer_rows.json", customer_path),
+    )
+    staged: list[tuple[Path, Path]] = []
+    published: list[tuple[Path, os.stat_result]] = []
+    try:
+        for source, target in copies:
+            with NamedTemporaryFile(
+                "wb", dir=target.parent, prefix=".replay-", suffix=".tmp", delete=False,
+            ) as stream:
+                staged.append((Path(stream.name), target))
+                with source.open("rb") as receipt:
+                    shutil.copyfileobj(receipt, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+        for stage, target in staged:
+            identity = stage.lstat()
+            publish_staged_file(stage, target)
+            published.append((target, identity))
+    except BaseException:
+        for target, identity in published:
+            try:
+                still_ours = os.path.samestat(target.lstat(), identity)
+            except FileNotFoundError:
+                continue
+            if still_ours:
+                target.unlink(missing_ok=True)
+        raise
+    finally:
+        for stage, _ in staged:
+            stage.unlink(missing_ok=True)
+
+
 def run_benchmark(
     *, source_dir: Path, identity_map_dir: Path, output_dir: Path, timeout_min: int,
     saved_run_dir: Path | None = None,
@@ -167,9 +204,8 @@ def run_benchmark(
                 and status.get("source_role_coverage_verified") is True
                 and status.get("customer_bijection_verified") is True
             ):
-                shutil.copyfile(role_dir / "ALL_SOURCE_ROLES.sealed.json", sealed_dir / f"{project}.json")
-                shutil.copyfile(
-                    role_dir / "ALL_SOURCE_ROLES.customer_rows.json",
+                _publish_project_evidence(
+                    role_dir, sealed_dir / f"{project}.json",
                     customer_dir / f"{project}.customer_rows.json",
                 )
         except (OSError, TypeError, ValueError, RuntimeError) as exc:

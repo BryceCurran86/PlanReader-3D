@@ -108,7 +108,7 @@ def test_original_source_recovery_reaches_workspace_customer_output(monkeypatch)
     assert added[0].metadata["commercial_projection_allowed"] is True
     assert added[0].value == opening.area_m2
     # Recover publishes the compact two-axis STACKER product. It must not mint
-    # the owner 2100 mm height assumption, including for internal 870 doors.
+    # the owner's missing-height assumption, including for internal 870 doors.
     from pb_external_door_height_estimate_policy import (
         OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
     )

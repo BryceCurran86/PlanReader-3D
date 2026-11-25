@@ -8,14 +8,24 @@ import { ReviewNotesPanel } from "./ReviewNotesPanel";
 import { PlanRevisionHistory } from "./PlanRevisionHistory";
 import { WallAdditionPanel } from "./WallAdditionPanel";
 import { BuildTools } from "./BuildTools";
-import { ConstructionView, StandardsPanel } from "./ConstructionView";
+import { VrDraftReviewPanel } from "./VrDraftReviewPanel";
+import { AssemblyStudyPanel, useAssemblyStudy } from "./AssemblyStudyPanel";
+import { saveVrReview, restoreVrReview } from "./vrDraftSave";
+import {DesignReviewPanel} from "./DesignReviewPanel";
+import {captureAlternative,restoreAlternative} from "./vrDesignReview";
+import type {DesignAlternative} from "./vrDesignReview";
+import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
+import {ArchitecturalPlan} from "./ArchitecturalPlanPanel";
+import type {LiningBoard} from "./constructionLiningVisual";
+import type {LayerOverrides} from "./constructionLayers";
+import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
-import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint } from "./footprintResize";
+import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
-import { isRoughIn, showConstructionItem } from "./constructionStages";
+import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
@@ -24,6 +34,12 @@ import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
+import { LocalOutlinePanel } from "./LocalOutlinePanel";
+import {PreciseCommandPanel} from "./PreciseCommandPanel";
+import {localBuildingShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import {starterManifest,starterBuild,starterBounds,STARTER_SHELL} from "./starterHouse";
+import type {DraftPickKind} from "./buildScene";
+import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
 import { freshReviewNotes } from "./reviewNotes";
@@ -56,12 +72,24 @@ export function App() {
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
+  const [vrRate,setVrRate]=useState("");
+  const [vrDraftStatus,setVrDraftStatus]=useState("");
+  const [recoveryScene,setRecoveryScene]=useState<SceneManifest|null>(null);
+  const [alternativeStore,setAlternativeStore]=useState<{scene:SceneManifest;entries:DesignAlternative[]}|null>(null);
+  const [allDimensions,setAllDimensions]=useState(false);
+  const [shellStore,setShellStore]=useState<{scene:SceneManifest;settings:ShellSettings}|null>(null);
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
+  const [starterScene,setStarterScene]=useState<SceneManifest|null>(null);
+  const [draftPickKind,setDraftPickKind]=useState<DraftPickKind>("auto");
+  const [draftSelection,setDraftSelection]=useState<string|null>(null);
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [planPreview,setPlanPreview]=useState(false);
+  const [liningBoard,setLiningBoard]=useState<LiningBoard>("standard");
+  const [layers,setLayers]=useState<LayerOverrides>({});
   const [resize, setResize] = useState<{
     scene: SceneManifest; enabled: boolean; hint: string;
   } & ResizeHistory | null>(null);
@@ -75,6 +103,7 @@ export function App() {
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
+  const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
   const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
@@ -90,6 +119,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [authenticatedSource, setAuthenticatedSource] = useState(false);
   const pendingLoad = useRef<AbortController | null>(null);
+  const latestManifest = useRef(manifest);
+  latestManifest.current=manifest;
   const handleSelect = useCallback((id: string | null) => {
     setSelectedId(id);
     setClipboardMessage(null);
@@ -149,7 +180,7 @@ export function App() {
   }, []);
 
   const finishLoad = useCallback((request: AbortController, result: SceneManifest | Error,
-    origin: "workspace" | "local" | "demo",
+    origin: "workspace" | "local" | "demo" | "starter",
   ) => {
     if (pendingLoad.current !== request || request.signal.aborted) return;
     pendingLoad.current = null;
@@ -161,21 +192,27 @@ export function App() {
     setManifest(result);
     setAuthenticatedSource(origin === "workspace");
     setDemoScene(origin === "demo" ? result : null);
+    setStarterScene(origin==="starter"?result:null);
+    setDraftSelection(null);setDraftPickKind("auto");
     setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
     setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
     setTeleportMode(false); setTeleportMessage(null);
-    setPlaced(null); setCatalogueSession(null); setResize(null);
+    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(null); setResize(null);
+    setShellStore(origin==="starter"?{scene:result,settings:STARTER_SHELL}:null);
     setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
     setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all");
     setStage("finished"); setPanel("plan"); setLastEdit("source");
-    setBuildHint(""); setToolMessage("");
+    setBuildHint(""); setToolMessage("");setVrRate("");setVrDraftStatus("");
     setCameraRequest(current => ({ mode: "isometric", focus: "scene", serial: current.serial + 1 }));
   }, []);
 
   useEffect(() => {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
-    if (!workspace) return () => pendingLoad.current?.abort();
+    if (!workspace) {
+      const request=startLoad();finishLoad(request,starterManifest(),"starter");
+      return () => pendingLoad.current?.abort();
+    }
     const request = startLoad();
     void (async () => {
       try {
@@ -239,11 +276,61 @@ export function App() {
     levels.includes(level) ? level : null;
   const buildState = placed && placed.scene === manifest ? placed.build : EMPTY_BUILD;
   const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
+  const recoveryKey=manifest?"planreader-vr-recovery:"+scopeKey(manifest):null;
+  const recoveryDraft=catalogue?.draft??null;
+  useEffect(()=>{
+    if(!manifest||recoveryScene!==manifest||!recoveryKey)return;
+    const timer=window.setTimeout(()=>{
+      try{
+        const saved=saveVrReview(manifest,buildState,recoveryDraft);
+        if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery limit exceeded");
+        localStorage.setItem(recoveryKey,saved);
+      }catch{setVrDraftStatus("Automatic local recovery could not save; export a draft manually.");}
+    },750);
+    return ()=>window.clearTimeout(timer);
+  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft]);
+  function restoreRecovery(){
+    if(!manifest||!recoveryKey)return;
+    try{
+      const saved=localStorage.getItem(recoveryKey);
+      if(!saved)throw Error("No local recovery saved for this source snapshot.");
+      if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery file exceeds the safe limit.");
+      const restored=restoreVrReview(manifest,JSON.parse(saved));
+      setPlaced({scene:manifest,build:restored.build});
+      setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");setRecoveryScene(manifest);
+      setVrDraftStatus("Recovered local draft. Automatic local recovery enabled.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Local recovery unavailable.");}
+  }
+  function toggleRecovery(){
+    if(!manifest||!recoveryKey)return;
+    if(recoveryScene===manifest){setRecoveryScene(null);return;}
+    try{
+      if(localStorage.getItem(recoveryKey)){
+        setVrDraftStatus("A recovery already exists. Restore it or discard it before enabling a new one.");return;
+      }
+      setRecoveryScene(manifest);
+    }catch{setVrDraftStatus("Browser local storage unavailable.");}
+  }
+  function discardRecovery(){
+    if(!recoveryKey)return;
+    try{setRecoveryScene(null);localStorage.removeItem(recoveryKey);setVrDraftStatus("Local recovery discarded.");}
+    catch{setVrDraftStatus("Could not discard local recovery.");}
+  }
   const activeItem = getCatalogueItem(catalogue?.itemId ?? null);
   const isDemo = manifest !== null && manifest === demoScene;
-  const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
+  const isStarter=!!manifest&&manifest===starterScene;
+  const baseFootprint = useMemo(() => manifest && (isStarter?starterBounds(buildState.walls):footprintBounds(manifest, isDemo)), [manifest, isDemo,isStarter,buildState.walls]);
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
+  const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
+  const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
+  const shell=useMemo(()=>manifest&&buildLevel?localBuildingShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),studyGeometry.ceilings.filter(c=>c.levelId===buildLevel&&c.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
+  const pricedStudyGeometry=useMemo(()=>{
+    if(!shell||!manifest||!buildLevel||[...studyGeometry.walls,...studyGeometry.ceilings].some(o=>o.scopeKey!==scopeKey(manifest)||o.levelId!==buildLevel))return studyGeometry;
+    return {...studyGeometry,shellMetrics:{floorM2:shell.floorM2,roofM2:shell.roofM2,slabM3:shell.slabM3,ceilingM2:shell.surfaces.some(s=>s.kind==="ceiling")?shell.floorM2:0}};
+  },[shell,manifest,buildLevel,studyGeometry]);
+  const assemblyStudy=useAssemblyStudy(pricedStudyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -257,6 +344,60 @@ export function App() {
     setCatalogueSession(previous => update(previous?.scene === manifest ? previous : {
       scene: manifest, itemId: null, turn: 0, draft: emptyItemDraft(scopeKey(manifest)),
     }));
+  }
+  const alternatives=alternativeStore&&alternativeStore.scene===manifest?alternativeStore.entries:[];
+  function saveAlternative(name:string){
+    if(!manifest||projection||resizeEnabled)return;
+    if(alternatives.length>=8){setVrDraftStatus("Maximum eight alternatives per open scene.");return;}
+    try{
+      const entry=captureAlternative(manifest,buildState,catalogue?.draft??null,name,newPlacementId("alternative"));
+      setAlternativeStore({scene:manifest,entries:[...alternatives,entry]});
+      setVrDraftStatus("Alternative captured. Local geometry and catalogue placements only.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot capture alternative.");}
+  }
+  function loadAlternative(entry:DesignAlternative){
+    if(!manifest||projection||resizeEnabled)return;
+    try{
+      const restored=restoreAlternative(manifest,entry);
+      enterMode("inspect");setPlaced({scene:manifest,build:restored.build});
+      setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");setVrDraftStatus("Restored "+entry.name+" · original source unchanged.");
+    }catch(e){setVrDraftStatus(e instanceof Error?e.message:"Cannot restore alternative.");}
+  }
+  function exportLocalVrDraft() {
+    if(!manifest)return;
+    try {
+      const text=saveVrReview(manifest,buildState,catalogue?.draft??null);
+      const blob=new Blob([text],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const anchor=document.createElement("a");
+      const safe=manifest.scope.projectId.replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,64);
+      anchor.href=url;anchor.download="planreader-vr-draft-"+safe+".json";
+      document.body.append(anchor);anchor.click();anchor.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),30000);
+      setVrDraftStatus("Local draft download requested. The original source and customer quantities were not modified.");
+    } catch {
+      setVrDraftStatus("Could not create a local draft download.");
+    }
+  }
+  async function reopenLocalVrDraft(file:File) {
+    const source=manifest;
+    if(!source)return;
+    if(file.size>3*1024*1024) {
+      setVrDraftStatus("Draft file exceeds the 3 MB review limit.");return;
+    }
+    try {
+      const data:unknown=JSON.parse(await file.text());
+      if(latestManifest.current!==source)
+        throw Error("The open source scene changed. Reopen this draft against its original snapshot.");
+      const restored=restoreVrReview(source,data);
+      setPlaced({scene:source,build:restored.build});
+      setCatalogueSession({scene:source,itemId:null,turn:0,draft:restored.itemDraft});
+      setLastEdit("draw");
+      setVrDraftStatus("Review-only draft reopened for the exact original source snapshot. No customer records changed.");
+    } catch(error) {
+      setVrDraftStatus(error instanceof Error?error.message:"Could not read local VR draft.");
+    }
   }
   function applyBuild(action: BuildAction) {
     if (!manifest) return;
@@ -293,7 +434,8 @@ export function App() {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
       enterMode("place");
-      if (!showConstructionItem(stage, item)) setStage(isRoughIn(item) ? "rough-in" : "finished");
+      if(layers[itemLayer(item)]==="hide")setLayers(current=>({...current,[itemLayer(item)]:"auto"}));
+      if (!itemLayerVisible(stage,item,layers)) setStage(isRoughIn(item) ? "rough-in" : "finished");
       setPanel("items");
       setLastEdit("place");
       changeCatalogue(current => ({ ...current, itemId: item.id, turn: 0 }));
@@ -328,6 +470,20 @@ export function App() {
 
   function onBuildAction(action: BuildAction) {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
+    if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
+    if(action.kind==="rotate-local-wall"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      if(next===buildState){setToolMessage("Wall rotation rejected or unchanged. Check junctions, angle and opening clearance.");return;}
+      if(catalogue?.draft.items.length){
+        const collect=(walls:typeof buildState.walls)=>currentItemPlacements(catalogue.draft.items,manifest,
+          [...activeBatchSketches,...walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])],isDemo,buildState.ceilings);
+        const retained=new Set(collect(next.walls).map(i=>i.id));
+        if(collect(buildState.walls).some(i=>!retained.has(i.id))){
+          setToolMessage("Rotation blocked: a hosted item would no longer fit its wall. Move the item first.");return;
+        }
+      }
+      setLastEdit("draw");applyBuild(action);setToolMessage(action.connected?"Wall angle updated · adjoining walls retained.":"Wall angle updated · independent rotation.");return;
+    }
     if (action.kind === "tool") {
       if (!buildLevel) return;
       if (buildState.tool === action.tool) {
@@ -378,7 +534,7 @@ export function App() {
 
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
-    if ((activeItem && !showConstructionItem(next, activeItem)) || next === "slab" ||
+    if ((activeItem && !itemLayerVisible(next,activeItem,layers)) || next === "slab" ||
         buildState.tool === "ceiling" && next !== "finished") enterMode("inspect");
     setStage(next);
   }
@@ -525,10 +681,10 @@ export function App() {
     mode === "wall-move" ? "Select a source wall. Use the arrow keys or hold the headset grip to move it." :
     mode === "teleport" ? "In VR, point the trigger at a verified floor." :
     !buildLevel && levels.length > 1 ? "Choose a level to draw. Drag to orbit." :
-    "Drag to orbit. Choose a tool to draw or place items.");
-  const planKind = isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
+    "Click an object to select; drag a draft object to move. Top 3D: drag empty space to pan.");
+  const planKind = isStarter ? "Editable starter house" : isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
   const cameraOptions: readonly [CameraView, string][] = [
-    ["isometric", "3D"], ["plan", "Plan"], ["north", "Front"], ["east", "Side"],
+    ["isometric", "3D"], ["plan", "Top 3D"], ["north", "Front"], ["east", "Side"],
   ];
   const panels = manifest ? [["plan", "Plan"], ["items", "Items"], ["review", "Review"], ["settings", "Settings"]] as const :
     [["plan", "Plan"], ["settings", "Settings"]] as const;
@@ -551,6 +707,9 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <label>Preview board <select value={liningBoard} onChange={e=>setLiningBoard(e.currentTarget.value as LiningBoard)} title="Visual board colour only, not a certified assembly"><option value="standard">Standard</option><option value="wet-area">Wet-area</option><option value="fire-rated">Fire-rated</option></select></label>
+            <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
+            <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
             {levels.length > 1 && <label>Level
               <select value={level} onChange={event => changeLevel(event.currentTarget.value)}>
                 <option value="all">All levels</option>
@@ -560,7 +719,8 @@ export function App() {
             <div className="tool-group" role="group" aria-label="Camera view">
               {cameraOptions.map(([orientation, label]) => <button key={orientation} type="button"
                 aria-pressed={cameraRequest.mode === orientation && cameraRequest.focus === "scene"}
-                onClick={() => requestCamera(orientation)}>{label}</button>)}
+                onClick={() => {setPlanPreview(false);requestCamera(orientation);}}>{label}</button>)}
+              <button type="button" aria-pressed={planPreview} onClick={()=>setPlanPreview(p=>!p)}>{planPreview?"Return to 3D":"Architectural plan (2D)"}</button>
               <button type="button" disabled={!selected} onClick={() => requestCamera(cameraRequest.mode, "selected")}>
                 Focus selection
               </button>
@@ -577,6 +737,28 @@ export function App() {
             {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
           </p>}
 
+          {buildLevel && <LocalOutlinePanel key={scopeKey(manifest)+":"+buildLevel}
+            walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
+            blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
+            onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
+          {buildLevel&&<details className="footprint-tools"><summary>Connected draft building shell</summary>
+            <p>Preview only. Uses one closed, equal-height local wall ring. Flat and two-plane pitched roofs follow valid irregular rings. Set a fixed ridge angle to keep its direction while editing. No existing local ceilings on the level. Does not replace source surfaces or save roof settings in draft exports.</p>
+            <label>Shell roof <select value={shellSettings.roof} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,roof:e.currentTarget.value as ShellSettings["roof"]}})}><option value="off">Off</option><option value="flat">Flat</option><option value="gable">Two-plane pitched roof</option></select></label>
+            <label>Roof pitch (degrees) <input type="number" min="5" max="60" step=".5" value={shellSettings.pitchDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=5&&n<=60)setShellStore({scene:manifest,settings:{...shellSettings,pitchDeg:n}});}}/></label>
+            {shellSettings.roof==="gable"&&<><label>Fixed ridge direction<input type="checkbox" checked={shellSettings.ridgeDeg!==undefined} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:e.currentTarget.checked?0:undefined}})}/></label>
+            {shellSettings.ridgeDeg!==undefined&&<label>Ridge angle (degrees, +X toward +Z)<input type="number" min="0" max="360" step="1" value={shellSettings.ridgeDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=0&&n<=360)setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:n}});}}/></label>}</>}
+            <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
+            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the exterior outline and wall heights.</p>:null}
+          </details>}
+          <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
+          <div className="tool-group" aria-label="Direct object editing">
+            <label>Pick <select aria-label="Pick" value={draftPickKind} onChange={e=>setDraftPickKind(e.currentTarget.value as DraftPickKind)}><option value="auto">Automatic</option><option value="walls">Walls</option><option value="ceilings">Ceilings</option></select></label>
+            <label>Selected draft object <select id="selected-draft-object" value={draftSelection??""} onChange={e=>{enterMode("inspect");setDraftSelection(e.currentTarget.value||null);}}><option value="">None</option>{buildState.walls.filter(w=>w.levelId===buildLevel).map((w,i)=><option key={w.proposalId} value={w.proposalId}>Wall {i+1} · {w.proposalId}</option>)}{buildState.ceilings.filter(c=>c.levelId===buildLevel).map((c,i)=><option key={c.proposalId} value={c.proposalId}>Ceiling {i+1} · {c.proposalId}</option>)}</select></label>
+            {draftSelection&&buildState.walls.some(w=>w.proposalId===draftSelection)&&<button type="button" onClick={()=>reviewWall(draftSelection)}>Edit wall details</button>}
+            {draftSelection&&buildState.ceilings.filter(c=>c.proposalId===draftSelection).map(c=><label key={c.proposalId}>Selected ceiling height (mm)<input type="number" min={100} max={20000} step={10} key={c.heightM} defaultValue={Math.round(c.heightM*1000)} onBlur={e=>{const h=e.currentTarget.valueAsNumber/1000;if(Number.isFinite(h)&&h>=.1&&h<=20)onBuildAction({kind:"adjust-ceiling",previous:c,ceiling:{...c,heightM:h}});}}/></label>)}
+            {draftSelection&&[...buildState.walls,...buildState.ceilings].filter(o=>o.proposalId===draftSelection).map(o=><output key={o.proposalId} aria-label="Selected draft position">Start {o.start.map(v=>Math.round(v*1000)).join(", ")} · End {o.end.map(v=>Math.round(v*1000)).join(", ")} mm</output>)}
+            {isStarter&&<span className="muted">Local draft house · not an authenticated plan</span>}
+          </div>
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
@@ -586,28 +768,31 @@ export function App() {
           {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
 
           <div className="viewport">
-            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
-                selectedId={selected?.objectId ?? null}
+                selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                mood={lightingMood} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} liningBoard={liningBoard} onLiningBoard={setLiningBoard} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
-                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onToolMessage={setToolMessage}
+                onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
                 catalogue={{ active: activeItem, items: placedItems, demo: isDemo,
                   canUndo: !!catalogue?.draft.history.length, turn: catalogue?.turn ?? 0,
                   onAction: onItemAction, onPlace: placeSelectedItem }}
-                teleportMode={mode === "teleport" && canTeleport} onTeleportMessage={setTeleportMessage}
-                onPcVrSessionReport={reportHeadset} />
-            </Suspense>
+                teleportMode={mode === "teleport" && canTeleport}
+                teleportAvailable={canTeleport} onTeleportToggle={toggleTeleport}
+                onTeleportMessage={setTeleportMessage}
+                onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
+                onReviewLocalWall={reviewWall} budget={{summary:assemblyStudy.summary,onCapture:assemblyStudy.capture,onClear:assemblyStudy.clear}} />
+            </Suspense>}
           </div>
           <div className="viewer-footer">
-            <span>Alt + drag to orbit with a tool active · Esc to finish · Ctrl/⌘ + Z to undo</span>
+            <span>Drag an object to edit · Top 3D empty drag pans · right drag pans · scroll zooms · Esc / Ctrl+Z</span>
             <span>VR · trigger to select or place, hold to drag</span>
           </div>
         </> : <div className="viewer-empty">
@@ -638,6 +823,7 @@ export function App() {
               {authenticatedSource && <div><span>Source SHA</span><code title={manifest.scope.sourceSha256}>{manifest.scope.sourceSha256.slice(0, 14)}…</code></div>}
             </div> : <p className="muted">Open a workspace from PlanReader or inspect a scene saved as JSON.</p>}
             {manifest && !isDemo && <button type="button" onClick={() => void openSyntheticDemo()}>Open example</button>}
+            {manifest&&!isStarter&&<button type="button" onClick={()=>finishLoad(startLoad(),starterManifest(),"starter")}>New starter house</button>}
           </div>
           {manifest && <div className="section-block">
             <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}
@@ -661,6 +847,18 @@ export function App() {
         </section>}
 
         {manifest && visible && <section id="panel-review" hidden={panel !== "review"} aria-label="Source and draft review">
+          <VrDraftReviewPanel build={buildState} rate={vrRate} onRate={setVrRate}
+            onSave={exportLocalVrDraft} onRestore={file=>{void reopenLocalVrDraft(file);}}
+            status={vrDraftStatus}/>
+          <div className="section-block">
+            <h2>Local draft recovery</h2>
+            <p className="muted">Optional browser-only autosave of draft walls, ceilings and catalogue items. No original PDFs or customer quantities are saved. Restore only against the same source snapshot.</p>
+            <button type="button" onClick={toggleRecovery}>{recoveryScene===manifest?"Pause automatic recovery":"Enable automatic recovery"}</button>
+            <button type="button" onClick={restoreRecovery}>Restore saved draft</button>
+            <button type="button" onClick={discardRecovery}>Discard recovery</button>
+          </div>
+          <DesignReviewPanel scene={manifest} build={buildState} items={catalogue?.draft.items.length??0} alternatives={alternatives} blocked={!!projection||resizeEnabled} onSave={saveAlternative} onRestore={loadAlternative} onRemove={id=>setAlternativeStore({scene:manifest,entries:alternatives.filter(a=>a.id!==id)})} study={assemblyStudy.study} status={vrDraftStatus}/>
+          <AssemblyStudyPanel controller={assemblyStudy}/>
           <div className="section-block">
             <h2>Review source objects</h2>
             <label htmlFor="review-search">Find an object</label>
@@ -804,6 +1002,7 @@ export function App() {
                 {Object.entries(VISUAL_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
               </select>
             </label>
+            <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
                 <option value="balanced">Balanced</option><option value="high">High fidelity</option>

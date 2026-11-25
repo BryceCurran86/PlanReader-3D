@@ -53,8 +53,10 @@ from pb_new_source_dark_ink_scope import is_source_neutral_dark
 # running an obsolete source-painted prototype. These original-producer
 # functions preserve native path indices; their results remain topology-only.
 from pb_layered_wall_doorway_room_ring_shadow import (
+    _ROLE_EVIDENCE as _ORIGINAL_ROLE_EVIDENCE,
     _collect_dark_painted_source_wall_strips as _original_source_dark_bars,
     _source_wall_ink_candidate_drawings as _original_source_wall_ink,
+    _source_wall_ink_role as _original_source_wall_ink_role,
     _unresolved_collinear_gap_breaches_outer_ring as _original_two_end_gap_veto,
 )
 
@@ -313,6 +315,34 @@ def _selected_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> i
             continue
         items = row.get("items")
         if not items:
+            continue
+        total += len(items)
+        if total > _PRIMITIVE_CAP:
+            return total
+    return total
+
+
+def _entry_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> int:
+    """Count the native items the wall-candidate collectors can consume, for the builder's entry cap.
+
+    Every item counts EXCEPT those on evidence-only rows: the unfilled, visible, non-green strokes the source-wall
+    selector retains as doorway/glazing evidence (they are not wall support) whose stroke colour the stroke-pair
+    collector cannot use (``_is_wall_stroke_color``). Those rows stay in the clipped rows with their original path
+    indices for every closure search; they never mint a wall strip, so they do not bound the wall candidate set. A
+    neutral-dark stroke the pair collector does consume keeps counting. Same 20,000 limit as
+    ``_selected_primitive_count``, which still counts every item for the halo functions.
+    """
+    total = 0
+    for row in drawings:
+        if row is None:
+            continue
+        items = row.get("items")
+        if not items:
+            continue
+        if (
+            _original_source_wall_ink_role(row) == _ORIGINAL_ROLE_EVIDENCE
+            and not _is_wall_stroke_color(row.get("color"))
+        ):
             continue
         total += len(items)
         if total > _PRIMITIVE_CAP:
@@ -2129,7 +2159,7 @@ def _split_at_closures(
 
 
 def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRingResult:
-    """Keep per-neighbourhood topology when the union of clips exceeds the 20k cap."""
+    """Keep the rings and failure reasons from separately traced viewports."""
     if not parts:
         return LayeredRoomRingResult(
             EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
@@ -2143,8 +2173,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
     any_strips = any(part.wall_strip_count for part in parts)
     for part in parts:
         for reason in part.reason_codes:
-            if reason == REASON_PRIMITIVE_CAP:
-                continue
             if reason == REASON_NO_WALL_INK and any_strips:
                 continue
             if reason not in reasons:
@@ -2153,9 +2181,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
         status = EvidenceResolutionStatus.CANDIDATE
         if REASON_RING_CLOSED not in reasons:
             reasons.insert(0, REASON_RING_CLOSED)
-    elif all(part.reason_codes == (REASON_PRIMITIVE_CAP,) for part in parts):
-        status = EvidenceResolutionStatus.ABSTAINED
-        reasons = [REASON_PRIMITIVE_CAP]
     else:
         status = EvidenceResolutionStatus.ABSTAINED
         if not reasons:
@@ -2259,7 +2284,7 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("page_index must be a non-negative int")
     if stroke_pair_wall_faces and viewport_pdf_pts is not None:
         indexed = _clip_drawing_items(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             viewports = _as_viewports(viewport_pdf_pts) or []
             if len(viewports) > 1:
                 return _merge_ring_results([
@@ -2284,7 +2309,7 @@ def build_layered_wall_doorway_room_rings(
             )
     else:
         indexed = _clip_drawings(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
             )
@@ -2297,7 +2322,7 @@ def build_layered_wall_doorway_room_rings(
         strict_indexed = _clip_drawing_items(
             source_pair_baseline_drawings, viewport_pdf_pts,
         )
-        if _selected_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED,
                 (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,

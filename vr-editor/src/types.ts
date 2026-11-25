@@ -1,6 +1,8 @@
 // Browser DTO mirrors pb_vr_editor_scene_manifest.py, never the geometry source of truth.
 import { validatedSourceSurfaces } from "./sourceSurfaces.ts";
 import type { SourceSurface } from "./sourceSurfaces";
+import {validOpeningReview} from "./sourceOpeningReview.ts";
+import type {OpeningReview} from "./sourceOpeningReview.ts";
 export interface WorkspaceScope {
   workspaceId: string;
   projectId: string;
@@ -25,6 +27,7 @@ export interface EditorObject {
   renderState: "verified" | "review";
   geometry: DisplayGeometry | null;
   dimensions: Record<string, number>;
+  openingReview?:OpeningReview;
   source: {
     sourceFileId: string | null;
     page: number | string | null;
@@ -92,11 +95,12 @@ function validObject(value: unknown): value is EditorObject {
         || (typeof trace.page === "number" && Number.isSafeInteger(trace.page)
             && trace.page >= 0))) return false;
   const geom = o.geometry;
-  if (geom === null) return true;
+  if (geom === null) return o.openingReview===undefined||o.objectType==="wall"&&validOpeningReview(o.openingReview,null);
   if (o.objectType !== "wall") return false;
   if (!geom || typeof geom !== "object" || Array.isArray(geom)) return false;
   const g = geom as Record<string, unknown>;
   if (!finitePoint(g.start) || !finitePoint(g.end)) return false;
+  if(o.openingReview!==undefined&&!validOpeningReview(o.openingReview,g as unknown as DisplayGeometry))return false;
   if (g.kind === "wallLine") return true;
   return g.kind === "wallFace" && typeof g.heightM === "number"
     && Number.isFinite(g.heightM) && g.heightM > 0;

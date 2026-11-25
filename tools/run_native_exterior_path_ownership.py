@@ -23,6 +23,10 @@ from pb_external_footprint_first_trace import (  # noqa: E402
 from pb_layered_wall_doorway_room_ring_shadow import (  # noqa: E402
     build_layered_wall_doorway_room_rings,
 )
+from pb_native_page_frame import (  # noqa: E402
+    NativePageFrameUnresolved,
+    effective_pdf_rotation,
+)
 from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
     enrich_open_to_exterior_span,
     own_exterior_contour_native_paths,
@@ -30,6 +34,18 @@ from pb_source_native_exterior_edge_path_ownership import (  # noqa: E402
 from pb_source_native_wall_role_and_junction_shadow import (  # noqa: E402
     identify_source_wall_junctions_and_roles,
 )
+
+
+def _page_rotation_for_roles(page) -> int | None:
+    """The page's effective /Rotate from the production frame seam, or None when it cannot be established.
+
+    None makes the role classifier fail closed: the title band is never tested in the wrong coordinate space.
+    180 and 270 are reported as they are; the classifier abstains on them.
+    """
+    try:
+        return effective_pdf_rotation(page)
+    except NativePageFrameUnresolved:
+        return None
 
 
 def main() -> int:
@@ -73,16 +89,20 @@ def main() -> int:
             closures=ring.closures,
         )
     page_rect = None
+    page_rotation = None
     import fitz as _fitz
     with _fitz.open(stream=raw, filetype="pdf") as doc:
-        rect = doc[args.page].rect
+        page = doc[args.page]
+        rect = page.rect
         page_rect = (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+        page_rotation = _page_rotation_for_roles(page)
     roles = identify_source_wall_junctions_and_roles(
         scope.drawings if scope.status == "CANDIDATE" else drawings,
         source_sha256=sha,
         page_index=args.page,
         trace=trace,
         page_bounds=page_rect,
+        page_rotation=page_rotation,
     )
     payload = {
         "source_sha256": sha,
@@ -95,6 +115,7 @@ def main() -> int:
         "temporary_doorway_closures": 0 if ring is None else len(ring.closures),
         "candidate_room_rings": 0 if ring is None else len(ring.rings),
         "wall_roles_and_junctions": roles.to_dict(),
+        "title_band_page_rotation": page_rotation,
         "commercial_quantity_rows": 0,
         "official_frozen120_score_change": 0,
     }

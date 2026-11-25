@@ -1,5 +1,51 @@
 # PlanReader-3D agent contract
 
+## Owner 24 November 2026 — active PlanReader team
+
+- **GPT MAX** owns the remaining GPT1, GPT2 and GPT3 lanes, including Acacia
+  source admission, Q5446 floors and customer output, cross-sheet and finish
+  authority, Lot16 host/frame integration, signed/customer retention, the
+  local benchmark and merge decisions.
+- **Claude** owns original footprint, wall, installed-opening and room-ring
+  geometry, canonical preview work and 3Laurel.
+- **Antigravity** owns Maryborough source registration, finish-source evidence
+  and schedule parsing. Coordinate his source handoffs with Claude and GPT MAX.
+
+Use the [owner handoff in #4135](https://github.com/BryceCurran86/PlanReader-3D/issues/4135#issuecomment-7111817975)
+and record exact function claims there before editing. The older assignments
+below document prior work and the donor lanes. Use the active assignments above
+for any unfinished work and continue with the existing acceptance rules.
+
+## Owner 24 November 2026 — retired private GitHub runner (current, mandatory)
+
+**There is no longer a private-source GitHub runner or companion-source workflow to
+fix, start, wait for or recreate.** Merged PR #4658 retired the hosted original
+PDF provisioning, private CI credentials and private companion benchmark paths.
+A missing private CI runner is NEVER a release blocker: stop citing it in
+coordination reports, review checklists and agent handoffs. Do not recreate
+`ORIGINAL_SOURCES_TOKEN`, source-provisioning workflows or self-hosted
+private GitHub Actions jobs to get a score.
+
+**Official original benchmark:** use the existing Windows app checkout and
+`RUN_PLANREADER_WINDOWS.bat benchmark --check-only`, followed by
+`RUN_PLANREADER_WINDOWS.bat benchmark` under its local execution guards.
+Use already-supplied originals (including the owner's existing Windows
+`documents/sources` directory or verified ChatGPT Library archive) and four
+independent identity maps, with private results outside the repository.
+GitHub Actions is source-free Python 3.13/3.14 and security/regression CI only.
+Historical requests for "protected/private original replay" mean the
+**local original-source-to-signed-customer acceptance on this Windows path**,
+not a separate private hosted runner or an excuse to request files again.
+
+Retiring the runner does **not** certify replay or relax source identity,
+physical/metric authority, signed/customer byte retention, security or the
+unchanged frozen120 scorer. A verified file preflight alone cannot publish a
+benchmark score. If an exact-head real local source→issuer→sealed customer
+execution is unavailable or fails, report the particular producer/record
+failure as UNVERIFIED/ABSTAIN/BLOCKED and progress independent tasks, never
+pretend private CI needs to be restored.
+
+
 ## Owner zero job-specific production rule — 21 November 2026 (mandatory for ALL agents)
 
 **No fix may be built around one named drawing, benchmark item, door, room, page,
@@ -104,15 +150,12 @@ and customer lineage. No new customer amount from a shadow candidate.
 See docs/engineering/ONE_APP_PRODUCTION_CONSOLIDATION_20261112.md.
 
 
-## Owner autonomous completion directive — 2026-11-10 (current)
+## Owner autonomous completion directive — 2026-11-10
 
-The owner directs **GPT MAX, Cursor, Claude and AntiGravity** to continue their
-assigned source-to-customer and benchmark work autonomously until the documented
-acceptance conditions are met. Read the current ordered queues and handoff
-contract in [Autonomous completion queues](docs/engineering/AUTONOMOUS_COMPLETION_QUEUES_20261110.md)
-and the latest claims on #4135 before each task. This four-agent assignment
-supersedes the historical "no new Cursor tasks" wording below. GPT1/GPT2/GPT3
-remain retired.
+Continue assigned source-to-customer and benchmark work autonomously until the
+documented acceptance conditions are met. Use the latest claims on #4135 and
+the [earlier completion queues](docs/engineering/AUTONOMOUS_COMPLETION_QUEUES_20261110.md)
+to connect the current assignments to pending work.
 
 - An architecture report is followed by implementation and validation within
   the same authorized task. Do not stop at "waiting for MAX/review/approval".
@@ -141,19 +184,19 @@ remain retired.
 The directive records work authorization; GitHub comments do not launch or keep
 an external agent process alive. Report execution and progress only when observed.
 
-## Owner external-door height estimate rule — 2026-11-09 (current)
+## Owner standard external-door height estimate rule — 2026-11-25 (current)
 
-**Where a specific external-door height is not stated on the door schedule, elevations or plans, assume 2100 mm for a provisional external-door estimate unless otherwise specifically noted.** Use an authenticated door-specific schedule/elevation height in preference to the assumption, and do not hide explicit conflicts or exceptions. The default is restricted to source-authenticated **external doors**; it is not a default for internal doors, windows, garage panels or joinery.
+**Where a specific standard external-door height is not stated on the door schedule, elevations or plans, assume 2040 mm for a provisional estimate unless otherwise specifically noted.** Use an authenticated door-specific schedule/elevation height in preference to the assumption, and do not hide explicit conflicts or exceptions. The default is restricted to source-authenticated **standard external doors**; internal doors, windows, garage panels and joinery retain their own evidence requirements.
 
-This owner-authorized estimating assumption must be labelled **"Assumed 2100 mm — verify on site"** and tracked with review provenance. It does not itself authenticate a drawing dimension, opening kind/host/frame/width or permit FIRM source-sealed quantities, verified commercial measurements or frozen benchmark scoring. The earlier general no-missing-height-default rule continues to apply to source-authenticated measurement/quantity authority; this is a separate provisional costing policy only. Full detail: [Owner external-door height policy](docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md). Reusable read-only resolver: `pb_external_door_height_estimate_policy.py`.
+This owner-authorized estimating assumption must be labelled **"Assumed 2040 mm — verify on site"** and tracked with review provenance. Source-authenticated measurements and frozen benchmark scoring require independent drawing evidence for the dimension, opening kind, host, frame and width. See the [owner external-door height policy](docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md). The read-only resolver is `pb_external_door_height_estimate_policy.py`.
 
-## Owner three-agent succession — 2026-11-06 (current top-priority role assignment)
+## Owner three-agent succession — 2026-11-06 (historical assignments)
 
-**Effective immediately, GPT1, GPT2 and GPT3 are retired as separate working agents.** The owner has reassigned ALL of their open code, source, measurement, customer and release responsibilities to **GPT MAX, Claude and AntiGravity**. Their three recurring ChatGPT tasks have been disabled. Do not reenable, message, assign to, await handoff from or create new GPT1/GPT2/GPT3 agents. Historical PR/issue author names are not active assignments.
+This handover records the earlier transfer of the GPT1, GPT2 and GPT3 backlog to GPT MAX, Claude and AntiGravity. Use its references to recover code and source evidence for the active team assignments above.
 
 **Mandatory master handover:** [docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md](docs/engineering/HANDOVER_GPT123_TO_GPTMAX_CLAUDE_ANTIGRAVITY_2026-11-06.md). Read it alongside this contract and the playbook before touching work inherited from the three retired agents.
 
-| Continuing agent | Full inherited owner role |
+| Agent | Role in the 6 November handover |
 |---|---|
 | **GPT MAX** | Overall technical/integration/release lead; former GPT3 pinned private-original replay, signed/customer lineage and frozen four-project 120 scorer; former GPT1 quantity/customer release integration; existing Lot16 source host/frame work. Coordinates conflicts, final-head CI, source verification and safe merges. |
 | **Claude** | Former GPT2 Maryborough pages 7/11/9 physical room/FT2/FT3/D13-D15/RCP source interpretation; former GPT1 finish and ceiling issuers/customer output; former GPT3 family semantic/lineage verification; related glazing-source work. |

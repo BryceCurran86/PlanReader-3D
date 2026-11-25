@@ -2,7 +2,7 @@
  * These settings NEVER alter metres, geometry, source authority or quantities.
  * Ground/sky are deliberately marked as presentation context, not source BIM.
  */
-export type LightingMood = "daylight" | "studio" | "dusk";
+export type LightingMood = "daylight" | "studio" | "dusk" | "night";
 export type RenderQuality = "balanced" | "high";
 export interface VisualPreset {
   label: string;
@@ -28,6 +28,12 @@ export const VISUAL_PRESETS: Readonly<Record<LightingMood, Readonly<VisualPreset
     background: 0x182934, ambientSky: 0xd9ebf7, ambientGround: 0x667782,
     ambientIntensity: 2.3, sunColor: 0xf7fbff, sunIntensity: 2.0,
     sunPosition: [-8, 17, 11], exposure: 0.92, materialRoughness: 0.83,
+  },
+  night: {
+    label: "Night · local fixture preview (illustrative)",
+    background: 0x121b2c, ambientSky: 0x8d9ac2, ambientGround: 0x45424d,
+    ambientIntensity: .24, sunColor: 0xb5c9ff, sunIntensity: .08,
+    sunPosition: [16, 12, 5], exposure: 1.0, materialRoughness: .88,
   },
   dusk: {
     label: "Warm evening light (illustrative)",

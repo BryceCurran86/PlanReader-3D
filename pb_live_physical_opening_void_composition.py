@@ -132,7 +132,7 @@ class LiveCanonicalOpeningObject:
     owner_approved_second_axis_record_id: Optional[str] = None
     owner_approved_width_mm: Optional[float] = None
     owner_approved_height_mm: Optional[float] = None
-    # One printed callout figure retained as width input for the owner 2100 mm
+    # One printed callout figure retained as width input for the owner's
     # external-door estimate. Never copied into width_m / height_m.
     figured_single_axis_mm: Optional[float] = None
     external_wall_role_record_id: Optional[str] = None

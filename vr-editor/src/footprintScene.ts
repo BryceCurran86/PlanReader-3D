@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { FOOTPRINT_CORNERS, footprintCorner, footprintDepth, footprintWidth, projectVertex, sameFootprint } from "./footprintResize.ts";
-import type { FootprintBounds, FootprintCorner, FootprintProjection } from "./footprintResize.ts";
+import { FOOTPRINT_CORNERS, FOOTPRINT_EDGES, footprintHandlePoint, footprintDepth, footprintWidth, projectVertex, sameFootprint } from "./footprintResize.ts";
+import type { FootprintBounds, FootprintHandle, FootprintProjection } from "./footprintResize.ts";
 import type { CatalogueHost } from "./catalogueScene.ts";
 
 type SourceMesh = THREE.Mesh | THREE.Line;
@@ -59,9 +59,10 @@ export function createFootprintGizmo(scene: THREE.Scene) {
   outline.frustumCulled = false;
   outline.renderOrder = 16;
   root.add(outline);
-  const handles = FOOTPRINT_CORNERS.map(corner => {
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10),
-      new THREE.MeshBasicMaterial({ color: 0x77efca, depthTest: false }));
+  const handles = [...FOOTPRINT_CORNERS,...FOOTPRINT_EDGES].map((corner:FootprintHandle) => {
+    const edge=FOOTPRINT_EDGES.some(e=>e===corner);
+    const mesh = new THREE.Mesh(edge?new THREE.BoxGeometry(1.7,1.1,1.7):new THREE.SphereGeometry(1, 16, 10),
+      new THREE.MeshBasicMaterial({ color: edge?0xffbd63:0x77efca, depthTest: false }));
     mesh.renderOrder = 17;
     root.add(mesh);
     return { corner, mesh };
@@ -73,7 +74,7 @@ export function createFootprintGizmo(scene: THREE.Scene) {
     last = bounds;
     const size = Math.max(0.12, Math.min(0.42, Math.min(footprintWidth(bounds), footprintDepth(bounds)) * 0.045));
     for (const row of handles) {
-      const [x, z] = footprintCorner(bounds, row.corner);
+      const [x, z] = footprintHandlePoint(bounds, row.corner);
       row.mesh.position.set(x, 0.06, z);
       row.mesh.scale.setScalar(size);
     }
@@ -84,7 +85,7 @@ export function createFootprintGizmo(scene: THREE.Scene) {
     positions.needsUpdate = true;
     root.updateWorldMatrix(true, true);
   }
-  function pick(ray: THREE.Raycaster): FootprintCorner | null {
+  function pick(ray: THREE.Raycaster): FootprintHandle | null {
     if (!root.visible) return null;
     const hit = ray.intersectObjects(handles.map(row => row.mesh), false)[0];
     return handles.find(row => row.mesh === hit?.object)?.corner ?? null;

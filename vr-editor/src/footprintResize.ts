@@ -5,6 +5,9 @@ import type { SceneManifest } from "./types.ts";
 
 export type FootprintBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 export type FootprintCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+export type FootprintEdge = "top" | "right" | "bottom" | "left";
+export type FootprintHandle = FootprintCorner | FootprintEdge;
+export const FOOTPRINT_EDGES: readonly FootprintEdge[] = ["top","right","bottom","left"];
 export type FootprintAnchor = FootprintCorner | "centre";
 export type FootprintProjection = {
   original: FootprintBounds; draft: FootprintBounds; scaleX: number; scaleZ: number;
@@ -61,6 +64,29 @@ export function resizeFromCorner(box: FootprintBounds, corner: FootprintCorner, 
     minZ: top ? z : box.minZ, maxZ: top ? box.maxZ : z,
   };
   return validBounds(draft) ? draft : null;
+}
+
+export function footprintHandlePoint(box:FootprintBounds,handle:FootprintHandle):PlanPoint{
+  switch(handle){
+    case "top":return [(box.minX+box.maxX)/2,box.minZ];
+    case "bottom":return [(box.minX+box.maxX)/2,box.maxZ];
+    case "left":return [box.minX,(box.minZ+box.maxZ)/2];
+    case "right":return [box.maxX,(box.minZ+box.maxZ)/2];
+    default:return footprintCorner(box,handle);
+  }
+}
+export function resizeFromHandle(box:FootprintBounds,handle:FootprintHandle,point:PlanPoint){
+  const [x,z]=footprintHandlePoint(box,handle);
+  const dx=Math.round((point[0]-x)*20)/20,dz=Math.round((point[1]-z)*20)/20;
+  const next={...box};
+  switch(handle){
+    case "top":next.minZ+=dz;break;
+    case "bottom":next.maxZ+=dz;break;
+    case "left":next.minX+=dx;break;
+    case "right":next.maxX+=dx;break;
+    default:return resizeFromCorner(box,handle,point);
+  }
+  return validBounds(next)?next:null;
 }
 
 export function resizeFromDimensions(box: FootprintBounds, width: number, depth: number, anchor: FootprintAnchor) {

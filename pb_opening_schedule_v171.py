@@ -454,6 +454,62 @@ def _explicit_two_level_schedule_header(cells: Sequence[str]) -> Dict[str, Any]:
     return mapping
 
 
+
+def _explicit_nested_schedule_header(
+    parent_cells: Sequence[str], child_cells: Sequence[str],
+) -> Dict[str, Any]:
+    """Combine two *column-aligned*, explicitly labelled dimension headings.
+
+    This opt-in B2 reader never guesses which child belongs to a spanning
+    group. An unaligned header or ambiguous leaf/frame ownership abstains.
+    Source word identity, metric unit and physical opening still require
+    their independent authorities.
+    """
+    if len(parent_cells) != len(child_cells) or len(parent_cells) < 3:
+        return {}
+    groups = {
+        "door leaf": "leaf", "window leaf": "leaf",
+        "door frame": "frame", "window frame": "frame",
+        "rough opening": "rough opening",
+        "clear opening": "clear opening",
+    }
+    expanded: List[str] = []
+    dimension_groups: Dict[str, List[Tuple[int, str]]] = {
+        "width": [], "height": [],
+    }
+    for i, (parent, child) in enumerate(zip(parent_cells, child_cells)):
+        p = " ".join(parent.strip().lower().split())
+        c = " ".join(child.strip().lower().split())
+        basis = groups.get(p)
+        if basis and c in _HEADER_WIDTH_KEYWORDS:
+            dimension_groups["width"].append((i, basis))
+            expanded.append(f"{basis} width")
+        elif basis and c in _HEADER_HEIGHT_KEYWORDS:
+            dimension_groups["height"].append((i, basis))
+            expanded.append(f"{basis} height")
+        elif re.fullmatch(r"(?:door|window)\s+(?:no\.?|number|mark|code)", p):
+            expanded.append("Mark")
+        elif p in ("door", "window") and c in ("no", "no.", "mark", "code"):
+            expanded.append("Mark")
+        else:
+            # Never borrow a dimension from an unrelated parent group.
+            expanded.append(parent.strip() or child.strip())
+
+    widths, heights = dimension_groups["width"], dimension_groups["height"]
+    if len(widths) != 1 or len(heights) != 1:
+        return {}
+    if widths[0][1] != heights[0][1]:
+        return {}
+    mapping = _explicit_two_level_schedule_header(expanded)
+    if (
+        mapping.get("width") != widths[0][0]
+        or mapping.get("height") != heights[0][0]
+        or mapping.get("dimension_basis") != widths[0][1]
+    ):
+        return {}
+    return mapping
+
+
 def parse_schedule_rows(
     rows: Sequence[Dict[str, Any]],
     page_no: int = 0,
@@ -471,14 +527,38 @@ def parse_schedule_rows(
     header_rows: set[int] = set()
 
     if two_level_header:
-        # Explicit source-text table schemas only. Different plausible column
-        # assignments are a conflict, not permission to elect the first/last.
+        # An explicit two-row group may qualify its WIDTH/HEIGHT subcolumns.
+        # Consume both header rows so the generic second row cannot erase an
+        # authenticated LEAF/FRAME basis. Competing complete headers abstain.
         candidates: List[Tuple[int, Dict[str, Any]]] = []
+        consumed: set[int] = set()
+        for idx in range(len(rows) - 1):
+            parent = [v.strip() for v in rows[idx].get("text", "").split("\t")]
+            child = [v.strip() for v in rows[idx + 1].get("text", "").split("\t")]
+            mapping = _explicit_nested_schedule_header(parent, child)
+            if mapping:
+                candidates.append((idx + 1, mapping))
+                consumed.update((idx, idx + 1))
+            elif (
+                any(" ".join(p.lower().split()) in {
+                    "door leaf", "window leaf", "door frame", "window frame",
+                    "rough opening", "clear opening",
+                } for p in parent)
+                and any(c.lower() in (
+                    _HEADER_WIDTH_KEYWORDS | _HEADER_HEIGHT_KEYWORDS
+                ) for c in child)
+            ):
+                # A grouped dimension header with unprovable alignment cannot
+                # be reinterpreted as an unrelated generic child header.
+                return []
         for idx, row in enumerate(rows):
+            if idx in consumed:
+                continue
             cells = [v.strip() for v in row.get("text", "").split("\t")]
             mapping = _explicit_two_level_schedule_header(cells)
             if mapping:
                 candidates.append((idx, mapping))
+                consumed.add(idx)
         if not candidates:
             return []
         fields = ("mark", "dims", "width", "height", "count", "desc",
@@ -489,8 +569,8 @@ def parse_schedule_rows(
         }
         if len(signatures) != 1:
             return []
-        header_idx, col_map = candidates[0]
-        header_rows = {idx for idx, _ in candidates}
+        header_idx, col_map = min(candidates, key=lambda pair: pair[0])
+        header_rows = consumed
     else:
         # Historical production path is byte-for-byte behaviourally unchanged.
         for idx, row in enumerate(rows):
@@ -516,7 +596,9 @@ def parse_schedule_rows(
         mark = ""
         if "mark" in col_map and col_map["mark"] < len(cells):
             mark = extract_mark(cells[col_map["mark"]])
-        if not mark:
+        # The strict opt-in table reader may not rescue a mark from a notes
+        # column or from a row with a missing/wrong mark-cell address.
+        if not mark and not two_level_header:
             mark = extract_mark(text)
         if not _is_opening_mark(mark):
             continue
@@ -610,21 +692,205 @@ def _parse_rows_without_header(
     return entries
 
 
+
+def _explicit_grid_nested_schedule_entries(
+    pdf_page: Any,
+    page_no: int,
+) -> Optional[List[ScheduleEntry]]:
+    """Read native printed table-grid ownership, opt-in and noncommercial.
+
+    A group header such as DOOR LEAF may span five child columns. Row-text
+    tab splits cannot prove that span, whereas actual PDF grid cell ownership
+    can. Only an explicitly labelled unique mark column and unique WIDTH and
+    HEIGHT children within the SAME parent group are usable. No opening
+    instance, row-count quantity, rough wall aperture or customer seal is
+    created. None means no qualifying grid; [] means competing/invalid grid.
+    """
+    try:
+        detector = getattr(pdf_page, "find_tables", None)
+        if not callable(detector):
+            return None
+        tables = tuple(detector(strategy="lines_strict").tables)
+    except (AttributeError, ValueError, TypeError, RuntimeError):
+        return None
+    if len(tables) > 100:
+        return []
+    found: List[Tuple[List[Sequence[Any]], int, int, int, int, str]] = []
+    header_count = 0
+    for table in tables:
+        try:
+            grid = list(table.extract())
+        except (AttributeError, ValueError, TypeError, RuntimeError):
+            continue
+        if len(grid) < 3 or len(grid) > 5000:
+            continue
+        def _label(value: Any) -> str:
+            return " ".join(str(value or "").lower().split())
+        for idx in range(len(grid) - 2):
+            parent, child = grid[idx], grid[idx + 1]
+            if not (
+                isinstance(parent, (list, tuple))
+                and isinstance(child, (list, tuple))
+                and len(parent) == len(child)
+                and 3 <= len(parent) <= 100
+            ):
+                continue
+            marks = [
+                column for column, value in enumerate(parent)
+                if re.fullmatch(
+                    r"(?:door|window)\s+(?:no\.?|number|mark|code)",
+                    _label(value),
+                )
+            ]
+            if len(marks) != 1:
+                continue
+            groups = [
+                (column, _label(value))
+                for column, value in enumerate(parent)
+                if _label(value) in (
+                    "door leaf", "window leaf",
+                    "door frame", "window frame",
+                    "rough opening", "clear opening",
+                )
+            ]
+            matches = []
+            for group_idx, (start, basis) in enumerate(groups):
+                end = (
+                    groups[group_idx + 1][0]
+                    if group_idx + 1 < len(groups) else len(parent)
+                )
+                widths = [
+                    col for col in range(start, end)
+                    if _label(child[col]) == "width"
+                ]
+                heights = [
+                    col for col in range(start, end)
+                    if _label(child[col]) == "height"
+                ]
+                if len(widths) == len(heights) == 1:
+                    matches.append((marks[0], widths[0], heights[0], basis))
+            if matches:
+                # No arbitrary election of leaf vs frame or other group.
+                header_count += 1
+                if len(matches) != 1:
+                    return []
+                mark_col, width_col, height_col, basis = matches[0]
+                found.append((grid, idx, mark_col, width_col, height_col, basis))
+    if header_count == 0:
+        return None
+    if len(found) != 1:
+        return []
+    grid, header_idx, mark_col, width_col, height_col, basis = found[0]
+    basis = basis.split()[-1] if basis in (
+        "door leaf", "window leaf", "door frame", "window frame"
+    ) else basis.replace(" ", "_")
+    entries: List[ScheduleEntry] = []
+    marks_seen: set[str] = set()
+    for cells in grid[header_idx + 2:]:
+        if not (
+            isinstance(cells, (tuple, list))
+            and max(mark_col, width_col, height_col) < len(cells)
+        ):
+            return []
+        raw_mark = str(cells[mark_col] or "").strip()
+        if not _is_opening_mark(raw_mark):
+            continue
+        mark = raw_mark.upper()
+        if mark in marks_seen:
+            # Duplicate typed schedule rows must remain alternatives; don't
+            # let a "last row wins" dict discard their competing dimensions.
+            return []
+        marks_seen.add(mark)
+        width = parse_single_dimension(str(cells[width_col] or ""))
+        height = parse_single_dimension(str(cells[height_col] or ""))
+        entries.append(ScheduleEntry(
+            type_mark=mark,
+            width_mm=width,
+            height_mm=height,
+            page_no=page_no,
+            parse_source="source_grid_nested_header",
+            dimension_basis=basis,
+            basis_source=f"grid:{basis}",
+        ))
+    return entries
+
+
+def _rotated_display_words(pdf_page: Any) -> List[tuple]:
+    """Explicit opt-in: page-native PyMuPDF word boxes to visible row space.
+
+    Invalid coordinate frames fail closed. No transformation of stored source
+    word IDs, wall coordinates, physical opening hosts or authority decisions.
+    """
+    import math
+
+    try:
+        rotation = int(pdf_page.rotation)
+        matrix = pdf_page.rotation_matrix
+        a, b, c, d, e, f = (
+            float(matrix.a), float(matrix.b), float(matrix.c),
+            float(matrix.d), float(matrix.e), float(matrix.f),
+        )
+        if rotation not in (90, 180, 270):
+            return []
+        if not all(math.isfinite(v) for v in (a, b, c, d, e, f)):
+            return []
+        if abs(a * d - b * c) <= 1e-12:
+            return []
+        source_words = list(pdf_page.get_text("words") or [])
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return []
+    transformed = []
+    for word in source_words:
+        if len(word) < 5:
+            return []
+        try:
+            x0, y0, x1, y1 = [float(v) for v in word[:4]]
+        except (TypeError, ValueError, OverflowError):
+            return []
+        if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+            return []
+        corners = (
+            (a * x + c * y + e, b * x + d * y + f)
+            for x in (x0, x1) for y in (y0, y1)
+        )
+        points = tuple(corners)
+        if not all(math.isfinite(v) for xy in points for v in xy):
+            return []
+        xs, ys = zip(*points)
+        transformed.append((min(xs), min(ys), max(xs), max(ys), *word[4:]))
+    return transformed
+
+
 def parse_schedule_page(
     pdf_page: Any,
     page_no: int = 0,
     *,
     two_level_header: bool = False,
 ) -> List[ScheduleEntry]:
-    try:
-        from pb_plan_read_engine_v1228 import _word_rows
-        rows = _word_rows(pdf_page)
-    except ImportError:
-        try:
-            words = list(pdf_page.get_text("words") or [])
-        except Exception:
+    if type(two_level_header) is not bool:
+        raise TypeError("two_level_header must be a bool")
+    if two_level_header:
+        gridded = _explicit_grid_nested_schedule_entries(pdf_page, page_no)
+        if gridded is not None:
+            return gridded
+    if two_level_header and getattr(pdf_page, "rotation", 0):
+        # The existing _word_rows groups NATIVE y; displayed landscape rows
+        # can run across native x on /Rotate 90/270. Only the opted-in B2
+        # candidate uses transformed rows, never the live production default.
+        words = _rotated_display_words(pdf_page)
+        if not words:
             return []
         rows = _basic_word_rows(words)
+    else:
+        try:
+            from pb_plan_read_engine_v1228 import _word_rows
+            rows = _word_rows(pdf_page)
+        except ImportError:
+            try:
+                words = list(pdf_page.get_text("words") or [])
+            except Exception:
+                return []
+            rows = _basic_word_rows(words)
     return parse_schedule_rows(
         rows, page_no=page_no, two_level_header=two_level_header,
     )

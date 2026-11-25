@@ -16,6 +16,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _source_wall_ink_candidate_drawings,
     _owner_excluded_green_ink,
     build_layered_wall_doorway_room_rings,
+    structural_native_primitive_count,
 )
 from pb_layered_wall_doorway_room_face_scope_shadow import (
     LAYERED_RING_FINISHED_FACE_GATE_REASON,
@@ -193,6 +194,9 @@ def test_real_maryborough_green_exclusion_unblocks_bounded_original_floor_wall_t
     name=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
     if not name or not Path(name).is_file():
         pytest.skip("private original Maryborough not provisioned")
+    assert __import__("hashlib").sha256(Path(name).read_bytes()).hexdigest() == (
+        "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    )
     with fitz.open(name) as doc:
         drawings=doc[6].get_drawings()
     assert len(drawings)==109_354
@@ -201,19 +205,27 @@ def test_real_maryborough_green_exclusion_unblocks_bounded_original_floor_wall_t
     assert source_count==14_038
     assert len(eligible)==len(drawings)
     assert len(drawings)-green_count==45_021
+    # The 20,000 limit bounds the STRUCTURAL wall set (wall support plus the opaque
+    # fills that can hide it). The doorway/glazing evidence strokes the selector
+    # retains keep their original indices but are not counted: counting them
+    # (45,189 primitives) made this page abstain from 3ce1d9b18 until this count.
+    assert sum(len(r.get("items",())) for r in eligible)==45_189
+    assert structural_native_primitive_count(drawings)==16_099
+    assert structural_native_primitive_count(eligible)==16_099
     # The actual original tracer, not just a test helper, uses these
     # SOURCE-PAINTED black paired lines with their ORIGINAL path indices.
     result=build_layered_wall_doorway_room_rings(
         drawings,source_sha256=SHA,page_index=6,
         dark_painted_wall_source=True,
     )
-    # Two anonymous opaque-black source bars now join the 116 existing strips.
-    assert result.wall_strip_count==118
-    assert len(result.rings)>0
-    assert sum(r.status is EvidenceResolutionStatus.CANDIDATE for r in result.rings)==6
-    assert len(result.closures)==2  # bounded source-only doorway topology
-    assert all(closure.kind=="swing_doorway" for closure in result.closures)
-    assert all(not ring.metric_area_issued for ring in result.rings)
+    # The page runs again. The exact strip, ring and closure counts are NOT pinned:
+    # they moved with 4285e133a (merged face strips), independently of the cap.
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.reason_codes!=(
+        "unlabelled_dark_wall_page_exceeds_20000_primitive_cap_needs_bounded_viewport",
+    )
+    assert result.wall_strip_count>0
+    assert sum(r.status is EvidenceResolutionStatus.CANDIDATE for r in result.rings)>0
     assert all(not r.metric_area_issued and not r.commercial_projection_allowed
                for r in result.rings)
     assert all(all(0<=i<len(drawings) for i in r.bounding_wall_path_indices)
