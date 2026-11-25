@@ -11,14 +11,14 @@ export function contextGroups(context:FinishContext):CatalogueGroup[]{
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
  if(old?.visual.kind==="fixture")return [old.group];
  const t=context.hit.target;
- const groups=priority.filter(g=>ITEM_CATALOGUE.some(i=>i.group===g&&i.targets.includes(t)));
+ const groups=priority.filter(g=>ITEM_CATALOGUE.some(i=>i.group===g&&i.targets.includes(t)&&i.visual.kind!=="fixture"&&i.visual.kind!=="design-assembly"));
  if(t==="opening")return groups.filter(g=>context.hit.opening?.door?["doors","entry","sliding-doors"].includes(g):context.hit.opening?.window?["windows","window-coverings"].includes(g):false);
  return groups;
 }
 export function contextChoices(context:FinishContext,group:CatalogueGroup):CatalogueItem[]{
  if(!contextGroups(context).includes(group))return [];
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
- return ITEM_CATALOGUE.filter(i=>i.group===group&&i.targets.includes(context.hit.target)&&(!old||old.visual.kind!=="fixture"||sameFixtureFamily(old,i)));
+ return ITEM_CATALOGUE.filter(i=>i.group===group&&i.targets.includes(context.hit.target)&&(old?.visual.kind==="fixture"?sameFixtureFamily(old,i):i.visual.kind!=="fixture"&&i.visual.kind!=="design-assembly"));
 }
 export function contextTitle(c:FinishContext){
  const entry=c.entry&&getCatalogueItem(c.entry.itemId);
