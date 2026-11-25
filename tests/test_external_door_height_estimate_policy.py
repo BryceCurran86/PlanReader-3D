@@ -1,4 +1,4 @@
-"""Source-neutral regressions for Bryce's external-door 2100 estimate policy."""
+"""Source-neutral regressions for Bryce's external-door estimate policy."""
 from dataclasses import FrozenInstanceError
 from dataclasses import replace
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from pb_external_door_height_estimate_policy import (
     OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM,
     OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
+    OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL,
     resolve_external_door_height_estimate,
 )
 
@@ -30,8 +31,11 @@ def assert_review_only(result, *, labelled_provisional_customer=False):
 
 def test_default_for_authentic_external_door_without_specific_height():
     result = estimate()
-    assert result.height_mm == OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM == 2100
+    assert result.height_mm == OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM == 2040
     assert result.basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
+    assert result.basis == "assumed_external_door_height_2040_mm_owner_policy"
+    assert result.reason_code == "external_door_height_not_specified_owner_2040_assumption"
+    assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL == "Assumed 2040 mm — verify on site"
     assert result.source_authenticated_height is False
     assert result.assumption_used is True
     assert result.verify_on_site is True
