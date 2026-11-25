@@ -156,7 +156,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     group.add(mount);
   }
   group.add(illustrativeTimberFrame(wall));
-  group.add(...nominalWallConnections(wall).children.slice());
+  for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
   if(profile.core!=="masonry"){
     const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
     const sides=profile.role==="internal"?[1,-1]:[assembly.exteriorSide==="left"?-1:1];
