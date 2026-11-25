@@ -423,14 +423,21 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const reportTool = (message: string) => interaction.current.onToolMessage(message);
     let anchorKey: readonly unknown[] = [];
     let cachedAnchors: ReturnType<typeof verifiedSourceWallAnchors> = [];
+    let segmentTargets: readonly WallTarget[] | null = null;
+    let cachedSegments: {start:WallTarget["start"];end:WallTarget["end"];objectId:string}[] = [];
     function snapOptions() {
+      const targets = resize.current.projection ? null : visibleWallTargets();
+      if (targets !== segmentTargets) {
+        segmentTargets=targets;
+        cachedSegments=targets?.filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})) ?? [];
+      }
       const key = [build.current.buildLevel, interaction.current.visibleIds, resize.current.projection];
       if (!key.every((v,i)=>v===anchorKey[i])) {
         anchorKey=key;
         cachedAnchors=resize.current.projection ? [] : verifiedSourceWallAnchors(manifest,build.current.buildLevel,interaction.current.visibleIds);
       }
       return {gridM:snapGrid,axis:snapAxis,magnetic,preferredDraftId:wallLock?.target.kind==="draft"?wallLock.target.id:null,
-        wallSegments:resize.current.projection?[]:visibleWallTargets().filter(t=>t.kind==="source").map(t=>({start:t.start,end:t.end,objectId:t.id})),
+        wallSegments:cachedSegments,
         verifiedAnchors: cachedAnchors};
     }
     function menuLayout(hint: string) {
