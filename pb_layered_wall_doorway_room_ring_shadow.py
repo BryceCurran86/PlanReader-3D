@@ -2224,22 +2224,24 @@ def _jamb_return_extent(
         return None
     other, jamb = candidates[0]
 
-    def reach(face: float) -> tuple[float, list[int]]:
-        """How far this face runs from the chord end without a break."""
-        spans = sorted(((lo, hi, index) for perp, lo, hi, index in faces if abs(perp - face) <= _JAMB_FACE_PT),
+    def reach(face: float) -> tuple[float, list[tuple[float, int]]]:
+        """How far this face runs from the chord end without a break, and the (position, path id) lines read."""
+        spans = sorted(((lo, hi, index, perp) for perp, lo, hi, index in faces if abs(perp - face) <= _JAMB_FACE_PT),
                        key=lambda span: (-span[1], span[0]) if direction < 0 else (span[0], -span[1]))
         edge, used = end, []
-        for lo, hi, index in spans:
+        for lo, hi, index, perp in spans:
             near, far = (hi, lo) if direction < 0 else (lo, hi)
             if direction * (near - edge) <= _JAMB_FACE_PT and direction * (far - edge) > 0:
                 edge = far
-                used.append(index)
+                used.append((perp, index))
         return edge, used
 
-    chord_far, chord_ids = reach(chord)
-    other_far, other_ids = reach(other)
+    chord_far, chord_lines = reach(chord)
+    other_far, other_lines = reach(other)
     far_end = end + direction * min(direction * (chord_far - end), direction * (other_far - end))
-    return far_end, (min(chord, other), max(chord, other)), tuple(sorted(set(chord_ids + other_ids + jamb)))
+    positions = [perp for perp, _index in chord_lines + other_lines]  # the band is where the drawn faces are
+    ids = {index for _perp, index in chord_lines + other_lines} | set(jamb)
+    return far_end, (min(positions), max(positions)), tuple(sorted(ids))
 
 
 def _collect_door_jamb_return_strips(

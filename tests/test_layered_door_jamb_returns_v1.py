@@ -45,7 +45,7 @@ class Scene:
 
     def __init__(self, *, thickness=6.5, chord_inset=0.0, nib_end=NIB_END, stub_end=STUB_END, vertical=False, mirror_along=False,
                  mirror_across=False, dx=0.0, dy=0.0, drop=(), extra=(), leaf=True, nib_break=False, nib_split=False,
-                 perpendicular=True, perp_shift=0.0, jambs_at_lo=True, far_face_at_lo=True):
+                 perpendicular=True, perp_shift=0.0, jambs_at_lo=True, far_face_at_lo=True, tip_offset=0.0, far_short=0.0):
         self.vertical, self.mirror_along, self.mirror_across, self.dx, self.dy = vertical, mirror_along, mirror_across, dx, dy
         near = FAR + thickness           # the swing face
         self.far, self.near = FAR, near
@@ -79,7 +79,7 @@ class Scene:
                 for k in range(3):
                     add("nib", (nib_end + k * third, across), (nib_end + (k + 1) * third, across), **kw)
             else:
-                add("nib", (nib_end, across), (cap_lo, across), **kw)
+                add("nib", (nib_end + (far_short if across == FAR else 0.0), across), (cap_lo, across), **kw)
         # extra lines just outside the swing face give the nib's far face two partner lines
         for across in (near + 0.5, near + 0.98):
             add("outside", (nib_end, across), (cap_lo, across), width=0.24)
@@ -99,6 +99,7 @@ class Scene:
         # the segmented swing: nine chords from the closed tip (LO) round the hinge (HI), and the radial leaf
         width = HI - LO
         pts = [(HI - width * math.cos(math.radians(10 * k)), chord + width * math.sin(math.radians(10 * k))) for k in range(10)]
+        pts[0] = (pts[0][0], pts[0][1] + tip_offset)         # the closed tip, moved off the face by the caller
         for a, b in zip(pts, pts[1:]):
             add("arc", a, b, width=0.48)
         if leaf:
@@ -367,6 +368,84 @@ def test_without_a_swing_there_is_nothing_to_bind_to(monkeypatch):
     assert seg.collect_source_black_segmented_door_swings(scene.rows) == ()
     assert _pieces(scene.rows, monkeypatch) == []
     assert _signature(_build(scene.rows)) == _signature(_build(scene.rows, door_jamb_returns=False))
+
+
+# ------------------------------------------------------------------------------------------------ the reused tolerances
+
+
+def _replace(scene, name, strokes):
+    """Swap a named group of rows for new (along, across) strokes, in place so every other row keeps its index."""
+    indices = scene.named[name]
+    assert len(strokes) <= len(indices)
+    for index, spec in zip(indices, strokes):
+        a, b = spec
+        scene.rows[index] = _stroke(scene.map(*a), scene.map(*b), width=0.96)
+    for index in indices[len(strokes):]:
+        scene.rows[index] = {"layer": "", "fill": None, "color": None, "items": ()}
+
+
+def test_a_closed_tip_just_off_the_face_keeps_the_band_on_the_drawn_faces(monkeypatch):
+    scene = Scene(tip_offset=0.05)
+    assert len(seg.collect_source_black_segmented_door_swings(scene.rows)) == 1
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
+
+
+def test_a_chord_that_is_not_axis_aligned_is_skipped(monkeypatch):
+    seen = _existing_strips(Scene().rows, monkeypatch)
+    diagonal = {**seen["witnesses"][0], "source_closed_leaf_tip_pdf_pts": (LO, FAR + 6.5 + 5.0)}
+    assert ring._collect_door_jamb_return_strips(seen["drawings"], (diagonal,), seen["strips"]) == []
+
+
+@pytest.mark.parametrize("tilt,made", [(0.05, True), (0.5, False)])
+def test_a_face_line_must_run_along_the_wall(tilt, made, monkeypatch):
+    scene = Scene()
+    _replace(scene, "frame_far_lo", [((LO, FAR), (LO - 2.2, FAR + tilt))])
+    expected = [scene.nib_rect()] if made else []
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect(), *expected)
+
+
+@pytest.mark.parametrize("gap,made", [(0.1, True), (0.3, False)])
+def test_a_face_must_start_at_the_chord_end(gap, made, monkeypatch):
+    scene = Scene()
+    _replace(scene, "frame_far_lo", [((LO - gap, FAR), (LO - 2.2, FAR))])
+    expected = [scene.nib_rect()] if made else []
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.stub_rect(), *expected)
+
+
+def test_a_face_that_starts_with_a_tick_is_not_read(monkeypatch):
+    scene = Scene()
+    scene.rows = scene.rows[:-len(scene.named["arc"]) - 1] + [_stroke(scene.map(LO - 0.5, FAR), scene.map(LO - 2.2, FAR))] +         scene.rows[-len(scene.named["arc"]) - 1:]
+    _replace(scene, "frame_far_lo", [((LO, FAR), (LO - 0.5, FAR))])
+    _only_stub(scene, monkeypatch)
+
+
+def test_a_face_drawn_twice_within_the_tolerance_is_one_face(monkeypatch):
+    scene = Scene(extra=[((LO, FAR + 0.1), (LO - 2.2, FAR + 0.1), {})])
+    assert _boxes(_pieces(scene.rows, monkeypatch)) == _rounded(scene.nib_rect(), scene.stub_rect())
+
+
+def test_a_line_running_through_the_chord_end_into_the_doorway_is_not_a_jamb_face(monkeypatch):
+    scene = Scene(drop=("frame_near_lo",), extra=[((LO + 10.0, FAR + 6.5), (NIB_END, FAR + 6.5), {})])
+    _only_stub(scene, monkeypatch)
+
+
+@pytest.mark.parametrize("cross", [(FAR - 10.0, FAR + 6.5), (FAR, FAR + 20.0), (FAR + 2.0, FAR + 4.0)],
+                         ids=["past the far face", "past the chord face", "touching neither face"])
+def test_only_a_cross_stroke_within_the_wall_and_on_a_face_is_a_jamb(cross, monkeypatch):
+    # drawn from the far end back, so it never ends where the swing chain starts
+    scene = Scene(jambs_at_lo=False, extra=[((LO, cross[1]), (LO, cross[0]), {})])
+    _only_stub(scene, monkeypatch)
+
+
+def test_the_piece_ends_where_the_shorter_face_stops(monkeypatch):
+    _only_stub(Scene(far_short=3.0), monkeypatch)
+
+
+def test_a_filled_path_is_not_read_as_a_face(monkeypatch):
+    scene = Scene()
+    for index in scene.named["frame_far_lo"]:
+        scene.rows[index] = {**scene.rows[index], "fill": (0.0, 0.0, 0.0)}
+    _only_stub(scene, monkeypatch)
 
 
 # ------------------------------------------------------------------------------------------------ the switch
