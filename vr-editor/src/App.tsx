@@ -15,6 +15,7 @@ import {DesignReviewPanel} from "./DesignReviewPanel";
 import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
+import type {LiningBoard} from "./constructionLiningVisual";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
@@ -80,6 +81,7 @@ export function App() {
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [liningBoard,setLiningBoard]=useState<LiningBoard>("standard");
   const [layers,setLayers]=useState<LayerOverrides>({});
   const [resize, setResize] = useState<{
     scene: SceneManifest; enabled: boolean; hint: string;
@@ -687,6 +689,7 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <label>Preview board <select value={liningBoard} onChange={e=>setLiningBoard(e.currentTarget.value as LiningBoard)} title="Visual board colour only, not a certified assembly"><option value="standard">Standard</option><option value="wet-area">Wet-area</option><option value="fire-rated">Fire-rated</option></select></label>
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
             <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
             {levels.length > 1 && <label>Level
@@ -747,7 +750,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} liningBoard={liningBoard} onLiningBoard={setLiningBoard} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
