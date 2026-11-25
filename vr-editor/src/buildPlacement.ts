@@ -1,5 +1,5 @@
 import {validLocalDoorMechanisms} from "./localDoorMotion.ts";
-import type { DoorMechanism, WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
+import type { DoorHardwareFinish, DoorMechanism, WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
@@ -59,6 +59,7 @@ export type BuildAction =
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
   | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
+  | {kind:"set-door-hardware";proposalId:string;openingId:string;finish:DoorHardwareFinish}
   | { kind: "set-door-mechanism"; proposalId:string; openingId:string; mechanism:DoorMechanism }
   | { kind: "exact-local-opening"; proposalId: string; openingId: string;
       field: OpeningField; valueMm: number };
@@ -420,6 +421,13 @@ export function updateBuild(
         !validCeiling(ceiling.start, ceiling.end) || !validHeight(ceiling.heightM)) return state;
     return checkpoint(state, { walls: state.walls,
       ceilings: state.ceilings.map(item => item === previous ? ceiling : item) });
+  }
+  if(action.kind==="set-door-hardware"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    const opening=wall?.openings.find(o=>o.openingId===action.openingId);
+    if(!wall||!opening||opening.openingKind!=="door"||!["chrome","matte-black","brushed-brass","brushed-nickel"].includes(action.finish)||opening.doorHardware===action.finish)return state;
+    const next={...wall,openings:wall.openings.map(o=>o===opening?{...o,doorHardware:action.finish}:o)};
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?next:w),ceilings:state.ceilings});
   }
   if(action.kind==="set-door-mechanism"){
     const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);

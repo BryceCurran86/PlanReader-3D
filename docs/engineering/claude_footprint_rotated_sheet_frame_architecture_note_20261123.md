@@ -1,0 +1,97 @@
+# Rotated sheets in the footprint chain: architecture note (23 Nov 2026)
+
+For review before any code (AGENTS.md: first deliverable on a new change). Item 2 of the owner order (#2608 comment 7082410634); follows the finding in #4650. Counts and public identifiers only: no private source content, coordinates or customer data.
+
+## 0. Compliance
+
+- **Read:** AGENTS.md; `docs/AI_ENGINEERING_PLAYBOOK.md` (sections 1, 5, 6, 11, 12, 13); `pb_page_frame_shadow.py` (header: the canonical frame vocabulary and its promotion gate); `pb_external_footprint_first_trace.py` in full; `pb_external_footprint_inside_face_runtime.py` (signature and page-bounds use); the use sites in `pb_source_native_exterior_edge_path_ownership.py` and `pb_source_native_wall_role_and_junction_shadow.py`; `pb_planreader_pdf_extractor.py` lines 1290 to 1412 and `pb_live_physical_net_wall_integration.py` lines 540 to 640; how `pb_page_title_authority.py`, `pb_schedule_opening_instance_binding_authority.py` and `pb_source_observation_authority.py` already convert rotated pages.
+- **Functions traced:** `trace_external_footprint_first` (raster to polygon) and every function that then compares the polygon or its bbox with native rows (section 1.3), plus the two live stages that receive `page.rect` (section 1.4).
+- **Authority boundaries crossed:** none. The footprint candidate stays `measurement_authorized=False` and `commercial_publishable=False`; nothing here publishes a quantity.
+- **Untouched by this proposal:** the live writers (`pb_planreader_pdf_extractor.py`, `pb_live_physical_net_wall_integration.py`), `pb_page_frame_shadow.py` (no production module may import it), W10, `benchmarks/frozen_holdout/full_plan_v2/**`, the 20,000-primitive cap and the 2.5 pt snap, every tool script (they pass the trace through).
+- **Not done:** no code written; only the local replay measurements in section 1.5 were run.
+
+## 1. Observed repository behavior
+
+1. **Two coordinate spaces on a rotated page.** Verified on synthetic pages at 0, 90, 180 and 270 degrees and on real /Rotate 90 sheets: `get_drawings()` rects and `get_text("words")` boxes are in the NATIVE (unrotated) page user space; `page.rect`, `page.rotation_matrix` and the rendered pixmap are in the DISPLAY (rotated) space. `pb_page_frame_shadow.py` states the same rule, says no production module may import it, and requires real /Rotate 90, 180 and 270 files before promotion.
+2. **The raster polygon is in display space.** `trace_external_footprint_first` rasterises the displayed page (its title-band cut and page-frame margins are display-space on purpose), so `polygon_pdf_pts` and `bbox_pdf_pts` are display-space despite the name. Nothing on the trace records the space.
+3. **Four functions compare the polygon or bbox with native rows without conversion:** `refine_external_footprint_against_wall_ink` (polygon against `get_drawings()` segments), `bound_native_drawings_to_footprint` (bbox window on row rects), `own_exterior_contour_native_paths` (polygon against native line segments) and the window in `pb_source_native_wall_role_and_junction_shadow`. Their callers are tools and tests (`tools/run_original_footprint_first.py`, `tools/run_native_exterior_path_ownership.py` and similar). The two live callers of the first trace (`pb_planreader_pdf_extractor.py`, `pb_live_physical_net_wall_integration.py`) use only its status and diagnostics.
+4. **The live extractor mixes the spaces too.** It passes `page.rect` (display extent) as `page_bounds_pdf_pts` together with native drawings and native words to `run_inside_face_footprint_runtime_stage` (which uses the bounds to refuse the page frame and in room-trace acceptance) and to `run_door_legend_read_stage`.
+5. **Measured on 702 pages of 58 local original PDFs.** A census of all 774 pages of the 58 PDFs finds 621 upright and 153 at /Rotate 90 (7 originals have rotated pages; one of them, 29 of 31 pages); none is at 180 or 270. The 35 candidate pages on rotated sheets are all /Rotate 90. On the 8 candidate pages of one rotated original the scoped window selects 19,459 rows in total, against 49,836 when the polygon is mapped to native space; 9,162 rows are in both and three pages share none. Of 11 rotated floor-plan pages (at most 20,000 rows) the live inside-face stage gives a different output with native page bounds on 5; all are ABSTAINED either way, but reasons and sub-records change (for example `no_dominant_dark_outer_wall_inside_page` becomes `no_valid_left_turn_candidate`).
+6. **Existing convention.** Other production modules already convert with `page.rotation_matrix` and pass a validated six-float tuple (`pb_schedule_opening_instance_binding_authority.py`: "verified six-value original page rotation required").
+7. **No footprint test covers a rotated page.**
+
+## 2. Inference
+
+- This is a missing frame annotation, not a heuristic problem: the trace does not say which space it is in, so every consumer assumes native, which is right only on an upright page. That is why it never showed.
+- Quantities do not depend on it today: the live consequence is review-only diagnostics. Where a rotated sheet loses or gains rows is the tool and shadow chain (scoped windows, edge ownership, bounded room rings), which feeds overlays and bounded-viewport diagnostics for rotated originals.
+- Renaming `polygon_pdf_pts` is not an option (serialised evidence); annotating the space is.
+
+## 3. Proposed change (shadow first, additive, upright pages byte-identical)
+
+1. `ExternalFootprintTrace` gains one defaulted field, `page_derotation_matrix: tuple[float, float, float, float, float, float] | None = None`: the six floats of PyMuPDF's `page.derotation_matrix`, mapping the display space of the polygon to the native space of the rows (as implemented the translation is re-derived in UserUnit-scaled points and cross-checked against PyMuPDF's matrix: section 9.1). It is set only when `page.rotation != 0`. `to_dict()` emits the key only when it is set, so upright output does not change.
+2. Pure helpers in the same module (no PyMuPDF): the polygon and bbox in native space, and the inverse for a corrected polygon. A matrix that is not six finite numbers abstains with `footprint_frame_matrix_invalid`; there is no silent identity.
+3. The four comparison sites call the helpers. `refine_external_footprint_against_wall_ink` maps its corrected polygon back so the returned trace stays in the trace's own space. Tools need no change.
+4. Not in this change: the live extractor's `page_bounds_pdf_pts=page.rect`. It is a live commercial writer, and 5 of 11 measured rotated floor plans change, so it is a separate decision for MAX with this evidence (pass the native extent, or leave it).
+5. #4650 derotates the polygon itself for its edge-support check; after this lands it can use the same helper.
+
+**Alternatives rejected.** Converting every row and word to display space at each consumer (many sites, 20,000-row transforms). Rasterising in native orientation (the title-band and frame heuristics are display-space). Making `polygon_pdf_pts` native on rotated pages (changes serialised evidence and breaks overlays that draw on the displayed raster).
+
+## 4. Tests to write first (AGENTS.md matrix)
+
+Synthetic positives at 0, 90, 180 and 270 degrees; look-alike negatives (a rotated page whose trace has no matrix keeps today's behaviour; an invalid matrix abstains); page-rotation invariance (the same drawing on a page turned by 0, 90, 180 or 270 must scope the same native row indices, with the building kept clear of the title band in every rotation); translation, scale, input-order and segment-splitting invariance; unrelated far content and viewport expansion; deterministic replay; no mutation of trace or rows; a cross-check of the helper against `pb_page_frame_shadow.display_to_native` (tests may import the shadow); upright `to_dict()` identical for the existing fixtures and for every upright candidate page of the local corpus; single-line mutants. Real-original replay: before and after counts on the rotated originals (reported, not tuned).
+
+## 5. Expected behaviour (stated before the tests)
+
+Upright pages: nothing changes, asserted. Rotated pages with a matrix: scope windows change; `bound_native_drawings_to_footprint` can move between CANDIDATE and its existing ABSTAIN reasons (`bounded_source_viewport_has_no_native_wall_ink`, `bounded_source_viewport_exceeds_20000_primitive_cap`) as the window changes; edge ownership binds different paths. The counts will be reported as measured.
+
+## 6. Benchmark observations that must not influence implementation
+
+The row counts above and the hub's quoted results are failure-mode evidence only. The change is an exact affine map with no threshold, no page number, no project name and no expected quantity.
+
+## 7. Decisions for the owner
+
+1. Approve items 1 to 3 as one shadow PR (stacked on nothing; it touches `pb_external_footprint_first_trace.py` near #4650's hunks, which merge by hand).
+2. The live extractor's page bounds (item 4): a separate PR with MAX's promotion review, or leave as is.
+3. Real /Rotate 180 and 270 sheets do not exist in the local corpus, so those two stay synthetic-only, as `pb_page_frame_shadow.py` requires until real files exist. Accept?
+4. The extra key on rotated traces: GPT1, whose #4647 writes the trace JSON, should confirm its writer tolerates it.
+
+## 8. Implementation results (23 Nov 2026)
+
+The design above was approved in chat and implemented as proposed (items 1 to 3), with these deviations and findings.
+
+**Deviations from the reviewed design**
+- `tools/run_native_exterior_path_ownership.py` needed a small edit the review did not list: edge records and span endpoints are now in native space on rotated traces, so the overlay maps them back to the displayed page before drawing.
+- A frame that is not an invertible map of six finite numbers is treated as invalid (the design said "six finite numbers"), and a rotated page whose frame cannot be read abstains in the tracer (`external_footprint_rotated_page_frame_unreadable`).
+
+**Replay on the local originals** (702 pages of 58 PDFs, main versus this change; counts only)
+- **Upright pages: unchanged.** 573 pages (258 candidates): the first-trace payload, the refine receipt and polygon, the bounded scope and the edge ownership are identical on all 573, and the frame key is present on none.
+- **Rotated pages: 129 pages, 35 candidates** (7 originals, all /Rotate 90). The frame is recorded on all 35 and the trace polygon is unchanged. The bounded scope selects different rows on all 35 (35,662 rows in total on main, 93,788 with the frame). Six pages move from CANDIDATE to ABSTAINED (`bounded_source_viewport_has_no_native_wall_ink`: with the window in the right place there is no native wall ink inside the footprint; inference: main's window had caught ink from elsewhere on the page) and one moves the other way.
+- **Edge ownership changes on 30 pages.** Contour edges bound to native wall ink rise from 11 to 233 (109 single paths plus 124 chains) and unmatched contour segments fall from 389 to 147; competing owners go from 0 to 3. The refine receipt changes on 7 pages.
+- Time per page stays under 3 s (2.2 s on main).
+
+**Tests.** 59 tests (page-rotation invariance at 0, 90, 180 and 270, round trips against PyMuPDF and `pb_page_frame_shadow`, invalid frames at every site, scale, order, collinear splitting, far content and page-size invariance, deterministic replay, no mutation); 25 of 25 single-line mutants killed; 484 related tests pass. (Superseded by section 9.4 after the review fixes.)
+
+**Still open (not changed here)**
+- The live extractor's `page_bounds_pdf_pts=page.rect`. The page-frame refusal in the inside-face stage wants the NATIVE extent, but `classify_native_path_role` (used by the native wall-role shadow) excludes rows in the bottom 18 percent of the page, which is a DISPLAY-space notion (the title block) applied to native y; there the right fix converts each row's rect to display space, not the bounds to native. The door-legend reader's legend-region search has the same mixed spaces. These need their own change; MAX owns the live writer.
+- The extra key on rotated traces also appears in the live extractor's `external_footprint_trace_live.traces`; MAX and GPT1 to confirm nothing hashes it. (Answered by MAX's review: section 9.3.)
+
+## 9. Review findings and fixes (23 Nov 2026)
+
+Two exact-head reviews of `0af705f04` (a P1 from MAX and an independent source-safety review) found one frame defect and one fail-closed gap. Both were reproduced or confirmed, fixed in `pb_external_footprint_first_trace.py`, and are covered by new tests that fail on the reviewed head. Upright pages are untouched: `_read_page_frame` returns before it reads anything else.
+
+**9.1 Rotated pages with a non-default /UserUnit (P1).** Observed: `page.rect`, the raster polygon and the `get_drawings()` rows are all in UserUnit-scaled points, but PyMuPDF's `page.derotation_matrix` translates by the UNSCALED page extent (`pb_page_frame_shadow.native_to_display` documents the same fact for `rotation_matrix`). Reproduced on synthetic sheets at /Rotate 90, 180 and 270 with /UserUnit 2: the stored matrix maps the display origin to native (0, 841.9) where the scaled native frame has (0, 1683.8) (the reviewer's 600 x 800 /Rotate 90 sheet: (0, 800) against (0, 1600)). That moves the footprint window by half a page into the wrong rows. An offset CropBox does not enter: PyMuPDF's native frame is crop-origin, so the derived translation needs no crop term (verified end to end).
+
+*Fix.* `_read_page_frame` derives the matrix from the rotation and the scaled displayed extent (`page.rect`), by the same arithmetic as `pb_page_frame_shadow.display_to_native`, and accepts it only if PyMuPDF's matrix agrees: the same rotation part, and its translation times the page's declared /UserUnit (read from the page dictionary, 1.0 when the key is absent) equal to the derived translation within 1e-5 relative (reference floor 1 pt, so PyMuPDF's float32 noise passes and a factor of two does not). Every other case abstains in the tracer with `external_footprint_rotated_page_frame_unreadable`: a UserUnit declared but an extent unscaled (or the reverse), a zero, negative, non-finite, indirect or unparseable UserUnit, a page rectangle that is empty or not at the origin, a rotation that is not a quarter turn. Nothing is guessed.
+
+**9.2 Oversized frame values (fail-closed gap).** `math.isfinite` on an integer beyond the double range raises OverflowError, so a constructed or deserialised trace with such a matrix crashed the helpers instead of returning the documented invalid-frame abstention. `_valid_matrix` is replaced by `_float_matrix` (an exact tuple of six `int` or `float`, converted to float inside the guard, with a finite determinant above the floor); `_apply_matrix` returns None for a coordinate that cannot be mapped to a finite point; `refine_external_footprint_against_wall_ink` keeps the original trace if the corrected outline cannot be carried back. Every comparison site returns its existing abstention and none raises. Same class, not touched: `bound_native_drawings_to_footprint` checks the raw bbox with `math.isfinite`, which raises OverflowError (not the documented ValueError) for an oversized integer in a constructed trace. It predates this change and does not involve the frame.
+
+**9.3 The review's compatibility points.** The added key changes rotated artifact bytes only; upright output is byte-identical, asserted on every upright page of the local corpus. MAX inspected the quantity signing and customer verification paths: they consume their canonical quantity evidence, not the trace. A combined-head artifact and signed/customer parity check stays on the release gate. The live review stages' page bounds are MAX's #4653; the display-space title-block exclusion in `classify_native_path_role` stays in this lane and is not part of this change.
+
+**9.4 Results.**
+- **Tests:** 200 in `tests/test_footprint_page_frame_native_space_v1.py` (was 59). The real tracer on synthetic sheets at /Rotate 0, 90, 180 and 270 x UserUnit 1, 2 and 1.5 x no crop and an offset CropBox (selected rows, the native window against the drawn building, and the overlay's drawn pixels against the displayed bbox); the reviewed 600 x 800 case; 28 frames that cannot be established and 9 that can; oversized values at every matrix position and every comparison site; unmappable points and bbox corners; and the existing invariances (far content, page size, input order, replay, no mutation) repeated at UserUnit 2. Against `0af705f04` 115 of the 200 fail; all 200 pass here.
+- **Mutants:** 69 of 73 single-line mutants killed. The four survivors are equivalent: the per-component `isfinite` check in `_float_matrix`, the `callable(getter)` check, and the finite and positive halves of the UserUnit check, each made redundant by a later guard (finite determinant and mapped coordinates; the `except Exception` around the getter; the translation cross-check). They are kept so that each reader states its own contract.
+- **Local originals (counts only):** none of the 861 pages of the 61 PDFs under the local sources folder carries a /UserUnit key, so the defect was latent there. At this head the derived matrix equals PyMuPDF's on all 129 rotated pages of the replay corpus (largest difference 0.0) and the 573 upright pages return no frame. The 702-page replay differs from the reviewed head on 0 pages in any field, and from main exactly as section 8 reports (upright 573 pages identical).
+- **Related checks:** 321 tests that import the changed modules pass, the CI guard scripts pass, and `ruff check --select F821,F823 .` passes.
+- **Observation, not changed:** the 2.5 pt snap tolerance and the other absolute-point constants stay in UserUnit-scaled points (AGENTS.md: unchanged). On a synthetic /UserUnit 2 sheet the doubled stroke puts the traced contour edge outside the 2.5 pt snap, so its edges classify `unmatched_contour_segment` where the unit-1 sheet matched them. Whether snap should follow UserUnit is a separate question for MAX.
+
+**9.5 Decision for MAX.** `pb_native_page_frame` rejects /Rotate 180 and 270 until real source files exist. The footprint chain converts them, on synthetic proof only (there is no real /Rotate 180 or 270 file in the local originals; this is a shadow chain with no live consumer). Keep it, or make `_read_page_frame` fail closed for those two rotations like the live contract? It is a one-line change either way.
