@@ -9,6 +9,7 @@ import type {
 export interface PcVrSessionReport {
   presenting: boolean;
   controllers: PcVrControllerInfo[];
+  performance?: {fps:number; frameMs:number; worstMs:number; drawCalls:number; triangles:number; geometries:number; textures:number; foveation:number};
 }
 
 type Props = {
@@ -74,6 +75,12 @@ export function PcVr2SetupPanel({session}: Props) {
               {" · "}{input.xrStandardSqueeze ? "Generic grip mapping" : "WebXR actions only"}
             </span>
           </li>)}</ul>}
+    </div>}
+    {session.performance && <div className="pcvr2-controllers">
+      <strong>Live immersive performance</strong>
+      <p>{session.performance.fps} FPS · {session.performance.frameMs.toFixed(1)} ms average · {session.performance.worstMs.toFixed(1)} ms worst frame</p>
+      <p className="muted">{session.performance.drawCalls} draw calls · {session.performance.triangles} triangles · {session.performance.geometries} geometries · {session.performance.textures} textures · foveation {session.performance.foveation.toFixed(2)}</p>
+      <p className="muted">Browser frame timing and GPU resource counts, not compositor FPS or measured memory bytes.</p>
     </div>}
     <p className="muted">In the headset: L2/R2 trigger selects a wall.
       The squeeze/grip action cycles temporary finish colours in inspection
