@@ -795,7 +795,7 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
