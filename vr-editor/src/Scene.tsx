@@ -732,6 +732,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     scene.add(physical);
     const pickables: THREE.Object3D[] = [];
     const verifiedFloorMeshes: THREE.Object3D[] = [];
+    const sourceOpeningLines: THREE.Line[] = [];
     const sourceById = new Map(manifest.objects.map(row => [row.objectId, row]));
     for (const row of manifest.objects) {
       const item = displayObject(row, initialPreset.materialRoughness);
@@ -752,7 +753,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           for(const o of row.openingReview?.positioned??[]){
             const points=reviewOpeningCorners(geometry,o).map(p=>new THREE.Vector3(...p));
             const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineDashedMaterial({color:0x58d9ef,dashSize:.08,gapSize:.04,depthWrite:false}));
-            line.computeLineDistances();preview.add(line);
+            line.computeLineDistances();
+            line.userData.sourceOpening = o;
+            line.userData.sourceWallId = row.objectId;
+            sourceOpeningLines.push(line);
+            preview.add(line);
           }
           if(preview.children.length)item.add(preview);
           if (row.objectType === "wall") sourceItemHosts.push(catalogueWallHost(
@@ -1044,6 +1049,35 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function targetWallAim(previous=wallLock?.target.key??null){
       return chooseWallAim(raycaster.ray,visibleWallTargets().filter(t=>!multiSelect||t.kind==="draft"),previous,magnetic);
+    }
+    // Source opening outlines carry review evidence only. Inspect the exact
+    // outline, never fabricate a cutout or a swing/slide mechanism.
+    const openingRay = new THREE.Raycaster();
+    openingRay.params.Line = {threshold:.045};
+    openingRay.far = 3;
+    let selectedOpeningLine:THREE.Line|null=null;
+    function inspectAimedSourceOpening(){
+      if(multiSelect||resize.current.projection||elevatedReturn)return false;
+      openingRay.ray.copy(raycaster.ray);
+      const candidates=sourceOpeningLines.filter(line=>{
+        const group=line.parent,wall=group?.parent;
+        return !!wall&&wall.visible&&!!group?.visible&&sourceVisible(wall)
+          &&!draftMap.current.get(wall.userData.objectId)?.heightM
+          &&displaySurface(construction.current.stage,undefined)
+          &&layerVisible(construction.current.layers,"openings",construction.current.stage!=="slab");
+      });
+      const hit=openingRay.intersectObjects(candidates,false)[0];
+      if(!hit)return false;
+      const line=hit.object as THREE.Line;
+      const blocker=raycaster.intersectObjects(pickables.filter(obj=>obj!==line.parent?.parent&&obj.visible&&obj instanceof THREE.Mesh&&sourceVisible(obj)&&displaySurface(construction.current.stage,obj.userData.surfaceKind)),false)[0];
+      if(blocker&&blocker.distance<hit.distance-.045)return false;
+      if(selectedOpeningLine&&selectedOpeningLine.material instanceof THREE.LineDashedMaterial)selectedOpeningLine.material.color.setHex(0x58d9ef);
+      selectedOpeningLine=line;
+      if(line.material instanceof THREE.LineDashedMaterial)line.material.color.setHex(0xffdf70);
+      const o=line.userData.sourceOpening as import("./sourceOpeningReview").ReviewOpening;
+      select(line.userData.sourceWallId);
+      reportTool(`Imported ${o.kind} ${Math.round(o.widthM*1000)} × ${Math.round(o.heightM*1000)} mm · review only; opening operation not verified.`);
+      return true;
     }
     function toggleAimedDoor(){
       if(multiSelect||resize.current.projection||elevatedReturn)return false;
@@ -1420,7 +1454,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const hit=raycaster.intersectObjects(pickables.filter(o=>o.visible&&o instanceof THREE.Mesh&&sourceVisible(o)&&displaySurface(construction.current.stage,o.userData.surfaceKind)),false)[0];
           if(!hit||hit.distance>=switchDistance-.02){visualSettings.current.onPreviewLights(!visualSettings.current.previewLights);reportTool("Local preview lights toggled (not electrical circuit wiring).");return;}
         }
-        if(!toggleAimedDoor())selectAtRay(press?.wallKey);return;
+        if(!toggleAimedDoor()&&!inspectAimedSourceOpening())selectAtRay(press?.wallKey);return;
       }
       if(!renderer.xr.isPresenting){
         teleportSettings.current.onTeleportMessage("Start a VR session before teleporting.");
