@@ -12,6 +12,7 @@ import { WALL_PROFILES, wallAssembly, wallDimensionText } from "./wallProfiles.t
 import type { WallAssembly, WallProfileId } from "./wallProfiles.ts";
 import {CONSTRUCTION_LAYERS} from "./constructionLayers.ts";
 import type {ConstructionLayer,LayerOverrides} from "./constructionLayers.ts";
+import type {LiningBoard} from "./constructionLiningVisual.ts";
 
 export type ItemAction =
   | { kind: "choose"; itemId: string }
@@ -31,6 +32,7 @@ export type MenuAction =
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
       "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" }
   | {area:"layer";layer:ConstructionLayer}
+  | {area:"lining";action:"board"|"inspect"}
   | { area:"wall-profile"; profile:WallProfileId }
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
@@ -60,6 +62,7 @@ export type QuestMenuState = {
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
   wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean; allDimensions?:boolean;
   layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
+  liningBoard?:LiningBoard; liningHidden?:boolean;
   budget?:ImmersiveBudget; budgetOpen?:boolean; budgetPage?:number;
   numeric?: {field:NumericDraftField;digits:string}|null;
 };
@@ -305,8 +308,13 @@ export function buildMenuLayout(
       add(option.label, 20 + 235 * (index % 4), 69 + 78 * Math.floor(index / 4), 222, 65,
         { area: "view", stage: option.id }, { active: stage === option.id });
     }
-    add("Back", 20 + 235 * (CONSTRUCTION_STAGES.length % 4), 69 + 78 * Math.floor(CONSTRUCTION_STAGES.length / 4), 222, 65, { area: "view" });
-    return { buttons, title: "Construction view", width: WIDTH, height: 110 + 78 * Math.ceil((CONSTRUCTION_STAGES.length+1)/4),
+    const extra:{label:string;action:MenuAction;disabled?:boolean}[]=[
+      {label:"Board: "+(quest?.liningBoard??"standard"),action:{area:"lining",action:"board"}},
+      {label:quest?.liningHidden?"Restore wall lining":"Inspect selected wall",action:{area:"lining",action:"inspect"},disabled:!quest?.selectedWall},
+      {label:"Back",action:{area:"view"}},
+    ];
+    extra.forEach((entry,i)=>{const index=CONSTRUCTION_STAGES.length+i;add(entry.label,20+235*(index%4),69+78*Math.floor(index/4),222,65,entry.action,{disabled:entry.disabled});});
+    return { buttons, title: "Construction view", width: WIDTH, height: 110 + 78 * Math.ceil((CONSTRUCTION_STAGES.length+extra.length)/4),
       note: stageDetails(stage).description };
   }
   if (browser.open && browser.groups) {
