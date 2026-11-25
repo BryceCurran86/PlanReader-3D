@@ -37,6 +37,8 @@ import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import {PreciseCommandPanel} from "./PreciseCommandPanel";
 import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import {starterManifest,starterBuild,starterBounds,starterShell,STARTER_SHELL} from "./starterHouse";
+import type {DraftPickKind} from "./buildScene";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
 import type { PcVrSessionReport } from "./PcVr2SetupPanel";
@@ -79,6 +81,9 @@ export function App() {
   const [toolMessage, setToolMessage] = useState("");
   const [lastEdit, setLastEdit] = useState<HistoryTarget>("source");
   const [demoScene, setDemoScene] = useState<SceneManifest | null>(null);
+  const [starterScene,setStarterScene]=useState<SceneManifest|null>(null);
+  const [draftPickKind,setDraftPickKind]=useState<DraftPickKind>("auto");
+  const [draftSelection,setDraftSelection]=useState<string|null>(null);
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
@@ -175,7 +180,7 @@ export function App() {
   }, []);
 
   const finishLoad = useCallback((request: AbortController, result: SceneManifest | Error,
-    origin: "workspace" | "local" | "demo",
+    origin: "workspace" | "local" | "demo" | "starter",
   ) => {
     if (pendingLoad.current !== request || request.signal.aborted) return;
     pendingLoad.current = null;
@@ -187,10 +192,13 @@ export function App() {
     setManifest(result);
     setAuthenticatedSource(origin === "workspace");
     setDemoScene(origin === "demo" ? result : null);
+    setStarterScene(origin==="starter"?result:null);
+    setDraftSelection(null);setDraftPickKind("auto");
     setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
     setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
     setTeleportMode(false); setTeleportMessage(null);
-    setPlaced(null); setCatalogueSession(null); setResize(null);
+    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(null); setResize(null);
+    setShellStore(origin==="starter"?{scene:result,settings:STARTER_SHELL}:null);
     setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
     setInspection({ ...DEFAULT_INSPECTION }); setSourceSheet(""); setLevel("all");
@@ -201,7 +209,10 @@ export function App() {
 
   useEffect(() => {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
-    if (!workspace) return () => pendingLoad.current?.abort();
+    if (!workspace) {
+      const request=startLoad();finishLoad(request,starterManifest(),"starter");
+      return () => pendingLoad.current?.abort();
+    }
     const request = startLoad();
     void (async () => {
       try {
@@ -308,13 +319,14 @@ export function App() {
   }
   const activeItem = getCatalogueItem(catalogue?.itemId ?? null);
   const isDemo = manifest !== null && manifest === demoScene;
-  const baseFootprint = useMemo(() => manifest && footprintBounds(manifest, isDemo), [manifest, isDemo]);
+  const isStarter=!!manifest&&manifest===starterScene;
+  const baseFootprint = useMemo(() => manifest && (isStarter?starterBounds(buildState.walls):footprintBounds(manifest, isDemo)), [manifest, isDemo,isStarter,buildState.walls]);
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
   const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
-  const shell=useMemo(()=>manifest&&buildLevel&&!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
+  const shell=useMemo(()=>manifest&&buildLevel?(isStarter?starterShell(studyGeometry.walls,shellSettings):!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null):null,[manifest,buildLevel,studyGeometry,shellSettings,isStarter]);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -665,8 +677,8 @@ export function App() {
     mode === "wall-move" ? "Select a source wall. Use the arrow keys or hold the headset grip to move it." :
     mode === "teleport" ? "In VR, point the trigger at a verified floor." :
     !buildLevel && levels.length > 1 ? "Choose a level to draw. Drag to orbit." :
-    "Drag to orbit. Choose a tool to draw or place items.");
-  const planKind = isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
+    "Click an object to select; drag a draft object to move. Top 3D: drag empty space to pan.");
+  const planKind = isStarter ? "Editable starter house" : isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
   const cameraOptions: readonly [CameraView, string][] = [
     ["isometric", "3D"], ["plan", "Top 3D"], ["north", "Front"], ["east", "Side"],
   ];
@@ -735,6 +747,13 @@ export function App() {
             {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
           </details>}
           <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
+          <div className="tool-group" aria-label="Direct object editing">
+            <label>Pick <select value={draftPickKind} onChange={e=>setDraftPickKind(e.currentTarget.value as DraftPickKind)}><option value="auto">Automatic</option><option value="walls">Walls</option><option value="ceilings">Ceilings</option></select></label>
+            <label>Selected object <select value={draftSelection??""} onChange={e=>{enterMode("inspect");setDraftSelection(e.currentTarget.value||null);}}><option value="">None</option>{buildState.walls.filter(w=>w.levelId===buildLevel).map((w,i)=><option key={w.proposalId} value={w.proposalId}>Wall {i+1} · {w.proposalId}</option>)}{buildState.ceilings.filter(c=>c.levelId===buildLevel).map((c,i)=><option key={c.proposalId} value={c.proposalId}>Ceiling {i+1} · {c.proposalId}</option>)}</select></label>
+            {draftSelection&&buildState.walls.some(w=>w.proposalId===draftSelection)&&<button type="button" onClick={()=>reviewWall(draftSelection)}>Edit wall details</button>}
+            {draftSelection&&buildState.ceilings.filter(c=>c.proposalId===draftSelection).map(c=><label key={c.proposalId}>Ceiling height (mm)<input type="number" min={100} max={20000} step={10} key={c.heightM} defaultValue={Math.round(c.heightM*1000)} onBlur={e=>{const h=e.currentTarget.valueAsNumber/1000;if(Number.isFinite(h)&&h>=.1&&h<=20)onBuildAction({kind:"adjust-ceiling",previous:c,ceiling:{...c,heightM:h}});}}/></label>)}
+            {isStarter&&<span className="muted">Local draft house · not an authenticated plan</span>}
+          </div>
           <BuildTools state={buildState} sizes={buildSizes} levelId={buildLevel}
             layoutEnabled={!projection && !resizeEnabled} hint={hint} onAction={onBuildAction} onSizes={setBuildSizes}
             onReview={reviewWall} catalogueOpen={catalogueOpen} busy={mode !== "inspect"}
@@ -746,7 +765,7 @@ export function App() {
           <div className="viewport">
             {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
-                selectedId={selected?.objectId ?? null}
+                selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
                 mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
@@ -768,7 +787,7 @@ export function App() {
             </Suspense>}
           </div>
           <div className="viewer-footer">
-            <span>Alt + drag to orbit with a tool active · Esc to finish · Ctrl/⌘ + Z to undo</span>
+            <span>Drag an object to edit · Top 3D empty drag pans · right drag pans · scroll zooms · Esc / Ctrl+Z</span>
             <span>VR · trigger to select or place, hold to drag</span>
           </div>
         </> : <div className="viewer-empty">
@@ -799,6 +818,7 @@ export function App() {
               {authenticatedSource && <div><span>Source SHA</span><code title={manifest.scope.sourceSha256}>{manifest.scope.sourceSha256.slice(0, 14)}…</code></div>}
             </div> : <p className="muted">Open a workspace from PlanReader or inspect a scene saved as JSON.</p>}
             {manifest && !isDemo && <button type="button" onClick={() => void openSyntheticDemo()}>Open example</button>}
+            {manifest&&!isStarter&&<button type="button" onClick={()=>finishLoad(startLoad(),starterManifest(),"starter")}>New starter house</button>}
           </div>
           {manifest && <div className="section-block">
             <PlanRevisionHistory key={manifest.scope.workspaceId + manifest.scope.snapshotId}

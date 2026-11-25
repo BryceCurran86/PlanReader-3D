@@ -16,8 +16,8 @@ import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
 import type { WallAxis, WallRotationPivot } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
-  displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
-import type { DraftGesture } from "./buildScene";
+  displayWallDraft, draftGesturePreview, magneticDraftWalls, directDraftGesture } from "./buildScene";
+import type { DraftGesture, DraftPickKind } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
@@ -80,6 +80,9 @@ type Props = {
   toolFeedback?:string;
   onToolMessage: (message: string) => void;
   selectedId: string | null;
+  draftPickKind:DraftPickKind;
+  draftSelection:string|null;
+  onDraftSelection:(id:string|null)=>void;
   onSelect: (id: string | null) => void;
   draftState: DraftHistory | null;
   onCycleStudy: (objectId: string) => void;
@@ -154,7 +157,7 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
   if (a.distanceTo(b) <= 1e-8) return null;
   const trustworthy = row.renderState === "verified" &&
     row.unresolvedIssues.length === 0;
-  const color = trustworthy ? 0xe8e4dc : 0xd5a56d;
+  const color = trustworthy ? 0xe8e4dc : 0xe0e1dc;
   const name = row.objectId;
   if (shape.kind === "wallFace" && mayRenderWallFace(shape.kind, shape.heightM)) {
     const h = shape.heightM;
@@ -191,7 +194,7 @@ function displayObject(row: EditorObject, roughness: number): THREE.Object3D | n
     b.clone().add(new THREE.Vector3(0, 0.015, 0)),
   ]);
   const line = new THREE.Line(
-    lineGeometry, new THREE.LineBasicMaterial({ color: 0xefb35d })
+    lineGeometry, new THREE.LineBasicMaterial({ color: 0x8999a5 })
   );
   line.userData.objectId = name;
   return line;
@@ -244,12 +247,14 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback };
   const [renderError, setRenderError] = useState<string | null>(null);
+  const directSelection=useRef({kind:draftPickKind,id:draftSelection,onSelect:onDraftSelection});
+  directSelection.current={kind:draftPickKind,id:draftSelection,onSelect:onDraftSelection};
   const callback = useRef(onSelect);
   callback.current = onSelect;
   const cycleCallback = useRef(onCycleStudy);
@@ -364,7 +369,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let stageMenuOpen = false;
     // All headset UX state is local to this viewer and resets on scene change.
     // The authenticated original scene and signed quantities never change.
-    let selectedDraftId: string | null = null;
+    let selectedDraftId: string | null = directSelection.current.id;
+    let lastExternalDraft=directSelection.current.id;
+    let cachedMenu:ReturnType<typeof menuLayout>|null=null;
+    let lastMenuLayoutTime=-Infinity;
+    const updateDraftSelection=(id:string|null)=>{selectedDraftId=id;lastExternalDraft=id;directSelection.current.onSelect(id);};
     let inspectedWall:string|null=null;
     let hoveredDraftId: string | null = null;
     let magnetic=true, multiSelect=false;
@@ -388,7 +397,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       toolsOpen=!toolsOpen;
       if(toolsOpen){
         for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
-        activeGrip=null;radial=true;displayedMenuLayout=null;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
+        activeGrip=null;radial=true;displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
       }
       else closeTools();
     }
@@ -406,8 +415,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function moveNavOffset(offset:NavOffset){setNavOffset(composeNavigationOffset(navOffset,offset));}
     let walkSpeed=1.2, turnArmed=true, lastNavTime=0;
     let ghostMode=false,openDoors=new Set<string>();
-    const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>
-      surfaceLayerVisible(stage,kind,construction.current.layers,!!elevatedReturn);
+    const topEditing=()=>!!elevatedReturn||(!renderer.xr.isPresenting&&visualSettings.current.cameraRequest.mode==="plan");
+    const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>{
+      if(topEditing()&&kind==="roof")return false;
+      if(topEditing()&&kind==="ceiling")return directSelection.current.kind==="ceilings";
+      return surfaceLayerVisible(stage,kind,construction.current.layers,!!elevatedReturn);
+    };
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
@@ -426,7 +439,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,resize.current.projection] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
@@ -883,6 +896,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           ? previous.object : displayCeilingDraft(ceiling);
         if(mesh!==previous?.object){
           mesh.userData.surfaceKind = "ceiling";
+          mesh.userData.proposalId=ceiling.proposalId;
           mesh.userData.ceilingDimensions=`${Math.round(Math.abs(ceiling.end[0]-ceiling.start[0])*1000)} × ${Math.round(Math.abs(ceiling.end[1]-ceiling.start[1])*1000)} mm · H ${Math.round(ceiling.heightM*1000)}`;
           wallAdditionLayer.add(mesh);
         }
@@ -999,7 +1013,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (target) itemControls.current.onPlace(item.id, target);
       else reportTool(reason ?? itemGuide(item));
     }
-    const select = (id: string | null) => callback.current(id);
+    const select = (id: string | null) => {if(id)updateDraftSelection(null);callback.current(id);};
     let targetKey:readonly unknown[]=[];let targets:WallTarget[]=[];
     function visibleWallTargets(){
       const {buildState,buildLevel}=build.current;
@@ -1076,7 +1090,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           }
           const id=aimed.target.id;
           if(multiSelect){if(selectedGroup.has(id))selectedGroup.delete(id);else selectedGroup.add(id);}
-          else selectedDraftId=id;
+          else updateDraftSelection(id);
           openingTools=false;openingIndex=0;numberPad=null;deleteArmed=false;
           select(null);reportTool(multiSelect?groupIds().length+" draft walls selected.":"Magnetic wall locked · open precision tools to edit.");return;
         }
@@ -1099,7 +1113,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const index=walls.findIndex(wall=>wall.proposalId===selectedDraftId);
       const wall=walls.length?walls[(index+1)%walls.length]:null;
       if (wall && !itemBrowser.open && !stageMenuOpen) {
-        selectedDraftId=wall.proposalId;
+        updateDraftSelection(wall.proposalId);
         openingTools=false;openingIndex=0;numberPad=null;
         deleteArmed=false;
         select(null);
@@ -1144,12 +1158,19 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       gesture: DraftGesture | null; resize: ResizeDrag | null; context: PointerContext } | null = null;
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
-      if (interaction.current.mode !== "draw" || resize.current.projection) return null;
+      if (resize.current.projection||resize.current.enabled||itemControls.current.active) return null;
+      if(interaction.current.mode==="inspect"&&(!renderer.xr.isPresenting||topEditing())){
+        const kind=directSelection.current.kind;
+        const stage=construction.current.stage;
+        const allowed={...buildState,walls:displaySurface(stage)?buildState.walls:[],ceilings:displaySurface(stage,"ceiling")?buildState.ceilings:[]};
+        return directDraftGesture(allowed,buildLevel,raycaster.ray,kind,topEditing(),snapOptions());
+      }
+      if(interaction.current.mode!=="draw")return null;
       return beginDraftGesture(buildState, buildLevel, raycaster.ray,snapOptions());
     }
     function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
       const { buildState, buildLevel, buildSizes } = build.current;
-      if (buildState.tool !== gesture.mode || buildLevel !== gesture.levelId) return null;
+      if ((!gesture.direct&&buildState.tool !== gesture.mode)||(gesture.direct&&interaction.current.mode!=="inspect")||buildLevel !== gesture.levelId) return null;
       const hand = controllerIndex === undefined ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
@@ -1174,6 +1195,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = resizing ? null : draftGesture();
       startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture, resize: resizing, context: pointerContext() };
       if (gesture || resizing) {
+        if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);}
         controls.enabled = false;
         renderer.domElement.setPointerCapture(e.pointerId);
       }
@@ -1207,6 +1229,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (start.gesture) completeDrag(start.gesture);
         return;
       }
+      if(start.gesture?.direct&&"previous" in start.gesture){updateDraftSelection(start.gesture.previous.proposalId);select(null);reportTool("Selected draft "+start.gesture.kind+" · drag to move or use object details.");return;}
       const active = itemControls.current.active;
       if (active) {
         placeSelectedItem(active);
@@ -1218,7 +1241,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         else reportTool(target.hint);
         return;
       }
-      if (!resize.current.enabled) selectAtRay();
+      if (!resize.current.enabled){updateDraftSelection(null);selectAtRay();}
     }
     function dragOver(event: DragEvent) {
       if (event.dataTransfer?.types.some(type => type === CATALOGUE_DRAG_TYPE || type === OPENING_DRAG_TYPE) &&
@@ -1297,15 +1320,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const menuConsumed=[false,false];
     function menuTarget(layout:ReturnType<typeof menuLayout>){
       if(!toolsOpen)return null;
+      const rayHit=buildOverlay.menuHit(raycaster,layout);
+      if(rayHit?.action)return rayHit;
       if(layout.radial){
         const right=inputSources.find(s=>s?.handedness==="right");
         const i=thumbstickSector(standardThumbstick(right));
         if(i>=0)return {index:i,action:layout.buttons[i]?.disabled?null:layout.buttons[i]?.action??null};
       }
-      return buildOverlay.menuHit(raycaster,layout);
+      return rayHit;
     }
     function activateMenu(choice:MenuAction){
-      displayedMenuLayout=null;
+      displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
     }
@@ -1328,9 +1353,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(toolsOpen){
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
-        if(inputSources[index]?.handedness!=="left"||!inputSources.some(s=>s?.handedness==="right")){
-          activateDisplayedMenu(layout);
-        }
+        activateDisplayedMenu(layout);
         return;
       }
       const menu = menuKey(layout);
@@ -1340,6 +1363,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (!xrResize[index]) {
         const gesture = draftGesture();
         if (gesture && "previous" in gesture) {
+          if(gesture.direct){updateDraftSelection(gesture.previous.proposalId);select(null);}
           const hand = controllers[index].getWorldPosition(new THREE.Vector3());
           gesture.fromController = [hand.x, hand.z];
         }
@@ -1373,6 +1397,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = xrGestures[index];
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
+      if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);reportTool("Selected draft "+gesture.kind+" · hold trigger and drag.");return;}
       // Menu actions dispatch exclusively on selectstart.
       if(toolsOpen)return;
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
@@ -1440,7 +1465,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const previous=navOffset;
         moveNavOffset(offset);
         elevatedReturn=previous;
-        reportTool("Elevated cutaway: look down, use left stick to pan. Walkthrough restores your position.");
+        reportTool("Bird’s-eye editing: aim at a wall, hold trigger and drag. Left stick pans. Walkthrough restores your position.");
       }catch{reportTool("The XR runtime declined the view change.");}
     }
     let collisionKey:readonly unknown[]=[];let collisionWalls:NavigationWall[]=[];
@@ -1765,6 +1790,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         resizeDrag(startPointer.resize);
       }
       const currentStage = construction.current.stage;
+      if(lastExternalDraft!==directSelection.current.id){lastExternalDraft=directSelection.current.id;selectedDraftId=lastExternalDraft;}
       refreshDimensions();refreshShell();
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
@@ -1772,7 +1798,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       // Preview only; keep original source surfaces, review openings and all quantity links intact.
       // Build at most one missing source overlay each frame, bounded in total, and reuse on finish switches.
       const sourceLiningAllowed=!!liningStage&&!appliedProjection&&layerVisible(construction.current.layers,"lining",true);
-      const sourceLiningInputs=[liningStage,sourceLiningAllowed,construction.current.liningBoard,construction.current.layers,interaction.current.visibleIds,draftMap.current,!!elevatedReturn];
+      const sourceLiningInputs=[liningStage,sourceLiningAllowed,construction.current.liningBoard,construction.current.layers,interaction.current.visibleIds,draftMap.current,topEditing(),directSelection.current.kind];
       const canShowSourceLining=(obj:THREE.Object3D)=>sourceLiningAllowed&&sourceVisible(obj)&&displaySurface(currentStage,obj.userData.surfaceKind)&&!draftMap.current.get(obj.userData.objectId)?.heightM;
       if(!sourceLiningInputs.every((v,i)=>v===sourceLiningKey[i])){
         sourceLiningKey=sourceLiningInputs;
@@ -1799,7 +1825,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       junctionLayer.visible=layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
       for(const child of junctionLayer.children)child.visible=junctionLayer.visible;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
-        resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall,construction.current.liningBoard,inspectedWall];
+        resize.current.projection,draftMap.current,topEditing(),directSelection.current.kind,lastAddedWall,construction.current.liningBoard,inspectedWall];
       if(!visibilityKey.every((v,i)=>v===surfaceVisibilityKey[i])){
       surfaceVisibilityKey=visibilityKey;
       for (const obj of pickables) {
@@ -1820,7 +1846,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           shape.material.visible = displaySurface(currentStage, "ceiling");
           for(const child of shape.children)if(child instanceof THREE.Mesh){
             if(child.userData.illustrativeLining){child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);}
-            else if(child.userData.constructionAccessory==="ceiling-frame")child.visible=!elevatedReturn&&layerVisible(construction.current.layers,"ceiling-frame",currentStage==="framing");
+            else if(child.userData.constructionAccessory==="ceiling-frame")child.visible=!topEditing()&&layerVisible(construction.current.layers,"ceiling-frame",currentStage==="framing");
           }
         } else {
           const inspect=inspectedWall!==null&&shape.userData.proposalId===inspectedWall&&!shape.userData.masonryAssembly&&currentStage!=="slab";
@@ -1847,7 +1873,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
-        const layout = toolsOpen ? menuLayout(prompt) : null;
+        // Cache the menu model and avoid large canvas uploads on every XR frame.
+        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
+        const layout=toolsOpen?cachedMenu:null;
         if(layout){
           buildOverlay.sizeMenu(layout);
           const pose=layout.radial?"radial":"panel";
@@ -1897,17 +1925,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
         if(layout){
           const signature=JSON.stringify(layout);
-          if(signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover){
+          if((signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover)&&(!displayedMenuLayout||now-lastMenuDraw>=80)){
             buildOverlay.drawMenu(layout,hover?.index??-1);
-            lastMenuSignature=signature;
+            lastMenuSignature=signature;displayedMenuLayout=layout;
+            lastMenuDraw=now;lastMenuHover=hover?.index??-1;
           }
-          displayedMenuLayout=layout;
-          lastMenuDraw=now;lastMenuHover=hover?.index??-1;
         }
       } else {
         hoveredDraftId=null;hoveredSourceId=null;wallLock=null;
         const drag = startPointer?.gesture;
-        const canAim = !!(buildState.tool || item) && hoveringCanvas && (!startPointer || !!drag);
+        const canAim = !!(buildState.tool || item || drag?.direct) && hoveringCanvas && (!startPointer || !!drag);
         if (canAim) raycaster.setFromCamera(mouse, camera);
         const itemPick = canAim && item ? itemView.candidate(raycaster, item, itemControls.current.turn) : null;
         const dragPreview=canAim&&!item&&drag?previewDrag(drag):null;
@@ -1924,6 +1951,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       // Local draft-only selection/hover highlight. No source mesh or priced
       // quantity is modified; original colours are restored when deselected.
       for (const group of wallAdditionLayer.children) {
+        if(group instanceof THREE.Mesh&&group.userData.surfaceKind==="ceiling"&&group.material instanceof THREE.MeshStandardMaterial){group.material.emissive.setHex(group.userData.proposalId===selectedDraftId?0x16ad83:0);group.material.emissiveIntensity=group.userData.proposalId===selectedDraftId?.65:0;continue;}
         if (!group.userData.reviewOnlyWallProposal) continue;
         const id = group.userData.proposalId as string;
         const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id));
@@ -2052,6 +2080,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             case "east": offset.set(distance, diagonal * 0.3, 0); break;
             default: offset.set(distance * 0.75, distance * 0.6, distance * 0.75);
           }
+          controls.enableRotate=requestedCamera.mode!=="plan";
+          controls.mouseButtons.LEFT=requestedCamera.mode==="plan"?THREE.MOUSE.PAN:THREE.MOUSE.ROTATE;
           controls.target.copy(center);
           camera.position.copy(center).add(offset);
           camera.up.set(0, requestedCamera.mode === "plan" ? 0 : 1,
