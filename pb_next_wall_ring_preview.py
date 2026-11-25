@@ -53,6 +53,7 @@ from pb_new_source_dark_ink_scope import is_source_neutral_dark
 # running an obsolete source-painted prototype. These original-producer
 # functions preserve native path indices; their results remain topology-only.
 from pb_layered_wall_doorway_room_ring_shadow import (
+    _source_wall_ink_role as _prototype_role,
     _collect_dark_painted_source_wall_strips as _original_source_dark_bars,
     _source_wall_ink_candidate_drawings as _original_source_wall_ink,
     _unresolved_collinear_gap_breaches_outer_ring as _original_two_end_gap_veto,
@@ -313,6 +314,22 @@ def _selected_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> i
             continue
         items = row.get("items")
         if not items:
+            continue
+        total += len(items)
+        if total > _PRIMITIVE_CAP:
+            return total
+    return total
+
+
+def _entry_primitive_count(drawings):
+    total = 0
+    for row in drawings:
+        if row is None:
+            continue
+        items = row.get('items')
+        if not items:
+            continue
+        if _prototype_role(row) == 'evidence' and not _is_wall_stroke_color(row.get('color')):
             continue
         total += len(items)
         if total > _PRIMITIVE_CAP:
@@ -2259,7 +2276,7 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("page_index must be a non-negative int")
     if stroke_pair_wall_faces and viewport_pdf_pts is not None:
         indexed = _clip_drawing_items(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             viewports = _as_viewports(viewport_pdf_pts) or []
             if len(viewports) > 1:
                 return _merge_ring_results([
@@ -2284,7 +2301,7 @@ def build_layered_wall_doorway_room_rings(
             )
     else:
         indexed = _clip_drawings(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
             )
@@ -2297,7 +2314,7 @@ def build_layered_wall_doorway_room_rings(
         strict_indexed = _clip_drawing_items(
             source_pair_baseline_drawings, viewport_pdf_pts,
         )
-        if _selected_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED,
                 (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
