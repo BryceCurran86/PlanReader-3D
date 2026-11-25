@@ -1,0 +1,4 @@
+# Isolated-runner pilot
+Stacked on #4720, not a replacement required check. Four separate runners per Python version, deterministic file-grouped greedy item-count balancing. Each runner collects tests/ without selection and retains its own assigned partition. Receipt verification requires every index once, equal complete collection/partition digests, matching selection counts/digests, successful pytest exits, and total counts. No original data, raw test output or private source runner.
+
+Compare elapsed time, total runner-minutes and full test outcomes to the same-version xdist candidate and serial baseline. The pilot may cost more runner-minutes and repeated collection overhead; only promote if observed wall time and reliability warrant it. Do not weaken the required CI check names, integrity gates or production acceptance. No runtime gain claimed.
