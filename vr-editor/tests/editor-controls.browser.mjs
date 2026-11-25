@@ -46,7 +46,7 @@ try {
   const view = page.locator(".view-toolbar");
   const tools = page.locator(".build-tools");
   const button = (area, name) => area.getByRole("button", { name, exact: true });
-  await button(view, "Plan").click();
+  await button(view, "Top 3D").click();
   await button(tools, "Wall").click();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const box = await canvas.boundingBox();

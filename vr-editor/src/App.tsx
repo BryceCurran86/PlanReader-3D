@@ -15,7 +15,7 @@ import {DesignReviewPanel} from "./DesignReviewPanel";
 import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
-import {ArchitecturalPlan} from "./ArchitecturalPlan";
+import {ArchitecturalPlan} from "./ArchitecturalPlanPanel";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
