@@ -558,12 +558,17 @@ export function createBuildOverlay(scene: THREE.Scene) {
   ghost.renderOrder=18;
   ghost.visible=false;
   scene.add(ghost);
+  let lastGhost: readonly number[] | null = null;
   function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number;assembly?:WallVisual["assembly"]}|null){
     ghost.visible=!!shape;
     if(!shape)return;
     const {start,end,heightM}=shape,length=planLength(start,end);
     if(length<.001){ghost.visible=false;return;}
-    const half=wallAssembly(shape.assembly).thicknessMm/2000,nx=-(end[1]-start[1])/length*half,nz=(end[0]-start[0])/length*half;
+    const half=wallAssembly(shape.assembly).thicknessMm/2000;
+    const key=[start[0],start[1],end[0],end[1],heightM,half];
+    if(lastGhost && key.every((v,i)=>v===lastGhost![i]))return;
+    lastGhost=key;
+    const nx=-(end[1]-start[1])/length*half,nz=(end[0]-start[0])/length*half;
     const points=[[start[0]+nx,.035,start[1]+nz],[end[0]+nx,.035,end[1]+nz],[end[0]-nx,.035,end[1]-nz],[start[0]-nx,.035,start[1]-nz],
       [start[0]+nx,heightM,start[1]+nz],[end[0]+nx,heightM,end[1]+nz],[end[0]-nx,heightM,end[1]-nz],[start[0]-nx,heightM,start[1]-nz]];
     let index=0;
@@ -610,7 +615,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
   }
   function sizeMenu(layout: MenuLayout) {
-    const scale=layout.radial?1050:1250;
+    // Larger angular hit targets without changing the menu action mapping.
+    const scale=layout.radial?950:1100;
     const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
