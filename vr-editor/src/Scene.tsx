@@ -790,7 +790,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
         }
-        if(next)shellGroup.add(...nominalShellFraming(next).children.slice());
+        if(next)for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
       }
       for(const mesh of shellGroup.children){
         const accessory=mesh.userData.constructionAccessory;
@@ -995,8 +995,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!resize.current.enabled&&!projection){
         for(const w of buildState.walls){
           if(w.scopeKey!==sceneScope||w.levelId!==buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(w.assembly).core==="masonry"))&&
-            !layerVisible(layers,"framing",stage==="framing"))continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(w.assembly).core==="masonry"))&&
+            !layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
           targets.push({key:"draft:"+w.proposalId,kind:"draft",id:w.proposalId,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
         }
       }
@@ -1446,9 +1446,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         for(const raw of build.current.buildState.walls){
           if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"))continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
           const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
-          const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in");
+          const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation");
           walls.push(...localNavigationWalls(w,openDoors,showDoors));
         }
       return walls;
