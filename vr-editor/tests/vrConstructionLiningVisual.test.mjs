@@ -43,6 +43,10 @@ test("generated ceiling lining preserves a concave recess",()=>{
  for(let i=0;i<p.count;i++)assert.ok(!(p.getX(i)>3+1e-5&&p.getZ(i)>2+1e-5));
  assert.equal(makeShellCeilingLining([[0,2.7,0],[1,3,0],[0,2.7,1]]),null);
 });
+test("oversized lining detail returns no partial mesh above the visual vertex budget",()=>{
+ const mesh=makeLiningVisual(200,20,[],(x,y,offset)=>new Vector3(x,y,offset));
+ assert.equal(mesh,null);
+});
 test("board type palette distinct; finish changes reuse the same geometry",()=>{
  const project=(x,y,offset)=>new Vector3(x,y,offset);
  const a=makeLiningVisual(3,2.7,[],project,"standard"),b=makeLiningVisual(3,2.7,[],project,"wet-area"),c=makeLiningVisual(3,2.7,[],project,"fire-rated");
