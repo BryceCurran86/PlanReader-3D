@@ -34,6 +34,7 @@ export type CatalogueHost = {
   roofEdges?: RoofEdge[];
   ceilingDraft?: CeilingDraft;
   halfThickness?:number;
+  finishFaces?:{left:THREE.Mesh;right:THREE.Mesh};
 };
 
 export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint, heightM: number): CatalogueHost {
@@ -78,7 +79,9 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
     hosts.push({ id: openingHostId(wall.proposalId, opening.openingId), target: "opening", mesh, opening: outline });
   }
   if (face instanceof THREE.Mesh) {
-    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
+    const left=group.children.find(c=>c.userData.draftFinishFace==="left"),right=group.children.find(c=>c.userData.draftFinishFace==="right");
+    const finishFaces=left instanceof THREE.Mesh&&right instanceof THREE.Mesh?{left,right}:undefined;
+    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, finishFaces,halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
       run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
@@ -251,6 +254,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const { visual } = item;
       if (host.target === "opening" && openingFitMessage(item, host.opening?.size)) continue;
       let node: THREE.Object3D;
+      let actualFinishFace=false;
       if (visual.kind === "roof-component") {
         const edge = host.roofEdges?.find(row => row.key === placement.roofEdgeKey);
         if (!edge) continue;
@@ -258,7 +262,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       } else if (visual.kind === "surface") {
         if (item.group === "doors" && designedDoors.has(host.id)) continue;
         if (visual.slot === "lining" && visibleFinishes.has(surfaceKey(placement))) continue;
-        node = finishMesh(host.mesh, visual, host.target, normal, placement.side);
+        const face=host.finishFaces&&host.run?((host.run.end[0]-host.run.start[0])*normal.z-(host.run.end[1]-host.run.start[1])*normal.x>0?host.finishFaces.left:host.finishFaces.right):null;
+        actualFinishFace=!!face;
+        node = finishMesh(face??host.mesh, visual, host.target, normal, face?1:placement.side);
       } else if (visual.kind === "trim") {
         node = trimMount(host, item, normal);
       } else if (visual.kind === "entry" || visual.kind === "opening-style") {
@@ -309,7 +315,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
         node = group;
       }
       // Stored wall anchors remain on the design centreline. Mount to the selected physical face.
-      if(host.target==="wall"&&host.halfThickness)node.position.addScaledVector(normal,host.halfThickness);
+      if(host.target==="wall"&&host.halfThickness&&!actualFinishFace)node.position.addScaledVector(normal,host.halfThickness);
       // A local leaf finish must follow its swing/slide/overhead transform.
       const parent=visual.kind==="surface"&&item.group==="doors"&&host.opening?.reviewLeaf&&!designedDoors.has(host.id)?host.opening.reviewLeaf:host.mesh;
       parent.add(node);
