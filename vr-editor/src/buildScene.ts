@@ -135,6 +135,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       panel(points, leaf);
       addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
+      door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
     }
   }
