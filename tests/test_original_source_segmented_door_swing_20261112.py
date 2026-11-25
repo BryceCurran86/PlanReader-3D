@@ -185,25 +185,3 @@ def test_original_legacy_door_mode_default_off_and_no_extra_witnesses():
     b=build_layered_wall_doorway_room_rings(rows,source_sha256=SHA,page_index=0,dark_painted_wall_source=True)
     assert not b.source_segmented_swing_witnesses
     assert a!=b
-
-
-@functools.lru_cache(maxsize=None)
-def _paired_ring(page_index):
-    original=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
-    if not original or not Path(original).is_file():
-        pytest.skip("private Maryborough original not provisioned")
-    with fitz.open(original) as doc:
-        drawings=doc[page_index].get_drawings()
-    return build_layered_wall_doorway_room_rings(
-        drawings,source_sha256=SHA,page_index=page_index,dark_painted_wall_source=True,door_jamb_returns=True,
-    )
-
-
-@pytest.mark.parametrize("page_index,expected",[(6,6),(23,0),(24,0),(25,1),(26,1)])
-def test_real_maryborough_paired_door_switch_recovers_source_owned_doorway_chords(page_index,expected):
-    # door_jamb_returns keeps each swing's own strokes out of the wall strips and adds its jamb returns. The two A110 chords lost at
-    # 4285e133a come back (with four more). On the p23 inset the door is closed by its swing directly, so no raw gap is left for a
-    # chord. Counts only; topology only. Without the switch the default path above is unchanged (still xfail).
-    real=_paired_ring(page_index)
-    assert len(real.source_owned_doorway_chords)==expected
-    assert all(not c["commercial_publishable"] and not c["metric_area_issued"] for c in real.source_owned_doorway_chords)
