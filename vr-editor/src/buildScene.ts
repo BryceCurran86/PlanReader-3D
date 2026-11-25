@@ -125,6 +125,10 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     const points = openingOutline(wall, opening);
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
       new THREE.LineBasicMaterial({ color: 0xf5d9ad })));
+    if(opening.openingKind==="window"){
+      const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
+      const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
+    }
     if (opening.openingKind === "door") {
       const leaf: number[] = [];
       panel(points, leaf);
@@ -205,7 +209,7 @@ type DragOpening = {kind:"opening";mode:"opening-move";from:PlanPoint;
   previous:PlacedWall;openingId:string};
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
+)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean; direct?:boolean };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -277,6 +281,19 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
     return { kind: "ceiling", mode, from, levelId, previous: ceiling.ceiling, anchor: [fixed.x, fixed.z] };
   }
   return null;
+}
+
+export type DraftPickKind="auto"|"walls"|"ceilings";
+/** Inspect-mode drag: use the existing validated move gesture, not a second
+ * geometry editing path. A top-view wall hit wins over a covering ceiling. */
+export function directDraftGesture(state:BuildState,levelId:string|null,ray:THREE.Ray,
+ kind:DraftPickKind,top:boolean,options:WallSnapOptions={}):DraftGesture|null{
+ const move={...state,tool:"move" as const};
+ const wall=()=>beginDraftGesture({...move,ceilings:[]},levelId,ray,options);
+ const ceiling=()=>beginDraftGesture({...move,walls:[]},levelId,ray,options);
+ const gesture=kind==="walls"||top&&kind==="auto"?wall():kind==="ceilings"?ceiling():
+   beginDraftGesture(move,levelId,ray,options);
+ return gesture?{...gesture,direct:true}:null;
 }
 
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
