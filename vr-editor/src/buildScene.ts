@@ -355,7 +355,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     valid = validEditedWall(shape)&&(!connected||(connectedWalls!==null&&connectedWalls.every(validEditedWall)));
     line = [new THREE.Vector3(shape.start[0], shape.heightM, shape.start[1]),
       new THREE.Vector3(shape.end[0], shape.heightM, shape.end[1])];
-    action = { kind: "adjust", previous, wall: shape, connected };
+    action = { kind: "adjust", previous, wall: shape, ...(connected ? {connected:true} : {}) };
   } else {
     const { previous, mode, from, anchor } = gesture;
     const corner: PlanPoint = [anchor[0] === Math.min(previous.start[0], previous.end[0])
@@ -370,7 +370,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     line.push(line[0]);
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
-  const hint = !valid ? connected&&gesture.kind==="wall" ? "Connected edit blocked: junction, wall size or opening conflict. Turn Junctions OFF to edit independently." : "Size is invalid or an opening would no longer fit."
+  const hint = !valid ? connected&&"previous" in gesture&&gesture.kind==="wall" ? "Connected edit blocked: junction, wall size or opening conflict. Turn Junctions OFF to edit independently." : "Size is invalid or an opening would no longer fit."
     : gesture.mode === "opening-move" ?
       "Release to slide draft opening along its host wall."
     : gesture.mode === "wall" && !("previous" in gesture)
