@@ -29,7 +29,7 @@ import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
-import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, redoItem, removeItem, undoItem } from "./itemPlacement";
+import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, redoItem, removeItem, undoItem } from "./itemPlacement";
 import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
@@ -102,6 +102,7 @@ export function App() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
+  const [outdoor,setOutdoor]=useState(true);
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
@@ -430,6 +431,26 @@ export function App() {
   }
 
   function onItemAction(action: ItemAction) {
+    if(action.kind==="apply-finish"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect")return;
+      const item=getCatalogueItem(action.itemId);
+      if(!item)return;
+      const key=scopeKey(manifest);
+      const id=newPlacementId("item");
+      const apply=(draft:ItemDraft)=>action.replaceId?replaceItemFinish(draft,key,action.replaceId!,action.itemId):placeItem(draft,key,id,action.itemId,action.hit,0);
+      const next=apply(catalogue.draft);
+      const walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
+      const targetId=action.replaceId??id;
+      if(next===catalogue.draft||!currentItemPlacements(next.items,manifest,walls,isDemo,buildState.ceilings).some(i=>i.id===targetId)){
+        setToolMessage("Finish unchanged or not compatible with this design object.");return;
+      }
+      setLastEdit("place");
+      if(!itemLayerVisible(stage,item,layers))setStage("finished");
+      if(layers[itemLayer(item)]==="hide")setLayers(current=>({...current,[itemLayer(item)]:"auto"}));
+      changeCatalogue(current=>({...current,draft:apply(current.draft)}));
+      setToolMessage("Applied "+item.label+" · local design only.");
+      return;
+    }
     if (action.kind === "choose") {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
@@ -707,6 +728,7 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <button type="button" aria-pressed={outdoor} onClick={()=>setOutdoor(v=>!v)}>{outdoor?"Grass & sky: on":"Grass & sky: off"}</button>
             <label>Preview board <select value={liningBoard} onChange={e=>setLiningBoard(e.currentTarget.value as LiningBoard)} title="Visual board colour only, not a certified assembly"><option value="standard">Standard</option><option value="wet-area">Wet-area</option><option value="fire-rated">Fire-rated</option></select></label>
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
             <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
@@ -772,7 +794,7 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
