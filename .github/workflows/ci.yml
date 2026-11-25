@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # 02:17 AEST; full checks remain mandatory on every main PR/push.
+    - cron: '17 16 * * *'
   workflow_dispatch:
     inputs:
       suite:
@@ -16,6 +19,12 @@ on:
           - full
           - focused
           - readiness
+      workers:
+        description: "Full suite workers: serial baseline, 2 (default), or 4 for profiling"
+        required: true
+        default: '2'
+        type: choice
+        options: ['0', '2', '4']
 
 # Public CI verifies code and source integrity but never needs a write token.
 permissions:
@@ -34,6 +43,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'full' }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
@@ -76,6 +86,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci-v1228.txt
 
       - name: Install dependencies
         run: |
@@ -146,6 +159,10 @@ jobs:
           # The receipt verifier rejects even harmless unindexed bytecode in
           # archived owner evidence. All tests must keep cache files out of it.
           PYTHONDONTWRITEBYTECODE: "1"
+          # Same complete collection on both Python versions; xdist verifies
+          # collection parity across workers. File grouping retains fixtures.
+          # Bounded worker count avoids oversubscribing BLAS/native libraries.
+          PYTEST_ADDOPTS: ${{ format('-n {0} --dist loadfile --durations=30', (github.event_name == 'workflow_dispatch' && inputs.workers) || '2') }}
         run: PYTHONPATH=. pytest -q -rs tests/
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)

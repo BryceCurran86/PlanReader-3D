@@ -117,3 +117,26 @@ def test_fastpath_still_runs_on_pull_requests_and_main_pushes_only():
     text = FASTPATH.read_text(encoding="utf-8")
     assert "  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n" in text
     assert "pull_request_target" not in text
+
+def test_parallel_full_ci_keeps_all_tests_and_nightly_release_guard():
+    text = source()
+    full = job("test")
+    assert "  schedule:\n" in text
+    assert "--dist loadfile --durations=30" in full
+    assert "PYTEST_ADDOPTS:" in full
+    assert "options: ['0', '2', '4']" in text
+    assert "PYTHONPATH=. pytest -q -rs tests/" in full
+    assert "requirements-ci-v1228.txt" in full
+    assert "fail-fast: false" in full
+    assert "pytest-xdist>=3.8,<4" in (ROOT / "requirements-ci-v1228.txt").read_text(encoding="utf-8")
+
+
+def test_scoped_development_workflow_cannot_replace_required_ci():
+    dev = (ROOT / ".github/workflows/vr-development-fast-feedback.yml").read_text(encoding="utf-8")
+    assert "name: VR development feedback (not release CI)" in dev
+    assert "branches: ['vr/**']" in dev
+    assert "tests/editable_3d/" in dev
+    assert "git diff --no-renames --name-only -z" in dev
+    assert "pull_request:" not in dev
+    assert "needs.scope.outputs.scope == 'vr-only'" in dev
+    assert "not full regression" in dev
