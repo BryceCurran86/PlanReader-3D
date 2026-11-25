@@ -13,6 +13,7 @@ import math
 from pb_external_door_height_estimate_policy import (
     OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM,
     OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
+    OWNER_EXTERNAL_DOOR_ASSUMPTION_REASON,
     OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL,
 )
 from pb_live_physical_opening_void_composition import (
@@ -42,7 +43,8 @@ LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY = (
     "pb_door_height_owner_gate_shadow.owner_approved_second_axis_area"
 )
 LIVE_OPENING_EXTERNAL_DOOR_HEIGHT_ESTIMATE_AREA_QUANTITY_AUTHORITY = (
-    "pb_external_door_height_estimate_policy.assumed_external_door_height_2100_mm"
+    "pb_external_door_height_estimate_policy."
+    f"assumed_external_door_height_{OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM}_mm"
 )
 
 
@@ -289,7 +291,7 @@ def _opening_quantity(
             LIVE_OPENING_OWNER_APPROVED_SECOND_AXIS_AREA_QUANTITY_AUTHORITY
         )
     elif basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS:
-        # Printed one-figure width * owner 2100 mm assumption. Not FIRM, not a
+        # Printed one-figure width * the owner's height assumption. Not FIRM, not a
         # source height, and never a substitute for host/frame/kind/width proof.
         width_mm = opening.figured_single_axis_mm
         role_record_id = opening.external_wall_role_record_id
@@ -374,7 +376,7 @@ def _opening_quantity(
                         if basis == "owner_approved_second_axis"
                         else (
                             "authenticated printed external-door width * "
-                            "owner-assumed 2100 mm height (verify on site)"
+                            f"owner-assumed {OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM} mm height (verify on site)"
                             if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
                             else "authenticated physical opening width * height"
                         )
@@ -400,7 +402,7 @@ def _opening_quantity(
             else (
                 (
                     LIVE_OPENING_AREA_QUANTITY_RESOLVED,
-                    "external_door_height_not_specified_owner_2100_assumption",
+                    OWNER_EXTERNAL_DOOR_ASSUMPTION_REASON,
                 )
                 if basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
                 else (LIVE_OPENING_AREA_QUANTITY_RESOLVED,)

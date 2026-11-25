@@ -1,17 +1,17 @@
-# Owner rule — external-door height when not specifically stated (9 November 2026)
+# Owner rule — standard external-door height when unstated (25 November 2026)
 
-Bryce's instruction: **assume 2100 mm for an authenticated external door if the plans do not specifically state another height**. This is an owner-authorized *estimating assumption*, not a measured/source-authenticated fact.
+Bryce's instruction is to **assume 2040 mm for an authenticated standard external door if the plans do not state a height**. Use it as a provisional estimate.
 
 ## Order of use
 
 1. Resolve the height from a uniquely door-linked source schedule. If a specific height is stated, use it.
 2. Otherwise resolve a specifically identified external-door elevation/plan height for that same door. If a different height is stated, use it.
-3. If neither specifically identifies the door's height and there is no unresolved specific exception, use **2100 mm as a provisional review estimate** for that authenticated external door only. Show “Assumed 2100 mm — verify on site.”
-4. Conflicting schedule/elevation evidence, another stated but unverified height, an unbound general joinery-height note, an unproven door identity, a window/internal door, or an unresolved exception: do not silently treat 2100 as measured. Stop for review or use the explicit owner-approved measurement route for review with its own provenance.
+3. If neither source states a height and there is no unresolved specific exception, use **2040 mm as a provisional review estimate** for the authenticated standard external door. A width-only schedule row can qualify. Show “Assumed 2040 mm — verify on site.”
+4. Send conflicting or unverified height claims, unbound joinery-height notes, unproven door identities and unresolved exceptions to review.
 
 ## Authority and implementation
 
-Source-authenticated figured height and an owner assumption are different authority classes. A default may support a *labelled provisional costing line with review provenance* ("Assumed 2100 mm — verify on site"), but it never by itself creates FIRM `QuantityEvidence`, a source-closed signed measurement or a frozen120 score. It also cannot manufacture a missing opening host, frame, typed door kind or width.
+The default supports a labelled provisional costing line with review provenance (“Assumed 2040 mm — verify on site”). Source evidence is required for a firm quantity, signed measurement or benchmark credit, and for the opening's host, frame, kind and width.
 
 Policy helper: `pb_external_door_height_estimate_policy.resolve_external_door_height_estimate`. The helper stays read-only. The live opening issuer may consume the assumption case as a labelled provisional customer quantity once the door, unique EXTERNAL host and printed width are already authenticated.
 
