@@ -425,3 +425,55 @@ def test_structurally_different_l_shaped_plan_with_internal_reentrant_joint():
     assert on.source_wall_joint_paint[0].source_path_id == len(l_walls)
     assert on.source_wall_joint_paint[0].flush_side_count >= 2
     assert on.source_wall_band_count == len(l_walls)
+
+
+def _circle(count, radius=10.0):
+    return Polygon([
+        (radius * math.cos(2 * math.pi * i / count), radius * math.sin(2 * math.pi * i / count))
+        for i in range(count)
+    ])
+
+
+def _wall_inside_chord(start, end, depth=2.5):
+    """A wall whose face lies on the chord, on the side towards the origin."""
+    (ax, ay), (bx, by) = start, end
+    nx, ny = by - ay, ax - bx
+    scale = depth / math.hypot(nx, ny)
+    if -ax * nx - ay * ny < 0:
+        nx, ny = -nx, -ny
+    dx, dy = nx * scale, ny * scale
+    return Polygon([start, end, (bx + dx, by + dy), (ax + dx, ay + dy)])
+
+
+@pytest.mark.parametrize("count", [64, 628, 5000])
+def test_a_finely_drawn_curve_never_becomes_a_flush_side(count):
+    rows = [_rect_row((0.0, 0.0, 1.0, 1.0))] * 3
+    # Walls along two chords of the circle, which a vertex-removing simplification turns into sides.
+    chords = [
+        ((-10.0, 0.0), (-4.9711, 8.6769)),
+        ((-4.9711, -8.6769), (5.0577, -8.6267)),
+    ]
+    bars = [_Bar(_wall_inside_chord(*chord), i) for i, chord in enumerate(chords)]
+    assert detect_source_wall_joint_paint(
+        [(2, _circle(count))], source_drawings=rows, wall_bars=bars,
+    ) == ()
+    # Touching two perpendicular wall faces only at tangent points is not a shared face either.
+    tangent = [_Bar(box(-12.5, -12.5, -10.0, 12.5), 0), _Bar(box(-10.0, -12.5, 12.5, -10.0), 1)]
+    assert detect_source_wall_joint_paint(
+        [(2, _circle(count))], source_drawings=rows, wall_bars=tangent,
+    ) == ()
+
+
+def test_sides_drawn_as_many_short_edges_still_count():
+    def cut(a, b, pieces):
+        return [(a[0] + (b[0] - a[0]) * i / pieces, a[1] + (b[1] - a[1]) * i / pieces)
+                for i in range(pieces)]
+
+    corners = list(JOINT)
+    fine = []
+    for start, end in zip(corners, corners[1:] + corners[:1]):
+        fine += cut(start, end, 40)
+    drawings = _drawings(_outline_row(fine))
+    attempt = _attempt(drawings)
+    assert attempt.status == "CANDIDATE"
+    assert [p.flush_side_count for p in attempt.source_wall_joint_paint] == [2]
