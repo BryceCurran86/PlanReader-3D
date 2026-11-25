@@ -156,7 +156,7 @@ function dispose(root: THREE.Object3D) {
     for (const material of faces) materials.add(material);
   });
   for (const material of materials) {
-    if (material instanceof THREE.MeshStandardMaterial) material.map?.dispose();
+    if (material instanceof THREE.MeshStandardMaterial) {material.map?.dispose();material.bumpMap?.dispose();material.roughnessMap?.dispose();}
     material.dispose();
   }
 }
