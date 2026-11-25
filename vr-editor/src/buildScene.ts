@@ -20,6 +20,7 @@ import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameV
 import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import {createPhysicalToolTray} from "./physicalToolTray.ts";
+import {openingFrameVisual,nominalDoorSlab} from "./openingFinishVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -138,6 +139,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     right = opening.offsetM + opening.widthM;
     surface(opening.offsetM, right, 0, opening.sillHeightM);
     surface(opening.offsetM, right, opening.sillHeightM + opening.heightM, wall.heightM);
+    const frame=openingFrameVisual(wall,opening);if(frame)group.add(frame);
     const points = openingOutline(wall, opening);
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
       new THREE.LineBasicMaterial({ color: 0xf5d9ad })));
@@ -150,6 +152,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       panel(points, leaf);
       addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
+      const slab=nominalDoorSlab(wall,opening);if(slab)door.add(slab);
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
       if(opening.doorMechanism!=="garage"&&opening.widthM>=.4&&opening.heightM>=1.2){
